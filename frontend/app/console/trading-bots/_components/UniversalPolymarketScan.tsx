@@ -160,38 +160,38 @@ export function UniversalPolymarketScan() {
   }
 
   return (
-    <section aria-label="Universal Polymarket Scan" className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
-      <h2 className="text-xl font-semibold text-emerald-950">Universal Polymarket Scan</h2>
-      <p className="mt-2 text-sm text-emerald-800">One Full Universe capture of Polymarket markets. Each workflow applies its own filters to this common scan.</p>
+    <section aria-label="Universal Polymarket Scan" className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+      <h2 className="text-xl font-semibold text-amber-950">Universal Polymarket Scan</h2>
+      <p className="mt-2 text-sm text-amber-800">One Full Universe capture of Polymarket markets. Each workflow applies its own filters to this common scan.</p>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button type="button" aria-pressed={!showSaved} onClick={() => setShowSaved(false)} className="rounded-lg bg-blue-700 px-3 py-2 text-sm font-semibold text-white">Original</button>
-        <div className="inline-flex overflow-hidden rounded-lg bg-blue-600 text-white">
+        <button type="button" aria-pressed={!showSaved} onClick={() => setShowSaved(false)} className="rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold text-white">Original</button>
+        <div className="inline-flex overflow-hidden rounded-lg bg-amber-600 text-white">
           <button type="button" onClick={() => void scan()} className="px-3 py-2 text-sm font-semibold">{running ? "Stop Scan" : "Scan Now"}</button>
-          <button type="button" disabled={!snapshot} aria-label="Open latest saved Universal Polymarket Scan" onClick={() => setShowSaved(true)} className="border-l border-blue-400 px-2 disabled:opacity-40"><Menu className="h-4 w-4" /></button>
+          <button type="button" disabled={!snapshot} aria-label="Open latest saved Universal Polymarket Scan" onClick={() => setShowSaved(true)} className="border-l border-amber-400 px-2 disabled:opacity-40"><Menu className="h-4 w-4" /></button>
         </div>
       </div>
       <UniversalScanAutoRunCard />
       {snapshot && <>
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Last stage run</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</dd></div>
-          <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Time taken</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{summary ? durationLabel(summary.durationMs) : "Calculating…"}</dd></div>
-          <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Total Events Scanned</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{snapshot.totalCandidates.toLocaleString("en-IN")}</dd></div>
+          <div className="rounded-xl border border-amber-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-amber-700">Last stage run</dt><dd className="mt-1 text-sm font-semibold text-amber-950">{dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</dd></div>
+          <div className="rounded-xl border border-amber-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-amber-700">Time taken</dt><dd className="mt-1 text-sm font-semibold text-amber-950">{summary ? durationLabel(summary.durationMs) : "Calculating…"}</dd></div>
+          <div className="rounded-xl border border-amber-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-amber-700">Total Events Scanned</dt><dd className="mt-1 text-sm font-semibold text-amber-950">{snapshot.totalCandidates.toLocaleString("en-IN")}</dd></div>
         </dl>
         <div className="mt-4 flex justify-end">
-          <a href={`/api/bullpen-ai/stage-one.xlsx?exportId=${snapshot.scanExportId}&universal=true&scope=all-scanned`} className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-800"><FileSpreadsheet className="h-4 w-4" />Download all scanned events</a>
+          <a href={`/api/bullpen-ai/stage-one.xlsx?exportId=${snapshot.scanExportId}&universal=true&scope=all-scanned`} className="inline-flex items-center gap-2 text-sm font-semibold text-amber-800"><FileSpreadsheet className="h-4 w-4" />Download all scanned events</a>
         </div>
         {summary && <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          {summary.tables.map(table => <article key={table.key} className="overflow-hidden rounded-xl border border-emerald-200 bg-white/90">
-            <div className="border-b border-emerald-100 px-4 py-3"><h3 className="font-semibold text-emerald-950">{table.title}</h3><p className="mt-0.5 text-xs text-emerald-700">{table.description}</p></div>
+          {summary.tables.map(table => <article key={table.key} className="overflow-hidden rounded-xl border border-amber-200 bg-white/90">
+            <div className="border-b border-amber-100 px-4 py-3"><h3 className="font-semibold text-amber-950">{table.title}</h3><p className="mt-0.5 text-xs text-amber-700">{table.description}</p></div>
             <div className="overflow-x-auto"><table className="w-full text-sm">
-              <thead><tr className="bg-emerald-50 text-left text-xs uppercase tracking-wide text-emerald-700"><th className="px-4 py-2 font-semibold">Breakdown</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
-              <tbody className="divide-y divide-emerald-100">{table.rows.filter(row => row.count > 0).map(row => <tr key={row.label}><td className="px-4 py-2 text-slate-700">{row.label}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{summary.totalEvents ? `${(row.count * 100 / summary.totalEvents).toFixed(1)}%` : "0.0%"}</td></tr>)}</tbody>
-              <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right tabular-nums">{table.rows.reduce((total, row) => total + row.count, 0).toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">100%</td></tr></tfoot>
+              <thead><tr className="bg-amber-50 text-left text-xs uppercase tracking-wide text-amber-700"><th className="px-4 py-2 font-semibold">Breakdown</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
+              <tbody className="divide-y divide-amber-100">{table.rows.filter(row => row.count > 0).map(row => <tr key={row.label}><td className="px-4 py-2 text-slate-700">{row.label}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{summary.totalEvents ? `${(row.count * 100 / summary.totalEvents).toFixed(1)}%` : "0.0%"}</td></tr>)}</tbody>
+              <tfoot><tr className="bg-amber-50 font-semibold text-amber-950"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right tabular-nums">{table.rows.reduce((total, row) => total + row.count, 0).toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">100%</td></tr></tfoot>
             </table></div>
           </article>)}
         </div>}
       </>}
-      <p role="status" className="mt-4 text-sm font-semibold text-emerald-900">{running ? `${count.toLocaleString("en-IN")} events scanned · ${pages} pages` : snapshot ? "Latest Full Universe scan is complete." : "No completed universal scan yet. Select Scan Now to capture the Full Universe."}</p>
+      <p role="status" className="mt-4 text-sm font-semibold text-amber-900">{running ? `${count.toLocaleString("en-IN")} events scanned · ${pages} pages` : snapshot ? "Latest Full Universe scan is complete." : "No completed universal scan yet. Select Scan Now to capture the Full Universe."}</p>
       {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {showSaved && snapshot && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/50 p-4">
         <div role="dialog" aria-modal="true" aria-label="Latest saved Universal Polymarket Scan" className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6">

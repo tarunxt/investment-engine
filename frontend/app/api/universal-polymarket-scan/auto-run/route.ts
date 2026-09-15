@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type ActionBody = {
-  action?: "save" | "enable" | "disable" | "run-now";
+  action?: "save" | "enable" | "disable" | "run-now" | "pause" | "resume" | "kill";
   startAt?: string;
   refreshMinutes?: number;
 };
@@ -64,4 +64,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

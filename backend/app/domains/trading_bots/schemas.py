@@ -84,7 +84,7 @@ class TradingBotsOverviewResponse(BaseModel):
 
 class UniversalScanHistoryItem(BaseModel):
     id: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
     triggered_by: Literal["manual", "scheduler"]
     started_at: str | None = None
     completed_at: str | None = None
@@ -95,6 +95,8 @@ class UniversalScanHistoryItem(BaseModel):
 class UniversalScanAutoRunStatus(BaseModel):
     enabled: bool
     running: bool
+    paused: bool = False
+    kill_requested: bool = False
     run_id: str | None = None
     start_at: str
     refresh_minutes: int
@@ -103,6 +105,10 @@ class UniversalScanAutoRunStatus(BaseModel):
     last_completed_at: str | None = None
     last_failed_at: str | None = None
     last_error: str | None = None
+    progress_events: int = 0
+    progress_pages: int = 0
+    estimated_total_events: int | None = None
+    progress_message: str | None = None
     history: list[UniversalScanHistoryItem] = Field(default_factory=list)
 
 
