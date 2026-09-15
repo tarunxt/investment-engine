@@ -24,6 +24,9 @@ facts. Active-run selection is workspace-scoped (legacy rows default to
 `bullpen007`); therefore a Bullpen 007 worker can never make the Bullpen Sports
 Stage 1 tile appear active. A running Stage 1 uses the yellow working treatment
 and current-run progress rather than the prior completed independent snapshot.
+For runs created before these compact output fields were retained, the same
+immutable `request_context.console_profile` lineage provides the display-only
+Universal Scan timestamp fallback; it does not rewrite the frozen run.
 
 ## Workflow-owned History views
 
