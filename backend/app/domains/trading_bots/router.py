@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
@@ -16,7 +16,10 @@ from app.domains.trading_bots.service import (
     build_trading_bots_overview,
     build_trading_bots_summary,
 )
-from app.domains.trading_bots.tasks import queue_universal_scan
+from app.domains.trading_bots.tasks import (
+    dispatch_universal_scan,
+    prepare_universal_scan,
+)
 from app.domains.trading_bots.universal_scan import (
     control_run,
     status_for_user,
@@ -101,14 +104,27 @@ async def disable_universal_scan_auto_run(current_user: User = Depends(get_curre
 
 
 @router.post("/universal-scan/auto-run/run-now", response_model=UniversalScanAutoRunStatus)
-async def run_universal_scan_now(current_user: User = Depends(get_current_user)):
+async def run_universal_scan_now(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     await asyncio.to_thread(
         _update_universal_schedule,
         current_user.id,
         enabled=True,
         start_at=utc_now().replace(microsecond=0).isoformat(),
     )
-    await asyncio.to_thread(queue_universal_scan, current_user.id, triggered_by="manual")
+    state, should_dispatch = await asyncio.to_thread(
+        prepare_universal_scan,
+        current_user.id,
+        triggered_by="manual",
+    )
+    if should_dispatch:
+        background_tasks.add_task(
+            dispatch_universal_scan,
+            current_user.id,
+            str(state["run_id"]),
+        )
     return await asyncio.to_thread(_universal_status, current_user.id)
 
 
