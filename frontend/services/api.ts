@@ -41,6 +41,8 @@ import {
   BullpenAutoLiveEventTrendsResponse,
   BullpenAutoLiveRunOrdersResponse,
   BullpenAutoLiveRunOnceRequest,
+  BullpenWorkflowRunNowRequest,
+  BullpenWorkflowRunNowResponse,
   BullpenAutoLiveDecision,
   BullpenAutoLivePersistedStatus,
   BullpenAutoLiveState,
@@ -2202,6 +2204,20 @@ class apiServiceClass implements IApiService {
 
       throw primaryError;
     });
+  }
+
+  queueBullpenWorkflowRunNow(
+    data: BullpenWorkflowRunNowRequest,
+  ): Promise<BullpenWorkflowRunNowResponse> {
+    const clientRequestId =
+      data.client_request_id?.trim() ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `workflow-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+    return this.post<BullpenWorkflowRunNowResponse>(
+      URLs.bullpenAutoLive.workflowRunNow(),
+      { ...data, client_request_id: clientRequestId },
+    );
   }
 
   startBullpenAutoLive(): Promise<BullpenAutoLiveState> {

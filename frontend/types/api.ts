@@ -2517,6 +2517,21 @@ export interface BullpenAutoLiveRunOnceRequest {
   client_run_id?: string | null;
 }
 
+export interface BullpenWorkflowRunNowRequest {
+  workspace_profile: "bullpen007" | "bullpen-sports";
+  client_request_id?: string;
+}
+
+export interface BullpenWorkflowRunNowResponse {
+  status: "queued";
+  run_id: string;
+  workspace_profile: "bullpen007" | "bullpen-sports";
+  universal_export_id: string;
+  universal_scan_started_at?: string | null;
+  universal_scan_completed_at?: string | null;
+  queued_at: string;
+}
+
 export interface BullpenAutoLiveOrderFunnel {
   planned: number;
   ready: number;

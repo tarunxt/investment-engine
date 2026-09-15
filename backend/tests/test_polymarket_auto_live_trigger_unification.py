@@ -43,7 +43,7 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertIn("BullpenAutoLiveBot(user_id=user_id).run_once(", trigger_batch)
         self.assertIn("source_scan_completed_at=source_completed_at", trigger_batch)
 
-    def test_start_now_builds_this_workflows_latest_universal_stage1(self) -> None:
+    def test_start_now_queues_this_workflow_on_latest_universal_scan(self) -> None:
         source = (
             ROOT
             / "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
@@ -52,9 +52,31 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             "  async function handleStopAutoRuns()", 1
         )[0]
 
-        self.assertIn("const runNowRequest = await buildRunNowRequest?.();", handler)
-        self.assertIn("runNowRequest.console_profile.workspace_profile !== workspaceProfile", handler)
-        self.assertIn("apiService.runBullpenAutoLiveOnce(runNowRequest)", handler)
+        self.assertIn("apiService.queueBullpenWorkflowRunNow({", handler)
+        self.assertIn("workspace_profile: workspaceProfile", handler)
+        self.assertNotIn("buildRunNowRequest", handler)
+        self.assertNotIn("executeBullpenScan", handler)
+
+    def test_manual_workflow_queue_pins_one_profile_and_waits_for_lane(self) -> None:
+        router_source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/router.py"
+        ).read_text(encoding="utf-8")
+        route = router_source.split("async def queue_workflow_run_now(", 1)[1].split(
+            '@router.post("/start"', 1
+        )[0]
+        self.assertIn("latest_completed_universal_export", route)
+        self.assertIn("universal_export_id=export_id", route)
+        self.assertIn("workspace_profiles=(request.workspace_profile,)", route)
+
+        task_source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/tasks.py"
+        ).read_text(encoding="utf-8")
+        task = task_source.split("def dispatch_bullpen_workflow_trigger_batch(", 1)[1].split(
+            "def bullpen_workflow_trigger_run_id", 1
+        )[0]
+        self.assertIn("resolved_profiles = tuple(workspace_profiles", task)
+        self.assertIn("wait_for_execution_lane=True", task)
+        self.assertIn('raise self.retry(countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS)', task)
 
     def test_completed_universal_scan_queues_the_workflow_trigger_batch(self) -> None:
         source = (

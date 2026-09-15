@@ -412,7 +412,7 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   assert.match(autoRunCardSource, /const normalizedStart = startWasNow \? "" : scheduleStartInput\.trim\(\);/);
   assert.match(
     autoRunCardSource,
-    /async function handleStartAutoRunNow\(\)[\s\S]*?Running fresh Stage 1 filters[\s\S]*?buildRunNowRequest\?\.\(\)[\s\S]*?runBullpenAutoLiveOnce\(runNowRequest\)/,
+    /async function handleStartAutoRunNow\(\)[\s\S]*?latest completed Universal Scan[\s\S]*?queueBullpenWorkflowRunNow\(\{[\s\S]*?workspace_profile: workspaceProfile/,
   );
   const startNowHandler = autoRunCardSource.match(
     /async function handleStartAutoRunNow\(\) \{[\s\S]*?\n  async function handleStopAutoRuns/,
@@ -421,10 +421,8 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   assert.doesNotMatch(startNowHandler, /stopBullpenAutoLive\(\)/);
   assert.doesNotMatch(startNowHandler, /buildConsoleSettingsUpdate\(/);
   assert.match(startNowHandler, /buildImmediateRunSettingsUpdate\(/);
-  assert.match(
-    startNowHandler,
-    /runNowRequest\.console_profile\.workspace_profile !== workspaceProfile/,
-  );
+  assert.doesNotMatch(startNowHandler, /buildRunNowRequest/);
+  assert.doesNotMatch(startNowHandler, /executeBullpenScan/);
   assert.match(
     autoRunCardSource,
     /if \(startWasNow\) \{[\s\S]*?runBullpenAutoLiveOnce\(\);/,
