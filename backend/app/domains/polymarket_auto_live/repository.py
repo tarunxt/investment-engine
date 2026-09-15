@@ -97,12 +97,14 @@ def _history_workspace_filter(
 ) -> object:
     """Assign durable runs to one console workflow, including legacy 007 rows."""
 
-    profile = record.payload["request_context"]["console_profile"][
-        "workspace_profile"
-    ].as_string()
     if workspace_profile == "bullpen-sports":
-        return profile == "bullpen-sports"
-    return or_(profile == "bullpen007", profile.is_(None))
+        return record.workspace_profile == "bullpen-sports"
+    return or_(
+        record.workspace_profile == "bullpen007",
+        record.workspace_profile.is_(None),
+    )
+
+
 TERMINAL_AUTO_LIVE_INTENT_STATUSES = frozenset(
     {
         "CONFIRMED",
@@ -504,6 +506,12 @@ def apply_run_to_record(
     record.user_id = user_id
     record.status = run.status
     record.triggered_by = run.triggered_by
+    record.workspace_profile = (
+        run.request_context.console_profile.workspace_profile
+        if run.request_context is not None
+        and run.request_context.console_profile is not None
+        else "bullpen007"
+    )
     record.dry_run = run.dry_run
     record.started_at = _parse_datetime(run.started_at) or utc_now()
     record.completed_at = _parse_datetime(run.completed_at)
