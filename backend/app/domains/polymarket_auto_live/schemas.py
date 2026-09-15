@@ -694,7 +694,7 @@ class BullpenWorkflowRunNowRequest(BaseModel):
 
 
 class BullpenWorkflowRunNowResponse(BaseModel):
-    status: Literal["queued"] = "queued"
+    status: Literal["started", "queued"]
     run_id: str
     workspace_profile: Literal["bullpen007", "bullpen-sports"]
     universal_export_id: str
