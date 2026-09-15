@@ -288,7 +288,7 @@ test("Stage 1 filtered exports remain available without projected browser rows",
   assert.equal(unavailable(false, { passedFilters: 0 }, false, null, null, { id: 123 }, []), true);
   assert.equal(unavailable(true, { passedFilters: 80 }, false, null, null, { id: 123 }, []), true);
   assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, null, [{}]), false);
-  assert.equal((scheduleCard.match(/disabled=\{filteredDownloadUnavailable\}/g) || []).length, 2);
+  assert.equal((scheduleCard.match(/disabled=\{filteredDownloadUnavailable\}/g) || []).length, 3);
   assert.doesNotMatch(scheduleCard, /disabled=\{filteredEventExportRows.length === 0\}/);
 });
 

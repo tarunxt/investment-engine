@@ -158,6 +158,8 @@ export type ScanResult = {
   totalRejectedQuestions?: number;
   scanExportId?: string | null;
   sourceScanExportId?: string | null;
+  sourceScanCompletedAt?: string | null;
+  filtersCompletedAt?: string | null;
 };
 
 export type BullpenScanSnapshot = Omit<ScanResult, "questions"> & {

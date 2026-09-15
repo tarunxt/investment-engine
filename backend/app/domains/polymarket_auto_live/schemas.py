@@ -628,6 +628,8 @@ class BullpenAutoLiveConsoleRunContext(BaseModel):
     source_label: str | None = None
     source_url: str | None = None
     scanned_at: str | None = None
+    source_scan_completed_at: str | None = None
+    filters_completed_at: str | None = None
     snapshot_id: str | None = None
     mode: str | None = None
     total_candidates: int = Field(default=0, ge=0)

@@ -36,6 +36,8 @@ export type StageOneGammaExportMetadata = {
   universalSource?: boolean;
   filterPending?: boolean;
   sourceScanExportId?: string;
+  sourceScanCompletedAt?: string;
+  filtersCompletedAt?: string;
   exportId: string;
   ownerHash: string;
   createdAt: string;
@@ -516,12 +518,14 @@ export async function reapplyStageOneGammaExportFilters({
   }
   await rename(temporaryFilteredPath, paths.filteredRows);
 
+  const filtersCompletedAt = new Date().toISOString();
   const updatedMetadata: StageOneGammaExportMetadata = {
     ...metadata,
     reapplyState: undefined,
     filterPending: false,
     filters,
-    updatedAt: new Date().toISOString(),
+    updatedAt: filtersCompletedAt,
+    filtersCompletedAt,
     acceptedCount: state.acceptedCount,
     rejectedCount: state.rejectedCount,
     acceptedSample: state.acceptedSample,
@@ -546,7 +550,9 @@ export async function forkUniversalScan(
   await copyFile(source.rowsPath, paths.rows);
   await writeFile(paths.filteredRows, "", "utf8");
   await saveMetadata({ ...source.metadata, exportId, ownerHash: ownerHash(ownerKey),
-    universalSource: false, sourceScanExportId: source.metadata.exportId, filterPending: true, updatedAt: new Date().toISOString(),
+    universalSource: false, sourceScanExportId: source.metadata.exportId,
+    sourceScanCompletedAt: source.metadata.updatedAt, filtersCompletedAt: undefined,
+    filterPending: true, updatedAt: new Date().toISOString(),
     acceptedCount: 0, rejectedCount: 0, acceptedSample: [], rejectedSample: [], reapplyState: undefined });
   return exportId;
 }

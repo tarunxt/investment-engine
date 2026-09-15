@@ -1750,6 +1750,8 @@ async function handleScan(
         pagesScanned: metadata.processedPages.length,
         scanExportId: metadata.exportId,
         sourceScanExportId: metadata.sourceScanExportId,
+        sourceScanCompletedAt: metadata.sourceScanCompletedAt,
+        filtersCompletedAt: metadata.filtersCompletedAt ?? metadata.updatedAt,
         details:
           "Reapplied saved Stage 1 filters to the existing Full Universe data without fetching Gamma again.",
       });

@@ -7125,6 +7125,12 @@ class BullpenAutoLiveEngine:
                     "scanned_at": manual_console_context.scanned_at
                     if manual_console_context and manual_console_context.scanned_at
                     else now.isoformat(),
+                    "source_scan_completed_at": manual_console_context.source_scan_completed_at
+                    if manual_console_context
+                    else None,
+                    "filters_completed_at": manual_console_context.filters_completed_at
+                    if manual_console_context
+                    else stage1_candidate_scan_completed_at,
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                 },
@@ -7528,6 +7534,12 @@ class BullpenAutoLiveEngine:
                         "scanned_at": manual_console_context.scanned_at
                         if manual_console_context and manual_console_context.scanned_at
                         else now.isoformat(),
+                        "source_scan_completed_at": manual_console_context.source_scan_completed_at
+                        if manual_console_context
+                        else None,
+                        "filters_completed_at": manual_console_context.filters_completed_at
+                        if manual_console_context
+                        else stage1_candidate_scan_completed_at,
                         "fixed_schedule_timezone": "Asia/Kolkata",
                         "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                     },

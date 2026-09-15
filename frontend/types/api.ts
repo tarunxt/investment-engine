@@ -2499,6 +2499,8 @@ export interface BullpenAutoLiveConsoleRunContext {
   source_label?: string | null;
   source_url?: string | null;
   scanned_at?: string | null;
+  source_scan_completed_at?: string | null;
+  filters_completed_at?: string | null;
   snapshot_id?: string | null;
   mode?: string | null;
   total_candidates: number;
