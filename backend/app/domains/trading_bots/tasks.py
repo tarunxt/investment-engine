@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from app.domains.trading_bots.universal_scan import (
     mark_queued,
     mark_started,
     read_state,
+    update_progress,
     utc_now,
 )
 from app.domains.polymarket_auto_live.models import PolymarketAutoLiveStateRecord
@@ -21,6 +23,10 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
 logger = get_logger("app.domains.trading_bots.tasks")
+
+
+class UniversalScanCancelled(RuntimeError):
+    """Raised when the operator kills the active Universal Scan."""
 
 
 def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object]:
@@ -61,6 +67,24 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
         session.commit()
     try:
         with UniversalExportWriter(user_id, started_at=started_at) as writer:
+            def report_progress(events: int, pages: int) -> None:
+                writer.set_pages(events, pages)
+                while True:
+                    with SyncSessionLocal() as progress_session:
+                        control = update_progress(
+                            progress_session,
+                            user_id,
+                            run_id,
+                            events=events,
+                            pages=pages,
+                        )
+                        progress_session.commit()
+                    if control == "kill":
+                        raise UniversalScanCancelled("Universal Scan cancelled by user.")
+                    if control != "pause":
+                        return
+                    time.sleep(2)
+
             result = asyncio.run(scan_candidate_markets(
                 min_liquidity_usd=0,
                 apply_base_filters=False,
@@ -69,7 +93,7 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
                 pagination_deadline_seconds=45 * 60,
                 preserve_partial_on_error=False,
                 accepted_callback=writer.add,
-                progress_callback=writer.set_pages,
+                progress_callback=report_progress,
                 retain_candidates=False,
             ))
             if not result.complete_universe:
@@ -80,6 +104,18 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
             finish_run(session, user_id, run_id, total_events=total_events)
             session.commit()
         return {"run_id": run_id, "status": "completed", "total_events": total_events}
+    except UniversalScanCancelled:
+        with SyncSessionLocal() as session:
+            state = read_state(session.get(PolymarketAutoLiveStateRecord, user_id))
+            finish_run(
+                session,
+                user_id,
+                run_id,
+                total_events=state["progress_events"],
+                cancelled=True,
+            )
+            session.commit()
+        return {"run_id": run_id, "status": "cancelled"}
     except Exception as exc:
         logger.exception("Universal Polymarket Scan %s failed", run_id)
         with SyncSessionLocal() as session:

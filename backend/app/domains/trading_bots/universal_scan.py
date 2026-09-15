@@ -89,12 +89,22 @@ def read_state(record: PolymarketAutoLiveStateRecord | None) -> dict[str, Any]:
     history = saved.get("history")
     return {
         "running": bool(saved.get("running", False)),
+        "paused": bool(saved.get("paused", False)),
+        "kill_requested": bool(saved.get("kill_requested", False)),
         "run_id": saved.get("run_id"),
         "next_run_at": saved.get("next_run_at"),
         "last_run_at": saved.get("last_run_at"),
         "last_completed_at": saved.get("last_completed_at"),
         "last_failed_at": saved.get("last_failed_at"),
         "last_error": saved.get("last_error"),
+        "progress_events": int(saved.get("progress_events", 0) or 0),
+        "progress_pages": int(saved.get("progress_pages", 0) or 0),
+        "estimated_total_events": (
+            int(saved["estimated_total_events"])
+            if isinstance(saved.get("estimated_total_events"), (int, float))
+            else None
+        ),
+        "progress_message": saved.get("progress_message"),
         "history": history[:MAX_HISTORY] if isinstance(history, list) else [],
     }
 
@@ -112,7 +122,50 @@ def save_state(session: Session, user_id: int, state: dict[str, Any]) -> None:
 def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
     settings = read_settings(session.get(PolymarketAutoLiveSettingsRecord, user_id))
     state = read_state(session.get(PolymarketAutoLiveStateRecord, user_id))
+    latest_history = state["history"][0] if state["history"] else None
+    last_run_at = parse_datetime(state["last_run_at"])
+    configured_start = parse_datetime(settings["start_at"])
+    effective_run_start = last_run_at.replace(microsecond=0) if last_run_at is not None else None
+    if (
+        isinstance(latest_history, dict)
+        and latest_history.get("triggered_by") == "manual"
+        and effective_run_start is not None
+        and (configured_start is None or effective_run_start > configured_start)
+    ):
+        settings["enabled"] = True
+        settings["start_at"] = effective_run_start.isoformat()
+        state["next_run_at"] = next_scheduled_time(
+            utc_now(),
+            start_at=settings["start_at"],
+            refresh_minutes=settings["refresh_minutes"],
+        ).isoformat()
+        save_settings(session, user_id, settings)
+        save_state(session, user_id, state)
     return {**settings, **state}
+
+
+def latest_export_total(user_id: int) -> int | None:
+    owner_hash = hashlib.sha256(f"{user_id}:universal".encode()).hexdigest()
+    latest: tuple[datetime, int] | None = None
+    for path in export_directory().glob("*.json"):
+        try:
+            metadata = json.loads(path.read_text(encoding="utf-8"))
+            completed_at = parse_datetime(metadata.get("updatedAt"))
+            row_count = metadata.get("rowCount")
+        except (OSError, ValueError):
+            continue
+        if (
+            metadata.get("ownerHash") != owner_hash
+            or not metadata.get("universalSource")
+            or not metadata.get("completed")
+            or completed_at is None
+            or not isinstance(row_count, (int, float))
+        ):
+            continue
+        candidate = (completed_at, int(row_count))
+        if latest is None or candidate[0] > latest[0]:
+            latest = candidate
+    return latest[1] if latest else None
 
 
 def update_schedule(
@@ -190,7 +243,18 @@ def mark_queued(session: Session, user_id: int, run_id: str, *, triggered_by: st
     if state["running"]:
         return state
     now = utc_now().isoformat()
-    state.update({"running": True, "run_id": run_id, "last_run_at": now, "last_error": None})
+    state.update({
+        "running": True,
+        "paused": False,
+        "kill_requested": False,
+        "run_id": run_id,
+        "last_run_at": now,
+        "last_error": None,
+        "progress_events": 0,
+        "progress_pages": 0,
+        "estimated_total_events": latest_export_total(user_id),
+        "progress_message": "Queued for the Universal Scan worker.",
+    })
     state["history"] = ([{
         "id": run_id,
         "status": "queued",
@@ -214,8 +278,73 @@ def mark_started(session: Session, user_id: int, run_id: str) -> bool:
         else item
         for item in state["history"]
     ]
+    state["progress_message"] = "Fetching the first Polymarket Gamma page."
     save_state(session, user_id, state)
     return True
+
+
+def update_progress(
+    session: Session,
+    user_id: int,
+    run_id: str,
+    *,
+    events: int,
+    pages: int,
+) -> str:
+    record = session.scalar(
+        select(PolymarketAutoLiveStateRecord)
+        .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+        .with_for_update()
+    )
+    state = read_state(record)
+    if not state["running"] or state["run_id"] != run_id:
+        return "kill"
+    state["progress_events"] = max(0, events)
+    state["progress_pages"] = max(0, pages)
+    if state["kill_requested"]:
+        state["progress_message"] = "Cancelling after the current Gamma page."
+        control = "kill"
+    elif state["paused"]:
+        state["progress_message"] = "Paused by user. Resume to continue scanning."
+        control = "pause"
+    else:
+        state["progress_message"] = f"Scanning page {pages:,}: {events:,} events captured."
+        control = "continue"
+    save_state(session, user_id, state)
+    return control
+
+
+def control_run(session: Session, user_id: int, *, action: str) -> dict[str, Any]:
+    record = session.scalar(
+        select(PolymarketAutoLiveStateRecord)
+        .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+        .with_for_update()
+    )
+    state = read_state(record)
+    if not state["running"]:
+        return state
+    if action == "pause":
+        state["paused"] = True
+        state["progress_message"] = "Pause requested; finishing the current Gamma page."
+    elif action == "resume":
+        state["paused"] = False
+        state["progress_message"] = "Resuming Universal Scan."
+    elif action == "kill":
+        state["kill_requested"] = True
+        state["paused"] = False
+        state["progress_message"] = "Kill requested; cancelling after the current Gamma page."
+    else:
+        raise ValueError("Unknown Universal Scan control action.")
+    save_state(session, user_id, state)
+    if action == "kill":
+        return finish_run(
+            session,
+            user_id,
+            str(state["run_id"]),
+            total_events=int(state["progress_events"]),
+            cancelled=True,
+        )
+    return state
 
 
 def finish_run(
@@ -225,11 +354,12 @@ def finish_run(
     *,
     total_events: int | None = None,
     error: str | None = None,
+    cancelled: bool = False,
 ) -> dict[str, Any]:
     settings = read_settings(_settings_record(session, user_id))
     state = read_state(_state_record(session, user_id))
     finished_at = utc_now().isoformat()
-    status = "failed" if error else "completed"
+    status = "cancelled" if cancelled else "failed" if error else "completed"
     history = []
     found = False
     for item in state["history"]:
@@ -245,10 +375,20 @@ def finish_run(
                            "total_events": total_events, "error": error})
     state.update({
         "running": False,
+        "paused": False,
+        "kill_requested": False,
         "run_id": None,
-        "last_completed_at": None if error else finished_at,
-        "last_failed_at": finished_at if error else state.get("last_failed_at"),
-        "last_error": error,
+        "last_completed_at": finished_at if not error and not cancelled else state.get("last_completed_at"),
+        "last_failed_at": finished_at if error and not cancelled else state.get("last_failed_at"),
+        "last_error": error if not cancelled else None,
+        "progress_events": total_events if total_events is not None else state.get("progress_events", 0),
+        "progress_message": (
+            "Universal Scan cancelled by user."
+            if cancelled
+            else error
+            if error
+            else f"Universal Scan completed with {total_events or 0:,} events."
+        ),
         "history": history[:MAX_HISTORY],
         "next_run_at": next_scheduled_time(
             utc_now(), start_at=settings["start_at"], refresh_minutes=settings["refresh_minutes"]

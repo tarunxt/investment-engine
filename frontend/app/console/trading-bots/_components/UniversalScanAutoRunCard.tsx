@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Clock3, History, Play, Power, RefreshCw, X } from "lucide-react";
+import { Clock3, History, Pause, Play, Power, RefreshCw, Square, X } from "lucide-react";
 
 type HistoryItem = {
   id: string;
-  status: "queued" | "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
   triggered_by: "manual" | "scheduler";
   started_at: string | null;
   completed_at: string | null;
@@ -16,6 +16,8 @@ type HistoryItem = {
 type AutoRunStatus = {
   enabled: boolean;
   running: boolean;
+  paused: boolean;
+  kill_requested: boolean;
   run_id: string | null;
   start_at: string;
   refresh_minutes: number;
@@ -24,6 +26,10 @@ type AutoRunStatus = {
   last_completed_at: string | null;
   last_failed_at: string | null;
   last_error: string | null;
+  progress_events: number;
+  progress_pages: number;
+  estimated_total_events: number | null;
+  progress_message: string | null;
   history: HistoryItem[];
 };
 
@@ -40,7 +46,7 @@ function dateTime(value: string | null) {
 
 function scheduleLabel(value: string, refreshMinutes: number) {
   const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
+    day: "numeric", year: "numeric",
     month: "long",
     hour: "2-digit",
     minute: "2-digit",
@@ -49,7 +55,7 @@ function scheduleLabel(value: string, refreshMinutes: number) {
     timeZone: IST,
   }).formatToParts(new Date(value));
   const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
-  return `Auto Runs Started at ${read("hour")}:${read("minute")}:${read("second")}, ${read("day")} ${read("month")} and refreshes every ${refreshMinutes} minutes`;
+  return `Auto Runs Started at ${read("hour")}:${read("minute")}:${read("second")}, ${read("day")} ${read("month")} ${read("year")} and refreshes every ${refreshMinutes} minutes`;
 }
 
 function toIstInput(value: string) {
@@ -106,16 +112,25 @@ export function UniversalScanAutoRunCard() {
     return () => window.clearTimeout(timer);
   }, [load]);
   useEffect(() => {
-    const timer = window.setInterval(() => void load(), status?.running ? 5_000 : 60_000);
+    const timer = window.setInterval(() => void load(), status?.running ? 2_000 : 60_000);
     return () => window.clearInterval(timer);
   }, [load, status?.running]);
 
-  async function act(action: "run-now" | "enable" | "disable") {
+  async function act(action: "run-now" | "enable" | "disable" | "pause" | "resume" | "kill") {
     setBusy(action); setError(null);
     try { apply(await requestStatus({ action })); }
     catch (actionError) { setError(actionError instanceof Error ? actionError.message : String(actionError)); }
     finally { setBusy(null); }
   }
+
+  const effectiveStartAt = status?.last_run_at && status.enabled
+    && Date.parse(status.last_run_at) > Date.parse(status.start_at)
+    ? status.last_run_at
+    : status?.start_at;
+  const estimatedTotal = status?.estimated_total_events ?? 0;
+  const progressPercent = status?.running && estimatedTotal > 0
+    ? Math.min(99, Math.round(status.progress_events * 100 / estimatedTotal))
+    : status?.running ? null : 0;
 
   async function saveSettings() {
     const startAt = istInputToIso(startInput);
@@ -131,12 +146,14 @@ export function UniversalScanAutoRunCard() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-fuchsia-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-fuchsia-700">Auto Run Schedule</span>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">Status: {status?.running ? "Running" : status?.enabled ? "Enabled" : "Disabled"}</span>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">Status: {status?.paused ? "Paused" : status?.running ? "Running" : status?.enabled ? "Enabled" : "Disabled"}</span>
           <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">Mode: Universal scan only</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => setShowHistory(true)} className="inline-flex items-center gap-2 rounded-lg bg-amber-300 px-4 py-2 text-xs font-bold uppercase tracking-wide text-slate-900"><History className="h-4 w-4" />History</button>
-          <button type="button" disabled={Boolean(busy) || status?.running} onClick={() => void act("run-now")} className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-wide text-emerald-800 disabled:opacity-50"><Play className="h-4 w-4" />{status?.running ? "Auto Run Running" : "Start AutoRun Now"}</button>
+          <button type="button" disabled={Boolean(busy) || status?.running} onClick={() => void act("run-now")} className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-100 px-4 py-2 text-xs font-bold uppercase tracking-wide text-amber-950 disabled:opacity-50"><Play className="h-4 w-4" />{status?.running ? "Auto Run Running" : "Start Auto Run Now"}</button>
+          {status?.running && <button type="button" disabled={Boolean(busy) || status.kill_requested} onClick={() => void act(status.paused ? "resume" : "pause")} className="inline-flex items-center gap-2 rounded-lg border border-amber-400 bg-amber-50 px-4 py-2 text-xs font-bold uppercase tracking-wide text-amber-900 disabled:opacity-50">{status.paused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}{status.paused ? "Resume" : "Pause"}</button>}
+          {status?.running && <button type="button" disabled={Boolean(busy) || status.kill_requested} onClick={() => void act("kill")} className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white disabled:opacity-50"><Square className="h-4 w-4" />{status.kill_requested ? "Killing…" : "Kill"}</button>}
           <button type="button" disabled={Boolean(busy)} onClick={() => void act(status?.enabled ? "disable" : "enable")} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white disabled:opacity-50"><Power className="h-4 w-4" />{status?.enabled ? "Disable Auto Run" : "Enable Auto Run"}</button>
         </div>
       </div>
@@ -157,7 +174,17 @@ export function UniversalScanAutoRunCard() {
         </label>
       </div>
 
-      {status && <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-950">{scheduleLabel(status.start_at, status.refresh_minutes)}</div>}
+      {status && effectiveStartAt && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950">{scheduleLabel(effectiveStartAt, status.refresh_minutes)}</div>}
+      {status?.running && <div className="mt-3 rounded-xl border border-amber-300 bg-amber-100 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold text-amber-950">
+          <span>{status.progress_events.toLocaleString("en-IN")} events scanned · {status.progress_pages.toLocaleString("en-IN")} pages</span>
+          <span>{progressPercent === null ? "Scanning…" : `${progressPercent}%`}</span>
+        </div>
+        <div role="progressbar" aria-label="Universal Scan progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent ?? undefined} className="mt-3 h-2.5 overflow-hidden rounded-full bg-amber-200">
+          <div className={`h-full rounded-full bg-amber-600 transition-all duration-500 ${progressPercent === null ? "w-1/3 animate-pulse" : ""}`} style={progressPercent === null ? undefined : { width: `${progressPercent}%` }} />
+        </div>
+        <p className="mt-2 text-xs text-amber-900">{status.progress_message || "Universal Scan is running."}</p>
+      </div>}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-slate-100 bg-white p-4"><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Next scheduled run</div><div className="mt-2 text-sm font-semibold text-slate-900">{dateTime(status?.next_run_at ?? null)}</div></div>
         <div className={`rounded-xl border p-4 ${status?.last_failed_at ? "border-red-200 bg-red-50" : "border-slate-100 bg-white"}`}><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Last failed run</div><div className="mt-2 text-sm font-semibold text-slate-900">{dateTime(status?.last_failed_at ?? null)}</div><div className="mt-1 text-xs text-slate-600">{status?.last_error ?? "No failed Universal Scan auto-run."}</div></div>
