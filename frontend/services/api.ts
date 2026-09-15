@@ -1812,12 +1812,19 @@ class apiServiceClass implements IApiService {
   }
 
   getBullpenAutoLiveHistory(
-    params: { page?: number; size?: number } = {},
+    params: {
+      page?: number;
+      size?: number;
+      workspaceProfile?: "bullpen007" | "bullpen-sports";
+    } = {},
     options?: ApiRequestControl,
   ): Promise<BullpenAutoLiveHistoryPage> {
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
     if (params.size) query.set("size", String(params.size));
+    if (params.workspaceProfile) {
+      query.set("workspace_profile", params.workspaceProfile);
+    }
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.get<BullpenAutoLiveHistoryPage>(
       `${URLs.bullpenAutoLive.history()}${suffix}`,
@@ -1826,10 +1833,16 @@ class apiServiceClass implements IApiService {
   }
 
   getBullpenAutoLiveHistoryEventTrends(
+    params: { workspaceProfile?: "bullpen007" | "bullpen-sports" } = {},
     options?: ApiRequestControl,
   ): Promise<BullpenAutoLiveEventTrendsResponse> {
+    const query = new URLSearchParams();
+    if (params.workspaceProfile) {
+      query.set("workspace_profile", params.workspaceProfile);
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.get<BullpenAutoLiveEventTrendsResponse>(
-      URLs.bullpenAutoLive.historyEventTrends(),
+      `${URLs.bullpenAutoLive.historyEventTrends()}${suffix}`,
       { cache: "no-store", ...options },
     );
   }

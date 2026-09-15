@@ -608,7 +608,15 @@ async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
         "app.domains.polymarket_auto_live.router._get_bot",
         fake_get_bot,
     )
-    async def fake_read_history(_credentials, *, page=1, size=20, event_trends=False):
+    async def fake_read_history(
+        _credentials,
+        *,
+        page=1,
+        size=20,
+        event_trends=False,
+        workspace_profile=None,
+    ):
+        calls.append(("workspace", workspace_profile))
         if event_trends:
             return await FakeBot().list_recent_event_trends()
         return await FakeBot().list_run_history(page=page, size=size)
@@ -619,8 +627,10 @@ async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
         transport=transport,
         base_url="http://testserver",
     ) as client:
-        history = await client.get("/polymarket/auto-live/history?page=2&size=10")
-        assert calls == [("history", 2, 10)]
+        history = await client.get(
+            "/polymarket/auto-live/history?page=2&size=10&workspace_profile=bullpen-sports"
+        )
+        assert calls == [("workspace", "bullpen-sports"), ("history", 2, 10)]
         details = await client.get(
             "/polymarket/auto-live/runs/run-1/decisions"
         )
@@ -629,12 +639,17 @@ async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
     assert history.json()["page"] == 2
     assert history.headers["cache-control"] == "private, no-cache"
     assert details.status_code == 200
-    assert calls == [("history", 2, 10), ("decisions", "run-1")]
+    assert calls == [
+        ("workspace", "bullpen-sports"),
+        ("history", 2, 10),
+        ("decisions", "run-1"),
+    ]
 
 
 @pytest.mark.anyio
 async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
     app = _build_test_app(auto_live_router)
+    workspace_profiles = []
 
     class FakeBot:
         async def list_recent_event_trends(self):
@@ -652,7 +667,15 @@ async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
         return FakeBot()
 
     monkeypatch.setattr("app.domains.polymarket_auto_live.router._get_bot", fake_get_bot)
-    async def fake_read_history(_credentials, *, page=1, size=20, event_trends=False):
+    async def fake_read_history(
+        _credentials,
+        *,
+        page=1,
+        size=20,
+        event_trends=False,
+        workspace_profile=None,
+    ):
+        workspace_profiles.append(workspace_profile)
         if event_trends:
             return await FakeBot().list_recent_event_trends()
         return await FakeBot().list_run_history(page=page, size=size)
@@ -660,11 +683,14 @@ async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
     monkeypatch.setattr("app.domains.polymarket_auto_live.router._read_history", fake_read_history)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-        response = await client.get("/polymarket/auto-live/history/event-trends")
+        response = await client.get(
+            "/polymarket/auto-live/history/event-trends?workspace_profile=bullpen-sports"
+        )
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-cache"
     assert response.json()["events"][0]["score"] == 140
+    assert workspace_profiles == ["bullpen-sports"]
     assert len(response.json()["events"][0]["scan_scores"]) == 20
     assert response.json()["events"][0]["scan_llm_outputs"] == [[] for _ in range(20)]
 
@@ -702,13 +728,25 @@ async def test_history_auth_and_read_share_one_session(monkeypatch, event_trends
         def __init__(self, db):
             assert db is session
 
-        async def list_run_history_page(self, user_id, *, page, size):
-            assert (user_id, page, size) == (7, 2, 10)
+        async def list_run_history_page(
+            self,
+            user_id,
+            *,
+            page,
+            size,
+            workspace_profile=None,
+        ):
+            assert (user_id, page, size, workspace_profile) == (
+                7,
+                2,
+                10,
+                "bullpen-sports",
+            )
             events.append("history")
             return expected
 
-        async def list_recent_event_trends(self, user_id):
-            assert user_id == 7
+        async def list_recent_event_trends(self, user_id, *, workspace_profile=None):
+            assert (user_id, workspace_profile) == (7, "bullpen-sports")
             events.append("trends")
             return expected
 
@@ -716,7 +754,13 @@ async def test_history_auth_and_read_share_one_session(monkeypatch, event_trends
     monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
     monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", auth)
     monkeypatch.setattr(prefix + "AsyncPolymarketAutoLiveRepository", Repo)
-    assert await _read_history(None, page=2, size=10, event_trends=event_trends) is expected
+    assert await _read_history(
+        None,
+        page=2,
+        size=10,
+        event_trends=event_trends,
+        workspace_profile="bullpen-sports",
+    ) is expected
     assert events == ["enter", "auth", "trends" if event_trends else "history", "exit"]
 
 

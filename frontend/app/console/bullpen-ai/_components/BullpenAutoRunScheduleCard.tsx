@@ -83,6 +83,10 @@ import {
   type BullpenWorkspaceProfile,
 } from "@/lib/bullpenStageOneSettings";
 import {
+  bullpenWorkspaceHistoryPath,
+  bullpenWorkspacePath,
+} from "@/lib/bullpenWorkspaceRoutes";
+import {
   mergeBullpenConsoleDecisionProjection,
   mergeBullpenConsoleRunProjection,
   reconcileBullpenConsoleRunCopies,
@@ -5960,7 +5964,13 @@ function RunDetailDialog({
 }
 
 
-export function BullpenRunDetailScreen({ runId }: { runId: string }) {
+export function BullpenRunDetailScreen({
+  runId,
+  workspaceProfile = "bullpen007",
+}: {
+  runId: string;
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
   const router = useRouter();
   const [state, setState] = useState<RunDetailDialogState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -6080,7 +6090,8 @@ export function BullpenRunDetailScreen({ runId }: { runId: string }) {
     return () => controller.abort();
   }, [normalizedRunId, reloadKey]);
 
-  const returnToHistory = () => router.push("/console/bullpen-ai/history");
+  const returnToHistory = () =>
+    router.push(bullpenWorkspaceHistoryPath(workspaceProfile));
 
   if (state) {
     const openScanCandidateDialog = (
@@ -6130,6 +6141,7 @@ export function BullpenRunDetailScreen({ runId }: { runId: string }) {
           <StageOneOutputDialog
             state={scanCandidateDialog}
             onClose={() => setScanCandidateDialog(null)}
+            workspaceProfile={workspaceProfile}
           />
         ) : null}
         {stageTwoInvestEventsDialog ? (
@@ -12294,8 +12306,14 @@ export function BullpenAutoRunScheduleCard({
           timeoutMs: 5_000,
         };
       const [pageResult, trendsResult] = await Promise.allSettled([
-        apiService.getBullpenAutoLiveHistory({ page, size: 20 }, requestOptions),
-        apiService.getBullpenAutoLiveHistoryEventTrends(requestOptions),
+        apiService.getBullpenAutoLiveHistory(
+          { page, size: 20, workspaceProfile },
+          requestOptions,
+        ),
+        apiService.getBullpenAutoLiveHistoryEventTrends(
+          { workspaceProfile },
+          requestOptions,
+        ),
       ]);
       if (controller.signal.aborted) return;
 
@@ -12325,7 +12343,7 @@ export function BullpenAutoRunScheduleCard({
         setRunHistoryEventTrendsLoading(false);
       }
     }
-  }, [autoRunStatusCacheKey]);
+  }, [autoRunStatusCacheKey, workspaceProfile]);
 
   async function openHistoryRunDetail(
     item: Pick<BullpenAutoLiveHistoryItem, "id">,
@@ -12458,8 +12476,8 @@ export function BullpenAutoRunScheduleCard({
     handledRequestedRunDetailIdRef.current = null;
     router.replace(
       returnRunDetailToHistory
-        ? "/console/bullpen-ai/history"
-        : "/console/bullpen-ai",
+        ? bullpenWorkspaceHistoryPath(workspaceProfile)
+        : bullpenWorkspacePath(workspaceProfile),
     );
   }
 
@@ -14223,7 +14241,7 @@ export function BullpenAutoRunScheduleCard({
               <History className="mr-2 h-4 w-4" />
               History
             </Button>
-            <Button type="button" variant="outline" onClick={() => window.open("/console/bullpen-ai/history", "_blank", "noopener,noreferrer")} aria-label="Open Bullpen History in new window" title="Open in new window" className="-ml-2 rounded-l-none border-l border-l-slate-900/20 border-[#f4d458] bg-[#f4d458] px-3 text-slate-950 hover:bg-[#e7c845]"><ExternalLink className="h-4 w-4" /></Button>
+            <Button type="button" variant="outline" onClick={() => window.open(bullpenWorkspaceHistoryPath(workspaceProfile), "_blank", "noopener,noreferrer")} aria-label="Open workflow History in new window" title="Open in new window" className="-ml-2 rounded-l-none border-l border-l-slate-900/20 border-[#f4d458] bg-[#f4d458] px-3 text-slate-950 hover:bg-[#e7c845]"><ExternalLink className="h-4 w-4" /></Button>
 
             <Button
               type="button"
@@ -15612,7 +15630,7 @@ export function BullpenAutoRunScheduleCard({
         {isRunHistoryDialogOpen ? (
           <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRunHistoryDialog(); }}>
             <div className="max-h-[92vh] w-full max-w-7xl">
-              <BullpenRunHistoryContent page={visibleRunHistoryPage} trends={visibleRunHistoryEventTrends} loading={runHistoryLoading} trendsLoading={runHistoryEventTrendsLoading} error={runHistoryError} trendsError={runHistoryEventTrendsError} detailLoadingId={runHistoryDetailLoadingId} onRefresh={() => void loadRunHistory()} onPage={(page) => void loadRunHistory(page)} onOpenRun={(run) => void openHistoryRunDetail(run)} onClose={closeRunHistoryDialog} />
+              <BullpenRunHistoryContent page={visibleRunHistoryPage} trends={visibleRunHistoryEventTrends} loading={runHistoryLoading} trendsLoading={runHistoryEventTrendsLoading} error={runHistoryError} trendsError={runHistoryEventTrendsError} detailLoadingId={runHistoryDetailLoadingId} onRefresh={() => void loadRunHistory()} onPage={(page) => void loadRunHistory(page)} onOpenRun={(run) => void openHistoryRunDetail(run)} onClose={closeRunHistoryDialog} fullScreenPath={bullpenWorkspaceHistoryPath(workspaceProfile)} />
             </div>
           </div>
         ) : null}
