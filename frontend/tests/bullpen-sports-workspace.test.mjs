@@ -25,7 +25,8 @@ test("Bullpen Sports owns its History and run-detail routes", () => {
   assert.match(historyPage, /workspaceProfile="bullpen-sports"/);
   assert.match(runPage, /workspaceProfile="bullpen-sports"/);
   assert.match(routes, /"\/console\/bullpen-sports"/);
-  assert.match(card, /window\.open\(bullpenWorkspaceHistoryPath\(workspaceProfile\)/);
+  assert.match(card, /router\.push\(bullpenWorkspaceHistoryPath\(workspaceProfile\)\)/);
+  assert.doesNotMatch(card, /window\.open\(bullpenWorkspaceHistoryPath\(workspaceProfile\)/);
   assert.match(card, /workspaceProfile[\s\S]*?getBullpenAutoLiveHistoryEventTrends/);
   assert.match(history, /workspaceCacheKey\(HISTORY_PAGE_CACHE_KEY, profile\)/);
   assert.match(history, /workspaceCacheKey\(EVENT_TRENDS_CACHE_KEY, profile\)/);

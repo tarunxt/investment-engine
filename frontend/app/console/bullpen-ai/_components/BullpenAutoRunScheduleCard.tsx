@@ -14241,7 +14241,7 @@ export function BullpenAutoRunScheduleCard({
               <History className="mr-2 h-4 w-4" />
               History
             </Button>
-            <Button type="button" variant="outline" onClick={() => window.open(bullpenWorkspaceHistoryPath(workspaceProfile), "_blank", "noopener,noreferrer")} aria-label="Open workflow History in new window" title="Open in new window" className="-ml-2 rounded-l-none border-l border-l-slate-900/20 border-[#f4d458] bg-[#f4d458] px-3 text-slate-950 hover:bg-[#e7c845]"><ExternalLink className="h-4 w-4" /></Button>
+            <Button type="button" variant="outline" onClick={() => router.push(bullpenWorkspaceHistoryPath(workspaceProfile))} aria-label="Open workflow History screen" title="Open History screen" className="-ml-2 rounded-l-none border-l border-l-slate-900/20 border-[#f4d458] bg-[#f4d458] px-3 text-slate-950 hover:bg-[#e7c845]"><ExternalLink className="h-4 w-4" /></Button>
 
             <Button
               type="button"

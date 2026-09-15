@@ -10,6 +10,8 @@ stored beside each durable run. The value is captured from
 workspace-profile field. The unscoped API behavior remains available for backward
 compatibility. Frontend History routes and local caches are namespaced by the same
 workspace profile so data cannot leak between workflow screens.
+The workflow card's external History shortcut uses authenticated client-side
+navigation to that workspace-owned route instead of opening a fresh browser tab.
 The release migration backfills only recent Sports rows and treats older null
 rows as Bullpen 007, avoiding repeated reads of large immutable run payloads.
 
