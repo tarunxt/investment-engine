@@ -14,6 +14,7 @@ import {
   cacheStageOneGammaExportSummary,
   cacheUniversalScanSummary,
   openLatestStageOneGammaExport,
+  openStageOneGammaExport,
   openUniversalScan,
   parseStageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
@@ -53,6 +54,19 @@ export async function GET(request: NextRequest) {
         { snapshot: null },
         { headers: { "cache-control": "no-store" } },
       );
+    }
+
+    let sourceScanCompletedAt = latest.metadata.sourceScanCompletedAt ?? null;
+    if (
+      !isUniversal &&
+      !sourceScanCompletedAt &&
+      latest.metadata.sourceScanExportId
+    ) {
+      const source = await openStageOneGammaExport({
+        exportId: latest.metadata.sourceScanExportId,
+        ownerKey: `${sessionOwner}:universal`,
+      }).catch(() => null);
+      sourceScanCompletedAt = source?.metadata.updatedAt ?? null;
     }
 
     const hasCachedSummary =
@@ -131,9 +145,9 @@ export async function GET(request: NextRequest) {
         totalRejectedQuestions: rejectedCount,
         scanExportId: latest.metadata.exportId,
         sourceScanExportId: latest.metadata.sourceScanExportId,
-        sourceScanCompletedAt:
-          latest.metadata.sourceScanCompletedAt ??
-          (isUniversal ? latest.metadata.updatedAt : null),
+        sourceScanCompletedAt: isUniversal
+          ? latest.metadata.updatedAt
+          : sourceScanCompletedAt,
         filtersCompletedAt: isUniversal
           ? null
           : latest.metadata.filtersCompletedAt ?? latest.metadata.updatedAt,

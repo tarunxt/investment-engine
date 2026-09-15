@@ -6,6 +6,7 @@ const card = read("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleC
 const page = read("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx");
 const shared = read("../app/console/trading-bots/_components/UniversalPolymarketScan.tsx");
 const route = read("../app/api/bullpen-ai/route.ts");
+const snapshotRoute = read("../app/api/bullpen-ai/stage-one-snapshot/route.ts");
 
 test("shared scan controls live in Trading Bots, while Bullpen Stage 1 is filters only", () => {
   assert.match(shared, /Universal Polymarket Scan/);
@@ -41,4 +42,6 @@ test("filtered evidence retains source lineage and server synchronization", () =
   assert.match(route, /sourceScanExportId: metadata\.sourceScanExportId/);
   assert.match(route, /sourceScanCompletedAt: metadata\.sourceScanCompletedAt/);
   assert.match(route, /filtersCompletedAt: metadata\.filtersCompletedAt/);
+  assert.match(snapshotRoute, /openStageOneGammaExport/);
+  assert.match(snapshotRoute, /sourceScanCompletedAt = source\?\.metadata\.updatedAt/);
 });
