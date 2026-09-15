@@ -684,6 +684,25 @@ class BullpenAutoLiveRunOnceRequest(BaseModel):
     )
 
 
+class BullpenWorkflowRunNowRequest(BaseModel):
+    workspace_profile: Literal["bullpen007", "bullpen-sports"]
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$",
+    )
+
+
+class BullpenWorkflowRunNowResponse(BaseModel):
+    status: Literal["queued"] = "queued"
+    run_id: str
+    workspace_profile: Literal["bullpen007", "bullpen-sports"]
+    universal_export_id: str
+    universal_scan_started_at: str | None = None
+    universal_scan_completed_at: str | None = None
+    queued_at: str
+
+
 class BullpenAutoLiveRejectedCandidateDiagnostic(BaseModel):
     market_id: str
     market_title: str
