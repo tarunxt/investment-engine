@@ -1,5 +1,6 @@
 import asyncio
 import json
+import inspect
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -12,7 +13,8 @@ from app.domains.jobs.models import Job  # noqa: F401 - auth model relationships
 from app.domains.prompts.models import Prompt  # noqa: F401
 
 from app.domains.polymarket_auto_live.clustering_progress import (
-    ClusteringProgressRequest, owned_run, progress_view,
+    ClusteringProgressRequest, get_clustering_progress, owned_run, progress_view,
+    record_clustering_progress,
 )
 
 
@@ -68,3 +70,8 @@ def test_delayed_duplicate_and_concurrent_reports_cannot_replace_current_progres
         asyncio.run(module.record_clustering_progress(uuid4(), request.model_copy(update={"attempt_id": uuid4(), "sequence": 0, "status": "collecting"}), SimpleNamespace(id=1)))
     assert error.value.status_code == 409
     session.add.assert_not_called()
+
+
+def test_progress_routes_accept_workflow_run_ids():
+    assert inspect.signature(get_clustering_progress).parameters["run_id"].annotation is str
+    assert inspect.signature(record_clustering_progress).parameters["run_id"].annotation is str
