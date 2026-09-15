@@ -54,4 +54,6 @@ test("queueing stays fast and reuses the prior completed total for progress", ()
   );
   assert.match(scheduler, /"estimated_total_events": state\["last_total_events"\]/);
   assert.doesNotMatch(scheduler, /def latest_export_total/);
+  assert.match(scheduler, /UniversalScanStateRecord/);
+  assert.doesNotMatch(scheduler, /PolymarketAutoLiveStateRecord/);
 });

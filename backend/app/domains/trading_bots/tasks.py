@@ -18,7 +18,7 @@ from app.domains.trading_bots.universal_scan import (
     update_progress,
     utc_now,
 )
-from app.domains.polymarket_auto_live.models import PolymarketAutoLiveStateRecord
+from app.domains.trading_bots.models import UniversalScanStateRecord
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
@@ -37,8 +37,8 @@ def prepare_universal_scan(
     run_id = f"universal-scan-{uuid4().hex}"
     with SyncSessionLocal() as session:
         record = session.scalar(
-            select(PolymarketAutoLiveStateRecord)
-            .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+            select(UniversalScanStateRecord)
+            .where(UniversalScanStateRecord.user_id == user_id)
             .with_for_update()
         )
         state = read_state(record)
@@ -120,7 +120,7 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
         return {"run_id": run_id, "status": "completed", "total_events": total_events}
     except UniversalScanCancelled:
         with SyncSessionLocal() as session:
-            state = read_state(session.get(PolymarketAutoLiveStateRecord, user_id))
+            state = read_state(session.get(UniversalScanStateRecord, user_id))
             finish_run(
                 session,
                 user_id,
