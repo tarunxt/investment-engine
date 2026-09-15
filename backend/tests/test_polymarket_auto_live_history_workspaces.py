@@ -22,17 +22,21 @@ def test_history_workspace_filter_isolates_sports_and_legacy_007_runs(tmp_path) 
         tables=[User.__table__, PolymarketAutoLiveRunRecord.__table__],
     )
 
-    def run_record(run_id: str, payload: dict) -> PolymarketAutoLiveRunRecord:
+    def run_record(
+        run_id: str,
+        workspace_profile: str | None,
+    ) -> PolymarketAutoLiveRunRecord:
         return PolymarketAutoLiveRunRecord(
             id=run_id,
             user_id=7,
             status="completed",
             triggered_by="manual",
+            workspace_profile=workspace_profile,
             dry_run=True,
             started_at=datetime(2026, 9, 15, 10, tzinfo=UTC),
             completed_at=datetime(2026, 9, 15, 10, 1, tzinfo=UTC),
             summary=f"{run_id} summary",
-            payload=payload,
+            payload={},
         )
 
     with Session(engine) as session:
@@ -46,25 +50,9 @@ def test_history_workspace_filter_isolates_sports_and_legacy_007_runs(tmp_path) 
         )
         session.add_all(
             [
-                run_record("legacy-007", {}),
-                run_record(
-                    "explicit-007",
-                    {
-                        "request_context": {
-                            "console_profile": {"workspace_profile": "bullpen007"}
-                        }
-                    },
-                ),
-                run_record(
-                    "sports",
-                    {
-                        "request_context": {
-                            "console_profile": {
-                                "workspace_profile": "bullpen-sports"
-                            }
-                        }
-                    },
-                ),
+                run_record("legacy-007", None),
+                run_record("explicit-007", "bullpen007"),
+                run_record("sports", "bullpen-sports"),
             ]
         )
         session.commit()
@@ -85,3 +73,13 @@ def test_history_workspace_filter_isolates_sports_and_legacy_007_runs(tmp_path) 
 
     assert sports_ids == ["sports"]
     assert set(bullpen007_ids) == {"legacy-007", "explicit-007"}
+
+
+def test_run_persistence_captures_workspace_profile_without_reading_payload() -> None:
+    source = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "app/domains/polymarket_auto_live/repository.py"
+    ).read_text()
+
+    assert "record.workspace_profile = (" in source
+    assert "run.request_context.console_profile.workspace_profile" in source

@@ -2,13 +2,16 @@
 
 ## Workflow-owned History views
 
-Bullpen History reads may be scoped by the durable
-`request_context.console_profile.workspace_profile` captured with each run.
+Bullpen History reads are scoped by the compact indexed `workspace_profile`
+stored beside each durable run. The value is captured from
+`request_context.console_profile.workspace_profile` whenever a run is saved.
 `bullpen-sports` History includes only Sports-owned runs and event trends;
 `bullpen007` includes explicit Bullpen 007 runs plus legacy rows that predate the
 workspace-profile field. The unscoped API behavior remains available for backward
 compatibility. Frontend History routes and local caches are namespaced by the same
 workspace profile so data cannot leak between workflow screens.
+The release migration backfills only recent Sports rows and treats older null
+rows as Bullpen 007, avoiding repeated reads of large immutable run payloads.
 
 ## Bullpen workspace filter profiles (2026-09-14)
 
