@@ -34,6 +34,21 @@ test("Bullpen Sports owns its History and run-detail routes", () => {
   assert.match(api, /query\.set\("workspace_profile", params\.workspaceProfile\)/);
 });
 
+test("both shared workflow screens show the three Stage 1 triggers without the legacy banner", () => {
+  const card = read("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx");
+  const types = read("../types/api.ts");
+
+  assert.match(card, /Stage 1 Trigger Monitor/);
+  assert.match(card, /1 · Fresh Universal Scan/);
+  assert.match(card, /2 · Start Auto Run Now/);
+  assert.match(card, /3 · Scheduled Time/);
+  assert.match(card, /workspaceProfile/);
+  assert.match(card, /getBullpenAutoLiveHistory\([\s\S]*?workspaceProfile/);
+  assert.match(types, /"universal_scan"/);
+  assert.doesNotMatch(card, /Auto Runs Started/);
+  assert.doesNotMatch(card, /scheduleSavedSummary/);
+});
+
 test("Bullpen Sports is directly below Bullpen 007 in navigation", () => {
   const navigation = read("../app/console/_components/sidebarNavigationConfig.ts");
   assert.match(

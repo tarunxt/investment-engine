@@ -58,6 +58,11 @@ from app.domains.polymarket_auto_live.stage_one_excel import (
     StageOneExcelExportError,
     remove_export,
 )
+from app.domains.polymarket_auto_live.workspace_profiles import (
+    FILTER_PROFILE_FIELDS,
+    NAMED_FILTER_PROFILES,
+    effective_filter_profile_settings,
+)
 from app.domains.polymarket_auto_live.export_source import build_owned_stage_one_excel
 from app.infrastructure.database.session import AsyncSessionLocal
 
@@ -79,57 +84,15 @@ DASHBOARD_SUMMARY_CACHE_CONTROL = "private, no-cache"
 DASHBOARD_SUMMARY_MAX_BYTES = 150_000
 DASHBOARD_SUMMARY_SLOW_THRESHOLD_MS = 1_500.0
 
-_NAMED_FILTER_PROFILES = {"bullpen-sports"}
-_FILTER_PROFILE_FIELDS = {
-    "console_min_market_odds",
-    "console_min_highest_market_odds",
-    "console_apply_yes_no_odds_thresholds",
-    "console_max_closing_days",
-    "console_min_volume_usd",
-    "console_min_liquidity_usd",
-    "console_min_volume_24hr_usd",
-    "console_max_spread_cents",
-    "console_rejected_theme_pattern",
-    "console_exclude_sports",
-    "console_sports_moneyline_only",
-    "console_exclude_weather",
-    "console_exclude_market_predictions",
-    "console_exclude_tweet_count_questions",
-    "console_exclude_released_by_events",
-    "console_only_binary_yes_no",
-    "console_exclude_custom_phrases",
-    "console_custom_exclude_phrases",
-    "console_scan_scope",
-}
-
-
 def _validate_filter_profile(profile: str | None) -> str | None:
     if profile is None:
         return None
     normalized = profile.strip().lower()
-    if normalized not in _NAMED_FILTER_PROFILES:
+    if normalized not in NAMED_FILTER_PROFILES:
         raise HTTPException(status_code=404, detail="Unknown Bullpen filter profile.")
     return normalized
 
 
-def _effective_filter_profile_settings(
-    settings: BullpenAutoLiveSettings,
-    profile: str,
-) -> BullpenAutoLiveSettings:
-    default_overlay: dict[str, object] = {}
-    if profile == "bullpen-sports":
-        default_overlay = {
-            "console_exclude_sports": False,
-            "console_sports_moneyline_only": True,
-            "console_scan_scope": "full_universe",
-        }
-    saved_overlay = settings.console_filter_profiles.get(profile, {})
-    overlay = {
-        key: value
-        for key, value in {**default_overlay, **saved_overlay}.items()
-        if key in _FILTER_PROFILE_FIELDS
-    }
-    return settings.model_copy(update=overlay)
 # Event-trend reads inspect up to twenty bounded console projections. Four
 # seconds was below normal p95 while a scan was persisting or the database pool
 # was briefly busy, so healthy reads were cancelled and surfaced as false
@@ -518,7 +481,7 @@ async def get_auto_live_settings(
     try:
         settings = await bot.get_settings()
         return (
-            _effective_filter_profile_settings(settings, resolved_profile)
+            effective_filter_profile_settings(settings, resolved_profile)
             if resolved_profile
             else settings
         )
@@ -613,7 +576,7 @@ async def update_auto_live_settings(
     resolved_profile = _validate_filter_profile(profile)
     if resolved_profile:
         update_fields = request.model_dump(exclude_unset=True)
-        unsupported_fields = set(update_fields) - _FILTER_PROFILE_FIELDS
+        unsupported_fields = set(update_fields) - FILTER_PROFILE_FIELDS
         if unsupported_fields:
             raise HTTPException(
                 status_code=400,
@@ -627,7 +590,7 @@ async def update_auto_live_settings(
                 for key, value in settings.console_filter_profiles.get(
                     resolved_profile, {}
                 ).items()
-                if key in _FILTER_PROFILE_FIELDS
+                if key in FILTER_PROFILE_FIELDS
             }
             current_overlay.update(update_fields)
             profiles = {
@@ -639,7 +602,7 @@ async def update_auto_live_settings(
             )
             await repo.save_settings(current_user.id, persisted)
             await session.commit()
-            return _effective_filter_profile_settings(
+            return effective_filter_profile_settings(
                 persisted, resolved_profile
             )
     bot = await _get_bot(current_user)

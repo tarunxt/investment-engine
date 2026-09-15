@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 from app.domains.polymarket_auto_live.console_profile import (
     console_market_filter_reasons,
 )
-from app.domains.polymarket_auto_live.router import (
-    _effective_filter_profile_settings,
+from app.domains.polymarket_auto_live.workspace_profiles import (
+    effective_filter_profile_settings,
 )
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveSettings
@@ -13,7 +13,7 @@ from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveSettings
 def test_sports_profile_defaults_to_shared_full_universe_with_sports_included() -> None:
     settings = BullpenAutoLiveSettings()
 
-    effective = _effective_filter_profile_settings(settings, "bullpen-sports")
+    effective = effective_filter_profile_settings(settings, "bullpen-sports")
 
     assert effective.console_scan_scope == "full_universe"
     assert effective.console_exclude_sports is False
@@ -30,7 +30,7 @@ def test_sports_profile_overlay_does_not_mutate_bullpen007_settings() -> None:
         },
     )
 
-    effective = _effective_filter_profile_settings(settings, "bullpen-sports")
+    effective = effective_filter_profile_settings(settings, "bullpen-sports")
 
     assert effective.console_min_volume_usd == 2500
     assert settings.console_min_volume_usd == 100

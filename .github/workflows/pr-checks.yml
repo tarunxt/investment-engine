@@ -52,6 +52,9 @@ jobs:
           backend/tests/test_database_outage.py
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py
+          backend/tests/test_universal_scan_auto_run.py
+          backend/tests/test_bullpen_sports_filter_profile.py
+          backend/tests/test_polymarket_auto_live_trigger_unification.py
           backend/tests/test_polymarket_auto_live_stage1_runtime.py
           backend/tests/test_polymarket_auto_live.py::test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_timeout
           backend/tests/test_polymarket_auto_live_lifecycle_safety.py

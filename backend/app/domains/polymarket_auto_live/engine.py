@@ -6036,7 +6036,14 @@ class BullpenAutoLiveEngine:
                 },
             )
             def report_scan_page(scanned_markets: int, completed_pages: int) -> None:
-                label = "Full Universe" if scan_scope == "full_universe" else "Trending"
+                label = (
+                    "Universal Scan"
+                    if manual_console_context is not None
+                    and manual_console_context.source_scan_completed_at
+                    else "Full Universe"
+                    if scan_scope == "full_universe"
+                    else "Trending"
+                )
                 message = f"Scanning {label}: {scanned_markets:,} markets across {completed_pages} pages."
                 report_stage1_progress(
                     message,
@@ -6094,6 +6101,17 @@ class BullpenAutoLiveEngine:
                     rejected_callback=store_rejected_source,
                     accepted_callback=streaming_sources.store_market,
                     page_cache_key=run.id if scan_scope == "full_universe" else None,
+                    universal_scan_user_id=(
+                        user_id
+                        if manual_console_context is not None
+                        and manual_console_context.source_scan_completed_at
+                        else None
+                    ),
+                    universal_scan_export_id=(
+                        manual_console_context.snapshot_id
+                        if manual_console_context is not None
+                        else None
+                    ),
                 )
             report_stage1_progress(
                 "Stage 1 pagination finished; preparing candidate exports and wallet handoff.",

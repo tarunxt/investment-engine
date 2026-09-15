@@ -1,5 +1,20 @@
 # Bullpen Run Audit
 
+## Workflow Stage 1 trigger contract (2026-09-15)
+
+Bullpen 007 and Bullpen Sports start their workflow-owned Stage 1 filters from
+the latest immutable completed Universal Polymarket Scan through three trigger
+sources: successful Universal Scan completion, the workflow's **Start Auto Run
+Now** action, and the configured scheduled time. Universal-completion and
+scheduled batches serialize Bullpen 007 and Sports through the single guarded
+execution lane, preventing one workflow from cancelling or overwriting the
+other. Each run persists its `workspace_profile`, `triggered_by`, Universal Scan
+snapshot ID, scan timestamps, and filters-completed timestamp in the existing
+run/audit contract. `triggered_by=universal_scan` is additive; historical trigger
+values remain valid. The workflow UI reads workspace-scoped History for passed,
+failed, running, and latest-attempt evidence and shows the next Universal Scan
+and workflow schedule timestamps in the **Stage 1 Trigger Monitor**.
+
 ## Workflow-owned History views
 
 Bullpen History reads are scoped by the compact indexed `workspace_profile`

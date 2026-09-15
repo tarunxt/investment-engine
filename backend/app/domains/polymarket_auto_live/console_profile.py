@@ -1104,7 +1104,73 @@ async def scan_console_profile_markets(
     rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
     accepted_callback: Callable[[ScannedMarket], None] | None = None,
     page_cache_key: str | None = None,
+    universal_scan_user_id: int | None = None,
+    universal_scan_export_id: str | None = None,
 ) -> ConsoleScanResult:
+    if universal_scan_user_id is not None:
+        from app.domains.trading_bots.universal_scan import iter_universal_scan_markets
+
+        metadata, universal_rows = iter_universal_scan_markets(
+            universal_scan_user_id,
+            export_id=universal_scan_export_id,
+        )
+        accepted: list[ScannedMarket] = []
+        rejected: list[ScanRejectedMarket] = []
+        total_candidates = 0
+        for total_candidates, market in enumerate(universal_rows, 1):
+            reasons = console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+                min_highest_market_odds=min_highest_market_odds,
+                apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
+                max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                min_volume_24hr_usd=min_volume_24hr_usd,
+                max_spread_cents=max_spread_cents,
+                rejected_theme_pattern=rejected_theme_pattern,
+                exclude_sports=exclude_sports,
+                sports_moneyline_only=sports_moneyline_only,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
+                custom_exclude_phrases=custom_exclude_phrases,
+            ) if apply_base_filters else []
+            if reasons:
+                rejected_market = ScanRejectedMarket(
+                    market_id=market.market_id,
+                    question=market.question,
+                    slug=market.slug,
+                    market_url=market.market_url,
+                    reasons=reasons,
+                    source_market=market,
+                )
+                rejected.append(rejected_market)
+                if rejected_callback is not None:
+                    rejected_callback(rejected_market)
+            else:
+                accepted.append(market)
+                if accepted_callback is not None:
+                    accepted_callback(market)
+            if progress_callback is not None and total_candidates % 1_000 == 0:
+                progress_callback(total_candidates, 1)
+        if progress_callback is not None:
+            progress_callback(total_candidates, 1)
+        return ConsoleScanResult(
+            source_label="Universal Polymarket Scan",
+            source_url="/console/trading-bots",
+            scanned_at=str(metadata.get("scannedAt") or metadata.get("createdAt") or ""),
+            accepted=accepted,
+            rejected=rejected,
+            total_candidates=total_candidates,
+            complete_universe=True,
+            catalogue_candidates=total_candidates,
+        )
+
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
     cli_exc: Exception | None = None
