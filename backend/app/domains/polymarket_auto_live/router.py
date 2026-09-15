@@ -27,16 +27,18 @@ from app.domains.auth.dependencies import (
 )
 from app.domains.auth.models import User
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
-from app.domains.polymarket_auto_live.console_projection import (
-    build_minimal_workflow_stage_results,
-)
+from app.domains.polymarket_auto_live.bot import AutoLiveExecutionLaneBusy
 from app.domains.polymarket_auto_live.console_profile import (
     scan_console_profile_markets,
+)
+from app.domains.polymarket_auto_live.console_projection import (
+    build_minimal_workflow_stage_results,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
     run_contains_historical_auth_error,
 )
 from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveConsoleRunContext,
     BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
     BullpenAutoLiveEventTrendsResponse,
@@ -1227,11 +1229,12 @@ async def queue_workflow_run_now(
     request: BullpenWorkflowRunNowRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """Queue one workflow against the latest immutable Universal Scan.
+    """Start one workflow against the latest immutable Universal Scan.
 
-    The worker owns scan resolution and waits for the user's guarded execution
-    lane, so two workflow buttons can be pressed without either run being
-    silently skipped or superseded.
+    Persist the run before returning whenever the guarded execution lane is
+    free. Only defer to the trigger queue when another workflow really owns the
+    lane. This keeps the button response tied to a durable run instead of an
+    optimistic client-only identity.
     """
 
     from app.domains.polymarket_auto_live.tasks import (
@@ -1259,28 +1262,73 @@ async def queue_workflow_run_now(
             detail="The latest Universal Polymarket Scan has no immutable export identity.",
         )
     queued_at = datetime.now(UTC).isoformat()
+    run_id = bullpen_workflow_trigger_run_id(
+        user_id=current_user.id,
+        triggered_by="manual",
+        batch_id=request.client_request_id,
+        workspace_profile=request.workspace_profile,
+    )
+    source_completed_at = str(
+        metadata.get("updatedAt")
+        or metadata.get("completedAt")
+        or queued_at
+    )
+    run_request = BullpenAutoLiveRunOnceRequest(
+        client_run_id=run_id,
+        wait_for_execution_lane=True,
+        console_profile=BullpenAutoLiveConsoleRunContext(
+            workspace_profile=request.workspace_profile,
+            source_label="Universal Polymarket Scan",
+            source_url="/console/trading-bots",
+            scanned_at=str(
+                metadata.get("scannedAt")
+                or metadata.get("createdAt")
+                or source_completed_at
+            ),
+            source_scan_completed_at=source_completed_at,
+            snapshot_id=export_id,
+            mode="30-days",
+            total_candidates=int(metadata.get("rowCount") or 0),
+            candidate_rows_prefiltered=False,
+            reuse_saved_llm_outputs=False,
+            candidate_rows=[],
+        ),
+    )
+    response_status: Literal["started", "queued"] = "started"
     try:
-        queue_bullpen_workflow_trigger_batch(
-            user_id=current_user.id,
-            triggered_by="manual",
-            batch_id=request.client_request_id,
-            universal_export_id=export_id,
-            workspace_profiles=(request.workspace_profile,),
-        )
+        bot = await _get_bot(current_user)
+        run = await bot.run_once(triggered_by="manual", request=run_request)
+        if run.status != "running":
+            raise HTTPException(status_code=409, detail=run.summary)
+    except AutoLiveExecutionLaneBusy:
+        response_status = "queued"
+        try:
+            queue_bullpen_workflow_trigger_batch(
+                user_id=current_user.id,
+                triggered_by="manual",
+                batch_id=request.client_request_id,
+                universal_export_id=export_id,
+                workspace_profiles=(request.workspace_profile,),
+            )
+        except Exception as exc:
+            logger.exception(
+                "Could not queue waiting manual workflow trigger for user %s profile %s",
+                current_user.id,
+                request.workspace_profile,
+            )
+            raise HTTPException(status_code=503, detail=_http_error_detail(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
-            "Could not queue manual workflow trigger for user %s profile %s",
+            "Could not start manual workflow trigger for user %s profile %s",
             current_user.id,
             request.workspace_profile,
         )
         raise HTTPException(status_code=503, detail=_http_error_detail(exc)) from exc
     return BullpenWorkflowRunNowResponse(
-        run_id=bullpen_workflow_trigger_run_id(
-            user_id=current_user.id,
-            triggered_by="manual",
-            batch_id=request.client_request_id,
-            workspace_profile=request.workspace_profile,
-        ),
+        status=response_status,
+        run_id=run_id,
         workspace_profile=request.workspace_profile,
         universal_export_id=export_id,
         universal_scan_started_at=(

@@ -13137,21 +13137,25 @@ export function BullpenAutoRunScheduleCard({
       setPendingRunId(queued.run_id);
       setRunNowStartedAt(queued.queued_at);
       setStartNowProgress(
-        "Stage 1 queued. It will start as soon as the guarded workflow lane is available…",
+        queued.status === "started"
+          ? "Stage 1 started on the latest completed Universal Scan…"
+          : "Stage 1 queued. It will start as soon as the guarded workflow lane is available…",
       );
       void loadSummary({
         preserveLoading: true,
         nextPendingRunId: queued.run_id,
       });
       setStartNowProgress(
-        "Auto Run queued. Live worker progress will appear below when Stage 1 starts.",
+        queued.status === "started"
+          ? "Auto Run started. Live Stage 1 worker progress appears below."
+          : "Auto Run queued. Live worker progress will appear below when Stage 1 starts.",
       );
       startNowProgressTimeoutRef.current = window.setTimeout(() => {
         setStartNowProgress(null);
         startNowProgressTimeoutRef.current = null;
       }, 5_000);
       setNotice(
-        `Queued only ${
+        `${queued.status === "started" ? "Started" : "Queued"} only ${
           workspaceProfile === "bullpen-sports"
             ? "Bullpen Sports"
             : "Bullpen 007"
