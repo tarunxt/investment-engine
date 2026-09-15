@@ -69,7 +69,13 @@ AutoLiveSubmissionEvidenceKind = Literal[
     "submitted_at",
     "uncertain_write_boundary",
 ]
-AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
+AutoLiveTriggeredBy = Literal[
+    "manual",
+    "scheduler",
+    "universal_scan",
+    "start",
+    "resume",
+]
 AutoLiveStrategyProfile = Literal["guardrail_kelly", "bullpen_console_top10"]
 AutoLiveExitStrategy = Literal[
     "OUTSIDE_TOP_10_RETURNS_DAY",
@@ -663,6 +669,9 @@ class BullpenAutoLiveConsoleRunContext(BaseModel):
 
 class BullpenAutoLiveRunOnceRequest(BaseModel):
     console_profile: BullpenAutoLiveConsoleRunContext | None = None
+    # Background workflow-trigger batches wait for the single guarded planner
+    # lane instead of superseding or recording a false skipped run.
+    wait_for_execution_lane: bool = False
     # Optional client-generated durable identity for ambiguity-safe starts.
     # Existing clients may omit it. When present, the API returns the already
     # persisted run for the same authenticated user instead of creating or

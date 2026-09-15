@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -17,6 +18,7 @@ from app.domains.mails.service import notify_stage2_position_warnings_sync
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.runtime_broker import run_with_bullpen_runtime_cleanup
 from app.domains.polymarket_auto_live.bot import (
+    AutoLiveExecutionLaneBusy,
     BullpenAutoLiveBot,
     _stage2_llm_targets_snapshot,
     build_initial_run_summary,
@@ -88,13 +90,22 @@ from app.domains.polymarket_auto_live.run_lifecycle import (
     release_auto_live_run_execution_lease_sync,
     update_auto_live_run_task_lifecycle_sync,
 )
+from app.domains.polymarket_auto_live.workspace_profiles import (
+    WORKFLOW_TRIGGER_PROFILES,
+    effective_filter_profile_settings,
+)
 from app.domains.polymarket_auto_live.repository import (
+    ACTIVE_AUTO_LIVE_RUN_STATUSES,
     SyncPolymarketAutoLiveRepository,
     record_to_run,
     record_to_settings,
     record_to_state,
 )
-from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveRun
+from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveConsoleRunContext,
+    BullpenAutoLiveRun,
+    BullpenAutoLiveRunOnceRequest,
+)
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 from app.infrastructure.messaging.task_registry import (
@@ -105,6 +116,8 @@ import app.infrastructure.database.all_models  # noqa: F401
 logger = get_logger("app.domains.polymarket_auto_live.tasks")
 
 AUTO_LIVE_WORKFLOW_MAX_RETRIES = 2
+WORKFLOW_TRIGGER_RECHECK_SECONDS = 15
+WORKFLOW_TRIGGER_MAX_RETRIES = 960
 
 
 def _utc_now() -> datetime:
@@ -577,6 +590,155 @@ def reconcile_interrupted_auto_live_runs_on_startup_sync(
     )
 
 
+def queue_bullpen_workflow_trigger_batch(
+    *,
+    user_id: int,
+    triggered_by: str,
+    batch_id: str,
+    universal_export_id: str | None = None,
+) -> None:
+    dispatch_bullpen_workflow_trigger_batch.apply_async(
+        kwargs={
+            "user_id": user_id,
+            "triggered_by": triggered_by,
+            "batch_id": batch_id,
+            "universal_export_id": universal_export_id,
+            "profile_index": 0,
+        },
+        queue=AUTO_LIVE_QUEUE,
+    )
+
+
+@celery.task(
+    bind=True,
+    name="app.domains.polymarket_auto_live.tasks.dispatch_bullpen_workflow_trigger_batch",
+    max_retries=WORKFLOW_TRIGGER_MAX_RETRIES,
+)
+def dispatch_bullpen_workflow_trigger_batch(
+    self,
+    *,
+    user_id: int,
+    triggered_by: str,
+    batch_id: str,
+    universal_export_id: str | None = None,
+    profile_index: int = 0,
+) -> dict[str, object]:
+    """Serially start each workspace from one immutable Universal Scan.
+
+    A user has one guarded execution lane. The batch therefore waits for the
+    preceding workflow to become terminal instead of allowing one trigger to
+    cancel, skip, or overwrite another workflow's Stage 1.
+    """
+
+    if profile_index >= len(WORKFLOW_TRIGGER_PROFILES):
+        return {"status": "completed", "batch_id": batch_id}
+    workspace_profile = WORKFLOW_TRIGGER_PROFILES[profile_index]
+    run_id = "wf-" + hashlib.sha256(
+        f"{user_id}:{triggered_by}:{batch_id}:{workspace_profile}".encode()
+    ).hexdigest()[:48]
+
+    with SyncSessionLocal() as session:
+        existing = session.get(PolymarketAutoLiveRunRecord, run_id)
+        active = session.scalar(
+            select(PolymarketAutoLiveRunRecord.id)
+            .where(
+                and_(
+                    PolymarketAutoLiveRunRecord.user_id == user_id,
+                    PolymarketAutoLiveRunRecord.status.in_(
+                        ACTIVE_AUTO_LIVE_RUN_STATUSES
+                    ),
+                )
+            )
+            .limit(1)
+        )
+
+    if existing is not None and existing.status not in ACTIVE_AUTO_LIVE_RUN_STATUSES:
+        dispatch_bullpen_workflow_trigger_batch.apply_async(
+            kwargs={
+                "user_id": user_id,
+                "triggered_by": triggered_by,
+                "batch_id": batch_id,
+                "universal_export_id": universal_export_id,
+                "profile_index": profile_index + 1,
+            },
+            countdown=1,
+            queue=AUTO_LIVE_QUEUE,
+        )
+        return {
+            "status": "advanced",
+            "workspace_profile": workspace_profile,
+            "run_id": run_id,
+        }
+
+    if active is not None or (
+        existing is not None and existing.status in ACTIVE_AUTO_LIVE_RUN_STATUSES
+    ):
+        raise self.retry(countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS)
+
+    from app.domains.trading_bots.universal_scan import (
+        latest_completed_universal_export,
+    )
+
+    resolved = latest_completed_universal_export(
+        user_id,
+        export_id=universal_export_id,
+    )
+    metadata = resolved[0] if resolved is not None else {}
+    snapshot_id = str(
+        metadata.get("exportId") or universal_export_id or f"missing-{batch_id}"
+    )
+    source_completed_at = str(
+        metadata.get("updatedAt") or metadata.get("completedAt") or batch_id
+    )
+    request = BullpenAutoLiveRunOnceRequest(
+        client_run_id=run_id,
+        wait_for_execution_lane=True,
+        console_profile=BullpenAutoLiveConsoleRunContext(
+            workspace_profile=workspace_profile,
+            source_label="Universal Polymarket Scan",
+            source_url="/console/trading-bots",
+            scanned_at=str(
+                metadata.get("scannedAt") or metadata.get("createdAt") or source_completed_at
+            ),
+            source_scan_completed_at=source_completed_at,
+            snapshot_id=snapshot_id,
+            mode="30-days",
+            total_candidates=int(metadata.get("rowCount") or 0),
+            candidate_rows_prefiltered=False,
+            reuse_saved_llm_outputs=False,
+            candidate_rows=[],
+        ),
+    )
+    try:
+        run = asyncio.run(
+            BullpenAutoLiveBot(user_id=user_id).run_once(
+                triggered_by=triggered_by,
+                request=request,
+            )
+        )
+    except AutoLiveExecutionLaneBusy as exc:
+        raise self.retry(
+            exc=exc,
+            countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS,
+        ) from exc
+    dispatch_bullpen_workflow_trigger_batch.apply_async(
+        kwargs={
+            "user_id": user_id,
+            "triggered_by": triggered_by,
+            "batch_id": batch_id,
+            "universal_export_id": snapshot_id,
+            "profile_index": profile_index,
+        },
+        countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS,
+        queue=AUTO_LIVE_QUEUE,
+    )
+    return {
+        "status": "queued",
+        "workspace_profile": workspace_profile,
+        "run_id": run.id,
+    }
+
+
 @celery.task(
     name="app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace",
     queue=AUTO_LIVE_QUEUE,
@@ -1009,6 +1171,17 @@ def _execute_polymarket_auto_live_run_with_lease(
             session.rollback()
 
         settings, state = _synchronize_state(user_id, repo)
+        workspace_profile = (
+            run.request_context.console_profile.workspace_profile
+            if run.request_context is not None
+            and run.request_context.console_profile is not None
+            else None
+        )
+        if workspace_profile is not None:
+            settings = effective_filter_profile_settings(
+                settings,
+                workspace_profile,
+            )
         position_records = repo.list_open_position_records(user_id)
         positions = [_position_snapshot_from_record(record) for record in position_records]
         historical_decisions = repo.list_decisions(user_id)
@@ -1664,7 +1837,7 @@ def dispatch_stalled_auto_live_run_fallbacks_sync(
     queue="beat",
 )
 def enqueue_due_polymarket_auto_live_runs() -> None:
-    """Dispatch every due schedule through ``BullpenAutoLiveBot.run_once``.
+    """Dispatch each due schedule to both workflow-owned Stage 1 pipelines.
 
     The calendar picker, immediate Start Auto Run action, custom recurring
     interval, and fixed fallback slots must differ only in how they produce a
@@ -1722,19 +1895,17 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
         # rows that were not part of this batch.
         session.commit()
 
+    batch_id = f"scheduled-{now.isoformat()}"
     for user_id in due_user_ids:
         try:
-            asyncio.run(
-                BullpenAutoLiveBot(user_id=user_id).run_once(
-                    triggered_by="scheduler",
-                )
+            queue_bullpen_workflow_trigger_batch(
+                user_id=user_id,
+                triggered_by="scheduler",
+                batch_id=batch_id,
             )
         except Exception:
-            # ``run_once`` durably records queue-publication failures. Keep the
-            # beat scanner available for other users and the next interval.
             logger.exception(
-                "Could not dispatch due Auto-Live run through the canonical "
-                "run template for user %s.",
+                "Could not dispatch due workflow Stage 1 batch for user %s.",
                 user_id,
             )
 

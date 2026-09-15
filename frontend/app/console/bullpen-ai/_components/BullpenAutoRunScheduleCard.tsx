@@ -314,6 +314,33 @@ type ErrorState = {
   details: string | null;
 };
 
+type UniversalScanTriggerStatus = {
+  next_run_at?: string | null;
+  last_completed_at?: string | null;
+  last_failed_at?: string | null;
+  last_error?: string | null;
+  running?: boolean;
+};
+
+function triggerOutcome(run: BullpenAutoLiveHistoryItem | undefined) {
+  if (!run) return "Awaiting first trigger";
+  if (run.status === "running" || run.status === "confirming") {
+    return "In progress";
+  }
+  if (run.status === "completed" || run.status === "partial_success") {
+    return "Passed";
+  }
+  return "Failed";
+}
+
+function triggerOutcomeClasses(run: BullpenAutoLiveHistoryItem | undefined) {
+  const outcome = triggerOutcome(run);
+  if (outcome === "Passed") return "text-emerald-700";
+  if (outcome === "Failed") return "text-rose-700";
+  if (outcome === "In progress") return "text-sky-700";
+  return "text-slate-500";
+}
+
 type InvestMetricDialogState = {
   kind: InvestMetricDialogKind;
   run: BullpenAutoLiveRun;
@@ -931,29 +958,6 @@ function saveBrowserCachedAutoRunStatus(
   return savedAt;
 }
 
-function formatIstScheduleSummaryDate(value: string) {
-  const normalized = value.replace(",", "").trim();
-  const match = normalized.match(
-    /^(\d{2}:\d{2}:\d{2})\s+(\d{1,2})\s+([A-Za-z]+)(?:\s+\d{4})?$/,
-  );
-  if (match) {
-    return `${match[1]}, ${match[2].padStart(2, "0")} ${match[3]}`;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("en-IN", {
-    timeZone: "Asia/Kolkata",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    day: "2-digit",
-    month: "long",
-    hour12: false,
-  })
-    .format(parsed)
-    .replace(",", "");
-}
-
 function formatScheduleInputFromDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata",
@@ -1034,17 +1038,6 @@ function formatScheduleInputFromDateTimeLocal(value: string) {
     Date.UTC(year, month - 1, day, hour - 5, minute - 30, 0),
   );
   return formatScheduleInputFromDate(date);
-}
-
-function buildScheduleSummary(startInput: string, refreshInput: string) {
-  const refreshMinutes = Number.parseInt(refreshInput, 10);
-  if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) return null;
-  const startLabel =
-    startInput.trim().toLowerCase() === "now"
-      ? "Now"
-      : formatIstScheduleSummaryDate(startInput.trim());
-  if (!startInput.trim()) return null;
-  return `Auto Runs Started${startLabel === "Now" ? "" : " at"} ${startLabel} and refreshes every ${refreshMinutes} minutes`;
 }
 
 function normalizeError(error: unknown) {
@@ -11270,6 +11263,15 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
+  const [triggerHistoryItems, setTriggerHistoryItems] = useState<
+    BullpenAutoLiveHistoryItem[]
+  >([]);
+  const [universalTriggerStatus, setUniversalTriggerStatus] =
+    useState<UniversalScanTriggerStatus | null>(null);
+  const [triggerMonitorLoading, setTriggerMonitorLoading] = useState(true);
+  const [triggerMonitorError, setTriggerMonitorError] = useState<string | null>(
+    null,
+  );
   const [runHistoryEventTrends, setRunHistoryEventTrends] =
     useState<BullpenAutoLiveEventTrendsResponse | null>(null);
   const [runHistoryEventTrendsLoading, setRunHistoryEventTrendsLoading] =
@@ -11322,9 +11324,6 @@ export function BullpenAutoRunScheduleCard({
   const [scheduleSettingsDirty, setScheduleSettingsDirty] = useState(false);
   const [scheduleSettingsSaveBusy, setScheduleSettingsSaveBusy] =
     useState(false);
-  const [scheduleSavedSummary, setScheduleSavedSummary] = useState<
-    string | null
-  >(null);
   const [selectedLlmTargets, setSelectedLlmTargets] = useState<
     ProviderModelTarget[]
   >([]);
@@ -11700,6 +11699,52 @@ export function BullpenAutoRunScheduleCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRunStatusCacheKey, authLoading]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadTriggerMonitor = async () => {
+      const [historyResult, universalResult] = await Promise.allSettled([
+        apiService.getBullpenAutoLiveHistory(
+          { page: 1, size: 50, workspaceProfile },
+          { signal: controller.signal, timeoutMs: 12_000 },
+        ),
+        fetch("/api/universal-polymarket-scan/auto-run", {
+          cache: "no-store",
+          credentials: "include",
+          signal: controller.signal,
+        }).then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Universal Scan trigger status is unavailable.");
+          }
+          return (await response.json()) as UniversalScanTriggerStatus;
+        }),
+      ]);
+      if (controller.signal.aborted) return;
+      if (historyResult.status === "fulfilled") {
+        setTriggerHistoryItems(historyResult.value.items);
+      }
+      if (universalResult.status === "fulfilled") {
+        setUniversalTriggerStatus(universalResult.value);
+      }
+      setTriggerMonitorError(
+        historyResult.status === "rejected" && universalResult.status === "rejected"
+          ? "Trigger status is temporarily unavailable. Retrying automatically."
+          : null,
+      );
+      setTriggerMonitorLoading(false);
+    };
+
+    void loadTriggerMonitor();
+    const intervalId = window.setInterval(
+      () => void loadTriggerMonitor(),
+      60_000,
+    );
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [workspaceProfile]);
+
   const persistedConsoleOrderUsd = resolvePositiveConsoleOrderUsd(
     summary?.state.last_console_trade_amount_usd,
     summary?.settings.console_order_usd,
@@ -11720,9 +11765,6 @@ export function BullpenAutoRunScheduleCard({
       setScheduleStartInput(nextStart);
       setSchedulePickerValue(parseScheduleInputToDateTimeLocalValue(nextStart));
       setScheduleRefreshInput(String(nextRefresh));
-      setScheduleSavedSummary(
-        buildScheduleSummary(nextStart, String(nextRefresh)),
-      );
     });
   }, [
     scheduleSettingsDirty,
@@ -12914,14 +12956,9 @@ export function BullpenAutoRunScheduleCard({
       void refreshPersistedAutoRunStatus();
       setScheduleSettingsDirty(false);
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
-      const nextSummaryText = buildScheduleSummary(
-        startWasNow ? "Now" : normalizedStart,
-        String(refreshMinutes),
-      );
-      setScheduleSavedSummary(nextSummaryText);
       await loadSummary({ preserveLoading: true });
       if (!options?.silentSuccess) {
-        setNotice(nextSummaryText);
+        setNotice("Auto-run schedule saved.");
       }
       return true;
     } catch (nextError) {
@@ -12981,12 +13018,6 @@ export function BullpenAutoRunScheduleCard({
         ),
       );
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
-      setScheduleSavedSummary(
-        buildScheduleSummary(
-          startWasNow ? "Now" : normalizedStart,
-          String(refreshMinutes),
-        ),
-      );
       setOptimisticSchedulerState({
         running: true,
         paused: false,
@@ -13455,6 +13486,15 @@ export function BullpenAutoRunScheduleCard({
     visiblePersistedAutoRunStatus?.state.next_run_at ?? summary?.state.next_run_at;
   const schedulerLastRunAt =
     visiblePersistedAutoRunStatus?.state.last_run_at ?? summary?.state.last_run_at;
+  const latestUniversalTriggerRun = triggerHistoryItems.find(
+    (run) => run.triggered_by === "universal_scan",
+  );
+  const latestManualTriggerRun = triggerHistoryItems.find(
+    (run) => run.triggered_by === "manual",
+  );
+  const latestScheduledTriggerRun = triggerHistoryItems.find(
+    (run) => run.triggered_by === "scheduler",
+  );
   const confirmedSchedulerPaused =
     visiblePersistedAutoRunStatus?.state.paused ?? summary?.state.paused ?? false;
   const schedulerPaused =
@@ -14138,6 +14178,89 @@ export function BullpenAutoRunScheduleCard({
           recentDecisions={recentDecisions}
           onRefresh={() => void refreshPortfolioSnapshot(true)}
         />
+        <section
+          aria-label="Stage 1 trigger monitor"
+          className="rounded-2xl border border-sky-200 bg-white/85 p-4 shadow-sm"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+                Stage 1 Trigger Monitor
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                Each trigger starts this workflow&apos;s filters on the latest completed Universal Polymarket Scan.
+              </p>
+            </div>
+            {triggerMonitorLoading ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Refreshing
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-3 grid gap-3 lg:grid-cols-3">
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800">
+                1 · Fresh Universal Scan
+              </p>
+              <p className={`mt-2 text-sm font-bold ${triggerOutcomeClasses(latestUniversalTriggerRun)}`}>
+                {triggerOutcome(latestUniversalTriggerRun)}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Latest scan completed: {formatIstDateTime(universalTriggerStatus?.last_completed_at)}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Stage 1 attempt: {formatIstDateTime(latestUniversalTriggerRun?.started_at)}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">
+                Next scan: {formatIstDateTime(universalTriggerStatus?.next_run_at)}
+              </p>
+              {universalTriggerStatus?.last_error ? (
+                <p className="mt-1 line-clamp-2 text-xs text-rose-700">
+                  {universalTriggerStatus.last_error}
+                </p>
+              ) : null}
+            </div>
+            <div className="rounded-xl border border-violet-100 bg-violet-50/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-800">
+                2 · Start Auto Run Now
+              </p>
+              <p className={`mt-2 text-sm font-bold ${triggerOutcomeClasses(latestManualTriggerRun)}`}>
+                {triggerOutcome(latestManualTriggerRun)}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Last pressed: {formatIstDateTime(latestManualTriggerRun?.started_at)}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Completed/failed: {formatIstDateTime(latestManualTriggerRun?.completed_at)}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">
+                Upcoming: operator initiated
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-100 bg-amber-50/70 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+                3 · Scheduled Time
+              </p>
+              <p className={`mt-2 text-sm font-bold ${triggerOutcomeClasses(latestScheduledTriggerRun)}`}>
+                {triggerOutcome(latestScheduledTriggerRun)}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Last scheduled attempt: {formatIstDateTime(latestScheduledTriggerRun?.started_at ?? schedulerLastRunAt)}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Completed/failed: {formatIstDateTime(latestScheduledTriggerRun?.completed_at)}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-700">
+                Upcoming: {formatIstDateTime(schedulerNextRunAt)}
+              </p>
+            </div>
+          </div>
+          {triggerMonitorError ? (
+            <p className="mt-3 text-xs font-semibold text-rose-700">
+              {triggerMonitorError}
+            </p>
+          ) : null}
+        </section>
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -14540,12 +14663,6 @@ export function BullpenAutoRunScheduleCard({
               )}
               {action === "kill-run" ? "Killing…" : "Kill"}
             </Button>
-          </div>
-        ) : null}
-
-        {scheduleSavedSummary ? (
-          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
-            {scheduleSavedSummary}
           </div>
         ) : null}
 

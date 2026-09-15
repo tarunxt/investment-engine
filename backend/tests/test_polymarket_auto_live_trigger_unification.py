@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class AutoLiveTriggerUnificationTests(unittest.TestCase):
-    def test_due_scheduler_delegates_to_canonical_run_once_template(self) -> None:
+    def test_due_scheduler_queues_both_workflow_stage1_profiles(self) -> None:
         source = (
             ROOT / "backend/app/domains/polymarket_auto_live/tasks.py"
         ).read_text(encoding="utf-8")
@@ -16,7 +16,7 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             "def dispatch_due_auto_live_order_intents", 1
         )[0]
 
-        self.assertIn("BullpenAutoLiveBot(user_id=user_id).run_once(", section)
+        self.assertIn("queue_bullpen_workflow_trigger_batch(", section)
         self.assertIn('triggered_by="scheduler"', section)
         self.assertNotIn("run = BullpenAutoLiveRun(", section)
         self.assertNotIn("publish_auto_live_task_with_fallback(", section)
@@ -30,20 +30,20 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             reservation_block.index("session.commit()"),
         )
 
-    def test_scheduler_trigger_supersedes_an_existing_active_run(self) -> None:
+    def test_trigger_batch_serializes_workflows_through_canonical_run_once(self) -> None:
         source = (
-            ROOT / "backend/app/domains/polymarket_auto_live/bot.py"
+            ROOT / "backend/app/domains/polymarket_auto_live/tasks.py"
         ).read_text(encoding="utf-8")
-        run_once = source.split("    async def run_once(", 1)[1].split(
-            "    async def start(", 1
+        trigger_batch = source.split("def dispatch_bullpen_workflow_trigger_batch(", 1)[1].split(
+            "def enqueue_due_polymarket_auto_live_runs", 1
         )[0]
 
-        self.assertIn('triggered_by == "scheduler"', run_once)
-        self.assertIn('requested_by="scheduler"', run_once)
-        self.assertIn("revoke_registered_auto_live_run_task", run_once)
-        self.assertNotIn("Scheduled Auto-Live trigger for user %s reused active run", run_once)
+        self.assertIn("WORKFLOW_TRIGGER_PROFILES", trigger_batch)
+        self.assertIn("ACTIVE_AUTO_LIVE_RUN_STATUSES", trigger_batch)
+        self.assertIn("BullpenAutoLiveBot(user_id=user_id).run_once(", trigger_batch)
+        self.assertIn("source_scan_completed_at=source_completed_at", trigger_batch)
 
-    def test_start_now_queues_backend_template_without_browser_scan_wait(self) -> None:
+    def test_start_now_builds_this_workflows_latest_universal_stage1(self) -> None:
         source = (
             ROOT
             / "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
@@ -52,9 +52,21 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             "  async function handleStopAutoRuns()", 1
         )[0]
 
-        self.assertIn("await apiService.startBullpenAutoLive();", handler)
-        self.assertIn("apiService.runBullpenAutoLiveOnce();", handler)
-        self.assertNotIn("buildRunNowRequest", handler)
+        self.assertIn("const runNowRequest = await buildRunNowRequest?.();", handler)
+        self.assertIn("runNowRequest.console_profile.workspace_profile !== workspaceProfile", handler)
+        self.assertIn("apiService.runBullpenAutoLiveOnce(runNowRequest)", handler)
+
+    def test_completed_universal_scan_queues_the_workflow_trigger_batch(self) -> None:
+        source = (
+            ROOT / "backend/app/domains/trading_bots/tasks.py"
+        ).read_text(encoding="utf-8")
+        completed = source.split("def execute_universal_polymarket_scan", 1)[1].split(
+            "except UniversalScanCancelled", 1
+        )[0]
+
+        self.assertIn("queue_bullpen_workflow_trigger_batch(", completed)
+        self.assertIn('triggered_by="universal_scan"', completed)
+        self.assertIn("universal_export_id=writer.export_id", completed)
 
 
 if __name__ == "__main__":

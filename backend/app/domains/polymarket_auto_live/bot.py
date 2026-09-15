@@ -43,6 +43,9 @@ from app.domains.polymarket_auto_live.run_handoff import (
     publish_auto_live_task_with_fallback,
 )
 from app.domains.polymarket_auto_live.run_lifecycle import queued_auto_live_task_lifecycle
+from app.domains.polymarket_auto_live.workspace_profiles import (
+    effective_filter_profile_settings,
+)
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
     apply_run_to_record,
@@ -83,6 +86,10 @@ from app.infrastructure.messaging.task_registry import (
 )
 
 logger = get_logger(__name__)
+
+
+class AutoLiveExecutionLaneBusy(RuntimeError):
+    """Raised when a serialized workflow trigger must retry after an active run."""
 
 CONSOLE_RUN_DETAIL_DECISION_LIMIT = 32
 CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT = 200
@@ -1051,6 +1058,16 @@ class BullpenAutoLiveBot:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
+            workspace_profile = (
+                request.console_profile.workspace_profile
+                if request is not None and request.console_profile is not None
+                else None
+            )
+            if workspace_profile is not None:
+                settings = effective_filter_profile_settings(
+                    settings,
+                    workspace_profile,
+                )
             state = await repo.ensure_state(self.user_id)
             lock_state_record = getattr(repo, "lock_state_record", None)
             if callable(lock_state_record):
@@ -1095,6 +1112,14 @@ class BullpenAutoLiveBot:
                 return run
 
             superseded_run: BullpenAutoLiveRun | None = None
+            if (
+                running_run is not None
+                and request is not None
+                and request.wait_for_execution_lane
+            ):
+                raise AutoLiveExecutionLaneBusy(
+                    f"Run {running_run.id} is already using the guarded execution lane."
+                )
             if running_run is not None and triggered_by == "scheduler":
                 revoked_task_id = await revoke_registered_auto_live_run_task(
                     running_run.id

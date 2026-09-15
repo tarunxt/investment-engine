@@ -8,6 +8,7 @@ import os
 import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 from uuid import uuid4
 
@@ -394,6 +395,136 @@ def finish_run(
 def export_directory() -> Path:
     configured = os.environ.get("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", "").strip()
     return Path(configured) if configured else Path.home() / ".local/share/credx-bullpen-stage-one-exports"
+
+
+def latest_completed_universal_export(
+    user_id: int,
+    *,
+    export_id: str | None = None,
+) -> tuple[dict[str, Any], Path] | None:
+    """Resolve the immutable Universal Scan selected by a workflow trigger."""
+
+    directory = export_directory()
+    owner_hash = hashlib.sha256(f"{user_id}:universal".encode()).hexdigest()
+    candidates: list[tuple[datetime, dict[str, Any], Path]] = []
+    metadata_paths = (
+        [directory / f"{export_id}.json"]
+        if export_id
+        else directory.glob("*.json")
+    )
+    for metadata_path in metadata_paths:
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            metadata.get("ownerHash") != owner_hash
+            or not metadata.get("universalSource")
+            or not metadata.get("completed")
+        ):
+            continue
+        updated_at = parse_datetime(metadata.get("updatedAt")) or datetime.min.replace(
+            tzinfo=UTC
+        )
+        candidates.append((updated_at, metadata, metadata_path))
+    if not candidates:
+        return None
+    _, metadata, metadata_path = max(candidates, key=lambda item: item[0])
+    rows_path = metadata_path.with_suffix(".jsonl")
+    if not rows_path.is_file():
+        return None
+    return metadata, rows_path
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def iter_universal_scan_markets(
+    user_id: int,
+    *,
+    export_id: str | None = None,
+) -> tuple[dict[str, Any], Iterator[Any]]:
+    """Stream the latest completed Universal Scan as canonical ScannedMarket rows."""
+
+    resolved = latest_completed_universal_export(user_id, export_id=export_id)
+    if resolved is None:
+        raise FileNotFoundError("No completed Universal Polymarket Scan is available.")
+    metadata, rows_path = resolved
+
+    def rows() -> Iterator[Any]:
+        from app.domains.polymarket_auto_live.scanner import ScannedMarket
+
+        with rows_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    envelope = json.loads(line)
+                    if isinstance(envelope, dict) and isinstance(
+                        envelope.get("compressedRowV1"), str
+                    ):
+                        payload = json.loads(
+                            zlib.decompress(
+                                base64.b64decode(envelope["compressedRowV1"])
+                            ).decode("utf-8")
+                        )
+                    else:
+                        payload = envelope
+                    candidate = payload.get("candidate", {})
+                    market = payload.get("market", {})
+                    event = payload.get("event", {})
+                    if not isinstance(candidate, dict) or not isinstance(market, dict):
+                        continue
+                    event = event if isinstance(event, dict) else {}
+                    outcomes = candidate.get("outcomeLabels")
+                    if not isinstance(outcomes, list):
+                        outcomes = market.get("outcomes")
+                    outcome_labels = (
+                        [str(item) for item in outcomes]
+                        if isinstance(outcomes, list)
+                        else ["Yes", "No"]
+                    )
+                    market_id = str(
+                        candidate.get("marketId")
+                        or candidate.get("conditionId")
+                        or candidate.get("id")
+                        or ""
+                    ).strip()
+                    question = str(candidate.get("question") or "").strip()
+                    if not market_id or not question:
+                        continue
+                    raw = {**market, "_export_event": event}
+                    yield ScannedMarket(
+                        market_id=market_id,
+                        question=question,
+                        market_url=candidate.get("marketUrl"),
+                        slug=candidate.get("slug"),
+                        close_time=candidate.get("closeTime"),
+                        theme=str(candidate.get("category") or "Uncategorized"),
+                        current_yes_odds=_optional_float(candidate.get("yesOdds")),
+                        current_no_odds=_optional_float(candidate.get("noOdds")),
+                        volume_usd=_optional_float(candidate.get("volume")),
+                        liquidity_usd=_optional_float(candidate.get("liquidity")),
+                        description=candidate.get("rules") or market.get("description"),
+                        outcome_labels=outcome_labels,
+                        event_slug=event.get("slug"),
+                        best_bid_cents=_optional_float(candidate.get("bestBidCents")),
+                        best_ask_cents=_optional_float(candidate.get("bestAskCents")),
+                        spread_cents=_optional_float(candidate.get("spreadCents")),
+                        volume_24hr_usd=_optional_float(candidate.get("volume24hr")),
+                        force_include=False,
+                        raw=raw,
+                    )
+                except (ValueError, TypeError, KeyError, zlib.error):
+                    continue
+
+    return metadata, rows()
 
 
 class UniversalExportWriter:

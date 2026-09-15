@@ -2327,6 +2327,7 @@ export type BullpenAutoLiveExecutorErrorCode =
 export type BullpenAutoLiveTriggeredBy =
   | "manual"
   | "scheduler"
+  | "universal_scan"
   | "start"
   | "resume";
 export type BullpenAutoLiveStrategyProfile =

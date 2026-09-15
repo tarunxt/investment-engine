@@ -115,8 +115,29 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
             writer.complete()
             total_events = writer.count
         with SyncSessionLocal() as session:
-            finish_run(session, user_id, run_id, total_events=total_events)
+            finish_run(
+                session,
+                user_id,
+                run_id,
+                total_events=total_events,
+            )
             session.commit()
+        try:
+            from app.domains.polymarket_auto_live.tasks import (
+                queue_bullpen_workflow_trigger_batch,
+            )
+
+            queue_bullpen_workflow_trigger_batch(
+                user_id=user_id,
+                triggered_by="universal_scan",
+                batch_id=run_id,
+                universal_export_id=writer.export_id,
+            )
+        except Exception:
+            logger.exception(
+                "Universal Scan %s completed, but its Bullpen workflow trigger batch could not be queued.",
+                run_id,
+            )
         return {"run_id": run_id, "status": "completed", "total_events": total_events}
     except UniversalScanCancelled:
         with SyncSessionLocal() as session:
