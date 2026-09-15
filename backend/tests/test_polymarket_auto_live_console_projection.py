@@ -371,6 +371,7 @@ def test_legacy_projected_row_is_explicitly_degraded_without_fabricated_stages()
         orders_planned=0,
         orders_submitted=0,
         error_message=None,
+        workspace_profile="bullpen-sports",
     )
     projected = BullpenAutoLiveRun.model_validate(payload)
     history = build_history_item(
@@ -383,6 +384,7 @@ def test_legacy_projected_row_is_explicitly_degraded_without_fabricated_stages()
     assert history.projection_available is False
     assert history.stages == []
     assert history.decisions_count == 25
+    assert projected.workspace_profile == "bullpen-sports"
 
 
 def test_history_item_exposes_stage_counts_and_frozen_duration() -> None:

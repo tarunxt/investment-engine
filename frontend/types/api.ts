@@ -2833,6 +2833,7 @@ export interface BullpenAutoLiveRun {
   orders_planned: number;
   orders_submitted: number;
   error_message?: string | null;
+  workspace_profile?: "bullpen007" | "bullpen-sports" | null;
   execution_version?: string | null;
   order_funnel?: BullpenAutoLiveOrderFunnel | null;
   action_funnels?: Record<string, BullpenAutoLiveOrderFunnel> | null;

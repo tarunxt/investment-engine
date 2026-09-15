@@ -2390,6 +2390,16 @@ still enriches its missing source completion time from the synchronized server
 snapshot instead of discarding the recovered lineage.
 Counts and exported evidence belong to
 that workflow output, while the source identifier records the common capture.
+Each workflow completion overwrites `filters_completed_at` with that run's own
+filter completion time; it never reuses the timestamp carried by an older source
+snapshot. Terminal saves retain the workspace captured when the run was queued,
+even after the large request context is removed, so Bullpen Sports results cannot
+fall back into Bullpen 007 history. The compact run projection also carries that
+non-sensitive workspace owner explicitly so the dashboard makes the same choice
+as the server-side History query. If a completed auto run and a saved independent
+Stage 1 snapshot both exist, the card displays the newer timestamped evidence.
+The Universal scheduler's start time is used only as a guarded legacy fallback
+when its completion predates the workflow start.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.

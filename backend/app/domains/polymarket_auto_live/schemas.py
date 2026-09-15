@@ -1084,6 +1084,7 @@ class BullpenAutoLiveRun(BaseModel):
     orders_planned: int = 0
     orders_submitted: int = 0
     error_message: str | None = None
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = None
     execution_version: str | None = None
     order_funnel: BullpenAutoLiveOrderFunnel = Field(default_factory=BullpenAutoLiveOrderFunnel)
     action_funnels: dict[str, BullpenAutoLiveOrderFunnel] = Field(default_factory=dict)

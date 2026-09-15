@@ -5679,6 +5679,27 @@ class BullpenAutoLiveEngine:
                 progress_outputs.update(outputs)
                 if isinstance(outputs.get("scan_progress"), dict):
                     latest_scan_progress.update(outputs["scan_progress"])
+            if manual_console_context is not None:
+                if manual_console_context.scanned_at:
+                    progress_outputs.setdefault(
+                        "scanned_at", manual_console_context.scanned_at
+                    )
+                if manual_console_context.source_scan_completed_at:
+                    progress_outputs.setdefault(
+                        "source_scan_completed_at",
+                        manual_console_context.source_scan_completed_at,
+                    )
+                if manual_console_context.snapshot_id:
+                    progress_outputs.setdefault(
+                        "snapshot_id", manual_console_context.snapshot_id
+                    )
+            if stage1_candidate_scan_completed_at is not None:
+                # This is the completion time of this workflow's filter pass.
+                # A source snapshot may carry an older filters_completed_at;
+                # it must not overwrite the evidence for the current run.
+                progress_outputs["filters_completed_at"] = (
+                    stage1_candidate_scan_completed_at
+                )
             if latest_scan_progress:
                 progress_outputs["scan_progress"] = {
                     **latest_scan_progress, "message": reason,
@@ -7153,9 +7174,7 @@ class BullpenAutoLiveEngine:
                     "source_scan_completed_at": manual_console_context.source_scan_completed_at
                     if manual_console_context
                     else None,
-                    "filters_completed_at": manual_console_context.filters_completed_at
-                    if manual_console_context
-                    else stage1_candidate_scan_completed_at,
+                    "filters_completed_at": stage1_candidate_scan_completed_at,
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                 },
@@ -7562,9 +7581,7 @@ class BullpenAutoLiveEngine:
                         "source_scan_completed_at": manual_console_context.source_scan_completed_at
                         if manual_console_context
                         else None,
-                        "filters_completed_at": manual_console_context.filters_completed_at
-                        if manual_console_context
-                        else stage1_candidate_scan_completed_at,
+                        "filters_completed_at": stage1_candidate_scan_completed_at,
                         "fixed_schedule_timezone": "Asia/Kolkata",
                         "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                     },

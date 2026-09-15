@@ -732,6 +732,7 @@ def projected_run_payload(
     orders_planned: int,
     orders_submitted: int,
     error_message: str | None,
+    workspace_profile: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     valid_projection = (
         isinstance(projection, dict)
@@ -758,6 +759,7 @@ def projected_run_payload(
                 if error_message is not None
                 else None
             ),
+            "workspace_profile": workspace_profile or "bullpen007",
         }
     )
     return payload, valid_projection

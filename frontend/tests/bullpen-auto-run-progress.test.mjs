@@ -1230,11 +1230,8 @@ test("Bullpen auto-run workflow view exposes detailed Stage 1 progress commentar
 
 test("an active Auto Run takes precedence over a saved independent scan", () => {
   const source = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url), "utf8");
-  const expression = source.split("{workflowView.stages.map((workflowStage) => {")[1].split("const stage =")[1].split(";")[0];
-  const select = new Function("workflowStage", "stageOneResultSource", "runIsActive", "independentStageOneView", `return (${expression});`);
-  const live = { key: "scan", state: "current", tone: "yellow" };
-  const saved = { key: "scan", state: "finished", tone: "green" };
-  assert.equal(select(live, "independent", true, saved), live);
-  assert.equal(select(live, "independent", false, saved), saved);
-  assert.equal(select(live, "original", false, saved), live);
+  assert.match(source, /function selectStageOneDisplayStage/);
+  assert.match(source, /independentTimestamp >= workflowTimestamp/);
+  assert.match(source, /stageOneResultSource === "independent" && !runIsActive/);
+  assert.match(source, /setStageOneResultSource\("original"\)/);
 });

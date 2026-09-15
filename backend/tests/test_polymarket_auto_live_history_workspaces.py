@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.domains.auth.models import User
 from app.domains.polymarket_auto_live.models import PolymarketAutoLiveRunRecord
-from app.domains.polymarket_auto_live.repository import _history_workspace_filter
+from app.domains.polymarket_auto_live.repository import (
+    _history_workspace_filter,
+    apply_run_to_record,
+)
+from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveRun
 from app.infrastructure.database.base import Base
 
 
@@ -83,3 +87,32 @@ def test_run_persistence_captures_workspace_profile_without_reading_payload() ->
 
     assert "record.workspace_profile = (" in source
     assert "run.request_context.console_profile.workspace_profile" in source
+    assert "or record.workspace_profile" in source
+
+
+def test_terminal_save_preserves_workspace_after_request_context_is_cleared() -> None:
+    record = PolymarketAutoLiveRunRecord(
+        id="sports-terminal",
+        user_id=7,
+        status="running",
+        triggered_by="manual",
+        workspace_profile="bullpen-sports",
+        dry_run=True,
+        started_at=datetime(2026, 9, 15, 10, tzinfo=UTC),
+        summary="Running.",
+        payload={},
+    )
+    run = BullpenAutoLiveRun(
+        id="sports-terminal",
+        triggered_by="manual",
+        status="completed",
+        dry_run=True,
+        started_at="2026-09-15T10:00:00+00:00",
+        completed_at="2026-09-15T10:05:00+00:00",
+        summary="Completed.",
+        request_context=None,
+    )
+
+    apply_run_to_record(record, run, user_id=7)
+
+    assert record.workspace_profile == "bullpen-sports"

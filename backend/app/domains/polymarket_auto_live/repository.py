@@ -285,6 +285,7 @@ def record_to_run(record: PolymarketAutoLiveRunRecord) -> BullpenAutoLiveRun:
             "orders_submitted": record.orders_submitted,
             "summary": record.summary,
             "error_message": record.error_message,
+            "workspace_profile": record.workspace_profile or "bullpen007",
         }
     )
     return BullpenAutoLiveRun.model_validate(payload)
@@ -310,6 +311,7 @@ def projected_row_to_run(row: object) -> tuple[BullpenAutoLiveRun, bool]:
         orders_planned=int(getattr(row, "orders_planned", 0) or 0),
         orders_submitted=int(getattr(row, "orders_submitted", 0) or 0),
         error_message=getattr(row, "error_message", None),
+        workspace_profile=getattr(row, "workspace_profile", None),
     )
     return BullpenAutoLiveRun.model_validate(payload), projection_available
 
@@ -506,11 +508,23 @@ def apply_run_to_record(
     record.user_id = user_id
     record.status = run.status
     record.triggered_by = run.triggered_by
-    record.workspace_profile = (
-        run.request_context.console_profile.workspace_profile
-        if run.request_context is not None
+    requested_workspace_profile = run.workspace_profile
+    if (
+        requested_workspace_profile is None
+        and run.request_context is not None
         and run.request_context.console_profile is not None
-        else "bullpen007"
+    ):
+        requested_workspace_profile = (
+            run.request_context.console_profile.workspace_profile
+        )
+    # The engine deliberately removes the potentially large request context
+    # before its terminal save.  Keep the workspace captured by the initial
+    # queued/running save instead of silently moving every completed run back
+    # to the legacy Bullpen 007 default.
+    record.workspace_profile = (
+        requested_workspace_profile
+        or record.workspace_profile
+        or "bullpen007"
     )
     record.dry_run = run.dry_run
     record.started_at = _parse_datetime(run.started_at) or utc_now()
@@ -960,6 +974,7 @@ class AsyncPolymarketAutoLiveRepository:
                     record.orders_submitted,
                     record.summary,
                     record.error_message,
+                    record.workspace_profile,
                     record.console_projection,
                     record.updated_at,
                 )
@@ -1002,6 +1017,7 @@ class AsyncPolymarketAutoLiveRepository:
                     record.orders_submitted,
                     record.summary,
                     record.error_message,
+                    record.workspace_profile,
                     record.console_projection,
                     record.updated_at,
                 )
