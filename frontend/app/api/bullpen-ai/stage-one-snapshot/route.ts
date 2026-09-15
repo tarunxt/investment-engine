@@ -68,6 +68,10 @@ export async function GET(request: NextRequest) {
       }).catch(() => null);
       sourceScanCompletedAt = source?.metadata.updatedAt ?? null;
     }
+    if (!isUniversal && !sourceScanCompletedAt) {
+      const source = await openUniversalScan(sessionOwner).catch(() => null);
+      sourceScanCompletedAt = source?.metadata.updatedAt ?? null;
+    }
 
     const hasCachedSummary =
       typeof latest.metadata.acceptedCount === "number" &&

@@ -44,4 +44,5 @@ test("filtered evidence retains source lineage and server synchronization", () =
   assert.match(route, /filtersCompletedAt: metadata\.filtersCompletedAt/);
   assert.match(snapshotRoute, /openStageOneGammaExport/);
   assert.match(snapshotRoute, /sourceScanCompletedAt = source\?\.metadata\.updatedAt/);
+  assert.match(snapshotRoute, /openUniversalScan\(sessionOwner\)/);
 });

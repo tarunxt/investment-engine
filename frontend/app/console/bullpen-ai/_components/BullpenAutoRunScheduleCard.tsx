@@ -10123,6 +10123,22 @@ function buildConsoleSettingsUpdate(
   };
 }
 
+function buildImmediateRunSettingsUpdate(
+  consoleOrderUsd: number,
+  consoleScanScope: "trending" | "full_universe",
+  consoleLlmTargets: ProviderModelTarget[],
+) {
+  return {
+    strategy_profile: "bullpen_console_top10" as const,
+    console_order_usd: resolvePositiveConsoleOrderUsd(consoleOrderUsd),
+    console_scan_scope: consoleScanScope,
+    console_llm_targets: consoleLlmTargets,
+    dry_run: false,
+    allow_live_execution: true,
+    require_manual_confirmation: false,
+  };
+}
+
 function isConsoleProfileSelected(
   summary: BullpenAutoLiveSummaryResponse | null,
 ) {
@@ -13023,7 +13039,7 @@ export function BullpenAutoRunScheduleCard({
       startNowProgressTimeoutRef.current = null;
     }
     setStartNowProgress(
-      "Validating refresh duration and preparing the Auto Run request…",
+      "Validating this workflow and preparing its Auto Run request…",
     );
     const abortIfStartCancelled = () => {
       if (!startNowCancelledRef.current) return false;
@@ -13035,17 +13051,6 @@ export function BullpenAutoRunScheduleCard({
     };
 
     try {
-      const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
-      if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
-        setError({
-          message: "Enter a refresh duration of at least 1 minute.",
-          details: null,
-        });
-        return;
-      }
-
-      const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
-      const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
       const latestConsoleOrderUsd = resolvePositiveConsoleOrderUsd(
         tradeAmountView.tradeAmountUsd,
         persistedConsoleOrderUsd,
@@ -13057,44 +13062,48 @@ export function BullpenAutoRunScheduleCard({
         return;
       }
 
-      if (autoRunActive) {
-        setStartNowProgress(
-          "Stopping the existing Auto Run before starting a fresh run…",
-        );
-        await apiService.stopBullpenAutoLive();
-        if (abortIfStartCancelled()) return;
-      }
-
       setStartNowProgress(
-        "Saving trade amount, schedule, refresh duration, and LLM settings…",
+        "Saving this run's trade amount and LLM settings…",
       );
       await apiService.updateBullpenAutoLiveSettings(
-        buildConsoleSettingsUpdate(
+        buildImmediateRunSettingsUpdate(
           latestConsoleOrderUsd,
           consoleScanScope,
-          normalizedStart || null,
-          refreshMinutes,
           consoleLlmTargets,
         ),
       );
       if (abortIfStartCancelled()) return;
-      setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
-      setScheduleSavedSummary(
-        buildScheduleSummary(
-          startWasNow ? "Now" : normalizedStart,
-          String(refreshMinutes),
-        ),
-      );
 
-      setStartNowProgress("Starting the Auto-Live scheduler in the backend…");
-      await apiService.startBullpenAutoLive();
-      void refreshPersistedAutoRunStatus();
-      if (abortIfStartCancelled()) return;
-      if (abortIfStartCancelled()) return;
       setStartNowProgress(
-        "Queueing the canonical Auto Run worker now…",
+        `Running fresh Stage 1 filters for ${
+          workspaceProfile === "bullpen-sports"
+            ? "Bullpen Sports"
+            : "Bullpen 007"
+        }…`,
       );
-      const run = await apiService.runBullpenAutoLiveOnce();
+      const runNowRequest = await buildRunNowRequest?.();
+      if (abortIfStartCancelled()) return;
+      if (!runNowRequest?.console_profile) {
+        throw new Error(
+          "The workflow-specific Stage 1 filters did not produce a runnable snapshot.",
+        );
+      }
+      if (
+        runNowRequest.console_profile.workspace_profile !== workspaceProfile
+      ) {
+        throw new Error(
+          "The Stage 1 snapshot belongs to a different workflow. Refresh this workflow and try again.",
+        );
+      }
+      setStartNowProgress(
+        `Queueing only ${
+          workspaceProfile === "bullpen-sports"
+            ? "Bullpen Sports"
+            : "Bullpen 007"
+        } from its fresh Stage 1 result…`,
+      );
+      const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+      void refreshPersistedAutoRunStatus();
       if (abortIfStartCancelled()) return;
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
@@ -13113,9 +13122,13 @@ export function BullpenAutoRunScheduleCard({
         startNowProgressTimeoutRef.current = null;
       }, 5_000);
       setNotice(
-        `Started a fresh Auto Run now with ${formatMoney(
+        `Started only ${
+          workspaceProfile === "bullpen-sports"
+            ? "Bullpen Sports"
+            : "Bullpen 007"
+        } from fresh Stage 1 filters with ${formatMoney(
           latestConsoleOrderUsd,
-        )} per new opportunity and a ${refreshMinutes}-minute refresh duration.`,
+        )} per new opportunity.`,
       );
     } catch (nextError) {
       setError(normalizeError(nextError));
