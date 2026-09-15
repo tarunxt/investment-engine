@@ -16,7 +16,7 @@ const celery = readFileSync(
 );
 
 test("Universal Scan renders its isolated Bullpen-style auto-run controls", () => {
-  assert.match(shared, /<UniversalScanAutoRunCard\s*\/>/);
+  assert.match(shared, /<UniversalScanAutoRunCard onStatusChange=/);
   assert.match(card, /History/);
   assert.match(card, /Start Auto Run Now/);
   assert.match(card, /Enable Auto Run/);
@@ -29,6 +29,12 @@ test("Universal Scan renders its isolated Bullpen-style auto-run controls", () =
   assert.match(card, /Next scheduled run/);
   assert.match(card, /Last failed run/);
   assert.match(card, /Mode: Universal scan only/);
+  assert.doesNotMatch(card, /Auto Runs Started at/);
+  assert.doesNotMatch(shared, /One Full Universe capture/);
+  assert.match(shared, /Last Universal Scan/);
+  assert.doesNotMatch(shared, /Last stage run/);
+  assert.match(shared, /status\.last_completed_at/);
+  assert.match(shared, /border-emerald-200 bg-emerald-50/);
 });
 
 test("Universal Scan uses a dedicated recurring worker task", () => {
