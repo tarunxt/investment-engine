@@ -316,6 +316,7 @@ type ErrorState = {
 
 type UniversalScanTriggerStatus = {
   next_run_at?: string | null;
+  last_run_at?: string | null;
   last_completed_at?: string | null;
   last_failed_at?: string | null;
   last_error?: string | null;
@@ -1514,6 +1515,40 @@ function getStageOneStats(stage: WorkflowStageView) {
     stage.scanCandidates.length;
 
   return { activePositions, claimablePositions, totalScanned, passedFilters };
+}
+
+function getStageOneEvidenceTimestamp(stage: WorkflowStageView) {
+  const timestamps = [
+    readStageOutputString(stage.outputs.filters_completed_at),
+    stage.timerCompletedAt,
+    readStageOutputString(stage.outputs.scanned_at),
+    readStageOutputString(stage.outputs.source_scan_completed_at),
+    stage.timerStartedAt,
+  ];
+  for (const timestamp of timestamps) {
+    const parsed = timestamp ? Date.parse(timestamp) : Number.NaN;
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Number.NaN;
+}
+
+function selectStageOneDisplayStage({
+  workflowStage,
+  independentStage,
+  preferIndependent,
+}: {
+  workflowStage: WorkflowStageView;
+  independentStage: WorkflowStageView | null;
+  preferIndependent: boolean;
+}) {
+  if (!preferIndependent || independentStage === null) return workflowStage;
+  const workflowTimestamp = getStageOneEvidenceTimestamp(workflowStage);
+  const independentTimestamp = getStageOneEvidenceTimestamp(independentStage);
+  if (!Number.isFinite(workflowTimestamp)) return independentStage;
+  if (!Number.isFinite(independentTimestamp)) return workflowStage;
+  return independentTimestamp >= workflowTimestamp
+    ? independentStage
+    : workflowStage;
 }
 
 function getStageOneIncludedActiveCount(
@@ -10224,7 +10259,9 @@ function runBelongsToWorkspace(
   workspaceProfile: BullpenWorkspaceProfile,
 ) {
   if (!run) return false;
-  const runWorkspace = run.request_context?.console_profile?.workspace_profile;
+  const runWorkspace =
+    run.workspace_profile ??
+    run.request_context?.console_profile?.workspace_profile;
   return (runWorkspace ?? "bullpen007") === workspaceProfile;
 }
 
@@ -13098,6 +13135,7 @@ export function BullpenAutoRunScheduleCard({
 
   async function handleStartAutoRunNow() {
     if (!claimAction("start-now")) return;
+    setStageOneResultSource("original");
     const startedAt = new Date().toISOString();
     setRunNowStartedAt(startedAt);
     setTimerNowMs(Date.parse(startedAt));
@@ -14911,11 +14949,13 @@ export function BullpenAutoRunScheduleCard({
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
             {workflowView.stages.map((workflowStage) => {
               const stage =
-                workflowStage.key === "scan" &&
-                stageOneResultSource === "independent" &&
-                !runIsActive &&
-                independentStageOneView
-                  ? independentStageOneView
+                workflowStage.key === "scan"
+                  ? selectStageOneDisplayStage({
+                      workflowStage,
+                      independentStage: independentStageOneView,
+                      preferIndependent:
+                        stageOneResultSource === "independent" && !runIsActive,
+                    })
                   : workflowStage;
               const immediateSuccess = getInvestStageImmediateSuccess(stage);
               const canOpenInputs =
@@ -15099,14 +15139,33 @@ export function BullpenAutoRunScheduleCard({
                 );
 
               if (["scan"].includes(stage.key)) {
-                const filterStage = isStageOneActive ? stage : independentStageOneView ?? stage;
+                const filterStage = stage;
                 const stats = getStageOneStats(filterStage);
+                const workflowStartedAt =
+                  workflowRunForMonitor?.started_at ?? null;
+                const universalScanCompletedAt =
+                  universalTriggerStatus?.last_completed_at ?? null;
+                const universalScanStartedAt =
+                  universalTriggerStatus?.last_run_at ?? null;
+                const workflowStartedMs = workflowStartedAt
+                  ? Date.parse(workflowStartedAt)
+                  : Number.NaN;
+                const universalCompletedMs = universalScanCompletedAt
+                  ? Date.parse(universalScanCompletedAt)
+                  : Number.NaN;
+                const latestUniversalScanPredatesWorkflow =
+                  Number.isFinite(workflowStartedMs) &&
+                  Number.isFinite(universalCompletedMs) &&
+                  universalCompletedMs <= workflowStartedMs;
                 const universalScanAt =
                   readStageOutputString(filterStage.outputs.scanned_at) ??
                   readStageOutputString(filterStage.outputs.source_scan_completed_at) ??
                   workflowRunForMonitor?.request_context?.console_profile?.scanned_at ??
                   workflowRunForMonitor?.request_context?.console_profile
                     ?.source_scan_completed_at ??
+                  (latestUniversalScanPredatesWorkflow
+                    ? universalScanStartedAt
+                    : null) ??
                   null;
                 const filtersCompletedAt =
                   readStageOutputString(filterStage.outputs.filters_completed_at) ??

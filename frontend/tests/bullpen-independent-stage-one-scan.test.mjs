@@ -52,7 +52,9 @@ test("filtered evidence retains source lineage and server synchronization", () =
 });
 
 test("an active workflow owns its yellow Stage 1 tile and reports live progress", () => {
-  assert.match(card, /isStageOneActive \? stage : independentStageOneView \?\? stage/);
+  assert.match(card, /selectStageOneDisplayStage/);
+  assert.match(card, /const filterStage = stage/);
+  assert.match(card, /setStageOneResultSource\("original"\)/);
   assert.match(card, /data-stage-state=\{isStageOneActive \? "working" : stage\.state\}/);
   assert.match(card, /data-testid="bullpen-stage-one-live-progress"/);
   assert.match(card, /scanProgressPercent/);
@@ -62,10 +64,13 @@ test("an active workflow owns its yellow Stage 1 tile and reports live progress"
     card,
     /workflowRunForMonitor\?\.request_context\?\.console_profile\?\.scanned_at/,
   );
+  assert.match(card, /universalTriggerStatus\?\.last_run_at/);
+  assert.match(card, /latestUniversalScanPredatesWorkflow/);
 });
 
 test("live run selection is isolated to the current workflow", () => {
   assert.match(card, /function runBelongsToWorkspace/);
+  assert.match(card, /run\.workspace_profile \?\?/);
   assert.match(card, /runWorkspace \?\? "bullpen007"/);
   assert.match(card, /getVisibleRun\(\s*summary,\s*pendingRunId,\s*workspaceProfile/);
   assert.match(card, /runBelongsToWorkspace\(run, workspaceProfile\)/);

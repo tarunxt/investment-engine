@@ -110,6 +110,12 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             "**(existing_stage1.outputs if existing_stage1 is not None else {})",
             progress,
         )
+        self.assertIn('progress_outputs["filters_completed_at"]', progress)
+        self.assertIn('progress_outputs.setdefault(\n                        "scanned_at"', progress)
+        self.assertNotIn(
+            '"filters_completed_at": manual_console_context.filters_completed_at',
+            engine,
+        )
 
         page_progress = engine.split("            def report_scan_page(", 1)[1].split(
             "            from app.domains.polymarket_auto_live.scan_source_store", 1
