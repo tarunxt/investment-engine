@@ -56,7 +56,7 @@ async def latest_log(session, user_id, run_id, resource):
 
 
 @router.get("/clustering/{run_id}/progress")
-async def get_clustering_progress(run_id: UUID, response: Response, current_user: User = Depends(get_current_user)):
+async def get_clustering_progress(run_id: str, response: Response, current_user: User = Depends(get_current_user)):
     response.headers["Cache-Control"] = "private, no-store"
     async with AsyncSessionLocal() as session:
         await owned_run(session, current_user.id, run_id)
@@ -76,7 +76,7 @@ async def get_clustering_progress(run_id: UUID, response: Response, current_user
 
 
 @router.post("/clustering/{run_id}/progress")
-async def record_clustering_progress(run_id: UUID, request: ClusteringProgressRequest, current_user: User = Depends(get_current_user)):
+async def record_clustering_progress(run_id: str, request: ClusteringProgressRequest, current_user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         # Never lock the busy scan row: scan/LLM persistence may hold it while
         # this independent external job needs to report a blocker. A short,
