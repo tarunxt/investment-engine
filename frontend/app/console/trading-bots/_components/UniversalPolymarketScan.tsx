@@ -191,7 +191,6 @@ export function UniversalPolymarketScan() {
     <section aria-label="Universal Polymarket Scan" className={sectionClass}>
       <h2 className={headingClass}>Universal Polymarket Scan</h2>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button type="button" aria-pressed={!showSaved} onClick={() => setShowSaved(false)} className={`rounded-lg px-3 py-2 text-sm font-semibold text-white ${scanActive ? "bg-amber-700" : "bg-blue-700"}`}>Original</button>
         <div className={`inline-flex overflow-hidden rounded-lg text-white ${scanActive ? "bg-amber-600" : "bg-blue-600"}`}>
           <button type="button" onClick={() => void scan()} className="px-3 py-2 text-sm font-semibold">{running ? "Stop Scan" : "Scan Now"}</button>
           <button type="button" disabled={!snapshot} aria-label="Open latest saved Universal Polymarket Scan" onClick={() => setShowSaved(true)} className={`border-l px-2 disabled:opacity-40 ${scanActive ? "border-amber-400" : "border-blue-400"}`}><Menu className="h-4 w-4" /></button>
@@ -200,7 +199,7 @@ export function UniversalPolymarketScan() {
       <UniversalScanAutoRunCard onStatusChange={handleAutoRunStatus} />
       {snapshot && <>
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={valueClass}>{dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</dd></div>
+          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot.scannedAt)}</span><span className="block">Completed/Failed: {dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</span></dd></div>
           <div className={tileClass}><dt className={labelClass}>Time taken</dt><dd className={valueClass}>{summary ? durationLabel(summary.durationMs) : "Calculating…"}</dd></div>
           <div className={tileClass}><dt className={labelClass}>Total Events Scanned</dt><dd className={valueClass}>{snapshot.totalCandidates.toLocaleString("en-IN")}</dd></div>
         </dl>
