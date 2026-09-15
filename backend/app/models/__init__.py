@@ -78,10 +78,13 @@ from app.domains.runs.models import (
 )
 from app.domains.zerodha.audit import ZerodhaAuditLog
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
+from app.domains.trading_bots.models import UniversalScanSettingsRecord, UniversalScanStateRecord
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 __all__ = [
     "SportsRankingSnapshot",
+    "UniversalScanSettingsRecord",
+    "UniversalScanStateRecord",
     "Bullpen008ContingentExitActivationRecord",
     "Bullpen008ContingentExitPolicyRecord",
     "Bullpen008DailyEquityBaselineRecord",

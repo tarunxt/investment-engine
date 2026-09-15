@@ -14,9 +14,9 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.domains.polymarket_auto_live.models import (
-    PolymarketAutoLiveSettingsRecord,
-    PolymarketAutoLiveStateRecord,
+from app.domains.trading_bots.models import (
+    UniversalScanSettingsRecord,
+    UniversalScanStateRecord,
 )
 
 SETTINGS_KEY = "universal_scan_auto_run"
@@ -54,25 +54,25 @@ def next_scheduled_time(reference: datetime, *, start_at: str, refresh_minutes: 
     return anchor + cycles * interval
 
 
-def _settings_record(session: Session, user_id: int) -> PolymarketAutoLiveSettingsRecord:
-    record = session.get(PolymarketAutoLiveSettingsRecord, user_id)
+def _settings_record(session: Session, user_id: int) -> UniversalScanSettingsRecord:
+    record = session.get(UniversalScanSettingsRecord, user_id)
     if record is None:
-        record = PolymarketAutoLiveSettingsRecord(user_id=user_id, payload={})
+        record = UniversalScanSettingsRecord(user_id=user_id, payload={})
         session.add(record)
         session.flush()
     return record
 
 
-def _state_record(session: Session, user_id: int) -> PolymarketAutoLiveStateRecord:
-    record = session.get(PolymarketAutoLiveStateRecord, user_id)
+def _state_record(session: Session, user_id: int) -> UniversalScanStateRecord:
+    record = session.get(UniversalScanStateRecord, user_id)
     if record is None:
-        record = PolymarketAutoLiveStateRecord(user_id=user_id, payload={})
+        record = UniversalScanStateRecord(user_id=user_id, payload={})
         session.add(record)
         session.flush()
     return record
 
 
-def read_settings(record: PolymarketAutoLiveSettingsRecord | None) -> dict[str, Any]:
+def read_settings(record: UniversalScanSettingsRecord | None) -> dict[str, Any]:
     saved = record.payload.get(SETTINGS_KEY) if record and isinstance(record.payload, dict) else None
     saved = saved if isinstance(saved, dict) else {}
     refresh = saved.get("refresh_minutes", DEFAULT_REFRESH_MINUTES)
@@ -83,7 +83,7 @@ def read_settings(record: PolymarketAutoLiveSettingsRecord | None) -> dict[str, 
     }
 
 
-def read_state(record: PolymarketAutoLiveStateRecord | None) -> dict[str, Any]:
+def read_state(record: UniversalScanStateRecord | None) -> dict[str, Any]:
     saved = record.payload.get(STATE_KEY) if record and isinstance(record.payload, dict) else None
     saved = saved if isinstance(saved, dict) else {}
     history = saved.get("history")
@@ -125,8 +125,8 @@ def save_state(session: Session, user_id: int, state: dict[str, Any]) -> None:
 
 
 def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
-    settings = read_settings(session.get(PolymarketAutoLiveSettingsRecord, user_id))
-    state = read_state(session.get(PolymarketAutoLiveStateRecord, user_id))
+    settings = read_settings(session.get(UniversalScanSettingsRecord, user_id))
+    state = read_state(session.get(UniversalScanStateRecord, user_id))
     latest_history = state["history"][0] if state["history"] else None
     last_run_at = parse_datetime(state["last_run_at"])
     configured_start = parse_datetime(settings["start_at"])
@@ -192,13 +192,13 @@ def update_schedule(
 
 
 def due_user_ids(session: Session, now: datetime) -> list[int]:
-    rows = session.scalars(select(PolymarketAutoLiveSettingsRecord)).all()
+    rows = session.scalars(select(UniversalScanSettingsRecord)).all()
     due: list[int] = []
     for row in rows:
         settings = read_settings(row)
         if not settings["enabled"]:
             continue
-        state_record = session.get(PolymarketAutoLiveStateRecord, row.user_id)
+        state_record = session.get(UniversalScanStateRecord, row.user_id)
         state = read_state(state_record)
         if state["running"]:
             started_at = parse_datetime(state["last_run_at"])
@@ -211,7 +211,7 @@ def due_user_ids(session: Session, now: datetime) -> list[int]:
                 stale_run_id,
                 error="Universal Scan worker exceeded its 55-minute recovery window.",
             )
-            state = read_state(session.get(PolymarketAutoLiveStateRecord, row.user_id))
+            state = read_state(session.get(UniversalScanStateRecord, row.user_id))
         next_at = parse_datetime(state["next_run_at"])
         if next_at is None:
             state["next_run_at"] = next_scheduled_time(
@@ -280,8 +280,8 @@ def update_progress(
     pages: int,
 ) -> str:
     record = session.scalar(
-        select(PolymarketAutoLiveStateRecord)
-        .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+        select(UniversalScanStateRecord)
+        .where(UniversalScanStateRecord.user_id == user_id)
         .with_for_update()
     )
     state = read_state(record)
@@ -304,8 +304,8 @@ def update_progress(
 
 def control_run(session: Session, user_id: int, *, action: str) -> dict[str, Any]:
     record = session.scalar(
-        select(PolymarketAutoLiveStateRecord)
-        .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+        select(UniversalScanStateRecord)
+        .where(UniversalScanStateRecord.user_id == user_id)
         .with_for_update()
     )
     state = read_state(record)

@@ -74,3 +74,7 @@ from app.domains.prompts.models import Prompt  # noqa: F401
 from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
 from app.domains.zerodha.audit import ZerodhaAuditLog  # noqa: F401
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot  # noqa: F401
+from app.domains.trading_bots.models import (  # noqa: F401
+    UniversalScanSettingsRecord,
+    UniversalScanStateRecord,
+)
