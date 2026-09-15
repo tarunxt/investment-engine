@@ -94,6 +94,40 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertIn('triggered_by="universal_scan"', completed)
         self.assertIn("universal_export_id=writer.export_id", completed)
 
+    def test_live_stage1_progress_retains_lineage_and_total_market_count(self) -> None:
+        engine = (
+            ROOT / "backend/app/domains/polymarket_auto_live/engine.py"
+        ).read_text(encoding="utf-8")
+        projection = (
+            ROOT / "backend/app/domains/polymarket_auto_live/console_projection.py"
+        ).read_text(encoding="utf-8")
+
+        progress = engine.split("        def report_stage1_progress(", 1)[1].split(
+            "        report_stage1_progress(", 1
+        )[0]
+        self.assertIn("existing_stage1.outputs", progress)
+        self.assertIn(
+            "**(existing_stage1.outputs if existing_stage1 is not None else {})",
+            progress,
+        )
+
+        page_progress = engine.split("            def report_scan_page(", 1)[1].split(
+            "            from app.domains.polymarket_auto_live.scan_source_store", 1
+        )[0]
+        self.assertIn('"totalMarkets"', page_progress)
+        self.assertIn("manual_console_context.total_candidates", page_progress)
+
+        projection_keys = projection.split("_STAGE_OUTPUT_KEYS = {", 1)[1].split(
+            "}", 1
+        )[0]
+        for key in (
+            "snapshot_id",
+            "scanned_at",
+            "source_scan_completed_at",
+            "filters_completed_at",
+        ):
+            self.assertIn(f'"{key}"', projection_keys)
+
 
 if __name__ == "__main__":
     unittest.main()

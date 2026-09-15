@@ -1218,7 +1218,11 @@ test("Bullpen auto-run summary sync keeps completed run visible after refresh", 
   );
   assert.match(
     scheduleCardSource,
-    /const latestRun = summary\?\.latest_run\s+\? reconcileBullpenConsoleRunCopies/,
+    /const latestWorkspaceRun = summary\s+\? runBelongsToWorkspace\(summary\.latest_run, workspaceProfile\)/,
+  );
+  assert.match(
+    scheduleCardSource,
+    /const latestRun = latestWorkspaceRun\s+\? reconcileBullpenConsoleRunCopies/,
   );
   assert.match(
     scheduleCardSource,
@@ -1230,7 +1234,7 @@ test("Bullpen auto-run summary sync keeps completed run visible after refresh", 
   );
   assert.match(
     scheduleCardSource,
-    /recent_runs\.find\(\(run\) => run\.status === "completed"\)/,
+    /recent_runs\.find\(\s*\(run\) =>\s*runBelongsToWorkspace\(run, workspaceProfile\)/,
   );
 });
 
