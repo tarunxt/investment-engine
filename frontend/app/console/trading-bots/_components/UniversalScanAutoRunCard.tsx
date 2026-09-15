@@ -44,20 +44,6 @@ function dateTime(value: string | null) {
   }).format(new Date(value));
 }
 
-function scheduleLabel(value: string, refreshMinutes: number) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric", year: "numeric",
-    month: "long",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-    timeZone: IST,
-  }).formatToParts(new Date(value));
-  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? "";
-  return `Auto Runs Started at ${read("hour")}:${read("minute")}:${read("second")}, ${read("day")} ${read("month")} ${read("year")} and refreshes every ${refreshMinutes} minutes`;
-}
-
 function toIstInput(value: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
@@ -85,7 +71,11 @@ async function requestStatus(body?: Record<string, unknown>) {
   return payload;
 }
 
-export function UniversalScanAutoRunCard() {
+export function UniversalScanAutoRunCard({
+  onStatusChange,
+}: {
+  onStatusChange?: (status: Pick<AutoRunStatus, "running" | "last_completed_at">) => void;
+}) {
   const [status, setStatus] = useState<AutoRunStatus | null>(null);
   const [startInput, setStartInput] = useState("");
   const [refreshMinutes, setRefreshMinutes] = useState(360);
@@ -96,11 +86,12 @@ export function UniversalScanAutoRunCard() {
 
   const apply = useCallback((next: AutoRunStatus) => {
     setStatus(next);
+    onStatusChange?.(next);
     setStartInput(toIstInput(next.start_at));
     setRefreshMinutes(next.refresh_minutes);
     setLastRefresh(new Date().toISOString());
     setError(null);
-  }, []);
+  }, [onStatusChange]);
 
   const load = useCallback(async () => {
     try { apply(await requestStatus()); }
@@ -123,10 +114,6 @@ export function UniversalScanAutoRunCard() {
     finally { setBusy(null); }
   }
 
-  const effectiveStartAt = status?.last_run_at && status.enabled
-    && Date.parse(status.last_run_at) > Date.parse(status.start_at)
-    ? status.last_run_at
-    : status?.start_at;
   const estimatedTotal = status?.estimated_total_events ?? 0;
   const progressPercent = status?.running && estimatedTotal > 0
     ? Math.min(99, Math.round(status.progress_events * 100 / estimatedTotal))
@@ -174,7 +161,6 @@ export function UniversalScanAutoRunCard() {
         </label>
       </div>
 
-      {status && effectiveStartAt && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-950">{scheduleLabel(effectiveStartAt, status.refresh_minutes)}</div>}
       {status?.running && <div className="mt-3 rounded-xl border border-amber-300 bg-amber-100 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm font-semibold text-amber-950">
           <span>{status.progress_events.toLocaleString("en-IN")} events scanned · {status.progress_pages.toLocaleString("en-IN")} pages</span>
