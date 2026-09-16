@@ -16,9 +16,14 @@ from .feeds import CRICKET_SOURCE_IDS
 
 logger = get_logger(__name__)
 
+# Spread one refresh cycle across fourteen minutes.  Queueing every source at
+# once exhausts the shared worker/database pool and can make the HTTP backend
+# unreachable exactly when the quarter-hour refresh begins.
+REFRESH_DISPATCH_WINDOW_SECONDS = 14 * 60
 
-# Populate new sources after deployment without waiting for the next quarter hour.
-# A shared cooldown prevents multiple worker services from dispatching duplicates.
+# Backfill pre-release scan indexes after deployment.  The normal beat schedule
+# owns source refreshes; dispatching the full catalogue again from worker startup
+# creates a duplicate burst and can starve the API during deployments.
 from celery.signals import worker_ready
 
 
@@ -28,8 +33,7 @@ def prime_rankings_on_start(sender=None, **kwargs):
     from app.core.config import settings
     try:
         with Redis.from_url(settings.redis_url, socket_timeout=2, socket_connect_timeout=2) as redis:
-            if redis.set("sports-rankings:startup:v3", "1", nx=True, ex=300):
-                dispatch_refresh.apply_async(retry=False)
+            if redis.set("sports-rankings:startup:v4", "1", nx=True, ex=300):
                 rebuild_polymarket_participant_indexes.apply_async(retry=False)
     except Exception:
         logger.exception("Sports ranking startup dispatch failed; scheduled refresh remains enabled")
@@ -38,8 +42,20 @@ def prime_rankings_on_start(sender=None, **kwargs):
 @celery.task(bind=True, max_retries=2, soft_time_limit=20, time_limit=25)
 def dispatch_refresh(self):
     try:
-        for source_id in sorted(SOURCE_IDS):
-            refresh_source.delay(source_id)
+        source_ids = sorted(SOURCE_IDS)
+        source_count = len(source_ids)
+        for index, source_id in enumerate(source_ids):
+            countdown = (
+                index * REFRESH_DISPATCH_WINDOW_SECONDS // source_count
+                if source_count
+                else 0
+            )
+            refresh_source.apply_async(
+                args=[source_id],
+                countdown=countdown,
+                retry=False,
+            )
+        return {"status": "queued", "sources": source_count}
     except Exception as exc:
         logger.exception("Sports ranking dispatch failed")
         raise self.retry(exc=exc, countdown=60)
