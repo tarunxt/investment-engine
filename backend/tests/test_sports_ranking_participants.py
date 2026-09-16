@@ -150,3 +150,59 @@ def test_scope_guard_never_maps_mens_team_to_women_or_academy():
     ])
 
     assert resolve(RankingQuery(code="scope", name="Manchester City FC"), {"scope-source": snap}, [competition])["candidates"] == []
+
+
+def test_periodic_refresh_staggers_sources_across_the_interval(monkeypatch):
+    from app.domains.sports_rankings import tasks
+
+    queued = []
+    monkeypatch.setattr(tasks, "SOURCE_IDS", {"source-c", "source-a", "source-b"})
+    monkeypatch.setattr(
+        tasks.refresh_source,
+        "apply_async",
+        lambda **kwargs: queued.append(kwargs),
+    )
+
+    result = tasks.dispatch_refresh.run()
+
+    assert result == {"status": "queued", "sources": 3}
+    assert [item["args"] for item in queued] == [
+        ["source-a"], ["source-b"], ["source-c"]
+    ]
+    assert [item["countdown"] for item in queued] == [0, 280, 560]
+    assert all(item["retry"] is False for item in queued)
+
+
+def test_worker_startup_only_queues_participant_backfill(monkeypatch):
+    from app.domains.sports_rankings import tasks
+
+    queued = []
+
+    class FakeRedis:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def set(self, key, value, **kwargs):
+            assert (key, value, kwargs) == (
+                "sports-rankings:startup:v4", "1", {"nx": True, "ex": 300}
+            )
+            return True
+
+    monkeypatch.setattr("redis.Redis.from_url", lambda *_args, **_kwargs: FakeRedis())
+    monkeypatch.setattr(
+        tasks.rebuild_polymarket_participant_indexes,
+        "apply_async",
+        lambda **kwargs: queued.append(kwargs),
+    )
+    monkeypatch.setattr(
+        tasks.dispatch_refresh,
+        "apply_async",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("startup refresh burst")),
+    )
+
+    tasks.prime_rankings_on_start()
+
+    assert queued == [{"retry": False}]
