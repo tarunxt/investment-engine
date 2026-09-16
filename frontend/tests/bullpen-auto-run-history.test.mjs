@@ -35,6 +35,13 @@ const stageOneExcel = readFileSync(
   ),
   "utf8",
 );
+const stageOneExcelHistoryDialog = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenStageOneExcelHistoryDialog.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const backendProxy = readFileSync(
   new URL("../app/backend-api/[...path]/route.ts", import.meta.url),
   "utf8",
@@ -362,6 +369,23 @@ test("Stage 1 filtered events can be downloaded as a complete Excel workbook", (
   assert.match(stageOneExcel, /"Returns\/day \(%\)"/);
   assert.match(stageOneExcel, /"Filter Reasons"/);
   assert.match(stageOneExcel, /candidates\.map/);
+});
+
+test("Stage 1 Excel split button opens the last 10 workspace-scoped scans", () => {
+  assert.match(scheduleCard, /Open last 10 Excel scans/);
+  assert.match(scheduleCard, /BullpenStageOneExcelHistoryDialog/);
+  assert.match(scheduleCard, /Events that Passed Filters/);
+  assert.match(
+    stageOneExcelHistoryDialog,
+    /getBullpenAutoLiveHistory\([\s\S]*?size: 30, workspaceProfile/,
+  );
+  assert.match(stageOneExcelHistoryDialog, /\.slice\(0, 10\)/);
+  assert.match(stageOneExcelHistoryDialog, /Universal Polymarket Scan timestamp/);
+  assert.match(stageOneExcelHistoryDialog, /Events that Passed Filters/);
+  assert.match(
+    stageOneExcelHistoryDialog,
+    /downloadCompleteStageOneRunExcel\(entry\.runId, "filtered"\)/,
+  );
 });
 
 test("Stage 1 all-scanned count downloads the maximum available CLI fields", () => {
