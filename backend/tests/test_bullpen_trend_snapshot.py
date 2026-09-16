@@ -20,6 +20,19 @@ def test_legacy_llm_coverage_still_gets_frozen_overlay():
     assert not needs_frozen_trend_overlay(stages)
 
 
+def test_running_stage_does_not_read_large_frozen_payload_for_partial_rows():
+    stages = [{"outputs": {
+        "workflow_stage_key": "llm",
+        "phase_status": "running",
+        "llm_candidate_count": 97,
+        "llm_reviewed_candidates": [{"market_id": "partial-row"}],
+    }}]
+    assert not needs_frozen_trend_overlay(stages)
+
+    stages[0]["outputs"]["phase_status"] = "completed"
+    assert needs_frozen_trend_overlay(stages)
+
+
 def test_overlay_sql_selects_candidates_without_rejected_scan_or_inputs():
     from sqlalchemy.orm import DeclarativeBase
     class Base(DeclarativeBase):

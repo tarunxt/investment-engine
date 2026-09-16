@@ -2470,3 +2470,17 @@ The shared Yes/No odds thresholds section has its own profile-specific enable
 checkbox. Disabling it bypasses both lower-side and higher-side odds thresholds
 in browser reapplies, manual scans, and scheduled scans while preserving the
 saved numeric values for later re-enabling.
+
+### History Stage 1 shortlist availability
+
+The History event table opens in the ungrouped view so every candidate retained
+by the latest completed Stage 1 is visible immediately. Cluster grouping and the
+strongest-LLM filter remain optional derived views; a clustering snapshot that
+lags a newer Sports scan cannot hide that scan's Stage 1 evidence.
+
+While a stage is running, its published candidate count can temporarily lead its
+bounded candidate rows. The event-trends read treats that as live progress, not
+as evidence of a legacy projection, and therefore does not inspect the immutable
+full-run payload. Once a stage is terminal, the existing bounded compatibility
+overlay remains available for older projections. This changes only History read
+performance and presentation; frozen Stage 1/2/3 audit payloads are unchanged.
