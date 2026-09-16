@@ -674,16 +674,18 @@ export function BullpenRunHistoryScreen({
                 currentPositions,
               )
             : trendsResult.value;
+        const identityBaseTrends = applySportsEventMetadata(positionTrends, null);
+        setTrends(identityBaseTrends);
         const [currentOrderBookOdds, sportsEventMetadata] = await Promise.all([
-          fetchCurrentOrderBookOdds(positionTrends).catch(() => null),
-          fetchSportsEventMetadata(positionTrends).catch(() => null),
+          fetchCurrentOrderBookOdds(identityBaseTrends).catch(() => null),
+          fetchSportsEventMetadata(identityBaseTrends).catch(() => null),
         ]);
         const oddsTrends = currentOrderBookOdds
           ? applyCurrentOrderBookOddsToEventTrends(
-              positionTrends,
+              identityBaseTrends,
               currentOrderBookOdds,
             )
-          : positionTrends;
+          : identityBaseTrends;
         const identityTrends = applySportsEventMetadata(oddsTrends, sportsEventMetadata);
         const nextTrends = await applySportsRankingsToEventTrends(identityTrends).catch(
           () => identityTrends,

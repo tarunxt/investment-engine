@@ -151,6 +151,8 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
   const sort = (key: ColumnKey) => setPreferences(p => ({ ...p, sort: { key, direction: p.sort.key === key && p.sort.direction === "asc" ? "desc" : "asc" } }));
   const resize = (key: ColumnKey, event: ReactPointerEvent) => { event.preventDefault(); const startX=event.clientX, start=preferences.widths[key]; const move=(e: PointerEvent) => setPreferences(p => ({ ...p, widths: { ...p.widths, [key]: Math.max(72, start + e.clientX-startX) } })); const up=()=>{ window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); }; window.addEventListener("pointermove",move); window.addEventListener("pointerup",up); };
   const cell = (key: ColumnKey, event: BullpenEventTableSnapshot) => {
+    const fallbackSportsTag = event.sports_event_slug?.match(/^([a-z0-9]+)-/i)?.[1]?.toLowerCase();
+    const sportsTags = event.sports_ranking?.tags.length ? event.sports_ranking.tags : fallbackSportsTag ? [fallbackSportsTag] : [];
     const activePositionSide = event.is_active_position ? event.active_position_side?.trim().toUpperCase() : null;
     const heldSideBelowLlmThreshold = hasHeldSideLlmOddsBelowThreshold(event);
     const heldSideCurrentOdds = activePositionSide === "YES" ? event.current_yes_odds : activePositionSide === "NO" ? event.current_no_odds : null;
@@ -167,7 +169,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
     if (key === "deadline") return event.is_claimable_position ? <span className="inline-flex min-w-20 items-center justify-center rounded-lg bg-green-700 px-3 py-1.5 text-sm font-black uppercase tracking-wide text-white shadow-md ring-2 ring-green-300 dark:bg-green-500 dark:text-slate-950 dark:ring-green-200" title="This resolved winning position is available to claim now">Claim</span> : <span className="text-xs font-semibold" title={formatTime(event.close_time)}>{formatDeadline(event.close_time)}</span>;
     if (key === "claimDate") return <span className="text-xs font-semibold" title="Best-guess claim availability; not a guaranteed settlement time">{formatDeadline(event.claim_date)}</span>;
     if (key === "score") return onScore ? <button className="text-right text-xs font-bold underline decoration-dotted" onClick={() => onScore(event)}>{event.score.toFixed(2)}</button> : <span className="text-right text-xs font-bold">{event.score.toFixed(2)}</span>;
-    if (key === "tags") return event.sports_ranking?.tags.length ? <span className="flex flex-wrap gap-1">{event.sports_ranking.tags.map(tag => <a key={tag} href={`/console/sports-rankings?code=${encodeURIComponent(tag)}`} target="_blank" rel="noreferrer" className="rounded-full bg-sky-100 px-2 py-1 text-[11px] font-bold text-sky-800 underline decoration-dotted" title={`Open ${tag} in Sports Rankings`}>{tag}</a>)}</span> : <span className="text-xs text-slate-400">—</span>;
+    if (key === "tags") return sportsTags.length ? <span className="flex flex-wrap gap-1">{sportsTags.map(tag => <a key={tag} href={`/console/sports-rankings?code=${encodeURIComponent(tag)}`} target="_blank" rel="noreferrer" className="rounded-full bg-sky-100 px-2 py-1 text-[11px] font-bold text-sky-800 underline decoration-dotted" title={`Open ${tag} in Sports Rankings`}>{tag}</a>)}</span> : <span className="text-xs text-slate-400">—</span>;
     if (key === "ranking" || key === "rating" || key === "points") {
       const comparison = event.sports_ranking;
       const metric = comparison?.[key];
