@@ -11323,6 +11323,8 @@ export function BullpenAutoRunScheduleCard({
   const [triggerHistoryItems, setTriggerHistoryItems] = useState<
     BullpenAutoLiveHistoryItem[]
   >([]);
+  const [workspaceRunFallback, setWorkspaceRunFallback] =
+    useState<BullpenAutoLiveRun | null>(null);
   const [universalTriggerStatus, setUniversalTriggerStatus] =
     useState<UniversalScanTriggerStatus | null>(null);
   const [triggerMonitorLoading, setTriggerMonitorLoading] = useState(true);
@@ -11779,6 +11781,35 @@ export function BullpenAutoRunScheduleCard({
       if (controller.signal.aborted) return;
       if (historyResult.status === "fulfilled") {
         setTriggerHistoryItems(historyResult.value.items);
+        const latestWorkspaceRunId = historyResult.value.items[0]?.id;
+        if (latestWorkspaceRunId) {
+          void apiService
+            .getBullpenAutoLiveRunConsole(latestWorkspaceRunId, {
+              signal: controller.signal,
+              timeoutMs: 10_000,
+            })
+            .then((detail) => {
+              if (
+                !controller.signal.aborted &&
+                runBelongsToWorkspace(detail.run, workspaceProfile)
+              ) {
+                setWorkspaceRunFallback(detail.run);
+              }
+            })
+            .catch((nextError) => {
+              if (
+                !controller.signal.aborted &&
+                !isRequestAbort(nextError)
+              ) {
+                console.warn(
+                  JSON.stringify({
+                    event: "bullpen_workspace_run_fallback_unavailable",
+                    run_id: latestWorkspaceRunId,
+                  }),
+                );
+              }
+            });
+        }
       }
       if (universalResult.status === "fulfilled") {
         setUniversalTriggerStatus(universalResult.value);
@@ -13552,7 +13583,11 @@ export function BullpenAutoRunScheduleCard({
     summary,
     pendingRunId,
     workspaceProfile,
-  );
+  ) ??
+    (workspaceRunFallback &&
+    (!pendingRunId || workspaceRunFallback.id === pendingRunId)
+      ? workspaceRunFallback
+      : null);
   const visibleRun =
     visibleRunCandidate && killedRunIds.has(visibleRunCandidate.id)
       ? null
@@ -13566,7 +13601,7 @@ export function BullpenAutoRunScheduleCard({
       : summary.recent_runs.find((run) =>
           runBelongsToWorkspace(run, workspaceProfile),
         ) ?? null
-    : null;
+    : workspaceRunFallback;
   const latestRun = latestWorkspaceRun
     ? reconcileBullpenConsoleRunCopies(
         summary?.recent_runs.find((run) => run.id === latestWorkspaceRun.id) ??

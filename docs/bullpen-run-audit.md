@@ -24,6 +24,10 @@ guarded queue. Lane acquisition and durable run creation remain worker-owned;
 the HTTP acknowledgement therefore does not wait behind an existing Stage 1
 transaction. This changes only trigger latency and live projection selection;
 the frozen Stage 1–3 evidence and audit schema are unchanged.
+If the compact dashboard read times out, the same workspace-scoped History read
+hydrates the newest bounded exact-run console projection as a display-only
+fallback. This keeps the last/current Stage 1 tile populated during dashboard
+pool pressure without allowing cached UI state to become an execution input.
 
 The live dashboard projection preserves this lineage while Stage 1 is running:
 `snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
