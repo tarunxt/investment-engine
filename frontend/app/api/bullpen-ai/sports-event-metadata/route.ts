@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const GAMMA_EVENT_BY_SLUG = "https://gamma-api.polymarket.com/events/slug";
+const GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const MAX_EVENTS = 200;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
@@ -16,31 +16,49 @@ function normalizedSlug(value: unknown) {
   return /^[a-z0-9][a-z0-9-]{1,298}[a-z0-9]$/.test(slug) ? slug : null;
 }
 
-async function fetchEvent(slug: string): Promise<CachedEvent> {
-  const existing = cache.get(slug);
-  if (existing && existing.expiresAt > Date.now()) return existing;
-  const response = await fetch(`${GAMMA_EVENT_BY_SLUG}/${encodeURIComponent(slug)}`, {
+async function fetchEvents(slugs: string[]): Promise<CachedEvent[]> {
+  if (!slugs.length) return [];
+  const params = new URLSearchParams({ limit: String(slugs.length) });
+  for (const slug of slugs) params.append("slug", slug);
+  const response = await fetch(`${GAMMA_EVENTS_URL}?${params.toString()}`, {
     cache: "no-store",
     headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(6_000),
+    signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(`Gamma event ${slug} returned HTTP ${response.status}`);
-  const payload = (await response.json()) as { title?: unknown };
-  const eventTitle = typeof payload.title === "string" && payload.title.trim() ? payload.title.trim() : null;
-  const result = { eventSlug: slug, eventTitle, expiresAt: Date.now() + CACHE_TTL_MS };
-  cache.set(slug, result);
-  return result;
+  if (!response.ok) throw new Error(`Gamma events returned HTTP ${response.status}`);
+  const payload = (await response.json()) as Array<{ slug?: unknown; title?: unknown }>;
+  const requested = new Set(slugs);
+  const results: CachedEvent[] = [];
+  for (const item of Array.isArray(payload) ? payload : []) {
+    const eventSlug = normalizedSlug(item.slug);
+    if (!eventSlug || !requested.has(eventSlug)) continue;
+    const eventTitle = typeof item.title === "string" && item.title.trim() ? item.title.trim() : null;
+    const result = { eventSlug, eventTitle, expiresAt: Date.now() + CACHE_TTL_MS };
+    cache.set(eventSlug, result);
+    results.push(result);
+  }
+  return results;
 }
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as { slugs?: unknown[] };
   const slugs = Array.from(new Set((body.slugs ?? []).map(normalizedSlug).filter((slug): slug is string => Boolean(slug)))).slice(0, MAX_EVENTS);
   const events: Record<string, { eventSlug: string; eventTitle: string | null }> = {};
-  const results = await Promise.allSettled(slugs.map(fetchEvent));
-  for (const result of results) {
-    if (result.status === "fulfilled") {
-      events[result.value.eventSlug] = { eventSlug: result.value.eventSlug, eventTitle: result.value.eventTitle };
+  const missing: string[] = [];
+  for (const slug of slugs) {
+    const existing = cache.get(slug);
+    if (existing && existing.expiresAt > Date.now()) {
+      events[slug] = { eventSlug: slug, eventTitle: existing.eventTitle };
+    } else {
+      missing.push(slug);
     }
+  }
+  try {
+    for (const result of await fetchEvents(missing)) {
+      events[result.eventSlug] = { eventSlug: result.eventSlug, eventTitle: result.eventTitle };
+    }
+  } catch (error) {
+    console.warn("Unable to load batched Gamma event metadata", error);
   }
   return NextResponse.json({ events });
 }

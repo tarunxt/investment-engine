@@ -286,8 +286,10 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(historyScreen, /sportsEventSlug\(event\)/);
   assert.match(historyScreen, /applySportsEventMetadata\(oddsTrends, sportsEventMetadata\)/);
   assert.match(historyScreen, /setTrends\(identityBaseTrends\)/);
-  assert.match(sportsEventMetadataRoute, /gamma-api\.polymarket\.com\/events\/slug/);
-  assert.match(sportsEventMetadataRoute, /Promise\.allSettled/);
+  assert.match(sportsEventMetadataRoute, /gamma-api\.polymarket\.com\/events/);
+  assert.match(sportsEventMetadataRoute, /params\.append\("slug", slug\)/);
+  assert.match(sportsEventMetadataRoute, /fetchEvents\(missing\)/);
+  assert.doesNotMatch(sportsEventMetadataRoute, /Promise\.allSettled/);
 });
 
 test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {
