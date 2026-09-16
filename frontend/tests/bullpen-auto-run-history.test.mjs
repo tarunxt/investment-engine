@@ -13,6 +13,7 @@ const historyContent = readFileSync(new URL("../app/console/bullpen-ai/_componen
 const historyScreen = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryScreen.tsx", import.meta.url), "utf8");
 const trendsTable = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx", import.meta.url), "utf8");
 const sportsEventMetadataRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-metadata/route.ts", import.meta.url), "utf8");
+const sportsEventComparisonsRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-comparisons/route.ts", import.meta.url), "utf8");
 const llmDialog = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx", import.meta.url), "utf8");
 const apiService = readFileSync(
   new URL("../services/api.ts", import.meta.url),
@@ -297,6 +298,10 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(sportsEventMetadataRoute, /Promise\.allSettled\(chunkSlugs\(missing\)\.map\(fetchEvents\)\)/);
   assert.match(backendProxy, /SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000/);
   assert.match(backendProxy, /method === "POST" && path === "api\/sports-rankings\/event-comparisons"/);
+  assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
+  assert.match(sportsEventComparisonsRoute, /createBackendSessionContext\(request\)/);
+  assert.match(sportsEventComparisonsRoute, /"\/api\/sports-rankings\/event-comparisons"/);
+  assert.match(sportsEventComparisonsRoute, /method: "POST", body/);
 });
 
 test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {
