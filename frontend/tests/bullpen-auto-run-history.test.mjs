@@ -281,9 +281,12 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(trendsTable, /fallbackSportsTag/);
   assert.match(trendsTable, /Δ A−B:/);
   assert.match(historyScreen, /readSportsEventComparisonsFromDetails/);
+  assert.match(historyScreen, /readSportsEventComparisons<[\s\S]*?>\(events\)/);
+  assert.match(historyScreen, /readRankingDetailsWithLimit/);
+  assert.match(historyScreen, /One slow or stale feed must not discard comparisons/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
   assert.match(historyScreen, /sports_ranking: comparisons\[event\.market_id\]/);
-  assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(events\)/);
+  assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(unresolved\)/);
   assert.match(historyScreen, /readRankingJson<\{ competitions: RankingCompetition\[\] \}>\(""\)/);
   assert.match(historyScreen, /teamNameKey/);
   assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)/);
