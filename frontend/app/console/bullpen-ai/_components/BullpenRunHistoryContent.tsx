@@ -281,7 +281,9 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const claimEvents = useMemo(() => applyClaimReturns(trends?.events ?? [], clusterState.rows, claimNow), [trends, clusterState.rows, claimNow]);
   const returnsEvent = claimEvents.find(event => event.market_id === returnsMarketId);
   const [showClusterJson, setShowClusterJson] = useState(false);
-  const [clusterMode, setClusterMode] = useState<ClusterMode>(2);
+  // History must first show the authoritative Stage 1 shortlist. Clustering is
+  // an optional derived view and may legitimately lag behind a new Sports run.
+  const [clusterMode, setClusterMode] = useState<ClusterMode>(0);
   const [showStrongestOnly, setShowStrongestOnly] = useState(false);
   const operationalRuns = latestRuns ?? (page?.page === 1 ? page.items : []);
   const latestScoredScanAt = trends?.events.flatMap(event => event.scan_timestamps.map((timestamp, index) => event.scan_scores[index] == null ? null : timestamp)).find(Boolean) ?? null;

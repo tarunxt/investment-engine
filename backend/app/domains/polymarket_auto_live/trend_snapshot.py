@@ -12,17 +12,37 @@ def needs_frozen_trend_overlay(stages):
         outputs = stage.get("outputs") or {}
         if not isinstance(outputs, dict):
             continue
+        phase_status = str(outputs.get("phase_status") or "").strip().lower()
+        # A running stage deliberately publishes its count before the bounded
+        # candidate rows are complete. Treating that temporary difference as a
+        # legacy projection makes the History request inspect the immutable,
+        # full run payload while Stage 1/2 is still writing it. Sports scans can
+        # make that payload very large, so the compatibility read can consume
+        # the whole HTTP timeout even though the current console projection
+        # already contains the completed Stage 1 shortlist.
+        stage_is_in_progress = phase_status in {
+            "queued", "running", "working", "confirming", "pending",
+        }
         accepted = outputs.get("accepted_candidates") or []
         count = outputs.get("accepted_candidates_count")
-        if isinstance(count, (int, float)) and count > len(accepted):
+        if (
+            not stage_is_in_progress
+            and isinstance(count, (int, float))
+            and count > len(accepted)
+        ):
             return True
         reviewed = outputs.get("llm_reviewed_candidates") or []
         reviewed_count = outputs.get("llm_candidate_count")
-        if isinstance(reviewed_count, (int, float)) and reviewed_count > len(reviewed):
+        if (
+            not stage_is_in_progress
+            and isinstance(reviewed_count, (int, float))
+            and reviewed_count > len(reviewed)
+        ):
             return True
-        for candidate in reviewed:
-            if isinstance(candidate, dict) and not candidate.get("llm_outputs"):
-                return True
+        if not stage_is_in_progress:
+            for candidate in reviewed:
+                if isinstance(candidate, dict) and not candidate.get("llm_outputs"):
+                    return True
     return False
 
 
