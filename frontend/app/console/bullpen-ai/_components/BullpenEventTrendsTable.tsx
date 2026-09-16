@@ -16,6 +16,10 @@ type ColumnKey =
   | "deadline"
   | "claimDate"
   | "score"
+  | "tags"
+  | "ranking"
+  | "rating"
+  | "points"
   | "bought"
   | "currentOdds"
   | "llmOdds"
@@ -51,7 +55,12 @@ const isAboveReturnsDivider = (event: BullpenEventTableSnapshot) =>
 const columns: Array<{ key: ColumnKey; label: string; width: number }> = [
   { key: "event", label: "Event", width: 330 }, { key: "deadline", label: "Deadline", width: 105 },
   { key: "claimDate", label: "Claim date", width: 120 },
-  { key: "score", label: "Score", width: 90 }, { key: "bought", label: "Bought", width: 90 },
+  { key: "score", label: "Score", width: 90 },
+  { key: "tags", label: "tag(s)", width: 100 },
+  { key: "ranking", label: "Ranking", width: 230 },
+  { key: "rating", label: "Rating", width: 230 },
+  { key: "points", label: "Points", width: 230 },
+  { key: "bought", label: "Bought", width: 90 },
   { key: "currentOdds", label: "Current Odds", width: 210 },
   { key: "llmOdds", label: "LLM Odds", width: 125 }, { key: "returns", label: "Returns/day", width: 110 },
   { key: "scans", label: "20 scans · newest to oldest", width: 420 },
@@ -62,7 +71,7 @@ const columnKeysForVariant = (variant: BullpenEventTableVariant): ColumnKey[] =>
   ? ["event", "deadline", "bought", "currentOdds", "llmOdds", "returns", "position"]
   : variant === "fresh-opportunities"
     ? ["event", "deadline", "currentOdds", "llmOdds", "returns", "amount", "volume", "liquidity"]
-    : ["event", "deadline", "claimDate", "score", "bought", "currentOdds", "llmOdds", "returns", "scans"];
+    : ["event", "deadline", "claimDate", "score", "tags", "ranking", "rating", "points", "bought", "currentOdds", "llmOdds", "returns", "scans"];
 const defaultsForVariant = (variant: BullpenEventTableVariant): Preferences => ({
   order: columnKeysForVariant(variant),
   widths: Object.fromEntries(columns.map(({ key, width }) => [key, width])) as Record<ColumnKey, number>,
@@ -70,6 +79,8 @@ const defaultsForVariant = (variant: BullpenEventTableVariant): Preferences => (
 });
 const odds = (value?: number | null) => value == null ? "—" : `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
 const cents = (value?: number | null) => value == null ? "—" : `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
+const sportsNumber = (value?: number | null) => value == null ? "—" : value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const sportsDelta = (value?: number | null) => value == null ? "—" : `${value > 0 ? "+" : ""}${sportsNumber(value)}`;
 const formatTime = (value?: string | null) => formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", second: "2-digit" });
 const formatDeadline = (value?: string | null) => value ? formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", year: undefined }) : "—";
 const scanColor = (score: number | null) => { if (score === null) return "rgb(203 213 225)"; const n = Math.max(0, Math.min(100, score)); const [a,b,p] = n <= 65 ? [[244,166,160],[255,255,255],(n-50)/15] : [[255,255,255],[82,183,126],(n-65)/35]; const progress = Math.max(0, Math.min(1,p)); return `rgb(${a.map((v,i) => Math.round(v + (b[i]-v)*progress)).join(" ")})`; };
@@ -125,7 +136,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
   const [hovered, setHovered] = useState<{ event: BullpenAutoLiveEventTrend; index: number } | null>(null);
   useEffect(() => { const timer = window.setTimeout(() => { try { const saved = JSON.parse(localStorage.getItem(storageKey) || "null") as Partial<Preferences> | null; if (saved?.order?.length === visibleColumns.length && saved.order.every(key => defaults.order.includes(key))) setPreferences({ order: saved.order, widths: { ...defaults.widths, ...saved.widths }, sort: saved.sort && defaults.order.includes(saved.sort.key) ? saved.sort : defaults.sort }); else setPreferences(defaults); } catch { setPreferences(defaults); } preferencesLoaded.current = true; }); return () => window.clearTimeout(timer); }, [defaults, storageKey, visibleColumns.length]);
   useEffect(() => { if (preferencesLoaded.current) localStorage.setItem(storageKey, JSON.stringify(preferences)); }, [preferences, storageKey]);
-  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const key = preferences.sort.key; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "claimDate" ? (event.claim_date ? Date.parse(event.claim_date) : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "bought" ? event.position_average_price_cents ?? -1 : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * (preferences.sort.direction === "asc" ? 1 : -1); }), [events, preferences.sort, showStrongestOnly]);
+  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const key = preferences.sort.key; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "claimDate" ? (event.claim_date ? Date.parse(event.claim_date) : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "tags" ? event.sports_ranking?.tags.join(" ") ?? "" : key === "ranking" || key === "rating" || key === "points" ? event.sports_ranking?.[key]?.delta ?? Number.NEGATIVE_INFINITY : key === "bought" ? event.position_average_price_cents ?? -1 : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * (preferences.sort.direction === "asc" ? 1 : -1); }), [events, preferences.sort, showStrongestOnly]);
   const showClusters = variant === "trends" && Boolean(clusters && onClusterEdit);
   const displayed = useMemo(() => {
     const arranged = arrangeClusterEvents(sorted, clusters ?? new Map(), showClusters ? clusterMode : 0);
@@ -156,6 +167,14 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
     if (key === "deadline") return event.is_claimable_position ? <span className="inline-flex min-w-20 items-center justify-center rounded-lg bg-green-700 px-3 py-1.5 text-sm font-black uppercase tracking-wide text-white shadow-md ring-2 ring-green-300 dark:bg-green-500 dark:text-slate-950 dark:ring-green-200" title="This resolved winning position is available to claim now">Claim</span> : <span className="text-xs font-semibold" title={formatTime(event.close_time)}>{formatDeadline(event.close_time)}</span>;
     if (key === "claimDate") return <span className="text-xs font-semibold" title="Best-guess claim availability; not a guaranteed settlement time">{formatDeadline(event.claim_date)}</span>;
     if (key === "score") return onScore ? <button className="text-right text-xs font-bold underline decoration-dotted" onClick={() => onScore(event)}>{event.score.toFixed(2)}</button> : <span className="text-right text-xs font-bold">{event.score.toFixed(2)}</span>;
+    if (key === "tags") return event.sports_ranking?.tags.length ? <span className="flex flex-wrap gap-1">{event.sports_ranking.tags.map(tag => <a key={tag} href={`/console/sports-rankings?code=${encodeURIComponent(tag)}`} target="_blank" rel="noreferrer" className="rounded-full bg-sky-100 px-2 py-1 text-[11px] font-bold text-sky-800 underline decoration-dotted" title={`Open ${tag} in Sports Rankings`}>{tag}</a>)}</span> : <span className="text-xs text-slate-400">—</span>;
+    if (key === "ranking" || key === "rating" || key === "points") {
+      const comparison = event.sports_ranking;
+      const metric = comparison?.[key];
+      const teamA = comparison?.team_a ?? "Team A";
+      const teamB = comparison?.team_b ?? "Team B";
+      return <span className="block text-[11px] leading-5" title={comparison?.match_status === "matched" ? `${comparison.competition ?? "Sports Rankings"}${comparison.source_as_of ? ` · ${comparison.source_as_of}` : ""}` : "No unambiguous Sports Rankings match is available for both teams."}><span className="block truncate"><strong>A · {teamA}</strong>: {sportsNumber(metric?.team_a)}</span><span className="block truncate"><strong>B · {teamB}</strong>: {sportsNumber(metric?.team_b)}</span><span className="block font-bold text-slate-700">Δ A−B: {sportsDelta(metric?.delta)}</span></span>;
+    }
     if (key === "bought") return <span className="text-xs font-semibold">{activePositionSide && event.position_average_price_cents != null ? <>{activePositionSide}<br/>{cents(event.position_average_price_cents)}</> : "—"}</span>;
     if (key === "currentOdds") {
       const quote = (side: "YES" | "NO") => {

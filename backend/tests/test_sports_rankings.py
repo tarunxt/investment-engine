@@ -5,8 +5,8 @@ import pytest
 
 from app.domains.sports_rankings.catalogue import CATALOGUE, IMPORTED_CATALOGUE, SOURCE_IDS, normalize_name
 from app.domains.sports_rankings.providers import parse_football, parse_valve
-from app.domains.sports_rankings.schemas import RankingQuery
-from app.domains.sports_rankings.service import ranking_rows, resolve, source_status
+from app.domains.sports_rankings.schemas import EventComparisonsQuery, RankingQuery
+from app.domains.sports_rankings.service import event_comparisons, ranking_rows, resolve, source_status
 
 
 def test_complete_import():
@@ -108,3 +108,35 @@ def test_explicit_feed_alias_resolves_imported_name(imported, provider):
     assert result['candidates'][0]['name'] == provider
     assert result['candidates'][0]['rank'] == 1
     assert resolve(RankingQuery(code='wsl', name=imported), {'football-data-E0': snap})['candidates'] == []
+
+
+def test_event_comparison_joins_both_teams_and_calculates_deltas():
+    snap = SimpleNamespace(
+        rows=[
+            {'name': 'Baltimore Ravens', 'rank': 2, 'rating': 91.5, 'points': 8},
+            {'name': 'Buffalo Bills', 'rank': 5, 'rating': 88, 'points': 6},
+        ],
+        status='ready', checked_at=datetime.now(UTC), source_as_of='2026-09-16',
+    )
+    query = EventComparisonsQuery(events=[{
+        'market_id': '123', 'event_slug': 'nfl-bal-buf-2026-09-16',
+        'event_title': 'Baltimore Ravens vs. Buffalo Bills',
+    }])
+    comparison = event_comparisons(query, {'espn-nfl': snap})['comparisons']['123']
+    assert comparison['code'] == 'nfl'
+    assert comparison['tags'] == ['nfl']
+    assert comparison['match_status'] == 'matched'
+    assert comparison['ranking'] == {'team_a': 2, 'team_b': 5, 'delta': -3}
+    assert comparison['rating'] == {'team_a': 91.5, 'team_b': 88, 'delta': 3.5}
+    assert comparison['points'] == {'team_a': 8, 'team_b': 6, 'delta': 2}
+
+
+def test_event_comparison_never_invents_values_for_unmatched_teams():
+    query = EventComparisonsQuery(events=[{
+        'market_id': '456', 'event_slug': 'bel1-a-b-2026-09-16',
+        'event_title': 'Unknown A vs Unknown B',
+    }])
+    comparison = event_comparisons(query, {})['comparisons']['456']
+    assert comparison['tags'] == ['bel1']
+    assert comparison['match_status'] == 'unmatched'
+    assert comparison['ranking'] is None

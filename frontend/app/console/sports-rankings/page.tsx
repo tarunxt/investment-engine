@@ -33,6 +33,14 @@ export default function SportsRankingsPage() {
   const [loading, setLoading] = useState(true);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion(v => v + 1), []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const linkedCompetition = params.get('competition');
+    const linkedCode = params.get('code');
+    if (linkedCompetition) setSelected(linkedCompetition);
+    if (linkedCode) setQuery(linkedCode);
+  }, []);
   const filtered = useMemo(() => competitions.filter(c =>
     (sport === 'All sports' || c.sport === sport) &&
     (coverage !== 'Connected feeds' || !!c.source_id) &&

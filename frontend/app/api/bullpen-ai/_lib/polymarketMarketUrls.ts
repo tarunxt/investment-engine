@@ -34,6 +34,7 @@ export type ResolvedPolymarketMarket = {
   slug: string | null;
   marketSlug: string | null;
   eventSlug: string | null;
+  eventTitle: string | null;
   marketUrl: string | null;
   authoritativeMarketOpen: boolean | null;
   category: string | null;
@@ -170,6 +171,17 @@ function getNestedEventSlug(value: unknown) {
   if (!record) return null;
 
   return readString(record, ["slug", "eventSlug", "urlSlug"]);
+}
+
+function getNestedEventTitle(value: unknown) {
+  for (const item of [...toArray(value), ...parseJsonArray(value)]) {
+    const record = toRecord(item);
+    if (!record) continue;
+    const title = readString(record, ["title", "name", "question"]);
+    if (title) return title;
+  }
+  const record = toRecord(value);
+  return record ? readString(record, ["title", "name", "question"]) : null;
 }
 
 function getNestedSeriesSlug(value: unknown) {
@@ -575,6 +587,7 @@ function normalizeResolvedMarket(
   const conditionId = readString(record, ["conditionId", "condition_id"]);
   const slug = getCanonicalPolymarketMarketSlug(record, fallbackSlug);
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
+  const eventTitle = getNestedEventTitle(record.events) || getNestedEventTitle(record.event);
   const { yesOdds: indicativeYesOdds, noOdds: indicativeNoOdds } =
     readOutcomeOdds(record);
   const rules = extractRulesText(record);
@@ -604,6 +617,7 @@ function normalizeResolvedMarket(
     slug,
     marketSlug: slug,
     eventSlug,
+    eventTitle,
     marketUrl: buildPolymarketEventUrl(eventSlug),
     authoritativeMarketOpen: resolveAuthoritativeMarketOpenState(record),
     category,
@@ -869,6 +883,7 @@ async function searchBullpenMarketByQuestion(
     })) as {
       events?: Array<{
         slug?: string | null;
+        title?: string | null;
         markets?: Array<{
           conditionId?: string | null;
           question?: string | null;
@@ -887,6 +902,7 @@ async function searchBullpenMarketByQuestion(
       (event.markets || []).map((market) => ({
         ...market,
         eventSlug: event.slug || null,
+        eventTitle: event.title || null,
       })),
     );
     const matchedMarket = markets?.find(
@@ -930,6 +946,7 @@ async function searchBullpenMarketByQuestion(
       slug: fallbackMarket.slug,
       marketSlug: fallbackMarket.slug,
       eventSlug: matchedMarket.eventSlug || null,
+      eventTitle: matchedMarket.eventTitle || null,
       marketUrl: fallbackMarket.marketUrl,
       // A normalized question-text match is useful for display enrichment,
       // but it is not exact condition/slug identity. Never let it reclassify

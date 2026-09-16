@@ -22,7 +22,9 @@ import type {
   BullpenAutoLiveEventTrendsResponse,
   BullpenAutoLiveHistoryItem,
   BullpenAutoLiveHistoryPage,
+  BullpenSportsRankingComparison,
 } from "@/types/api";
+import { readSportsEventComparisons } from "@/lib/sportsRankingsApi";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
@@ -164,6 +166,8 @@ async function fetchCurrentBullpenPositions() {
 }
 
 type CurrentOrderBookMarket = {
+  eventSlug?: string | null;
+  eventTitle?: string | null;
   yesOdds?: number | null;
   noOdds?: number | null;
   yesBestBid?: number | null;
@@ -321,6 +325,8 @@ export function applyCurrentOrderBookOddsToEventTrends(
           : event.current_no_odds ?? null;
       return {
         ...event,
+        sports_event_slug: market?.eventSlug ?? event.sports_event_slug ?? null,
+        sports_event_title: market?.eventTitle ?? event.sports_event_title ?? null,
         current_yes_odds: currentYesOdds,
         current_no_odds: currentNoOdds,
         current_yes_bid_cents: market?.yesBestBid ?? null,
@@ -337,6 +343,29 @@ export function applyCurrentOrderBookOddsToEventTrends(
         ),
       };
     }),
+  };
+}
+
+async function applySportsRankingsToEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+): Promise<BullpenAutoLiveEventTrendsResponse> {
+  const events = trends.events
+    .filter((event) => event.sports_event_slug || event.sports_event_title)
+    .map((event) => ({
+      market_id: event.market_id,
+      event_slug: event.sports_event_slug ?? null,
+      event_title: event.sports_event_title ?? null,
+    }));
+  if (!events.length) return trends;
+  const payload = await readSportsEventComparisons<{
+    comparisons: Record<string, BullpenSportsRankingComparison>;
+  }>(events);
+  return {
+    ...trends,
+    events: trends.events.map((event) => ({
+      ...event,
+      sports_ranking: payload.comparisons[event.market_id] ?? null,
+    })),
   };
 }
 
@@ -604,12 +633,15 @@ export function BullpenRunHistoryScreen({
         const currentOrderBookOdds = await fetchCurrentOrderBookOdds(
           positionTrends,
         ).catch(() => null);
-        const nextTrends = currentOrderBookOdds
+        const oddsTrends = currentOrderBookOdds
           ? applyCurrentOrderBookOddsToEventTrends(
               positionTrends,
               currentOrderBookOdds,
             )
           : positionTrends;
+        const nextTrends = await applySportsRankingsToEventTrends(oddsTrends).catch(
+          () => oddsTrends,
+        );
         setTrends(nextTrends);
         cacheEventTrends(nextTrends, workspaceProfile);
       } else {
