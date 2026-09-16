@@ -280,9 +280,8 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(trendsTable, /\/console\/sports-rankings\?code=/);
   assert.match(trendsTable, /fallbackSportsTag/);
   assert.match(trendsTable, /Δ A−B:/);
-  assert.match(historyScreen, /readSportsEventComparisons/);
+  assert.match(historyScreen, /readSportsEventComparisonsFromDetails/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
-  assert.match(historyScreen, /readSportsEventComparisons<[\s\S]*?>\(events\)/);
   assert.match(historyScreen, /sports_ranking: comparisons\[event\.market_id\]/);
   assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(events\)/);
   assert.match(historyScreen, /readRankingJson<\{ competitions: RankingCompetition\[\] \}>\(""\)/);

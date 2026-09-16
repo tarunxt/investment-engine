@@ -24,7 +24,7 @@ import type {
   BullpenAutoLiveHistoryPage,
   BullpenSportsRankingComparison,
 } from "@/types/api";
-import { readRankingJson, readSportsEventComparisons } from "@/lib/sportsRankingsApi";
+import { readRankingJson } from "@/lib/sportsRankingsApi";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
@@ -401,14 +401,7 @@ async function applySportsRankingsToEventTrends(
       event_title: event.sports_event_title ?? null,
     }));
   if (!events.length) return trends;
-  let comparisons: Record<string, BullpenSportsRankingComparison>;
-  try {
-    comparisons = (await readSportsEventComparisons<{
-      comparisons: Record<string, BullpenSportsRankingComparison>;
-    }>(events)).comparisons;
-  } catch {
-    comparisons = await readSportsEventComparisonsFromDetails(events);
-  }
+  const comparisons = await readSportsEventComparisonsFromDetails(events);
   return {
     ...trends,
     events: trends.events.map((event) => ({
