@@ -43,6 +43,7 @@ const BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
 const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000;
 const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
 const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
+const SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 const PUBLIC_BACKEND_PATHS = new Set([
@@ -251,7 +252,12 @@ function isBullpenStageOneExcelDownload(method: string, path: string) {
   );
 }
 
+function isSportsEventComparisonsRead(method: string, path: string) {
+  return method === "POST" && path === "api/sports-rankings/event-comparisons";
+}
+
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
   if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return 4_000;
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {
@@ -289,6 +295,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
   if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return 6_000;
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {

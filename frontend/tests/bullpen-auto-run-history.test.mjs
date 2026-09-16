@@ -296,6 +296,8 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(sportsEventMetadataRoute, /params\.append\("slug", slug\)/);
   assert.match(sportsEventMetadataRoute, /GAMMA_BATCH_SIZE = 10/);
   assert.match(sportsEventMetadataRoute, /Promise\.allSettled\(chunkSlugs\(missing\)\.map\(fetchEvents\)\)/);
+  assert.match(backendProxy, /SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000/);
+  assert.match(backendProxy, /method === "POST" && path === "api\/sports-rankings\/event-comparisons"/);
 });
 
 test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {
