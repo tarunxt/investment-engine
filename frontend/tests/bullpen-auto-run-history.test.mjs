@@ -285,6 +285,8 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(historyScreen, /readSportsEventComparisons<[\s\S]*?>\(events\)/);
   assert.match(historyScreen, /readRankingDetailsWithLimit/);
   assert.match(historyScreen, /One slow or stale feed must not discard comparisons/);
+  assert.match(historyScreen, /competition\.status === "ready"/);
+  assert.match(historyScreen, /competition\.ranked_count/);
   assert.match(sportsRankingsApi, /AbortSignal\.timeout\(16_500\)/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
   assert.match(historyScreen, /sports_ranking: comparisons\[event\.market_id\]/);

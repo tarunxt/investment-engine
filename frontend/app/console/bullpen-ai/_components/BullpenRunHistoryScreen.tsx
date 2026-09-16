@@ -440,12 +440,14 @@ type RankingCompetition = {
   name: string;
   source_id: string | null;
   source_as_of?: string | null;
+  status?: string | null;
+  ranked_count?: number | null;
 };
 type RankingDetail = RankingCompetition & { rows: RankingDetailRow[] };
 
 async function readRankingDetailsWithLimit(
   competitions: RankingCompetition[],
-  concurrency = 4,
+  concurrency = 6,
 ) {
   const details: RankingDetail[] = [];
   let next = 0;
@@ -489,7 +491,13 @@ async function readSportsEventComparisonsFromDetails(
 ) {
   const codes = new Set(events.map((event) => event.event_slug?.split("-", 1)[0]).filter(Boolean));
   const catalogue = await readRankingJson<{ competitions: RankingCompetition[] }>("");
-  const relevant = catalogue.competitions.filter((competition) => competition.source_id && codes.has(competition.code));
+  const relevant = catalogue.competitions.filter(
+    (competition) =>
+      competition.source_id &&
+      competition.status === "ready" &&
+      (competition.ranked_count ?? 0) > 0 &&
+      codes.has(competition.code),
+  );
   const details = await readRankingDetailsWithLimit(relevant);
   const output: Record<string, BullpenSportsRankingComparison> = {};
   for (const event of events) {
