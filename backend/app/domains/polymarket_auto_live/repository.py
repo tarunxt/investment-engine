@@ -954,10 +954,18 @@ class AsyncPolymarketAutoLiveRepository:
     async def get_latest_projected_run(
         self,
         user_id: int,
+        *,
+        workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
     ) -> tuple[BullpenAutoLiveRun, bool, str] | None:
         """Read the newest console projection without selecting the TOAST payload."""
 
         record = PolymarketAutoLiveRunRecord
+        filters = [
+            record.user_id == user_id,
+            _dashboard_relevant_run_filter(user_id=user_id),
+        ]
+        if workspace_profile is not None:
+            filters.append(_history_workspace_filter(record, workspace_profile))
         row = (
             await self.session.execute(
                 select(
@@ -978,8 +986,7 @@ class AsyncPolymarketAutoLiveRepository:
                     record.console_projection,
                     record.updated_at,
                 )
-                .where(record.user_id == user_id)
-                .where(_dashboard_relevant_run_filter(user_id=user_id))
+                .where(*filters)
                 .order_by(desc(record.started_at), desc(record.created_at))
                 .limit(1)
             )

@@ -27,7 +27,6 @@ from app.domains.auth.dependencies import (
 )
 from app.domains.auth.models import User
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
-from app.domains.polymarket_auto_live.bot import AutoLiveExecutionLaneBusy
 from app.domains.polymarket_auto_live.console_profile import (
     scan_console_profile_markets,
 )
@@ -38,7 +37,6 @@ from app.domains.polymarket_auto_live.run_recovery import (
     run_contains_historical_auth_error,
 )
 from app.domains.polymarket_auto_live.schemas import (
-    BullpenAutoLiveConsoleRunContext,
     BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
     BullpenAutoLiveEventTrendsResponse,
@@ -175,6 +173,7 @@ async def _read_persisted_status(
 
 async def _read_dashboard_summary(
     credentials: HTTPAuthorizationCredentials | None,
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = None,
 ) -> tuple[BullpenAutoLiveSummary, int]:
     """Read auth and the dashboard projection through one database session.
 
@@ -189,7 +188,10 @@ async def _read_dashboard_summary(
     async with AsyncSessionLocal() as session:
         user_id = await _resolve_persisted_status_user_id(credentials, session)
         bot = await polymarket_auto_live_bot_manager.get_bot(user_id)
-        summary = await bot.get_dashboard_summary(session=session)
+        summary = await bot.get_dashboard_summary(
+            session=session,
+            workspace_profile=workspace_profile,
+        )
         summary = BullpenAutoLiveSummary.model_validate(summary)
     return summary, user_id
 
@@ -765,6 +767,9 @@ async def get_auto_live_summary(current_user: User = Depends(get_current_user)):
 async def get_auto_live_dashboard_summary(
     request: Request,
     response: Response,
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = Query(
+        default=None
+    ),
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Load persisted console projections without worker or runtime work."""
@@ -773,7 +778,7 @@ async def get_auto_live_dashboard_summary(
     user_id: int | None = None
     try:
         summary, user_id = await asyncio.wait_for(
-            _read_dashboard_summary(credentials),
+            _read_dashboard_summary(credentials, workspace_profile),
             timeout=DASHBOARD_SUMMARY_TIMEOUT_SECONDS,
         )
         summary = await _attach_latest_active_auth(
@@ -1231,10 +1236,9 @@ async def queue_workflow_run_now(
 ):
     """Start one workflow against the latest immutable Universal Scan.
 
-    Persist the run before returning whenever the guarded execution lane is
-    free. Only defer to the trigger queue when another workflow really owns the
-    lane. This keeps the button response tied to a durable run instead of an
-    optimistic client-only identity.
+    Validate the immutable source and enqueue the idempotent workflow trigger
+    before returning. The worker owns lane acquisition and durable run creation,
+    so the browser is never held behind a long-running Stage 1 transaction.
     """
 
     from app.domains.polymarket_auto_live.tasks import (
@@ -1268,66 +1272,23 @@ async def queue_workflow_run_now(
         batch_id=request.client_request_id,
         workspace_profile=request.workspace_profile,
     )
-    source_completed_at = str(
-        metadata.get("updatedAt")
-        or metadata.get("completedAt")
-        or queued_at
-    )
-    run_request = BullpenAutoLiveRunOnceRequest(
-        client_run_id=run_id,
-        wait_for_execution_lane=True,
-        console_profile=BullpenAutoLiveConsoleRunContext(
-            workspace_profile=request.workspace_profile,
-            source_label="Universal Polymarket Scan",
-            source_url="/console/trading-bots",
-            scanned_at=str(
-                metadata.get("scannedAt")
-                or metadata.get("createdAt")
-                or source_completed_at
-            ),
-            source_scan_completed_at=source_completed_at,
-            snapshot_id=export_id,
-            mode="30-days",
-            total_candidates=int(metadata.get("rowCount") or 0),
-            candidate_rows_prefiltered=False,
-            reuse_saved_llm_outputs=False,
-            candidate_rows=[],
-        ),
-    )
-    response_status: Literal["started", "queued"] = "started"
     try:
-        bot = await _get_bot(current_user)
-        run = await bot.run_once(triggered_by="manual", request=run_request)
-        if run.status != "running":
-            raise HTTPException(status_code=409, detail=run.summary)
-    except AutoLiveExecutionLaneBusy:
-        response_status = "queued"
-        try:
-            queue_bullpen_workflow_trigger_batch(
-                user_id=current_user.id,
-                triggered_by="manual",
-                batch_id=request.client_request_id,
-                universal_export_id=export_id,
-                workspace_profiles=(request.workspace_profile,),
-            )
-        except Exception as exc:
-            logger.exception(
-                "Could not queue waiting manual workflow trigger for user %s profile %s",
-                current_user.id,
-                request.workspace_profile,
-            )
-            raise HTTPException(status_code=503, detail=_http_error_detail(exc)) from exc
-    except HTTPException:
-        raise
+        queue_bullpen_workflow_trigger_batch(
+            user_id=current_user.id,
+            triggered_by="manual",
+            batch_id=request.client_request_id,
+            universal_export_id=export_id,
+            workspace_profiles=(request.workspace_profile,),
+        )
     except Exception as exc:
         logger.exception(
-            "Could not start manual workflow trigger for user %s profile %s",
+            "Could not queue manual workflow trigger for user %s profile %s",
             current_user.id,
             request.workspace_profile,
         )
         raise HTTPException(status_code=503, detail=_http_error_detail(exc)) from exc
     return BullpenWorkflowRunNowResponse(
-        status=response_status,
+        status="queued",
         run_id=run_id,
         workspace_profile=request.workspace_profile,
         universal_export_id=export_id,
