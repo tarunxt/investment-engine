@@ -24,7 +24,7 @@ import type {
   BullpenAutoLiveHistoryPage,
   BullpenSportsRankingComparison,
 } from "@/types/api";
-import { readSportsEventComparisons } from "@/lib/sportsRankingsApi";
+import { readRankingJson, readSportsEventComparisons } from "@/lib/sportsRankingsApi";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
@@ -401,16 +401,85 @@ async function applySportsRankingsToEventTrends(
       event_title: event.sports_event_title ?? null,
     }));
   if (!events.length) return trends;
-  const payload = await readSportsEventComparisons<{
-    comparisons: Record<string, BullpenSportsRankingComparison>;
-  }>(events);
+  let comparisons: Record<string, BullpenSportsRankingComparison>;
+  try {
+    comparisons = (await readSportsEventComparisons<{
+      comparisons: Record<string, BullpenSportsRankingComparison>;
+    }>(events)).comparisons;
+  } catch {
+    comparisons = await readSportsEventComparisonsFromDetails(events);
+  }
   return {
     ...trends,
     events: trends.events.map((event) => ({
       ...event,
-      sports_ranking: payload.comparisons[event.market_id] ?? null,
+      sports_ranking: comparisons[event.market_id] ?? null,
     })),
   };
+}
+
+type RankingDetailRow = {
+  name: string;
+  imported_names?: string[];
+  rank?: number | null;
+  rating?: number | null;
+  points?: number | null;
+};
+type RankingCompetition = {
+  id: string;
+  code: string;
+  name: string;
+  source_id: string | null;
+  source_as_of?: string | null;
+};
+type RankingDetail = RankingCompetition & { rows: RankingDetailRow[] };
+
+function teamNameKey(value: string) {
+  const designators = new Set(["ac", "afc", "cf", "fc", "fk", "sc"]);
+  const tokens = value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  while (tokens.length && designators.has(tokens[0])) tokens.shift();
+  while (tokens.length && designators.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens.join(" ");
+}
+
+function uniqueRankingRow(rows: RankingDetailRow[], name: string) {
+  const exact = rows.filter((row) => [row.name, ...(row.imported_names ?? [])].some((candidate) => candidate.localeCompare(name, undefined, { sensitivity: "accent" }) === 0));
+  if (exact.length === 1) return exact[0];
+  const key = teamNameKey(name);
+  const normalized = rows.filter((row) => [row.name, ...(row.imported_names ?? [])].some((candidate) => teamNameKey(candidate) === key));
+  return normalized.length === 1 ? normalized[0] : null;
+}
+
+async function readSportsEventComparisonsFromDetails(
+  events: Array<{ market_id: string; event_slug?: string | null; event_title?: string | null }>,
+) {
+  const codes = new Set(events.map((event) => event.event_slug?.split("-", 1)[0]).filter(Boolean));
+  const catalogue = await readRankingJson<{ competitions: RankingCompetition[] }>("");
+  const relevant = catalogue.competitions.filter((competition) => competition.source_id && codes.has(competition.code));
+  const details = await Promise.all(relevant.map((competition) => readRankingJson<RankingDetail>(`/competitions/${encodeURIComponent(competition.id)}`)));
+  const output: Record<string, BullpenSportsRankingComparison> = {};
+  for (const event of events) {
+    const code = event.event_slug?.split("-", 1)[0] ?? null;
+    const teams = event.event_title?.split(/\s+(?:vs\.?|v\.?|@)\s+/i);
+    if (!code || teams?.length !== 2) continue;
+    const pairs = details
+      .filter((detail) => detail.code === code)
+      .map((detail) => ({ detail, left: uniqueRankingRow(detail.rows, teams[0]), right: uniqueRankingRow(detail.rows, teams[1]) }))
+      .filter((pair) => pair.left && pair.right);
+    if (pairs.length !== 1) continue;
+    const { detail, left, right } = pairs[0];
+    const metric = (key: "rank" | "rating" | "points") => {
+      const teamA = typeof left?.[key] === "number" ? left[key] : null;
+      const teamB = typeof right?.[key] === "number" ? right[key] : null;
+      return { team_a: teamA, team_b: teamB, delta: teamA !== null && teamB !== null ? teamA - teamB : null };
+    };
+    output[event.market_id] = {
+      market_id: event.market_id, code, tags: [code], team_a: left!.name, team_b: right!.name,
+      match_status: "matched", ranking: metric("rank"), rating: metric("rating"), points: metric("points"),
+      competition_id: detail.id, competition: detail.name, source_as_of: detail.source_as_of ?? null,
+    };
+  }
+  return output;
 }
 
 function resolveActivePositionSide(
