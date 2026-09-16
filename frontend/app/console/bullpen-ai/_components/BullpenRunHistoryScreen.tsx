@@ -401,26 +401,14 @@ async function applySportsRankingsToEventTrends(
       event_title: event.sports_event_title ?? null,
     }));
   if (!events.length) return trends;
-  const batches: typeof events[] = [];
-  for (let index = 0; index < events.length; index += 20) {
-    batches.push(events.slice(index, index + 20));
-  }
-  const results = await Promise.allSettled(
-    batches.map((batch) =>
-      readSportsEventComparisons<{
-        comparisons: Record<string, BullpenSportsRankingComparison>;
-      }>(batch),
-    ),
-  );
-  const comparisons: Record<string, BullpenSportsRankingComparison> = {};
-  for (const result of results) {
-    if (result.status === "fulfilled") Object.assign(comparisons, result.value.comparisons);
-  }
+  const payload = await readSportsEventComparisons<{
+    comparisons: Record<string, BullpenSportsRankingComparison>;
+  }>(events);
   return {
     ...trends,
     events: trends.events.map((event) => ({
       ...event,
-      sports_ranking: comparisons[event.market_id] ?? null,
+      sports_ranking: payload.comparisons[event.market_id] ?? null,
     })),
   };
 }

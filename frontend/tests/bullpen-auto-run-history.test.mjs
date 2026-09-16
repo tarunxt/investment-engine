@@ -281,9 +281,8 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(trendsTable, /Δ A−B:/);
   assert.match(historyScreen, /readSportsEventComparisons/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
-  assert.match(historyScreen, /index \+= 20/);
-  assert.match(historyScreen, /Promise\.allSettled\([\s\S]*?readSportsEventComparisons/);
-  assert.match(historyScreen, /sports_ranking: comparisons\[event\.market_id\]/);
+  assert.match(historyScreen, /readSportsEventComparisons<[\s\S]*?>\(events\)/);
+  assert.match(historyScreen, /sports_ranking: payload\.comparisons\[event\.market_id\]/);
   assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)/);
   assert.match(historyScreen, /sportsEventSlug\(event\)/);
   assert.match(historyScreen, /applySportsEventMetadata\(identityBaseTrends, sportsEventMetadata\)/);
