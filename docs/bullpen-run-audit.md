@@ -2,7 +2,7 @@
 
 ## Sports ranking enrichment (2026-09-16)
 
-Bullpen Sports History enriches each Stage 1 event from the authenticated Sports Rankings service. The Polymarket parent-event slug supplies the verified competition tag, while both parent-event participant names must resolve to one compatible ranking source before numeric values are displayed. History shows the competition tag (linked to the filtered Sports Rankings page), both team names and values, and Team A minus Team B deltas for ranking, rating, and points. Missing or ambiguous source values remain `—`; the UI never converts unavailable rankings into zeroes or chooses an arbitrary match.
+Bullpen Sports History enriches each Stage 1 event from the authenticated Sports Rankings service. The Polymarket parent-event slug supplies the verified competition tag, while an independent, bounded Gamma event-title lookup supplies both participant names without depending on the heavier current-odds refresh. Both participants must resolve to one compatible ranking source before numeric values are displayed. History shows the competition tag (linked to the filtered Sports Rankings page), both team names and values, and Team A minus Team B deltas for ranking, rating, and points. Missing or ambiguous source values remain `—`; the UI never converts unavailable rankings into zeroes or chooses an arbitrary match.
 
 ## Workflow Stage 1 trigger contract (2026-09-15)
 

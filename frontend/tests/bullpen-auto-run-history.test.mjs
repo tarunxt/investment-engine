@@ -12,6 +12,7 @@ const scheduleCard = readFileSync(
 const historyContent = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx", import.meta.url), "utf8");
 const historyScreen = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryScreen.tsx", import.meta.url), "utf8");
 const trendsTable = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx", import.meta.url), "utf8");
+const sportsEventMetadataRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-metadata/route.ts", import.meta.url), "utf8");
 const llmDialog = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx", import.meta.url), "utf8");
 const apiService = readFileSync(
   new URL("../services/api.ts", import.meta.url),
@@ -280,6 +281,11 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(historyScreen, /readSportsEventComparisons/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
   assert.match(historyScreen, /sports_ranking: payload\.comparisons\[event\.market_id\]/);
+  assert.match(historyScreen, /fetchSportsEventMetadata\(positionTrends\)/);
+  assert.match(historyScreen, /sportsEventSlug\(event\)/);
+  assert.match(historyScreen, /applySportsEventMetadata\(oddsTrends, sportsEventMetadata\)/);
+  assert.match(sportsEventMetadataRoute, /gamma-api\.polymarket\.com\/events\/slug/);
+  assert.match(sportsEventMetadataRoute, /Promise\.allSettled/);
 });
 
 test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {

@@ -183,6 +183,10 @@ type CurrentOrderBookOddsResponse = {
   fetchedAt?: string | null;
 };
 
+type SportsEventMetadataResponse = {
+  events?: Record<string, { eventSlug: string; eventTitle: string | null }>;
+};
+
 const MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE = 100;
 
 function historyCurrentOddsLookupId(
@@ -246,6 +250,46 @@ async function fetchCurrentOrderBookOdds(
   }
 
   return { markets: mergedMarkets, fetchedAt };
+}
+
+function sportsEventSlug(event: BullpenAutoLiveEventTrend) {
+  if (event.sports_event_slug) return event.sports_event_slug;
+  const match = event.market_url?.match(/polymarket\.com\/event\/([^/?#]+)/i);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+async function fetchSportsEventMetadata(
+  trends: BullpenAutoLiveEventTrendsResponse,
+): Promise<SportsEventMetadataResponse> {
+  const slugs = Array.from(new Set(trends.events.map(sportsEventSlug).filter((slug): slug is string => Boolean(slug))));
+  const response = await fetch("/api/bullpen-ai/sports-event-metadata", {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Cache-Control": "no-cache", "content-type": "application/json" },
+    body: JSON.stringify({ slugs }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Sports event metadata request failed (${response.status}).`);
+  return response.json() as Promise<SportsEventMetadataResponse>;
+}
+
+function applySportsEventMetadata(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  response: SportsEventMetadataResponse | null,
+): BullpenAutoLiveEventTrendsResponse {
+  return {
+    ...trends,
+    events: trends.events.map((event) => {
+      const slug = sportsEventSlug(event);
+      const metadata = slug ? response?.events?.[slug] : null;
+      return {
+        ...event,
+        sports_event_slug: metadata?.eventSlug ?? slug,
+        sports_event_title: metadata?.eventTitle ?? event.sports_event_title ?? null,
+      };
+    }),
+  };
 }
 
 function currentReturnsPerDay(
@@ -630,17 +674,19 @@ export function BullpenRunHistoryScreen({
                 currentPositions,
               )
             : trendsResult.value;
-        const currentOrderBookOdds = await fetchCurrentOrderBookOdds(
-          positionTrends,
-        ).catch(() => null);
+        const [currentOrderBookOdds, sportsEventMetadata] = await Promise.all([
+          fetchCurrentOrderBookOdds(positionTrends).catch(() => null),
+          fetchSportsEventMetadata(positionTrends).catch(() => null),
+        ]);
         const oddsTrends = currentOrderBookOdds
           ? applyCurrentOrderBookOddsToEventTrends(
               positionTrends,
               currentOrderBookOdds,
             )
           : positionTrends;
-        const nextTrends = await applySportsRankingsToEventTrends(oddsTrends).catch(
-          () => oddsTrends,
+        const identityTrends = applySportsEventMetadata(oddsTrends, sportsEventMetadata);
+        const nextTrends = await applySportsRankingsToEventTrends(identityTrends).catch(
+          () => identityTrends,
         );
         setTrends(nextTrends);
         cacheEventTrends(nextTrends, workspaceProfile);
