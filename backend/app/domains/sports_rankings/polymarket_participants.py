@@ -19,6 +19,9 @@ _CODE = re.compile(r"^([a-z0-9]+)-", re.IGNORECASE)
 _NON_PARTICIPANTS = {"draw", "tie", "yes", "no"}
 _SPORT_TERMS = (
     ("american football", "american-football"),
+    ("college football", "american-football"),
+    ("gridiron", "american-football"),
+    ("nfl", "american-football"),
     ("association football", "soccer"),
     ("football", "soccer"),
     ("soccer", "soccer"),
