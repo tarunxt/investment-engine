@@ -110,6 +110,18 @@ def test_explicit_feed_alias_resolves_imported_name(imported, provider):
     assert resolve(RankingQuery(code='wsl', name=imported), {'football-data-E0': snap})['candidates'] == []
 
 
+def test_team_designator_suffix_resolves_unique_provider_team():
+    snap = SimpleNamespace(
+        rows=[
+            {'name': 'Brentford', 'rank': 7, 'points': 4},
+            {'name': 'Chelsea', 'rank': 2, 'points': 9},
+        ],
+        status='ready', checked_at=datetime.now(UTC), source_as_of='2026-09-16',
+    )
+    assert resolve(RankingQuery(code='epl', name='Brentford FC'), {'football-data-E0': snap})['candidates'][0]['rank'] == 7
+    assert resolve(RankingQuery(code='epl', name='Chelsea FC'), {'football-data-E0': snap})['candidates'][0]['points'] == 9
+
+
 def test_event_comparison_joins_both_teams_and_calculates_deltas():
     snap = SimpleNamespace(
         rows=[
