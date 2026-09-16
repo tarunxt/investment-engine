@@ -19,6 +19,10 @@ from app.domains.trading_bots.models import (
     UniversalScanSettingsRecord,
     UniversalScanStateRecord,
 )
+from app.domains.sports_rankings.polymarket_participants import (
+    SportsParticipantCollector,
+    participant_index_path,
+)
 
 SETTINGS_KEY = "universal_scan_auto_run"
 STATE_KEY = "universal_scan_auto_run"
@@ -561,6 +565,7 @@ class UniversalExportWriter:
         self.sample: list[dict[str, Any]] = []
         self.identity_keys: set[str] = set()
         self.pages = 0
+        self.sports_participants = SportsParticipantCollector()
 
     def __enter__(self) -> "UniversalExportWriter":
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -569,6 +574,7 @@ class UniversalExportWriter:
         return self
 
     def add(self, market: Any) -> None:
+        self.sports_participants.add(market)
         raw = market.raw if isinstance(market.raw, dict) else {}
         event = raw.get("_export_event") if isinstance(raw.get("_export_event"), dict) else {}
         market_raw = {key: value for key, value in raw.items() if key not in {"_export_event", "events", "_scan_export_data"}}
@@ -646,6 +652,17 @@ class UniversalExportWriter:
             "acceptedSample": self.sample,
             "rejectedSample": [],
         }
+        participant_path = participant_index_path(self.rows_path)
+        participant_temporary = participant_path.with_suffix(participant_path.suffix + ".tmp")
+        participant_temporary.write_text(
+            json.dumps(
+                self.sports_participants.payload(export_id=self.export_id),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        participant_temporary.replace(participant_path)
         temporary = self.metadata_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
         temporary.replace(self.metadata_path)
@@ -663,7 +680,7 @@ class UniversalExportWriter:
             if metadata.get("ownerHash") != owner_hash or not metadata.get("universalSource"):
                 continue
             old_id = metadata_path.stem
-            for suffix in (".json", ".jsonl", ".filtered.jsonl"):
+            for suffix in (".json", ".jsonl", ".filtered.jsonl", ".sports-participants.json"):
                 (self.directory / f"{old_id}{suffix}").unlink(missing_ok=True)
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -673,3 +690,6 @@ class UniversalExportWriter:
             self.rows_path.unlink(missing_ok=True)
             self.filtered_path.unlink(missing_ok=True)
             self.metadata_path.unlink(missing_ok=True)
+            participant_path = participant_index_path(self.rows_path)
+            participant_path.unlink(missing_ok=True)
+            participant_path.with_suffix(participant_path.suffix + ".tmp").unlink(missing_ok=True)

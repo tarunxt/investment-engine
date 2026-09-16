@@ -28,8 +28,9 @@ def prime_rankings_on_start(sender=None, **kwargs):
     from app.core.config import settings
     try:
         with Redis.from_url(settings.redis_url, socket_timeout=2, socket_connect_timeout=2) as redis:
-            if redis.set("sports-rankings:startup:v2", "1", nx=True, ex=300):
+            if redis.set("sports-rankings:startup:v3", "1", nx=True, ex=300):
                 dispatch_refresh.apply_async(retry=False)
+                rebuild_polymarket_participant_indexes.apply_async(retry=False)
     except Exception:
         logger.exception("Sports ranking startup dispatch failed; scheduled refresh remains enabled")
 
@@ -54,6 +55,39 @@ def reconcile_cricket(self):
     except Exception as exc:
         logger.exception("Cricket reconciliation dispatch failed")
         raise self.retry(exc=exc, countdown=60)
+
+
+@celery.task(bind=True, max_retries=1, soft_time_limit=240, time_limit=300)
+def rebuild_polymarket_participant_indexes(self):
+    """Backfill compact participant indexes for scans completed before this release."""
+    from app.domains.sports_rankings.polymarket_participants import (
+        participant_index_path,
+        write_participant_index,
+    )
+    from app.domains.trading_bots.models import UniversalScanStateRecord
+    from app.domains.trading_bots.universal_scan import (
+        iter_universal_scan_markets,
+        latest_completed_universal_export,
+    )
+
+    try:
+        with SyncSessionLocal() as db:
+            user_ids = list(db.scalars(select(UniversalScanStateRecord.user_id)).all())
+        rebuilt = 0
+        for user_id in user_ids:
+            resolved = latest_completed_universal_export(user_id)
+            if resolved is None:
+                continue
+            metadata, rows_path = resolved
+            if participant_index_path(rows_path).is_file():
+                continue
+            _, markets = iter_universal_scan_markets(user_id, export_id=metadata.get("exportId"))
+            write_participant_index(rows_path, markets, export_id=metadata.get("exportId"))
+            rebuilt += 1
+        return {"status": "ready", "rebuilt": rebuilt}
+    except Exception as exc:
+        logger.exception("Polymarket sports participant index backfill failed")
+        raise self.retry(exc=exc, countdown=120)
 
 
 @celery.task(bind=True, max_retries=2, soft_time_limit=70, time_limit=80)

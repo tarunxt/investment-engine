@@ -1,7 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 import re
 
-from .catalogue import CATALOGUE, normalize_name, source_kind
+from .catalogue import ALIASES, CATALOGUE, normalize_name, participant_aliases, source_kind
 from .feeds import FEEDS
 from .schemas import EventComparisonsQuery, RankingQuery
 
@@ -44,10 +45,16 @@ def summary(competition, snapshot=None):
 
 
 def ranking_rows(competition, snapshot=None):
+    code = competition.get("code", "")
     rows = [{**r, "imported_names": []} for r in (snapshot.rows if snapshot else [])]
     for participant in competition["participants"]:
-        names = {normalize_name(n) for n in [participant["name"], *participant["aliases"]]}
-        matches = [r for r in rows if normalize_name(r["name"]) in names]
+        names = [
+            participant["name"],
+            *participant_aliases(
+                code, participant["name"], participant.get("aliases", [])
+            ),
+        ]
+        matches = _matching_rows(names, rows, code)
         if len(matches) == 1:
             matches[0]["imported_names"].append(participant["name"])
         else:
@@ -55,37 +62,107 @@ def ranking_rows(competition, snapshot=None):
     return rows
 
 
-_TEAM_DESIGNATORS = {"ac", "afc", "cf", "fc", "fk", "sc", "ssc", "sv", "us", "vfl"}
-_TEAM_NAME_ALIASES = {
-    "wolverhampton wanderers": "wolves",
-    "wolverhampton": "wolves",
-    "darmstadt 98": "darmstadt",
+_TEAM_DESIGNATORS = {
+    "ac", "afc", "as", "bk", "bsc", "cd", "cf", "fc", "fk", "if", "kaa",
+    "krc", "kv", "nk", "osc", "rc", "rcd", "sc", "sk", "sl", "ssc", "sv",
+    "ud", "us", "vfb", "vfl",
+}
+_TEAM_WORD_EQUIVALENTS = {
+    "athletic": "ath", "athletico": "ath", "atletico": "ath", "atlético": "ath",
+    "manchester": "man", "saint": "st", "sankt": "st",
+}
+_TEAM_SCOPE_QUALIFIERS = {
+    "academy", "b", "ii", "ladies", "lfc", "reserves", "u17", "u18", "u19",
+    "u20", "u21", "u23", "women", "womens", "wfc",
 }
 
 
-def _team_name_key(value):
+def _base_team_name_keys(value):
     tokens = normalize_name(value).split()
+    if not tokens:
+        return set()
+    keys = {" ".join(tokens)}
     while tokens and tokens[0] in _TEAM_DESIGNATORS:
         tokens.pop(0)
     while tokens and tokens[-1] in _TEAM_DESIGNATORS:
         tokens.pop()
-    key = " ".join(tokens)
-    return _TEAM_NAME_ALIASES.get(key, key)
+    if not tokens:
+        return keys
+    keys.add(" ".join(tokens))
+    equivalent = [_TEAM_WORD_EQUIVALENTS.get(token, token) for token in tokens]
+    keys.add(" ".join(equivalent))
+    if 2 <= len(equivalent) <= 6:
+        initials = "".join(token if len(token) <= 3 else token[0] for token in equivalent)
+        if len(initials) >= 2:
+            keys.add(initials)
+    keys.update(key.replace(" ", "") for key in list(keys) if len(key) >= 5)
+    return {key for key in keys if key}
 
 
-def resolve(query, snapshots):
+def _team_name_keys(value, code=None, *, include_global=False):
+    family = {value}
+    mappings = [ALIASES.get(code, {})] if code else []
+    # Cross-competition fallback is needed for cup/continental tags whose
+    # provider row comes from a domestic table (for example Wolves).
+    if include_global:
+        mappings.extend(mapping for mapped_code, mapping in ALIASES.items() if mapped_code != code)
+    normalized = normalize_name(value)
+    for mapping in mappings:
+        for canonical, aliases in mapping.items():
+            values = [canonical, *aliases]
+            if normalized in {normalize_name(candidate) for candidate in values}:
+                family.update(values)
+    keys = set()
+    for candidate in family:
+        keys.update(_base_team_name_keys(candidate))
+    return keys
+
+
+def _compatible_team_scope(left, right):
+    left_scope = set(normalize_name(left).split()).intersection(_TEAM_SCOPE_QUALIFIERS)
+    right_scope = set(normalize_name(right).split()).intersection(_TEAM_SCOPE_QUALIFIERS)
+    return left_scope == right_scope
+
+
+def _matching_rows(names, rows, code, *, include_global=False):
+    query_keys = set()
+    for name in names:
+        query_keys.update(_team_name_keys(name, code, include_global=include_global))
+    exact = [
+        row for row in rows
+        if query_keys.intersection(_team_name_keys(row["name"], code, include_global=include_global))
+    ]
+    if exact:
+        return exact
+
+    # A conservative unique fuzzy fallback catches punctuation, shortened
+    # legal names and provider abbreviations not yet seen in the alias file.
+    scored = []
+    for row in rows:
+        if not any(_compatible_team_scope(name, row["name"]) for name in names):
+            continue
+        row_keys = _team_name_keys(row["name"], code, include_global=include_global)
+        score = max(
+            (SequenceMatcher(None, left, right).ratio() for left in query_keys for right in row_keys),
+            default=0.0,
+        )
+        scored.append((score, row))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if not scored or scored[0][0] < 0.88:
+        return []
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < 0.08:
+        return []
+    return [scored[0][1]]
+
+
+def resolve(query, snapshots, catalogue=None):
     candidates = []
-    for c in CATALOGUE:
+    for c in catalogue or CATALOGUE:
         if c["code"] != query.code or (query.competition_id and c["id"] != query.competition_id):
             continue
         snap = snapshots.get(c["source_id"])
         rows = ranking_rows(c, snap)
-        exact = [row for row in rows if normalize_name(query.name) in {normalize_name(n) for n in [row["name"], *row["imported_names"]]}]
-        matched_rows = exact or [
-            row for row in rows
-            if not row.get("match_status")
-            and _team_name_key(query.name) in {_team_name_key(n) for n in [row["name"], *row["imported_names"]]}
-        ]
+        matched_rows = _matching_rows([query.name], rows, c["code"])
         for row in matched_rows:
             candidates.append({"competition_id": c["id"], "competition": c["name"], "code": c["code"], "source_id": c["source_id"], "status": source_status(snap, c["source_id"]), "ranking_kind": source_kind(c["source_id"]), "source_as_of": snap.source_as_of if snap else None, **row})
     # A master list and an imported tournament can refer to the same source row.
@@ -101,24 +178,21 @@ def resolve(query, snapshots):
     return {"match_status": "matched" if len(candidates) == 1 else "ambiguous" if candidates else "unmatched", "candidates": candidates, "automatic_analysis_enabled": False}
 
 
-def _resolve_sport(name, sport_id, snapshots):
+def _resolve_sport(name, sport_id, snapshots, catalogue=None):
     """Resolve a participant across one sport without crossing ranking sources."""
     candidates = []
-    for competition in CATALOGUE:
+    for competition in catalogue or CATALOGUE:
         if competition.get("sport_id") != sport_id or not competition.get("source_id"):
             continue
         snapshot = snapshots.get(competition["source_id"])
         if snapshot is None:
             continue
         rows = ranking_rows(competition, snapshot)
-        exact = [
-            row for row in rows
-            if normalize_name(name) in {normalize_name(value) for value in [row["name"], *row["imported_names"]]}
-        ]
-        matched = exact or [
-            row for row in rows
+        matched = [
+            row for row in _matching_rows(
+                [name], rows, competition["code"], include_global=True
+            )
             if not row.get("match_status")
-            and _team_name_key(name) in {_team_name_key(value) for value in [row["name"], *row["imported_names"]]}
         ]
         for row in matched:
             candidates.append({
@@ -163,10 +237,8 @@ def _compatible_pairs(left, right):
     pairs = []
     for team_a in left:
         for team_b in right:
-            left_ids = set(team_a.get("competition_ids", [team_a["competition_id"]]))
-            right_ids = set(team_b.get("competition_ids", [team_b["competition_id"]]))
             same_source = team_a.get("source_id") and team_a.get("source_id") == team_b.get("source_id")
-            if same_source or left_ids.intersection(right_ids):
+            if same_source:
                 pairs.append((team_a, team_b))
     unique = {}
     for team_a, team_b in pairs:
@@ -179,7 +251,8 @@ def _compatible_pairs(left, right):
     return list(unique.values())
 
 
-def event_comparisons(query: EventComparisonsQuery, snapshots):
+def event_comparisons(query: EventComparisonsQuery, snapshots, catalogue=None):
+    catalogue = catalogue or CATALOGUE
     comparisons = {}
     for event in query.events:
         code = _market_code(event.event_slug)
@@ -202,19 +275,19 @@ def event_comparisons(query: EventComparisonsQuery, snapshots):
             comparisons[event.market_id] = base
             continue
 
-        left = resolve(RankingQuery(code=code, name=participants[0]), snapshots)["candidates"]
-        right = resolve(RankingQuery(code=code, name=participants[1]), snapshots)["candidates"]
+        left = resolve(RankingQuery(code=code, name=participants[0]), snapshots, catalogue)["candidates"]
+        right = resolve(RankingQuery(code=code, name=participants[1]), snapshots, catalogue)["candidates"]
         pairs = _compatible_pairs(left, right)
         soccer_codes = {
-            competition["code"] for competition in CATALOGUE
+            competition["code"] for competition in catalogue
             if competition.get("sport_id") == "soccer" and competition["code"]
         } | {"efl"}
         if not pairs and code in soccer_codes:
             # A cup/continental tag may not have a useful table of its own. Use
             # domestic standings only when both teams resolve uniquely to the
             # same published source; never compare unrelated league tables.
-            left = _resolve_sport(participants[0], "soccer", snapshots)
-            right = _resolve_sport(participants[1], "soccer", snapshots)
+            left = _resolve_sport(participants[0], "soccer", snapshots, catalogue)
+            right = _resolve_sport(participants[1], "soccer", snapshots, catalogue)
             pairs = _compatible_pairs(left, right)
         if len(pairs) != 1:
             base["match_status"] = "ambiguous" if pairs or left or right else "unmatched"
