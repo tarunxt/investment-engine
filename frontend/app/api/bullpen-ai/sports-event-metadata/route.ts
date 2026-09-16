@@ -5,6 +5,7 @@ export const runtime = "nodejs";
 
 const GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const MAX_EVENTS = 200;
+const GAMMA_BATCH_SIZE = 10;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 type CachedEvent = { eventSlug: string; eventTitle: string | null; expiresAt: number };
@@ -23,7 +24,7 @@ async function fetchEvents(slugs: string[]): Promise<CachedEvent[]> {
   const response = await fetch(`${GAMMA_EVENTS_URL}?${params.toString()}`, {
     cache: "no-store",
     headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(22_000),
   });
   if (!response.ok) throw new Error(`Gamma events returned HTTP ${response.status}`);
   const payload = (await response.json()) as Array<{ slug?: unknown; title?: unknown }>;
@@ -40,6 +41,14 @@ async function fetchEvents(slugs: string[]): Promise<CachedEvent[]> {
   return results;
 }
 
+function chunkSlugs(slugs: string[]) {
+  const chunks: string[][] = [];
+  for (let index = 0; index < slugs.length; index += GAMMA_BATCH_SIZE) {
+    chunks.push(slugs.slice(index, index + GAMMA_BATCH_SIZE));
+  }
+  return chunks;
+}
+
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as { slugs?: unknown[] };
   const slugs = Array.from(new Set((body.slugs ?? []).map(normalizedSlug).filter((slug): slug is string => Boolean(slug)))).slice(0, MAX_EVENTS);
@@ -53,12 +62,15 @@ export async function POST(request: NextRequest) {
       missing.push(slug);
     }
   }
-  try {
-    for (const result of await fetchEvents(missing)) {
-      events[result.eventSlug] = { eventSlug: result.eventSlug, eventTitle: result.eventTitle };
+  const batches = await Promise.allSettled(chunkSlugs(missing).map(fetchEvents));
+  for (const batch of batches) {
+    if (batch.status === "fulfilled") {
+      for (const result of batch.value) {
+        events[result.eventSlug] = { eventSlug: result.eventSlug, eventTitle: result.eventTitle };
+      }
+    } else {
+      console.warn("Unable to load batched Gamma event metadata", batch.reason);
     }
-  } catch (error) {
-    console.warn("Unable to load batched Gamma event metadata", error);
   }
   return NextResponse.json({ events });
 }
