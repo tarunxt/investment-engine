@@ -386,8 +386,10 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   // Slow wallet/CLI reads must not open the circuit for healthy database-only
   // history reads on the same backend origin. Use fixed scopes so this
   // registry remains bounded; never key circuit state by user or run ID.
-  const historyCircuitScope =
-    SAFE_FALLBACK_METHODS.has(request.method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))
+  const readCircuitScope =
+    SAFE_FALLBACK_METHODS.has(request.method) && PUBLIC_BACKEND_PATHS.has(path)
+      ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))
       ? "api/sports-rankings"
       : isClusteringProgressRead(request.method, path)
       ? "polymarket/auto-live/clustering/progress"
@@ -397,7 +399,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       ? path
       : undefined;
   const resolvedCandidates = resolveBackendApiCandidates(request).map(
-    (candidate) => ({ ...candidate, circuitScope: historyCircuitScope }),
+    (candidate) => ({ ...candidate, circuitScope: readCircuitScope }),
   );
   const isPublicRequest = PUBLIC_BACKEND_PATHS.has(path);
   const backendSession = isPublicRequest
