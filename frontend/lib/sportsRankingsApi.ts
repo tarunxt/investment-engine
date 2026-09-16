@@ -20,7 +20,9 @@ export async function readRankingJson<T>(
   for (let attempt = 0; attempt < 3; attempt++) {
     signal?.throwIfAborted();
     try {
-      const timeout = AbortSignal.timeout(8000);
+      // The authenticated proxy allows one slow database-backed ranking read
+      // to finish before falling back to another origin.
+      const timeout = AbortSignal.timeout(16_500);
       const response = await fetcher(base + path, {
         cache: 'no-store', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });

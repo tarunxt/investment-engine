@@ -14,6 +14,7 @@ const historyScreen = readFileSync(new URL("../app/console/bullpen-ai/_component
 const trendsTable = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx", import.meta.url), "utf8");
 const sportsEventMetadataRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-metadata/route.ts", import.meta.url), "utf8");
 const sportsEventComparisonsRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-comparisons/route.ts", import.meta.url), "utf8");
+const sportsRankingsApi = readFileSync(new URL("../lib/sportsRankingsApi.ts", import.meta.url), "utf8");
 const llmDialog = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx", import.meta.url), "utf8");
 const apiService = readFileSync(
   new URL("../services/api.ts", import.meta.url),
@@ -284,6 +285,7 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(historyScreen, /readSportsEventComparisons<[\s\S]*?>\(events\)/);
   assert.match(historyScreen, /readRankingDetailsWithLimit/);
   assert.match(historyScreen, /One slow or stale feed must not discard comparisons/);
+  assert.match(sportsRankingsApi, /AbortSignal\.timeout\(16_500\)/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
   assert.match(historyScreen, /sports_ranking: comparisons\[event\.market_id\]/);
   assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(unresolved\)/);

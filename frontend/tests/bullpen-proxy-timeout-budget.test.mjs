@@ -25,6 +25,10 @@ test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", (
     proxySource,
     /BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
   );
+  assert.match(
+    proxySource,
+    /SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
+  );
   assert.match(proxySource, /isBullpenHistoryRead\(method, path\)/);
   assert.match(proxySource, /path\.startsWith\("polymarket\/auto-live\/"\)/);
   assert.match(
