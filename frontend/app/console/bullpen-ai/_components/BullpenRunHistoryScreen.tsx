@@ -495,11 +495,17 @@ async function readRankingDetailsWithLimit(
 }
 
 function teamNameKey(value: string) {
-  const designators = new Set(["ac", "afc", "cf", "fc", "fk", "sc"]);
+  const designators = new Set(["ac", "afc", "cf", "fc", "fk", "sc", "ssc", "sv", "us", "vfl"]);
+  const aliases: Record<string, string> = {
+    "wolverhampton wanderers": "wolves",
+    wolverhampton: "wolves",
+    "darmstadt 98": "darmstadt",
+  };
   const tokens = value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
   while (tokens.length && designators.has(tokens[0])) tokens.shift();
   while (tokens.length && designators.has(tokens[tokens.length - 1])) tokens.pop();
-  return tokens.join(" ");
+  const key = tokens.join(" ");
+  return aliases[key] ?? key;
 }
 
 function uniqueRankingRow(rows: RankingDetailRow[], name: string) {

@@ -1,4 +1,13 @@
 {
+  "egy1": {
+    "name": "Egyptian Premier League"
+  },
+  "efl": {
+    "name": "English Football League Cup"
+  },
+  "uel": {
+    "name": "UEFA Europa League"
+  },
   "lal": {
     "name": "LaLiga",
     "series": "10193"

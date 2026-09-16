@@ -13,6 +13,23 @@ for league, sport, path in [
 ]:
     add(f"espn-{league}", sport, f"{league.upper()} season standings", f"https://site.api.espn.com/apis/v2/sports/{path}/{league}/standings", "espn", f"https://www.espn.com/{league}/standings", league,
         "ESPN records, ordered within each published group by win percentage (derived; equal records share a rank). Not an official playoff seed or cross-group ranking. If the new season has no games, the previous season is explicitly labelled.")
+
+# Polymarket uses competition-specific soccer prefixes.  Keep these mappings
+# explicit so a tag can be traced to the exact published standings source.
+for code, league, label, minimum in [
+    ("egy1", "egy.1", "Egyptian Premier League", 10),
+    ("pol", "pol.1", "Polish Ekstraklasa", 10),
+    ("bl2", "ger.2", "German 2. Bundesliga", 10),
+    ("sea", "ita.1", "Italian Serie A", 10),
+    ("uel", "uefa.europa", "UEFA Europa League", 8),
+]:
+    add(
+        f"espn-soccer-{code}", "soccer", f"{label} standings",
+        f"https://site.api.espn.com/apis/v2/sports/soccer/{league}/standings",
+        "espn-soccer", f"https://www.espn.com/soccer/standings/_/league/{league}", code,
+        "Published competition table from ESPN. Rating is a transparent derived points-efficiency percentage (points divided by three times games played); rank and points remain publisher values.",
+        minimum=minimum,
+    )
 add("nhl-official", "ice-hockey", "NHL league standings", "https://api-web.nhle.com/v1/standings/now", "nhl", "https://www.nhl.com/standings", "nhl",
     "Official NHL league order. The source may return the last completed season before the new season starts; season and source date are shown.")
 for gender, key in [("Men", "mru"), ("Women", "wru")]:

@@ -39,7 +39,7 @@ def validate(rows, minimum=10):
     return list(unique.values())
 
 
-def parse_json(data, parser):
+def parse_json(data, parser, minimum=10):
     rows, date, season = [], None, None
     if parser == "rugby":
         date = data["effective"]["label"]
@@ -56,7 +56,7 @@ def parse_json(data, parser):
         if len(dates) != 1 or len(seasons) != 1:
             raise ValueError("Mixed NHL snapshot seasons/dates")
         date, season = dates.pop(), seasons.pop()
-    elif parser == "espn":
+    elif parser in {"espn", "espn-soccer"}:
         season = str(data["season"])
         def visit(node):
             nonlocal season
@@ -67,23 +67,35 @@ def parse_json(data, parser):
                     stats = {r["name"]: r.get("value") for r in entry["stats"]}
                     wins, losses = number(stats["wins"]), number(stats["losses"])
                     ties = number(stats.get("ties") or 0)
-                    played = wins + losses + ties
-                    pct = number(stats["winPercent"])
-                    if min(wins, losses, ties, pct) < 0 or pct > 1:
-                        raise ValueError("Invalid standings record")
-                    rows.append(dict(name=entry["team"]["displayName"], provider_id=entry["team"]["id"], rank=None, points=None, rating=pct, played=played, won=wins, lost=losses, record=f"{wins}-{losses}" + (f"-{ties}" if ties else ""), group=node["name"]))
+                    played = number(stats.get("gamesPlayed") or wins + losses + ties)
+                    if parser == "espn-soccer":
+                        points = number(stats["points"])
+                        rank_value = stats.get("rank")
+                        rank = number(rank_value) if rank_value not in (None, "") else None
+                        rating = round(points / (played * 3) * 100, 2) if played else None
+                        if min(wins, losses, ties, played, points) < 0 or (rating is not None and not 0 <= rating <= 100):
+                            raise ValueError("Invalid soccer standings record")
+                        rows.append(dict(name=entry["team"]["displayName"], provider_id=entry["team"]["id"], rank=rank, points=points, rating=rating, played=played, won=wins, lost=losses, drawn=ties, record=f"{wins}-{ties}-{losses}", group=node["name"]))
+                    else:
+                        pct = number(stats["winPercent"])
+                        if min(wins, losses, ties, pct) < 0 or pct > 1:
+                            raise ValueError("Invalid standings record")
+                        rows.append(dict(name=entry["team"]["displayName"], provider_id=entry["team"]["id"], rank=None, points=None, rating=pct, played=played, won=wins, lost=losses, record=f"{wins}-{losses}" + (f"-{ties}" if ties else ""), group=node["name"]))
             for child in node.get("children", []):
                 visit(child)
         visit(data)
-        rows.sort(key=lambda r: (r["group"], -r["rating"], r["name"]))
+        rows.sort(key=lambda r: (r["group"], r["rank"] if r["rank"] is not None else math.inf, -(r["rating"] or 0), r["name"]))
         for group in {r["group"] for r in rows}:
             previous, rank = None, None
             for i, row in enumerate([r for r in rows if r["group"] == group], 1):
+                if row["rank"] is not None:
+                    previous = row["rating"]
+                    continue
                 if row["rating"] != previous:
                     rank = i
                 row["rank"] = rank if row["played"] else None
                 previous = row["rating"]
-    return validate(rows), date, season
+    return validate(rows, minimum), date, season
 
 
 def parse_html(body, parser):
@@ -156,13 +168,13 @@ def fetch_public(source_id, client, now):
     if parser.startswith("cricket-"):
         from .cricket import parse_cricket
         rows, date, season = parse_cricket(body, feed)
-    elif parser in {"espn", "tennis", "rugby", "nhl"}:
+    elif parser in {"espn", "espn-soccer", "tennis", "rugby", "nhl"}:
         data = json.loads(body)
-        rows, date, season = parse_json(data, parser)
-        if parser == "espn" and not any(r["played"] for r in rows):
+        rows, date, season = parse_json(data, parser, feed.get("minimum", 10))
+        if parser in {"espn", "espn-soccer"} and not any(r["played"] for r in rows):
             current = data["season"]["year"] if isinstance(data["season"], dict) else int(data["season"])
             body, url = read_public(client, feed["url"] + f"?season={current - 1}")
-            rows, date, season = parse_json(json.loads(body), parser)
+            rows, date, season = parse_json(json.loads(body), parser, feed.get("minimum", 10))
             season = f"{season} · previous completed season"
     else:
         rows, date, season = parse_html(body, parser)
