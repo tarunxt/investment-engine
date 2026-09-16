@@ -1,5 +1,5 @@
 name: Inspect Rankings Runtime
-# Runtime inspection requested 2026-09-16T20:38Z
+# Runtime inspection requested 2026-09-16T20:39Z
 
 on:
   workflow_dispatch:
@@ -45,7 +45,8 @@ jobs:
             ps -eo comm,pid,ppid,etime,args | awk '$1 == "postgres" {print}'
             sudo journalctl -u postgresql@18-main --since '-40 minutes' -n 80 -o cat --no-pager
             sudo tail -n 300 /var/log/postgresql/postgresql-*-main.log | grep -E 'LOG:.*(shutdown|shut down|ready to accept|checkpoint|starting PostgreSQL)|FATAL:.*(shutdown|shutting down)|PANIC:' | tail -n 35 || true
-            ps -eo pid,comm,rss,etime,args --sort=-rss | head -n 20\n            sudo systemctl show investor-backend investor-celery-worker investor-celery-auto-live-worker --property=Id,ActiveState,MemoryCurrent,TasksCurrent --no-pager
+            ps -eo pid,comm,rss,etime,args --sort=-rss | head -n 20
+            sudo systemctl show investor-backend investor-celery-worker investor-celery-auto-live-worker --property=Id,ActiveState,MemoryCurrent,TasksCurrent --no-pager
             sudo -u postgres psql -X -d postgres -P pager=off -c "SHOW max_connections; SELECT state, wait_event_type, wait_event, count(*) FROM pg_stat_activity GROUP BY 1,2,3 ORDER BY 4 DESC;" || true
             sudo journalctl -u investor-backend -u postgresql --since '-20 minutes' -n 15000 -o cat --no-pager | python3 -c '
             import collections,json,re,sys
@@ -57,4 +58,5 @@ jobs:
                     line=re.sub(r"(?:postgres|redis|https?)[^\s]*://[^\s]+","[redacted-url]",line)
                     errors.append(line.strip()[:450])
             print(json.dumps({"exception_counts":counts,"database_errors":errors[-30:]},indent=2))'
-            curl -sS --max-time 8 http://127.0.0.1:8000/health/ready || true\n            curl -i -sS --max-time 12 http://127.0.0.1:3000/backend-api/health/live || true
+            curl -sS --max-time 8 http://127.0.0.1:8000/health/ready || true
+            curl -i -sS --max-time 12 http://127.0.0.1:3000/backend-api/health/live || true
