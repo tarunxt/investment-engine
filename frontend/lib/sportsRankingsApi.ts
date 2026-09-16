@@ -38,3 +38,20 @@ export async function readRankingJson<T>(
   }
   throw new Error('Unable to load rankings.');
 }
+
+export async function readSportsEventComparisons<T>(
+  events: Array<{ market_id: string; event_slug?: string | null; event_title?: string | null }>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(base + '/event-comparisons', {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: { 'Cache-Control': 'no-cache', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ events }),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
+  });
+  if (response.status === 401) throw new Error('Please sign in to view rankings.');
+  if (!response.ok) throw new Error(`Unable to load event rankings (${response.status}).`);
+  return response.json() as Promise<T>;
+}

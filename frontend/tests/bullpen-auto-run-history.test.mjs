@@ -269,6 +269,19 @@ test("event trends support deadlines, persistent table controls, and stable scan
   assert.match(llmDialog, /output\.rationale/);
 });
 
+test("Sports History shows linked ranking comparisons immediately after Score", () => {
+  assert.match(trendsTable, /"score", "tags", "ranking", "rating", "points", "bought"/);
+  assert.match(trendsTable, /label: "tag\(s\)"/);
+  assert.match(trendsTable, /label: "Ranking"/);
+  assert.match(trendsTable, /label: "Rating"/);
+  assert.match(trendsTable, /label: "Points"/);
+  assert.match(trendsTable, /\/console\/sports-rankings\?code=/);
+  assert.match(trendsTable, /Δ A−B:/);
+  assert.match(historyScreen, /readSportsEventComparisons/);
+  assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
+  assert.match(historyScreen, /sports_ranking: payload\.comparisons\[event\.market_id\]/);
+});
+
 test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {
   assert.match(scheduleCard, /variant="active-positions"/);
   assert.match(scheduleCard, /variant="fresh-opportunities"/);

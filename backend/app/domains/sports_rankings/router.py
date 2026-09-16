@@ -6,8 +6,8 @@ from app.domains.auth.dependencies import get_current_user
 from app.infrastructure.database.session import get_async_db
 from .catalogue import CATALOGUE, REFRESH_SECONDS, SOURCE_IDS
 from .models import SportsRankingSnapshot
-from .schemas import RankingQuery, RefreshRequest
-from .service import ranking_rows, resolve, summary
+from .schemas import EventComparisonsQuery, RankingQuery, RefreshRequest
+from .service import event_comparisons, ranking_rows, resolve, summary
 from .master import SPORTS
 from .classification import MatchCandidate, classify
 
@@ -40,6 +40,12 @@ async def competition(competition_id: str, response: Response, db: AsyncSession 
 async def resolve_name(query: RankingQuery, db: AsyncSession = Depends(get_async_db)):
     snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
     return resolve(query, snapshots)
+
+
+@router.post("/event-comparisons")
+async def compare_events(query: EventComparisonsQuery, db: AsyncSession = Depends(get_async_db)):
+    snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
+    return event_comparisons(query, snapshots)
 
 
 @router.post("/refresh", status_code=202)

@@ -3088,6 +3088,30 @@ export interface BullpenAutoLiveEventTrend {
   is_active_position?: boolean;
   is_claimable_position?: boolean;
   active_position_side?: BullpenAutoLiveOutcomeSide | null;
+  sports_event_slug?: string | null;
+  sports_event_title?: string | null;
+  sports_ranking?: BullpenSportsRankingComparison | null;
+}
+
+export interface BullpenSportsMetricComparison {
+  team_a: number | null;
+  team_b: number | null;
+  delta: number | null;
+}
+
+export interface BullpenSportsRankingComparison {
+  market_id: string;
+  code: string | null;
+  tags: string[];
+  team_a: string | null;
+  team_b: string | null;
+  match_status: "matched" | "ambiguous" | "unmatched";
+  ranking: BullpenSportsMetricComparison | null;
+  rating: BullpenSportsMetricComparison | null;
+  points: BullpenSportsMetricComparison | null;
+  competition_id: string | null;
+  competition: string | null;
+  source_as_of: string | null;
 }
 
 export interface BullpenAutoLiveEventTrendsResponse {
