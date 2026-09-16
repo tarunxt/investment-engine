@@ -49,7 +49,7 @@ export async function readSportsEventComparisons<T>(
     credentials: 'same-origin',
     headers: { 'Cache-Control': 'no-cache', 'Content-Type': 'application/json' },
     body: JSON.stringify({ events }),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
   });
   if (response.status === 401) throw new Error('Please sign in to view rankings.');
   if (!response.ok) throw new Error(`Unable to load event rankings (${response.status}).`);

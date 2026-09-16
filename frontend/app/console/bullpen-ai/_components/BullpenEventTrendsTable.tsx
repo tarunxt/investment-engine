@@ -173,8 +173,9 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
     if (key === "ranking" || key === "rating" || key === "points") {
       const comparison = event.sports_ranking;
       const metric = comparison?.[key];
-      const teamA = comparison?.team_a ?? "Team A";
-      const teamB = comparison?.team_b ?? "Team B";
+      const titleTeams = event.sports_event_title?.split(/\s+(?:vs\.?|v\.?|@)\s+/i);
+      const teamA = comparison?.team_a ?? titleTeams?.[0]?.trim() ?? "Team A";
+      const teamB = comparison?.team_b ?? titleTeams?.[1]?.trim() ?? "Team B";
       return <span className="block text-[11px] leading-5" title={comparison?.match_status === "matched" ? `${comparison.competition ?? "Sports Rankings"}${comparison.source_as_of ? ` · ${comparison.source_as_of}` : ""}` : "No unambiguous Sports Rankings match is available for both teams."}><span className="block truncate"><strong>A · {teamA}</strong>: {sportsNumber(metric?.team_a)}</span><span className="block truncate"><strong>B · {teamB}</strong>: {sportsNumber(metric?.team_b)}</span><span className="block font-bold text-slate-700">Δ A−B: {sportsDelta(metric?.delta)}</span></span>;
     }
     if (key === "bought") return <span className="text-xs font-semibold">{activePositionSide && event.position_average_price_cents != null ? <>{activePositionSide}<br/>{cents(event.position_average_price_cents)}</> : "—"}</span>;
