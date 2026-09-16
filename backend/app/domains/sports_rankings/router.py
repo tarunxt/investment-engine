@@ -14,6 +14,19 @@ from .classification import MatchCandidate, classify
 router = APIRouter(prefix="/api/sports-rankings", tags=["sports-rankings"], dependencies=[Depends(get_current_user)])
 
 
+def _comparison_source_ids(query: EventComparisonsQuery):
+    codes = {
+        event.event_slug.strip().lower().split("-", 1)[0]
+        for event in query.events
+        if event.event_slug and "-" in event.event_slug
+    }
+    return {
+        competition["source_id"]
+        for competition in CATALOGUE
+        if competition["code"] in codes and competition["source_id"]
+    }
+
+
 @router.get("")
 async def catalogue(response: Response, db: AsyncSession = Depends(get_async_db)):
     response.headers["Cache-Control"] = "private, no-store"
@@ -44,7 +57,15 @@ async def resolve_name(query: RankingQuery, db: AsyncSession = Depends(get_async
 
 @router.post("/event-comparisons")
 async def compare_events(query: EventComparisonsQuery, db: AsyncSession = Depends(get_async_db)):
-    snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
+    source_ids = _comparison_source_ids(query)
+    snapshots = {
+        snapshot.source_id: snapshot
+        for snapshot in (
+            await db.scalars(
+                select(SportsRankingSnapshot).where(SportsRankingSnapshot.source_id.in_(source_ids))
+            )
+        ).all()
+    } if source_ids else {}
     return event_comparisons(query, snapshots)
 
 
