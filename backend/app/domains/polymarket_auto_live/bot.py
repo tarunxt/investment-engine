@@ -734,10 +734,14 @@ class BullpenAutoLiveBot:
     async def get_dashboard_summary(
         self,
         session: AsyncSession | None = None,
+        workspace_profile: str | None = None,
     ) -> BullpenAutoLiveSummary:
         if session is None:
             async with AsyncSessionLocal() as owned_session:
-                return await self.get_dashboard_summary(session=owned_session)
+                return await self.get_dashboard_summary(
+                    session=owned_session,
+                    workspace_profile=workspace_profile,
+                )
 
         query_started_at = perf_counter()
         repo = AsyncPolymarketAutoLiveRepository(session)
@@ -757,8 +761,17 @@ class BullpenAutoLiveBot:
             if active_identity is not None
             else None
         )
+        if (
+            latest_projection is not None
+            and workspace_profile is not None
+            and latest_projection[0].workspace_profile != workspace_profile
+        ):
+            latest_projection = None
         if latest_projection is None:
-            latest_projection = await repo.get_latest_projected_run(self.user_id)
+            latest_projection = await repo.get_latest_projected_run(
+                self.user_id,
+                workspace_profile=workspace_profile,
+            )
         latest_run = latest_projection[0] if latest_projection else None
         verified_portfolio_snapshot = state.verified_portfolio_snapshot
         if verified_portfolio_snapshot is None and latest_run is not None:

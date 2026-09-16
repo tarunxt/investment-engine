@@ -233,8 +233,19 @@ const bullpenAutoLiveApiUrls = {
   // recovery, runtime diagnostics, or a Bullpen CLI auth refresh.
   status: () => `${resolveApiBaseUrl()}/polymarket/auto-live/status`,
   summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
-  dashboardSummary: () =>
-    `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard`,
+  dashboardSummary: (workspaceProfile?: "bullpen007" | "bullpen-sports") => {
+    const resolvedWorkspaceProfile =
+      workspaceProfile ??
+      (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/console/bullpen-sports")
+        ? "bullpen-sports"
+        : undefined);
+    return `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard${
+      resolvedWorkspaceProfile
+        ? `?workspace_profile=${encodeURIComponent(resolvedWorkspaceProfile)}`
+        : ""
+    }`;
+  },
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   hourlyRebalanceResult: () =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/hourly-rebalance/result`,

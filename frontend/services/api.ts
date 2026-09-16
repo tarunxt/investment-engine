@@ -1755,9 +1755,10 @@ class apiServiceClass implements IApiService {
 
   getBullpenAutoLiveDashboardSummary(
     options?: ApiRequestControl,
+    workspaceProfile?: "bullpen007" | "bullpen-sports",
   ): Promise<BullpenAutoLiveSummaryResponse> {
     return this.get<BullpenAutoLiveSummaryResponse>(
-      URLs.bullpenAutoLive.dashboardSummary(),
+      URLs.bullpenAutoLive.dashboardSummary(workspaceProfile),
       { cache: "no-store", ...options },
     );
   }

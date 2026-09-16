@@ -15,6 +15,16 @@ values remain valid. The workflow UI reads workspace-scoped History for passed,
 failed, running, and latest-attempt evidence and shows the next Universal Scan
 and workflow schedule timestamps in the **Stage 1 Trigger Monitor**.
 
+The compact dashboard read is also workspace-scoped. On first page load it
+selects the newest bounded projection owned by that workflow, so a newer run in
+the other workflow cannot replace the last completed Stage 1 tile with empty
+placeholders. **Start Auto Run Now** validates the latest immutable Universal
+Scan and immediately submits an idempotent, workspace-specific trigger to the
+guarded queue. Lane acquisition and durable run creation remain worker-owned;
+the HTTP acknowledgement therefore does not wait behind an existing Stage 1
+transaction. This changes only trigger latency and live projection selection;
+the frozen Stage 1–3 evidence and audit schema are unchanged.
+
 The live dashboard projection preserves this lineage while Stage 1 is running:
 `snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
 `filters_completed_at` remain available in compact responses. Its additive

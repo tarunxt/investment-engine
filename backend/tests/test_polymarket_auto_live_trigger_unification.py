@@ -57,7 +57,7 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertNotIn("buildRunNowRequest", handler)
         self.assertNotIn("executeBullpenScan", handler)
 
-    def test_manual_workflow_start_persists_immediately_or_queues_when_lane_busy(self) -> None:
+    def test_manual_workflow_start_acknowledges_after_queue_submission(self) -> None:
         router_source = (
             ROOT / "backend/app/domains/polymarket_auto_live/router.py"
         ).read_text(encoding="utf-8")
@@ -65,10 +65,9 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             '@router.post("/start"', 1
         )[0]
         self.assertIn("latest_completed_universal_export", route)
-        self.assertIn("await bot.run_once", route)
-        self.assertIn("except AutoLiveExecutionLaneBusy", route)
-        self.assertIn("client_run_id=run_id", route)
-        self.assertIn("snapshot_id=export_id", route)
+        self.assertNotIn("await bot.run_once", route)
+        self.assertNotIn("AutoLiveExecutionLaneBusy", route)
+        self.assertIn('status="queued"', route)
         self.assertIn("universal_export_id=export_id", route)
         self.assertIn("workspace_profiles=(request.workspace_profile,)", route)
 
@@ -81,6 +80,28 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertIn("resolved_profiles = tuple(workspace_profiles", task)
         self.assertIn("wait_for_execution_lane=True", task)
         self.assertIn('raise self.retry(countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS)', task)
+
+    def test_dashboard_summary_selects_latest_projection_by_workspace(self) -> None:
+        router_source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/router.py"
+        ).read_text(encoding="utf-8")
+        bot_source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/bot.py"
+        ).read_text(encoding="utf-8")
+        repository_source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/repository.py"
+        ).read_text(encoding="utf-8")
+
+        dashboard_route = router_source.split(
+            "async def get_auto_live_dashboard_summary(", 1
+        )[1].split('@router.get("/history"', 1)[0]
+        self.assertIn("workspace_profile", dashboard_route)
+        self.assertIn("_read_dashboard_summary(credentials, workspace_profile)", dashboard_route)
+        self.assertIn("workspace_profile=workspace_profile", bot_source)
+        latest_projection = repository_source.split(
+            "async def get_latest_projected_run(", 1
+        )[1].split("async def get_projected_run_for_user(", 1)[0]
+        self.assertIn("_history_workspace_filter(record, workspace_profile)", latest_projection)
 
     def test_completed_universal_scan_queues_the_workflow_trigger_batch(self) -> None:
         source = (

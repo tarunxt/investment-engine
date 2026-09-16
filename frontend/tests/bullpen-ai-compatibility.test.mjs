@@ -379,11 +379,11 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
   );
   assert.match(
     apiSource,
-    /getBullpenAutoLiveDashboardSummary\([\s\S]*?URLs\.bullpenAutoLive\.dashboardSummary\(\)/,
+    /getBullpenAutoLiveDashboardSummary\([\s\S]*?URLs\.bullpenAutoLive\.dashboardSummary\(workspaceProfile\)/,
   );
   assert.match(
     urlsSource,
-    /dashboardSummary: \(\) =>\s*`\$\{resolveApiBaseUrl\(\)\}\/polymarket\/auto-live\/summary\/dashboard`/,
+    /dashboardSummary: \(workspaceProfile\?: "bullpen007" \| "bullpen-sports"\)[\s\S]*?startsWith\("\/console\/bullpen-sports"\)[\s\S]*?workspace_profile=/,
   );
 });
 
