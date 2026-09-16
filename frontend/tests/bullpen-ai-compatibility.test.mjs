@@ -385,6 +385,15 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
     urlsSource,
     /dashboardSummary: \(workspaceProfile\?: "bullpen007" \| "bullpen-sports"\)[\s\S]*?startsWith\("\/console\/bullpen-sports"\)[\s\S]*?workspace_profile=/,
   );
+  assert.match(autoRunCardSource, /workspaceRunFallback/);
+  assert.match(
+    autoRunCardSource,
+    /historyResult\.value\.items\[0\]\?\.id[\s\S]*?getBullpenAutoLiveRunConsole\(latestWorkspaceRunId/,
+  );
+  assert.match(
+    autoRunCardSource,
+    /getVisibleRun\([\s\S]*?\) \?\?[\s\S]*?workspaceRunFallback/,
+  );
 });
 
 test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without persisting a timestamp", () => {
