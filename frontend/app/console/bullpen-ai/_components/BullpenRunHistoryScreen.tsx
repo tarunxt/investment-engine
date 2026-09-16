@@ -446,7 +446,7 @@ type RankingCompetition = {
 type RankingDetail = RankingCompetition & { rows: RankingDetailRow[] };
 
 async function readRankingDetailsWithLimit(
-  competitions: RankingCompetition[],
+  competitions: Array<Pick<RankingCompetition, "id">>,
   concurrency = 6,
 ) {
   const details: RankingDetail[] = [];
@@ -489,16 +489,31 @@ function uniqueRankingRow(rows: RankingDetailRow[], name: string) {
 async function readSportsEventComparisonsFromDetails(
   events: Array<{ market_id: string; event_slug?: string | null; event_title?: string | null }>,
 ) {
-  const codes = new Set(events.map((event) => event.event_slug?.split("-", 1)[0]).filter(Boolean));
-  const catalogue = await readRankingJson<{ competitions: RankingCompetition[] }>("");
-  const relevant = catalogue.competitions.filter(
-    (competition) =>
-      competition.source_id &&
-      competition.status === "ready" &&
-      (competition.ranked_count ?? 0) > 0 &&
-      codes.has(competition.code),
+  const codes = new Set(
+    events
+      .map((event) => event.event_slug?.split("-", 1)[0])
+      .filter((code): code is string => Boolean(code)),
   );
-  const details = await readRankingDetailsWithLimit(relevant);
+  // Most verified Polymarket prefixes are also competition IDs. Read those
+  // details directly so a slow full catalogue cannot block valid comparisons.
+  const details = await readRankingDetailsWithLimit(
+    Array.from(codes).sort().map((id) => ({ id })),
+  );
+  const loadedCodes = new Set(details.map((detail) => detail.code));
+  try {
+    const catalogue = await readRankingJson<{ competitions: RankingCompetition[] }>("");
+    const exceptional = catalogue.competitions.filter(
+      (competition) =>
+        competition.source_id &&
+        competition.status === "ready" &&
+        (competition.ranked_count ?? 0) > 0 &&
+        codes.has(competition.code) &&
+        !loadedCodes.has(competition.code),
+    );
+    details.push(...(await readRankingDetailsWithLimit(exceptional)));
+  } catch {
+    // Direct tag/competition matches remain useful without the catalogue.
+  }
   const output: Record<string, BullpenSportsRankingComparison> = {};
   for (const event of events) {
     const code = event.event_slug?.split("-", 1)[0] ?? null;
