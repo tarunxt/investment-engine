@@ -107,7 +107,16 @@ test("database history routes use fixed circuit scopes distinct from wallet read
   const source = read("../app/backend-api/[...path]/route.ts");
   assert.match(source, /path === "polymarket\/auto-live\/history"/);
   assert.match(source, /path === "polymarket\/auto-live\/history\/event-trends"/);
-  assert.match(source, /circuitScope: historyCircuitScope/);
+  assert.match(source, /circuitScope: readCircuitScope/);
+});
+
+test("public health reads have isolated circuits for deployment probes", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+  assert.match(
+    source,
+    /SAFE_FALLBACK_METHODS\.has\(request\.method\) && PUBLIC_BACKEND_PATHS\.has\(path\)/,
+  );
+  assert.match(source, /\? path\s*:\s*SAFE_FALLBACK_METHODS/);
 });
 
 test("clustering progress uses a bounded dedicated circuit across scan IDs", () => {
