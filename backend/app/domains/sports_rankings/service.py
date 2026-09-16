@@ -55,7 +55,12 @@ def ranking_rows(competition, snapshot=None):
     return rows
 
 
-_TEAM_DESIGNATORS = {"ac", "afc", "cf", "fc", "fk", "sc"}
+_TEAM_DESIGNATORS = {"ac", "afc", "cf", "fc", "fk", "sc", "ssc", "sv", "us", "vfl"}
+_TEAM_NAME_ALIASES = {
+    "wolverhampton wanderers": "wolves",
+    "wolverhampton": "wolves",
+    "darmstadt 98": "darmstadt",
+}
 
 
 def _team_name_key(value):
@@ -64,7 +69,8 @@ def _team_name_key(value):
         tokens.pop(0)
     while tokens and tokens[-1] in _TEAM_DESIGNATORS:
         tokens.pop()
-    return " ".join(tokens)
+    key = " ".join(tokens)
+    return _TEAM_NAME_ALIASES.get(key, key)
 
 
 def resolve(query, snapshots):
@@ -95,6 +101,43 @@ def resolve(query, snapshots):
     return {"match_status": "matched" if len(candidates) == 1 else "ambiguous" if candidates else "unmatched", "candidates": candidates, "automatic_analysis_enabled": False}
 
 
+def _resolve_sport(name, sport_id, snapshots):
+    """Resolve a participant across one sport without crossing ranking sources."""
+    candidates = []
+    for competition in CATALOGUE:
+        if competition.get("sport_id") != sport_id or not competition.get("source_id"):
+            continue
+        snapshot = snapshots.get(competition["source_id"])
+        if snapshot is None:
+            continue
+        rows = ranking_rows(competition, snapshot)
+        exact = [
+            row for row in rows
+            if normalize_name(name) in {normalize_name(value) for value in [row["name"], *row["imported_names"]]}
+        ]
+        matched = exact or [
+            row for row in rows
+            if not row.get("match_status")
+            and _team_name_key(name) in {_team_name_key(value) for value in [row["name"], *row["imported_names"]]}
+        ]
+        for row in matched:
+            candidates.append({
+                "competition_id": competition["id"], "competition": competition["name"],
+                "code": competition["code"], "source_id": competition["source_id"],
+                "status": source_status(snapshot, competition["source_id"]),
+                "ranking_kind": source_kind(competition["source_id"]),
+                "source_as_of": snapshot.source_as_of, **row,
+            })
+    unique = {}
+    for row in candidates:
+        key = (row["source_id"], row.get("group"), normalize_name(row["name"]), row.get("roster"), row.get("rank"))
+        if key not in unique:
+            unique[key] = {**row, "competition_ids": [row["competition_id"]]}
+        else:
+            unique[key]["competition_ids"].append(row["competition_id"])
+    return list(unique.values())
+
+
 def _head_to_head_participants(title):
     if not title:
         return None
@@ -109,7 +152,31 @@ def _market_code(slug):
 
 def _metric(row, key):
     value = row.get(key)
+    if value is None and key == "rating" and (row.get("source_id") or "").startswith("football-data-"):
+        points, played = row.get("points"), row.get("played")
+        if isinstance(points, (int, float)) and isinstance(played, (int, float)) and played > 0:
+            value = round(points / (played * 3) * 100, 2)
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _compatible_pairs(left, right):
+    pairs = []
+    for team_a in left:
+        for team_b in right:
+            left_ids = set(team_a.get("competition_ids", [team_a["competition_id"]]))
+            right_ids = set(team_b.get("competition_ids", [team_b["competition_id"]]))
+            same_source = team_a.get("source_id") and team_a.get("source_id") == team_b.get("source_id")
+            if same_source or left_ids.intersection(right_ids):
+                pairs.append((team_a, team_b))
+    unique = {}
+    for team_a, team_b in pairs:
+        key = (
+            team_a.get("source_id") or team_a["competition_id"], normalize_name(team_a["name"]),
+            normalize_name(team_b["name"]), team_a.get("rank"), team_b.get("rank"),
+            team_a.get("rating"), team_b.get("rating"), team_a.get("points"), team_b.get("points"),
+        )
+        unique.setdefault(key, (team_a, team_b))
+    return list(unique.values())
 
 
 def event_comparisons(query: EventComparisonsQuery, snapshots):
@@ -137,24 +204,18 @@ def event_comparisons(query: EventComparisonsQuery, snapshots):
 
         left = resolve(RankingQuery(code=code, name=participants[0]), snapshots)["candidates"]
         right = resolve(RankingQuery(code=code, name=participants[1]), snapshots)["candidates"]
-        pairs = []
-        for team_a in left:
-            for team_b in right:
-                left_ids = set(team_a.get("competition_ids", [team_a["competition_id"]]))
-                right_ids = set(team_b.get("competition_ids", [team_b["competition_id"]]))
-                same_source = team_a.get("source_id") and team_a.get("source_id") == team_b.get("source_id")
-                if same_source or left_ids.intersection(right_ids):
-                    pairs.append((team_a, team_b))
-
-        unique = {}
-        for team_a, team_b in pairs:
-            key = (
-                team_a.get("source_id") or team_a["competition_id"], normalize_name(team_a["name"]),
-                normalize_name(team_b["name"]), team_a.get("rank"), team_b.get("rank"),
-                team_a.get("rating"), team_b.get("rating"), team_a.get("points"), team_b.get("points"),
-            )
-            unique.setdefault(key, (team_a, team_b))
-        pairs = list(unique.values())
+        pairs = _compatible_pairs(left, right)
+        soccer_codes = {
+            competition["code"] for competition in CATALOGUE
+            if competition.get("sport_id") == "soccer" and competition["code"]
+        } | {"efl"}
+        if not pairs and code in soccer_codes:
+            # A cup/continental tag may not have a useful table of its own. Use
+            # domestic standings only when both teams resolve uniquely to the
+            # same published source; never compare unrelated league tables.
+            left = _resolve_sport(participants[0], "soccer", snapshots)
+            right = _resolve_sport(participants[1], "soccer", snapshots)
+            pairs = _compatible_pairs(left, right)
         if len(pairs) != 1:
             base["match_status"] = "ambiguous" if pairs or left or right else "unmatched"
             comparisons[event.market_id] = base

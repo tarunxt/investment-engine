@@ -20,11 +20,26 @@ def _comparison_source_ids(query: EventComparisonsQuery):
         for event in query.events
         if event.event_slug and "-" in event.event_slug
     }
-    return {
+    source_ids = {
         competition["source_id"]
         for competition in CATALOGUE
         if competition["code"] in codes and competition["source_id"]
     }
+    soccer_codes = {
+        competition["code"]
+        for competition in CATALOGUE
+        if competition.get("sport_id") == "soccer" and competition["code"]
+    } | {"efl"}
+    if codes.intersection(soccer_codes):
+        # Cup and continental events often contain teams whose current table is
+        # their domestic league. Load the bounded soccer snapshot set so the
+        # service can use a unique same-source fallback.
+        source_ids.update(
+            competition["source_id"]
+            for competition in CATALOGUE
+            if competition.get("sport_id") == "soccer" and competition["source_id"]
+        )
+    return source_ids
 
 
 @router.get("")

@@ -5,6 +5,7 @@ import pytest
 
 from app.domains.sports_rankings.catalogue import CATALOGUE, IMPORTED_CATALOGUE, SOURCE_IDS, normalize_name
 from app.domains.sports_rankings.providers import parse_football, parse_valve
+from app.domains.sports_rankings.public_providers import parse_json
 from app.domains.sports_rankings.schemas import EventComparisonsQuery, RankingQuery
 from app.domains.sports_rankings.service import event_comparisons, ranking_rows, resolve, source_status
 from app.domains.sports_rankings.router import _comparison_source_ids
@@ -149,7 +150,10 @@ def test_event_comparison_loads_only_relevant_connected_sources():
         {'market_id': '1', 'event_slug': 'epl-bre-che-2026-09-18', 'event_title': 'Brentford FC vs. Chelsea FC'},
         {'market_id': '2', 'event_slug': 'egy1-gem-zas-2026-09-16', 'event_title': 'Ghazl El Mahalla SC vs. Zamalek SC'},
     ])
-    assert _comparison_source_ids(query) == {'football-data-E0'}
+    source_ids = _comparison_source_ids(query)
+    assert 'football-data-E0' in source_ids
+    assert 'espn-soccer-egy1' in source_ids
+    assert 'espn-soccer-pol' in source_ids
 
 
 def test_event_comparison_never_invents_values_for_unmatched_teams():
@@ -161,3 +165,51 @@ def test_event_comparison_never_invents_values_for_unmatched_teams():
     assert comparison['tags'] == ['bel1']
     assert comparison['match_status'] == 'unmatched'
     assert comparison['ranking'] is None
+
+
+def test_soccer_standings_parser_preserves_rank_points_and_derives_rating():
+    data = {
+        'season': {'year': 2026},
+        'children': [{
+            'name': 'League table',
+            'standings': {
+                'season': 2026,
+                'seasonDisplayName': '2026/27',
+                'entries': [
+                    {
+                        'team': {'id': str(index), 'displayName': f'Team {index}'},
+                        'stats': [
+                            {'name': 'rank', 'value': index}, {'name': 'gamesPlayed', 'value': 4},
+                            {'name': 'wins', 'value': 3}, {'name': 'ties', 'value': 0},
+                            {'name': 'losses', 'value': 1}, {'name': 'points', 'value': 9},
+                        ],
+                    }
+                    for index in range(1, 11)
+                ],
+            },
+        }],
+    }
+    rows, _, season = parse_json(data, 'espn-soccer')
+    assert season == '2026/27'
+    assert rows[0]['rank'] == 1
+    assert rows[0]['points'] == 9
+    assert rows[0]['rating'] == 75
+
+
+def test_cup_event_uses_unique_same_domestic_source_and_derives_rating():
+    snap = SimpleNamespace(
+        rows=[
+            {'name': 'Everton', 'rank': 6, 'points': 7, 'played': 4},
+            {'name': 'Wolves', 'rank': 12, 'points': 4, 'played': 4},
+        ],
+        status='ready', checked_at=datetime.now(UTC), source_as_of='2026-09-16',
+    )
+    query = EventComparisonsQuery(events=[{
+        'market_id': 'efl-1', 'event_slug': 'efl-eve-wol-2026-09-17',
+        'event_title': 'Everton FC vs Wolverhampton Wanderers FC',
+    }])
+    comparison = event_comparisons(query, {'football-data-E0': snap})['comparisons']['efl-1']
+    assert comparison['match_status'] == 'matched'
+    assert comparison['ranking'] == {'team_a': 6, 'team_b': 12, 'delta': -6}
+    assert comparison['points'] == {'team_a': 7, 'team_b': 4, 'delta': 3}
+    assert comparison['rating'] == {'team_a': 58.33, 'team_b': 33.33, 'delta': 25.0}
