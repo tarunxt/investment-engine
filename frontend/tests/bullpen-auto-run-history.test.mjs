@@ -277,13 +277,15 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(trendsTable, /label: "Rating"/);
   assert.match(trendsTable, /label: "Points"/);
   assert.match(trendsTable, /\/console\/sports-rankings\?code=/);
+  assert.match(trendsTable, /fallbackSportsTag/);
   assert.match(trendsTable, /Δ A−B:/);
   assert.match(historyScreen, /readSportsEventComparisons/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
   assert.match(historyScreen, /sports_ranking: payload\.comparisons\[event\.market_id\]/);
-  assert.match(historyScreen, /fetchSportsEventMetadata\(positionTrends\)/);
+  assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)/);
   assert.match(historyScreen, /sportsEventSlug\(event\)/);
   assert.match(historyScreen, /applySportsEventMetadata\(oddsTrends, sportsEventMetadata\)/);
+  assert.match(historyScreen, /setTrends\(identityBaseTrends\)/);
   assert.match(sportsEventMetadataRoute, /gamma-api\.polymarket\.com\/events\/slug/);
   assert.match(sportsEventMetadataRoute, /Promise\.allSettled/);
 });

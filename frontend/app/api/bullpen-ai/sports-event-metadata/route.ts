@@ -5,7 +5,6 @@ export const runtime = "nodejs";
 
 const GAMMA_EVENT_BY_SLUG = "https://gamma-api.polymarket.com/events/slug";
 const MAX_EVENTS = 200;
-const CONCURRENCY = 12;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
 
 type CachedEvent = { eventSlug: string; eventTitle: string | null; expiresAt: number };
@@ -37,12 +36,10 @@ export async function POST(request: NextRequest) {
   const body = (await request.json()) as { slugs?: unknown[] };
   const slugs = Array.from(new Set((body.slugs ?? []).map(normalizedSlug).filter((slug): slug is string => Boolean(slug)))).slice(0, MAX_EVENTS);
   const events: Record<string, { eventSlug: string; eventTitle: string | null }> = {};
-  for (let index = 0; index < slugs.length; index += CONCURRENCY) {
-    const results = await Promise.allSettled(slugs.slice(index, index + CONCURRENCY).map(fetchEvent));
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        events[result.value.eventSlug] = { eventSlug: result.value.eventSlug, eventTitle: result.value.eventTitle };
-      }
+  const results = await Promise.allSettled(slugs.map(fetchEvent));
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      events[result.value.eventSlug] = { eventSlug: result.value.eventSlug, eventTitle: result.value.eventTitle };
     }
   }
   return NextResponse.json({ events });
