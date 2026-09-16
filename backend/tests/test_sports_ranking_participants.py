@@ -173,6 +173,19 @@ def test_periodic_refresh_staggers_sources_across_the_interval(monkeypatch):
     assert all(item["retry"] is False for item in queued)
 
 
+def test_refresh_concurrency_helpers_are_stable_and_bounded():
+    from app.domains.sports_rankings import tasks
+
+    source_ids = [f"source-{index}" for index in range(100)]
+    slots = [tasks._refresh_slot(source_id) for source_id in source_ids]
+    delays = [tasks._refresh_deferral_seconds(source_id) for source_id in source_ids]
+
+    assert slots == [tasks._refresh_slot(source_id) for source_id in source_ids]
+    assert all(0 <= slot < tasks.REFRESH_CONCURRENCY_SLOTS for slot in slots)
+    assert set(slots) == set(range(tasks.REFRESH_CONCURRENCY_SLOTS))
+    assert all(30 <= delay < 90 for delay in delays)
+
+
 def test_worker_startup_only_queues_participant_backfill(monkeypatch):
     from app.domains.sports_rankings import tasks
 

@@ -2,7 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import OperationalError
 
@@ -20,6 +20,18 @@ logger = get_logger(__name__)
 # once exhausts the shared worker/database pool and can make the HTTP backend
 # unreachable exactly when the quarter-hour refresh begins.
 REFRESH_DISPATCH_WINDOW_SECONDS = 14 * 60
+REFRESH_CONCURRENCY_SLOTS = 4
+REFRESH_ADVISORY_LOCK_BASE = 764_210
+
+
+def _refresh_slot(source_id: str) -> int:
+    digest = hashlib.sha256(source_id.encode()).digest()
+    return int.from_bytes(digest[:4], "big") % REFRESH_CONCURRENCY_SLOTS
+
+
+def _refresh_deferral_seconds(source_id: str) -> int:
+    digest = hashlib.sha256(source_id.encode()).digest()
+    return 30 + int.from_bytes(digest[4:6], "big") % 60
 
 # Backfill pre-release scan indexes after deployment.  The normal beat schedule
 # owns source refreshes; dispatching the full catalogue again from worker startup
@@ -112,6 +124,18 @@ def refresh_source(self, source_id):
         raise ValueError("Unknown ranking source")
     now = datetime.now(UTC)
     with SyncSessionLocal() as db:
+        # A cycle can contain hundreds of sources.  Keep only a small bounded
+        # number of network fetches/transactions alive across every worker and
+        # defer overflow instead of exhausting PostgreSQL connections or RAM.
+        lock_key = REFRESH_ADVISORY_LOCK_BASE + _refresh_slot(source_id)
+        has_slot = bool(db.scalar(select(func.pg_try_advisory_xact_lock(lock_key))))
+        if not has_slot:
+            refresh_source.apply_async(
+                args=[source_id],
+                countdown=_refresh_deferral_seconds(source_id),
+                retry=False,
+            )
+            return {"status": "deferred"}
         db.execute(insert(SportsRankingSnapshot).values(source_id=source_id, status="pending", rows=[]).on_conflict_do_nothing(index_elements=["source_id"]))
         db.commit()
         # One writer per source, including duplicate deliveries and manual refresh.
