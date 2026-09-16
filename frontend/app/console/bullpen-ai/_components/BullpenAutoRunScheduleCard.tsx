@@ -2165,6 +2165,7 @@ function StageOneRunStats({
   renderInteractiveRows = false,
   onOpenScanCandidateDialog,
   onOpenScanFilters,
+  onOpenExcelHistory,
   onRecoverLegacyExport,
   workspaceProfile = "bullpen007",
 }: {
@@ -2180,12 +2181,12 @@ function StageOneRunStats({
     mode: ScanCandidateDialogMode,
   ) => void;
   onOpenScanFilters?: () => void;
+  onOpenExcelHistory?: () => void;
   onRecoverLegacyExport?: (
     exportScope: "filtered" | "all-scanned",
   ) => void;
   workspaceProfile?: BullpenWorkspaceProfile;
 }) {
-  const [isExcelHistoryOpen, setIsExcelHistoryOpen] = useState(false);
   const stats = getStageOneStats(stage);
   const includedActiveCount = getStageOneIncludedActiveCount(
     stage,
@@ -2362,7 +2363,7 @@ function StageOneRunStats({
             </button>
             <button
               type="button"
-              onClick={() => setIsExcelHistoryOpen(true)}
+              onClick={onOpenExcelHistory}
               className="inline-flex items-center justify-center border-l border-emerald-200 text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-400"
               aria-label="Open last 10 Excel scans"
               title="Last 10 Excel scans"
@@ -2383,11 +2384,6 @@ function StageOneRunStats({
             View & edit filters
           </button>
         ) : null}
-        <BullpenStageOneExcelHistoryDialog
-          open={isExcelHistoryOpen}
-          onClose={() => setIsExcelHistoryOpen(false)}
-          workspaceProfile={workspaceProfile}
-        />
       </div>
     );
   }
@@ -11336,6 +11332,8 @@ export function BullpenAutoRunScheduleCard({
   const [stage3PreviewDialog, setStage3PreviewDialog] =
     useState<Stage3PreviewDialogState | null>(null);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
+  const [isExcelHistoryDialogOpen, setIsExcelHistoryDialogOpen] =
+    useState(false);
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
   const [triggerHistoryItems, setTriggerHistoryItems] = useState<
@@ -15288,6 +15286,7 @@ export function BullpenAutoRunScheduleCard({
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                         onOpenScanFilters={onOpenScanFilters}
+                        onOpenExcelHistory={() => setIsExcelHistoryDialogOpen(true)}
                         workspaceProfile={workspaceProfile} />
                     </div>
                     <div className={`mt-5 border-t pt-3 ${isStageOneActive ? "border-amber-200/80" : "border-emerald-200/80"}`}>
@@ -15937,6 +15936,12 @@ export function BullpenAutoRunScheduleCard({
             </div>
           </div>
         ) : null}
+
+        <BullpenStageOneExcelHistoryDialog
+          open={isExcelHistoryDialogOpen}
+          onClose={() => setIsExcelHistoryDialogOpen(false)}
+          workspaceProfile={workspaceProfile}
+        />
 
         {isEventExitStrategiesDialogOpen ? (
           <BullpenEventExitStrategiesDialog
