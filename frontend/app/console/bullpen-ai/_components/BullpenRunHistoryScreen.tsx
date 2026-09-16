@@ -24,7 +24,7 @@ import type {
   BullpenAutoLiveHistoryPage,
   BullpenSportsRankingComparison,
 } from "@/types/api";
-import { readRankingJson } from "@/lib/sportsRankingsApi";
+import { readRankingJson, readSportsEventComparisons } from "@/lib/sportsRankingsApi";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
@@ -399,9 +399,25 @@ async function applySportsRankingsToEventTrends(
       market_id: event.market_id,
       event_slug: event.sports_event_slug ?? null,
       event_title: event.sports_event_title ?? null,
-    }));
+  }));
   if (!events.length) return trends;
-  const comparisons = await readSportsEventComparisonsFromDetails(events);
+  let comparisons: Record<string, BullpenSportsRankingComparison> = {};
+  try {
+    comparisons = (await readSportsEventComparisons<{
+      comparisons: Record<string, BullpenSportsRankingComparison>;
+    }>(events)).comparisons;
+  } catch {
+    // The ranking detail reads below remain an independent recovery path.
+  }
+  const unresolved = events.filter(
+    (event) => comparisons[event.market_id]?.match_status !== "matched",
+  );
+  if (unresolved.length) {
+    comparisons = {
+      ...comparisons,
+      ...(await readSportsEventComparisonsFromDetails(unresolved)),
+    };
+  }
   return {
     ...trends,
     events: trends.events.map((event) => ({
@@ -427,6 +443,31 @@ type RankingCompetition = {
 };
 type RankingDetail = RankingCompetition & { rows: RankingDetailRow[] };
 
+async function readRankingDetailsWithLimit(
+  competitions: RankingCompetition[],
+  concurrency = 4,
+) {
+  const details: RankingDetail[] = [];
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, competitions.length) }, async () => {
+      while (next < competitions.length) {
+        const competition = competitions[next++];
+        try {
+          details.push(
+            await readRankingJson<RankingDetail>(
+              `/competitions/${encodeURIComponent(competition.id)}`,
+            ),
+          );
+        } catch {
+          // One slow or stale feed must not discard comparisons from healthy feeds.
+        }
+      }
+    }),
+  );
+  return details;
+}
+
 function teamNameKey(value: string) {
   const designators = new Set(["ac", "afc", "cf", "fc", "fk", "sc"]);
   const tokens = value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
@@ -449,7 +490,7 @@ async function readSportsEventComparisonsFromDetails(
   const codes = new Set(events.map((event) => event.event_slug?.split("-", 1)[0]).filter(Boolean));
   const catalogue = await readRankingJson<{ competitions: RankingCompetition[] }>("");
   const relevant = catalogue.competitions.filter((competition) => competition.source_id && codes.has(competition.code));
-  const details = await Promise.all(relevant.map((competition) => readRankingJson<RankingDetail>(`/competitions/${encodeURIComponent(competition.id)}`)));
+  const details = await readRankingDetailsWithLimit(relevant);
   const output: Record<string, BullpenSportsRankingComparison> = {};
   for (const event of events) {
     const code = event.event_slug?.split("-", 1)[0] ?? null;
