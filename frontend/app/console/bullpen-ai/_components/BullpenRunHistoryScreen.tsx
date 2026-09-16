@@ -688,27 +688,36 @@ export function BullpenRunHistoryScreen({
             : trendsResult.value;
         const identityBaseTrends = applySportsEventMetadata(positionTrends, null);
         setTrends(identityBaseTrends);
-        const [currentOrderBookOdds, sportsEventMetadata] = await Promise.all([
-          fetchCurrentOrderBookOdds(identityBaseTrends).catch(() => null),
-          fetchSportsEventMetadata(identityBaseTrends).catch(() => null),
-        ]);
+        const currentOrderBookOddsPromise = fetchCurrentOrderBookOdds(identityBaseTrends).catch(() => null);
+        const sportsEventMetadata = await fetchSportsEventMetadata(identityBaseTrends).catch(() => null);
+        const metadataTrends = applySportsEventMetadata(identityBaseTrends, sportsEventMetadata);
+        setTrends(metadataTrends);
+        const rankedTrends = await applySportsRankingsToEventTrends(metadataTrends).catch(
+          () => metadataTrends,
+        );
+        setTrends(rankedTrends);
+        const currentOrderBookOdds = await currentOrderBookOddsPromise;
         const oddsTrends = currentOrderBookOdds
           ? applyCurrentOrderBookOddsToEventTrends(
-              identityBaseTrends,
+              rankedTrends,
               currentOrderBookOdds,
             )
-          : identityBaseTrends;
-        const identityTrends = applySportsEventMetadata(oddsTrends, sportsEventMetadata);
-        setTrends(identityTrends);
-        const nextTrends = await applySportsRankingsToEventTrends(identityTrends).catch(
-          () => identityTrends,
-        );
-        setTrends(nextTrends);
-        cacheEventTrends(nextTrends, workspaceProfile);
+          : rankedTrends;
+        setTrends(oddsTrends);
+        cacheEventTrends(oddsTrends, workspaceProfile);
       } else {
         const cachedTrends = readCachedEventTrends(workspaceProfile);
         if (cachedTrends) {
-          setTrends(cachedTrends);
+          const identityBaseTrends = applySportsEventMetadata(cachedTrends, null);
+          setTrends(identityBaseTrends);
+          const sportsEventMetadata = await fetchSportsEventMetadata(identityBaseTrends).catch(() => null);
+          const metadataTrends = applySportsEventMetadata(identityBaseTrends, sportsEventMetadata);
+          setTrends(metadataTrends);
+          const rankedTrends = await applySportsRankingsToEventTrends(metadataTrends).catch(
+            () => metadataTrends,
+          );
+          setTrends(rankedTrends);
+          cacheEventTrends(rankedTrends, workspaceProfile);
         } else {
           setTrendsError(
             `Event trends are temporarily unavailable. ${formatUnknownError(trendsResult.reason)}`,
