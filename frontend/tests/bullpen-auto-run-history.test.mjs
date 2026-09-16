@@ -289,9 +289,11 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(historyScreen, /competition\.ranked_count/);
   assert.match(historyScreen, /Array\.from\(codes\)\.sort\(\)\.map\(\(id\) => \(\{ id \}\)\)/);
   assert.match(historyScreen, /Direct tag\/competition matches remain useful/);
+  assert.match(historyScreen, /preserveCachedSportsRankings/);
+  assert.match(historyScreen, /sports_ranking\?\.match_status === "matched"/);
   assert.match(sportsRankingsApi, /AbortSignal\.timeout\(16_500\)/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
-  assert.match(historyScreen, /sports_ranking: comparisons\[event\.market_id\]/);
+  assert.match(historyScreen, /comparisons\[event\.market_id\]\?\.match_status === "matched"/);
   assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(unresolved\)/);
   assert.match(historyScreen, /readRankingJson<\{ competitions: RankingCompetition\[\] \}>\(""\)/);
   assert.match(historyScreen, /teamNameKey/);

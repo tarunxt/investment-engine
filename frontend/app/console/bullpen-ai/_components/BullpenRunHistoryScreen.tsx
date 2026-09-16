@@ -143,6 +143,27 @@ function cacheEventTrends(
   }
 }
 
+function preserveCachedSportsRankings(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  cached: BullpenAutoLiveEventTrendsResponse | null,
+) {
+  const cachedByMarket = new Map(
+    (cached?.events ?? [])
+      .filter((event) => event.sports_ranking?.match_status === "matched")
+      .map((event) => [event.market_id, event.sports_ranking] as const),
+  );
+  return {
+    ...trends,
+    events: trends.events.map((event) => ({
+      ...event,
+      sports_ranking:
+        event.sports_ranking?.match_status === "matched"
+          ? event.sports_ranking
+          : cachedByMarket.get(event.market_id) ?? event.sports_ranking ?? null,
+    })),
+  };
+}
+
 async function fetchCurrentBullpenPositions() {
   const params = new URLSearchParams({
     caller_source: "ui-history-portfolio-refresh",
@@ -422,7 +443,10 @@ async function applySportsRankingsToEventTrends(
     ...trends,
     events: trends.events.map((event) => ({
       ...event,
-      sports_ranking: comparisons[event.market_id] ?? null,
+      sports_ranking:
+        comparisons[event.market_id]?.match_status === "matched"
+          ? comparisons[event.market_id]
+          : event.sports_ranking ?? comparisons[event.market_id] ?? null,
     })),
   };
 }
@@ -804,7 +828,10 @@ export function BullpenRunHistoryScreen({
         setTrends(identityBaseTrends);
         const currentOrderBookOddsPromise = fetchCurrentOrderBookOdds(identityBaseTrends).catch(() => null);
         const sportsEventMetadata = await fetchSportsEventMetadata(identityBaseTrends).catch(() => null);
-        const metadataTrends = applySportsEventMetadata(identityBaseTrends, sportsEventMetadata);
+        const metadataTrends = preserveCachedSportsRankings(
+          applySportsEventMetadata(identityBaseTrends, sportsEventMetadata),
+          readCachedEventTrends(workspaceProfile),
+        );
         setTrends(metadataTrends);
         const rankedTrends = await applySportsRankingsToEventTrends(metadataTrends).catch(
           () => metadataTrends,
@@ -825,7 +852,10 @@ export function BullpenRunHistoryScreen({
           const identityBaseTrends = applySportsEventMetadata(cachedTrends, null);
           setTrends(identityBaseTrends);
           const sportsEventMetadata = await fetchSportsEventMetadata(identityBaseTrends).catch(() => null);
-          const metadataTrends = applySportsEventMetadata(identityBaseTrends, sportsEventMetadata);
+          const metadataTrends = preserveCachedSportsRankings(
+            applySportsEventMetadata(identityBaseTrends, sportsEventMetadata),
+            cachedTrends,
+          );
           setTrends(metadataTrends);
           const rankedTrends = await applySportsRankingsToEventTrends(metadataTrends).catch(
             () => metadataTrends,
