@@ -55,15 +55,33 @@ def ranking_rows(competition, snapshot=None):
     return rows
 
 
+_TEAM_DESIGNATORS = {"ac", "afc", "cf", "fc", "fk", "sc"}
+
+
+def _team_name_key(value):
+    tokens = normalize_name(value).split()
+    while tokens and tokens[0] in _TEAM_DESIGNATORS:
+        tokens.pop(0)
+    while tokens and tokens[-1] in _TEAM_DESIGNATORS:
+        tokens.pop()
+    return " ".join(tokens)
+
+
 def resolve(query, snapshots):
     candidates = []
     for c in CATALOGUE:
         if c["code"] != query.code or (query.competition_id and c["id"] != query.competition_id):
             continue
         snap = snapshots.get(c["source_id"])
-        for row in ranking_rows(c, snap):
-            if normalize_name(query.name) in {normalize_name(n) for n in [row["name"], *row["imported_names"]]}:
-                candidates.append({"competition_id": c["id"], "competition": c["name"], "code": c["code"], "source_id": c["source_id"], "status": source_status(snap, c["source_id"]), "ranking_kind": source_kind(c["source_id"]), "source_as_of": snap.source_as_of if snap else None, **row})
+        rows = ranking_rows(c, snap)
+        exact = [row for row in rows if normalize_name(query.name) in {normalize_name(n) for n in [row["name"], *row["imported_names"]]}]
+        matched_rows = exact or [
+            row for row in rows
+            if not row.get("match_status")
+            and _team_name_key(query.name) in {_team_name_key(n) for n in [row["name"], *row["imported_names"]]}
+        ]
+        for row in matched_rows:
+            candidates.append({"competition_id": c["id"], "competition": c["name"], "code": c["code"], "source_id": c["source_id"], "status": source_status(snap, c["source_id"]), "ranking_kind": source_kind(c["source_id"]), "source_as_of": snap.source_as_of if snap else None, **row})
     # A master list and an imported tournament can refer to the same source row.
     # Collapse only identical source identities; never merge rating systems/groups.
     unique = {}
