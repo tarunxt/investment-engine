@@ -195,6 +195,7 @@ import {
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
 import { BullpenStage2ActionablesDialog } from "./BullpenStage2ActionablesDialog";
+import { BullpenStageOneExcelHistoryDialog } from "./BullpenStageOneExcelHistoryDialog";
 import { buildBullpenStage2Actionables } from "./bullpenStage2Actionables";
 import {
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
@@ -2184,6 +2185,7 @@ function StageOneRunStats({
   ) => void;
   workspaceProfile?: BullpenWorkspaceProfile;
 }) {
+  const [isExcelHistoryOpen, setIsExcelHistoryOpen] = useState(false);
   const stats = getStageOneStats(stage);
   const includedActiveCount = getStageOneIncludedActiveCount(
     stage,
@@ -2317,7 +2319,7 @@ function StageOneRunStats({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
-              Passed filters
+              Events that Passed Filters
             </span>
             <span className="mt-0.5 block text-2xl font-bold tabular-nums text-emerald-950">
               {formattedPassedFilters}
@@ -2339,24 +2341,35 @@ function StageOneRunStats({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={downloadFilteredEvents}
-            disabled={filteredDownloadUnavailable}
-            className="rounded-xl border border-emerald-200/80 bg-white/75 p-3 text-left transition hover:border-emerald-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-45"
-            aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
-            title="Download filtered events Excel"
-          >
-            <div className="flex items-center gap-2 text-emerald-700">
-              <FileSpreadsheet className="h-4 w-4" />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.1em]">
-                Export
-              </span>
-            </div>
-            <p className="mt-2 text-sm font-bold text-emerald-950">
-              Download Excel
-            </p>
-          </button>
+          <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] overflow-hidden rounded-xl border border-emerald-200/80 bg-white/75 transition hover:border-emerald-300 hover:bg-white focus-within:ring-2 focus-within:ring-emerald-300">
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={filteredDownloadUnavailable}
+              className="p-3 text-left disabled:cursor-not-allowed disabled:opacity-45"
+              aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+              title="Download filtered events Excel"
+            >
+              <div className="flex items-center gap-2 text-emerald-700">
+                <FileSpreadsheet className="h-4 w-4" />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.1em]">
+                  Export
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-bold text-emerald-950">
+                Download Excel
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsExcelHistoryOpen(true)}
+              className="inline-flex items-center justify-center border-l border-emerald-200 text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-400"
+              aria-label="Open last 10 Excel scans"
+              title="Last 10 Excel scans"
+            >
+              <Menu className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
 
         {onOpenScanFilters ? (
@@ -2370,6 +2383,11 @@ function StageOneRunStats({
             View & edit filters
           </button>
         ) : null}
+        <BullpenStageOneExcelHistoryDialog
+          open={isExcelHistoryOpen}
+          onClose={() => setIsExcelHistoryOpen(false)}
+          workspaceProfile={workspaceProfile}
+        />
       </div>
     );
   }
