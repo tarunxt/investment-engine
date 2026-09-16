@@ -75,6 +75,19 @@ def test_current_scan_adds_previously_unlisted_tournament_code():
     ]
 
 
+def test_college_football_tag_is_not_misclassified_as_soccer():
+    market = sports_market(
+        code="ncaaf",
+        title="Ohio State Buckeyes vs. Michigan Wolverines",
+        question="Will Ohio State Buckeyes win on 2026-09-18?",
+    )
+    market.raw["_export_event"]["tags"] = [{"label": "College Football"}]
+    collector = SportsParticipantCollector()
+    collector.add(market)
+
+    assert collector.payload()["codes"]["ncaaf"]["sport_id"] == "american-football"
+
+
 def test_real_racing_club_is_imported_and_maps_to_santander():
     competition = next(item for item in CATALOGUE if item["id"] == "lal")
     augmented = augment_competition(competition, {
