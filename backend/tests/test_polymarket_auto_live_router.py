@@ -413,8 +413,13 @@ async def test_dashboard_summary_reader_reuses_single_database_session(monkeypat
             return False
 
     class FakeBot:
-        async def get_dashboard_summary(self, session=None):
+        async def get_dashboard_summary(
+            self,
+            session=None,
+            workspace_profile=None,
+        ):
             events.append(("summary", session))
+            assert workspace_profile is None
             return summary
 
     async def fake_resolve_user(_credentials, session):
@@ -472,7 +477,7 @@ async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch)
 
     summary_reads: list[bool] = []
 
-    async def fake_read_dashboard_summary(_credentials):
+    async def fake_read_dashboard_summary(_credentials, _workspace_profile=None):
         summary_reads.append(True)
         return summary, 7
 
