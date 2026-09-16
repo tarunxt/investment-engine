@@ -1,11 +1,15 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
+from app.domains.auth.models import User
 from app.infrastructure.database.session import get_async_db
-from .catalogue import CATALOGUE, REFRESH_SECONDS, SOURCE_IDS
+from .catalogue import CATALOGUE, REFRESH_SECONDS, SOURCE_IDS, augment_catalogue
 from .models import SportsRankingSnapshot
+from .polymarket_participants import load_participant_index
 from .schemas import EventComparisonsQuery, RankingQuery, RefreshRequest
 from .service import event_comparisons, ranking_rows, resolve, summary
 from .master import SPORTS
@@ -14,7 +18,7 @@ from .classification import MatchCandidate, classify
 router = APIRouter(prefix="/api/sports-rankings", tags=["sports-rankings"], dependencies=[Depends(get_current_user)])
 
 
-def _comparison_source_ids(query: EventComparisonsQuery):
+def _comparison_source_ids(query: EventComparisonsQuery, catalogue=CATALOGUE):
     codes = {
         event.event_slug.strip().lower().split("-", 1)[0]
         for event in query.events
@@ -22,12 +26,12 @@ def _comparison_source_ids(query: EventComparisonsQuery):
     }
     source_ids = {
         competition["source_id"]
-        for competition in CATALOGUE
+        for competition in catalogue
         if competition["code"] in codes and competition["source_id"]
     }
     soccer_codes = {
         competition["code"]
-        for competition in CATALOGUE
+        for competition in catalogue
         if competition.get("sport_id") == "soccer" and competition["code"]
     } | {"efl"}
     if codes.intersection(soccer_codes):
@@ -36,17 +40,25 @@ def _comparison_source_ids(query: EventComparisonsQuery):
         # service can use a unique same-source fallback.
         source_ids.update(
             competition["source_id"]
-            for competition in CATALOGUE
+            for competition in catalogue
             if competition.get("sport_id") == "soccer" and competition["source_id"]
         )
     return source_ids
 
 
 @router.get("")
-async def catalogue(response: Response, db: AsyncSession = Depends(get_async_db)):
+async def catalogue(
+    response: Response,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
     response.headers["Cache-Control"] = "private, no-store"
+    current_catalogue = augment_catalogue(
+        CATALOGUE,
+        await asyncio.to_thread(load_participant_index, current_user.id),
+    )
     snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
-    return {"schema_version": 2, "sports": SPORTS, "refresh_seconds": REFRESH_SECONDS, "automatic_analysis_enabled": False, "competitions": [summary(c, snapshots.get(c["source_id"])) for c in CATALOGUE]}
+    return {"schema_version": 3, "sports": SPORTS, "refresh_seconds": REFRESH_SECONDS, "automatic_analysis_enabled": False, "competitions": [summary(c, snapshots.get(c["source_id"])) for c in current_catalogue]}
 
 
 @router.post("/classify")
@@ -55,9 +67,18 @@ async def classify_match(query: MatchCandidate):
 
 
 @router.get("/competitions/{competition_id}")
-async def competition(competition_id: str, response: Response, db: AsyncSession = Depends(get_async_db)):
+async def competition(
+    competition_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
     response.headers["Cache-Control"] = "private, no-store"
-    c = next((c for c in CATALOGUE if c["id"] == competition_id), None)
+    current_catalogue = augment_catalogue(
+        CATALOGUE,
+        await asyncio.to_thread(load_participant_index, current_user.id),
+    )
+    c = next((c for c in current_catalogue if c["id"] == competition_id), None)
     if c is None:
         raise HTTPException(404, "Competition not found")
     snap = await db.get(SportsRankingSnapshot, c["source_id"]) if c["source_id"] else None
@@ -65,14 +86,30 @@ async def competition(competition_id: str, response: Response, db: AsyncSession 
 
 
 @router.post("/resolve")
-async def resolve_name(query: RankingQuery, db: AsyncSession = Depends(get_async_db)):
+async def resolve_name(
+    query: RankingQuery,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_catalogue = augment_catalogue(
+        CATALOGUE,
+        await asyncio.to_thread(load_participant_index, current_user.id),
+    )
     snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
-    return resolve(query, snapshots)
+    return resolve(query, snapshots, current_catalogue)
 
 
 @router.post("/event-comparisons")
-async def compare_events(query: EventComparisonsQuery, db: AsyncSession = Depends(get_async_db)):
-    source_ids = _comparison_source_ids(query)
+async def compare_events(
+    query: EventComparisonsQuery,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_catalogue = augment_catalogue(
+        CATALOGUE,
+        await asyncio.to_thread(load_participant_index, current_user.id),
+    )
+    source_ids = _comparison_source_ids(query, current_catalogue)
     snapshots = {
         snapshot.source_id: snapshot
         for snapshot in (
@@ -81,7 +118,7 @@ async def compare_events(query: EventComparisonsQuery, db: AsyncSession = Depend
             )
         ).all()
     } if source_ids else {}
-    return event_comparisons(query, snapshots)
+    return event_comparisons(query, snapshots, current_catalogue)
 
 
 @router.post("/refresh", status_code=202)

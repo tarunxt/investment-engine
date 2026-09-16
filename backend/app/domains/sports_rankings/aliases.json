@@ -153,8 +153,62 @@
     ]
   },
   "lal": {
+    "Athletic Club": [
+      "Ath Bilbao",
+      "Athletic Bilbao"
+    ],
+    "Atlético de Madrid": [
+      "Ath Madrid",
+      "Atletico Madrid"
+    ],
+    "CA Osasuna": [
+      "Osasuna"
+    ],
+    "Deportivo Alavés": [
+      "Alaves",
+      "Alavés"
+    ],
+    "Elche CF": [
+      "Elche"
+    ],
     "FC Barcelona": [
       "Barcelona"
+    ],
+    "Real Betis Balompié": [
+      "Betis",
+      "Real Betis"
+    ],
+    "Real Madrid CF": [
+      "Real Madrid"
+    ],
+    "Real Racing Club": [
+      "Santander",
+      "Racing Santander",
+      "Real Racing Club de Santander"
+    ],
+    "Real Racing Club de Santander": [
+      "Santander",
+      "Racing Santander",
+      "Real Racing Club"
+    ],
+    "Real Sociedad": [
+      "Sociedad"
+    ],
+    "RCD Espanyol de Barcelona": [
+      "Espanol",
+      "Espanyol"
+    ],
+    "Rayo Vallecano": [
+      "Vallecano"
+    ],
+    "Sevilla FC": [
+      "Sevilla"
+    ],
+    "Valencia CF": [
+      "Valencia"
+    ],
+    "Villarreal CF": [
+      "Villarreal"
     ],
     "Getafe CF": [
       "Getafe"

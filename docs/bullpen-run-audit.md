@@ -4,6 +4,14 @@
 
 Bullpen Sports History enriches each Stage 1 event from the authenticated Sports Rankings service. The Polymarket parent-event slug supplies the verified competition tag, while an independent, bounded Gamma event-title lookup supplies both participant names without depending on the heavier current-odds refresh. Both participants must resolve to one compatible ranking source before numeric values are displayed. Competition-specific ESPN soccer tables cover Egyptian Premier League, Polish Ekstraklasa, German 2. Bundesliga, Italian Serie A and UEFA Europa League tags. Cup events may fall back to domestic standings only when both participants resolve uniquely to the same published source; unrelated league tables are never compared. Football rating is the transparent points-efficiency percentage (points divided by three times games played). History shows the competition tag (linked to the filtered Sports Rankings page), both team names and values, and Team A minus Team B deltas for ranking, rating, and points. Missing or ambiguous source values remain `—`; the UI never converts unavailable rankings into zeroes or chooses an arbitrary match.
 
+Each completed Universal Scan also emits a compact competition-scoped participant
+index. Sports Rankings merges the latest index into its seed catalogue, allowing
+new Polymarket teams and events to resolve without waiting for a code release.
+Resolution uses reviewed provider aliases plus conservative generated variants;
+fuzzy matches must be unique and may not cross academy, reserve, gender or youth
+scope boundaries. This changes enrichment inputs only. Frozen Stage 1–3 snapshots,
+selection formulas, order decisions and historical audit records are not rewritten.
+
 ## Workflow Stage 1 trigger contract (2026-09-15)
 
 Bullpen 007 and Bullpen Sports start their workflow-owned Stage 1 filters from

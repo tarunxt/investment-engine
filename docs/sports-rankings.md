@@ -5,12 +5,24 @@ It does not change trading decisions, filters, probabilities or existing audit s
 
 ## Coverage
 
-The imported 14 September 2026 list contains 346 event rows, 75 URL prefixes,
+The seed imported on 14 September 2026 contains 346 event rows, 75 URL prefixes,
 95 competition/stage entries and 388 participant-name memberships. Every input
 title and slug is preserved in catalogue.json. Competition mappings remain inferred.
 88 relevant codes were checked against Polymarket's public `/sports` registry on
 14 September 2026 and are stored in polymarket_codes.json. A prefix may identify multiple tournaments.
 Question/slug disagreements require review; the importer does not silently fix them.
+
+The seed is no longer the participant ceiling. Every completed Universal
+Polymarket Scan now writes a compact, competition-prefix-scoped participant and
+event index beside its immutable export. Authenticated Sports Rankings reads merge
+that user's latest index into the seed catalogue, so newly listed teams in `uel`,
+`lal`, and every other scanned sports prefix appear without a manual catalogue
+release. A scan can also add a newly observed tournament prefix when its parent
+event supplies a recognized sport tag; unsupported/unknown sport labels are not
+guessed. The index accepts explicit parent-event `Team A vs Team B` titles and the
+date-specific `Will Team win on YYYY-MM-DD?` moneyline form; draws, generic outcomes
+and tournament outrights are not imported as teams. A worker-start backfill builds
+the index for the latest successful scan created before this feature was deployed.
 
 The expanded master contains all 123 user-requested sport/discipline entries,
 including golf match play, with 226 ranking/competition lists. `master_sports.txt`
@@ -148,13 +160,16 @@ selection falls outside the filters. Groups, ratings, points and records are sho
 separately. Duplicate references to an identical source row collapse in resolution;
 different sources, rosters and ranking groups remain distinct candidates.
 
-Name normalization is Unicode-aware, case/diacritic/punctuation insensitive,
-with explicit aliases only. It never removes academy, gender or youth qualifiers.
-aliases.json contains 66 competition-scoped football name mappings reviewed against
-the connected feed labels on 14 September 2026 (for example Manchester City FC to
-Man City). Original imported names remain visible beside the provider's ranked name.
-Aliases do not assert tournament entry or merge youth/academy/women's teams.
-Absent names remain null-ranked; inferred prefix/name matches are not trading authorization.
+Name normalization is Unicode-aware, case/diacritic/punctuation insensitive. It
+generates safe legal-designator, common-word and initialism variants, then applies
+a conservative unique fuzzy fallback inside one competition/source. Reviewed
+competition aliases remain authoritative for unrelated provider names such as
+`Real Racing Club` / `Real Racing Club de Santander` to Football-Data's
+`Santander`. Domestic-table fallback may reuse a reviewed alias across a cup or
+continental tag, but never across rating sources. Academy, reserve, gender and
+youth qualifiers must match exactly and are never removed by fuzzy resolution.
+Original Polymarket names remain visible beside the provider's ranked name. Absent
+or ambiguous names remain null-ranked; inferred matches are not trading authorization.
 The future analysis consumer must explicitly reject ambiguous, missing, stale or
 failed rankings and distinguish official rankings from derived performance order.
 

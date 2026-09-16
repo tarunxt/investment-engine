@@ -7,11 +7,53 @@ import zlib
 from types import SimpleNamespace
 
 from app.domains.polymarket_auto_live.console_profile import scan_console_profile_markets
+from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.trading_bots.universal_scan import (
+    UniversalExportWriter,
     latest_completed_universal_export,
     next_scheduled_time,
     read_state,
 )
+
+
+def test_completed_universal_export_writes_sports_participant_index(tmp_path, monkeypatch):
+    monkeypatch.setenv("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", str(tmp_path))
+    started_at = datetime(2026, 9, 16, tzinfo=UTC)
+    market = ScannedMarket(
+        market_id="lal-1",
+        question="Will Real Racing Club win on 2026-09-18?",
+        market_url="https://polymarket.com/event/lal-rac-bar-2026-09-18",
+        slug="lal-real-racing-win",
+        close_time="2026-09-18T20:00:00+00:00",
+        theme="Sports",
+        current_yes_odds=50,
+        current_no_odds=50,
+        volume_usd=1000,
+        liquidity_usd=1000,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug="lal-rac-bar-2026-09-18",
+        best_bid_cents=49,
+        best_ask_cents=51,
+        spread_cents=2,
+        raw={
+            "feeType": "sports_fees_v2",
+            "sportsMarketType": "moneyline",
+            "_export_event": {
+                "slug": "lal-rac-bar-2026-09-18",
+                "title": "Real Racing Club vs. FC Barcelona",
+            },
+        },
+    )
+
+    with UniversalExportWriter(42, started_at=started_at) as writer:
+        writer.add(market)
+        writer.complete()
+
+    payload = json.loads(
+        (tmp_path / f"{writer.export_id}.sports-participants.json").read_text(encoding="utf-8")
+    )
+    assert payload["codes"]["lal"]["participants"] == ["FC Barcelona", "Real Racing Club"]
 
 
 def test_universal_scan_schedule_stays_anchored_to_configured_start():
