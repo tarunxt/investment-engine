@@ -7,6 +7,7 @@ from app.domains.sports_rankings.catalogue import CATALOGUE, IMPORTED_CATALOGUE,
 from app.domains.sports_rankings.providers import parse_football, parse_valve
 from app.domains.sports_rankings.schemas import EventComparisonsQuery, RankingQuery
 from app.domains.sports_rankings.service import event_comparisons, ranking_rows, resolve, source_status
+from app.domains.sports_rankings.router import _comparison_source_ids
 
 
 def test_complete_import():
@@ -141,6 +142,14 @@ def test_event_comparison_joins_both_teams_and_calculates_deltas():
     assert comparison['ranking'] == {'team_a': 2, 'team_b': 5, 'delta': -3}
     assert comparison['rating'] == {'team_a': 91.5, 'team_b': 88, 'delta': 3.5}
     assert comparison['points'] == {'team_a': 8, 'team_b': 6, 'delta': 2}
+
+
+def test_event_comparison_loads_only_relevant_connected_sources():
+    query = EventComparisonsQuery(events=[
+        {'market_id': '1', 'event_slug': 'epl-bre-che-2026-09-18', 'event_title': 'Brentford FC vs. Chelsea FC'},
+        {'market_id': '2', 'event_slug': 'egy1-gem-zas-2026-09-16', 'event_title': 'Ghazl El Mahalla SC vs. Zamalek SC'},
+    ])
+    assert _comparison_source_ids(query) == {'football-data-E0'}
 
 
 def test_event_comparison_never_invents_values_for_unmatched_teams():
