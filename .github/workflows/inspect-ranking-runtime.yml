@@ -29,4 +29,4 @@ jobs:
             curl --max-time 8 --silent --show-error -w '\nhealth_seconds=%{time_total}\n' http://127.0.0.1:8000/health/live || true
             pid=$(sudo systemctl show investor-backend --value -p MainPID)
             sudo /tmp/credx-history-pyspy/bin/py-spy dump --pid "$pid" || true
-            sudo journalctl -u investor-backend --since '5 minutes ago' --no-pager | grep -E 'request_performance|ERROR|Traceback' | tail -n 65
+            sudo journalctl -u investor-backend --since '3 minutes ago' --no-pager | grep -E 'request_performance|ERROR|Traceback' | tail -n 65
