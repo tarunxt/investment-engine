@@ -23,6 +23,37 @@ jobs:
           command_timeout: 180s
           script: |
             set -eu
-            sudo /srv/investor/backend/.venv/bin/python -m pip install --disable-pip-version-check --target /tmp/credx-history-pyspy py-spy
-            /tmp/credx-history-pyspy/bin/py-spy dump --help
-            sudo /tmp/credx-history-pyspy/bin/py-spy dump --pid "$(systemctl show investor-backend --property=MainPID --value)"
+            curl --fail --silent --show-error https://raw.githubusercontent.com/tarunxt/investment-engine/618e565957e1a087197d09b2ec652ea635de7bce/backend/app/domains/sports_rankings/service.py -o /tmp/credx-ranking-candidate.py
+            cat > /tmp/credx-ranking-benchmark.py <<'PY'
+            import importlib.util, json, signal, sys, time
+            from functools import lru_cache
+            sys.path.insert(0, '/srv/investor/backend')
+            import app.domains.sports_rankings.catalogue as catalogue
+            catalogue.normalize_name = lru_cache(maxsize=32768)(catalogue.normalize_name)
+            from app.domains.sports_rankings.polymarket_participants import load_participant_index
+            from app.domains.sports_rankings.models import SportsRankingSnapshot
+            from app.domains.sports_rankings.schemas import EventComparisonsQuery
+            from app.domains.auth.models import User
+            from app.infrastructure.database.sync_session import SyncSessionLocal
+            from sqlalchemy import select
+            signal.alarm(90)
+            spec = importlib.util.spec_from_file_location('app.domains.sports_rankings.benchmark', '/tmp/credx-ranking-candidate.py')
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            with SyncSessionLocal() as session:
+                uid = session.scalar(select(User.id).where(User.email == 'tarun.singh6893@gmail.com'))
+                snapshots = {s.source_id:s for s in session.scalars(select(SportsRankingSnapshot)).all()}
+                session.expunge_all()
+            current = catalogue.augment_catalogue(catalogue.CATALOGUE, load_participant_index(uid))
+            events = []
+            for c in current:
+                for e in c['events']:
+                    if e.get('slug') and module._head_to_head_participants(e.get('title')):
+                        events.append({'market_id':str(len(events)), 'event_slug':e['slug'], 'event_title':e['title']})
+                    if len(events) == 97: break
+                if len(events) == 97: break
+            started=time.monotonic()
+            result=module.event_comparisons(EventComparisonsQuery(events=events),snapshots,current)
+            print(json.dumps({'events':len(events),'catalogue_participants':sum(len(c['participants']) for c in current),'duration_seconds':round(time.monotonic()-started,3),'matched':sum(c['match_status']=='matched' for c in result['comparisons'].values())}))
+            PY
+            sudo systemd-run --quiet --wait --pipe --collect --uid=investor -p EnvironmentFile=/etc/investor/backend.env -p WorkingDirectory=/srv/investor/backend -p MemoryMax=768M -p CPUQuota=50% /srv/investor/backend/.venv/bin/python /tmp/credx-ranking-benchmark.py
