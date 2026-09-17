@@ -1836,12 +1836,18 @@ class apiServiceClass implements IApiService {
   }
 
   getBullpenAutoLiveHistoryEventTrends(
-    params: { workspaceProfile?: "bullpen007" | "bullpen-sports" } = {},
+    params: {
+      workspaceProfile?: "bullpen007" | "bullpen-sports";
+      timeoutSeconds?: number;
+    } = {},
     options?: ApiRequestControl,
   ): Promise<BullpenAutoLiveEventTrendsResponse> {
     const query = new URLSearchParams();
     if (params.workspaceProfile) {
       query.set("workspace_profile", params.workspaceProfile);
+    }
+    if (params.timeoutSeconds) {
+      query.set("proxy_timeout_seconds", String(params.timeoutSeconds));
     }
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.get<BullpenAutoLiveEventTrendsResponse>(

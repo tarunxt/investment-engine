@@ -146,6 +146,7 @@ import {
   type BullpenEventTableSnapshot,
 } from "./BullpenEventTrendsTable";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
+import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import {
   buildBullpenStage3InvestPreviewSteps,
@@ -893,6 +894,7 @@ const POLL_INTERVAL_MS = 2_000;
 const RUN_TIMER_INTERVAL_MS = 5_000;
 const AUTO_RUN_STATUS_TIMEOUT_MS = 2_000;
 const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
+const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
 const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;
 const AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3;
 
@@ -11213,6 +11215,8 @@ export function BullpenAutoRunScheduleCard({
   independentScanSnapshot = null,
   onRunIndependentStageOne,
 }: BullpenAutoRunScheduleCardProps) {
+  const { timeoutSeconds: eventTrendsTimeoutSeconds, saveTimeoutSeconds } =
+    useEventTrendsTimeout();
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedRunDetailIdFromSearchParams =
@@ -11560,7 +11564,7 @@ export function BullpenAutoRunScheduleCard({
 
   async function refreshPersistedAutoRunStatus(options?: {
     retrying?: boolean;
-  }) {
+}) {
     const controller = autoRunStatusAbortControllerRef.current;
     const cacheKey = autoRunStatusCacheKey;
     if (!controller || controller.signal.aborted || !cacheKey) return null;
@@ -12449,18 +12453,26 @@ export function BullpenAutoRunScheduleCard({
     setRunHistoryEventTrendsError(null);
 
     try {
-      const requestOptions = {
+      const historyRequestOptions = {
           signal: controller.signal,
           timeoutMs: 5_000,
         };
       const [pageResult, trendsResult] = await Promise.allSettled([
         apiService.getBullpenAutoLiveHistory(
           { page, size: 20, workspaceProfile },
-          requestOptions,
+          historyRequestOptions,
         ),
         apiService.getBullpenAutoLiveHistoryEventTrends(
-          { workspaceProfile },
-          requestOptions,
+          {
+            workspaceProfile,
+            timeoutSeconds: eventTrendsTimeoutSeconds,
+          },
+          {
+            signal: controller.signal,
+            timeoutMs:
+              eventTrendsTimeoutSeconds * 1_000 +
+              EVENT_TRENDS_CLIENT_GRACE_MS,
+          },
         ),
       ]);
       if (controller.signal.aborted) return;
@@ -12491,7 +12503,7 @@ export function BullpenAutoRunScheduleCard({
         setRunHistoryEventTrendsLoading(false);
       }
     }
-  }, [autoRunStatusCacheKey, workspaceProfile]);
+  }, [autoRunStatusCacheKey, eventTrendsTimeoutSeconds, workspaceProfile]);
 
   async function openHistoryRunDetail(
     item: Pick<BullpenAutoLiveHistoryItem, "id">,
@@ -15932,7 +15944,7 @@ export function BullpenAutoRunScheduleCard({
         {isRunHistoryDialogOpen ? (
           <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRunHistoryDialog(); }}>
             <div className="max-h-[92vh] w-full max-w-7xl">
-              <BullpenRunHistoryContent page={visibleRunHistoryPage} trends={visibleRunHistoryEventTrends} loading={runHistoryLoading} trendsLoading={runHistoryEventTrendsLoading} error={runHistoryError} trendsError={runHistoryEventTrendsError} detailLoadingId={runHistoryDetailLoadingId} onRefresh={() => void loadRunHistory()} onPage={(page) => void loadRunHistory(page)} onOpenRun={(run) => void openHistoryRunDetail(run)} onClose={closeRunHistoryDialog} fullScreenPath={bullpenWorkspaceHistoryPath(workspaceProfile)} />
+              <BullpenRunHistoryContent page={visibleRunHistoryPage} trends={visibleRunHistoryEventTrends} loading={runHistoryLoading} trendsLoading={runHistoryEventTrendsLoading} error={runHistoryError} trendsError={runHistoryEventTrendsError} detailLoadingId={runHistoryDetailLoadingId} onRefresh={() => void loadRunHistory()} onPage={(page) => void loadRunHistory(page)} onOpenRun={(run) => void openHistoryRunDetail(run)} onClose={closeRunHistoryDialog} fullScreenPath={bullpenWorkspaceHistoryPath(workspaceProfile)} eventTrendsTimeoutSeconds={eventTrendsTimeoutSeconds} onEventTrendsTimeoutChange={saveTimeoutSeconds} />
             </div>
           </div>
         ) : null}

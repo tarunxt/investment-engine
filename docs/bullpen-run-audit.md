@@ -60,6 +60,12 @@ Bullpen History reads are scoped by the compact indexed `workspace_profile`
 stored beside each durable run. The value is captured from
 `request_context.console_profile.workspace_profile` whenever a run is saved.
 `bullpen-sports` History includes only Sports-owned runs and event trends;
+event-trends reads use a browser-persisted 30-second backend threshold by
+default. The timeout duration in an event-trends error is clickable and may be
+changed to a whole number from 5 through 120 seconds. The selected value is
+sent to both the same-origin proxy and the backend projection so the displayed
+threshold and enforced deadline remain aligned.
+
 `bullpen007` includes explicit Bullpen 007 runs plus legacy rows that predate the
 workspace-profile field. The unscoped API behavior remains available for backward
 compatibility. Frontend History routes and local caches are namespaced by the same

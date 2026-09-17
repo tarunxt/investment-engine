@@ -30,10 +30,12 @@ import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
 import type { BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
 import { bullpenWorkspaceRunPath } from "@/lib/bullpenWorkspaceRoutes";
+import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
 
 const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v2";
 const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v2";
 const HISTORY_READ_TIMEOUT_MS = 20_000;
+const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
 const HISTORY_READ_RETRY_DELAY_MS = 750;
 const DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300;
 const MIN_RUN_HISTORY_REFRESH_SECONDS = 60;
@@ -691,6 +693,8 @@ export function BullpenRunHistoryScreen({
 }: {
   workspaceProfile?: BullpenWorkspaceProfile;
 }) {
+  const { timeoutSeconds: eventTrendsTimeoutSeconds, saveTimeoutSeconds } =
+    useEventTrendsTimeout();
   const router = useRouter();
   const [page, setPage] =
     useState<BullpenAutoLiveHistoryPage | null>(() =>
@@ -766,8 +770,15 @@ export function BullpenRunHistoryScreen({
         const [trendsResult] = await Promise.allSettled([
           readHistoryWithRetry(() =>
             apiService.getBullpenAutoLiveHistoryEventTrends(
-              { workspaceProfile },
-              historyRequestOptions,
+              {
+                workspaceProfile,
+                timeoutSeconds: eventTrendsTimeoutSeconds,
+              },
+              {
+                timeoutMs:
+                  eventTrendsTimeoutSeconds * 1_000 +
+                  EVENT_TRENDS_CLIENT_GRACE_MS,
+              },
             ),
           ),
         ]);
@@ -884,7 +895,7 @@ export function BullpenRunHistoryScreen({
       setPortfolioReady(true);
       setLoading(false);
     }
-  }, [workspaceProfile]);
+  }, [eventTrendsTimeoutSeconds, workspaceProfile]);
 
   useEffect(() => {
     window.queueMicrotask(() => void load());
@@ -924,6 +935,8 @@ export function BullpenRunHistoryScreen({
           onRefresh={() => void load(page?.page ?? 1)}
           refreshIntervalSeconds={refreshIntervalSeconds}
           onRefreshIntervalChange={saveRefreshInterval}
+          eventTrendsTimeoutSeconds={eventTrendsTimeoutSeconds}
+          onEventTrendsTimeoutChange={saveTimeoutSeconds}
           onPage={(next) => void load(next)}
           onOpenRun={openRun}
           showFullScreen={false}

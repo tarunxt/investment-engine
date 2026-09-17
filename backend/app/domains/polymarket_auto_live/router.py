@@ -100,6 +100,15 @@ def _validate_filter_profile(profile: str | None) -> str | None:
 # was briefly busy, so healthy reads were cancelled and surfaced as false
 # outages. Keep a firm deadline while allowing a short pool wait.
 HISTORY_TIMEOUT_SECONDS = 12.0
+DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS = 30
+MIN_EVENT_TRENDS_TIMEOUT_SECONDS = 5
+MAX_EVENT_TRENDS_TIMEOUT_SECONDS = 120
+
+
+def _event_trends_timeout_seconds(requested_seconds: int) -> float:
+    return float(requested_seconds)
+
+
 # Exact-run reads share the same database pool as a running Full Universe scan.
 # Four seconds was short enough to turn healthy bounded projections into repeated
 # false 503s under pool pressure. Keep the browser request bounded while allowing
@@ -934,6 +943,12 @@ async def list_auto_live_history_event_trends(
         default=None,
         description="Restrict scans to one Bullpen console workflow.",
     ),
+    proxy_timeout_seconds: int = Query(
+        default=DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS,
+        ge=MIN_EVENT_TRENDS_TIMEOUT_SECONDS,
+        le=MAX_EVENT_TRENDS_TIMEOUT_SECONDS,
+        description="Maximum time allowed for the event-trends database projection.",
+    ),
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Return the strongest-side score heatmap for the latest 20 scans."""
@@ -944,10 +959,17 @@ async def list_auto_live_history_event_trends(
                 event_trends=True,
                 workspace_profile=workspace_profile,
             ),
-            timeout=HISTORY_TIMEOUT_SECONDS,
+            timeout=_event_trends_timeout_seconds(proxy_timeout_seconds),
         )
     except asyncio.TimeoutError as exc:
-        raise HTTPException(status_code=503, detail="Auto-Live event trends are temporarily delayed. Retry shortly.", headers={"Cache-Control": "no-store"}) from exc
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The backend did not respond in time "
+                f"({proxy_timeout_seconds} seconds). Please retry."
+            ),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
     except SQLAlchemyError as exc:
         raise _database_not_ready_error(exc) from exc
     response.headers["Cache-Control"] = "private, no-cache"

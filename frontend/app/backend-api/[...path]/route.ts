@@ -40,6 +40,10 @@ const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
 // retains its existing strict budget.
 const BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
 const BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS = 30_000;
+const MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS = 5_000;
+const MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS = 120_000;
+const EVENT_TRENDS_PROXY_TRANSPORT_GRACE_MS = 2_000;
 const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000;
 const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
 const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
@@ -218,6 +222,14 @@ function readBoundedTimeout(
   return Math.min(Math.max(configured, 1_000), maximumMs);
 }
 
+function formatTimeoutBudget(timeoutMs: number) {
+  const seconds = timeoutMs / 1_000;
+  const value = Number.isInteger(seconds)
+    ? String(seconds)
+    : String(Number(seconds.toFixed(3)));
+  return `${value} ${seconds === 1 ? "second" : "seconds"}`;
+}
+
 function isBullpenAutoLiveRead(method: string, path: string) {
   return (
     SAFE_FALLBACK_METHODS.has(method) &&
@@ -239,6 +251,28 @@ function isBullpenHistoryRead(method: string, path: string) {
     SAFE_FALLBACK_METHODS.has(method) &&
     (path === "polymarket/auto-live/history" ||
       path === "polymarket/auto-live/history/event-trends")
+  );
+}
+
+function isBullpenEventTrendsRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    path === "polymarket/auto-live/history/event-trends"
+  );
+}
+
+function getEventTrendsProxyTimeoutMs(request: NextRequest, path: string) {
+  if (!isBullpenEventTrendsRead(request.method, path)) return null;
+  const requestedSeconds = Number.parseInt(
+    request.nextUrl.searchParams.get("proxy_timeout_seconds") || "",
+    10,
+  );
+  if (!Number.isFinite(requestedSeconds)) {
+    return DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS;
+  }
+  return Math.min(
+    MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS,
+    Math.max(MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS, requestedSeconds * 1_000),
   );
 }
 
@@ -420,7 +454,14 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     );
   }
 
-  const totalTimeoutMs = getProxyTotalTimeoutMs(request.method, path);
+  const eventTrendsTimeoutMs = getEventTrendsProxyTimeoutMs(request, path);
+  const totalTimeoutMs =
+    eventTrendsTimeoutMs === null
+      ? getProxyTotalTimeoutMs(request.method, path)
+      : eventTrendsTimeoutMs + EVENT_TRENDS_PROXY_TRANSPORT_GRACE_MS;
+  const primaryAttemptTimeoutMs = eventTrendsTimeoutMs
+    ? eventTrendsTimeoutMs + 1_000
+    : getProxyAttemptTimeoutMs(request.method, path);
 
   try {
     const result = await executeBoundedApiRequest({
@@ -431,7 +472,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
         : mutationOriginCircuit,
       callerSignal: request.signal,
       totalBudgetMs: totalTimeoutMs,
-      primaryAttemptBudgetMs: getProxyAttemptTimeoutMs(request.method, path),
+      primaryAttemptBudgetMs: primaryAttemptTimeoutMs,
       refreshAuthentication: backendSession
         ? (signal) => rotateBackendTokens(backendSession, signal)
         : undefined,
@@ -479,7 +520,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       outcome = "timeout";
       return NextResponse.json(
         {
-          message: "The backend did not respond in time. Please retry.",
+          message: `The backend did not respond in time (${formatTimeoutBudget(eventTrendsTimeoutMs ?? totalTimeoutMs)}). Please retry.`,
         },
         {
           status: 504,
