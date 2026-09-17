@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from difflib import SequenceMatcher
 import re
 
@@ -99,6 +100,7 @@ def _base_team_name_keys(value):
     return {key for key in keys if key}
 
 
+@lru_cache(maxsize=32768)
 def _team_name_keys(value, code=None, *, include_global=False):
     family = {value}
     mappings = [ALIASES.get(code, {})] if code else []
@@ -115,7 +117,7 @@ def _team_name_keys(value, code=None, *, include_global=False):
     keys = set()
     for candidate in family:
         keys.update(_base_team_name_keys(candidate))
-    return keys
+    return frozenset(keys)
 
 
 def _compatible_team_scope(left, right):
@@ -155,13 +157,22 @@ def _matching_rows(names, rows, code, *, include_global=False):
     return [scored[0][1]]
 
 
-def resolve(query, snapshots, catalogue=None):
+def _ranking_rows_cached(competition, snapshot, rows_cache):
+    if rows_cache is None:
+        return ranking_rows(competition, snapshot)
+    key = id(competition)
+    if key not in rows_cache:
+        rows_cache[key] = ranking_rows(competition, snapshot)
+    return rows_cache[key]
+
+
+def resolve(query, snapshots, catalogue=None, *, rows_cache=None):
     candidates = []
     for c in catalogue or CATALOGUE:
         if c["code"] != query.code or (query.competition_id and c["id"] != query.competition_id):
             continue
         snap = snapshots.get(c["source_id"])
-        rows = ranking_rows(c, snap)
+        rows = _ranking_rows_cached(c, snap, rows_cache)
         matched_rows = _matching_rows([query.name], rows, c["code"])
         for row in matched_rows:
             candidates.append({"competition_id": c["id"], "competition": c["name"], "code": c["code"], "source_id": c["source_id"], "status": source_status(snap, c["source_id"]), "ranking_kind": source_kind(c["source_id"]), "source_as_of": snap.source_as_of if snap else None, **row})
@@ -178,7 +189,7 @@ def resolve(query, snapshots, catalogue=None):
     return {"match_status": "matched" if len(candidates) == 1 else "ambiguous" if candidates else "unmatched", "candidates": candidates, "automatic_analysis_enabled": False}
 
 
-def _resolve_sport(name, sport_id, snapshots, catalogue=None):
+def _resolve_sport(name, sport_id, snapshots, catalogue=None, *, rows_cache=None):
     """Resolve a participant across one sport without crossing ranking sources."""
     candidates = []
     for competition in catalogue or CATALOGUE:
@@ -187,7 +198,7 @@ def _resolve_sport(name, sport_id, snapshots, catalogue=None):
         snapshot = snapshots.get(competition["source_id"])
         if snapshot is None:
             continue
-        rows = ranking_rows(competition, snapshot)
+        rows = _ranking_rows_cached(competition, snapshot, rows_cache)
         matched = [
             row for row in _matching_rows(
                 [name], rows, competition["code"], include_global=True
@@ -254,6 +265,29 @@ def _compatible_pairs(left, right):
 def event_comparisons(query: EventComparisonsQuery, snapshots, catalogue=None):
     catalogue = catalogue or CATALOGUE
     comparisons = {}
+    # Rebuilding every imported participant table for both teams of every event
+    # made a 97-event request monopolize the API for minutes. Cache only within
+    # this request so refreshed source metrics are never hidden by a stale cache.
+    rows_cache = {}
+    resolved_names = {}
+    resolved_sport_names = {}
+
+    def named(code, name):
+        key = (code, name)
+        if key not in resolved_names:
+            resolved_names[key] = resolve(
+                RankingQuery(code=code, name=name), snapshots, catalogue,
+                rows_cache=rows_cache,
+            )["candidates"]
+        return resolved_names[key]
+
+    def sport_named(name):
+        if name not in resolved_sport_names:
+            resolved_sport_names[name] = _resolve_sport(
+                name, "soccer", snapshots, catalogue, rows_cache=rows_cache,
+            )
+        return resolved_sport_names[name]
+
     for event in query.events:
         code = _market_code(event.event_slug)
         participants = _head_to_head_participants(event.event_title)
@@ -275,8 +309,8 @@ def event_comparisons(query: EventComparisonsQuery, snapshots, catalogue=None):
             comparisons[event.market_id] = base
             continue
 
-        left = resolve(RankingQuery(code=code, name=participants[0]), snapshots, catalogue)["candidates"]
-        right = resolve(RankingQuery(code=code, name=participants[1]), snapshots, catalogue)["candidates"]
+        left = named(code, participants[0])
+        right = named(code, participants[1])
         pairs = _compatible_pairs(left, right)
         soccer_codes = {
             competition["code"] for competition in catalogue
@@ -286,8 +320,8 @@ def event_comparisons(query: EventComparisonsQuery, snapshots, catalogue=None):
             # A cup/continental tag may not have a useful table of its own. Use
             # domestic standings only when both teams resolve uniquely to the
             # same published source; never compare unrelated league tables.
-            left = _resolve_sport(participants[0], "soccer", snapshots, catalogue)
-            right = _resolve_sport(participants[1], "soccer", snapshots, catalogue)
+            left = sport_named(participants[0])
+            right = sport_named(participants[1])
             pairs = _compatible_pairs(left, right)
         if len(pairs) != 1:
             base["match_status"] = "ambiguous" if pairs or left or right else "unmatched"

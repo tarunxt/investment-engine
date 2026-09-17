@@ -213,3 +213,56 @@ def test_cup_event_uses_unique_same_domestic_source_and_derives_rating():
     assert comparison['ranking'] == {'team_a': 6, 'team_b': 12, 'delta': -6}
     assert comparison['points'] == {'team_a': 7, 'team_b': 4, 'delta': 3}
     assert comparison['rating'] == {'team_a': 58.33, 'team_b': 33.33, 'delta': 25.0}
+
+
+def test_event_batch_builds_each_ranking_table_once_and_reads_fresh_metrics(monkeypatch):
+    from app.domains.sports_rankings import service
+    competition = {
+        'id': 'batch', 'code': 'nfl', 'name': 'Batch', 'source_id': 'espn-nfl',
+        'sport_id': 'american-football', 'participants': [], 'events': [],
+    }
+    snap = SimpleNamespace(
+        rows=[{'name': 'Baltimore Ravens', 'rank': 2}, {'name': 'Buffalo Bills', 'rank': 5}],
+        status='ready', checked_at=datetime.now(UTC), source_as_of='2026-09-17',
+    )
+    calls = []
+    original = service.ranking_rows
+
+    def observed(competition, snapshot):
+        calls.append(competition['id'])
+        return original(competition, snapshot)
+
+    monkeypatch.setattr(service, 'ranking_rows', observed)
+    query = EventComparisonsQuery(events=[{
+        'market_id': str(i), 'event_slug': 'nfl-bal-buf-2026-09-17',
+        'event_title': 'Baltimore Ravens vs. Buffalo Bills',
+    } for i in range(97)])
+    result = service.event_comparisons(query, {'espn-nfl': snap}, [competition])
+    assert calls == ['batch']
+    assert len(result['comparisons']) == 97
+    assert all(c['ranking']['delta'] == -3 for c in result['comparisons'].values())
+    snap.rows[0]['rank'] = 1
+    result = service.event_comparisons(query, {'espn-nfl': snap}, [competition])
+    assert calls == ['batch', 'batch']
+    assert result['comparisons']['0']['ranking']['delta'] == -4
+
+
+@pytest.mark.anyio
+async def test_comparison_cpu_work_does_not_run_on_api_event_loop(monkeypatch):
+    import threading
+    from app.domains.sports_rankings import router
+    main_thread = threading.get_ident()
+    query = EventComparisonsQuery(events=[{
+        'market_id': '1', 'event_slug': 'nfl-a-b', 'event_title': 'A vs B',
+    }])
+    monkeypatch.setattr(router, 'load_participant_index', lambda user_id: {})
+    monkeypatch.setattr(router, 'augment_catalogue', lambda *args: [])
+    monkeypatch.setattr(router, '_comparison_source_ids', lambda *args: set())
+
+    def compare(*args):
+        assert threading.get_ident() != main_thread
+        return {'comparisons': {}}
+
+    monkeypatch.setattr(router, 'event_comparisons', compare)
+    result = await router.compare_events(query, db=None, current_user=SimpleNamespace(id=7))
+    assert result == {'comparisons': {}}

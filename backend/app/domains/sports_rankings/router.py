@@ -82,7 +82,7 @@ async def competition(
     if c is None:
         raise HTTPException(404, "Competition not found")
     snap = await db.get(SportsRankingSnapshot, c["source_id"]) if c["source_id"] else None
-    return {**summary(c, snap), "rows": ranking_rows(c, snap)}
+    return {**summary(c, snap), "rows": await asyncio.to_thread(ranking_rows, c, snap)}
 
 
 @router.post("/resolve")
@@ -96,7 +96,7 @@ async def resolve_name(
         await asyncio.to_thread(load_participant_index, current_user.id),
     )
     snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
-    return resolve(query, snapshots, current_catalogue)
+    return await asyncio.to_thread(resolve, query, snapshots, current_catalogue)
 
 
 @router.post("/event-comparisons")
@@ -118,7 +118,7 @@ async def compare_events(
             )
         ).all()
     } if source_ids else {}
-    return event_comparisons(query, snapshots, current_catalogue)
+    return await asyncio.to_thread(event_comparisons, query, snapshots, current_catalogue)
 
 
 @router.post("/refresh", status_code=202)
