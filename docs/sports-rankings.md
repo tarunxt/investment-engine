@@ -175,3 +175,12 @@ failed rankings and distinguish official rankings from derived performance order
 
 Schema migration: sports_rankings_001 (parent 3d4e5f6a7b8c). Existing release
 migration execution creates the table before the backend and worker are promoted.
+
+### Event comparison responsiveness
+
+Comparison batches reuse each competition's participant rows and each team lookup
+within that request. Name normalization and immutable alias keys use bounded caches;
+ranking metrics are never cached between requests. CPU matching runs outside the
+FastAPI event-loop thread so a large history batch cannot block health, portfolio,
+or history requests. Matching thresholds, scope boundaries and ambiguity rules
+are unchanged.

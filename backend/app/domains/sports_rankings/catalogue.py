@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 import re
 import unicodedata
 from pathlib import Path
@@ -20,6 +21,7 @@ SOURCE_IDS = {"valve-global", *(f"football-data-{d}" for d in FOOTBALL_DIVISIONS
 REFRESH_SECONDS = 900
 
 
+@lru_cache(maxsize=32768)
 def normalize_name(value: str) -> str:
     # Retain scripts (including Cyrillic); do not merge academy, women's or U20 teams.
     value = "".join(c for c in unicodedata.normalize("NFKD", value) if not unicodedata.combining(c))

@@ -2511,3 +2511,8 @@ hourly rebalance results, but no longer hydrates frozen run payloads, takes sche
 write locks, reconciles runs, or enqueues execution on a browser refresh. Recovery
 and execution remain in existing worker/control paths. Reading history creates no
 audit event and does not change any frozen run or audit snapshot.
+
+Sports ranking enrichment now reuses matching work within each HTTP batch and runs
+outside the API event-loop thread. Numeric metrics are read anew for each request;
+matching thresholds and source/identity boundaries are unchanged. This affects
+read-time enrichment only and does not rewrite frozen inputs or audit snapshots.
