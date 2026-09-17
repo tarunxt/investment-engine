@@ -55,7 +55,12 @@ jobs:
             result=module.event_comparisons(EventComparisonsQuery(events=events[:200]),snapshots,current)
             print(json.dumps({'events':min(len(events),200),'duration_seconds':round(time.monotonic()-started,3),'matched':sum(c['match_status']=='matched' for c in result['comparisons'].values())}),flush=True)
             started=time.monotonic()
-            count=sum(len(module.ranking_rows(c,snapshots.get(c['source_id']))) for c in current)
+            count=0
+            for c in current:
+                print(json.dumps({'starting':c['id'],'participants':len(c['participants']),'source_rows':len(snapshots[c['source_id']].rows) if c['source_id'] in snapshots else 0}),flush=True)
+                step=time.monotonic()
+                count+=len(module.ranking_rows(c,snapshots.get(c['source_id'])))
+                print(json.dumps({'completed':c['id'],'seconds':round(time.monotonic()-step,3)}),flush=True)
             print(json.dumps({'all_catalogue_rows':count,'duration_seconds':round(time.monotonic()-started,3)}),flush=True)
             PY
             sudo systemd-run --quiet --wait --pipe --collect --uid=investor -p EnvironmentFile=/etc/investor/backend.env -p WorkingDirectory=/srv/investor/backend -p MemoryMax=768M -p CPUQuota=50% /srv/investor/backend/.venv/bin/python /tmp/credx-ranking-benchmark.py
