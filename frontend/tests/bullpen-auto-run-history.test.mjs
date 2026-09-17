@@ -158,6 +158,15 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyScreen, /current_odds_fetched_at: response\.fetchedAt/);
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
+  assert.match(historyContent, /aria-label="Choose table columns"/);
+  assert.match(historyContent, /BULLPEN_EVENT_TREND_COLUMN_OPTIONS\.map/);
+  assert.match(historyContent, /bullpen-event-trends-visible-columns-v1/);
+  assert.match(historyContent, /visibleColumnKeys=\{visibleColumnKeys\}/);
+  assert.match(trendsTable, /label: "Active \(icon\)"/);
+  assert.match(trendsTable, /label: "Cluster ID"/);
+  assert.match(trendsTable, /preferences\.order\.filter\(key => selectedColumnKeys\.has\(key\)\)/);
+  assert.match(trendsTable, /showActiveColumn &&/);
+  assert.match(trendsTable, /showClusterColumn &&/);
   assert.match(trendsTable, /\(event\.scan_scores\[0\] \?\? -1\) >= 80/);
   assert.match(trendsTable, /hasStrongestLatestLlmOdds\(event\) \|\| event\.is_active_position \|\| event\.is_claimable_position/);
   assert.match(trendsTable, /hasHeldSideOddsBelowThreshold\(event\)[\s\S]*?activeBelowOddsThreshold \? "bg-red-200 text-red-950 ring-2 ring-inset ring-red-600/);
