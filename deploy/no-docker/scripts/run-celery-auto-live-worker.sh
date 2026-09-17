@@ -25,4 +25,5 @@ exec "$BACKEND_ROOT/.venv/bin/celery" \
   --loglevel="${CELERY_LOG_LEVEL:-info}" \
   --concurrency="${CELERY_AUTO_LIVE_WORKER_CONCURRENCY:-1}" \
   --prefetch-multiplier="${CELERY_AUTO_LIVE_WORKER_PREFETCH_MULTIPLIER:-${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}}" \
-  --max-tasks-per-child="${CELERY_AUTO_LIVE_MAX_TASKS_PER_CHILD:-1}"
+  --max-tasks-per-child="${CELERY_AUTO_LIVE_MAX_TASKS_PER_CHILD:-1}" \
+  --max-memory-per-child="${CELERY_AUTO_LIVE_MAX_MEMORY_PER_CHILD_KB:-1200000}"

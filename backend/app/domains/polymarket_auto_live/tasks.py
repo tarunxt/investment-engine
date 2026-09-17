@@ -117,7 +117,11 @@ logger = get_logger("app.domains.polymarket_auto_live.tasks")
 
 AUTO_LIVE_WORKFLOW_MAX_RETRIES = 2
 WORKFLOW_TRIGGER_RECHECK_SECONDS = 15
-WORKFLOW_TRIGGER_MAX_RETRIES = 960
+# A stale execution lane must not keep two or more trigger batches waking a
+# prefork child every 15 seconds for four hours.  Thirty minutes is long enough
+# for a healthy serialized workflow; run recovery remains the durable path for
+# a genuinely stuck lane.
+WORKFLOW_TRIGGER_MAX_RETRIES = 120
 
 
 def _utc_now() -> datetime:
