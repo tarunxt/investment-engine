@@ -25,8 +25,8 @@ jobs:
             set -eu
             cd /srv/investor
             git rev-parse HEAD
-            sudo systemctl show investor-api -p ActiveState -p SubState -p MainPID -p MemoryCurrent -p ActiveEnterTimestamp
+            sudo systemctl show investor-backend -p ActiveState -p SubState -p MainPID -p MemoryCurrent -p ActiveEnterTimestamp
             ps -eo pid,pcpu,rss,etime,args --sort=-pcpu | head -n 9
             curl --max-time 8 --silent --show-error -w '\nhealth_seconds=%{time_total}\n' http://127.0.0.1:8000/health/live || true
-            pid=$(sudo systemctl show investor-api --value -p MainPID)
+            pid=$(pgrep -f "^/home/deploy/apps/myapp/backend/.venv/bin/python /srv/investor/backend/.venv/bin/uvicorn" | head -n 1)
             sudo /tmp/credx-history-pyspy/bin/py-spy dump --pid "$pid" || true
