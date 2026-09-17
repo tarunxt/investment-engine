@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 22467)
-Total output lines: 2351
-
 from __future__ import annotations
 
 import asyncio
@@ -1098,7 +1095,243 @@ def execute_polymarket_auto_live_run(
                 "Skipping duplicate Auto-Live run task %s for run %s; PostgreSQL "
                 "execution fence is held by another worker.",
                 task_id,
-             …2467 tokens truncated…c, SoftTimeLimitExceeded):
+                run_id,
+            )
+            raise Ignore()
+        with SyncSessionLocal() as lifecycle_session:
+            started_run = mark_auto_live_run_task_started_sync(
+                lifecycle_session,
+                run_id=run_id,
+                task_id=task_id,
+                worker_hostname=worker_hostname,
+                queue=_task_delivery_queue(self),
+                increment_redelivery=(
+                    broker_redelivered or lease_observed_at is not None
+                ),
+            )
+            lifecycle_session.commit()
+        if started_run is None:
+            logger.warning("Auto-Live run %s disappeared before its worker started", run_id)
+            return
+        if started_run.status != "running":
+            logger.info(
+                "Skipping inactive Auto-Live run %s with status %s",
+                run_id,
+                started_run.status,
+            )
+            _mark_auto_live_task_lifecycle_best_effort(
+                run_id=run_id,
+                task_id=task_id,
+                state="REVOKED" if started_run.status in {"failed", "skipped"} else "SUCCESS",
+                worker_hostname=worker_hostname,
+            )
+            return
+        heartbeat = AutoLiveRunHeartbeat(lease=lease, worker_hostname=worker_hostname)
+        heartbeat.start()
+        if not _run_execution_fence_is_owned(advisory_lock):
+            raise self.retry(
+                exc=AutoLiveRunExecutionLeaseLost(
+                    "Auto-Live PostgreSQL execution fence was lost before planner start."
+                ),
+                countdown=AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS,
+            )
+        _execute_polymarket_auto_live_run_with_lease(
+            self,
+            user_id,
+            run_id,
+            task_id=task_id,
+            heartbeat=heartbeat,
+            advisory_lock=advisory_lock,
+        )
+    finally:
+        if heartbeat is not None:
+            heartbeat.stop()
+        if advisory_lock is not None:
+            advisory_lock.release()
+        release_auto_live_run_execution_lease_sync(lease)
+
+
+def _execute_polymarket_auto_live_run_with_lease(
+    self,
+    user_id: int,
+    run_id: str,
+    *,
+    task_id: str,
+    heartbeat: AutoLiveRunHeartbeat,
+    advisory_lock: AutoLiveAdvisoryLock,
+) -> None:
+    with SyncSessionLocal() as session:
+        repo = SyncPolymarketAutoLiveRepository(session)
+        register_auto_live_run_task_sync(run_id, task_id)
+        run = repo.get_run(run_id)
+        if run is None:
+            logger.warning("Auto-Live run %s for user %s was not found", run_id, user_id)
+            return
+        if run.status != "running":
+            logger.info("Skipping inactive Auto-Live run %s with status %s", run_id, run.status)
+            _mark_auto_live_task_lifecycle_best_effort(
+                run_id=run_id,
+                task_id=task_id,
+                state="REVOKED" if run.status in {"failed", "skipped"} else "SUCCESS",
+                worker_hostname=getattr(self.request, "hostname", None),
+            )
+            return
+        if not _run_execution_fence_is_owned(advisory_lock):
+            session.rollback()
+            raise self.retry(
+                exc=AutoLiveRunExecutionLeaseLost(
+                    "Auto-Live PostgreSQL execution fence was lost before workflow start."
+                ),
+                countdown=AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS,
+            )
+        try:
+            materialize_run_audit_snapshot_sync(
+                session,
+                user_id=user_id,
+                run_id=run_id,
+                force=True,
+                freeze=False,
+            )
+            session.commit()
+        except Exception:
+            logger.exception("Initial Bullpen run audit materialization failed for run %s", run_id)
+            session.rollback()
+
+        settings, state = _synchronize_state(user_id, repo)
+        workspace_profile = (
+            run.request_context.console_profile.workspace_profile
+            if run.request_context is not None
+            and run.request_context.console_profile is not None
+            else None
+        )
+        if workspace_profile is not None:
+            settings = effective_filter_profile_settings(
+                settings,
+                workspace_profile,
+            )
+        position_records = repo.list_open_position_records(user_id)
+        positions = [_position_snapshot_from_record(record) for record in position_records]
+        historical_decisions = repo.list_decisions(user_id)
+
+        try:
+            if not _run_execution_fence_is_owned(advisory_lock):
+                raise AutoLiveRunExecutionLeaseLost(
+                    "Auto-Live PostgreSQL execution fence was lost before Stage 1/2 work."
+                )
+
+            def persist_progress(current_run: BullpenAutoLiveRun, current_state) -> None:
+                if not _run_execution_fence_is_owned(advisory_lock):
+                    raise AutoLiveRunExecutionLeaseLost(
+                        "Auto-Live PostgreSQL execution fence was lost before progress persistence."
+                    )
+                persist_auto_live_progress_sync(
+                    user_id=user_id,
+                    repo=repo,
+                    session=session,
+                    run=current_run,
+                    state=current_state,
+                )
+
+                # The engine invokes this callback immediately after finalizing
+                # Stage 2 and before it enters Stage 3. Reserve the delivery
+                # record before SMTP so worker redelivery cannot duplicate mail.
+                try:
+                    mail_metadata = notify_stage2_position_warnings_sync(
+                        session,
+                        user_id=user_id,
+                        run=current_run,
+                    )
+                    if mail_metadata.get("status") != "stage2_not_complete":
+                        repo.save_run(user_id, current_run)
+                        session.commit()
+                except Exception:
+                    session.rollback()
+                    logger.exception(
+                        "Stage 2 position-warning mail processing failed for run %s; "
+                        "the trading workflow will continue.",
+                        current_run.id,
+                    )
+
+            engine_result = run_with_bullpen_runtime_cleanup(
+                BullpenAutoLiveEngine().execute(
+                    user_id=user_id,
+                    settings=settings,
+                    state=state,
+                    run=run,
+                    positions=positions,
+                    historical_decisions=historical_decisions,
+                    progress_callback=persist_progress,
+                    durable_execution=auto_live_execution_v2_enabled(),
+                )
+            )
+            if engine_result.run.status not in {
+                "completed",
+                "partial_success",
+                "failed",
+                "skipped",
+                "confirming",
+            }:
+                raise RuntimeError(
+                    "Bullpen Auto-Live engine returned without finalizing the run "
+                    f"status (received {engine_result.run.status!r})."
+                )
+            if not _run_execution_fence_is_owned(advisory_lock):
+                raise AutoLiveRunExecutionLeaseLost(
+                    "Auto-Live PostgreSQL execution fence was lost before final persistence."
+                )
+        except AutoLiveRunExecutionLeaseLost as exc:
+            # Never let an old task save its stale in-memory run as a generic
+            # retry/failure after its ownership is gone. The advisory lock
+            # serializes any in-flight remote call; retry only after the task
+            # has unwound and released that fence.
+            logger.warning(
+                "Auto-Live run %s lost execution ownership; rolling back stale "
+                "planner state before a fenced retry.",
+                run_id,
+            )
+            session.rollback()
+            raise self.retry(
+                exc=exc,
+                countdown=AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS,
+            )
+        except AutoLiveRunCancelled:
+            logger.info("Stopping Auto-Live worker for user-cancelled run %s", run_id)
+            try:
+                materialize_run_audit_snapshot_sync(
+                    session,
+                    user_id=user_id,
+                    run_id=run_id,
+                    force=True,
+                    freeze=True,
+                )
+                session.commit()
+            except Exception:
+                logger.exception(
+                    "Bullpen run audit freeze after cancellation failed for run %s",
+                    run_id,
+                )
+                session.rollback()
+            _mark_auto_live_task_lifecycle_best_effort(
+                run_id=run_id,
+                task_id=task_id,
+                state="REVOKED",
+                worker_hostname=getattr(self.request, "hostname", None),
+            )
+            return
+        except Exception as exc:
+            if not _run_execution_fence_is_owned(advisory_lock):
+                session.rollback()
+                raise self.retry(
+                    exc=AutoLiveRunExecutionLeaseLost(
+                        "Auto-Live PostgreSQL execution fence was lost before retry persistence."
+                    ),
+                    countdown=AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS,
+                )
+            logger.exception("Auto-Live run %s failed before completion", run_id)
+            sanitized_error = redact_secrets(str(exc))
+            current_retries = int(getattr(self.request, "retries", 0) or 0)
+            max_retries = AUTO_LIVE_WORKFLOW_MAX_RETRIES
+            if current_retries < max_retries and not isinstance(exc, SoftTimeLimitExceeded):
                 if _run_was_cancelled_by_user(repo, run_id, lock=True):
                     logger.info("Skipping retry for cancelled Auto-Live run %s", run_id)
                     return
