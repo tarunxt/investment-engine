@@ -2516,3 +2516,7 @@ Sports ranking enrichment now reuses matching work within each HTTP batch and ru
 outside the API event-loop thread. Numeric metrics are read anew for each request;
 matching thresholds and source/identity boundaries are unchanged. This affects
 read-time enrichment only and does not rewrite frozen inputs or audit snapshots.
+
+### 2026-09-17 — Bound imported-team fuzzy matching
+
+Live traffic exposed a remaining CPU bottleneck after moving comparisons off the API loop: fuzzy matching grew with every unranked imported participant. Ranking tables now index exact names incrementally and run conservative fuzzy matching only against validated source rows. Unranked imported rows remain available through exact names and aliases, but cannot become fuzzy proxies for unrelated teams. Safe similarity upper bounds skip pairs that cannot meet either the acceptance threshold or ambiguity margin. This preserves published metrics and avoids fabricating rankings. Regression coverage includes a 3,000-participant unranked import and unique/ambiguous source matches.
