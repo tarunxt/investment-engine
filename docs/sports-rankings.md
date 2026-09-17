@@ -184,3 +184,5 @@ ranking metrics are never cached between requests. CPU matching runs outside the
 FastAPI event-loop thread so a large history batch cannot block health, portfolio,
 or history requests. Matching thresholds, scope boundaries and ambiguity rules
 are unchanged.
+
+Imported unranked placeholders are exact-name/alias matches only. Fuzzy matching is limited to published ranking rows, with character-count upper bounds before expensive similarity scoring. Exact lookup uses an incremental index so importing large participant lists does not cause quadratic fuzzy matching.

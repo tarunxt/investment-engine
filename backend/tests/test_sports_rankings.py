@@ -266,3 +266,24 @@ async def test_comparison_cpu_work_does_not_run_on_api_event_loop(monkeypatch):
     monkeypatch.setattr(router, 'event_comparisons', compare)
     result = await router.compare_events(query, db=None, current_user=SimpleNamespace(id=7))
     assert result == {'comparisons': {}}
+
+
+def test_large_unranked_import_does_not_fuzzy_match_placeholders(monkeypatch):
+    from app.domains.sports_rankings import service
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Unranked placeholders must not trigger fuzzy scoring")
+    monkeypatch.setattr(service, 'SequenceMatcher', unexpected)
+    participants = [{'name': f'Imported participant {i}'} for i in range(3000)]
+    rows = service.ranking_rows({'code': 'test', 'participants': participants})
+    assert len(rows) == 3000
+    assert all(row['rank'] is None for row in rows)
+    assert [row['name'] for row in rows] == [p['name'] for p in participants]
+
+
+def test_fuzzy_upper_bound_preserves_unique_and_ambiguous_source_matches():
+    from app.domains.sports_rankings.service import _matching_rows
+    unique = [{'name': 'Nottingham', 'rank': 3}]
+    assert _matching_rows(['Nottinghem'], unique, 'test') == unique
+    ambiguous = unique + [{'name': 'Nottinghum', 'rank': 4}]
+    assert _matching_rows(['Nottinghem'], ambiguous, 'test') == []
+    assert _matching_rows(['Unrelated club'], unique, 'test') == []

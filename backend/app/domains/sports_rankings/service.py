@@ -1,3 +1,4 @@
+from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from difflib import SequenceMatcher
@@ -48,6 +49,7 @@ def summary(competition, snapshot=None):
 def ranking_rows(competition, snapshot=None):
     code = competition.get("code", "")
     rows = [{**r, "imported_names": []} for r in (snapshot.rows if snapshot else [])]
+    matcher = _RowMatcher(rows, code)
     for participant in competition["participants"]:
         names = [
             participant["name"],
@@ -55,11 +57,13 @@ def ranking_rows(competition, snapshot=None):
                 code, participant["name"], participant.get("aliases", [])
             ),
         ]
-        matches = _matching_rows(names, rows, code)
+        matches = matcher.match(names)
         if len(matches) == 1:
             matches[0]["imported_names"].append(participant["name"])
         else:
-            rows.append({"name": participant["name"], "rank": None, "points": None, "imported_names": [participant["name"]], "match_status": "ambiguous" if matches else "unmatched"})
+            row = {"name": participant["name"], "rank": None, "points": None, "imported_names": [participant["name"]], "match_status": "ambiguous" if matches else "unmatched"}
+            rows.append(row)
+            matcher.add(row)
     return rows
 
 
@@ -126,35 +130,71 @@ def _compatible_team_scope(left, right):
     return left_scope == right_scope
 
 
-def _matching_rows(names, rows, code, *, include_global=False):
-    query_keys = set()
-    for name in names:
-        query_keys.update(_team_name_keys(name, code, include_global=include_global))
-    exact = [
-        row for row in rows
-        if query_keys.intersection(_team_name_keys(row["name"], code, include_global=include_global))
-    ]
-    if exact:
-        return exact
+@lru_cache(maxsize=32768)
+def _key_counts(key):
+    return Counter(key)
 
-    # A conservative unique fuzzy fallback catches punctuation, shortened
-    # legal names and provider abbreviations not yet seen in the alias file.
-    scored = []
-    for row in rows:
-        if not any(_compatible_team_scope(name, row["name"]) for name in names):
-            continue
-        row_keys = _team_name_keys(row["name"], code, include_global=include_global)
-        score = max(
-            (SequenceMatcher(None, left, right).ratio() for left in query_keys for right in row_keys),
-            default=0.0,
-        )
-        scored.append((score, row))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    if not scored or scored[0][0] < 0.88:
-        return []
-    if len(scored) > 1 and scored[0][0] - scored[1][0] < 0.08:
-        return []
-    return [scored[0][1]]
+
+class _RowMatcher:
+    """Incremental exact index with a safe upper bound before fuzzy scoring."""
+
+    def __init__(self, rows, code, *, include_global=False):
+        self.code = code
+        self.include_global = include_global
+        self.rows = []
+        self.ranked_rows = []
+        self.exact = defaultdict(list)
+        for row in rows:
+            self.add(row)
+
+    def add(self, row):
+        keys = _team_name_keys(row["name"], self.code, include_global=self.include_global)
+        index = len(self.rows)
+        self.rows.append((row, keys))
+        # Imported placeholders have no validated ranking and must not become
+        # fuzzy aliases for another imported team. Keep exact lookup only.
+        if not row.get("match_status"):
+            self.ranked_rows.append((row, keys))
+        for key in keys:
+            self.exact[key].append(index)
+
+    def match(self, names):
+        query_keys = set()
+        for name in names:
+            query_keys.update(_team_name_keys(name, self.code, include_global=self.include_global))
+        exact = {index for key in query_keys for index in self.exact.get(key, ())}
+        if exact:
+            return [self.rows[index][0] for index in sorted(exact)]
+        scored = []
+        for row, row_keys in self.ranked_rows:
+            if not any(_compatible_team_scope(name, row["name"]) for name in names):
+                continue
+            score = 0.0
+            for left in query_keys:
+                for right in row_keys:
+                    total = len(left) + len(right)
+                    # Scores below .80 can neither win (.88) nor make an
+                    # accepted winner ambiguous (margin .08). Both bounds
+                    # dominate SequenceMatcher.ratio, so matching is unchanged.
+                    if not total or 2 * min(len(left), len(right)) < .799999999999 * total:
+                        continue
+                    left_counts, right_counts = _key_counts(left), _key_counts(right)
+                    overlap = sum(min(count, right_counts.get(char, 0)) for char, count in left_counts.items())
+                    if 2 * overlap < .799999999999 * total:
+                        continue
+                    score = max(score, SequenceMatcher(None, left, right).ratio())
+            if score >= .799999999999:
+                scored.append((score, row))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if not scored or scored[0][0] < .88:
+            return []
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < .08:
+            return []
+        return [scored[0][1]]
+
+
+def _matching_rows(names, rows, code, *, include_global=False):
+    return _RowMatcher(rows, code, include_global=include_global).match(names)
 
 
 def _ranking_rows_cached(competition, snapshot, rows_cache):
