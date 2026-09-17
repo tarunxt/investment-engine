@@ -3,7 +3,7 @@ name: Inspect Rankings Runtime
 on:
   workflow_dispatch:
   push:
-    branches: [codex/fix-ranking-errors]
+    branches: [codex/inspect-event-trends-runtime-20260917]
     paths: [.github/workflows/inspect-ranking-runtime.yml]
 
 permissions:
