@@ -6,6 +6,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class AutoLiveTriggerUnificationTests(unittest.TestCase):
+    def test_workflow_trigger_wait_is_bounded_to_thirty_minutes(self) -> None:
+        source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/tasks.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("WORKFLOW_TRIGGER_RECHECK_SECONDS = 15", source)
+        self.assertIn("WORKFLOW_TRIGGER_MAX_RETRIES = 120", source)
+        self.assertNotIn("WORKFLOW_TRIGGER_MAX_RETRIES = 960", source)
+
     def test_due_scheduler_queues_both_workflow_stage1_profiles(self) -> None:
         source = (
             ROOT / "backend/app/domains/polymarket_auto_live/tasks.py"

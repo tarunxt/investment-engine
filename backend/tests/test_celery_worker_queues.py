@@ -11,6 +11,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_COMMON = REPOSITORY_ROOT / "deploy/no-docker/scripts/runtime-common.sh"
 PRIMARY_WORKER_SCRIPT = REPOSITORY_ROOT / "deploy/no-docker/scripts/run-celery-worker.sh"
 EMAIL_WORKER_SCRIPT = REPOSITORY_ROOT / "deploy/no-docker/scripts/run-celery-email-worker.sh"
+AUTO_LIVE_WORKER_SCRIPT = (
+    REPOSITORY_ROOT / "deploy/no-docker/scripts/run-celery-auto-live-worker.sh"
+)
+BEAT_WORKER_SCRIPT = (
+    REPOSITORY_ROOT / "deploy/no-docker/scripts/run-celery-beat-worker.sh"
+)
 
 
 def _effective_queues(configured_queues: str) -> subprocess.CompletedProcess[str]:
@@ -59,3 +65,34 @@ def test_email_worker_has_one_dedicated_pool_without_adding_total_concurrency():
     assert "-Q email" in script
     assert "CELERY_EMAIL_WORKER_CONCURRENCY:-1" in script
     assert 'email-worker@%h' in script
+
+
+def test_long_lived_worker_children_are_recycled_by_memory():
+    auto_live = AUTO_LIVE_WORKER_SCRIPT.read_text()
+    beat = BEAT_WORKER_SCRIPT.read_text()
+
+    assert "--max-memory-per-child" in auto_live
+    assert "CELERY_AUTO_LIVE_MAX_MEMORY_PER_CHILD_KB:-1200000" in auto_live
+    assert "--max-memory-per-child" in beat
+    assert "CELERY_BEAT_WORKER_MAX_MEMORY_PER_CHILD_KB:-400000" in beat
+
+
+def test_production_services_reserve_api_memory_and_contain_worker_ooms():
+    unit_root = REPOSITORY_ROOT / "deploy/no-docker/systemd"
+    for prefix in ("investor", "investment-engine"):
+        backend = (unit_root / f"{prefix}-backend.service").read_text()
+        assert "MemoryLow=1024M" in backend
+        assert "OOMScoreAdjust=-500" in backend
+        assert "CPUWeight=200" in backend
+
+        for role in (
+            "celery-worker",
+            "celery-auto-live-worker",
+            "celery-email-worker",
+            "celery-beat-worker",
+        ):
+            worker = (unit_root / f"{prefix}-{role}.service").read_text()
+            assert "MemoryHigh=" in worker
+            assert "MemoryMax=" in worker
+            assert "MemorySwapMax=" in worker
+            assert "OOMPolicy=kill" in worker
