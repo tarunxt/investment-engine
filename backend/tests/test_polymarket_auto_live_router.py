@@ -856,7 +856,7 @@ async def test_history_state_poll_is_read_only_and_preserves_rebalance(monkeypat
     monkeypatch.setattr(route_module, "_read_display_state", read_display)
     app = _build_test_app(auto_live_router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get("/polymarket-auto-live/state")
+        response = await client.get("/polymarket/auto-live/state")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-store"
     assert response.json()["last_run_id"] == "large-running-run"
@@ -876,6 +876,6 @@ async def test_history_state_poll_returns_retryable_timeout(monkeypatch):
     monkeypatch.setattr(route_module, "PERSISTED_STATUS_TIMEOUT_SECONDS", 0.001)
     app = _build_test_app(auto_live_router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        response = await client.get("/polymarket-auto-live/state")
+        response = await client.get("/polymarket/auto-live/state")
     assert response.status_code == 503
     assert "temporarily delayed" in response.json()["detail"]

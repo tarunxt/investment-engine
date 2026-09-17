@@ -2505,7 +2505,7 @@ performance and presentation; frozen Stage 1/2/3 audit payloads are unchanged.
 
 ### Read-only history state (September 2026)
 
-`GET /polymarket-auto-live/state` reads authenticated scheduler/configuration
+`GET /polymarket/auto-live/state` reads authenticated scheduler/configuration
 metadata in one bounded session. It preserves the state response fields, including
 hourly rebalance results, but no longer hydrates frozen run payloads, takes scheduler
 write locks, reconciles runs, or enqueues execution on a browser refresh. Recovery
