@@ -635,6 +635,20 @@ class BullpenAutoLiveBot:
             await session.commit()
             return settings
 
+    async def get_display_state(
+        self, session: AsyncSession,
+    ) -> BullpenAutoLiveState:
+        """Read scheduler metadata without hydrating runs or driving execution.
+
+        Recovery and scheduling belong to the worker/control paths. A history
+        refresh must neither decode a large frozen payload nor wait for a write
+        lock held by a planner.
+        """
+        repo = AsyncPolymarketAutoLiveRepository(session)
+        settings = record_to_settings(await repo.get_settings_record(self.user_id))
+        state = record_to_state(await repo.get_state_record(self.user_id))
+        return self._synchronize_persisted_scheduler_state(settings, state)
+
     async def get_state(self) -> BullpenAutoLiveState:
         should_enqueue_due_run = False
         async with AsyncSessionLocal() as session:

@@ -633,11 +633,28 @@ async def reset_auto_live_settings(current_user: User = Depends(get_current_user
     return await bot.reset_settings()
 
 
+async def _read_display_state(credentials: HTTPAuthorizationCredentials | None):
+    async with AsyncSessionLocal() as session:
+        user_id = await _resolve_persisted_status_user_id(credentials, session)
+        bot = await polymarket_auto_live_bot_manager.get_bot(user_id)
+        return await bot.get_display_state(session)
+
+
 @router.get("/state", response_model=BullpenAutoLiveState)
-async def get_auto_live_state(current_user: User = Depends(get_current_user)):
-    bot = await _get_bot(current_user)
+async def get_auto_live_state(
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    """Read display state; browser polling must not run scheduler recovery."""
+    response.headers["Cache-Control"] = "private, no-store"
     try:
-        return await bot.get_state()
+        return await asyncio.wait_for(
+            _read_display_state(credentials), timeout=PERSISTED_STATUS_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503, detail="Auto-Live state is temporarily delayed. Retry shortly.",
+        ) from exc
     except SQLAlchemyError as exc:
         raise _database_not_ready_error(exc) from exc
 

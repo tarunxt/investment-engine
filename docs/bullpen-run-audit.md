@@ -2502,3 +2502,12 @@ as evidence of a legacy projection, and therefore does not inspect the immutable
 full-run payload. Once a stage is terminal, the existing bounded compatibility
 overlay remains available for older projections. This changes only History read
 performance and presentation; frozen Stage 1/2/3 audit payloads are unchanged.
+
+### Read-only history state (September 2026)
+
+`GET /polymarket/auto-live/state` reads authenticated scheduler/configuration
+metadata in one bounded session. It preserves the state response fields, including
+hourly rebalance results, but no longer hydrates frozen run payloads, takes scheduler
+write locks, reconciles runs, or enqueues execution on a browser refresh. Recovery
+and execution remain in existing worker/control paths. Reading history creates no
+audit event and does not change any frozen run or audit snapshot.
