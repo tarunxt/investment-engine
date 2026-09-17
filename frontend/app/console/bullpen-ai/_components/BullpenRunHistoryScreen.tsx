@@ -430,16 +430,10 @@ async function applySportsRankingsToEventTrends(
       comparisons: Record<string, BullpenSportsRankingComparison>;
     }>(events)).comparisons;
   } catch {
-    // The ranking detail reads below remain an independent recovery path.
-  }
-  const unresolved = events.filter(
-    (event) => comparisons[event.market_id]?.match_status !== "matched",
-  );
-  if (unresolved.length) {
-    comparisons = {
-      ...comparisons,
-      ...(await readSportsEventComparisonsFromDetails(unresolved)),
-    };
+    // A successful batch is authoritative, including unavailable/ambiguous
+    // rankings. Detail recovery is only for a failed request; retrying every
+    // unmatched event delayed all results and the portfolio for minutes.
+    comparisons = await readSportsEventComparisonsFromDetails(events);
   }
   return {
     ...trends,
@@ -800,6 +794,9 @@ export function BullpenRunHistoryScreen({
         positionsPromise,
         runtimeStatePromise.catch(() => null),
       ]);
+      // Show the freshly primed portfolio before optional event enrichment.
+      setPortfolioVersion((version) => version + 1);
+      setPortfolioReady(true);
       if (runtimeState) {
         setLastRebalanceAt(runtimeState.last_rebalance_at ?? null);
         setHourlyRebalanceStatus(runtimeState.latest_hourly_rebalance_status ?? null);
@@ -885,7 +882,6 @@ export function BullpenRunHistoryScreen({
           );
         }
       }
-      setPortfolioVersion((version) => version + 1);
     } catch (cause) {
       setError(
         `Run history is temporarily unavailable. ${formatUnknownError(cause)}`,

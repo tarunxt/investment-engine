@@ -2520,3 +2520,7 @@ read-time enrichment only and does not rewrite frozen inputs or audit snapshots.
 ### 2026-09-17 — Bound imported-team fuzzy matching
 
 Live traffic exposed a remaining CPU bottleneck after moving comparisons off the API loop: fuzzy matching grew with every unranked imported participant. Ranking tables now index exact names incrementally and run conservative fuzzy matching only against validated source rows. Unranked imported rows remain available through exact names and aliases, but cannot become fuzzy proxies for unrelated teams. Safe similarity upper bounds skip pairs that cannot meet either the acceptance threshold or ambiguity margin. This preserves published metrics and avoids fabricating rankings. Regression coverage includes a 3,000-participant unranked import and unique/ambiguous source matches.
+
+### 2026-09-17 — Render successful history enrichment promptly
+
+Live browser verification found that successful comparison responses were followed by a detail-request fan-out for every unmatched event. The page withheld all comparisons and the portfolio until those redundant reads finished. Successful comparison batches are now authoritative, including legitimate missing/ambiguous rankings; independent detail recovery remains available after a failed batch request. The wallet-primed portfolio becomes visible before optional event enrichment. Behavioral frontend tests cover successful unmatched responses and failed-request recovery.

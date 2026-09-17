@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
+import ts from "typescript";
 
 const historyScreen = readFileSync(
   new URL(
@@ -186,7 +188,7 @@ test("History shows bought price and exact Bullpen bid/ask spreads", () => {
   assert.match(historyScreen, /current_yes_bid_cents: market\?\.yesBestBid/);
   assert.match(historyScreen, /current_no_ask_cents: market\?\.noBestAsk/);
   assert.match(trendsTable, /\{ key: "bought", label: "Bought"/);
-  assert.match(trendsTable, /"score", "bought", "currentOdds"/);
+  assert.match(trendsTable, /"score", "tags", "ranking", "rating", "points", "bought", "currentOdds"/);
   assert.match(trendsTable, /Spread \$\{cents\(spread\)\}/);
   assert.match(trendsTable, /heldSideCurrentOdds > HELD_SIDE_ODDS_ALERT_THRESHOLD/);
 });
@@ -208,7 +210,7 @@ test("History keeps deadlines and Returns/day when the latest LLM scan is uncove
   );
   assert.match(
     historyScreen,
-    /applyCurrentOrderBookOddsToEventTrends\(\s*positionTrends,/,
+    /applyCurrentOrderBookOddsToEventTrends\(\s*rankedTrends,/,
   );
   assert.match(
     historyScreen,
@@ -238,4 +240,38 @@ test("History does not treat a shared parent market id as an active contract mat
     /const contractCandidates = activePositions\.filter\(\(position\) =>\s*isSameBullpenContract\(event, position\)/,
   );
   assert.match(historyScreen, /candidates: contractCandidates/);
+});
+
+
+function rankingEnrichment(batch, fallback) {
+  const start = historyScreen.indexOf("async function applySportsRankingsToEventTrends(");
+  const end = historyScreen.indexOf("type RankingDetailRow", start);
+  const code = ts.transpileModule(historyScreen.slice(start, end), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return vm.runInNewContext(`${code}; applySportsRankingsToEventTrends`, {
+    readSportsEventComparisons: batch,
+    readSportsEventComparisonsFromDetails: fallback,
+  });
+}
+
+test("Successful ranking batches render unmatched rows without detail fan-out", async () => {
+  const enrich = rankingEnrichment(
+    async () => ({ comparisons: { a: { match_status: "unmatched", ranking: null } } }),
+    async () => { throw new Error("Unexpected detail fan-out"); },
+  );
+  const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "cup-a-b" }] });
+  assert.equal(result.events[0].sports_ranking.match_status, "unmatched");
+  assert.equal(result.events[0].sports_ranking.ranking, null);
+});
+
+test("Failed ranking batches retain independent detail recovery", async () => {
+  let calls = 0;
+  const enrich = rankingEnrichment(
+    async () => { throw new Error("Temporary gateway failure"); },
+    async () => { calls++; return { a: { match_status: "matched", ranking: { delta: -2 } } }; },
+  );
+  const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "cup-a-b" }] });
+  assert.equal(calls, 1);
+  assert.equal(result.events[0].sports_ranking.ranking.delta, -2);
 });

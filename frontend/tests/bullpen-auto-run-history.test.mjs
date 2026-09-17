@@ -319,7 +319,7 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(sportsRankingsApi, /AbortSignal\.timeout\(16_500\)/);
   assert.match(historyScreen, /sports_event_title: market\?\.eventTitle/);
   assert.match(historyScreen, /comparisons\[event\.market_id\]\?\.match_status === "matched"/);
-  assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(unresolved\)/);
+  assert.match(historyScreen, /readSportsEventComparisonsFromDetails\(events\)/);
   assert.match(historyScreen, /readRankingJson<\{ competitions: RankingCompetition\[\] \}>\(""\)/);
   assert.match(historyScreen, /teamNameKey/);
   assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)/);
