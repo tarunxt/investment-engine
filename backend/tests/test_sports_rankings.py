@@ -273,7 +273,7 @@ def test_large_unranked_import_does_not_fuzzy_match_placeholders(monkeypatch):
     def unexpected(*args, **kwargs):
         raise AssertionError("Unranked placeholders must not trigger fuzzy scoring")
     monkeypatch.setattr(service, 'SequenceMatcher', unexpected)
-    participants = [{'name': f'Imported participant {i}'} for i in range(3000)]
+    participants = [{'name': f'Importedparticipant{i}'} for i in range(3000)]
     rows = service.ranking_rows({'code': 'test', 'participants': participants})
     assert len(rows) == 3000
     assert all(row['rank'] is None for row in rows)
