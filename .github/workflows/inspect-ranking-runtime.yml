@@ -23,44 +23,10 @@ jobs:
           command_timeout: 180s
           script: |
             set -eu
-            curl --fail --silent --show-error https://raw.githubusercontent.com/tarunxt/investment-engine/0d206c47178fd35c7ff8d38c1b915b79d7d97a65/backend/app/domains/sports_rankings/service.py -o /tmp/credx-ranking-candidate.py
-            cat > /tmp/credx-ranking-benchmark.py <<'PY'
-            import importlib.util, json, signal, sys, time
-            sys.path.insert(0, '/srv/investor/backend')
-            from app.domains.sports_rankings.catalogue import CATALOGUE, augment_catalogue
-            from app.domains.sports_rankings.polymarket_participants import load_participant_index
-            from app.domains.sports_rankings.models import SportsRankingSnapshot
-            from app.domains.sports_rankings.schemas import EventComparisonsQuery
-            import app.models
-            from app.domains.auth.models import User
-            from app.infrastructure.database.sync_session import SyncSessionLocal
-            from sqlalchemy import select
-            signal.alarm(120)
-            spec=importlib.util.spec_from_file_location('app.domains.sports_rankings.benchmark','/tmp/credx-ranking-candidate.py')
-            module=importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            with SyncSessionLocal() as session:
-                uid=session.scalar(select(User.id).where(User.email=='tarun.singh6893@gmail.com'))
-                snapshots={s.source_id:s for s in session.scalars(select(SportsRankingSnapshot)).all()}
-                session.expunge_all()
-            current=augment_catalogue(CATALOGUE,load_participant_index(uid))
-            wanted=set(["egy1-gem-zas-2026-09-16","efl-eve-wol-2026-09-09","pol-wlo-wie-2026-09-18","acle-por-vik-2026-09-16","bl2-wob-svd-2026-09-18","u20wwc-bra-usa-2026-09-16","sea-mon-sas-2026-09-18","uel-sun-az-2026-09-16","uslc-har-spo-2026-09-16","uel-mil1-ben-2026-09-16","u20wwc-esp-por-2026-09-16","aut-scr-wsg-2026-09-18","uel-stu1-ren1-2026-09-16","efl-fle-she-2026-09-16","lal-dep-sev-2026-09-16","lib-lqu-pal-2026-09-16","uel-lil1-ut-2026-09-17","sud-cam-san-2026-09-16","uel-and-lyo-2026-09-16","lal-bar-rrc-2026-09-16","lal-bet-get-2026-09-17","lal-esp-elc-2026-09-18","fl1-asm-rcl-2026-09-18","grc-kif-pao-2026-09-16","uel-bes-olm-2026-09-17","uel-oly-jag-2026-09-16","uel-lev-cel2-2026-09-16","sud-tor-cie-2026-09-17","grc-aek-mp-2026-09-17","efl-mnu-bha-2026-09-16","efl-mnc-nor-2026-09-17","lal-lev-bil-2026-09-16","tur-kas-kon-2026-09-18","acle-jeo-rey-2026-09-16","uel-juv-nec-2026-09-17","u20wwc-ita-chn-2026-09-16","isr-hta-pet-2026-09-18","enl-kid-gat-2026-09-16","rus-spa-fak-2026-09-16","rus-bal-zen-2026-09-16","uel-cel-ftc-2026-09-17","rou1-fcr-fap-2026-09-20","bun-bay-uni-2026-09-18","lib-cor-est-2026-09-16","nwsl-den-bay-2026-09-16","argpn-sma-tri-2026-09-16","uel-cry-lep-2026-09-17","bol1-gua-aur-2026-09-16","lal-mad-osa-2026-09-16","bol1-nap-alw-2026-09-16","epl-bre-che-2026-09-18","chi1-ccu-cdh-2026-08-30","idn1-sam-dew-2026-09-16","efl-cov-ast-2026-09-16","uel-omo-cel1-2026-09-16","grc-ari-mar-2026-09-16","u20wwc-arg-kor-2026-09-16","uel-aa-spp-2026-09-16","uel-rso-bou-2026-09-17"])
-            events=[]
-            for c in current:
-                for e in c['events']:
-                    if e.get('slug') in wanted and module._head_to_head_participants(e.get('title')):
-                        events.append({'market_id':str(len(events)), 'event_slug':e['slug'], 'event_title':e['title']})
-            print(json.dumps({'browser_event_slugs':len(wanted),'matched_catalogue_events':len(events)}),flush=True)
-            started=time.monotonic()
-            result=module.event_comparisons(EventComparisonsQuery(events=events[:200]),snapshots,current)
-            print(json.dumps({'events':min(len(events),200),'duration_seconds':round(time.monotonic()-started,3),'matched':sum(c['match_status']=='matched' for c in result['comparisons'].values())}),flush=True)
-            started=time.monotonic()
-            count=0
-            for c in current:
-                print(json.dumps({'starting':c['id'],'participants':len(c['participants']),'source_rows':len(snapshots[c['source_id']].rows) if c['source_id'] in snapshots else 0}),flush=True)
-                step=time.monotonic()
-                count+=len(module.ranking_rows(c,snapshots.get(c['source_id'])))
-                print(json.dumps({'completed':c['id'],'seconds':round(time.monotonic()-step,3)}),flush=True)
-            print(json.dumps({'all_catalogue_rows':count,'duration_seconds':round(time.monotonic()-started,3)}),flush=True)
-            PY
-            sudo systemd-run --quiet --wait --pipe --collect --uid=investor -p EnvironmentFile=/etc/investor/backend.env -p WorkingDirectory=/srv/investor/backend -p MemoryMax=768M -p CPUQuota=50% /srv/investor/backend/.venv/bin/python /tmp/credx-ranking-benchmark.py
+            cd /srv/investor
+            git rev-parse HEAD
+            sudo systemctl show investor-backend -p ActiveState -p MainPID -p MemoryCurrent -p ActiveEnterTimestamp
+            curl --max-time 8 --silent --show-error -w '\nhealth_seconds=%{time_total}\n' http://127.0.0.1:8000/health/live || true
+            pid=$(sudo systemctl show investor-backend --value -p MainPID)
+            sudo /tmp/credx-history-pyspy/bin/py-spy dump --pid "$pid" || true
+            sudo journalctl -u investor-backend --since '5 minutes ago' --no-pager | grep -E 'request_performance|ERROR|Traceback' | tail -n 65
