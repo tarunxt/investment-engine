@@ -817,3 +817,65 @@ def test_event_trends_defer_immutable_decision_payload_reads():
     assert 'decision.payload["llm_outputs"]' not in initial_slice
     assert "fallback_decision_ids" in source[fallback_query:]
     assert 'decision.payload["llm_outputs"]' in source[fallback_query:]
+
+
+@pytest.mark.anyio
+async def test_history_state_poll_is_read_only_and_preserves_rebalance(monkeypatch):
+    from app.domains.polymarket_auto_live import bot as bot_module
+    from app.domains.polymarket_auto_live import router as route_module
+
+    class MetadataRepo:
+        def __init__(self, session):
+            assert session is sentinel
+
+        async def get_settings_record(self, user_id):
+            assert user_id == 7
+            return None
+
+        async def get_state_record(self, user_id):
+            assert user_id == 7
+            return None
+
+        def __getattr__(self, name):
+            raise AssertionError(f"Display polling must not call {name}")
+
+    sentinel = object()
+    state = BullpenAutoLiveState(
+        last_run_id="large-running-run",
+        latest_hourly_rebalance_status="failed",
+        latest_hourly_rebalance_at="2026-09-17T05:00:00+00:00",
+        latest_hourly_rebalance_detail="Recorded failure",
+    )
+    monkeypatch.setattr(bot_module, "AsyncPolymarketAutoLiveRepository", MetadataRepo)
+    monkeypatch.setattr(bot_module, "record_to_state", lambda record: state)
+    bot = bot_module.BullpenAutoLiveBot(user_id=7)
+
+    async def read_display(credentials):
+        return await bot.get_display_state(sentinel)
+
+    monkeypatch.setattr(route_module, "_read_display_state", read_display)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/polymarket-auto-live/state")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json()["last_run_id"] == "large-running-run"
+    assert response.json()["latest_hourly_rebalance_status"] == "failed"
+    assert response.json()["latest_hourly_rebalance_detail"] == "Recorded failure"
+
+
+@pytest.mark.anyio
+async def test_history_state_poll_returns_retryable_timeout(monkeypatch):
+    import asyncio
+    from app.domains.polymarket_auto_live import router as route_module
+
+    async def delayed_read(credentials):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(route_module, "_read_display_state", delayed_read)
+    monkeypatch.setattr(route_module, "PERSISTED_STATUS_TIMEOUT_SECONDS", 0.001)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/polymarket-auto-live/state")
+    assert response.status_code == 503
+    assert "temporarily delayed" in response.json()["detail"]
