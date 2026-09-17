@@ -164,6 +164,23 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /visibleColumnKeys=\{visibleColumnKeys\}/);
   assert.match(trendsTable, /label: "Active \(icon\)"/);
   assert.match(trendsTable, /label: "Cluster ID"/);
+  for (const label of [
+    "Event",
+    "Deadline",
+    "Claim date",
+    "Score",
+    "tag(s)",
+    "Ranking",
+    "Rating",
+    "Points",
+    "Bought",
+    "Current Odds",
+    "LLM Odds",
+    "Returns/day",
+    "20 scans · newest to oldest",
+  ]) {
+    assert.ok(trendsTable.includes(`label: "${label}"`), label);
+  }
   assert.match(trendsTable, /preferences\.order\.filter\(key => selectedColumnKeys\.has\(key\)\)/);
   assert.match(trendsTable, /showActiveColumn &&/);
   assert.match(trendsTable, /showClusterColumn &&/);
