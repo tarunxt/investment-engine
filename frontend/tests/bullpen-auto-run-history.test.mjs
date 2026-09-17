@@ -204,6 +204,24 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
 });
 
+test("event trends timeout is editable, persisted, and sent to the proxy", () => {
+  const timeoutHook = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/useEventTrendsTimeout.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(timeoutHook, /DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS = 30/);
+  assert.match(timeoutHook, /bullpen-event-trends-timeout-seconds-v1/);
+  assert.match(timeoutHook, /window\.localStorage\.setItem/);
+  assert.match(historyContent, /Backend wait threshold/);
+  assert.match(historyContent, /Save threshold/);
+  assert.match(historyContent, /onClick=\{onConfigure\}/);
+  assert.match(apiService, /query\.set\("proxy_timeout_seconds"/);
+});
+
 test("Stage 1 and history refresh exact contracts instead of shared parent events", () => {
   assert.match(scheduleCard, /conditionId: candidate\.conditionId/);
   assert.match(scheduleCard, /const activeSide = \[\s*candidate\.conditionId/);

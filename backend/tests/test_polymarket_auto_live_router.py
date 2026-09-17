@@ -789,11 +789,14 @@ async def test_history_deadline_includes_auth_pool_wait(monkeypatch, suffix):
     monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
     monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", blocked_auth)
     monkeypatch.setattr(prefix + "HISTORY_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(prefix + "_event_trends_timeout_seconds", lambda _: 0.01)
     app = _build_test_app(auto_live_router)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
         response = await client.get("/polymarket/auto-live/history" + suffix)
     assert response.status_code == 503
     assert response.headers["cache-control"] == "no-store"
+    if suffix:
+        assert "30 seconds" in response.json()["detail"]
     assert closed == [True]
 
 

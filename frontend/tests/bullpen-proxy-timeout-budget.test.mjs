@@ -37,6 +37,13 @@ test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", (
   );
   assert.match(proxySource, /getProxyTotalTimeoutMs\(request\.method, path\)/);
   assert.match(proxySource, /X-Backend-Proxy-Budget-Ms/);
+  assert.match(
+    proxySource,
+    /The backend did not respond in time \(\$\{formatTimeoutBudget\(eventTrendsTimeoutMs \?\? totalTimeoutMs\)\}\)\. Please retry\./,
+  );
+  assert.match(proxySource, /DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS = 30_000/);
+  assert.match(proxySource, /MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS = 120_000/);
+  assert.match(proxySource, /proxy_timeout_seconds/);
 });
 
 test("ordinary API reads retain the strict fast-failure budget", () => {
