@@ -359,6 +359,17 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(historyScreen, /const identityBaseTrends = applySportsEventMetadata\(cachedTrends, null\)/);
   assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)\.catch\(\(\) => null\)/);
   assert.match(trendsTable, /event\.sports_event_title\?\.split/);
+  assert.match(trendsTable, /sportsNumber\(Math\.abs\(value\)\)/);
+  assert.match(trendsTable, /absoluteSportsMetricDelta/);
+  assert.match(trendsTable, /Math\.abs\(delta\)/);
+  assert.match(trendsTable, /isSportsDeltaSortKey\(key\)/);
+  assert.match(trendsTable, /return left === null \? 1 : -1/);
+  assert.match(trendsTable, /Sort \$\{item\.label\} by absolute A minus B delta/);
+  assert.match(trendsTable, /data-ranking-delta=/);
+  assert.match(trendsTable, /data-rating-delta=/);
+  assert.match(trendsTable, /data-points-delta=/);
+  assert.match(trendsTable, /variant !== "trends" \|\| isSportsDeltaSortKey\(preferences\.sort\.key\)/);
+  assert.doesNotMatch(trendsTable, /sports_ranking\?\.\[key\]\?\.delta \?\? Number\.NEGATIVE_INFINITY/);
   assert.match(sportsEventMetadataRoute, /gamma-api\.polymarket\.com\/events/);
   assert.match(sportsEventMetadataRoute, /params\.append\("slug", slug\)/);
   assert.match(sportsEventMetadataRoute, /GAMMA_BATCH_SIZE = 10/);
