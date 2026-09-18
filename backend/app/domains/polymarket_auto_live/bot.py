@@ -888,13 +888,15 @@ class BullpenAutoLiveBot:
     ) -> list[BullpenAutoLiveRun]:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
+            if not include_detail:
+                runs = await repo.list_projected_runs(self.user_id, limit=limit)
+                return [_summarize_run_for_list(run) for run in runs]
+
             runs = await repo.list_runs(self.user_id, limit=limit)
             if await self._reconcile_terminal_stage3_decisions(repo, runs):
                 await session.commit()
                 runs = await repo.list_runs(self.user_id, limit=limit)
-            if include_detail:
-                return runs
-            return [_summarize_run_for_list(run) for run in runs]
+            return runs
 
     async def list_run_history(
         self,

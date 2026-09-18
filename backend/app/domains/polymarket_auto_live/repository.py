@@ -951,6 +951,49 @@ class AsyncPolymarketAutoLiveRepository:
         rows = (await self.session.execute(query)).scalars().all()
         return [record_to_run(row) for row in rows]
 
+    async def list_projected_runs(
+        self,
+        user_id: int,
+        *,
+        limit: int | None = None,
+    ) -> list[BullpenAutoLiveRun]:
+        """Return bounded run projections without reading the full JSON payload.
+
+        A completed run payload can be hundreds of megabytes. Selecting ORM
+        entities for the default ``/runs`` response made PostgreSQL stream those
+        payloads even though the API immediately removed all detailed fields.
+        Keep full payload reads available through ``list_runs`` for explicit
+        detail requests while making the normal list path control-plane safe.
+        """
+
+        record = PolymarketAutoLiveRunRecord
+        query = (
+            select(
+                record.id,
+                record.status,
+                record.triggered_by,
+                record.dry_run,
+                record.started_at,
+                record.completed_at,
+                record.live_execution_requested,
+                record.live_execution_attempted,
+                record.decisions_count,
+                record.orders_planned,
+                record.orders_submitted,
+                record.summary,
+                record.error_message,
+                record.workspace_profile,
+                record.console_projection,
+                record.updated_at,
+            )
+            .where(record.user_id == user_id)
+            .order_by(desc(record.started_at), desc(record.created_at))
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = (await self.session.execute(query)).all()
+        return [projected_row_to_run(row)[0] for row in rows]
+
     async def get_latest_projected_run(
         self,
         user_id: int,
