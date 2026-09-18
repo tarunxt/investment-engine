@@ -39,6 +39,9 @@ const TOURNAMENT_ALIASES: Record<string, { name: string; tag: string }> = {
   "coppa italia": { name: "Coppa Italia", tag: "ita" },
   "liga mx": { name: "Liga MX", tag: "mex" },
   "copa libertadores": { name: "Copa Libertadores", tag: "lib" },
+  "fifa world cup": { name: "FIFA World Cup", tag: "fifa-wc" },
+  "copa america": { name: "Copa América", tag: "copa" },
+  "indian premier league": { name: "Indian Premier League", tag: "ipl" },
   "poland ekstraklasa": { name: "Ekstraklasa", tag: "pol" },
   "supercopa de espana": { name: "Supercopa de España", tag: "esp" },
 };
@@ -80,9 +83,6 @@ function canonicalTournament(question: BullpenQuestionRow) {
     parts.flatMap((part) => part.toLowerCase().match(/[a-z0-9]+/g) ?? []),
   );
 
-  const byCode = TOURNAMENT_CODES.find(({ tag }) => exactTokens.has(tag));
-  if (byCode) return { name: byCode.name, tag: byCode.tag };
-
   const bySeries = TOURNAMENT_CODES.find(({ series }) =>
     series.some((id) => exactTokens.has(id)),
   );
@@ -98,6 +98,12 @@ function canonicalTournament(question: BullpenQuestionRow) {
     return normalizedParts.some((part) => part === normalizedName || part.includes(normalizedName));
   });
   if (byName) return { name: byName.name, tag: byName.tag };
+
+  // Treat a short code as an identifier only when it is a complete metadata
+  // segment. This prevents names such as "FIFA World Cup" from being mistaken
+  // for the separate `fifa` (EA Sports FC) tournament code.
+  const byCode = TOURNAMENT_CODES.find(({ tag }) => normalizedParts.includes(tag));
+  if (byCode) return { name: byCode.name, tag: byCode.tag };
 
   const fallback = parts.find((part) => {
     const normalized = normalizedLookup(part);

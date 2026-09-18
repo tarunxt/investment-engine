@@ -32,6 +32,8 @@ test("Sports Breakup includes normalized tournament, tag, and sport columns", ()
   assert.match(component, /summary\.tournaments\.map/);
   assert.match(component, /canonicalTournament\(question\)/);
   assert.match(component, /polymarketTournamentCodes/);
+  assert.match(component, /"fifa world cup": \{ name: "FIFA World Cup"/);
+  assert.match(component, /normalizedParts\.includes\(tag\)/);
   assert.doesNotMatch(component, />Tag\(s\)</);
   assert.match(component, /\{row\.tag\}/);
   assert.match(component, /\{row\.sport\}/);
