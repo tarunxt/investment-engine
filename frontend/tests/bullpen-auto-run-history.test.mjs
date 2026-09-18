@@ -114,7 +114,9 @@ test("Bullpen history uses a saved, editable 1-20 scan window", () => {
   assert.match(historyContent, /event-trends-scan-count-title/);
   assert.match(historyContent, /Enter a whole number from 1 to 20 scans/);
   assert.match(historyContent, /This preference is saved to your account/);
-  assert.match(historyContent, /event_trends_scan_count: scanCount/);
+  assert.match(historyContent, /updateBullpenAutoLiveEventTrendsScanCount\(scanCount\)/);
+  assert.match(apiService, /historyEventTrendsScanCount\(\)/);
+  assert.match(urls, /history\/event-trends\/scan-count/);
   assert.match(trendsTable, /event\.scan_scores\.slice\(0, scanCount\)\.map\(\(score,i\) =>/);
   assert.doesNotMatch(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
   assert.doesNotMatch(historyContent, /Grey = not covered \/ no valid LLM score/);

@@ -770,6 +770,65 @@ async def test_history_auth_and_read_share_one_session(monkeypatch, event_trends
 
 
 @pytest.mark.anyio
+async def test_event_trends_scan_count_update_uses_one_session(monkeypatch):
+    events = []
+
+    class Session:
+        async def commit(self):
+            events.append("commit")
+
+        async def rollback(self):
+            events.append("rollback")
+
+    session = Session()
+
+    class Context:
+        async def __aenter__(self):
+            events.append("enter")
+            return session
+
+        async def __aexit__(self, *args):
+            events.append("exit")
+
+    async def auth(_credentials, db):
+        assert db is session
+        events.append("auth")
+        return 7
+
+    class Repo:
+        def __init__(self, db):
+            assert db is session
+
+        async def ensure_settings(self, user_id):
+            assert user_id == 7
+            events.append("read")
+            return BullpenAutoLiveSettings()
+
+        async def save_settings(self, user_id, settings):
+            assert user_id == 7
+            assert settings.event_trends_scan_count == 1
+            events.append("save")
+
+    prefix = "app.domains.polymarket_auto_live.router."
+    monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
+    monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", auth)
+    monkeypatch.setattr(prefix + "AsyncPolymarketAutoLiveRepository", Repo)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put(
+            "/polymarket/auto-live/history/event-trends/scan-count",
+            json={"event_trends_scan_count": 1},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["event_trends_scan_count"] == 1
+    assert events == ["enter", "auth", "read", "save", "commit", "exit"]
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("suffix", ["", "/event-trends"])
 async def test_history_deadline_includes_auth_pool_wait(monkeypatch, suffix):
     import asyncio

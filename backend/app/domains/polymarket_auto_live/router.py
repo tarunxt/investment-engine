@@ -953,6 +953,33 @@ async def list_auto_live_history(
     return history
 
 
+@router.put("/history/event-trends/scan-count", response_model=BullpenAutoLiveSettings)
+async def update_event_trends_scan_count(
+    request: BullpenAutoLiveSettingsUpdate,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    """Persist the History scan window without opening a second DB session."""
+
+    update_fields = request.model_dump(exclude_unset=True)
+    if set(update_fields) != {"event_trends_scan_count"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Only event_trends_scan_count may be updated here.",
+        )
+    async with AsyncSessionLocal() as session:
+        try:
+            user_id = await _resolve_persisted_status_user_id(credentials, session)
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            settings = await repo.ensure_settings(user_id)
+            persisted = settings.model_copy(update=update_fields)
+            await repo.save_settings(user_id, persisted)
+            await session.commit()
+            return persisted
+        except SQLAlchemyError as exc:
+            await session.rollback()
+            raise _database_not_ready_error(exc) from exc
+
+
 @router.get("/history/event-trends", response_model=BullpenAutoLiveEventTrendsResponse)
 async def list_auto_live_history_event_trends(
     response: Response,

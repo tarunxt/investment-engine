@@ -53,6 +53,7 @@ const SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000;
 const SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
 const SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
+const EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS = 20_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 const PUBLIC_BACKEND_PATHS = new Set([
   "auth/register",
@@ -309,6 +310,12 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {
     return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
+  if (
+    method === "PUT" &&
+    path === "polymarket/auto-live/history/event-trends/scan-count"
+  ) {
+    return EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS;
   }
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return readBoundedTimeout(

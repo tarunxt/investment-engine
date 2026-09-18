@@ -258,6 +258,8 @@ const bullpenAutoLiveApiUrls = {
   history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
   historyEventTrends: () =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends`,
+  historyEventTrendsScanCount: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends/scan-count`,
   runs: (includeDetail = false) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs${
       includeDetail ? "?include_detail=true" : ""
