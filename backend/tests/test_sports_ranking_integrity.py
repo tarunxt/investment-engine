@@ -41,6 +41,7 @@ def test_all_97_audited_rows_have_both_ranks_without_cross_scope_deltas():
             assert all(row[metric]["delta"] is None for metric in ("ranking", "rating", "points"))
         for side in ("a", "b"):
             assert row["team_details"][side]["selected"]["snapshot_hash"] == "fixture"
+            assert "for this team" in row["team_details"][side]["remedy"]
 
 
 def test_cup_fallback_cannot_select_chilean_everton():

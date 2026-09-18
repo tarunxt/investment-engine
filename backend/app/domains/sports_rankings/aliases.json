@@ -249,6 +249,11 @@
     ],
     "RC Deportivo A Coruña": [
       "La Coruna"
+    ],
+    "Club Atlético de Madrid": [
+      "Atletico Madrid",
+      "Atlético Madrid",
+      "Ath Madrid"
     ]
   },
   "bun": {
@@ -260,6 +265,9 @@
     ],
     "SV 07 Elversberg": [
       "Elversberg"
+    ],
+    "1. FC Union Berlin": [
+      "Union Berlin"
     ]
   },
   "ere": {
@@ -373,6 +381,10 @@
     ],
     "Jagiellonia Białystok": [
       "Jagiellonia Bialystok"
+    ],
+    "RC Celta de Vigo": [
+      "Celta Vigo",
+      "Celta"
     ]
   },
   "grc": {

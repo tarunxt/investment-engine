@@ -213,7 +213,8 @@ def compare_events(query, snapshots, catalogue):
                           "STALE" if selected else missing_status(competitions))
                 statuses.append(status)
                 result["team_details"][side] = {
-                    "raw_name": raw, "status_code": status, "remedy": REMEDIES[status],
+                    "raw_name": raw, "status_code": status,
+                    "remedy": "A current published rank is available for this team." if status == "VALID" else REMEDIES[status],
                     "selected": selected,
                     "candidates": [{k: r.get(k) for k in ("name", "canonical_id", "source_id", "group", "season", "rank", "source_status")}
                                    for r in options],

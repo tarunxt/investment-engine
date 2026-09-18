@@ -53,20 +53,23 @@ def prime_rankings_on_start(sender=None, **kwargs):
 
 @celery.task(bind=True, max_retries=2, soft_time_limit=20, time_limit=25)
 def dispatch_refresh(self):
+    from redis import Redis
+    from app.core.config import settings
+    cycle = int(datetime.now(UTC).timestamp()) // 900
+    key = f"sports-rankings:dispatch:v2:{cycle}"
     try:
-        source_ids = sorted(SOURCE_IDS)
-        source_count = len(source_ids)
-        for index, source_id in enumerate(source_ids):
-            countdown = (
-                index * REFRESH_DISPATCH_WINDOW_SECONDS // source_count
-                if source_count
-                else 0
-            )
-            refresh_source.apply_async(
-                args=[source_id],
-                countdown=countdown,
-                retry=False,
-            )
+        with Redis.from_url(settings.redis_url, socket_timeout=2, socket_connect_timeout=2) as redis:
+            if not redis.set(key, "1", nx=True, ex=1800):
+                return {"status": "already_queued"}
+            try:
+                source_ids = sorted(SOURCE_IDS)
+                source_count = len(source_ids)
+                for index, source_id in enumerate(source_ids):
+                    countdown = index * REFRESH_DISPATCH_WINDOW_SECONDS // source_count
+                    refresh_source.apply_async(args=[source_id], countdown=countdown, retry=False)
+            except Exception:
+                redis.delete(key)
+                raise
         return {"status": "queued", "sources": source_count}
     except Exception as exc:
         logger.exception("Sports ranking dispatch failed")

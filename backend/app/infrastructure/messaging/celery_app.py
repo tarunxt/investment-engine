@@ -40,8 +40,8 @@ celery.conf.task_queues = (
 celery.conf.task_default_queue = "ai"
 
 celery.conf.task_routes = {
-    "app.domains.sports_rankings.tasks.dispatch_refresh": {"queue": "beat"},
-    "app.domains.sports_rankings.tasks.reconcile_cricket": {"queue": "beat"},
+    "app.domains.sports_rankings.tasks.dispatch_refresh": {"queue": "ai"},
+    "app.domains.sports_rankings.tasks.reconcile_cricket": {"queue": "ai"},
     "app.domains.sports_rankings.tasks.refresh_source": {"queue": "ai"},
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.mails.tasks.deliver_completion_email": {"queue": "email"},
@@ -90,6 +90,7 @@ celery.conf.beat_schedule = {
     "sports-rankings-refresh": {
         "task": "app.domains.sports_rankings.tasks.dispatch_refresh",
         "schedule": crontab(minute="*/15"),
+        "options": {"expires": 900},
     },
     "completion-mail-outbox-recovery": {
         "task": "app.domains.mails.tasks.recover_completion_emails",

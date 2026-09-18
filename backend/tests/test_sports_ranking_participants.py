@@ -156,6 +156,18 @@ def test_periodic_refresh_staggers_sources_across_the_interval(monkeypatch):
     from app.domains.sports_rankings import tasks
 
     queued = []
+    class Lease:
+        claimed = False
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def set(self, key, value, **kwargs):
+            assert key.startswith("sports-rankings:dispatch:v2:")
+            assert kwargs == {"nx": True, "ex": 1800}
+            if self.claimed: return False
+            self.claimed = True
+            return True
+    lease = Lease()
+    monkeypatch.setattr("redis.Redis.from_url", lambda *_args, **_kwargs: lease)
     monkeypatch.setattr(tasks, "SOURCE_IDS", {"source-c", "source-a", "source-b"})
     monkeypatch.setattr(
         tasks.refresh_source,
@@ -171,6 +183,8 @@ def test_periodic_refresh_staggers_sources_across_the_interval(monkeypatch):
     ]
     assert [item["countdown"] for item in queued] == [0, 280, 560]
     assert all(item["retry"] is False for item in queued)
+    assert tasks.dispatch_refresh.run() == {"status": "already_queued"}
+    assert len(queued) == 3
 
 
 def test_refresh_concurrency_helpers_are_stable_and_bounded():
@@ -219,3 +233,10 @@ def test_worker_startup_only_queues_participant_backfill(monkeypatch):
     tasks.prime_rankings_on_start()
 
     assert queued == [{"retry": False}]
+
+
+def test_ranking_dispatch_bypasses_control_backlog_and_expires_old_cycles():
+    from app.infrastructure.messaging.celery_app import celery
+    assert celery.conf.task_routes["app.domains.sports_rankings.tasks.dispatch_refresh"]["queue"] == "ai"
+    assert celery.conf.task_routes["app.domains.sports_rankings.tasks.refresh_source"]["queue"] == "ai"
+    assert celery.conf.beat_schedule["sports-rankings-refresh"]["options"]["expires"] == 900
