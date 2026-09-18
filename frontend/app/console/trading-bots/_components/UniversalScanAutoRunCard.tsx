@@ -152,8 +152,25 @@ export function UniversalScanAutoRunCard({
   }, [load, status?.running]);
 
   async function act(action: "run-now" | "enable" | "disable" | "pause" | "resume" | "kill") {
+    const savesSchedule = action === "run-now" || action === "enable";
+    const startAt = savesSchedule ? istInputToIso(startInput) : null;
+    if (
+      savesSchedule &&
+      (!startAt || !Number.isInteger(refreshMinutes) || refreshMinutes < 1 || refreshMinutes > 10_080)
+    ) {
+      setError({
+        message: "Select a valid schedule.",
+        details: "Choose the intended IST date and time and a refresh duration from 1 to 10,080 minutes, then retry the action.",
+      });
+      return;
+    }
     setBusy(action); setError(null);
-    try { apply(await requestStatus({ action })); }
+    try {
+      apply(await requestStatus({
+        action,
+        ...(savesSchedule ? { startAt, refreshMinutes } : {}),
+      }));
+    }
     catch (actionError) { setError(normalizeAutoRunError(actionError)); }
     finally { setBusy(null); }
   }
@@ -165,7 +182,13 @@ export function UniversalScanAutoRunCard({
 
   async function saveSettings() {
     const startAt = istInputToIso(startInput);
-    if (!startAt) return;
+    if (!startAt || !Number.isInteger(refreshMinutes) || refreshMinutes < 1 || refreshMinutes > 10_080) {
+      setError({
+        message: "Select a valid schedule.",
+        details: "Choose the intended IST date and time and a refresh duration from 1 to 10,080 minutes, then retry the action.",
+      });
+      return;
+    }
     setBusy("save"); setError(null);
     try { apply(await requestStatus({ action: "save", startAt, refreshMinutes })); }
     catch (saveError) { setError(normalizeAutoRunError(saveError)); }
@@ -197,16 +220,19 @@ export function UniversalScanAutoRunCard({
       <div className="mt-4 grid gap-3 rounded-2xl bg-slate-50 p-3 md:grid-cols-2">
         <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Auto-run start time (IST)
           <span className="mt-2 flex items-center rounded-xl border border-slate-200 bg-white px-3">
-            <input type="datetime-local" value={startInput} onChange={event => setStartInput(event.target.value)} onBlur={() => void saveSettings()} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-800 outline-none" />
+            <input type="datetime-local" value={startInput} onChange={event => setStartInput(event.target.value)} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-800 outline-none" />
             <Clock3 className="h-4 w-4 text-blue-600" />
           </span>
         </label>
         <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Refresh duration
           <span className="mt-2 flex items-center rounded-xl border border-slate-200 bg-white px-3">
-            <input type="number" min={1} max={10080} value={refreshMinutes} onChange={event => setRefreshMinutes(Number(event.target.value))} onBlur={() => void saveSettings()} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-800 outline-none" />
+            <input type="number" min={1} max={10080} value={refreshMinutes} onChange={event => setRefreshMinutes(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-slate-800 outline-none" />
             <span className="text-xs text-slate-500">min</span>
           </span>
         </label>
+      </div>
+      <div className="mt-2 flex justify-end">
+        <button type="button" disabled={Boolean(busy)} onClick={() => void saveSettings()} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700 disabled:opacity-50">Save schedule</button>
       </div>
 
       {status?.running && <div className="mt-3 rounded-xl border border-amber-300 bg-amber-100 p-4">

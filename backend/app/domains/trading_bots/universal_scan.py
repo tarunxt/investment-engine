@@ -166,34 +166,6 @@ def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
             error="Universal Scan worker exceeded its 55-minute recovery window.",
         )
         state = read_state(session.get(UniversalScanStateRecord, user_id))
-    completed_export = latest_completed_universal_export(user_id)
-    if completed_export is not None:
-        completed_metadata, _ = completed_export
-        completed_scan_started_at = (
-            completed_metadata.get("scannedAt")
-            or completed_metadata.get("createdAt")
-        )
-        if isinstance(completed_scan_started_at, str):
-            state["last_completed_run_started_at"] = completed_scan_started_at
-    latest_history = state["history"][0] if state["history"] else None
-    last_run_at = parse_datetime(state["last_run_at"])
-    configured_start = parse_datetime(settings["start_at"])
-    effective_run_start = last_run_at.replace(microsecond=0) if last_run_at is not None else None
-    if (
-        isinstance(latest_history, dict)
-        and latest_history.get("triggered_by") == "manual"
-        and effective_run_start is not None
-        and (configured_start is None or effective_run_start > configured_start)
-    ):
-        settings["enabled"] = True
-        settings["start_at"] = effective_run_start.isoformat()
-        state["next_run_at"] = next_scheduled_time(
-            utc_now(),
-            start_at=settings["start_at"],
-            refresh_minutes=settings["refresh_minutes"],
-        ).isoformat()
-        save_settings(session, user_id, settings)
-        save_state(session, user_id, state)
     if settings["enabled"] and not state["running"] and parse_datetime(state["next_run_at"]) is None:
         state["next_run_at"] = next_scheduled_time(
             utc_now(),

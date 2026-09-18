@@ -52,15 +52,19 @@ test("Universal Scan uses a dedicated recurring worker task", () => {
   assert.match(celery, /execute_universal_polymarket_scan/);
 });
 
-test("Start Auto Run Now enables and re-anchors the recurring schedule", () => {
+test("Start Auto Run Now enables an immediate run without re-anchoring the recurring schedule", () => {
   const router = readFileSync(
     new URL("../../backend/app/domains/trading_bots/router.py", import.meta.url),
     "utf8",
   );
   assert.match(router, /enabled=True/);
-  assert.match(router, /start_at=utc_now\(\)\.replace\(microsecond=0\)\.isoformat\(\)/);
+  assert.match(router, /start_at=request\.start_at if request else None/);
+  assert.doesNotMatch(router, /start_at=utc_now\(\)/);
   assert.match(router, /background_tasks\.add_task/);
   assert.match(router, /dispatch_universal_scan/);
+  assert.match(card, /savesSchedule = action === "run-now" \|\| action === "enable"/);
+  assert.match(card, /\{ startAt, refreshMinutes \}/);
+  assert.match(card, /Save schedule/);
 });
 
 test("Universal Scan proxy preserves backend failures for clickable diagnostics", () => {
@@ -72,6 +76,8 @@ test("Universal Scan proxy preserves backend failures for clickable diagnostics"
   assert.match(route, /Backend returned HTTP/);
   assert.match(route, /status: error\.status/);
   assert.match(route, /status: 502/);
+  assert.match(route, /TRANSIENT_BACKEND_STATUSES/);
+  assert.match(route, /attempt < 3/);
 });
 
 test("queueing stays fast and reuses the prior completed total for progress", () => {
@@ -83,4 +89,9 @@ test("queueing stays fast and reuses the prior completed total for progress", ()
   assert.doesNotMatch(scheduler, /def latest_export_total/);
   assert.match(scheduler, /UniversalScanStateRecord/);
   assert.doesNotMatch(scheduler, /PolymarketAutoLiveStateRecord/);
+  const statusBody = scheduler.slice(
+    scheduler.indexOf("def status_for_user"),
+    scheduler.indexOf("def update_schedule"),
+  );
+  assert.doesNotMatch(statusBody, /latest_completed_universal_export/);
 });

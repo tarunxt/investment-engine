@@ -16,6 +16,32 @@ type ActionBody = {
   refreshMinutes?: number;
 };
 
+const TRANSIENT_BACKEND_STATUSES = new Set([502, 503, 504]);
+
+async function fetchAutoRunBackend(
+  session: Awaited<ReturnType<typeof createBackendSessionContext>>,
+  path: string,
+  options?: Parameters<typeof fetchBackendJsonWithSession>[2],
+) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await fetchBackendJsonWithSession(session, path, options);
+    } catch (error) {
+      lastError = error;
+      if (
+        !(error instanceof BackendRuntimeHttpError) ||
+        !TRANSIENT_BACKEND_STATUSES.has(error.status) ||
+        attempt === 2
+      ) {
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 function autoRunErrorResponse(error: unknown, fallback: string) {
   if (error instanceof BackendRuntimeHttpError) {
     return NextResponse.json(
@@ -38,7 +64,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
   try {
-    const result = await fetchBackendJsonWithSession(
+    const result = await fetchAutoRunBackend(
       session,
       "/trading-bots/universal-scan/auto-run",
     );
@@ -61,9 +87,9 @@ export async function POST(request: NextRequest) {
     const path = action === "save"
       ? "/trading-bots/universal-scan/auto-run/settings"
       : `/trading-bots/universal-scan/auto-run/${action}`;
-    const result = await fetchBackendJsonWithSession(session, path, {
+    const result = await fetchAutoRunBackend(session, path, {
       method: "POST",
-      body: action === "save" ? {
+      body: ["save", "enable", "run-now"].includes(action) ? {
         start_at: body.startAt,
         refresh_minutes: body.refreshMinutes,
       } : {},
