@@ -1375,7 +1375,7 @@ class AsyncPolymarketAutoLiveRepository:
         self,
         user_id: int,
         *,
-        scan_count: int = 20,
+        scan_count: int | None = None,
         workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
     ) -> BullpenAutoLiveEventTrendsResponse:
         """Aggregate the latest Stage 2 LLM scans, with decision rows as fallback.
@@ -1390,14 +1390,18 @@ class AsyncPolymarketAutoLiveRepository:
         """
         run = PolymarketAutoLiveRunRecord
         decision = PolymarketAutoLiveDecisionRecord
-        normalized_scan_count = max(1, min(scan_count, 20))
+        settings = record_to_settings(await self.get_settings_record(user_id))
+        requested_scan_count = (
+            settings.event_trends_scan_count
+            if scan_count is None
+            else scan_count
+        )
+        normalized_scan_count = max(1, min(requested_scan_count, 20))
         trend_generated_at = utc_now()
         run_filters = [run.user_id == user_id]
         if workspace_profile is not None:
             run_filters.append(_history_workspace_filter(run, workspace_profile))
-        returns_formula = record_to_settings(
-            await self.get_settings_record(user_id)
-        ).returns_per_day_formula
+        returns_formula = settings.returns_per_day_formula
         run_rows = (await self.session.execute(
             select(
                 run.id,
@@ -1416,7 +1420,7 @@ class AsyncPolymarketAutoLiveRepository:
         run_ids = [str(row.id) for row in run_rows]
         if not run_ids:
             return BullpenAutoLiveEventTrendsResponse(
-                scan_count=20,
+                scan_count=normalized_scan_count,
                 generated_at=utc_now().isoformat(),
             )
 
@@ -2120,7 +2124,7 @@ class AsyncPolymarketAutoLiveRepository:
         events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
         return BullpenAutoLiveEventTrendsResponse(
             events=events,
-            scan_count=20,
+            scan_count=normalized_scan_count,
             generated_at=trend_generated_at.isoformat(),
         )
 

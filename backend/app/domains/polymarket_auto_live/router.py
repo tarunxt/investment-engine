@@ -968,7 +968,7 @@ async def list_auto_live_history_event_trends(
     ),
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
-    """Return the strongest-side score heatmap for the latest 20 scans."""
+    """Return the strongest-side score heatmap for the user's saved scan window."""
     try:
         trends = await asyncio.wait_for(
             _read_history(

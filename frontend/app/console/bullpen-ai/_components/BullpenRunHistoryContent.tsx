@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createBullpenQuestionRow, type BullpenQuestionRow } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
+import { apiService } from "@/services/api";
 import type { BullpenAutoLiveEventTrend, BullpenAutoLiveEventTrendsResponse, BullpenAutoLiveHistoryItem, BullpenAutoLiveHistoryPage } from "@/types/api";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 import { BullpenClusterJsonDialog, useBullpenEventClusters } from "./BullpenEventClusters";
@@ -322,6 +323,63 @@ function EventTrendsTimeoutDialog({
   );
 }
 
+function EventTrendsScanCountDialog({
+  scanCount,
+  onSave,
+  onClose,
+}: {
+  scanCount: number;
+  onSave: (scanCount: number) => Promise<void> | void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(String(scanCount));
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const nextScanCount = Number(value);
+    if (!Number.isInteger(nextScanCount) || nextScanCount < 1 || nextScanCount > 20) {
+      setValidationError("Enter a whole number from 1 to 20 scans.");
+      return;
+    }
+    setSaving(true);
+    setValidationError(null);
+    try {
+      await onSave(nextScanCount);
+      onClose();
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : "Could not save the scan window. Please retry.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
+      <form role="dialog" aria-modal="true" aria-labelledby="event-trends-scan-count-title" className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl" onSubmit={submit}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-slate-500">Recurring events</p>
+            <h3 id="event-trends-scan-count-title" className="mt-2 text-lg font-bold text-slate-950">Scans to compare</h3>
+          </div>
+          <button type="button" disabled={saving} onClick={onClose} aria-label="Close scan count settings"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="mt-5 space-y-2">
+          <Label htmlFor="event-trends-scan-count">Number of recent scans</Label>
+          <Input id="event-trends-scan-count" type="number" min={1} max={20} step={1} value={value} onChange={(event) => { setValue(event.target.value); setValidationError(null); }} className="rounded-lg border border-slate-300 px-3" autoFocus />
+          <p className="text-xs text-slate-500">Choose 1–20. A smaller window reads and processes fewer saved runs, so it should load faster. This preference is saved to your account.</p>
+          {validationError ? <p role="alert" className="text-sm font-medium text-red-700">{validationError}</p> : null}
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save and refresh"}</Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function EventTrendsError({
   error,
   timeoutSeconds,
@@ -378,6 +436,8 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const [operationalDetail, setOperationalDetail] = useState<OperationalStatusDetail | null>(null);
   const [showRefreshInterval, setShowRefreshInterval] = useState(false);
   const [showEventTrendsTimeout, setShowEventTrendsTimeout] = useState(false);
+  const [showEventTrendsScanCount, setShowEventTrendsScanCount] = useState(false);
+  const [savedEventTrendsScanCount, setSavedEventTrendsScanCount] = useState<number | null>(null);
   const clusterState = useBullpenEventClusters();
   const [claimNow, setClaimNow] = useState(() => Date.now());
   useEffect(() => {
@@ -415,6 +475,14 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const operationalRuns = latestRuns ?? (page?.page === 1 ? page.items : []);
   const latestScoredScanAt = trends?.events.flatMap(event => event.scan_timestamps.map((timestamp, index) => event.scan_scores[index] == null ? null : timestamp)).find(Boolean) ?? null;
   const currentOddsUpdatedAt = trends?.current_odds_fetched_at ?? latestScoredScanAt ?? trends?.generated_at ?? null;
+  const eventTrendsScanCount = savedEventTrendsScanCount ?? trends?.scan_count ?? 20;
+  const saveEventTrendsScanCount = async (scanCount: number) => {
+    await apiService.updateBullpenAutoLiveSettings({
+      event_trends_scan_count: scanCount,
+    });
+    setSavedEventTrendsScanCount(scanCount);
+    onRefresh();
+  };
   const latestStage1 = findLatestOperationalStage(operationalRuns, "scan");
   const latestStage2 = findLatestOperationalStage(operationalRuns, "llm");
   const latestStage3 = findLatestOperationalStage(operationalRuns, "invest");
@@ -446,7 +514,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
       <div className="flex flex-wrap justify-end gap-2">{showFullScreen && <Button variant="outline" onClick={() => window.open(fullScreenPath, "_blank", "noopener,noreferrer")}><ExternalLink className="mr-2 h-4 w-4" />Full Screen</Button>}<div className="inline-flex overflow-hidden border border-slate-200"><Button variant="ghost" className="border-0 px-4" onClick={onRefresh} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>{onRefreshIntervalChange ? <Button variant="ghost" size="icon" className="w-9 border-0 border-l border-slate-200" onClick={() => setShowRefreshInterval(true)} aria-label="Set Run History refresh time" aria-haspopup="dialog"><Menu className="h-4 w-4" /></Button> : null}</div>{onClose && <Button variant="outline" size="icon" onClick={onClose} aria-label="Close Bullpen run history"><X className="h-4 w-4" /></Button>}</div>
     </header>
     <div className="max-h-[74vh] overflow-y-auto px-6 py-5">
-      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3"><div><h2 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h2><div className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] font-semibold text-slate-600 sm:grid-cols-2"><p>Latest Stage 1: {formatOperationalStage(latestStage1)}</p><button type="button" className="flex items-center gap-1 text-left underline decoration-dotted underline-offset-2 hover:text-blue-700" onClick={() => setOperationalDetail({ title: "Latest Stage 1 Clustering", clusteringRunId: latestStage1Run?.id ?? null, status: clusteringStatus, timestampLabel: clusteringPending ? "Pending since" : clusteringFailed ? "Failed at" : "Completed at", timestamp: clusteringPending ? formatTime(latestStage1?.completed_at) : clusteringFailed ? formatTime(metadata.failed_at) : formatTime(metadata.completed_at), reason: clusteringReason, rows: [{ label: "Latest Stage 1 run", value: latestStage1Run?.id ?? "Not recorded" }, { label: "Latest published run", value: metadata.source_run_id ?? "Not recorded" }, { label: "Published source Stage 1", value: formatTime(metadata.source_stage1_completed_at) }, { label: "Published filtered count", value: metadata.filtered_count == null ? "Not recorded" : metadata.filtered_count.toLocaleString("en-IN") }, { label: "Published classification", value: metadata.counts ? `${metadata.counts.classified ?? "—"} classified · ${metadata.counts.unresolved ?? "—"} unresolved · ${metadata.counts.clusters ?? "—"} clusters` : "Not recorded" }] })}>Latest Stage 1 Clustering: {clusteringStatus}<Info className="h-3 w-3 shrink-0" /></button><p>Current Bullpen Odds fetched/updated: {formatOperationalTimestamp(currentOddsUpdatedAt)}</p><button type="button" className="flex items-center gap-1 text-left underline decoration-dotted underline-offset-2 hover:text-blue-700" onClick={() => setOperationalDetail({ title: "Latest Bullpen Rebalance", status: rebalanceDisplay, timestampLabel: hourlyRebalanceStatus === "failed" ? "Failed at" : "Recorded at", timestamp: formatTime(hourlyRebalanceAt ?? lastRebalanceAt), reason: rebalanceReason, rows: [{ label: "Reported status", value: hourlyRebalanceStatus ?? (lastRebalanceAt ? "completed (legacy)" : "Not recorded") }, { label: "Automation detail", value: specificRebalanceDetail || "No workflow-specific detail was recorded." }, { label: "Cred-X runner error (may be separate)", value: hourlyRebalanceLastError || "No runner error was recorded." }, { label: "Cred-X runner action (may be separate)", value: hourlyRebalanceLastAction || "No runner action was recorded." }, { label: "Legacy rebalance time", value: formatTime(lastRebalanceAt) }] })}>Latest Bullpen Rebalance: {rebalanceDisplay}<Info className="h-3 w-3 shrink-0" /></button><p>Latest Stage 2 LLM scan: {formatOperationalStage(latestStage2)}</p><p>Latest Stage 3 completion: {formatOperationalStage(latestStage3)}</p></div></div><div className="flex flex-wrap items-center gap-2">
+      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3"><div><h2 className="text-sm font-bold text-slate-950">Recurring Events Across the Last <button type="button" onClick={() => setShowEventTrendsScanCount(true)} className="underline decoration-dotted underline-offset-2 hover:text-blue-700" aria-label={`Change recurring event scan count from ${eventTrendsScanCount} scans`}>{eventTrendsScanCount} {eventTrendsScanCount === 1 ? "Scan" : "Scans"}</button></h2><div className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] font-semibold text-slate-600 sm:grid-cols-2"><p>Latest Stage 1: {formatOperationalStage(latestStage1)}</p><button type="button" className="flex items-center gap-1 text-left underline decoration-dotted underline-offset-2 hover:text-blue-700" onClick={() => setOperationalDetail({ title: "Latest Stage 1 Clustering", clusteringRunId: latestStage1Run?.id ?? null, status: clusteringStatus, timestampLabel: clusteringPending ? "Pending since" : clusteringFailed ? "Failed at" : "Completed at", timestamp: clusteringPending ? formatTime(latestStage1?.completed_at) : clusteringFailed ? formatTime(metadata.failed_at) : formatTime(metadata.completed_at), reason: clusteringReason, rows: [{ label: "Latest Stage 1 run", value: latestStage1Run?.id ?? "Not recorded" }, { label: "Latest published run", value: metadata.source_run_id ?? "Not recorded" }, { label: "Published source Stage 1", value: formatTime(metadata.source_stage1_completed_at) }, { label: "Published filtered count", value: metadata.filtered_count == null ? "Not recorded" : metadata.filtered_count.toLocaleString("en-IN") }, { label: "Published classification", value: metadata.counts ? `${metadata.counts.classified ?? "—"} classified · ${metadata.counts.unresolved ?? "—"} unresolved · ${metadata.counts.clusters ?? "—"} clusters` : "Not recorded" }] })}>Latest Stage 1 Clustering: {clusteringStatus}<Info className="h-3 w-3 shrink-0" /></button><p>Current Bullpen Odds fetched/updated: {formatOperationalTimestamp(currentOddsUpdatedAt)}</p><button type="button" className="flex items-center gap-1 text-left underline decoration-dotted underline-offset-2 hover:text-blue-700" onClick={() => setOperationalDetail({ title: "Latest Bullpen Rebalance", status: rebalanceDisplay, timestampLabel: hourlyRebalanceStatus === "failed" ? "Failed at" : "Recorded at", timestamp: formatTime(hourlyRebalanceAt ?? lastRebalanceAt), reason: rebalanceReason, rows: [{ label: "Reported status", value: hourlyRebalanceStatus ?? (lastRebalanceAt ? "completed (legacy)" : "Not recorded") }, { label: "Automation detail", value: specificRebalanceDetail || "No workflow-specific detail was recorded." }, { label: "Cred-X runner error (may be separate)", value: hourlyRebalanceLastError || "No runner error was recorded." }, { label: "Cred-X runner action (may be separate)", value: hourlyRebalanceLastAction || "No runner action was recorded." }, { label: "Legacy rebalance time", value: formatTime(lastRebalanceAt) }] })}>Latest Bullpen Rebalance: {rebalanceDisplay}<Info className="h-3 w-3 shrink-0" /></button><p>Latest Stage 2 LLM scan: {formatOperationalStage(latestStage2)}</p><p>Latest Stage 3 completion: {formatOperationalStage(latestStage3)}</p></div></div><div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setShowClusterJson(true)} className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold uppercase text-slate-600 hover:border-sky-400">Add Cluster json</button>
           <button type="button" aria-pressed={clusterMode !== 0} data-cluster-mode={clusterMode} title={clusterMode === 0 ? "All events. Click to group clusters." : clusterMode === 1 ? "Grouped clusters. Click to show only each cluster’s top event." : "Top event per cluster. Click to show all events."} onClick={() => setClusterMode(value => ((value + 1) % 3) as ClusterMode)} className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${clusterMode === 2 ? "border-blue-800 bg-blue-800 text-white" : clusterMode === 1 ? "border-sky-300 bg-sky-200 text-sky-950" : "border-slate-300 bg-slate-100 text-slate-600"}`}>Cluster Top Events</button>
           <button type="button" role="switch" aria-checked={showStrongestOnly} onClick={() => setShowStrongestOnly(value => !value)} className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${showStrongestOnly ? "border-violet-700 bg-violet-700 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-violet-400 hover:text-violet-700"}`}>Strongest LLM odds ≥80%</button>
@@ -461,11 +529,11 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
           </div></div></div>
         {clusterState.error && <p role="alert" className="px-4 py-2 text-xs text-red-700">{clusterState.error}</p>}
         {clusterMode !== 0 && <p role="status" className="px-4 py-2 text-xs text-sky-800">{clusterMode === 1 ? "Grouped clusters" : "Top event per cluster"} · Highest Returns/day first · Assigned events with valid Current Odds and Returns/day{showStrongestOnly ? " · Strongest LLM filter is also on" : ""}</p>}
-        {trendsLoading && !trends ? <div className="flex gap-2 p-4 text-xs"><Loader2 className="h-4 w-4 animate-spin" />Loading event trends…</div> : trendsError ? <EventTrendsError error={trendsError} timeoutSeconds={eventTrendsTimeoutSeconds} onConfigure={() => setShowEventTrendsTimeout(true)} /> : trends?.events.length ? <BullpenEventTrendsTable events={claimEvents} clusters={clusterState.clusters} clusterMode={clusterMode} onClusterEdit={clusterState.edit} showStrongestOnly={showStrongestOnly} visibleColumnKeys={visibleColumnKeys} onScore={setScoreEvent} onLlm={setLlmQuestion} onClaimReturns={event => setReturnsMarketId(event.market_id)} onReturnsFormula={() => setShowReturnsFormula(true)} /> : <p className="p-4 text-xs text-slate-500">No events were covered in the latest 20 saved scans.</p>}
+        {trendsLoading && !trends ? <div className="flex gap-2 p-4 text-xs"><Loader2 className="h-4 w-4 animate-spin" />Loading event trends…</div> : trendsError ? <EventTrendsError error={trendsError} timeoutSeconds={eventTrendsTimeoutSeconds} onConfigure={() => setShowEventTrendsTimeout(true)} /> : trends?.events.length ? <BullpenEventTrendsTable events={claimEvents} scanCount={eventTrendsScanCount} clusters={clusterState.clusters} clusterMode={clusterMode} onClusterEdit={clusterState.edit} showStrongestOnly={showStrongestOnly} visibleColumnKeys={visibleColumnKeys} onScore={setScoreEvent} onLlm={setLlmQuestion} onClaimReturns={event => setReturnsMarketId(event.market_id)} onReturnsFormula={() => setShowReturnsFormula(true)} /> : <p className="p-4 text-xs text-slate-500">No events were covered in the latest {eventTrendsScanCount} saved {eventTrendsScanCount === 1 ? "scan" : "scans"}.</p>}
       </section>
       {error && !loading && <div className="mb-4 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">{error}</div>}
       {loading && !page?.items.length ? <div className="flex justify-center gap-2 p-8"><Loader2 className="h-4 w-4 animate-spin" />Loading saved Bullpen runs…</div> : <div className="space-y-3">{page?.items.map(run => <button key={run.id} onClick={() => onOpenRun(run)} disabled={detailLoadingId != null} className="w-full rounded-2xl border bg-slate-50 p-4 text-left hover:bg-blue-50"><div className="flex justify-between gap-3"><div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">{run.triggered_by === "scheduler" ? "Auto Run" : "Manual Run"}</span><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold capitalize">{run.status}</span><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold">{formatTime(run.started_at)}</span></div><p className="mt-2 text-sm font-semibold">{run.summary || "Run summary unavailable."}</p><p className="mt-1 text-xs text-slate-600">Run {run.id}</p></div>{detailLoadingId === run.id && <Loader2 className="h-4 w-4 animate-spin" />}</div><div className="mt-3 flex flex-wrap gap-2">{run.stages.map(stage => <span key={`${stage.key}-${stage.stage_number}`} className="rounded-full border bg-white px-2.5 py-1 text-[11px] font-semibold">{stage.label}: {stage.status}</span>)}</div></button>)}</div>}
       {page && page.pages > 1 && <div className="mt-5 flex items-center justify-between border-t pt-4"><Button variant="outline" disabled={loading || page.page <= 1} onClick={() => onPage(page.page - 1)}>Previous</Button><span className="text-xs font-semibold">Page {page.page} of {page.pages}</span><Button variant="outline" disabled={loading || !page.has_next} onClick={() => onPage(page.page + 1)}>Next</Button></div>}
-    </div>{showClusterJson && <BullpenClusterJsonDialog rows={clusterState.rows} marketIds={new Set(trends?.events.map(event => event.market_id) ?? [])} onApply={clusterState.save} onClose={() => setShowClusterJson(false)} />}{scoreEvent && <ScoreCalculation event={scoreEvent} onClose={() => setScoreEvent(null)} />}{llmQuestion && <BullpenLlmBreakdownDialog question={llmQuestion} onClose={() => setLlmQuestion(null)} />}{(returnsEvent || showReturnsFormula) && <BullpenClaimReturnsDialog event={returnsEvent} onClose={() => { setReturnsMarketId(null); setShowReturnsFormula(false); }} />}{operationalDetail && <OperationalStatusDialog detail={operationalDetail} onClose={() => setOperationalDetail(null)} />}{showRefreshInterval && refreshIntervalSeconds && onRefreshIntervalChange ? <RefreshIntervalDialog seconds={refreshIntervalSeconds} onSave={onRefreshIntervalChange} onClose={() => setShowRefreshInterval(false)} /> : null}{showEventTrendsTimeout && onEventTrendsTimeoutChange ? <EventTrendsTimeoutDialog seconds={eventTrendsTimeoutSeconds} onSave={onEventTrendsTimeoutChange} onClose={() => setShowEventTrendsTimeout(false)} /> : null}
+    </div>{showClusterJson && <BullpenClusterJsonDialog rows={clusterState.rows} marketIds={new Set(trends?.events.map(event => event.market_id) ?? [])} onApply={clusterState.save} onClose={() => setShowClusterJson(false)} />}{scoreEvent && <ScoreCalculation event={scoreEvent} onClose={() => setScoreEvent(null)} />}{llmQuestion && <BullpenLlmBreakdownDialog question={llmQuestion} onClose={() => setLlmQuestion(null)} />}{(returnsEvent || showReturnsFormula) && <BullpenClaimReturnsDialog event={returnsEvent} onClose={() => { setReturnsMarketId(null); setShowReturnsFormula(false); }} />}{operationalDetail && <OperationalStatusDialog detail={operationalDetail} onClose={() => setOperationalDetail(null)} />}{showRefreshInterval && refreshIntervalSeconds && onRefreshIntervalChange ? <RefreshIntervalDialog seconds={refreshIntervalSeconds} onSave={onRefreshIntervalChange} onClose={() => setShowRefreshInterval(false)} /> : null}{showEventTrendsTimeout && onEventTrendsTimeoutChange ? <EventTrendsTimeoutDialog seconds={eventTrendsTimeoutSeconds} onSave={onEventTrendsTimeoutChange} onClose={() => setShowEventTrendsTimeout(false)} /> : null}{showEventTrendsScanCount ? <EventTrendsScanCountDialog scanCount={eventTrendsScanCount} onSave={saveEventTrendsScanCount} onClose={() => setShowEventTrendsScanCount(false)} /> : null}
   </div>;
 }

@@ -92,6 +92,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   console_custom_exclude_phrases: [],
   returns_per_day_formula:
     "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)",
+  event_trends_scan_count: 20,
   min_liquidity_usd: 1000,
   min_independent_active_markets: 10,
   target_active_markets: 15,

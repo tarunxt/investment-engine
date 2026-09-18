@@ -109,10 +109,14 @@ test("Bullpen history requests bypass caches and remain abortable", () => {
   assert.match(historyContent, /Page \{page\.page\}/);
 });
 
-test("Bullpen history shows scored event trends for exactly 20 newest-first scans", () => {
-  assert.match(historyContent, /Recurring Events Across the Last 20 Scans/);
+test("Bullpen history uses a saved, editable 1-20 scan window", () => {
+  assert.match(historyContent, /Recurring Events Across the Last/);
+  assert.match(historyContent, /event-trends-scan-count-title/);
+  assert.match(historyContent, /Enter a whole number from 1 to 20 scans/);
+  assert.match(historyContent, /This preference is saved to your account/);
+  assert.match(historyContent, /event_trends_scan_count: scanCount/);
+  assert.match(trendsTable, /event\.scan_scores\.slice\(0, scanCount\)\.map\(\(score,i\) =>/);
   assert.doesNotMatch(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
-  assert.match(trendsTable, /event\.scan_scores\.map\(\(score,i\) =>/);
   assert.doesNotMatch(historyContent, /Grey = not covered \/ no valid LLM score/);
   assert.doesNotMatch(historyContent, /Latest saved run:/);
   assert.doesNotMatch(historyContent, /Latest scored LLM scan:/);
