@@ -4,6 +4,7 @@ import re
 import unicodedata
 from pathlib import Path
 from .feeds import FEEDS
+from .polymarket_participants import clean_participant_name
 from .master import CODE_REGISTRY, SPORT_BY_ID, extend_catalogue
 
 CATALOGUE = json.loads(Path(__file__).with_name("catalogue.json").read_text())
@@ -53,10 +54,11 @@ def augment_competition(competition, participant_registry):
             ),
         }
         for participant in competition["participants"]
+        if clean_participant_name(participant["name"]) is not None
     ]
     known = {normalize_name(participant["name"]) for participant in participants}
     for name in dynamic_names if isinstance(dynamic_names, list) else []:
-        if not isinstance(name, str) or not normalize_name(name) or normalize_name(name) in known:
+        if clean_participant_name(name) is None or normalize_name(name) in known:
             continue
         participants.append({
             "name": name,
@@ -103,7 +105,7 @@ def augment_catalogue(catalogue, participant_registry):
             "category": sport["category"],
             "scope": sport["scope"],
             "reference_url": "https://polymarket.com/sports",
-            "source_id": None,
+            "source_id": next((key for key, feed in FEEDS.items() if feed.get("code") == code), None),
             "mapping_status": "current_polymarket_scan",
             "code_verified": code in CODE_REGISTRY,
             "entry_kind": "polymarket_scan",
@@ -116,7 +118,7 @@ def augment_catalogue(catalogue, participant_registry):
 
 def source_kind(source_id):
     if source_id in FEEDS:
-        if FEEDS[source_id]["parser"] in {"cricket-table", "cricket-hundred", "cricket-ecb", "espn-soccer"}:
+        if FEEDS[source_id]["parser"] in {"cricket-table", "cricket-hundred", "cricket-ecb", "espn-soccer", "fotmob"}:
             return "Published competition standings"
         return "Derived group standings" if FEEDS[source_id]["parser"] == "espn" else "Published ranking"
     return "Derived results table" if (source_id or "").startswith("football-data-") else "Valve global ranking" if source_id == "valve-global" else "Reference only"

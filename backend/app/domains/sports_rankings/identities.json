@@ -1,0 +1,1013 @@
+{
+  "bl2": {
+    "1 fc heidenheim": {
+      "espn": "6418"
+    },
+    "heidenheim": {
+      "espn": "6418"
+    },
+    "fc energie cottbus": {
+      "espn": "123"
+    },
+    "cottbus": {
+      "espn": "123"
+    },
+    "hertha bsc": {
+      "espn": "129"
+    },
+    "hertha": {
+      "espn": "129"
+    },
+    "karlsruher sc": {
+      "espn": "4471"
+    },
+    "karlsruhe": {
+      "espn": "4471"
+    },
+    "vfl osnabruck": {
+      "espn": "7013"
+    },
+    "osnabruck": {
+      "espn": "7013"
+    },
+    "sv darmstadt 98": {
+      "espn": "3812"
+    },
+    "darmstadt": {
+      "espn": "3812"
+    },
+    "darmstadt 98": {
+      "espn": "3812"
+    },
+    "vfl wolfsburg": {
+      "espn": "138"
+    },
+    "wolfsburg": {
+      "espn": "138"
+    }
+  },
+  "sea": {
+    "ac monza": {
+      "espn": "4007"
+    },
+    "monza": {
+      "espn": "4007"
+    },
+    "bologna fc 1909": {
+      "espn": "107"
+    },
+    "bologna": {
+      "espn": "107"
+    },
+    "ssc napoli": {
+      "espn": "114"
+    },
+    "napoli": {
+      "espn": "114"
+    },
+    "us lecce": {
+      "espn": "113"
+    },
+    "lecce": {
+      "espn": "113"
+    },
+    "us sassuolo calcio": {
+      "espn": "3997"
+    },
+    "sassuolo": {
+      "espn": "3997"
+    }
+  },
+  "uel": {
+    "real sociedad de futbol": {
+      "espn": "89"
+    },
+    "real sociedad": {
+      "espn": "89"
+    },
+    "sociedad": {
+      "espn": "89"
+    },
+    "as omonoia leukosias": {
+      "espn": "617"
+    },
+    "omonia nicosia": {
+      "espn": "617"
+    },
+    "olympique de marseille": {
+      "espn": "176"
+    },
+    "marseille": {
+      "espn": "176"
+    },
+    "kks lech poznan": {
+      "espn": "2990"
+    },
+    "lech poznan": {
+      "espn": "2990"
+    },
+    "olympiakos sfp": {
+      "espn": "435"
+    },
+    "olympiacos": {
+      "espn": "435"
+    },
+    "olympiakos": {
+      "espn": "435"
+    },
+    "olympiacos piraeus": {
+      "espn": "435"
+    },
+    "nec": {
+      "espn": "147"
+    },
+    "nec nijmegen": {
+      "espn": "147"
+    },
+    "rsc anderlecht": {
+      "espn": "441"
+    },
+    "anderlecht": {
+      "espn": "441"
+    },
+    "olympique lyonnais": {
+      "espn": "167"
+    },
+    "lyon": {
+      "espn": "167"
+    },
+    "sc uniao torreense": {
+      "espn": "21615"
+    },
+    "torreense": {
+      "espn": "21615"
+    },
+    "sk puntigamer sturm graz": {
+      "espn": "3746"
+    },
+    "sk sturm graz": {
+      "espn": "3746"
+    },
+    "sturm graz": {
+      "espn": "3746"
+    },
+    "stade rennais fc 1901": {
+      "espn": "169"
+    },
+    "stade rennais": {
+      "espn": "169"
+    },
+    "rennes": {
+      "espn": "169"
+    },
+    "az": {
+      "espn": "140"
+    },
+    "az alkmaar": {
+      "espn": "140"
+    },
+    "ac sparta praha": {
+      "espn": "433"
+    },
+    "sparta prague": {
+      "espn": "433"
+    },
+    "ararat armenia fa": {
+      "espn": "20024"
+    },
+    "ararat armenia": {
+      "espn": "20024"
+    },
+    "ferencvarosi tc": {
+      "espn": "622"
+    },
+    "ferencvaros": {
+      "espn": "622"
+    },
+    "sport lisboa e benfica": {
+      "espn": "1929"
+    },
+    "benfica": {
+      "espn": "1929"
+    },
+    "bayer 04 leverkusen": {
+      "espn": "131"
+    },
+    "bayer leverkusen": {
+      "espn": "131"
+    },
+    "lillestrøm sk": {
+      "espn": "987"
+    },
+    "lillestrom": {
+      "espn": "987"
+    },
+    "besiktas jk": {
+      "espn": "1895"
+    },
+    "besiktas": {
+      "espn": "1895"
+    },
+    "jagiellonia białystok": {
+      "espn": "11505"
+    },
+    "jagiellonia bialystok": {
+      "espn": "11505"
+    }
+  },
+  "epl": {
+    "brighton hove albion fc": {
+      "espn": "331"
+    },
+    "brighton": {
+      "espn": "331"
+    },
+    "coventry city fc": {
+      "espn": "388"
+    },
+    "coventry": {
+      "espn": "388"
+    },
+    "manchester city fc": {
+      "espn": "382"
+    },
+    "man city": {
+      "espn": "382"
+    },
+    "manchester united fc": {
+      "espn": "360"
+    },
+    "man united": {
+      "espn": "360"
+    }
+  },
+  "elc": {
+    "sheffield united fc": {
+      "espn": "398"
+    },
+    "sheffield united": {
+      "espn": "398"
+    },
+    "wolverhampton wanderers fc": {
+      "espn": "380"
+    },
+    "wolves": {
+      "espn": "380"
+    },
+    "norwich city fc": {
+      "espn": "381"
+    },
+    "norwich": {
+      "espn": "381"
+    },
+    "norwich city": {
+      "espn": "381"
+    }
+  },
+  "lal": {
+    "athletic club": {
+      "espn": "93"
+    },
+    "ath bilbao": {
+      "espn": "93"
+    },
+    "athletic bilbao": {
+      "espn": "93"
+    },
+    "atletico de madrid": {
+      "espn": "1068"
+    },
+    "ath madrid": {
+      "espn": "1068"
+    },
+    "atletico madrid": {
+      "espn": "1068"
+    },
+    "ca osasuna": {
+      "espn": "97"
+    },
+    "osasuna": {
+      "espn": "97"
+    },
+    "deportivo alaves": {
+      "espn": "96"
+    },
+    "alaves": {
+      "espn": "96"
+    },
+    "elche cf": {
+      "espn": "3751"
+    },
+    "elche": {
+      "espn": "3751"
+    },
+    "fc barcelona": {
+      "espn": "83"
+    },
+    "barcelona": {
+      "espn": "83"
+    },
+    "real betis balompie": {
+      "espn": "244"
+    },
+    "betis": {
+      "espn": "244"
+    },
+    "real betis": {
+      "espn": "244"
+    },
+    "real madrid cf": {
+      "espn": "86"
+    },
+    "real madrid": {
+      "espn": "86"
+    },
+    "real racing club": {
+      "espn": "87"
+    },
+    "santander": {
+      "espn": "87"
+    },
+    "racing santander": {
+      "espn": "87"
+    },
+    "real racing club de santander": {
+      "espn": "87"
+    },
+    "real sociedad": {
+      "espn": "89"
+    },
+    "sociedad": {
+      "espn": "89"
+    },
+    "rcd espanyol de barcelona": {
+      "espn": "88"
+    },
+    "espanol": {
+      "espn": "88"
+    },
+    "espanyol": {
+      "espn": "88"
+    },
+    "rayo vallecano": {
+      "espn": "101"
+    },
+    "vallecano": {
+      "espn": "101"
+    },
+    "sevilla fc": {
+      "espn": "243"
+    },
+    "sevilla": {
+      "espn": "243"
+    },
+    "valencia cf": {
+      "espn": "94"
+    },
+    "valencia": {
+      "espn": "94"
+    },
+    "villarreal cf": {
+      "espn": "102"
+    },
+    "villarreal": {
+      "espn": "102"
+    },
+    "getafe cf": {
+      "espn": "2922"
+    },
+    "getafe": {
+      "espn": "2922"
+    },
+    "levante ud": {
+      "espn": "1538"
+    },
+    "levante": {
+      "espn": "1538"
+    },
+    "malaga cf": {
+      "espn": "99"
+    },
+    "malaga": {
+      "espn": "99"
+    }
+  },
+  "bun": {
+    "fc bayern munchen": {
+      "espn": "132"
+    },
+    "bayern munich": {
+      "espn": "132"
+    },
+    "hamburger sv": {
+      "espn": "127"
+    },
+    "hamburg": {
+      "espn": "127"
+    },
+    "sv 07 elversberg": {
+      "espn": "10388"
+    },
+    "elversberg": {
+      "espn": "10388"
+    }
+  },
+  "fl1": {
+    "es troyes ac": {
+      "espn": "170"
+    },
+    "troyes": {
+      "espn": "170"
+    },
+    "le mans fc": {
+      "espn": "2697"
+    },
+    "le mans": {
+      "espn": "2697"
+    },
+    "lille osc": {
+      "espn": "166"
+    },
+    "lille": {
+      "espn": "166"
+    },
+    "racing club de lens": {
+      "espn": "175"
+    },
+    "lens": {
+      "espn": "175"
+    }
+  },
+  "tur": {
+    "galatasaray sk": {
+      "espn": "432"
+    },
+    "galatasaray": {
+      "espn": "432"
+    },
+    "genclerbirligi sk": {
+      "espn": "996"
+    },
+    "genclerbirligi": {
+      "espn": "996"
+    },
+    "kasımpasa sk": {
+      "espn": "6870"
+    },
+    "kasimpasa": {
+      "espn": "6870"
+    }
+  },
+  "ere": {
+    "fc utrecht": {
+      "espn": "153"
+    },
+    "utrecht": {
+      "espn": "153"
+    },
+    "feyenoord rotterdam": {
+      "espn": "142"
+    },
+    "feyenoord": {
+      "espn": "142"
+    },
+    "pec zwolle": {
+      "espn": "2565"
+    },
+    "zwolle": {
+      "espn": "2565"
+    },
+    "psv": {
+      "espn": "148"
+    },
+    "psv eindhoven": {
+      "espn": "148"
+    },
+    "sc heerenveen": {
+      "espn": "146"
+    },
+    "heerenveen": {
+      "espn": "146"
+    },
+    "telstar 1963": {
+      "espn": "3735"
+    },
+    "telstar": {
+      "espn": "3735"
+    }
+  },
+  "por": {
+    "cd santa clara": {
+      "espn": "12215"
+    },
+    "santa clara": {
+      "espn": "12215"
+    },
+    "fc arouca": {
+      "espn": "15784"
+    },
+    "arouca": {
+      "espn": "15784"
+    },
+    "gil vicente fc": {
+      "espn": "3699"
+    },
+    "gil vicente": {
+      "espn": "3699"
+    },
+    "sport lisboa e benfica": {
+      "espn": "1929"
+    },
+    "benfica": {
+      "espn": "1929"
+    }
+  },
+  "nwsl": {
+    "denver summit fc": {
+      "espn": "131563"
+    },
+    "denver summit": {
+      "espn": "131563"
+    },
+    "bay fc": {
+      "espn": "22187"
+    }
+  },
+  "gre1": {
+    "ae kifisia fc": {
+      "espn": "21969"
+    },
+    "kifisia": {
+      "espn": "21969"
+    },
+    "ae kifisias": {
+      "espn": "21969"
+    },
+    "aek athens": {
+      "espn": "887"
+    },
+    "aek": {
+      "espn": "887"
+    },
+    "aris thessaloniki": {
+      "espn": "11553"
+    },
+    "aris": {
+      "espn": "11553"
+    },
+    "as aris thessalonikis": {
+      "espn": "11553"
+    },
+    "pae ps kalamata": {
+      "espn": "132429"
+    },
+    "kalamata": {
+      "espn": "132429"
+    },
+    "paok thessaloniki": {
+      "espn": "605"
+    },
+    "paok": {
+      "espn": "605"
+    },
+    "volos nps": {
+      "espn": "20043"
+    },
+    "volos nfc": {
+      "espn": "20043"
+    },
+    "panathinaikos athens": {
+      "espn": "443"
+    },
+    "panathinaikos": {
+      "espn": "443"
+    },
+    "panathinaikos ao": {
+      "espn": "443"
+    },
+    "olympiacos piraeus": {
+      "espn": "435"
+    },
+    "olympiacos": {
+      "espn": "435"
+    },
+    "olympiakos": {
+      "espn": "435"
+    },
+    "olympiakos sfp": {
+      "espn": "435"
+    },
+    "panaitolikos agrinio": {
+      "espn": "11431"
+    },
+    "panetolikos": {
+      "espn": "11431"
+    },
+    "panaitolikos": {
+      "espn": "11431"
+    }
+  },
+  "bol1": {
+    "ca nacional potosi": {
+      "espn": "10311"
+    },
+    "nacional potosi": {
+      "espn": "10311"
+    },
+    "club always ready": {
+      "espn": "19425"
+    },
+    "always ready": {
+      "espn": "19425"
+    },
+    "club guabira": {
+      "espn": "9497"
+    },
+    "guabira": {
+      "espn": "9497"
+    },
+    "club aurora": {
+      "espn": "6046"
+    },
+    "aurora": {
+      "espn": "6046"
+    }
+  },
+  "chi1": {
+    "cd coquimbo unido": {
+      "espn": "8186"
+    },
+    "coquimbo unido": {
+      "espn": "8186"
+    },
+    "cd huachipato": {
+      "espn": "4134"
+    },
+    "huachipato": {
+      "espn": "4134"
+    }
+  },
+  "argpn": {
+    "san martin de san juan": {
+      "espn": "7845"
+    },
+    "san martin san juan": {
+      "espn": "7845"
+    },
+    "csd tristan suarez": {
+      "espn": "10163"
+    },
+    "tristan suarez": {
+      "espn": "10163"
+    }
+  },
+  "lib": {
+    "sc corinthians paulista": {
+      "espn": "874"
+    },
+    "corinthians": {
+      "espn": "874"
+    },
+    "ldu de quito": {
+      "espn": "4816"
+    },
+    "liga de quito": {
+      "espn": "4816"
+    },
+    "ldu quito": {
+      "espn": "4816"
+    },
+    "se palmeiras": {
+      "espn": "2029"
+    },
+    "palmeiras": {
+      "espn": "2029"
+    }
+  },
+  "rus": {
+    "fk baltika kaliningrad": {
+      "espn": "21949"
+    },
+    "baltika kaliningrad": {
+      "espn": "21949"
+    },
+    "baltika": {
+      "espn": "21949"
+    },
+    "fk zenit": {
+      "espn": "2533"
+    },
+    "zenit st petersburg": {
+      "espn": "2533"
+    },
+    "fk spartak moskva": {
+      "espn": "1941"
+    },
+    "spartak moscow": {
+      "espn": "1941"
+    },
+    "fk fakel voronezh": {
+      "espn": "21539"
+    },
+    "fakel voronezh": {
+      "espn": "21539"
+    },
+    "fakel": {
+      "espn": "21539"
+    }
+  },
+  "enl": {
+    "kidderminster harriers fc": {
+      "espn": "319"
+    },
+    "kidderminster harriers": {
+      "espn": "319"
+    },
+    "kidderminster": {
+      "espn": "319"
+    },
+    "gateshead fc": {
+      "espn": "3138"
+    },
+    "gateshead": {
+      "espn": "3138"
+    }
+  },
+  "uslc": {
+    "sporting jax": {
+      "espn": "131578"
+    },
+    "hartford athletic": {
+      "espn": "19411"
+    }
+  },
+  "acle": {
+    "jeonbuk fc": {
+      "espn": "7119"
+    },
+    "jeonbuk hyundai motors": {
+      "espn": "7119"
+    },
+    "jeonbuk motors": {
+      "espn": "7119"
+    },
+    "port fc": {
+      "espn": "17757"
+    },
+    "port": {
+      "espn": "17757"
+    },
+    "kashiwa reysol": {
+      "espn": "7476"
+    },
+    "vissel kobe": {
+      "espn": "7477"
+    }
+  },
+  "sud": {
+    "ca mineiro": {
+      "espn": "7632"
+    },
+    "atletico mg": {
+      "espn": "7632"
+    },
+    "atletico mineiro": {
+      "espn": "7632"
+    },
+    "santos fc": {
+      "espn": "2674"
+    },
+    "santos": {
+      "espn": "2674"
+    },
+    "cs cienciano": {
+      "espn": "3372"
+    },
+    "cienciano": {
+      "espn": "3372"
+    },
+    "montevideo city torque": {
+      "espn": "19002"
+    },
+    "cienciano del cusco": {
+      "espn": "3372"
+    }
+  },
+  "aut": {
+    "sk rapid": {
+      "espn": "519"
+    },
+    "rapid vienna": {
+      "espn": "519"
+    },
+    "rapid wien": {
+      "espn": "519"
+    },
+    "wsg tirol": {
+      "espn": "18794"
+    },
+    "wsg swarovski tirol": {
+      "espn": "18794"
+    }
+  },
+  "pol": {
+    "widzew lodz": {
+      "fotmob": "8024"
+    },
+    "widzew łodz": {
+      "fotmob": "8024"
+    },
+    "wieczysta krakow": {
+      "fotmob": "1286895"
+    }
+  },
+  "egy1": {
+    "ghazl el mahalla sc": {
+      "fotmob": "101752"
+    },
+    "ghazl el mahalla": {
+      "fotmob": "101752"
+    },
+    "ghazl al mahalla": {
+      "fotmob": "101752"
+    },
+    "zamalek sc": {
+      "fotmob": "80591"
+    },
+    "zamalek": {
+      "fotmob": "80591"
+    }
+  },
+  "idn1": {
+    "borneo samarinda": {
+      "fotmob": "585858"
+    },
+    "borneo fc": {
+      "fotmob": "585858"
+    },
+    "dewa united": {
+      "fotmob": "585860"
+    }
+  },
+  "isr": {
+    "hapoel tel aviv fc": {
+      "fotmob": "10181"
+    },
+    "hapoel tel aviv": {
+      "fotmob": "10181"
+    },
+    "hapoel petah tikva fc": {
+      "fotmob": "9755"
+    },
+    "hapoel petach tikva": {
+      "fotmob": "9755"
+    },
+    "hapoel petah tikva": {
+      "fotmob": "9755"
+    }
+  },
+  "rou1": {
+    "fc rapid 1923": {
+      "fotmob": "9738"
+    },
+    "rapid bucuresti": {
+      "fotmob": "9738"
+    },
+    "rapid bucharest": {
+      "fotmob": "9738"
+    },
+    "fc arges pitesti": {
+      "fotmob": "9732"
+    },
+    "arges pitesti": {
+      "fotmob": "9732"
+    }
+  },
+  "grc": {
+    "aek": {
+      "fotmob": "8563"
+    },
+    "aek athens": {
+      "fotmob": "8563"
+    },
+    "mgs panserraikos": {
+      "fotmob": "104814"
+    },
+    "panserraikos": {
+      "fotmob": "104814"
+    },
+    "as aris thessalonikis": {
+      "fotmob": "8239"
+    },
+    "aris": {
+      "fotmob": "8239"
+    },
+    "aris thessaloniki": {
+      "fotmob": "8239"
+    },
+    "gs marko": {
+      "fotmob": "1787833"
+    },
+    "marko": {
+      "fotmob": "1787833"
+    },
+    "ae kifisias": {
+      "fotmob": "488099"
+    },
+    "kifisia": {
+      "fotmob": "488099"
+    },
+    "ae kifisia fc": {
+      "fotmob": "488099"
+    },
+    "panathinaikos ao": {
+      "fotmob": "10200"
+    },
+    "panathinaikos": {
+      "fotmob": "10200"
+    },
+    "panathinaikos athens": {
+      "fotmob": "10200"
+    }
+  },
+  "u20wwc": {
+    "korea republic": {
+      "fotmob": "1459887"
+    },
+    "south korea u20 w": {
+      "fotmob": "1459887"
+    },
+    "south korea u20": {
+      "fotmob": "1459887"
+    },
+    "korea republic u20": {
+      "fotmob": "1459887"
+    },
+    "china pr": {
+      "fotmob": "1619796"
+    },
+    "china u20 w": {
+      "fotmob": "1619796"
+    },
+    "china u20": {
+      "fotmob": "1619796"
+    },
+    "usa": {
+      "fotmob": "1459888"
+    },
+    "usa u20 w": {
+      "fotmob": "1459888"
+    },
+    "usa u20": {
+      "fotmob": "1459888"
+    },
+    "united states u20": {
+      "fotmob": "1459888"
+    },
+    "argentina": {
+      "fotmob": "2057964"
+    },
+    "argentina u20 w": {
+      "fotmob": "2057964"
+    },
+    "argentina u20": {
+      "fotmob": "2057964"
+    },
+    "brazil": {
+      "fotmob": "1459880"
+    },
+    "brazil u20 w": {
+      "fotmob": "1459880"
+    },
+    "brazil u20": {
+      "fotmob": "1459880"
+    },
+    "italy": {
+      "fotmob": "2058028"
+    },
+    "italy u20 w": {
+      "fotmob": "2058028"
+    },
+    "italy u20": {
+      "fotmob": "2058028"
+    },
+    "spain": {
+      "fotmob": "1459878"
+    },
+    "spain u20 w": {
+      "fotmob": "1459878"
+    },
+    "spain u20": {
+      "fotmob": "1459878"
+    },
+    "portugal u20": {
+      "fotmob": "2058045"
+    },
+    "portugal u20 w": {
+      "fotmob": "2058045"
+    },
+    "portugal": {
+      "fotmob": "2058045"
+    }
+  }
+}

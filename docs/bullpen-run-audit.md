@@ -1,16 +1,30 @@
 # Bullpen Run Audit
 
-## Sports ranking enrichment (2026-09-16)
+## Sports ranking evidence (2026-09-18)
 
-Bullpen Sports History enriches each Stage 1 event from the authenticated Sports Rankings service. The Polymarket parent-event slug supplies the verified competition tag, while an independent, bounded Gamma event-title lookup supplies both participant names without depending on the heavier current-odds refresh. Both participants must resolve to one compatible ranking source before numeric values are displayed. Competition-specific ESPN soccer tables cover Egyptian Premier League, Polish Ekstraklasa, German 2. Bundesliga, Italian Serie A and UEFA Europa League tags. Cup events may fall back to domestic standings only when both participants resolve uniquely to the same published source; unrelated league tables are never compared. Football rating is the transparent points-efficiency percentage (points divided by three times games played). History shows the competition tag (linked to the filtered Sports Rankings page), both team names and values, and Team A minus Team B deltas for ranking, rating, and points. Missing or ambiguous source values remain `—`; the UI never converts unavailable rankings into zeroes or chooses an arbitrary match.
+Sports history uses the canonical `sports-ranking-v2` resolver. The parent event provides the competition tag and participant identities. Reviewed competition-scoped names and provider IDs resolve teams; spelling similarity and generated initials cannot select a ranking. Imported null placeholders never enter the ranked identity index. Provider IDs, season, group, source status, successful retrieval timestamp and content hash accompany each selected row.
 
-Each completed Universal Scan also emits a compact competition-scoped participant
-index. Sports Rankings merges the latest index into its seed catalogue, allowing
-new Polymarket teams and events to resolve without waiting for a code release.
-Resolution uses reviewed provider aliases plus conservative generated variants;
-fuzzy matches must be unique and may not cross academy, reserve, gender or youth
-scope boundaries. This changes enrichment inputs only. Frozen Stage 1–3 snapshots,
-selection formulas, order decisions and historical audit records are not rewritten.
+The preferred published provider is selected deterministically; duplicate providers do not make a valid pair ambiguous. Two ranks can be displayed independently, but a delta requires the same provider, season and group, current successful data and two distinct team identities. EFL Cup domestic fallback is restricted to English leagues. Cross-group U20/continental matches and cross-division EFL matches retain individual ranks with an explicit non-comparable status. Points efficiency is `points / (3 * played) * 100`, not a win probability; unplayed ratings remain null and published zeroes remain zeroes. Official adjusted points are retained.
+
+History displays **current reference data**, labelled as such, with a coverage count and clickable source/error details. Current errors replace cached matches. There is no separate frontend resolver. Codes distinguish disconnected/pending/failed/stale feeds, unmapped teams, source conflicts, invalid participants and incompatible scopes. The next automatic refresh or manual refresh rechecks these states.
+
+Future scans capture `sports_ranking_at_scan` on sports candidate rows using existing stored snapshots, with no external requests. Run audits retain this evidence in `stage_1.sports_ranking_evidence`. Resumed scans do not overwrite captured evidence. Capture errors are explicit and validators flag missing/inconsistent evidence or unsafe deltas. This is additive schema-v2 JSON evidence, requiring no migration. Resolver/algorithm and audit rule registry versions are updated. Existing frozen runs are not backfilled with today's ranks; the reference enrichment does not alter eligibility, sizing or execution.
+
+| Tags | Corrective source / identity behavior |
+|---|---|
+| `grc` | Greek Cup league-phase table from FotMob 145, separate from Greek Super League. |
+| `u20wwc` | FotMob 10369, validated female U20 competition; group preserved, no senior-team substitution. |
+| `nwsl` | ESPN usa.nwsl, including Denver Summit and Bay FC provider IDs. |
+| `uel` | ESPN uefa.europa; reviewed long-name/diacritic mappings and provider IDs resolve all audited teams. |
+| `pol`, `egy1` | Invalid ESPN URLs removed; FotMob 196/519 validated tables. |
+| `idn1`, `rou1`, `isr` | FotMob 8983/189/127, country/gender/edition validation. |
+| `bol1`, `chi1`, `argpn`, `rus`, `enl`, `uslc`, `aut` | Connected published ESPN tables; group retained. |
+| `lib`, `sud`, `acle` | Published continental tables; different groups/regions are not subtracted. |
+| `efl` | Individual current English domestic ranks; cross-division comparisons explicitly unavailable. |
+| `bl2`, `sea` | ESPN preferred over duplicate derived tables, with deterministic selection. |
+| `epl`, `lal`, `bun`, `fl1`, `tur` | Published ESPN tables supplement existing derived sources; explicit provider provenance. |
+
+Regression evidence captured 2026-09-18 covers 97 audited market rows across 27 tags: both ranks for all rows, 82 comparable and 15 explicitly different scopes, including all 23 UEL rows comparable. Fixtures contain public tables and retain unrelated teams to test collision safety. Additional tests cover stale/failed sources, provider renames, duplicate providers, market-suffix contamination, wrong-club lookalikes, gender validation and immutable scan capture. External provider availability cannot be guaranteed; failures remain visible with retained last-good values labelled historical, never fabricated current rankings.
 
 ## Workflow Stage 1 trigger contract (2026-09-15)
 

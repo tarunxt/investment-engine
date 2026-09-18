@@ -3100,6 +3100,20 @@ export interface BullpenSportsMetricComparison {
 }
 
 export interface BullpenSportsRankingComparison {
+  resolution_version?: string;
+  generated_at?: string;
+  view?: string;
+  status_code?: string;
+  explanation?: string;
+  comparable?: boolean;
+  team_details?: Record<string, {
+    raw_name: string; status_code: string; remedy: string;
+    selected: { name: string; canonical_id: string; source_id: string; competition: string;
+      group?: string; season?: string; source_url?: string; successful_at?: string;
+      source_as_of?: string; snapshot_hash?: string; source_status: string; ranking_kind: string } | null;
+    candidates: Array<{ name: string; source_id: string; group?: string; season?: string }>;
+  }>;
+  source_diagnostics?: Array<{ source_id: string; status: string; error?: string; published_rows: number; last_success?: string }>;
   market_id: string;
   code: string | null;
   tags: string[];

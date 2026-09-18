@@ -21,7 +21,7 @@
     "series": "12320"
   },
   "uru1": {
-    "name": "Uruguayan Primera Divisi\u00f3n",
+    "name": "Uruguayan Primera División",
     "series": "11862"
   },
   "ecu1": {
@@ -45,7 +45,7 @@
     "series": "12319"
   },
   "tur": {
-    "name": "S\u00fcper Lig",
+    "name": "Süper Lig",
     "series": "10292"
   },
   "fin1": {
@@ -101,7 +101,7 @@
     "series": "11879"
   },
   "lva1": {
-    "name": "Virsl\u012bga",
+    "name": "Virslīga",
     "series": "11874"
   },
   "ltu1": {
@@ -253,7 +253,7 @@
     "series": "10361"
   },
   "svk1": {
-    "name": "Nik\u00e9 liga",
+    "name": "Niké liga",
     "series": "11452"
   },
   "ow": {
@@ -277,7 +277,7 @@
     "series": "11241"
   },
   "arg": {
-    "name": "Liga Profesional de F\u00fatbol",
+    "name": "Liga Profesional de Fútbol",
     "series": "10285"
   },
   "atp": {
@@ -359,5 +359,33 @@
   "epl": {
     "name": "Premier League",
     "series": "10188"
+  },
+  "grc": {
+    "name": "Greek Cup",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
+  },
+  "bol1": {
+    "name": "Bolivian Primera Division",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
+  },
+  "lib": {
+    "name": "Copa Libertadores",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
+  },
+  "enl": {
+    "name": "English National League",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
+  },
+  "uslc": {
+    "name": "USL Championship",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
+  },
+  "acle": {
+    "name": "AFC Champions League Elite",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
+  },
+  "sud": {
+    "name": "Copa Sudamericana",
+    "verified_from": "Polymarket event slugs in Bullpen Sports history, 2026-09-18"
   }
 }

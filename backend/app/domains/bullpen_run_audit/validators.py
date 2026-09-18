@@ -850,6 +850,21 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     stage_3 = bundle.get("stage_3") if isinstance(bundle.get("stage_3"), dict) else {}
     raw = bundle.get("raw") if isinstance(bundle.get("raw"), dict) else {}
 
+    for index, evidence in enumerate(stage_1.get("sports_ranking_evidence") or []):
+        ranking = evidence.get("ranking") or {}
+        unsafe_delta = not ranking.get("comparable") and any(
+            (ranking.get(metric) or {}).get("delta") is not None
+            for metric in ("ranking", "rating", "points")
+        )
+        if evidence.get("capture_error") or not ranking or unsafe_delta:
+            findings.append(_finding(
+                code="SPORTS_RANKING_EVIDENCE_INVALID", severity="medium", stage="stage-1",
+                category="reference-data", title="Sports ranking evidence is incomplete or inconsistent",
+                explanation="Scan evidence must preserve source identity and must not subtract incompatible ranks.",
+                suggested_remediation="Repair ranking capture/resolution for future runs. Never rewrite frozen historical evidence.",
+                evidence_pointers=[f"/stage_1/sports_ranking_evidence/{index}"],
+            ))
+
     started_at = overview.get("started_at")
     completed_at = overview.get("completed_at")
     duration_seconds = _float(overview.get("duration_seconds"))

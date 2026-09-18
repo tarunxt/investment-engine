@@ -4,11 +4,11 @@ from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
 BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
-    "2026-09-05-stage1-common-filters-v30"
+    "2026-09-18-sports-ranking-evidence-v31"
 )
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-09-05-stage1-common-filters-v30"
+    "2026-09-18-sports-ranking-evidence-v31"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -44,6 +44,14 @@ AUDIT_SECTION_KEYS: Final[tuple[str, ...]] = (
 )
 
 AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
+    {
+        "algorithm_key": "sports_ranking_reference",
+        "stage": "stage-1",
+        "algorithm_version": "sports-ranking-v2",
+        "source_module": "app.domains.sports_rankings.comparisons",
+        "source_function": "compare_events",
+        "label": "Frozen sports reference ranks, identities, scopes and source provenance",
+    },
     {
         "algorithm_key": "run_execution_handoff_fallback",
         "stage": "overview",

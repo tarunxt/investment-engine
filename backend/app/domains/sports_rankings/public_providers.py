@@ -73,9 +73,9 @@ def parse_json(data, parser, minimum=10):
                         rank_value = stats.get("rank")
                         rank = number(rank_value) if rank_value not in (None, "") else None
                         rating = round(points / (played * 3) * 100, 2) if played else None
-                        if min(wins, losses, ties, played, points) < 0 or (rating is not None and not 0 <= rating <= 100):
+                        if min(wins, losses, ties, played) < 0 or (rating is not None and rating > 100):
                             raise ValueError("Invalid soccer standings record")
-                        rows.append(dict(name=entry["team"]["displayName"], provider_id=entry["team"]["id"], rank=rank, points=points, rating=rating, played=played, won=wins, lost=losses, drawn=ties, record=f"{wins}-{ties}-{losses}", group=node["name"]))
+                        rows.append(dict(name=entry["team"]["displayName"], provider_id=str(entry["team"]["id"]), provider_aliases=list(dict.fromkeys(v for k in ("displayName", "shortDisplayName", "name") if isinstance((v := entry["team"].get(k)), str) and len(v) > 2)), rank=rank, points=points, rating=rating, played=played, won=wins, lost=losses, drawn=ties, record=f"{wins}-{ties}-{losses}", group=node["name"]))
                     else:
                         pct = number(stats["winPercent"])
                         if min(wins, losses, ties, pct) < 0 or pct > 1:
@@ -85,7 +85,7 @@ def parse_json(data, parser, minimum=10):
                 visit(child)
         visit(data)
         rows.sort(key=lambda r: (r["group"], r["rank"] if r["rank"] is not None else math.inf, -(r["rating"] or 0), r["name"]))
-        for group in {r["group"] for r in rows}:
+        for group in ({r["group"] for r in rows} if parser == "espn" else set()):
             previous, rank = None, None
             for i, row in enumerate([r for r in rows if r["group"] == group], 1):
                 if row["rank"] is not None:
@@ -165,13 +165,16 @@ def fetch_public(source_id, client, now):
     feed = FEEDS[source_id]
     body, url = read_public(client, feed["url"])
     parser = feed["parser"]
-    if parser.startswith("cricket-"):
+    if parser == "fotmob":
+        from .football_tables import parse_fotmob
+        rows, date, season = parse_fotmob(body, feed)
+    elif parser.startswith("cricket-"):
         from .cricket import parse_cricket
         rows, date, season = parse_cricket(body, feed)
     elif parser in {"espn", "espn-soccer", "tennis", "rugby", "nhl"}:
         data = json.loads(body)
         rows, date, season = parse_json(data, parser, feed.get("minimum", 10))
-        if parser in {"espn", "espn-soccer"} and not any(r["played"] for r in rows):
+        if parser == "espn" and not any(r["played"] for r in rows):
             current = data["season"]["year"] if isinstance(data["season"], dict) else int(data["season"])
             body, url = read_public(client, feed["url"] + f"?season={current - 1}")
             rows, date, season = parse_json(json.loads(body), parser, feed.get("minimum", 10))

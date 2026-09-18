@@ -3259,6 +3259,8 @@ def _serialize_scan_candidate(
     returns_per_day: float | None = None,
 ) -> dict[str, object]:
     raw = market.raw if isinstance(market.raw, dict) else {}
+    parent = raw.get("_export_event")
+    parent = parent if isinstance(parent, dict) else next((e for e in (raw.get("events") or []) if isinstance(e, dict) and e.get("slug") == market.event_slug), {})
     return {
         "scan_export_data": raw.get("_scan_export_data") or encode_scan_export_data(raw),
         "question_id": (
@@ -3276,6 +3278,8 @@ def _serialize_scan_candidate(
         "question": market.question,
         "market_title": market.question,
         "market_url": market.market_url,
+        "sports_event_slug": market.event_slug if str(market.theme).casefold() == "sports" or raw.get("sportsMarketType") else None,
+        "sports_event_title": parent.get("title"),
         "slug": market.slug,
         "close_time": market.close_time,
         "theme": market.theme,
@@ -6307,6 +6311,17 @@ class BullpenAutoLiveEngine:
             run.diagnostics.new_buy_enabled = False
             self._report_progress(progress_callback, run, state)
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
+
+        # Reference-only enrichment: freeze the same resolver used by history.
+        # This does not affect eligibility, order planning, or trading decisions.
+        if any(row.get("sports_event_slug") for row in stage1_accepted_candidates):
+            from app.domains.sports_rankings.capture import capture_candidate_rankings
+            try:
+                await asyncio.to_thread(capture_candidate_rankings, stage1_accepted_candidates)
+            except Exception as exc:
+                for row in stage1_accepted_candidates:
+                    if row.get("sports_event_slug") and not row.get("sports_ranking_at_scan"):
+                        row["sports_ranking_capture_error"] = type(exc).__name__
 
         stage1_candidate_scan_completed_at = utc_now_iso()
         report_stage1_progress(
