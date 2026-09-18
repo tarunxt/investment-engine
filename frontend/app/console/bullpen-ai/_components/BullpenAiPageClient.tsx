@@ -140,6 +140,7 @@ import {
   isActiveBullpenPosition,
   shouldPreserveBullpenPositionsOnRefresh,
 } from "@/lib/bullpenPositions";
+import { SportsBreakupSection } from "./SportsBreakupSection";
 
 const BullpenQuestionsTable = dynamic(
   () =>
@@ -5352,6 +5353,10 @@ function BullpenAiPageContent({
         </CardContent>
         ) : null}
       </Card>
+      ) : null}
+
+      {workspaceProfile === "bullpen-sports" ? (
+        <SportsBreakupSection snapshot={activeVisibleSnapshot} />
       ) : null}
 
       <BullpenQuestionsTable

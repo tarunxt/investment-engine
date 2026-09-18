@@ -20,6 +20,8 @@ export type BullpenQuestion = {
   questionId?: string | null;
   closeTime: string | null;
   category: string;
+  sportsTournament?: string | null;
+  sportsTags?: string[];
   yesOdds: number | null;
   noOdds: number | null;
   currentOddsUpdatedAt?: string | null;
