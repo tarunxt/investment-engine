@@ -11313,7 +11313,7 @@ export function BullpenAutoRunScheduleCard({
     useState<ScanCandidateDialogState | null>(null);
   const [stageOneResultSource, setStageOneResultSource] = useState<
     "original" | "independent"
-  >("original");
+  >(() => independentScanSnapshot ? "independent" : "original");
   const [isIndependentStageOneScanning, setIsIndependentStageOneScanning] =
     useState(false);
   const [independentStageOneStartedAt, setIndependentStageOneStartedAt] =
@@ -12353,7 +12353,7 @@ export function BullpenAutoRunScheduleCard({
     try {
       const nextSummary = await apiService.getBullpenAutoLiveDashboardSummary({
         signal: requestSignal,
-        timeoutMs: 5_000,
+        timeoutMs: 15_000,
       });
       if (requestSignal?.aborted) return null;
       const projectedTrackedRun = getVisibleRun(
@@ -12858,7 +12858,7 @@ export function BullpenAutoRunScheduleCard({
             })
           : await apiService.polymarketState({
               signal: requestSignal,
-              timeoutMs: 8_000,
+              timeoutMs: 15_000,
             });
         if (requestSignal?.aborted) return;
         applyPortfolioState(nextState);
@@ -13738,6 +13738,11 @@ export function BullpenAutoRunScheduleCard({
   const independentStageOneView = independentScanSnapshot
     ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
     : null;
+  useEffect(() => {
+    if (independentScanSnapshot) {
+      setStageOneResultSource("independent");
+    }
+  }, [independentScanSnapshot?.snapshotId]);
   const handleIndependentStageOneScan = async (
     downloadScope: "filtered" | "all-scanned" | null = null,
   ) => {
