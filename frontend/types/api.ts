@@ -2365,6 +2365,7 @@ export interface BullpenAutoLiveSettings {
   console_exclude_custom_phrases: boolean;
   console_custom_exclude_phrases: string[];
   returns_per_day_formula: string;
+  event_trends_scan_count: number;
   min_liquidity_usd: number;
   min_independent_active_markets: number;
   target_active_markets: number;

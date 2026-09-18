@@ -256,6 +256,25 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
 
 
 @pytest.mark.anyio
+async def test_event_trends_honor_a_one_scan_query_window(monkeypatch):
+    monkeypatch.setattr(
+        repository_module,
+        "utc_now",
+        lambda: datetime(2026, 8, 10, 2, 45, tzinfo=UTC),
+    )
+    session = _StageTwoOnlySession()
+
+    response = await AsyncPolymarketAutoLiveRepository(session).list_recent_event_trends(
+        7,
+        scan_count=1,
+    )
+
+    assert response.scan_count == 1
+    assert len(response.events[0].scan_scores) == 20
+    assert all(score is None for score in response.events[0].scan_scores[1:])
+
+
+@pytest.mark.anyio
 async def test_event_trends_use_latest_run_that_actually_completed_stage1(monkeypatch):
     monkeypatch.setattr(
         repository_module,

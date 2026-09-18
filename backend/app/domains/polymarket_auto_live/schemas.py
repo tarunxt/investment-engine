@@ -255,6 +255,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     returns_per_day_formula: str = (
         "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
     )
+    event_trends_scan_count: int = Field(default=20, ge=1, le=20)
     min_liquidity_usd: float = Field(default=1_000, ge=0)
 
     min_independent_active_markets: int = Field(default=10, ge=1)
@@ -476,6 +477,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     console_exclude_custom_phrases: bool | None = None
     console_custom_exclude_phrases: list[str] | None = None
     returns_per_day_formula: str | None = None
+    event_trends_scan_count: int | None = Field(default=None, ge=1, le=20)
     min_liquidity_usd: float | None = Field(default=None, ge=0)
 
     min_independent_active_markets: int | None = Field(default=None, ge=1)
