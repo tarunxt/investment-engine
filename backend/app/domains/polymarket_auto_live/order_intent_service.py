@@ -3735,7 +3735,6 @@ def reconcile_interrupted_runs_on_startup_sync(
             .values(
                 status="failed",
                 completed_at=current,
-                closed_at=current,
                 summary=stale_detail,
                 error_message=stale_detail,
                 updated_at=current,
