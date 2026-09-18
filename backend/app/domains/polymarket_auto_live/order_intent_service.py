@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import UTC, datetime, timedelta
 from typing import Iterable, Sequence
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.logging import get_logger
@@ -3701,6 +3701,54 @@ def reconcile_interrupted_runs_on_startup_sync(
     current = interrupted_at or utc_now()
     interrupted_at_iso = _isoformat(current) or utc_now_iso()
     active_task_ids = _active_celery_task_ids_sync()
+    # A legacy run payload can contain an entire Universal Scan. Hydrating one
+    # of those multi-hundred-megabyte JSON values merely to discover that its
+    # worker disappeared days ago can exhaust the production host before normal
+    # lifecycle recovery gets a chance to run. Terminalize unambiguously stale
+    # running rows through their indexed scalar columns first; compact console
+    # projections continue to provide the frozen Stage 1-3 audit evidence.
+    stale_cutoff = current - timedelta(hours=2)
+    stale_rows = session.execute(
+        select(
+            PolymarketAutoLiveRunRecord.id,
+            PolymarketAutoLiveRunRecord.user_id,
+        )
+        .where(PolymarketAutoLiveRunRecord.status == "running")
+        .where(PolymarketAutoLiveRunRecord.updated_at <= stale_cutoff)
+        .order_by(PolymarketAutoLiveRunRecord.started_at.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    ).all()
+    stale_run_ids = [str(row.id) for row in stale_rows]
+    stale_user_ids = {int(row.user_id) for row in stale_rows}
+    if stale_run_ids:
+        stale_detail = (
+            "Auto-Live worker exceeded the two-hour recovery window and was "
+            "closed during startup recovery."
+        )
+        session.execute(
+            update(PolymarketAutoLiveRunRecord)
+            .where(PolymarketAutoLiveRunRecord.id.in_(stale_run_ids))
+            .values(
+                status="failed",
+                completed_at=current,
+                closed_at=current,
+                summary=stale_detail,
+                error_message=stale_detail,
+                updated_at=current,
+            )
+        )
+        session.execute(
+            update(PolymarketAutoLiveStateRecord)
+            .where(PolymarketAutoLiveStateRecord.user_id.in_(stale_user_ids))
+            .values(
+                running=False,
+                paused=False,
+                status="error",
+                last_run_at=current,
+                updated_at=current,
+            )
+        )
     run_query = select(PolymarketAutoLiveRunRecord).where(
         PolymarketAutoLiveRunRecord.status.in_(("running", "confirming"))
     )
@@ -3717,7 +3765,7 @@ def reconcile_interrupted_runs_on_startup_sync(
         .scalars()
         .all()
     )
-    recovered_ids: list[str] = []
+    recovered_ids: list[str] = stale_run_ids.copy()
     for run_record in run_records:
         run = record_to_run(run_record)
         if run.status == "confirming":
