@@ -20,6 +20,7 @@ REMEDIES = {
     "FEED_PENDING": "The configured source is awaiting its first successful refresh.",
     "FEED_FAILED": "Check the source error, repair the provider adapter or enable a validated fallback, then refresh.",
     "STALE": "Refresh this source; retained last-good values are historical and cannot be used as a current comparison.",
+    "NO_PUBLISHED_RANK": "The provider knows this team but has not published its position yet. Keep it unranked until the current competition table is published.",
     "TEAM_UNMAPPED": "Verify the team and season membership, then add a reviewed provider-ID or name mapping. Do not guess the nearest team.",
     "SOURCE_CONFLICT": "Multiple team identities or ranking groups remain within the selected provider. Verify the fixture scope before selecting one.",
     "METADATA_MISSING": "Import the parent fixture with two explicit participant names and a verified competition tag.",
@@ -80,7 +81,7 @@ def compare_events(query, snapshots, catalogue):
             snapshot = snapshots.get(competition.get("source_id"))
             rows = ranking_rows(competition, snapshot)
             # Imported null placeholders are diagnostic names, never ranked identities.
-            published = [r for r in rows if not r.get("match_status") and numeric(r.get("rank"))]
+            published = [r for r in rows if not r.get("match_status") and (numeric(r.get("rank")) or r.get("provider_id"))]
             indexes[key] = _RowMatcher(published, competition.get("code"), include_global=False)
         return indexes[key]
 
@@ -131,7 +132,7 @@ def compare_events(query, snapshots, catalogue):
         return list(output.values())
 
     def usable(row):
-        return row["source_status"] == "ready" and row["edition_current"]
+        return row["source_status"] == "ready" and row["edition_current"] and numeric(row.get("rank"))
 
     def select(rows):
         if not rows:
@@ -206,6 +207,7 @@ def compare_events(query, snapshots, catalogue):
                 ("b", participants[1], b, conflict_b, right),
             ):
                 status = ("SOURCE_CONFLICT" if conflict else
+                          "NO_PUBLISHED_RANK" if selected and not numeric(selected.get("rank")) else
                           "VALID" if selected and usable(selected) else
                           "FEED_FAILED" if selected and selected["source_status"] == "failed" else
                           "STALE" if selected else missing_status(competitions))

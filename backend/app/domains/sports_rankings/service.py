@@ -217,7 +217,9 @@ def resolve(query, snapshots, catalogue=None, *, rows_cache=None):
             continue
         snap = snapshots.get(c["source_id"])
         rows = _ranking_rows_cached(c, snap, rows_cache)
-        matched_rows = _matching_rows([query.name], rows, c["code"])
+        matched_rows = _RowMatcher(rows, c["code"]).match(
+            [query.name, *participant_aliases(c["code"], query.name)], allow_fuzzy=False
+        )
         for row in matched_rows:
             candidates.append({"competition_id": c["id"], "competition": c["name"], "code": c["code"], "source_id": c["source_id"], "status": source_status(snap, c["source_id"]), "ranking_kind": source_kind(c["source_id"]), "source_as_of": snap.source_as_of if snap else None, **row})
     # A master list and an imported tournament can refer to the same source row.

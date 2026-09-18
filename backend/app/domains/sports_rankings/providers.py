@@ -104,7 +104,7 @@ def fetch_source(source_id, now=None):
     if source_id not in SOURCE_IDS:
         raise ValueError("Unknown ranking source")
     now = now or datetime.now(UTC)
-    with httpx.Client(timeout=12, follow_redirects=False, headers={"User-Agent": "Cred-X-SportsRankings/1.0", "Accept": "application/json,text/csv,text/plain"}) as client:
+    with httpx.Client(timeout=30 if FEEDS.get(source_id, {}).get("parser") == "fotmob" else 12, follow_redirects=False, headers={"User-Agent": "Cred-X-SportsRankings/1.0", "Accept": "application/json,text/csv,text/plain"}) as client:
         if source_id in FEEDS:
             return fetch_public(source_id, client, now)
         if source_id == "valve-global":

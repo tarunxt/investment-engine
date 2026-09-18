@@ -126,3 +126,13 @@ def test_audit_flags_capture_errors_and_cross_scope_delta_without_rewriting_evid
     findings = build_deterministic_findings({"stage_1": {"sports_ranking_evidence": evidence}})
     assert any(f["code"] == "SPORTS_RANKING_EVIDENCE_INVALID" for f in findings)
     assert evidence == frozen
+
+
+def test_known_team_without_published_position_is_not_reported_as_unmapped():
+    snaps = snapshots()
+    for row in snaps["espn-soccer-nwsl"].rows:
+        row.update(rank=None, played=0, rating=None, points=0)
+    result = compare("nwsl", "Bay FC vs. Denver Summit FC", snaps)
+    assert result["status_code"] == "NO_PUBLISHED_RANK"
+    assert result["points"]["team_a"] == 0
+    assert result["ranking"]["team_a"] is None and not result["comparable"]
