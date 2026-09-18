@@ -61,3 +61,15 @@ jobs:
             print(json.dumps({"exception_counts":counts,"database_errors":errors[-30:]},indent=2))'
             curl -sS --max-time 8 http://127.0.0.1:8000/health/ready || true
             curl -i -sS --max-time 12 http://127.0.0.1:3000/backend-api/health/live || true
+
+            echo "==> Run scalar-only stale Auto-Live recovery"
+            APP_ROOT="/srv/investment-engine"
+            if [[ ! -d "$APP_ROOT/backend" && -d "/srv/investor/backend" ]]; then
+              APP_ROOT="/srv/investor"
+            fi
+            APP_SERVICE_USER="investment-engine"
+            if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_SERVICE_USER="investor"
+            fi
+            sudo -u "$APP_SERVICE_USER" -H env APP_ROOT="$APP_ROOT" BACKEND_ENV_FILE="/etc/investor/backend.env" bash -lc 'cd "$APP_ROOT/backend"; source .venv/bin/activate; set -a; source "$BACKEND_ENV_FILE"; set +a; python -c "from app.domains.polymarket_auto_live.tasks import reconcile_interrupted_auto_live_runs_on_startup_sync; print({\"recovered_runs\": reconcile_interrupted_auto_live_runs_on_startup_sync(limit=100)})"'
+            curl --fail --silent --show-error --max-time 12 http://127.0.0.1:8000/health/ready
