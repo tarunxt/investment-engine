@@ -172,7 +172,7 @@ export default function SportsRankingsPage() {
           </div>
           <p className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800">{detail.note}</p>
           <p className="text-sm">{detail.scope}</p>
-          <p className="text-xs text-slate-500">{detail.code_verified ? 'Code verified against Polymarket’s sports registry on 14 September 2026. ' : detail.code ? 'Code inferred from imported event URLs. ' : 'Internal sport IDs are not Polymarket codes. '}{detail.entry_kind === 'imported_competition' ? 'Imported participants are not verified current-season members. ' : ''}Gender, age, format and ranking groups must match the event before comparing participants.</p>
+          <p className="text-xs text-slate-500">{detail.code_verified ? 'Competition code verified from the Polymarket registry or observed parent-event URLs. ' : detail.code ? 'Code inferred from imported event URLs. ' : 'Internal sport IDs are not Polymarket codes. '}{detail.entry_kind === 'imported_competition' ? 'Imported participants are not verified current-season members. ' : ''}Gender, age, format and ranking groups must match the event before comparing participants.</p>
           <div className="flex flex-wrap gap-4 text-sm">
             <a className="text-blue-600 underline dark:text-blue-300" href={detail.reference_url} target="_blank" rel="noreferrer">Reference page</a>
             {detail.source_url && <a className="text-blue-600 underline dark:text-blue-300" href={detail.source_url} target="_blank" rel="noreferrer">Published dataset</a>}

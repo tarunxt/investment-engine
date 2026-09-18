@@ -224,7 +224,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
   };
   const selectedColumnWidth = renderedOrder.reduce((sum,key)=>sum+preferences.widths[key],0) + (showActiveColumn ? 40 : 0) + (showClusterColumn ? 104 : 0);
   const sportsEvents = events.filter(event => event.sports_event_slug);
-  const rankedEvents = sportsEvents.filter(event => event.sports_ranking?.ranking?.team_a != null && event.sports_ranking?.ranking?.team_b != null).length;
+  const rankedEvents = sportsEvents.filter(event => ["VALID", "NOT_COMPARABLE"].includes(event.sports_ranking?.status_code ?? "") && event.sports_ranking?.ranking?.team_a != null && event.sports_ranking?.ranking?.team_b != null).length;
   const comparableEvents = sportsEvents.filter(event => event.sports_ranking?.comparable).length;
   return <div className="relative overflow-x-auto px-4 py-2">
     {sportsEvents.length > 0 && renderedOrder.includes("ranking") && <p className="mb-3 text-xs text-slate-600" aria-label="Sports ranking coverage">Current rankings: {rankedEvents}/{sportsEvents.length} events have both ranks · {comparableEvents} comparable · {sportsEvents.length - rankedEvents} need attention. Click a ranking for source, freshness and explanation.</p>}
