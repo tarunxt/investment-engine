@@ -14,15 +14,16 @@ import app.models  # noqa: F401
 import app.domains.polymarket_auto_live.order_intent_service as order_intent_service
 import pytest
 from app.domains.auth.models import User
+from app.domains.polymarket_auto_live.bot import BullpenAutoLiveBot
+from app.domains.polymarket_auto_live.console_projection import (
+    build_run_console_projection,
+)
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
     PolymarketAutoLiveOrderAttemptRecord,
     PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLiveCapitalReservationRecord,
     PolymarketAutoLiveRunRecord,
-)
-from app.domains.polymarket_auto_live.console_projection import (
-    build_run_console_projection,
 )
 from app.domains.polymarket_auto_live.order_intent_service import (
     _active_reserved_cash,
@@ -139,6 +140,85 @@ def test_operator_intent_mutations_take_blocking_row_lock() -> None:
     assert "polymarket_auto_live_order_intents.id = 'intent-lock'" in compiled
     assert "polymarket_auto_live_order_intents.user_id = 7" in compiled
     assert statement.get_execution_options()["populate_existing"] is True
+
+
+@pytest.mark.anyio
+async def test_projected_run_list_never_selects_full_execution_payload() -> None:
+    captured = []
+
+    class _Result:
+        def all(self):
+            return []
+
+    class _Session:
+        async def execute(self, statement):
+            captured.append(statement)
+            return _Result()
+
+    repo = AsyncPolymarketAutoLiveRepository(_Session())
+
+    assert await repo.list_projected_runs(7, limit=25) == []
+    assert len(captured) == 1
+    compiled = str(
+        captured[0].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "polymarket_auto_live_runs.console_projection" in compiled
+    assert "polymarket_auto_live_runs.payload" not in compiled
+    assert "LIMIT 25" in compiled
+
+
+@pytest.mark.anyio
+async def test_default_run_list_uses_only_projected_rows(monkeypatch) -> None:
+    calls = []
+    run = BullpenAutoLiveRun(
+        id="projected-run",
+        triggered_by="scheduler",
+        status="completed",
+        dry_run=True,
+        started_at="2026-09-18T10:00:00+00:00",
+        completed_at="2026-09-18T10:01:00+00:00",
+        summary="Projected summary",
+    )
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Repo:
+        def __init__(self, _session):
+            pass
+
+        async def list_projected_runs(
+            self,
+            user_id: int,
+            *,
+            limit: int | None = None,
+        ):
+            calls.append(("projected", user_id, limit))
+            return [run]
+
+        async def list_runs(self, user_id: int, *, limit: int | None = None):
+            raise AssertionError("The default list must not load full run payloads.")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        _Session,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _Repo,
+    )
+
+    result = await BullpenAutoLiveBot(user_id=7).list_runs(limit=25)
+
+    assert calls == [("projected", 7, 25)]
+    assert [item.id for item in result] == ["projected-run"]
 
 
 def test_run_order_summary_never_returns_another_users_run(tmp_path) -> None:
