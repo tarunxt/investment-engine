@@ -33,6 +33,7 @@ test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", (
     proxySource,
     /BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
   );
+  assert.match(proxySource, /path === "polymarket\/auto-live\/status"/);
   assert.match(proxySource, /path === "polymarket\/auto-live\/summary\/dashboard"/);
   assert.match(proxySource, /path === "polymarket\/state"/);
   assert.match(

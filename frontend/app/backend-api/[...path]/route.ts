@@ -266,7 +266,8 @@ function isBullpenEventTrendsRead(method: string, path: string) {
 function isBullpenDashboardRead(method: string, path: string) {
   return (
     SAFE_FALLBACK_METHODS.has(method) &&
-    (path === "polymarket/auto-live/summary/dashboard" ||
+    (path === "polymarket/auto-live/status" ||
+      path === "polymarket/auto-live/summary/dashboard" ||
       path === "polymarket/state")
   );
 }
