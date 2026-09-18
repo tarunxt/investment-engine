@@ -40,6 +40,8 @@ const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
 // retains its existing strict budget.
 const BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
 const BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
 const DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS = 30_000;
 const MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS = 5_000;
 const MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS = 120_000;
@@ -261,6 +263,14 @@ function isBullpenEventTrendsRead(method: string, path: string) {
   );
 }
 
+function isBullpenDashboardRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live/summary/dashboard" ||
+      path === "polymarket/state")
+  );
+}
+
 function getEventTrendsProxyTimeoutMs(request: NextRequest, path: string) {
   if (!isBullpenEventTrendsRead(request.method, path)) return null;
   const requestedSeconds = Number.parseInt(
@@ -311,6 +321,10 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
     return BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
   }
 
+  if (isBullpenDashboardRead(method, path)) {
+    return BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+
   if (isBullpenAutoLiveRead(method, path)) {
     return readBoundedTimeout(
       process.env.BULLPEN_BACKEND_PROXY_TIMEOUT_MS,
@@ -343,6 +357,10 @@ function getProxyTotalTimeoutMs(method: string, path: string) {
 
   if (isBullpenHistoryRead(method, path)) {
     return BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  }
+
+  if (isBullpenDashboardRead(method, path)) {
+    return BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
   }
 
   if (isBullpenAutoLiveRead(method, path)) {

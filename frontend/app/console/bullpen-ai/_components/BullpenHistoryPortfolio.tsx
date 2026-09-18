@@ -86,10 +86,10 @@ export function BullpenHistoryPortfolio() {
     try {
       const [summaryResult, stateResult, positionsResult] =
         await Promise.allSettled([
-          apiService.getBullpenAutoLiveDashboardSummary({ timeoutMs: 5_000 }),
+          apiService.getBullpenAutoLiveDashboardSummary({ timeoutMs: 15_000 }),
           forceFresh
-            ? apiService.polymarketLiveBalanceRefresh({ timeoutMs: 5_000 })
-            : apiService.polymarketState({ timeoutMs: 5_000 }),
+            ? apiService.polymarketLiveBalanceRefresh({ timeoutMs: 15_000 })
+            : apiService.polymarketState({ timeoutMs: 15_000 }),
           fetchPositions(forceFresh),
         ]);
 

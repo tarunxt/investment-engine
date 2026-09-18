@@ -159,6 +159,9 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
   assert.match(historyContent, /aria-label="Choose table columns"/);
+  assert.match(historyContent, /fixed inset-0 z-\[220\]/);
+  assert.match(historyContent, /aria-modal="true"/);
+  assert.match(historyContent, /max-h-\[calc\(100dvh-2rem\)\]/);
   assert.match(historyContent, /BULLPEN_EVENT_TREND_COLUMN_OPTIONS\.map/);
   assert.match(historyContent, /bullpen-event-trends-visible-columns-v1/);
   assert.match(historyContent, /visibleColumnKeys=\{visibleColumnKeys\}/);
