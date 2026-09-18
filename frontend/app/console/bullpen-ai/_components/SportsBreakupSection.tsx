@@ -179,7 +179,7 @@ function BreakdownCard({ table, totalEvents }: { table: BreakdownTable; totalEve
       </div>
       <div className="overflow-x-auto"><table className="w-full text-sm">
         <thead><tr className="bg-emerald-50 text-left text-xs uppercase tracking-wide text-emerald-700"><th className="px-4 py-2 font-semibold">Breakdown</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
-        <tbody className="divide-y divide-emerald-100">{table.rows.map((row) => <tr key={row.label}><td className="px-4 py-2 text-slate-700">{row.label}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{shareLabel(row.count, totalEvents)}</td></tr>)}</tbody>
+        <tbody className="divide-y divide-emerald-100">{table.rows.length > 0 ? table.rows.map((row) => <tr key={row.label}><td className="px-4 py-2 text-slate-700">{row.label}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{shareLabel(row.count, totalEvents)}</td></tr>) : <tr><td className="px-4 py-3 text-slate-500" colSpan={3}>No filtered events in this snapshot.</td></tr>}</tbody>
         <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right tabular-nums">{totalEvents.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">{totalEvents > 0 ? "100%" : "0%"}</td></tr></tfoot>
       </table></div>
     </article>
@@ -194,17 +194,17 @@ export function SportsBreakupSection({ snapshot }: { snapshot: BullpenScanSnapsh
         <div><h2 className="text-xl font-semibold text-emerald-950">Sports Breakup</h2><p className="mt-1 text-sm text-emerald-800">Breakdown of the events that passed the active Bullpen Sports filters.</p></div>
         <div className="rounded-xl border border-emerald-200 bg-white/80 px-4 py-3 text-right"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Events that passed filters</p><p className="mt-1 text-xl font-bold tabular-nums text-emerald-950">{summary.totalEvents.toLocaleString("en-IN")}</p></div>
       </div>
-      {summary.totalEvents > 0 ? <div className="mt-5 grid gap-4 lg:grid-cols-2">
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <article className="overflow-hidden rounded-xl border border-emerald-200 bg-white/90 lg:col-span-2">
           <div className="border-b border-emerald-100 px-4 py-3"><h3 className="font-semibold text-emerald-950">Tournaments</h3><p className="mt-0.5 text-xs text-emerald-700">Tournament or league, associated tags, and filtered-event count</p></div>
           <div className="overflow-x-auto"><table className="w-full text-sm">
             <thead><tr className="bg-emerald-50 text-left text-xs uppercase tracking-wide text-emerald-700"><th className="px-4 py-2 font-semibold">Tournament</th><th className="px-4 py-2 font-semibold">Tag(s)</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
-            <tbody className="divide-y divide-emerald-100">{summary.tournaments.map((row) => <tr key={row.label}><td className="px-4 py-2 font-medium text-slate-800">{row.label}</td><td className="px-4 py-2 text-slate-600">{row.tags.length > 0 ? row.tags.join(", ") : "—"}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{shareLabel(row.count, summary.totalEvents)}</td></tr>)}</tbody>
-            <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2" colSpan={2}>Total</td><td className="px-4 py-2 text-right tabular-nums">{summary.totalEvents.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">100%</td></tr></tfoot>
+            <tbody className="divide-y divide-emerald-100">{summary.tournaments.length > 0 ? summary.tournaments.map((row) => <tr key={row.label}><td className="px-4 py-2 font-medium text-slate-800">{row.label}</td><td className="px-4 py-2 text-slate-600">{row.tags.length > 0 ? row.tags.join(", ") : "—"}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{shareLabel(row.count, summary.totalEvents)}</td></tr>) : <tr><td className="px-4 py-3 text-slate-500" colSpan={4}>No filtered sports events in this snapshot.</td></tr>}</tbody>
+            <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2" colSpan={2}>Total</td><td className="px-4 py-2 text-right tabular-nums">{summary.totalEvents.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">{summary.totalEvents > 0 ? "100%" : "0%"}</td></tr></tfoot>
           </table></div>
         </article>
         {summary.tables.map((table) => <BreakdownCard key={table.key} table={table} totalEvents={summary.totalEvents} />)}
-      </div> : <p className="mt-5 rounded-xl border border-emerald-200 bg-white/80 px-4 py-5 text-sm text-emerald-900">No filtered sports events are available in the selected snapshot yet.</p>}
+      </div>
     </section>
   );
 }
