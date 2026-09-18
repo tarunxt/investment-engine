@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import settings
 from app.core.request_timing import add_database_duration
 
+ASYNC_POOL_TIMEOUT_SECONDS = 5
+
 # ── Async engine (FastAPI / HTTP path) ──────────────────────────────────────
 # Requires postgresql+asyncpg:// URL. We normalise here so callers keep a
 # plain postgresql:// value in the environment.
@@ -20,7 +22,10 @@ async_engine = create_async_engine(
     _async_url,
     pool_size=20,
     max_overflow=40,
-    pool_timeout=30,
+    # Fail inside the API's response budget instead of leaving requests queued
+    # after the proxy has already returned 504. The global exception handler
+    # turns pool exhaustion into a retryable 503 with Retry-After.
+    pool_timeout=ASYNC_POOL_TIMEOUT_SECONDS,
     pool_pre_ping=True,
     echo=settings.debug,
 )
