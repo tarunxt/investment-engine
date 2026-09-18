@@ -3714,7 +3714,10 @@ def reconcile_interrupted_runs_on_startup_sync(
             PolymarketAutoLiveRunRecord.user_id,
         )
         .where(PolymarketAutoLiveRunRecord.status == "running")
-        .where(PolymarketAutoLiveRunRecord.updated_at <= stale_cutoff)
+        # Heartbeats, deploy recovery, and unrelated projection repairs may
+        # legitimately refresh updated_at on an orphan. The immutable run start
+        # is the authoritative age for the two-hour recovery boundary.
+        .where(PolymarketAutoLiveRunRecord.started_at <= stale_cutoff)
         .order_by(PolymarketAutoLiveRunRecord.started_at.asc())
         .limit(limit)
         .with_for_update(skip_locked=True)

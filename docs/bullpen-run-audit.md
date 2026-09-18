@@ -51,6 +51,8 @@ Startup recovery terminalizes running rows older than two hours through indexed
 scalar columns before hydrating any historical run payload. This prevents an
 orphaned legacy Full Universe payload from exhausting backend and PostgreSQL
 memory while preserving its immutable payload and compact console projection.
+Run age is measured from the immutable `started_at` value; later heartbeat or
+projection writes cannot make an hours-old orphan appear fresh again.
 
 The live dashboard projection preserves this lineage while Stage 1 is running:
 `snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
