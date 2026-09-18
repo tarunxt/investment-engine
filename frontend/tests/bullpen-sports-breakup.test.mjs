@@ -12,13 +12,14 @@ test("Bullpen Sports renders Sports Breakup immediately above Events Summary", (
   );
 });
 
-test("Sports Breakup includes tournament tags and the requested supporting tables", () => {
+test("Sports Breakup includes normalized tournament, tag, and sport columns", () => {
   const component = read("../app/console/bullpen-ai/_components/SportsBreakupSection.tsx");
   for (const label of [
     "Sports Breakup",
     "Events that passed filters",
     "Tournaments",
-    "Tag(s)",
+    "Tag",
+    "Sport",
     "Sports Categories",
     "Expiry",
     "Odds Profile",
@@ -29,6 +30,11 @@ test("Sports Breakup includes tournament tags and the requested supporting table
     assert.match(component, new RegExp(label.replace(/[()]/g, "\\$&")));
   }
   assert.match(component, /summary\.tournaments\.map/);
+  assert.match(component, /canonicalTournament\(question\)/);
+  assert.match(component, /polymarketTournamentCodes/);
+  assert.doesNotMatch(component, />Tag\(s\)</);
+  assert.match(component, /\{row\.tag\}/);
+  assert.match(component, /\{row\.sport\}/);
   assert.match(component, /shareLabel\(row\.count, summary\.totalEvents\)/);
 });
 
