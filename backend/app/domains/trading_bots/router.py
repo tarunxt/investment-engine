@@ -24,7 +24,6 @@ from app.domains.trading_bots.universal_scan import (
     control_run,
     status_for_user,
     update_schedule,
-    utc_now,
 )
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
@@ -94,8 +93,17 @@ async def update_universal_scan_auto_run(
 
 
 @router.post("/universal-scan/auto-run/enable", response_model=UniversalScanAutoRunStatus)
-async def enable_universal_scan_auto_run(current_user: User = Depends(get_current_user)):
-    return await asyncio.to_thread(_update_universal_schedule, current_user.id, enabled=True)
+async def enable_universal_scan_auto_run(
+    request: UniversalScanScheduleUpdate | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    return await asyncio.to_thread(
+        _update_universal_schedule,
+        current_user.id,
+        enabled=True,
+        start_at=request.start_at if request else None,
+        refresh_minutes=request.refresh_minutes if request else None,
+    )
 
 
 @router.post("/universal-scan/auto-run/disable", response_model=UniversalScanAutoRunStatus)
@@ -106,13 +114,15 @@ async def disable_universal_scan_auto_run(current_user: User = Depends(get_curre
 @router.post("/universal-scan/auto-run/run-now", response_model=UniversalScanAutoRunStatus)
 async def run_universal_scan_now(
     background_tasks: BackgroundTasks,
+    request: UniversalScanScheduleUpdate | None = None,
     current_user: User = Depends(get_current_user),
 ):
     await asyncio.to_thread(
         _update_universal_schedule,
         current_user.id,
         enabled=True,
-        start_at=utc_now().replace(microsecond=0).isoformat(),
+        start_at=request.start_at if request else None,
+        refresh_minutes=request.refresh_minutes if request else None,
     )
     state, should_dispatch = await asyncio.to_thread(
         prepare_universal_scan,

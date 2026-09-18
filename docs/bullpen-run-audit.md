@@ -2468,8 +2468,9 @@ display fallback whenever older Stage 1 evidence does not carry an explicit
 source timestamp. The fallback may be newer than the displayed workflow run so
 the monitor can show the latest completed shared scan instead of a dash; a later
 failed or cancelled Universal attempt can never replace it. The status endpoint
-resolves this start timestamp from the immutable completed export metadata, with
-the bounded run history used only as a legacy fallback. The card also displays
+resolves this start timestamp from the persisted bounded completed-run history
+written by the same terminal worker path, without walking the export directory
+on every poll. The card also displays
 the workflow's own start timestamp as `Last stage run`, keeping workflow time and
 shared-scan time visibly distinct.
 
@@ -2493,6 +2494,15 @@ worker disappears between scheduler ticks.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
+
+The Universal Scan scheduler keeps its configured IST start time and refresh
+interval separate from an immediate execution. `Start Auto Run Now` atomically
+saves the visible schedule, enables recurrence, and queues one run immediately;
+that manual run never re-anchors the selected future start time. `Enable Auto
+Run` atomically saves the same visible schedule and enables recurrence without
+queuing an immediate run. The status path reads the persisted completed-run
+history instead of scanning the export directory, and the frontend retries
+transient 502/503/504 backend responses before showing the clickable diagnostic.
 
 `Start Auto Run Now` is an immediate workflow-scoped action. It first reapplies
 the selected workspace's Stage 1 filters to the shared Universal scan, validates
