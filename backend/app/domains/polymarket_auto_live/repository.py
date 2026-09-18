@@ -1402,6 +1402,9 @@ class AsyncPolymarketAutoLiveRepository:
             select(
                 run.id,
                 run.console_projection["stage_results"].label("trend_stage_results"),
+                run.console_projection["version"].as_integer().label(
+                    "trend_projection_version"
+                ),
                 run.started_at,
                 run.completed_at,
                 run.updated_at,
@@ -1449,6 +1452,19 @@ class AsyncPolymarketAutoLiveRepository:
         )
         latest_stage1_run_id = str(latest_stage1_run_row.id)
 
+        def requires_frozen_trend_overlay(run_row: object) -> bool:
+            projection_version = getattr(
+                run_row, "trend_projection_version", None
+            )
+            if (
+                isinstance(projection_version, int)
+                and projection_version >= CONSOLE_PROJECTION_VERSION
+            ):
+                return False
+            return needs_frozen_trend_overlay(
+                getattr(run_row, "trend_stage_results", None)
+            )
+
         # Projections created before per-model trend retention kept only the
         # first ten Stage-2 rows and removed their llm_outputs. Read just the
         # latest run's frozen stage slice as a compatibility overlay. This is
@@ -1460,7 +1476,7 @@ class AsyncPolymarketAutoLiveRepository:
             )
             .where(run.user_id == user_id)
             .where(run.id == run_rows[0].id)
-            .where(needs_frozen_trend_overlay(run_rows[0].trend_stage_results))
+            .where(requires_frozen_trend_overlay(run_rows[0]))
         )).first()
         trend_run_rows = list(run_rows)
         if latest_frozen_stage_row is not None and isinstance(
@@ -1469,6 +1485,9 @@ class AsyncPolymarketAutoLiveRepository:
             trend_run_rows.append(SimpleNamespace(
                 id=run_rows[0].id,
                 trend_stage_results=latest_frozen_stage_row.trend_stage_results,
+                trend_projection_version=getattr(
+                    run_rows[0], "trend_projection_version", None
+                ),
                 started_at=run_rows[0].started_at,
                 completed_at=run_rows[0].completed_at,
                 updated_at=run_rows[0].updated_at,
@@ -1480,7 +1499,7 @@ class AsyncPolymarketAutoLiveRepository:
                 )
                 .where(run.user_id == user_id)
                 .where(run.id == latest_stage1_run_row.id)
-                .where(needs_frozen_trend_overlay(latest_stage1_run_row.trend_stage_results))
+                .where(requires_frozen_trend_overlay(latest_stage1_run_row))
             )).first()
             if latest_stage1_frozen_row is not None and isinstance(
                 latest_stage1_frozen_row.trend_stage_results, list
@@ -1489,6 +1508,9 @@ class AsyncPolymarketAutoLiveRepository:
                     id=latest_stage1_run_row.id,
                     trend_stage_results=(
                         latest_stage1_frozen_row.trend_stage_results
+                    ),
+                    trend_projection_version=getattr(
+                        latest_stage1_run_row, "trend_projection_version", None
                     ),
                     started_at=latest_stage1_run_row.started_at,
                     completed_at=latest_stage1_run_row.completed_at,
