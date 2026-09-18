@@ -13,7 +13,7 @@ test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", (
     "../../backend/app/domains/polymarket_auto_live/router.py",
   );
 
-  assert.match(backendSource, /DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 4\.0/);
+  assert.match(backendSource, /DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 12\.0/);
   assert.match(backendSource, /HISTORY_TIMEOUT_SECONDS = 12\.0/);
   assert.match(backendSource, /CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 12\.0/);
 
@@ -25,6 +25,16 @@ test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", (
     proxySource,
     /BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
   );
+  assert.match(
+    proxySource,
+    /BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500/,
+  );
+  assert.match(
+    proxySource,
+    /BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
+  );
+  assert.match(proxySource, /path === "polymarket\/auto-live\/summary\/dashboard"/);
+  assert.match(proxySource, /path === "polymarket\/state"/);
   assert.match(
     proxySource,
     /SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
