@@ -2163,6 +2163,10 @@ History skips frozen overlays when retained candidate and per-model coverage is
 complete. Compatibility overlays select only stage metadata, accepted candidates
 and reviewed LLM rows in PostgreSQL. Rejected scan rows and export sources are
 excluded before HTTP transfer; frozen audit snapshots and exports remain unchanged.
+Current console-projection versions never re-open immutable run JSON merely because
+an individual failed model has no `llm_outputs`; only older projection versions may
+use the bounded compatibility overlay. This keeps the 20-scan History read responsive
+without changing any saved Stage 1/2/3 evidence.
 # Stage 1 export availability
 
 Filtered Excel downloads use the frozen run ID or independent scan export ID even
