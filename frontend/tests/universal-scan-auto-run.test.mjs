@@ -19,6 +19,7 @@ test("Universal Scan renders its isolated Bullpen-style auto-run controls", () =
   assert.match(shared, /<UniversalScanAutoRunCard onStatusChange=/);
   assert.match(card, /History/);
   assert.match(card, /Start Auto Run Now/);
+  assert.match(card, /autoRunEnabled \? "Run Now" : "Start Auto Run Now"/);
   assert.match(card, /Enable Auto Run/);
   assert.match(card, /"Pause"/);
   assert.match(card, /"Kill"/);

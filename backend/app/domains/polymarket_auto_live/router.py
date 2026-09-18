@@ -77,7 +77,7 @@ logger = get_logger(__name__)
 # identity lookup. Bound it well below the browser timeout so a saturated
 # database produces a compact retryable state instead of a page-level
 # indefinite wait.
-PERSISTED_STATUS_TIMEOUT_SECONDS = 2.0
+PERSISTED_STATUS_TIMEOUT_SECONDS = 10.0
 PERSISTED_STATUS_SLOW_THRESHOLD_MS = 500.0
 PERSISTED_STATUS_CACHE_CONTROL = "private, max-age=5, stale-while-revalidate=30"
 DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 12.0
