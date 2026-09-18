@@ -295,7 +295,12 @@ async def test_get_summary_backfills_completed_run_decisions_from_stage3_payload
             assert user_id == 7
             return None
 
-        async def list_runs(self, user_id: int, *, limit: int | None = None):
+        async def list_projected_runs(
+            self,
+            user_id: int,
+            *,
+            limit: int | None = None,
+        ):
             assert user_id == 7
             assert limit in {10, None}
             return [run]

@@ -724,10 +724,10 @@ class BullpenAutoLiveBot:
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             _, state = await self._get_active_run_or_recover(repo, settings, state)
-            runs = await repo.list_runs(self.user_id, limit=run_limit)
+            runs = await repo.list_projected_runs(self.user_id, limit=run_limit)
             if await self._reconcile_terminal_stage3_decisions(repo, runs):
                 await session.commit()
-                runs = await repo.list_runs(self.user_id, limit=run_limit)
+                runs = await repo.list_projected_runs(self.user_id, limit=run_limit)
             decisions = await repo.list_decisions(self.user_id, limit=25)
             await repo.save_state(self.user_id, state)
             await session.commit()

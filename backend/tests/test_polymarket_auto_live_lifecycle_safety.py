@@ -1158,7 +1158,12 @@ async def test_state_and_summary_polls_do_not_terminalize_healthy_active_run(
             assert user_id == 7
             assert next_state.last_error is None
 
-        async def list_runs(self, user_id: int, *, limit: int | None = None):
+        async def list_projected_runs(
+            self,
+            user_id: int,
+            *,
+            limit: int | None = None,
+        ):
             assert user_id == 7
             assert limit == 10
             return [run]
