@@ -2,6 +2,9 @@ name: Inspect Production Frontend
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/inspect-universal-auto-run-api
 
 permissions:
   contents: read
