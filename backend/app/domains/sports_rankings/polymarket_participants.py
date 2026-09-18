@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 _MATCHUP = re.compile(r"\s+(?:vs\.?|v\.?|@)\s+", re.IGNORECASE)
 _WIN_QUESTION = re.compile(
     r"^Will\s+(.+?)\s+win\s+on\s+\d{4}-\d{2}-\d{2}\??$",
@@ -46,6 +46,20 @@ def _clean_name(value: object) -> str | None:
     if not name or name.casefold() in _NON_PARTICIPANTS or len(name) > 200:
         return None
     return name
+
+
+# Market descriptions must never enter the team registry, even from old indexes.
+_MARKET_SUFFIX = re.compile(
+    r"(?:\s[-–—:]\s|\s)(?:total corners|exact score|first team to score|"
+    r"halftime result|half.time result|second half result|more markets|player props|"
+    r"(?:1st|2nd) half.*|both teams to score|total goals|handicap|spread)(?:\s|$)",
+    re.IGNORECASE,
+)
+
+
+def clean_participant_name(value):
+    name = _clean_name(value)
+    return None if name is None or _MARKET_SUFFIX.search(name) else name
 
 
 def _event_payload(market: Any) -> dict[str, Any]:
@@ -106,7 +120,9 @@ def participant_record(
     if event_title:
         parts = _MATCHUP.split(event_title, maxsplit=1)
         if len(parts) == 2:
-            names = [name for part in parts if (name := _clean_name(part))]
+            names = [name for part in parts if (name := clean_participant_name(part))]
+            if len(names) != 2:
+                return None
 
     # Polymarket also represents a full match as one Yes/No market per side.
     # Only the date-specific "Will X win" form is accepted here; outrights such
@@ -115,7 +131,7 @@ def participant_record(
         question = _clean_name(getattr(market, "question", None))
         question_match = _WIN_QUESTION.match(question or "")
         if question_match:
-            candidate = _clean_name(question_match.group(1))
+            candidate = clean_participant_name(question_match.group(1))
             if candidate:
                 names = [candidate]
     if not names:
@@ -194,7 +210,7 @@ def load_participant_index(user_id: int) -> dict[str, dict[str, Any]]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if payload.get("schema_version") != INDEX_SCHEMA_VERSION or not isinstance(payload.get("codes"), dict):
+    if payload.get("schema_version") not in (1, INDEX_SCHEMA_VERSION) or not isinstance(payload.get("codes"), dict):
         return {}
     return {
         str(code).casefold(): value

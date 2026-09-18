@@ -24,7 +24,7 @@ import type {
   BullpenAutoLiveHistoryPage,
   BullpenSportsRankingComparison,
 } from "@/types/api";
-import { readRankingJson, readSportsEventComparisons } from "@/lib/sportsRankingsApi";
+import { readSportsEventComparisons } from "@/lib/sportsRankingsApi";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
@@ -32,7 +32,7 @@ import type { BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
 import { bullpenWorkspaceRunPath } from "@/lib/bullpenWorkspaceRoutes";
 import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
 
-const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v2";
+const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v3";
 const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v2";
 const HISTORY_READ_TIMEOUT_MS = 20_000;
 const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
@@ -149,21 +149,9 @@ function preserveCachedSportsRankings(
   trends: BullpenAutoLiveEventTrendsResponse,
   cached: BullpenAutoLiveEventTrendsResponse | null,
 ) {
-  const cachedByMarket = new Map(
-    (cached?.events ?? [])
-      .filter((event) => event.sports_ranking?.match_status === "matched")
-      .map((event) => [event.market_id, event.sports_ranking] as const),
-  );
-  return {
-    ...trends,
-    events: trends.events.map((event) => ({
-      ...event,
-      sports_ranking:
-        event.sports_ranking?.match_status === "matched"
-          ? event.sports_ranking
-          : cachedByMarket.get(event.market_id) ?? event.sports_ranking ?? null,
-    })),
-  };
+  // Current backend diagnostics are authoritative. Never resurrect cached matches.
+  void cached;
+  return trends;
 }
 
 async function fetchCurrentBullpenPositions() {
@@ -429,140 +417,25 @@ async function applySportsRankingsToEventTrends(
     comparisons = (await readSportsEventComparisons<{
       comparisons: Record<string, BullpenSportsRankingComparison>;
     }>(events)).comparisons;
-  } catch {
-    // A successful batch is authoritative, including unavailable/ambiguous
-    // rankings. Detail recovery is only for a failed request; retrying every
-    // unmatched event delayed all results and the portfolio for minutes.
-    comparisons = await readSportsEventComparisonsFromDetails(events);
+  } catch (error) {
+    comparisons = Object.fromEntries(events.map(event => [event.market_id, {
+      market_id: event.market_id, code: event.event_slug?.split("-", 1)[0] ?? null,
+      tags: event.event_slug ? [event.event_slug.split("-", 1)[0]] : [],
+      team_a: null, team_b: null, match_status: "unmatched" as const,
+      ranking: null, rating: null, points: null, competition_id: null,
+      competition: null, source_as_of: null, status_code: "SERVICE_UNAVAILABLE",
+      explanation: `${error instanceof Error ? error.message : "Rankings request failed."} Refresh to retry the canonical ranking service.`,
+      view: "current", resolution_version: "sports-ranking-v2",
+    }]));
   }
   return {
     ...trends,
     events: trends.events.map((event) => ({
       ...event,
       sports_ranking:
-        comparisons[event.market_id]?.match_status === "matched"
-          ? comparisons[event.market_id]
-          : event.sports_ranking ?? comparisons[event.market_id] ?? null,
+        comparisons[event.market_id] ?? null,
     })),
   };
-}
-
-type RankingDetailRow = {
-  name: string;
-  imported_names?: string[];
-  rank?: number | null;
-  rating?: number | null;
-  points?: number | null;
-};
-type RankingCompetition = {
-  id: string;
-  code: string;
-  name: string;
-  source_id: string | null;
-  source_as_of?: string | null;
-  status?: string | null;
-  ranked_count?: number | null;
-};
-type RankingDetail = RankingCompetition & { rows: RankingDetailRow[] };
-
-async function readRankingDetailsWithLimit(
-  competitions: Array<Pick<RankingCompetition, "id">>,
-  concurrency = 6,
-) {
-  const details: RankingDetail[] = [];
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, competitions.length) }, async () => {
-      while (next < competitions.length) {
-        const competition = competitions[next++];
-        try {
-          details.push(
-            await readRankingJson<RankingDetail>(
-              `/competitions/${encodeURIComponent(competition.id)}`,
-            ),
-          );
-        } catch {
-          // One slow or stale feed must not discard comparisons from healthy feeds.
-        }
-      }
-    }),
-  );
-  return details;
-}
-
-function teamNameKey(value: string) {
-  const designators = new Set(["ac", "afc", "cf", "fc", "fk", "sc", "ssc", "sv", "us", "vfl"]);
-  const aliases: Record<string, string> = {
-    "wolverhampton wanderers": "wolves",
-    wolverhampton: "wolves",
-    "darmstadt 98": "darmstadt",
-  };
-  const tokens = value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
-  while (tokens.length && designators.has(tokens[0])) tokens.shift();
-  while (tokens.length && designators.has(tokens[tokens.length - 1])) tokens.pop();
-  const key = tokens.join(" ");
-  return aliases[key] ?? key;
-}
-
-function uniqueRankingRow(rows: RankingDetailRow[], name: string) {
-  const exact = rows.filter((row) => [row.name, ...(row.imported_names ?? [])].some((candidate) => candidate.localeCompare(name, undefined, { sensitivity: "accent" }) === 0));
-  if (exact.length === 1) return exact[0];
-  const key = teamNameKey(name);
-  const normalized = rows.filter((row) => [row.name, ...(row.imported_names ?? [])].some((candidate) => teamNameKey(candidate) === key));
-  return normalized.length === 1 ? normalized[0] : null;
-}
-
-async function readSportsEventComparisonsFromDetails(
-  events: Array<{ market_id: string; event_slug?: string | null; event_title?: string | null }>,
-) {
-  const codes = new Set(
-    events
-      .map((event) => event.event_slug?.split("-", 1)[0])
-      .filter((code): code is string => Boolean(code)),
-  );
-  // Most verified Polymarket prefixes are also competition IDs. Read those
-  // details directly so a slow full catalogue cannot block valid comparisons.
-  const details = await readRankingDetailsWithLimit(
-    Array.from(codes).sort().map((id) => ({ id })),
-  );
-  const loadedCodes = new Set(details.map((detail) => detail.code));
-  try {
-    const catalogue = await readRankingJson<{ competitions: RankingCompetition[] }>("");
-    const exceptional = catalogue.competitions.filter(
-      (competition) =>
-        competition.source_id &&
-        competition.status === "ready" &&
-        (competition.ranked_count ?? 0) > 0 &&
-        codes.has(competition.code) &&
-        !loadedCodes.has(competition.code),
-    );
-    details.push(...(await readRankingDetailsWithLimit(exceptional)));
-  } catch {
-    // Direct tag/competition matches remain useful without the catalogue.
-  }
-  const output: Record<string, BullpenSportsRankingComparison> = {};
-  for (const event of events) {
-    const code = event.event_slug?.split("-", 1)[0] ?? null;
-    const teams = event.event_title?.split(/\s+(?:vs\.?|v\.?|@)\s+/i);
-    if (!code || teams?.length !== 2) continue;
-    const pairs = details
-      .filter((detail) => detail.code === code)
-      .map((detail) => ({ detail, left: uniqueRankingRow(detail.rows, teams[0]), right: uniqueRankingRow(detail.rows, teams[1]) }))
-      .filter((pair) => pair.left && pair.right);
-    if (pairs.length !== 1) continue;
-    const { detail, left, right } = pairs[0];
-    const metric = (key: "rank" | "rating" | "points") => {
-      const teamA = typeof left?.[key] === "number" ? left[key] : null;
-      const teamB = typeof right?.[key] === "number" ? right[key] : null;
-      return { team_a: teamA, team_b: teamB, delta: teamA !== null && teamB !== null ? teamA - teamB : null };
-    };
-    output[event.market_id] = {
-      market_id: event.market_id, code, tags: [code], team_a: left!.name, team_b: right!.name,
-      match_status: "matched", ranking: metric("rank"), rating: metric("rating"), points: metric("points"),
-      competition_id: detail.id, competition: detail.name, source_as_of: detail.source_as_of ?? null,
-    };
-  }
-  return output;
 }
 
 function resolveActivePositionSide(

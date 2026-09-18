@@ -1160,6 +1160,13 @@ def _build_bundle(
             "missing_fields": missing_fields,
         },
         "stage_1": {
+            "sports_ranking_evidence": [
+                {"market_id": row.get("market_id"),
+                 "ranking": row.get("sports_ranking_at_scan"),
+                 "capture_error": row.get("sports_ranking_capture_error")}
+                for row in (stage1_outputs.get("accepted_candidates") or [])
+                if isinstance(row, dict) and row.get("sports_event_slug")
+            ],
             "run_stages": [
                 stage for stage in run_stage_results if _logical_stage_number_for_result(stage) == 1
             ],

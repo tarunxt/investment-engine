@@ -245,7 +245,7 @@ test("History does not treat a shared parent market id as an active contract mat
 
 function rankingEnrichment(batch, fallback) {
   const start = historyScreen.indexOf("async function applySportsRankingsToEventTrends(");
-  const end = historyScreen.indexOf("type RankingDetailRow", start);
+  const end = historyScreen.indexOf("function resolveActivePositionSide", start);
   const code = ts.transpileModule(historyScreen.slice(start, end), {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -265,13 +265,22 @@ test("Successful ranking batches render unmatched rows without detail fan-out", 
   assert.equal(result.events[0].sports_ranking.ranking, null);
 });
 
-test("Failed ranking batches retain independent detail recovery", async () => {
+test("Failed ranking batches expose a service error without a second matcher", async () => {
   let calls = 0;
   const enrich = rankingEnrichment(
     async () => { throw new Error("Temporary gateway failure"); },
     async () => { calls++; return { a: { match_status: "matched", ranking: { delta: -2 } } }; },
   );
   const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "cup-a-b" }] });
-  assert.equal(calls, 1);
-  assert.equal(result.events[0].sports_ranking.ranking.delta, -2);
+  assert.equal(calls, 0);
+  assert.equal(result.events[0].sports_ranking.ranking, null);
+  assert.equal(result.events[0].sports_ranking.status_code, "SERVICE_UNAVAILABLE");
+});
+
+
+test("Current unmatched results replace previously cached matches", async () => {
+  const enrich = rankingEnrichment(async () => ({ comparisons: { a: { match_status: "unmatched", status_code: "TEAM_UNMAPPED", ranking: null } } }));
+  const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "uel-a-b", sports_ranking: { match_status: "matched", ranking: { team_a: 1, team_b: 2, delta: -1 } } }] });
+  assert.equal(result.events[0].sports_ranking.status_code, "TEAM_UNMAPPED");
+  assert.equal(result.events[0].sports_ranking.ranking, null);
 });

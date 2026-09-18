@@ -86,7 +86,7 @@ def test_code_scoped_resolution_does_not_enable_analysis():
     result = resolve(RankingQuery(code='argpn', name='CA San Miguel'), {})
     assert result['match_status'] == 'matched'
     assert result['candidates'][0]['rank'] is None
-    assert result['candidates'][0]['status'] == 'unavailable'
+    assert result['candidates'][0]['status'] == 'pending'
     assert result['automatic_analysis_enabled'] is False
     assert resolve(RankingQuery(code='arg', name='CA San Miguel'), {})['match_status'] == 'unmatched'
 
@@ -152,8 +152,8 @@ def test_event_comparison_loads_only_relevant_connected_sources():
     ])
     source_ids = _comparison_source_ids(query)
     assert 'football-data-E0' in source_ids
-    assert 'espn-soccer-egy1' in source_ids
-    assert 'espn-soccer-pol' in source_ids
+    assert 'fotmob-egy1' in source_ids
+    assert 'fotmob-pol' in source_ids
 
 
 def test_event_comparison_never_invents_values_for_unmatched_teams():

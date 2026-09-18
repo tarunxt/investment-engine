@@ -14,6 +14,13 @@
     ],
     "VfL Osnabrück": [
       "Osnabruck"
+    ],
+    "SV Darmstadt 98": [
+      "Darmstadt",
+      "Darmstadt 98"
+    ],
+    "VfL Wolfsburg": [
+      "Wolfsburg"
     ]
   },
   "sea": {
@@ -28,11 +35,15 @@
     ],
     "US Lecce": [
       "Lecce"
+    ],
+    "US Sassuolo Calcio": [
+      "Sassuolo"
     ]
   },
   "gre1": {
     "AE Kifisia FC": [
-      "Kifisia"
+      "Kifisia",
+      "AE Kifisiás"
     ],
     "AEK Athens": [
       "AEK"
@@ -41,7 +52,8 @@
       "Levadeiakos"
     ],
     "Aris Thessaloniki": [
-      "Aris"
+      "Aris",
+      "AS Áris Thessaloníkis"
     ],
     "PAE PS Kalamata": [
       "Kalamata"
@@ -51,6 +63,19 @@
     ],
     "Volos NPS": [
       "Volos NFC"
+    ],
+    "Panathinaikos Athens": [
+      "Panathinaikos",
+      "Panathinaikós AO"
+    ],
+    "Olympiacos Piraeus": [
+      "Olympiacos",
+      "Olympiakos",
+      "Olympiakós SFP"
+    ],
+    "Panaitolikos Agrinio": [
+      "Panetolikos",
+      "Panaitolikos"
     ]
   },
   "tur": {
@@ -277,6 +302,315 @@
     ],
     "Wolverhampton Wanderers FC": [
       "Wolves"
+    ],
+    "Norwich City FC": [
+      "Norwich",
+      "Norwich City"
+    ]
+  },
+  "uel": {
+    "Real Sociedad de Fútbol": [
+      "Real Sociedad",
+      "Sociedad"
+    ],
+    "AS Omónoia Leukosías": [
+      "Omonia Nicosia"
+    ],
+    "Olympique de Marseille": [
+      "Marseille"
+    ],
+    "KKS Lech Poznań": [
+      "Lech Poznan"
+    ],
+    "Olympiakós SFP": [
+      "Olympiacos",
+      "Olympiakos",
+      "Olympiacos Piraeus"
+    ],
+    "NEC": [
+      "NEC Nijmegen"
+    ],
+    "RSC Anderlecht": [
+      "Anderlecht"
+    ],
+    "Olympique Lyonnais": [
+      "Lyon"
+    ],
+    "SC União Torreense": [
+      "Torreense"
+    ],
+    "SK Puntigamer Sturm Graz": [
+      "SK Sturm Graz",
+      "Sturm Graz"
+    ],
+    "Stade Rennais FC 1901": [
+      "Stade Rennais",
+      "Rennes"
+    ],
+    "AZ": [
+      "AZ Alkmaar"
+    ],
+    "AC Sparta Praha": [
+      "Sparta Prague"
+    ],
+    "Ararat-Armenia FA": [
+      "ARARAT-ARMENIA"
+    ],
+    "Ferencvárosi TC": [
+      "Ferencvaros"
+    ],
+    "Sport Lisboa e Benfica": [
+      "Benfica"
+    ],
+    "Bayer 04 Leverkusen": [
+      "Bayer Leverkusen"
+    ],
+    "Lillestrøm SK": [
+      "Lillestrom"
+    ],
+    "Beşiktaş JK": [
+      "Besiktas"
+    ],
+    "Jagiellonia Białystok": [
+      "Jagiellonia Bialystok"
+    ]
+  },
+  "grc": {
+    "AEK": [
+      "AEK Athens"
+    ],
+    "MGS Panserraïkós": [
+      "Panserraikos"
+    ],
+    "AS Áris Thessaloníkis": [
+      "Aris",
+      "Aris Thessaloniki"
+    ],
+    "GS Markó": [
+      "Marko"
+    ],
+    "AE Kifisiás": [
+      "Kifisia",
+      "AE Kifisia FC"
+    ],
+    "Panathinaikós AO": [
+      "Panathinaikos",
+      "Panathinaikos Athens"
+    ]
+  },
+  "nwsl": {
+    "Denver Summit FC": [
+      "Denver Summit"
+    ],
+    "Bay FC": [
+      "Bay FC"
+    ]
+  },
+  "bol1": {
+    "CA Nacional Potosí": [
+      "Nacional Potosí",
+      "Nacional Potosi"
+    ],
+    "Club Always Ready": [
+      "Always Ready"
+    ],
+    "Club Guabirá": [
+      "Guabirá",
+      "Guabira"
+    ],
+    "Club Aurora": [
+      "Aurora"
+    ]
+  },
+  "chi1": {
+    "CD Coquimbo Unido": [
+      "Coquimbo Unido"
+    ],
+    "CD Huachipato": [
+      "Huachipato"
+    ]
+  },
+  "argpn": {
+    "San Martin de San Juan": [
+      "San Martín (San Juan)",
+      "San Martin San Juan"
+    ],
+    "CSD Tristan Suarez": [
+      "Tristán Suárez",
+      "Tristan Suarez"
+    ]
+  },
+  "lib": {
+    "SC Corinthians Paulista": [
+      "Corinthians"
+    ],
+    "LDU de Quito": [
+      "Liga de Quito",
+      "LDU Quito"
+    ],
+    "SE Palmeiras": [
+      "Palmeiras"
+    ]
+  },
+  "sud": {
+    "CA Mineiro": [
+      "Atlético-MG",
+      "Atletico-MG",
+      "Atletico Mineiro"
+    ],
+    "Santos FC": [
+      "Santos"
+    ],
+    "CS Cienciano": [
+      "Cienciano"
+    ],
+    "Montevideo City Torque": [
+      "Montevideo City Torque"
+    ],
+    "Cienciano": [
+      "Cienciano del Cusco"
+    ]
+  },
+  "acle": {
+    "Jeonbuk FC": [
+      "Jeonbuk Hyundai Motors",
+      "Jeonbuk Motors"
+    ],
+    "Port FC": [
+      "Port"
+    ],
+    "Kashiwa Reysol": [
+      "Kashiwa Reysol"
+    ],
+    "Vissel Kobe": [
+      "Vissel Kobe"
+    ]
+  },
+  "aut": {
+    "SK Rapid": [
+      "Rapid Vienna",
+      "Rapid Wien"
+    ],
+    "WSG Tirol": [
+      "WSG Swarovski Tirol",
+      "WSG Tirol"
+    ]
+  },
+  "rus": {
+    "FK Baltika Kaliningrad": [
+      "Baltika Kaliningrad",
+      "Baltika"
+    ],
+    "FK Zenit": [
+      "Zenit St Petersburg",
+      "Zenit St. Petersburg"
+    ],
+    "FK Spartak Moskva": [
+      "Spartak Moscow"
+    ],
+    "FK Fakel Voronezh": [
+      "Fakel Voronezh",
+      "Fakel"
+    ]
+  },
+  "enl": {
+    "Kidderminster Harriers FC": [
+      "Kidderminster Harriers",
+      "Kidderminster"
+    ],
+    "Gateshead FC": [
+      "Gateshead"
+    ]
+  },
+  "uslc": {
+    "Sporting Jax": [
+      "Sporting Jax"
+    ],
+    "Hartford Athletic": [
+      "Hartford Athletic"
+    ]
+  },
+  "pol": {
+    "Widzew Lodz": [
+      "Widzew Łódź",
+      "Widzew Lodz"
+    ],
+    "Wieczysta Krakow": [
+      "Wieczysta Kraków"
+    ]
+  },
+  "egy1": {
+    "Ghazl El Mahalla SC": [
+      "Ghazl El Mahalla",
+      "Ghazl Al Mahalla"
+    ],
+    "Zamalek SC": [
+      "Zamalek"
+    ]
+  },
+  "idn1": {
+    "Borneo Samarinda": [
+      "Borneo FC",
+      "Borneo Samarinda"
+    ],
+    "Dewa United": [
+      "Dewa United"
+    ]
+  },
+  "rou1": {
+    "FC Rapid 1923": [
+      "Rapid Bucuresti",
+      "Rapid București",
+      "Rapid Bucharest"
+    ],
+    "FC Argeș Pitești": [
+      "FC Arges Pitesti",
+      "Arges Pitesti"
+    ]
+  },
+  "isr": {
+    "Hapoel Tel Aviv FC": [
+      "Hapoel Tel Aviv"
+    ],
+    "Hapoel Petah Tikva FC": [
+      "Hapoel Petach Tikva",
+      "Hapoel Petah Tikva"
+    ]
+  },
+  "u20wwc": {
+    "Korea Republic": [
+      "South Korea U20 (W)",
+      "South Korea U20",
+      "Korea Republic U20"
+    ],
+    "China PR": [
+      "China U20 (W)",
+      "China U20"
+    ],
+    "USA": [
+      "USA U20 (W)",
+      "USA U20",
+      "United States U20"
+    ],
+    "Argentina": [
+      "Argentina U20 (W)",
+      "Argentina U20"
+    ],
+    "Brazil": [
+      "Brazil U20 (W)",
+      "Brazil U20"
+    ],
+    "Italy": [
+      "Italy U20 (W)",
+      "Italy U20"
+    ],
+    "Spain": [
+      "Spain U20 (W)",
+      "Spain U20"
+    ],
+    "Portugal U20": [
+      "Portugal U20 (W)",
+      "Portugal"
     ]
   }
 }

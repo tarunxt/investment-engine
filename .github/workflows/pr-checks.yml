@@ -47,6 +47,8 @@ jobs:
         run: >-
           pytest -q
           backend/tests/test_sports_rankings.py
+          backend/tests/test_sports_ranking_integrity.py
+          backend/tests/test_bullpen_run_audit.py
           backend/tests/test_sports_ranking_participants.py
           backend/tests/test_sports_master.py
           backend/tests/test_cricket_rankings.py

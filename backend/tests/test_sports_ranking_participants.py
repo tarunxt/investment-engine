@@ -200,7 +200,7 @@ def test_worker_startup_only_queues_participant_backfill(monkeypatch):
 
         def set(self, key, value, **kwargs):
             assert (key, value, kwargs) == (
-                "sports-rankings:startup:v4", "1", {"nx": True, "ex": 300}
+                "sports-rankings:startup:v5", "1", {"nx": True, "ex": 300}
             )
             return True
 

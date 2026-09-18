@@ -17,8 +17,6 @@ for league, sport, path in [
 # Polymarket uses competition-specific soccer prefixes.  Keep these mappings
 # explicit so a tag can be traced to the exact published standings source.
 for code, league, label, minimum in [
-    ("egy1", "egy.1", "Egyptian Premier League", 10),
-    ("pol", "pol.1", "Polish Ekstraklasa", 10),
     ("bl2", "ger.2", "German 2. Bundesliga", 10),
     ("sea", "ita.1", "Italian Serie A", 10),
     ("uel", "uefa.europa", "UEFA Europa League", 8),
@@ -69,3 +67,53 @@ for key, sport, series, slug, name, minimum in [
         series_id=series, series_name=name, minimum=minimum)
 
 CRICKET_SOURCE_IDS = {key for key in FEEDS if key.startswith("cricket-")}
+
+# Validated published soccer tables; each source retains provider IDs and groups.
+for code, league, label, minimum, scope in [
+    ("epl", "eng.1", "English Premier League", 20, "domestic"),
+    ("elc", "eng.2", "English Championship", 24, "domestic"),
+    ("lal", "esp.1", "Spanish LaLiga", 20, "domestic"),
+    ("lal2", "esp.2", "Spanish Segunda Division", 22, "domestic"),
+    ("bun", "ger.1", "German Bundesliga", 18, "domestic"),
+    ("fl1", "fra.1", "French Ligue 1", 18, "domestic"),
+    ("tur", "tur.1", "Turkish Super Lig", 18, "domestic"),
+    ("ere", "ned.1", "Dutch Eredivisie", 18, "domestic"),
+    ("por", "por.1", "Portuguese Primeira Liga", 18, "domestic"),
+    ("bel", "bel.1", "Belgian Pro League", 16, "domestic"),
+    ("it2", "ita.2", "Italian Serie B", 20, "domestic"),
+    ("nwsl", "usa.nwsl", "National Women's Soccer League", 12, "women-senior-club"),
+    ("gre1", "gre.1", "Greek Super League", 10, "domestic"),
+    ("bol1", "bol.1", "Bolivian Primera Division", 12, "domestic"),
+    ("chi1", "chi.1", "Chilean Primera Division", 12, "domestic"),
+    ("argpn", "arg.2", "Argentina Primera Nacional", 24, "domestic"),
+    ("lib", "conmebol.libertadores", "Copa Libertadores", 24, "continental"),
+    ("rus", "rus.1", "Russian Premier League", 12, "domestic"),
+    ("enl", "eng.5", "English National League", 20, "domestic"),
+    ("uslc", "usa.usl.1", "USL Championship", 20, "domestic"),
+    ("acle", "afc.champions", "AFC Champions League Elite", 16, "continental"),
+    ("sud", "conmebol.sudamericana", "Copa Sudamericana", 24, "continental"),
+    ("aut", "aut.1", "Austrian Bundesliga", 10, "domestic"),
+    ("el1", "eng.3", "English League One", 20, "domestic"),
+    ("el2", "eng.4", "English League Two", 20, "domestic"),
+]:
+    add(f"espn-soccer-{code}", "soccer", label,
+        f"https://site.api.espn.com/apis/v2/sports/soccer/{league}/standings",
+        "espn-soccer", f"https://www.espn.com/soccer/standings/_/league/{league}", code,
+        "Published positions and points; rating is points efficiency, not win probability. Groups and seasons are separate; no cross-group rank subtraction.",
+        minimum=minimum, provider="espn", priority=10, scope=scope)
+
+# Public server-rendered tables; league ID, country, gender and edition are validated.
+for code, league_id, label, country, gender, minimum, scope in [
+    ("pol", 196, "Polish Ekstraklasa", "POL", "male", 18, "domestic"),
+    ("egy1", 519, "Egyptian Premier League", "EGY", "male", 20, "domestic"),
+    ("idn1", 8983, "Indonesian Super League", "IDN", "male", 18, "domestic"),
+    ("isr", 127, "Israeli Premier League", "ISR", "male", 14, "domestic"),
+    ("rou1", 189, "Romanian Liga I", "ROU", "male", 16, "domestic"),
+    ("grc", 145, "Greek Cup league phase", "GRE", "male", 17, "cup"),
+    ("u20wwc", 10369, "Women's U20 World Cup", "INT", "female", 24, "women-u20-national"),
+]:
+    add(f"fotmob-{code}", "soccer", label,
+        f"https://www.fotmob.com/leagues/{league_id}/overview", "fotmob", code=code,
+        note="Published position and adjusted points in the named edition and group. Points efficiency is not a win probability. Knockout opponents may have different group ranks.",
+        league_id=league_id, country=country, gender=gender, minimum=minimum,
+        provider="fotmob", priority=10, scope=scope)

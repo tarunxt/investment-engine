@@ -33,6 +33,9 @@ def extend_catalogue(imported):
         item = {**entry, "sport_id": sport_id, "sport": sport["name"], "category": sport["category"], "scope": sport["scope"], "entry_kind": "imported_competition", "code_verified": entry["code"] in CODE_REGISTRY}
         if entry["code"] == "nfl":
             item["source_id"] = "espn-nfl"
+        connected = next((key for key, feed in FEEDS.items() if feed.get("code") == entry["code"]), None)
+        if connected and not item.get("source_id"):
+            item["source_id"] = connected
         result.append(item)
     for sport in SPORTS:
         sources = [(key, feed) for key, feed in FEEDS.items() if feed["sport_id"] == sport["id"]]
@@ -42,7 +45,8 @@ def extend_catalogue(imported):
             sources = [(None, dict(name=sport["name"], reference_url=sport["reference_url"], code=next((k for k, v in CODE_SPORT.items() if v == sport["id"] and k in CODE_REGISTRY), "")))]
         for source_id, feed in sources:
             code = feed.get("code") or ""
+            # Provider source IDs are not proof of a Polymarket tag.
             if code not in CODE_REGISTRY:
                 code = ""
-            result.append(dict(id=f"sport-{sport['id']}-{source_id or 'reference'}", code=code, name=feed["name"], sport=sport["name"], sport_id=sport["id"], category=sport["category"], scope=sport["scope"], reference_url=feed["reference_url"], source_id=source_id, mapping_status="master_sport", code_verified=bool(code), entry_kind="master_sport", participants=[], events=[]))
+            result.append(dict(id=f"sport-{sport['id']}-{source_id or 'reference'}", code=code, name=feed["name"], sport=sport["name"], sport_id=sport["id"], category=sport["category"], scope=sport["scope"], reference_url=feed["reference_url"], source_id=source_id, mapping_status="master_sport", code_verified=code in CODE_REGISTRY, entry_kind="master_sport", participants=[], events=[]))
     return result

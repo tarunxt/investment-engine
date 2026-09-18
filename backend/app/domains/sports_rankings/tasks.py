@@ -45,7 +45,7 @@ def prime_rankings_on_start(sender=None, **kwargs):
     from app.core.config import settings
     try:
         with Redis.from_url(settings.redis_url, socket_timeout=2, socket_connect_timeout=2) as redis:
-            if redis.set("sports-rankings:startup:v4", "1", nx=True, ex=300):
+            if redis.set("sports-rankings:startup:v5", "1", nx=True, ex=300):
                 rebuild_polymarket_participant_indexes.apply_async(retry=False)
     except Exception:
         logger.exception("Sports ranking startup dispatch failed; scheduled refresh remains enabled")
@@ -89,6 +89,7 @@ def reconcile_cricket(self):
 def rebuild_polymarket_participant_indexes(self):
     """Backfill compact participant indexes for scans completed before this release."""
     from app.domains.sports_rankings.polymarket_participants import (
+        INDEX_SCHEMA_VERSION,
         participant_index_path,
         write_participant_index,
     )
@@ -107,8 +108,13 @@ def rebuild_polymarket_participant_indexes(self):
             if resolved is None:
                 continue
             metadata, rows_path = resolved
-            if participant_index_path(rows_path).is_file():
-                continue
+            index_path = participant_index_path(rows_path)
+            if index_path.is_file():
+                try:
+                    if json.loads(index_path.read_text()).get("schema_version") == INDEX_SCHEMA_VERSION:
+                        continue
+                except (ValueError, OSError):
+                    pass
             _, markets = iter_universal_scan_markets(user_id, export_id=metadata.get("exportId"))
             write_participant_index(rows_path, markets, export_id=metadata.get("exportId"))
             rebuilt += 1
@@ -137,7 +143,8 @@ def refresh_source(self, source_id):
             )
             return {"status": "deferred"}
         db.execute(insert(SportsRankingSnapshot).values(source_id=source_id, status="pending", rows=[]).on_conflict_do_nothing(index_elements=["source_id"]))
-        db.commit()
+        db.flush()
+        # Keep the transaction-scoped concurrency slot through the bounded fetch.
         # One writer per source, including duplicate deliveries and manual refresh.
         try:
             snapshot = db.scalar(select(SportsRankingSnapshot).where(SportsRankingSnapshot.source_id == source_id).with_for_update(nowait=True))
