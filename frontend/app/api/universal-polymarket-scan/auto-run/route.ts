@@ -5,6 +5,7 @@ import {
   createBackendSessionContext,
   fetchBackendJsonWithSession,
 } from "@/app/api/bullpen-ai/_lib/serverBackendSession";
+import { BackendRuntimeHttpError } from "@/app/api/bullpen-ai/_lib/backendBullpenRuntime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,6 +15,22 @@ type ActionBody = {
   startAt?: string;
   refreshMinutes?: number;
 };
+
+function autoRunErrorResponse(error: unknown, fallback: string) {
+  if (error instanceof BackendRuntimeHttpError) {
+    return NextResponse.json(
+      { error: error.message || fallback, detail: `Backend returned HTTP ${error.status}.` },
+      { status: error.status },
+    );
+  }
+  return NextResponse.json(
+    {
+      error: fallback,
+      detail: error instanceof Error ? error.message : "The backend connection failed without further detail.",
+    },
+    { status: 502 },
+  );
+}
 
 export async function GET(request: NextRequest) {
   const session = await createBackendSessionContext(request);
@@ -29,10 +46,7 @@ export async function GET(request: NextRequest) {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not load Universal Scan auto-run status." },
-      { status: 500 },
-    );
+    return autoRunErrorResponse(error, "Could not load Universal Scan auto-run status.");
   }
 }
 
@@ -58,9 +72,6 @@ export async function POST(request: NextRequest) {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not update Universal Scan auto-run." },
-      { status: 500 },
-    );
+    return autoRunErrorResponse(error, "Could not update Universal Scan auto-run.");
   }
 }

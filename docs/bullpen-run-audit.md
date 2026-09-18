@@ -2434,12 +2434,27 @@ fall back into Bullpen 007 history. The compact run projection also carries that
 non-sensitive workspace owner explicitly so the dashboard makes the same choice
 as the server-side History query. If a completed auto run and a saved independent
 Stage 1 snapshot both exist, the card displays the newer timestamped evidence.
-The successful Universal scheduler run's paired start time is used only as a
-guarded legacy fallback when that same run's completion predates the workflow
-start. A later failed or cancelled Universal attempt can never replace this
-lineage. The status endpoint resolves this start timestamp from the immutable
-completed export metadata, with the bounded run history used only as a legacy
-fallback.
+The successful Universal scheduler run's paired start time is used as the
+display fallback whenever older Stage 1 evidence does not carry an explicit
+source timestamp. The fallback may be newer than the displayed workflow run so
+the monitor can show the latest completed shared scan instead of a dash; a later
+failed or cancelled Universal attempt can never replace it. The status endpoint
+resolves this start timestamp from the immutable completed export metadata, with
+the bounded run history used only as a legacy fallback. The card also displays
+the workflow's own start timestamp as `Last stage run`, keeping workflow time and
+shared-scan time visibly distinct.
+
+Scheduler controls use a single effective state: a currently active workflow
+also renders the primary action as `Running` and exposes the stop control, so
+`Enable Auto Runs` cannot appear beside Pause/Kill. Pause/Kill remain hidden
+when no active run exists. A persisted running/confirming workflow older than
+the backend's two-hour absolute recovery limit is treated as stale display data,
+not live execution, so an orphaned record cannot leave Pause/Kill visible for
+days. Universal Scan status refreshes are explicitly
+labelled as status-only reads and do not start a scan. Failed status or control
+requests open a diagnostic dialog containing the operation, HTTP response,
+server detail, and recovery guidance; this presentation does not alter frozen
+Stage 1–3 evidence.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
