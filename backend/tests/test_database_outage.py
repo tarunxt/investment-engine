@@ -6,6 +6,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, TimeoutError
 from starlette.requests import Request
 
 from app.infrastructure.database.errors import database_is_unavailable
+from app.infrastructure.database.session import ASYNC_POOL_TIMEOUT_SECONDS
 
 
 def test_database_shutdown_pool_and_connection_failures_are_transient():
@@ -20,6 +21,10 @@ def test_database_shutdown_pool_and_connection_failures_are_transient():
 def test_application_bugs_and_invalid_writes_are_not_reported_as_outages():
     assert not database_is_unavailable(ValueError('invalid rank'))
     assert not database_is_unavailable(IntegrityError('insert', {}, ValueError('constraint')))
+
+
+def test_database_pool_exhaustion_fails_inside_the_proxy_deadline():
+    assert ASYNC_POOL_TIMEOUT_SECONDS == 5
 
 
 def test_outage_response_is_retryable_without_exposing_driver_detail():
