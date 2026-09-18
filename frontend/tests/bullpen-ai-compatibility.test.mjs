@@ -278,7 +278,7 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunCardSource, /formatLatestRunSummaryTileLabel\(latestTerminalRun\)/);
   assert.match(autoRunCardSource, /Stage 2 has no saved LLM targets/);
   assert.match(autoRunCardSource, /latestRunFailureMessage/);
-  assert.match(autoRunCardSource, /isActivelyWorkingRunStatus\(visibleRun\?\.status\)/);
+  assert.match(autoRunCardSource, /isActivelyWorkingRunStatus\(run\.status\)/);
   assert.doesNotMatch(autoRunCardSource, /Boolean\(summary\?\.state\.running\)/);
   assert.match(autoRunCardSource, /setSelectedRunSummaryTile\("next"\)/);
   assert.match(autoRunCardSource, /setSelectedRunSummaryTile\("last"\)/);
@@ -367,10 +367,11 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
   assert.match(autoRunCardSource, /summaryLoadInFlightRef/);
   assert.match(
     autoRunCardSource,
-    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 5_000,\s*\}\);/,
+    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 15_000,\s*\}\);/,
   );
   assert.match(autoRunCardSource, /getPersistedAutoRunStatus\(/);
   assert.match(autoRunCardSource, /AUTO_RUN_STATUS_TIMEOUT_MS/);
+  assert.match(autoRunCardSource, /AUTO_RUN_STATUS_TIMEOUT_MS = 12_000/);
   assert.match(autoRunCardSource, /setSummary\(visiblePayload\.summary\);/);
   assert.doesNotMatch(autoRunCardSource, /summaryPromise/);
   assert.match(

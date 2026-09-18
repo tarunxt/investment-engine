@@ -892,7 +892,10 @@ const POLL_INTERVAL_MS = 2_000;
 // card every second only changes elapsed labels, so a five-second cadence
 // avoids needless whole-card renders while retaining useful timing feedback.
 const RUN_TIMER_INTERVAL_MS = 5_000;
-const AUTO_RUN_STATUS_TIMEOUT_MS = 2_000;
+// Production database pool pressure can briefly delay the otherwise lightweight
+// persisted-status read. Match the backend's bounded recovery window so a
+// healthy schedule does not paint as unavailable after only two seconds.
+const AUTO_RUN_STATUS_TIMEOUT_MS = 12_000;
 const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
 const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
 const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;

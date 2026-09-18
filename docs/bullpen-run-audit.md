@@ -40,6 +40,10 @@ If the compact dashboard read times out, the same workspace-scoped History read
 hydrates the newest bounded exact-run console projection as a display-only
 fallback. This keeps the last/current Stage 1 tile populated during dashboard
 pool pressure without allowing cached UI state to become an execution input.
+The lightweight persisted-status request allows a bounded ten-second database
+recovery window, with a twelve-second browser budget. This keeps genuine
+failures bounded while preventing a healthy schedule from being labelled
+unavailable during brief production connection-pool pressure.
 
 The live dashboard projection preserves this lineage while Stage 1 is running:
 `snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
