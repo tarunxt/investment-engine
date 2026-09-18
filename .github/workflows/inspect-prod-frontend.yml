@@ -339,6 +339,41 @@ jobs:
                 FROM pg_stat_activity
                 WHERE datname = current_database();
               " || true
+              echo "==> PostgreSQL active queries and transaction ages"
+              sudo -u postgres psql -X -d aidb -P pager=off -x -c "
+                SELECT
+                  pid,
+                  usename,
+                  application_name,
+                  client_addr,
+                  state,
+                  wait_event_type,
+                  wait_event,
+                  now() - xact_start AS transaction_age,
+                  now() - query_start AS query_age,
+                  left(regexp_replace(query, E'[\\n\\r\\t]+', ' ', 'g'), 1200) AS query
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                ORDER BY xact_start NULLS LAST, query_start NULLS LAST;
+              " || true
+              echo "==> PostgreSQL blocking chains"
+              sudo -u postgres psql -X -d aidb -P pager=off -x -c "
+                SELECT
+                  blocked.pid AS blocked_pid,
+                  now() - blocked.query_start AS blocked_for,
+                  blocked.wait_event_type,
+                  blocked.wait_event,
+                  left(regexp_replace(blocked.query, E'[\\n\\r\\t]+', ' ', 'g'), 800) AS blocked_query,
+                  blocker.pid AS blocker_pid,
+                  blocker.state AS blocker_state,
+                  now() - blocker.xact_start AS blocker_transaction_age,
+                  left(regexp_replace(blocker.query, E'[\\n\\r\\t]+', ' ', 'g'), 800) AS blocker_query
+                FROM pg_stat_activity blocked
+                CROSS JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) AS blocking_pid
+                JOIN pg_stat_activity blocker ON blocker.pid = blocking_pid
+                WHERE blocked.datname = current_database();
+              " || true
               echo "==> Dashboard summary query plans"
               sudo -u postgres psql -X -d aidb -P pager=off -c "
                 EXPLAIN (ANALYZE, BUFFERS)
