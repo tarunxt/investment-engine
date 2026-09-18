@@ -1,5 +1,5 @@
 name: Inspect Rankings Runtime
-# Diagnostic refresh: 2026-09-18 backend health recovery
+# Diagnostic refresh: 2026-09-18 stale-run retry
 # Runtime inspection requested 2026-09-16T20:39Z
 
 on:
