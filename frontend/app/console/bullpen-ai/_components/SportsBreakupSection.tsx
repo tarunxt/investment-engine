@@ -1,7 +1,8 @@
 import type { BullpenQuestionRow, BullpenScanSnapshot } from "@/lib/bullpen-ai";
+import polymarketTournamentCodes from "../../../../../backend/app/domains/sports_rankings/polymarket_codes.json";
 
 type BreakdownRow = { label: string; count: number };
-type TournamentRow = BreakdownRow & { tags: string[] };
+type TournamentRow = BreakdownRow & { tag: string; sport: string };
 type BreakdownTable = {
   key: string;
   title: string;
@@ -19,6 +20,35 @@ const GENERIC_CATEGORY_PARTS = new Set([
   "yes no",
   "binary",
 ]);
+const SPORT_NAMES = new Map([
+  ["soccer", "Soccer"],
+  ["football", "Soccer"],
+  ["cricket", "Cricket"],
+  ["basketball", "Basketball"],
+  ["baseball", "Baseball"],
+  ["hockey", "Hockey"],
+  ["tennis", "Tennis"],
+  ["golf", "Golf"],
+  ["esports", "Esports"],
+]);
+const TOURNAMENT_ALIASES: Record<string, { name: string; tag: string }> = {
+  "afc champions league elite": { name: "AFC Champions League Elite", tag: "afc" },
+  "efl cup": { name: "EFL Cup", tag: "efl" },
+  "carabao cup": { name: "EFL Cup", tag: "efl" },
+  "copa argentina": { name: "Copa Argentina", tag: "arg" },
+  "coppa italia": { name: "Coppa Italia", tag: "ita" },
+  "liga mx": { name: "Liga MX", tag: "mex" },
+  "copa libertadores": { name: "Copa Libertadores", tag: "lib" },
+  "poland ekstraklasa": { name: "Ekstraklasa", tag: "pol" },
+  "supercopa de espana": { name: "Supercopa de España", tag: "esp" },
+};
+const TOURNAMENT_CODES = Object.entries(polymarketTournamentCodes).map(([tag, value]) => ({
+  tag,
+  name: value.name,
+  series: "series" in value && typeof value.series === "string"
+    ? value.series.split(",").map((part) => part.trim())
+    : [],
+}));
 
 function cleanLabel(value: string) {
   return value.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
@@ -31,20 +61,57 @@ function categoryParts(question: BullpenQuestionRow) {
     .filter((part) => part && !GENERIC_CATEGORY_PARTS.has(part.toLowerCase()));
 }
 
-function normalizedTags(question: BullpenQuestionRow) {
-  const values = [...(question.sportsTags ?? []), ...categoryParts(question)];
-  return Array.from(
-    new Map(
-      values
-        .map(cleanLabel)
-        .filter(Boolean)
-        .map((tag) => [tag.toLowerCase(), tag] as const),
-    ).values(),
-  ).slice(0, 8);
+function metadataParts(question: BullpenQuestionRow) {
+  return [question.sportsTournament, ...(question.sportsTags ?? []), question.category]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => value.split(/\s*(?:·|>|\||•|→)\s*/))
+    .map(cleanLabel)
+    .filter(Boolean);
 }
 
-function tournamentFor(question: BullpenQuestionRow) {
-  return question.sportsTournament?.trim() || categoryParts(question)[0] || "Unclassified tournament";
+function normalizedLookup(value: string) {
+  return cleanLabel(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function canonicalTournament(question: BullpenQuestionRow) {
+  const parts = metadataParts(question);
+  const normalizedParts = parts.map(normalizedLookup);
+  const exactTokens = new Set(
+    parts.flatMap((part) => part.toLowerCase().match(/[a-z0-9]+/g) ?? []),
+  );
+
+  const byCode = TOURNAMENT_CODES.find(({ tag }) => exactTokens.has(tag));
+  if (byCode) return { name: byCode.name, tag: byCode.tag };
+
+  const bySeries = TOURNAMENT_CODES.find(({ series }) =>
+    series.some((id) => exactTokens.has(id)),
+  );
+  if (bySeries) return { name: bySeries.name, tag: bySeries.tag };
+
+  const alias = Object.entries(TOURNAMENT_ALIASES).find(([candidate]) =>
+    normalizedParts.some((part) => part === candidate || part.includes(candidate)),
+  )?.[1];
+  if (alias) return alias;
+
+  const byName = TOURNAMENT_CODES.find(({ name }) => {
+    const normalizedName = normalizedLookup(name);
+    return normalizedParts.some((part) => part === normalizedName || part.includes(normalizedName));
+  });
+  if (byName) return { name: byName.name, tag: byName.tag };
+
+  const fallback = parts.find((part) => {
+    const normalized = normalizedLookup(part);
+    return normalized.length > 2
+      && !GENERIC_CATEGORY_PARTS.has(normalized)
+      && !SPORT_NAMES.has(normalized)
+      && !/^v\d+$/.test(normalized)
+      && !/^\d[\d,]*$/.test(normalized)
+      && !/^\d{4}\s+\d{2}/.test(normalized)
+      && !/^(?:https?|www|home|default|polymarket upload|s3|en gb|us east)/.test(normalized);
+  });
+  if (!fallback) return { name: "Unclassified tournament", tag: "—" };
+  const tag = normalizedLookup(fallback).split(" ").slice(0, 3).join("-");
+  return { name: fallback, tag: tag || "—" };
 }
 
 function sportFor(question: BullpenQuestionRow) {
@@ -56,7 +123,7 @@ function sportFor(question: BullpenQuestionRow) {
   ].filter(Boolean).join(" ").toLowerCase();
 
   if (/\b(nfl|ncaa football|american football)\b/.test(text)) return "American football";
-  if (/\b(soccer|football|epl|uefa|fifa|la liga|bundesliga|serie a|ligue 1)\b/.test(text)) return "Football / Soccer";
+  if (/\b(soccer|football|epl|uefa|fifa|la liga|bundesliga|serie a|ligue 1)\b/.test(text)) return "Soccer";
   if (/\b(nba|wnba|basketball)\b/.test(text)) return "Basketball";
   if (/\b(mlb|baseball)\b/.test(text)) return "Baseball";
   if (/\b(nhl|hockey)\b/.test(text)) return "Hockey";
@@ -142,13 +209,16 @@ export function buildSportsBreakup(snapshot: BullpenScanSnapshot | null) {
   const referenceTime = Number.isFinite(parsedReferenceTime) ? parsedReferenceTime : Date.now();
   const tournamentMap = new Map<string, TournamentRow>();
   questions.forEach((question) => {
-    const label = tournamentFor(question);
-    const key = label.toLowerCase();
-    const current = tournamentMap.get(key) ?? { label, count: 0, tags: [] };
+    const tournament = canonicalTournament(question);
+    const sport = sportFor(question);
+    const key = `${tournament.name.toLowerCase()}\u0000${tournament.tag}\u0000${sport}`;
+    const current = tournamentMap.get(key) ?? {
+      label: tournament.name,
+      count: 0,
+      tag: tournament.tag,
+      sport,
+    };
     current.count += 1;
-    current.tags = Array.from(
-      new Map([...current.tags, ...normalizedTags(question)].map((tag) => [tag.toLowerCase(), tag] as const)).values(),
-    ).slice(0, 8);
     tournamentMap.set(key, current);
   });
   const tournaments = Array.from(tournamentMap.values()).sort(
@@ -196,11 +266,11 @@ export function SportsBreakupSection({ snapshot }: { snapshot: BullpenScanSnapsh
       </div>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <article className="overflow-hidden rounded-xl border border-emerald-200 bg-white/90 lg:col-span-2">
-          <div className="border-b border-emerald-100 px-4 py-3"><h3 className="font-semibold text-emerald-950">Tournaments</h3><p className="mt-0.5 text-xs text-emerald-700">Tournament or league, associated tags, and filtered-event count</p></div>
+          <div className="border-b border-emerald-100 px-4 py-3"><h3 className="font-semibold text-emerald-950">Tournaments</h3><p className="mt-0.5 text-xs text-emerald-700">Tournament, identifier tag, sport, and filtered-event count</p></div>
           <div className="overflow-x-auto"><table className="w-full text-sm">
-            <thead><tr className="bg-emerald-50 text-left text-xs uppercase tracking-wide text-emerald-700"><th className="px-4 py-2 font-semibold">Tournament</th><th className="px-4 py-2 font-semibold">Tag(s)</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
-            <tbody className="divide-y divide-emerald-100">{summary.tournaments.length > 0 ? summary.tournaments.map((row) => <tr key={row.label}><td className="px-4 py-2 font-medium text-slate-800">{row.label}</td><td className="px-4 py-2 text-slate-600">{row.tags.length > 0 ? row.tags.join(", ") : "—"}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{shareLabel(row.count, summary.totalEvents)}</td></tr>) : <tr><td className="px-4 py-3 text-slate-500" colSpan={4}>No filtered sports events in this snapshot.</td></tr>}</tbody>
-            <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2" colSpan={2}>Total</td><td className="px-4 py-2 text-right tabular-nums">{summary.totalEvents.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">{summary.totalEvents > 0 ? "100%" : "0%"}</td></tr></tfoot>
+            <thead><tr className="bg-emerald-50 text-left text-xs uppercase tracking-wide text-emerald-700"><th className="px-4 py-2 font-semibold">Tournament</th><th className="px-4 py-2 font-semibold">Tag</th><th className="px-4 py-2 font-semibold">Sport</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
+            <tbody className="divide-y divide-emerald-100">{summary.tournaments.length > 0 ? summary.tournaments.map((row) => <tr key={`${row.label}-${row.tag}-${row.sport}`}><td className="px-4 py-2 font-medium text-slate-800">{row.label}</td><td className="px-4 py-2 text-slate-600">{row.tag}</td><td className="px-4 py-2 text-slate-600">{row.sport}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{shareLabel(row.count, summary.totalEvents)}</td></tr>) : <tr><td className="px-4 py-3 text-slate-500" colSpan={5}>No filtered sports events in this snapshot.</td></tr>}</tbody>
+            <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2" colSpan={3}>Total</td><td className="px-4 py-2 text-right tabular-nums">{summary.totalEvents.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">{summary.totalEvents > 0 ? "100%" : "0%"}</td></tr></tfoot>
           </table></div>
         </article>
         {summary.tables.map((table) => <BreakdownCard key={table.key} table={table} totalEvents={summary.totalEvents} />)}
