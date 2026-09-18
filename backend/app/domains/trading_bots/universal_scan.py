@@ -29,6 +29,7 @@ STATE_KEY = "universal_scan_auto_run"
 DEFAULT_START_AT = "2026-08-22T12:30:00+00:00"  # 18:00 IST
 DEFAULT_REFRESH_MINUTES = 360
 MAX_HISTORY = 25
+UNIVERSAL_SCAN_RUN_RECOVERY_WINDOW = timedelta(minutes=55)
 
 
 def utc_now() -> datetime:
@@ -45,6 +46,20 @@ def parse_datetime(value: object) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def run_exceeded_recovery_window(
+    state: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if not state.get("running"):
+        return False
+    started_at = parse_datetime(state.get("last_run_at"))
+    if started_at is None:
+        return True
+    reference = (now or utc_now()).astimezone(UTC)
+    return reference - started_at > UNIVERSAL_SCAN_RUN_RECOVERY_WINDOW
 
 
 def next_scheduled_time(reference: datetime, *, start_at: str, refresh_minutes: int) -> datetime:
@@ -143,6 +158,14 @@ def save_state(session: Session, user_id: int, state: dict[str, Any]) -> None:
 def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
     settings = read_settings(session.get(UniversalScanSettingsRecord, user_id))
     state = read_state(session.get(UniversalScanStateRecord, user_id))
+    if run_exceeded_recovery_window(state):
+        finish_run(
+            session,
+            user_id,
+            str(state.get("run_id") or f"stale-{user_id}"),
+            error="Universal Scan worker exceeded its 55-minute recovery window.",
+        )
+        state = read_state(session.get(UniversalScanStateRecord, user_id))
     completed_export = latest_completed_universal_export(user_id)
     if completed_export is not None:
         completed_metadata, _ = completed_export
@@ -226,8 +249,7 @@ def due_user_ids(session: Session, now: datetime) -> list[int]:
         state_record = session.get(UniversalScanStateRecord, row.user_id)
         state = read_state(state_record)
         if state["running"]:
-            started_at = parse_datetime(state["last_run_at"])
-            if started_at is None or now - started_at <= timedelta(minutes=55):
+            if not run_exceeded_recovery_window(state, now=now):
                 continue
             stale_run_id = str(state.get("run_id") or f"stale-{row.user_id}")
             finish_run(

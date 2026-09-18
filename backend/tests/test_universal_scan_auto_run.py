@@ -13,6 +13,7 @@ from app.domains.trading_bots.universal_scan import (
     latest_completed_universal_export,
     next_scheduled_time,
     read_state,
+    run_exceeded_recovery_window,
 )
 
 
@@ -74,6 +75,27 @@ def test_universal_scan_schedule_stays_anchored_to_configured_start():
         start_at=start,
         refresh_minutes=360,
     ) == datetime(2026, 9, 15, 18, 30, tzinfo=UTC)
+
+
+def test_universal_scan_status_rejects_orphaned_running_state():
+    now = datetime(2026, 9, 18, 10, 0, tzinfo=UTC)
+
+    assert run_exceeded_recovery_window(
+        {"running": True, "last_run_at": "2026-09-18T09:04:59+00:00"},
+        now=now,
+    )
+    assert not run_exceeded_recovery_window(
+        {"running": True, "last_run_at": "2026-09-18T09:05:01+00:00"},
+        now=now,
+    )
+    assert run_exceeded_recovery_window(
+        {"running": True, "last_run_at": None},
+        now=now,
+    )
+    assert not run_exceeded_recovery_window(
+        {"running": False, "last_run_at": "2026-09-16T00:00:00+00:00"},
+        now=now,
+    )
 
 
 def test_status_pairs_the_latest_successful_scan_with_its_own_start_time():

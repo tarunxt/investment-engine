@@ -2455,6 +2455,12 @@ labelled as status-only reads and do not start a scan. Failed status or control
 requests open a diagnostic dialog containing the operation, HTTP response,
 server detail, and recovery guidance; this presentation does not alter frozen
 Stage 1–3 evidence.
+
+The Universal Scan status read also closes its own orphaned running state after
+the existing 55-minute worker recovery window, even when the recurring schedule
+has been disabled. This uses the same terminal failure and history update path as
+the scheduled watchdog, so controls cannot remain live indefinitely when a
+worker disappears between scheduler ticks.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
