@@ -65,7 +65,9 @@ test("an active workflow owns its yellow Stage 1 tile and reports live progress"
     /workflowRunForMonitor\?\.request_context\?\.console_profile\?\.scanned_at/,
   );
   assert.match(card, /universalTriggerStatus\?\.last_completed_run_started_at/);
-  assert.match(card, /latestUniversalScanPredatesWorkflow/);
+  assert.match(card, /Last stage run:/);
+  assert.match(card, /universalScanStartedAt \?\?/);
+  assert.doesNotMatch(card, /latestUniversalScanPredatesWorkflow/);
 });
 
 test("live run selection is isolated to the current workflow", () => {

@@ -28,7 +28,12 @@ test("Universal Scan renders its isolated Bullpen-style auto-run controls", () =
   assert.match(card, /Refresh duration/);
   assert.match(card, /Next scheduled run/);
   assert.match(card, /Last failed run/);
-  assert.match(card, /Mode: Universal scan only/);
+  assert.doesNotMatch(card, /Mode: Universal scan only/);
+  assert.doesNotMatch(card, /Status: \{status/);
+  assert.match(card, /Status last checked/);
+  assert.match(card, /Refreshes status only; no scan is started/);
+  assert.match(card, /Universal Scan auto-run error details/);
+  assert.match(card, /How to fix:/);
   assert.doesNotMatch(card, /Auto Runs Started at/);
   assert.doesNotMatch(shared, /One Full Universe capture/);
   assert.match(shared, /Last Universal Scan/);
@@ -38,7 +43,7 @@ test("Universal Scan renders its isolated Bullpen-style auto-run controls", () =
   assert.doesNotMatch(shared, />Original<\/button>/);
   assert.match(shared, /status\.last_completed_at/);
   assert.match(shared, /border-emerald-200 bg-emerald-50/);
-  assert.match(card, /status\?\.enabled \? "bg-red-700" : "bg-slate-950"/);
+  assert.match(card, /const autoRunEnabled = Boolean\(status\?\.enabled \|\| status\?\.running\)/);
 });
 
 test("Universal Scan uses a dedicated recurring worker task", () => {
@@ -55,6 +60,17 @@ test("Start Auto Run Now enables and re-anchors the recurring schedule", () => {
   assert.match(router, /start_at=utc_now\(\)\.replace\(microsecond=0\)\.isoformat\(\)/);
   assert.match(router, /background_tasks\.add_task/);
   assert.match(router, /dispatch_universal_scan/);
+});
+
+test("Universal Scan proxy preserves backend failures for clickable diagnostics", () => {
+  const route = readFileSync(
+    new URL("../app/api/universal-polymarket-scan/auto-run/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(route, /BackendRuntimeHttpError/);
+  assert.match(route, /Backend returned HTTP/);
+  assert.match(route, /status: error\.status/);
+  assert.match(route, /status: 502/);
 });
 
 test("queueing stays fast and reuses the prior completed total for progress", () => {

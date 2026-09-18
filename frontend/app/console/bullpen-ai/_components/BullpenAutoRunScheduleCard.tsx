@@ -10231,6 +10231,18 @@ function isActivelyWorkingRunStatus(
   return status === "running" || status === "confirming";
 }
 
+const ACTIVE_RUN_UI_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
+
+function isCrediblyActiveWorkflowRun(
+  run: BullpenAutoLiveRun | null | undefined,
+  nowMs: number,
+) {
+  if (!run || !isActivelyWorkingRunStatus(run.status)) return false;
+  const startedAtMs = Date.parse(run.started_at ?? "");
+  if (!Number.isFinite(startedAtMs)) return true;
+  return nowMs - startedAtMs <= ACTIVE_RUN_UI_MAX_AGE_MS;
+}
+
 function isUserCancelledRun(run: BullpenAutoLiveRun | null | undefined) {
   if (run?.status !== "failed") return false;
   return /cancelled by user/i.test(
@@ -13899,7 +13911,7 @@ export function BullpenAutoRunScheduleCard({
   const liveWorkflowSettled = isBullpenAutoRunWorkflowSettled(liveWorkflowView);
   const hasActiveWorkflowStage = liveWorkflowView.stages.some(
     (stage) =>
-      isActivelyWorkingRunStatus(workflowRun?.status) && stage.isCurrent,
+      isCrediblyActiveWorkflowRun(workflowRun, timerNowMs) && stage.isCurrent,
   );
   const runActionRequested = action === "invest-now";
   const startNowActionRequested = action === "start-now";
@@ -13908,8 +13920,9 @@ export function BullpenAutoRunScheduleCard({
     (runActionRequested ||
       startNowActionRequested ||
       pendingRunId !== null ||
-      isActivelyWorkingRunStatus(visibleRun?.status) ||
+      isCrediblyActiveWorkflowRun(visibleRun, timerNowMs) ||
       hasActiveWorkflowStage);
+  const effectiveAutoRunActive = autoRunActive || runIsActive;
   // Keep using the reconciled terminal copy after Stage 3. The compact
   // `latest_run` payload can contain zero placeholders and omit frozen rows;
   // selecting it here used to reset Stage 1/2 figures and left their dialogs
@@ -14498,13 +14511,18 @@ export function BullpenAutoRunScheduleCard({
               type="button"
               variant="outline"
               onClick={handleStartAutoRunNow}
-              disabled={action !== null}
+              disabled={action !== null || runIsActive}
               className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 disabled:opacity-60"
             >
               {action === "start-now" ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Starting...
+                </>
+              ) : runIsActive ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Running
                 </>
               ) : (
                 <>
@@ -14513,7 +14531,7 @@ export function BullpenAutoRunScheduleCard({
                 </>
               )}
             </Button>
-            {autoRunActive ? (
+            {effectiveAutoRunActive ? (
               <Button
                 variant="outline"
                 onClick={handleStopAutoRuns}
@@ -14755,7 +14773,7 @@ export function BullpenAutoRunScheduleCard({
           ) : null}
         </div>
 
-        {showActiveRunControls ? (
+        {showActiveRunControls && effectiveAutoRunActive ? (
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -15212,29 +15230,15 @@ export function BullpenAutoRunScheduleCard({
                 const stats = getStageOneStats(filterStage);
                 const workflowStartedAt =
                   workflowRunForMonitor?.started_at ?? null;
-                const universalScanCompletedAt =
-                  universalTriggerStatus?.last_completed_at ?? null;
                 const universalScanStartedAt =
                   universalTriggerStatus?.last_completed_run_started_at ?? null;
-                const workflowStartedMs = workflowStartedAt
-                  ? Date.parse(workflowStartedAt)
-                  : Number.NaN;
-                const universalCompletedMs = universalScanCompletedAt
-                  ? Date.parse(universalScanCompletedAt)
-                  : Number.NaN;
-                const latestUniversalScanPredatesWorkflow =
-                  Number.isFinite(workflowStartedMs) &&
-                  Number.isFinite(universalCompletedMs) &&
-                  universalCompletedMs <= workflowStartedMs;
                 const universalScanAt =
                   readStageOutputString(filterStage.outputs.scanned_at) ??
                   readStageOutputString(filterStage.outputs.source_scan_completed_at) ??
                   workflowRunForMonitor?.request_context?.console_profile?.scanned_at ??
                   workflowRunForMonitor?.request_context?.console_profile
                     ?.source_scan_completed_at ??
-                  (latestUniversalScanPredatesWorkflow
-                    ? universalScanStartedAt
-                    : null) ??
+                  universalScanStartedAt ??
                   null;
                 const filtersCompletedAt =
                   readStageOutputString(filterStage.outputs.filters_completed_at) ??
@@ -15251,6 +15255,12 @@ export function BullpenAutoRunScheduleCard({
                         <p className={`text-sm font-bold ${toneClasses.text}`}>Stage 1 · Filters</p>
                         <p className={`text-xs ${toneClasses.muted}`}>Qualified event shortlist</p>
                         <div className={`mt-1.5 space-y-0.5 text-xs ${toneClasses.muted}`}>
+                          <p>
+                            <span className="font-semibold">Last stage run:</span>{" "}
+                            <span className="tabular-nums">
+                              {formatIstDateTime(workflowStartedAt)}
+                            </span>
+                          </p>
                           <p>
                             <span className="font-semibold">Universal Polymarket Scan:</span>{" "}
                             <span className="tabular-nums">

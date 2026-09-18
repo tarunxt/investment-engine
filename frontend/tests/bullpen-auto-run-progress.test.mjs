@@ -3,6 +3,22 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 
+const scheduleCard = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+test("stale persisted workflows cannot keep run controls active", () => {
+  assert.match(scheduleCard, /ACTIVE_RUN_UI_MAX_AGE_MS = 2 \* 60 \* 60 \* 1_000/);
+  assert.match(scheduleCard, /isCrediblyActiveWorkflowRun\(visibleRun, timerNowMs\)/);
+  assert.match(scheduleCard, /const effectiveAutoRunActive = autoRunActive \|\| runIsActive/);
+  assert.match(scheduleCard, /disabled=\{action !== null \|\| runIsActive\}/);
+  assert.match(scheduleCard, /Running/);
+});
+
 async function loadProgressModule() {
   const source = readFileSync(
     new URL(
