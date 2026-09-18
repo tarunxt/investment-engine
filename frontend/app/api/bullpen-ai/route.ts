@@ -393,6 +393,63 @@ function readCategory(
   );
 }
 
+function readSportsTournament(record: Record<string, unknown>) {
+  return (
+    readString(record, [
+      "tournament",
+      "tournamentName",
+      "league",
+      "leagueName",
+      "competition",
+      "competitionName",
+      "series",
+      "seriesName",
+    ]) ??
+    readDeepString(record, [
+      "tournament",
+      "tournamentName",
+      "league",
+      "leagueName",
+      "competition",
+      "competitionName",
+      "series",
+      "seriesName",
+    ])
+  );
+}
+
+function readSportsTags(record: Record<string, unknown>) {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: unknown) => {
+    let label: string | null = null;
+    if (typeof value === "string") {
+      label = value.trim() || null;
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      label = readString(value as Record<string, unknown>, [
+        "code",
+        "slug",
+        "label",
+        "name",
+        "title",
+      ]);
+    }
+    if (!label) return;
+    const normalized = label.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    tags.push(label);
+  };
+
+  for (const key of ["tags", "categories", "tag", "sport", "sports"] as const) {
+    const value = record[key];
+    if (Array.isArray(value)) value.forEach(add);
+    else add(value);
+  }
+
+  return tags;
+}
+
 function readDeepString(value: unknown, keys: string[]): string | null {
   const seen = new Set<unknown>();
   const stack: unknown[] = [value];
@@ -1058,6 +1115,8 @@ function normalizeQuestion(
     question,
     closeTime,
     category,
+    sportsTournament: readSportsTournament(record),
+    sportsTags: readSportsTags(record),
     yesOdds,
     noOdds,
     volume: readDisplayValue(record, [
@@ -1270,6 +1329,26 @@ function hydrateStoredCandidateForFiltering(
   event: Record<string, unknown>,
 ): FilterableBullpenQuestion {
   const theme = question.category ?? "";
+  const sportsTournament =
+    question.sportsTournament ??
+    readSportsTournament(market) ??
+    readSportsTournament(event);
+  const sportsTags = Array.from(
+    new Map(
+      [
+        ...(question.sportsTags ?? []),
+        ...readSportsTags(event),
+        ...readSportsTags(market),
+      ].map((tag) => [tag.toLowerCase(), tag] as const),
+    ).values(),
+  );
+
+  // Re-filtering stores the same candidate object in the accepted sample.
+  // Enrich that object from the preserved raw Gamma event/market so the
+  // Sports Breakup can describe the already-saved Universal Scan as well as
+  // newly captured scans.
+  question.sportsTournament = sportsTournament;
+  question.sportsTags = sportsTags;
   return {
     ...question,
     volume24hr:
