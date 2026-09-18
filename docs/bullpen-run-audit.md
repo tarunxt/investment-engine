@@ -44,6 +44,9 @@ The lightweight persisted-status request allows a bounded ten-second database
 recovery window, with a twelve-second browser budget. This keeps genuine
 failures bounded while preventing a healthy schedule from being labelled
 unavailable during brief production connection-pool pressure.
+The same-origin backend proxy classifies this status read with the dashboard
+budget (12.5 seconds per attempt, 14 seconds total), so it cannot terminate the
+request before either of those inner recovery deadlines.
 
 The live dashboard projection preserves this lineage while Stage 1 is running:
 `snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
