@@ -1800,6 +1800,15 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  updateBullpenAutoLiveEventTrendsScanCount(
+    scanCount: number,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.put<BullpenAutoLiveSettings>(
+      URLs.bullpenAutoLive.historyEventTrendsScanCount(),
+      { event_trends_scan_count: scanCount },
+    );
+  }
+
   resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
     return this.post<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.resetSettings());
   }

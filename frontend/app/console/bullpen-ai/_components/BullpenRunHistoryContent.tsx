@@ -477,9 +477,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const currentOddsUpdatedAt = trends?.current_odds_fetched_at ?? latestScoredScanAt ?? trends?.generated_at ?? null;
   const eventTrendsScanCount = savedEventTrendsScanCount ?? trends?.scan_count ?? 20;
   const saveEventTrendsScanCount = async (scanCount: number) => {
-    await apiService.updateBullpenAutoLiveSettings({
-      event_trends_scan_count: scanCount,
-    });
+    await apiService.updateBullpenAutoLiveEventTrendsScanCount(scanCount);
     setSavedEventTrendsScanCount(scanCount);
     onRefresh();
   };

@@ -270,6 +270,7 @@ export interface IApiService {
     ): Promise<BullpenAutoLiveState>;
     getBullpenAutoLiveSettings(options?: ApiRequestControl): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
+    updateBullpenAutoLiveEventTrendsScanCount(scanCount: number): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     getBullpenAutoLiveRuns(
       options?: ApiRequestControl,
