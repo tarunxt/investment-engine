@@ -24,6 +24,8 @@ type AutoRunStatus = {
   next_run_at: string | null;
   last_run_at: string | null;
   last_completed_at: string | null;
+  last_completed_run_started_at: string | null;
+  last_total_events: number | null;
   last_failed_at: string | null;
   last_error: string | null;
   progress_events: number;
@@ -117,7 +119,7 @@ function normalizeAutoRunError(error: unknown): AutoRunError {
 export function UniversalScanAutoRunCard({
   onStatusChange,
 }: {
-  onStatusChange?: (status: Pick<AutoRunStatus, "running" | "last_completed_at">) => void;
+  onStatusChange?: (status: Pick<AutoRunStatus, "running" | "last_completed_at" | "last_completed_run_started_at" | "last_total_events">) => void;
 }) {
   const [status, setStatus] = useState<AutoRunStatus | null>(null);
   const [startInput, setStartInput] = useState("");
