@@ -48,7 +48,9 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         )[0]
 
         self.assertIn("WORKFLOW_TRIGGER_PROFILES", trigger_batch)
-        self.assertIn("ACTIVE_AUTO_LIVE_RUN_STATUSES", trigger_batch)
+        self.assertIn("WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES", trigger_batch)
+        self.assertIn('WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES = ("running",)', source)
+        self.assertNotIn("ACTIVE_AUTO_LIVE_RUN_STATUSES", trigger_batch)
         self.assertIn("BullpenAutoLiveBot(user_id=user_id).run_once(", trigger_batch)
         self.assertIn("source_scan_completed_at=source_completed_at", trigger_batch)
         self.assertIn('queue="beat"', trigger_batch)
@@ -62,6 +64,21 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertIn(
             '"app.domains.polymarket_auto_live.tasks.dispatch_bullpen_workflow_trigger_batch": {"queue": "beat"}',
             celery_source,
+        )
+
+    def test_confirming_orders_do_not_block_the_next_stage1_planner(self) -> None:
+        bot_source = (
+            ROOT / "backend/app/domains/polymarket_auto_live/bot.py"
+        ).read_text(encoding="utf-8")
+        run_once = bot_source.split("    async def run_once(", 1)[1].split(
+            "    async def", 1
+        )[0]
+        self.assertIn('running_run.status == "confirming"', run_once)
+        self.assertIn("request.wait_for_execution_lane", run_once)
+        self.assertIn("running_run = None", run_once)
+        self.assertIn(
+            "continues durable Stage 3 confirmation",
+            run_once,
         )
 
     def test_start_now_queues_this_workflow_on_latest_universal_scan(self) -> None:
