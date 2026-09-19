@@ -50,6 +50,7 @@ celery.conf.task_routes = {
     "app.domains.runs.tasks.backfill_final_actionable_history_task": {"queue": "ai"},
     "app.domains.runs.tasks.*": {"queue": "email"},
     "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run": {"queue": AUTO_LIVE_QUEUE},
+    "app.domains.polymarket_auto_live.tasks.dispatch_bullpen_workflow_trigger_batch": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent": {"queue": "ai"},
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_order_intent": {"queue": "ai"},
     "app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent": {"queue": "ai"},
