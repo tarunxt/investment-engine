@@ -144,6 +144,32 @@ def test_status_pairs_the_latest_successful_scan_with_its_own_start_time():
     )
 
 
+def test_state_bound_export_id_recovers_historical_owner_hash(tmp_path, monkeypatch):
+    monkeypatch.setenv("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", str(tmp_path))
+    export_id = "00000000-0000-0000-0000-000000000042"
+    metadata = {
+        "exportId": export_id,
+        "ownerHash": "historical-owner-hash",
+        "universalSource": True,
+        "completed": True,
+        "createdAt": "2026-09-19T05:46:37+00:00",
+        "updatedAt": "2026-09-19T06:07:02+00:00",
+        "scannedAt": "2026-09-19T05:46:37+00:00",
+        "rowCount": 207252,
+    }
+    (tmp_path / f"{export_id}.json").write_text(json.dumps(metadata), encoding="utf-8")
+    (tmp_path / f"{export_id}.jsonl").write_text("{}\n", encoding="utf-8")
+
+    assert latest_completed_universal_export(42, export_id=export_id) is None
+    recovered = latest_completed_universal_export(
+        42,
+        export_id=export_id,
+        trusted_export_id=True,
+    )
+    assert recovered is not None
+    assert recovered[0]["rowCount"] == 207252
+
+
 def test_workflow_stage1_filters_the_saved_universal_scan(tmp_path, monkeypatch):
     monkeypatch.setenv("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", str(tmp_path))
     user_id = 42
