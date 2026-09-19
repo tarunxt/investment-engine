@@ -6185,11 +6185,12 @@ class BullpenAutoLiveEngine:
             # retaining raw objects plus base64 payloads in every run/heartbeat copy
             # can exhaust the planner's memory at Full Universe scale.
             from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
-            if scanned.serialized_rejected is not None:
+            serialized_rejected = getattr(scanned, "serialized_rejected", None)
+            if serialized_rejected is not None:
                 # The Universal reader already externalized each raw source and
                 # released its wrapper object during streaming. Reuse that list
                 # directly instead of constructing a second 177k-object graph.
-                stage1_rejected_candidates = scanned.serialized_rejected
+                stage1_rejected_candidates = serialized_rejected
             else:
                 stage1_rejected_candidates = []
                 with ScanSourceWriter() as source_store:
@@ -6218,7 +6219,7 @@ class BullpenAutoLiveEngine:
             # catalogue remains in stage1_rejected_candidates for Excel/audit.
             diagnostic_rejections = (
                 scanned.rejected
-                if scanned.serialized_rejected is None
+                if serialized_rejected is None
                 else stage1_rejected_candidates[:1_000]
             )
             for rejected in diagnostic_rejections:
