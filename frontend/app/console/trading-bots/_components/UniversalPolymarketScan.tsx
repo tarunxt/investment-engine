@@ -21,16 +21,6 @@ type UniversalScanSummary = {
   }>;
 };
 
-type UniversalScanPageResponse = {
-  error?: string;
-  retryReason?: string;
-  retryAfterMs?: number;
-  scanExportId?: string;
-  scanStartedAt?: string;
-  cumulativeTotalCandidates?: number;
-  nextCursor?: string;
-};
-
 function durationLabel(durationMs: number) {
   const totalSeconds = Math.max(0, Math.round(durationMs / 1_000));
   const hours = Math.floor(totalSeconds / 3_600);
