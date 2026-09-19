@@ -128,6 +128,11 @@ def read_state(record: UniversalScanStateRecord | None) -> dict[str, Any]:
         "last_completed_run_started_at": completed_run_started_at,
         "last_failed_at": saved.get("last_failed_at"),
         "last_error": saved.get("last_error"),
+        "workflow_trigger_export_id": saved.get("workflow_trigger_export_id"),
+        "workflow_trigger_dispatched_at": saved.get("workflow_trigger_dispatched_at"),
+        "workflow_trigger_completed_export_id": saved.get(
+            "workflow_trigger_completed_export_id"
+        ),
         "last_total_events": (
             int(saved["last_total_events"])
             if isinstance(saved.get("last_total_events"), (int, float))

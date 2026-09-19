@@ -120,9 +120,41 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             "except UniversalScanCancelled", 1
         )[0]
 
-        self.assertIn("queue_bullpen_workflow_trigger_batch(", completed)
-        self.assertIn('triggered_by="universal_scan"', completed)
+        self.assertIn("state = finish_run(", completed)
+        self.assertIn('state["workflow_trigger_export_id"] = writer.export_id', completed)
+        self.assertIn('state["workflow_trigger_dispatched_at"] = None', completed)
+        self.assertIn("ensure_completed_universal_scan_workflow_trigger(", completed)
         self.assertIn("universal_export_id=writer.export_id", completed)
+
+    def test_completed_scan_handoff_is_repaired_by_beat_with_idempotent_run_ids(self) -> None:
+        task_source = (
+            ROOT / "backend/app/domains/trading_bots/tasks.py"
+        ).read_text(encoding="utf-8")
+        celery_source = (
+            ROOT / "backend/app/infrastructure/messaging/celery_app.py"
+        ).read_text(encoding="utf-8")
+
+        ensure = task_source.split(
+            "def ensure_completed_universal_scan_workflow_trigger(", 1
+        )[1].split("class UniversalScanCancelled", 1)[0]
+        self.assertIn('return f"universal-export-{universal_export_id}"', task_source)
+        self.assertIn("bullpen_workflow_trigger_run_id(", ensure)
+        self.assertIn("WORKFLOW_TRIGGER_PROFILES", ensure)
+        self.assertIn("workflow_trigger_dispatched_at", ensure)
+        self.assertIn("queue_bullpen_workflow_trigger_batch(", ensure)
+        self.assertIn("workspace_profiles=missing_profiles", ensure)
+        self.assertIn(
+            "def reconcile_completed_universal_scan_workflow_triggers()",
+            task_source,
+        )
+        self.assertIn(
+            '"universal-polymarket-stage1-handoff-recovery"',
+            celery_source,
+        )
+        self.assertIn(
+            '"app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers"',
+            celery_source,
+        )
 
     def test_live_stage1_progress_retains_lineage_and_total_market_count(self) -> None:
         engine = (

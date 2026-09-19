@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -12,9 +13,12 @@ from app.domains.trading_bots.universal_scan import (
     UniversalExportWriter,
     due_user_ids,
     finish_run,
+    latest_completed_universal_export,
     mark_queued,
     mark_started,
+    parse_datetime,
     read_state,
+    save_state,
     update_progress,
     utc_now,
 )
@@ -23,6 +27,110 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
 logger = get_logger("app.domains.trading_bots.tasks")
+
+WORKFLOW_TRIGGER_REDISPATCH_AFTER = timedelta(minutes=45)
+
+
+def _workflow_trigger_batch_id(universal_export_id: str) -> str:
+    return f"universal-export-{universal_export_id}"
+
+
+def ensure_completed_universal_scan_workflow_trigger(
+    *,
+    user_id: int,
+    universal_export_id: str | None = None,
+) -> dict[str, object]:
+    """Publish or repair the durable Universal Scan -> Stage 1 handoff.
+
+    Scan completion is committed before broker publication. The state marker
+    below makes that gap recoverable: Beat republishes an unmarked completion,
+    while deterministic workflow run IDs keep a replay idempotent.
+    """
+
+    resolved = latest_completed_universal_export(
+        user_id,
+        export_id=universal_export_id,
+    )
+    if resolved is None:
+        return {"status": "missing_export", "user_id": user_id}
+    metadata, _ = resolved
+    export_id = str(metadata.get("exportId") or universal_export_id or "").strip()
+    if not export_id:
+        return {"status": "missing_export_id", "user_id": user_id}
+
+    from app.domains.polymarket_auto_live.models import PolymarketAutoLiveRunRecord
+    from app.domains.polymarket_auto_live.tasks import (
+        bullpen_workflow_trigger_run_id,
+        queue_bullpen_workflow_trigger_batch,
+    )
+    from app.domains.polymarket_auto_live.workspace_profiles import (
+        WORKFLOW_TRIGGER_PROFILES,
+    )
+
+    batch_id = _workflow_trigger_batch_id(export_id)
+    now = utc_now()
+    with SyncSessionLocal() as session:
+        record = session.scalar(
+            select(UniversalScanStateRecord)
+            .where(UniversalScanStateRecord.user_id == user_id)
+            .with_for_update()
+        )
+        state = read_state(record)
+        missing_profiles = tuple(
+            profile
+            for profile in WORKFLOW_TRIGGER_PROFILES
+            if session.get(
+                PolymarketAutoLiveRunRecord,
+                bullpen_workflow_trigger_run_id(
+                    user_id=user_id,
+                    triggered_by="universal_scan",
+                    batch_id=batch_id,
+                    workspace_profile=profile,
+                ),
+            )
+            is None
+        )
+        if not missing_profiles:
+            state["workflow_trigger_export_id"] = export_id
+            state["workflow_trigger_completed_export_id"] = export_id
+            save_state(session, user_id, state)
+            session.commit()
+            return {
+                "status": "completed",
+                "user_id": user_id,
+                "universal_export_id": export_id,
+            }
+
+        dispatched_at = (
+            parse_datetime(state.get("workflow_trigger_dispatched_at"))
+            if state.get("workflow_trigger_export_id") == export_id
+            else None
+        )
+        if dispatched_at is not None and now - dispatched_at < WORKFLOW_TRIGGER_REDISPATCH_AFTER:
+            return {
+                "status": "already_dispatched",
+                "user_id": user_id,
+                "universal_export_id": export_id,
+                "missing_profiles": list(missing_profiles),
+            }
+
+        queue_bullpen_workflow_trigger_batch(
+            user_id=user_id,
+            triggered_by="universal_scan",
+            batch_id=batch_id,
+            universal_export_id=export_id,
+            workspace_profiles=missing_profiles,
+        )
+        state["workflow_trigger_export_id"] = export_id
+        state["workflow_trigger_dispatched_at"] = now.isoformat()
+        save_state(session, user_id, state)
+        session.commit()
+        return {
+            "status": "dispatched",
+            "user_id": user_id,
+            "universal_export_id": export_id,
+            "missing_profiles": list(missing_profiles),
+        }
 
 
 class UniversalScanCancelled(RuntimeError):
@@ -115,22 +223,19 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
             writer.complete()
             total_events = writer.count
         with SyncSessionLocal() as session:
-            finish_run(
+            state = finish_run(
                 session,
                 user_id,
                 run_id,
                 total_events=total_events,
             )
+            state["workflow_trigger_export_id"] = writer.export_id
+            state["workflow_trigger_dispatched_at"] = None
+            save_state(session, user_id, state)
             session.commit()
         try:
-            from app.domains.polymarket_auto_live.tasks import (
-                queue_bullpen_workflow_trigger_batch,
-            )
-
-            queue_bullpen_workflow_trigger_batch(
+            ensure_completed_universal_scan_workflow_trigger(
                 user_id=user_id,
-                triggered_by="universal_scan",
-                batch_id=run_id,
                 universal_export_id=writer.export_id,
             )
         except Exception:
@@ -173,3 +278,29 @@ def enqueue_due_universal_polymarket_scans() -> dict[str, object]:
         except Exception:
             logger.exception("Could not queue scheduled Universal Scan for user %s", user_id)
     return {"queued_user_ids": queued, "queued_count": len(queued)}
+
+
+@celery.task(
+    name="app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers",
+    queue="beat",
+)
+def reconcile_completed_universal_scan_workflow_triggers() -> dict[str, object]:
+    """Repair completed scans whose Stage 1 broker handoff never became durable."""
+
+    with SyncSessionLocal() as session:
+        user_ids = list(
+            session.execute(select(UniversalScanStateRecord.user_id)).scalars().all()
+        )
+
+    results: list[dict[str, object]] = []
+    for user_id in user_ids:
+        try:
+            results.append(
+                ensure_completed_universal_scan_workflow_trigger(user_id=user_id)
+            )
+        except Exception:
+            logger.exception(
+                "Could not reconcile the completed Universal Scan workflow trigger for user %s.",
+                user_id,
+            )
+    return {"checked_user_ids": user_ids, "results": results}
