@@ -428,13 +428,19 @@ def export_directory() -> Path:
 
 def _readable_export_directories() -> tuple[Path, ...]:
     primary = export_directory()
+    app_root = os.environ.get("APP_ROOT", "").strip()
+    deployed = (
+        *((Path(app_root) / "backend/.stage-one-exports",) if app_root else ()),
+        Path("/srv/investor/backend/.stage-one-exports"),
+        Path("/srv/investment-engine/backend/.stage-one-exports"),
+    )
     legacy = (
         Path.home() / ".local/share/credx-bullpen-stage-one-exports",
         Path("/home/investor/.local/share/credx-bullpen-stage-one-exports"),
         Path("/home/investment-engine/.local/share/credx-bullpen-stage-one-exports"),
     )
     directories: list[Path] = []
-    for directory in (primary, *legacy):
+    for directory in (primary, *deployed, *legacy):
         if directory not in directories:
             directories.append(directory)
     return tuple(directories)

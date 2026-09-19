@@ -4,17 +4,31 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import zlib
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.domains.polymarket_auto_live.console_profile import scan_console_profile_markets
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.trading_bots.universal_scan import (
     UniversalExportWriter,
+    _readable_export_directories,
     latest_completed_universal_export,
     next_scheduled_time,
     read_state,
     run_exceeded_recovery_window,
 )
+
+
+def test_readable_export_directories_include_stable_deploy_roots(tmp_path, monkeypatch):
+    app_root = tmp_path / "current-app"
+    monkeypatch.setenv("APP_ROOT", str(app_root))
+    monkeypatch.delenv("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", raising=False)
+
+    directories = _readable_export_directories()
+
+    assert app_root / "backend/.stage-one-exports" in directories
+    assert Path("/srv/investor/backend/.stage-one-exports") in directories
+    assert Path("/srv/investment-engine/backend/.stage-one-exports") in directories
 
 
 def test_completed_universal_export_writes_sports_participant_index(tmp_path, monkeypatch):
