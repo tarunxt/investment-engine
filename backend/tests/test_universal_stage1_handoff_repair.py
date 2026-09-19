@@ -48,3 +48,22 @@ def test_universal_state_preserves_repair_batch_identity() -> None:
     )
     state = read_state(record)
     assert state["workflow_trigger_batch_id"] == "export-1-repair-123"
+
+
+def test_universal_export_default_is_shared_across_service_homes(monkeypatch) -> None:
+    from app.domains.trading_bots.universal_scan import (
+        _readable_export_directories,
+        export_directory,
+    )
+
+    monkeypatch.delenv("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", raising=False)
+    primary = export_directory()
+    assert primary.name == ".stage-one-exports"
+    assert primary.parent.name == "backend"
+
+    readable = _readable_export_directories()
+    assert readable[0] == primary
+    assert any(
+        str(path).endswith(".local/share/credx-bullpen-stage-one-exports")
+        for path in readable[1:]
+    )

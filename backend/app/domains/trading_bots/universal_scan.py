@@ -418,7 +418,26 @@ def finish_run(
 
 def export_directory() -> Path:
     configured = os.environ.get("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", "").strip()
-    return Path(configured) if configured else Path.home() / ".local/share/credx-bullpen-stage-one-exports"
+    if configured:
+        return Path(configured)
+    # API and Celery services can run with different HOME values across a
+    # deployment. Keep immutable exports beside the deployed backend so both
+    # processes resolve the same host-persistent path.
+    return Path(__file__).resolve().parents[3] / ".stage-one-exports"
+
+
+def _readable_export_directories() -> tuple[Path, ...]:
+    primary = export_directory()
+    legacy = (
+        Path.home() / ".local/share/credx-bullpen-stage-one-exports",
+        Path("/home/investor/.local/share/credx-bullpen-stage-one-exports"),
+        Path("/home/investment-engine/.local/share/credx-bullpen-stage-one-exports"),
+    )
+    directories: list[Path] = []
+    for directory in (primary, *legacy):
+        if directory not in directories:
+            directories.append(directory)
+    return tuple(directories)
 
 
 def latest_completed_universal_export(
@@ -428,13 +447,19 @@ def latest_completed_universal_export(
 ) -> tuple[dict[str, Any], Path] | None:
     """Resolve the immutable Universal Scan selected by a workflow trigger."""
 
-    directory = export_directory()
     owner_hash = hashlib.sha256(f"{user_id}:universal".encode()).hexdigest()
     candidates: list[tuple[datetime, dict[str, Any], Path]] = []
     metadata_paths = (
-        [directory / f"{export_id}.json"]
+        (
+            directory / f"{export_id}.json"
+            for directory in _readable_export_directories()
+        )
         if export_id
-        else directory.glob("*.json")
+        else (
+            metadata_path
+            for directory in _readable_export_directories()
+            for metadata_path in directory.glob("*.json")
+        )
     )
     for metadata_path in metadata_paths:
         try:
