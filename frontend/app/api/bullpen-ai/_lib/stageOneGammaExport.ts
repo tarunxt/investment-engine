@@ -13,9 +13,12 @@ import type {
 } from "@/lib/bullpen-ai";
 import type { UniversalScanSummary } from "./universalScanSummary";
 
+const DEPLOYED_APP_ROOT = process.env.APP_ROOT?.trim();
 const EXPORT_DIRECTORY = process.env.BULLPEN_STAGE_ONE_EXPORT_DIRECTORY?.trim() ||
   (process.env.NODE_ENV === "production"
-    ? join(homedir(), ".local", "share", "credx-bullpen-stage-one-exports")
+    ? DEPLOYED_APP_ROOT
+      ? join(DEPLOYED_APP_ROOT, "backend", ".stage-one-exports")
+      : join(homedir(), ".local", "share", "credx-bullpen-stage-one-exports")
     : join(tmpdir(), "credx-bullpen-stage-one-exports"));
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const ORPHAN_EXPORT_GRACE_MS = 2 * 60 * 1_000;
