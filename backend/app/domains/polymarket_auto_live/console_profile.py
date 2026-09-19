@@ -256,6 +256,10 @@ class ConsoleScanResult:
     complete_universe: bool = True
     trending_candidates: int | None = None
     catalogue_candidates: int | None = None
+    # Universal scans can contain hundreds of thousands of rejected markets.
+    # When a callback externalizes their raw source, retain only the serialized
+    # candidate dictionaries and release the heavier wrapper/market objects.
+    serialized_rejected: list[dict[str, object]] | None = None
 
 
 def _market_identity_keys(market: ScannedMarket) -> set[str]:
@@ -1101,7 +1105,7 @@ async def scan_console_profile_markets(
     gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
     scan_scope: ConsoleScanScope = "trending",
     progress_callback: Callable[[int, int], None] | None = None,
-    rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
+    rejected_callback: Callable[[ScanRejectedMarket], dict[str, object] | None] | None = None,
     accepted_callback: Callable[[ScannedMarket], None] | None = None,
     page_cache_key: str | None = None,
     universal_scan_user_id: int | None = None,
@@ -1116,6 +1120,9 @@ async def scan_console_profile_markets(
         )
         accepted: list[ScannedMarket] = []
         rejected: list[ScanRejectedMarket] = []
+        serialized_rejected: list[dict[str, object]] | None = (
+            [] if rejected_callback is not None else None
+        )
         total_candidates = 0
         for total_candidates, market in enumerate(universal_rows, 1):
             reasons = console_market_filter_reasons(
@@ -1149,9 +1156,17 @@ async def scan_console_profile_markets(
                     reasons=reasons,
                     source_market=market,
                 )
-                rejected.append(rejected_market)
-                if rejected_callback is not None:
-                    rejected_callback(rejected_market)
+                if rejected_callback is None:
+                    rejected.append(rejected_market)
+                else:
+                    serialized = rejected_callback(rejected_market)
+                    if serialized is None:
+                        # Preserve compatibility for callbacks that only observe
+                        # rejects and do not take ownership of their payload.
+                        rejected.append(rejected_market)
+                    else:
+                        assert serialized_rejected is not None
+                        serialized_rejected.append(serialized)
             else:
                 accepted.append(market)
                 if accepted_callback is not None:
@@ -1169,6 +1184,7 @@ async def scan_console_profile_markets(
             total_candidates=total_candidates,
             complete_universe=True,
             catalogue_candidates=total_candidates,
+            serialized_rejected=serialized_rejected,
         )
 
     scanned_at = datetime.now(UTC).isoformat()
