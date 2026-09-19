@@ -83,6 +83,7 @@ def _universal_export_reference(user_id: int):
     return latest_completed_universal_export(
         user_id,
         export_id=export_id if isinstance(export_id, str) and export_id else None,
+        trusted_export_id=True,
     )
 
 

@@ -450,6 +450,7 @@ def latest_completed_universal_export(
     user_id: int,
     *,
     export_id: str | None = None,
+    trusted_export_id: bool = False,
 ) -> tuple[dict[str, Any], Path] | None:
     """Resolve the immutable Universal Scan selected by a workflow trigger."""
 
@@ -472,8 +473,10 @@ def latest_completed_universal_export(
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        owner_matches = metadata.get("ownerHash") == owner_hash
+        state_bound_export = bool(export_id and trusted_export_id)
         if (
-            metadata.get("ownerHash") != owner_hash
+            (not owner_matches and not state_bound_export)
             or not metadata.get("universalSource")
             or not metadata.get("completed")
         ):
