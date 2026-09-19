@@ -122,6 +122,9 @@ WORKFLOW_TRIGGER_RECHECK_SECONDS = 15
 # for a healthy serialized workflow; run recovery remains the durable path for
 # a genuinely stuck lane.
 WORKFLOW_TRIGGER_MAX_RETRIES = 120
+# Stage 3 confirmation is reconciled by durable intent workers and no longer
+# owns the single Stage 1/2 planning lane.
+WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES = ("running",)
 
 
 def _utc_now() -> datetime:
@@ -682,14 +685,14 @@ def dispatch_bullpen_workflow_trigger_batch(
                 and_(
                     PolymarketAutoLiveRunRecord.user_id == user_id,
                     PolymarketAutoLiveRunRecord.status.in_(
-                        ACTIVE_AUTO_LIVE_RUN_STATUSES
+                        WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES
                     ),
                 )
             )
             .limit(1)
         )
 
-    if existing is not None and existing.status not in ACTIVE_AUTO_LIVE_RUN_STATUSES:
+    if existing is not None and existing.status not in WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES:
         dispatch_bullpen_workflow_trigger_batch.apply_async(
             kwargs={
                 "user_id": user_id,
@@ -709,7 +712,7 @@ def dispatch_bullpen_workflow_trigger_batch(
         }
 
     if active is not None or (
-        existing is not None and existing.status in ACTIVE_AUTO_LIVE_RUN_STATUSES
+        existing is not None and existing.status in WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES
     ):
         raise self.retry(countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS)
 
