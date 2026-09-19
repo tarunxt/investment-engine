@@ -63,6 +63,11 @@ export function UniversalPolymarketScan() {
   const [error, setError] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
   const [autoRunRunning, setAutoRunRunning] = useState(false);
+  const [recordedScan, setRecordedScan] = useState<{
+    startedAt: string;
+    completedAt: string;
+    totalEvents: number;
+  } | null>(null);
   const autoRunRefreshController = useRef<AbortController | null>(null);
   const lastAutoRunCompletion = useRef<string | null>(null);
 
@@ -83,8 +88,24 @@ export function UniversalPolymarketScan() {
     }
   }
 
-  const handleAutoRunStatus = useCallback((status: { running: boolean; last_completed_at: string | null }) => {
+  const handleAutoRunStatus = useCallback((status: {
+    running: boolean;
+    last_completed_at: string | null;
+    last_completed_run_started_at?: string | null;
+    last_total_events?: number | null;
+  }) => {
     setAutoRunRunning(status.running);
+    if (
+      status.last_completed_at &&
+      status.last_completed_run_started_at &&
+      typeof status.last_total_events === "number"
+    ) {
+      setRecordedScan({
+        startedAt: status.last_completed_run_started_at,
+        completedAt: status.last_completed_at,
+        totalEvents: status.last_total_events,
+      });
+    }
     if (!status.last_completed_at || status.last_completed_at === lastAutoRunCompletion.current) return;
     lastAutoRunCompletion.current = status.last_completed_at;
     autoRunRefreshController.current?.abort();
@@ -168,15 +189,15 @@ export function UniversalPolymarketScan() {
         </div>
       </div>
       <UniversalScanAutoRunCard onStatusChange={handleAutoRunStatus} />
-      {snapshot && <>
+      {(snapshot || recordedScan) && <>
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot.scannedAt)}</span><span className="block">Completed/Failed: {dateLabel(summary?.completedAt ?? snapshot.sourceScanCompletedAt ?? snapshot.scannedAt)}</span></dd></div>
-          <div className={tileClass}><dt className={labelClass}>Time taken</dt><dd className={valueClass}>{summary ? durationLabel(summary.durationMs) : "Calculating…"}</dd></div>
-          <div className={tileClass}><dt className={labelClass}>Total Events Scanned</dt><dd className={valueClass}>{snapshot.totalCandidates.toLocaleString("en-IN")}</dd></div>
+          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot?.scannedAt ?? recordedScan!.startedAt)}</span><span className="block">Completed: {dateLabel(summary?.completedAt ?? snapshot?.sourceScanCompletedAt ?? recordedScan!.completedAt)}</span></dd></div>
+          <div className={tileClass}><dt className={labelClass}>Time taken</dt><dd className={valueClass}>{summary ? durationLabel(summary.durationMs) : recordedScan ? durationLabel(new Date(recordedScan.completedAt).getTime() - new Date(recordedScan.startedAt).getTime()) : "Preparing…"}</dd></div>
+          <div className={tileClass}><dt className={labelClass}>Total Events Scanned</dt><dd className={valueClass}>{(snapshot?.totalCandidates ?? recordedScan!.totalEvents).toLocaleString("en-IN")}</dd></div>
         </dl>
-        <div className="mt-4 flex justify-end">
+        {snapshot && <div className="mt-4 flex justify-end">
           <a href={`/api/bullpen-ai/stage-one.xlsx?exportId=${snapshot.scanExportId}&universal=true&scope=all-scanned`} className={`inline-flex items-center gap-2 text-sm font-semibold ${scanActive ? "text-amber-800" : "text-emerald-800"}`}><FileSpreadsheet className="h-4 w-4" />Download all scanned events</a>
-        </div>
+        </div>}
         {summary && <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {summary.tables.map(table => <article key={table.key} className={`overflow-hidden rounded-xl border bg-white/90 ${scanActive ? "border-amber-200" : "border-emerald-200"}`}>
             <div className={`border-b px-4 py-3 ${scanActive ? "border-amber-100" : "border-emerald-100"}`}><h3 className={`font-semibold ${scanActive ? "text-amber-950" : "text-emerald-950"}`}>{table.title}</h3><p className={`mt-0.5 text-xs ${scanActive ? "text-amber-700" : "text-emerald-700"}`}>{table.description}</p></div>
@@ -188,8 +209,9 @@ export function UniversalPolymarketScan() {
           </article>)}
         </div>}
       </>}
-      <p role="status" className={`mt-4 text-sm font-semibold ${scanActive ? "text-amber-900" : "text-emerald-900"}`}>{snapshot ? "Latest Full Universe scan is complete." : scanActive ? "Universal Scan is queued or running. Progress is shown below." : "No completed universal scan yet. Select Scan Now to queue the Full Universe worker."}</p>
+      <p role="status" className={`mt-4 text-sm font-semibold ${scanActive ? "text-amber-900" : "text-emerald-900"}`}>{snapshot ? "Latest Full Universe scan is complete." : recordedScan ? "Latest Universal scan details were recovered from durable run history." : scanActive ? "Universal Scan is queued or running. Progress is shown below." : "No completed universal scan yet. Select Scan Now to queue the Full Universe worker."}</p>
       {summaryProgress && <p className="mt-2 text-sm text-slate-600">Saved scan details are available. Preparing breakdown tables: {summaryProgress.processedRows.toLocaleString("en-IN")} / {summaryProgress.totalRows.toLocaleString("en-IN")} rows.</p>}
+      {recordedScan && !snapshot && <p className="mt-2 text-sm text-slate-600">The historical event rows needed for breakdown tables are no longer available. No replacement scan was started.</p>}
       {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {showSaved && snapshot && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/50 p-4">
         <div role="dialog" aria-modal="true" aria-label="Latest saved Universal Polymarket Scan" className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6">
