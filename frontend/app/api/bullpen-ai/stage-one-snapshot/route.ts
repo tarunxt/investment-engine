@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,13 +19,26 @@ import {
   openUniversalScan,
   parseStageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
-import { createUniversalScanSummaryAccumulator } from "../_lib/universalScanSummary";
+import {
+  createUniversalScanSummaryAccumulator,
+  type UniversalScanSummaryCheckpoint,
+} from "../_lib/universalScanSummary";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_ROWS_PER_STATUS = 500;
+const UNIVERSAL_SUMMARY_CHUNK_ROWS = 10_000;
+
+type UniversalSummaryBuildState = {
+  version: 1;
+  exportId: string;
+  exportUpdatedAt: string;
+  byteOffset: number;
+  processedRows: number;
+  checkpoint: UniversalScanSummaryCheckpoint;
+};
 
 export async function GET(request: NextRequest) {
   const session = await createBackendSessionContext(request);
@@ -116,17 +130,88 @@ export async function GET(request: NextRequest) {
     }
 
     let universalSummary = isUniversal ? latest.metadata.universalSummary : undefined;
+    let universalSummaryProgress: { processedRows: number; totalRows: number } | null = null;
     if (isUniversal && (!universalSummary || universalSummary.totalEvents !== latest.metadata.rowCount)) {
+      const progressPath = `${latest.rowsPath}.summary-progress.json`;
+      let buildState: UniversalSummaryBuildState | null = null;
+      try {
+        const saved = JSON.parse(await readFile(progressPath, "utf8")) as UniversalSummaryBuildState;
+        if (
+          saved.version === 1 &&
+          saved.exportId === latest.metadata.exportId &&
+          saved.exportUpdatedAt === latest.metadata.updatedAt &&
+          Number.isSafeInteger(saved.byteOffset) &&
+          saved.byteOffset >= 0 &&
+          Number.isSafeInteger(saved.processedRows) &&
+          saved.processedRows >= 0 &&
+          saved.checkpoint?.version === 1
+        ) {
+          buildState = saved;
+        }
+      } catch {
+        buildState = null;
+      }
+      const initialCheckpoint: UniversalScanSummaryCheckpoint = {
+        version: 1,
+        totalEvents: 0,
+        counters: {
+          category: {},
+          expiry: {},
+          odds: {},
+          volume: {},
+          liquidity: {},
+          structure: {},
+        },
+      };
+      buildState ??= {
+        version: 1,
+        exportId: latest.metadata.exportId,
+        exportUpdatedAt: latest.metadata.updatedAt,
+        byteOffset: 0,
+        processedRows: 0,
+        checkpoint: initialCheckpoint,
+      };
       const summary = createUniversalScanSummaryAccumulator({
         startedAt: latest.metadata.scannedAt ?? latest.metadata.createdAt,
         completedAt: latest.metadata.updatedAt,
+        checkpoint: buildState.checkpoint,
       });
-      const lines = createInterface({ input: createReadStream(latest.rowsPath, { encoding: "utf8" }), crlfDelay: Infinity });
+      const input = createReadStream(latest.rowsPath, {
+        encoding: "utf8",
+        start: buildState.byteOffset,
+      });
+      const lines = createInterface({ input, crlfDelay: Infinity });
+      let chunkRows = 0;
+      let reachedEnd = true;
       for await (const line of lines) {
-        if (line) summary.add(parseStageOneGammaExportRow(line).candidate);
+        if (!line) continue;
+        summary.add(parseStageOneGammaExportRow(line).candidate);
+        buildState.byteOffset += Buffer.byteLength(`${line}\n`, "utf8");
+        buildState.processedRows += 1;
+        chunkRows += 1;
+        if (chunkRows >= UNIVERSAL_SUMMARY_CHUNK_ROWS) {
+          reachedEnd = false;
+          lines.close();
+          input.destroy();
+          break;
+        }
       }
-      universalSummary = summary.finish();
-      await cacheUniversalScanSummary({ metadata: latest.metadata, ownerKey, summary: universalSummary }).catch(() => undefined);
+      buildState.checkpoint = summary.checkpoint();
+      if (reachedEnd || buildState.processedRows >= latest.metadata.rowCount) {
+        universalSummary = summary.finish();
+        await cacheUniversalScanSummary({
+          metadata: latest.metadata,
+          ownerKey,
+          summary: universalSummary,
+        });
+        await rm(progressPath, { force: true }).catch(() => undefined);
+      } else {
+        await writeFile(progressPath, JSON.stringify(buildState), "utf8");
+        universalSummaryProgress = {
+          processedRows: buildState.processedRows,
+          totalRows: latest.metadata.rowCount,
+        };
+      }
     }
 
     const mode = latest.metadata.mode ?? "30-days";
@@ -161,7 +246,7 @@ export async function GET(request: NextRequest) {
       `bullpen-server-${latest.metadata.exportId}`,
     );
     return NextResponse.json(
-      { snapshot, universalSummary },
+      { snapshot, universalSummary, universalSummaryProgress },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error: unknown) {

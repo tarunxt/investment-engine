@@ -20,7 +20,26 @@ export type UniversalScanSummary = {
   tables: UniversalScanBreakdownTable[];
 };
 
+export type UniversalScanSummaryCheckpoint = {
+  version: 1;
+  totalEvents: number;
+  counters: Record<"category" | "expiry" | "odds" | "volume" | "liquidity" | "structure", Record<string, number>>;
+};
+
 type Counter = Map<string, number>;
+
+function counterFrom(values?: Record<string, number>): Counter {
+  return new Map(
+    Object.entries(values ?? {}).filter(
+      (entry): entry is [string, number] =>
+        Number.isFinite(entry[1]) && entry[1] >= 0,
+    ),
+  );
+}
+
+function counterRecord(counter: Counter) {
+  return Object.fromEntries(counter);
+}
 
 function increment(counter: Counter, label: string) {
   counter.set(label, (counter.get(label) ?? 0) + 1);
@@ -109,18 +128,20 @@ export function createUniversalScanSummary({
 export function createUniversalScanSummaryAccumulator({
   startedAt,
   completedAt,
+  checkpoint,
 }: {
   startedAt: string;
   completedAt: string;
+  checkpoint?: UniversalScanSummaryCheckpoint;
 }) {
   const referenceTime = Date.parse(completedAt);
-  const category: Counter = new Map();
-  const expiry: Counter = new Map();
-  const odds: Counter = new Map();
-  const volume: Counter = new Map();
-  const liquidity: Counter = new Map();
-  const structure: Counter = new Map();
-  let totalEvents = 0;
+  const category = counterFrom(checkpoint?.counters.category);
+  const expiry = counterFrom(checkpoint?.counters.expiry);
+  const odds = counterFrom(checkpoint?.counters.odds);
+  const volume = counterFrom(checkpoint?.counters.volume);
+  const liquidity = counterFrom(checkpoint?.counters.liquidity);
+  const structure = counterFrom(checkpoint?.counters.structure);
+  let totalEvents = checkpoint?.totalEvents ?? 0;
 
   const moneyOrder = ["Under $100", "$100–$999", "$1K–$9.9K", "$10K–$99.9K", "$100K+"];
   return {
@@ -132,6 +153,20 @@ export function createUniversalScanSummaryAccumulator({
       increment(volume, moneyBand(question.volume, "Volume unavailable"));
       increment(liquidity, moneyBand(question.liquidity, "Liquidity unavailable"));
       increment(structure, structureFor(question));
+    },
+    checkpoint(): UniversalScanSummaryCheckpoint {
+      return {
+        version: 1,
+        totalEvents,
+        counters: {
+          category: counterRecord(category),
+          expiry: counterRecord(expiry),
+          odds: counterRecord(odds),
+          volume: counterRecord(volume),
+          liquidity: counterRecord(liquidity),
+          structure: counterRecord(structure),
+        },
+      };
     },
     finish(): UniversalScanSummary {
       return {

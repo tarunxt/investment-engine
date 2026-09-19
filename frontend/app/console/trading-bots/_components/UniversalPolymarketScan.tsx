@@ -32,7 +32,12 @@ function durationLabel(durationMs: number) {
 async function fetchUniversalSnapshot(signal?: AbortSignal) {
   const response = await fetch("/api/bullpen-ai/stage-one-snapshot?universal=true", { cache: "no-store", signal });
   const body = await response.text();
-  let payload: { snapshot?: BullpenScanSnapshot | null; universalSummary?: UniversalScanSummary | null; error?: string };
+  let payload: {
+    snapshot?: BullpenScanSnapshot | null;
+    universalSummary?: UniversalScanSummary | null;
+    universalSummaryProgress?: { processedRows: number; totalRows: number } | null;
+    error?: string;
+  };
   try {
     payload = JSON.parse(body) as typeof payload;
   } catch {
@@ -53,6 +58,7 @@ function waitForRetry(milliseconds: number, signal: AbortSignal) {
 export function UniversalPolymarketScan() {
   const [snapshot, setSnapshot] = useState<BullpenScanSnapshot | null>(null);
   const [summary, setSummary] = useState<UniversalScanSummary | null>(null);
+  const [summaryProgress, setSummaryProgress] = useState<{ processedRows: number; totalRows: number } | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
@@ -61,17 +67,18 @@ export function UniversalPolymarketScan() {
   const lastAutoRunCompletion = useRef<string | null>(null);
 
   async function loadSnapshot(signal: AbortSignal) {
-    for (let attempt = 1; attempt <= 8; attempt += 1) {
+    for (let attempt = 1; attempt <= 64; attempt += 1) {
       try {
         const payload = await fetchUniversalSnapshot(signal);
         setSnapshot(payload.snapshot ?? null);
         setSummary(payload.universalSummary ?? null);
+        setSummaryProgress(payload.universalSummaryProgress ?? null);
         setError(null);
-        return;
+        if (!payload.universalSummaryProgress) return;
+        await waitForRetry(750, signal);
       } catch (snapshotError) {
-        if (signal.aborted || attempt === 8) throw snapshotError;
-        setError(`Scan saved. Finalizing breakdown tables (${attempt}/8)…`);
-        await waitForRetry(Math.min(15_000, 2_000 * attempt), signal);
+        if (signal.aborted || attempt === 64) throw snapshotError;
+        await waitForRetry(Math.min(10_000, 1_000 * attempt), signal);
       }
     }
   }
@@ -93,10 +100,7 @@ export function UniversalPolymarketScan() {
 
   useEffect(() => {
     const abort = new AbortController();
-    void fetchUniversalSnapshot(abort.signal).then(payload => {
-      setSnapshot(payload.snapshot ?? null);
-      setSummary(payload.universalSummary ?? null);
-    }).catch(error => {
+    void loadSnapshot(abort.signal).catch(error => {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setError(String(error.message));
     });
@@ -166,7 +170,7 @@ export function UniversalPolymarketScan() {
       <UniversalScanAutoRunCard onStatusChange={handleAutoRunStatus} />
       {snapshot && <>
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot.scannedAt)}</span><span className="block">Completed/Failed: {dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</span></dd></div>
+          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot.scannedAt)}</span><span className="block">Completed/Failed: {dateLabel(summary?.completedAt ?? snapshot.sourceScanCompletedAt ?? snapshot.scannedAt)}</span></dd></div>
           <div className={tileClass}><dt className={labelClass}>Time taken</dt><dd className={valueClass}>{summary ? durationLabel(summary.durationMs) : "Calculating…"}</dd></div>
           <div className={tileClass}><dt className={labelClass}>Total Events Scanned</dt><dd className={valueClass}>{snapshot.totalCandidates.toLocaleString("en-IN")}</dd></div>
         </dl>
@@ -185,6 +189,7 @@ export function UniversalPolymarketScan() {
         </div>}
       </>}
       <p role="status" className={`mt-4 text-sm font-semibold ${scanActive ? "text-amber-900" : "text-emerald-900"}`}>{snapshot ? "Latest Full Universe scan is complete." : scanActive ? "Universal Scan is queued or running. Progress is shown below." : "No completed universal scan yet. Select Scan Now to queue the Full Universe worker."}</p>
+      {summaryProgress && <p className="mt-2 text-sm text-slate-600">Saved scan details are available. Preparing breakdown tables: {summaryProgress.processedRows.toLocaleString("en-IN")} / {summaryProgress.totalRows.toLocaleString("en-IN")} rows.</p>}
       {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {showSaved && snapshot && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/50 p-4">
         <div role="dialog" aria-modal="true" aria-label="Latest saved Universal Polymarket Scan" className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6">
