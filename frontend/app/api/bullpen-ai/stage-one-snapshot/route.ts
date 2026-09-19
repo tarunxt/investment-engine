@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { dirname } from "node:path";
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -10,7 +11,10 @@ import {
   type BullpenQuestion,
 } from "@/lib/bullpen-ai";
 
-import { createBackendSessionContext } from "../_lib/serverBackendSession";
+import {
+  createBackendSessionContext,
+  fetchBackendJsonWithSession,
+} from "../_lib/serverBackendSession";
 import {
   cacheStageOneGammaExportSummary,
   cacheUniversalScanSummary,
@@ -18,6 +22,7 @@ import {
   openStageOneGammaExport,
   openUniversalScan,
   parseStageOneGammaExportRow,
+  type StageOneGammaExportMetadata,
 } from "../_lib/stageOneGammaExport";
 import {
   createUniversalScanSummaryAccumulator,
@@ -58,11 +63,27 @@ export async function GET(request: NextRequest) {
       : workspaceProfile === "bullpen007"
         ? sessionOwner
         : `${sessionOwner}:${workspaceProfile}`;
-    const latest = isUniversal
+    let latest = isUniversal
       ? await openUniversalScan(sessionOwner)
       : await openLatestStageOneGammaExport({
       ownerKey,
     });
+    if (isUniversal && !latest) {
+      const remote = await fetchBackendJsonWithSession<{
+        export?: {
+          metadata: StageOneGammaExportMetadata;
+          rows_path: string;
+          filtered_rows_path: string;
+        } | null;
+      }>(session, "/trading-bots/universal-scan/export-reference").catch(() => null);
+      if (remote?.export) {
+        latest = {
+          metadata: remote.export.metadata,
+          rowsPath: remote.export.rows_path,
+          filteredRowsPath: remote.export.filtered_rows_path,
+        };
+      }
+    }
     if (!latest) {
       return NextResponse.json(
         { snapshot: null },
@@ -203,6 +224,7 @@ export async function GET(request: NextRequest) {
           metadata: latest.metadata,
           ownerKey,
           summary: universalSummary,
+          directory: dirname(latest.rowsPath),
         });
         await rm(progressPath, { force: true }).catch(() => undefined);
       } else {
