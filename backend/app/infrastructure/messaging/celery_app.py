@@ -60,7 +60,10 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace": {"queue": AUTO_LIVE_QUEUE},
-    "app.domains.trading_bots.tasks.execute_universal_polymarket_scan": {"queue": AUTO_LIVE_QUEUE},
+    # Universal catalogue capture is independent from Bullpen planning. Keep
+    # it on the multi-process AI pool so a long or redelivered scan cannot hold
+    # the single-consumer Stage 1/2 planning lane.
+    "app.domains.trading_bots.tasks.execute_universal_polymarket_scan": {"queue": "ai"},
     "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans": {"queue": "beat"},
     "app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers": {"queue": "beat"},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
