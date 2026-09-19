@@ -15,4 +15,9 @@ test("production frontend reads the backend worker's shared Universal exports", 
     /join\(DEPLOYED_APP_ROOT, "backend", "\.stage-one-exports"\)/,
   );
   assert.match(source, /BULLPEN_STAGE_ONE_EXPORT_DIRECTORY/);
+  assert.match(source, /READABLE_EXPORT_DIRECTORIES/);
+  assert.match(source, /\/srv\/investor\/backend\/\.stage-one-exports/);
+  assert.match(source, /\/srv\/investment-engine\/backend\/\.stage-one-exports/);
+  assert.match(source, /findReadableMetadata/);
+  assert.match(source, /located\.directory/);
 });
