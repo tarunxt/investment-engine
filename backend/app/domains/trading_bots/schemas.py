@@ -104,6 +104,7 @@ class UniversalScanAutoRunStatus(BaseModel):
     last_run_at: str | None = None
     last_completed_at: str | None = None
     last_completed_run_started_at: str | None = None
+    last_total_events: int | None = None
     last_failed_at: str | None = None
     last_error: str | None = None
     progress_events: int = 0
