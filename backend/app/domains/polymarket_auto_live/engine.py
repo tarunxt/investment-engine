@@ -6094,11 +6094,18 @@ class BullpenAutoLiveEngine:
 
             from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
             with ScanSourceWriter() as streaming_sources:
-                def store_rejected_source(rejected: ScanRejectedMarket) -> None:
-                    rejected.serialized_candidate = streaming_sources.store_rejected(
+                def store_rejected_source(
+                    rejected: ScanRejectedMarket,
+                ) -> dict[str, object]:
+                    serialized = streaming_sources.store_rejected(
                         _serialize_rejected_scan_candidate(rejected)
                     )
+                    # The callback transfers ownership to the lightweight
+                    # serialized list. Release the raw ScannedMarket before the
+                    # next Universal row is decoded.
+                    rejected.serialized_candidate = None
                     rejected.source_market = None
+                    return serialized
 
                 scanned = await scan_console_profile_markets(
                     now=now,
@@ -6178,55 +6185,96 @@ class BullpenAutoLiveEngine:
             # retaining raw objects plus base64 payloads in every run/heartbeat copy
             # can exhaust the planner's memory at Full Universe scale.
             from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
-            stage1_rejected_candidates = []
-            with ScanSourceWriter() as source_store:
-                for candidate in stage1_accepted_candidates:
-                    source_store.store(candidate)
-                for rejected_index, rejected in enumerate(scanned.rejected, 1):
-                    if rejected_index % 5000 == 0:
-                        report_stage1_progress(
-                            f"Preparing Stage 1 exports: {rejected_index:,} rejected rows processed.",
-                            completed_items=scanned_total_candidates,
-                        )
-                    # Transfer ownership instead of copying the full rejected
-                    # catalogue again during the export/wallet handoff.
-                    candidate = rejected.serialized_candidate
-                    if candidate is None:
-                        candidate = source_store.store_rejected(
-                            _serialize_rejected_scan_candidate(rejected)
-                        )
-                    stage1_rejected_candidates.append(candidate)
-                    rejected.serialized_candidate = None
-                    rejected.source_market = None
+            if scanned.serialized_rejected is not None:
+                # The Universal reader already externalized each raw source and
+                # released its wrapper object during streaming. Reuse that list
+                # directly instead of constructing a second 177k-object graph.
+                stage1_rejected_candidates = scanned.serialized_rejected
+            else:
+                stage1_rejected_candidates = []
+                with ScanSourceWriter() as source_store:
+                    for candidate in stage1_accepted_candidates:
+                        source_store.store(candidate)
+                    for rejected_index, rejected in enumerate(scanned.rejected, 1):
+                        if rejected_index % 5000 == 0:
+                            report_stage1_progress(
+                                f"Preparing Stage 1 exports: {rejected_index:,} rejected rows processed.",
+                                completed_items=scanned_total_candidates,
+                            )
+                        candidate = rejected.serialized_candidate
+                        if candidate is None:
+                            candidate = source_store.store_rejected(
+                                _serialize_rejected_scan_candidate(rejected)
+                            )
+                        stage1_rejected_candidates.append(candidate)
+                        rejected.serialized_candidate = None
+                        rejected.source_market = None
 
             market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
             market_by_id = {market.market_id: market for market in scanned.accepted}
             scan_seed_markets = scanned.accepted
-            for rejected in scanned.rejected:
-                for reason in rejected.reasons:
+            # Rejection diagnostics are explanatory samples, not a trading
+            # input. Bound the map for Universal scans; the complete rejected
+            # catalogue remains in stage1_rejected_candidates for Excel/audit.
+            diagnostic_rejections = (
+                scanned.rejected
+                if scanned.serialized_rejected is None
+                else stage1_rejected_candidates[:1_000]
+            )
+            for rejected in diagnostic_rejections:
+                if isinstance(rejected, ScanRejectedMarket):
+                    rejected_market = rejected
+                    reasons = rejected.reasons
+                else:
+                    rejected_market = ScannedMarket(
+                        market_id=str(rejected.get("market_id") or ""),
+                        question=str(rejected.get("question") or ""),
+                        market_url=rejected.get("market_url"),
+                        slug=rejected.get("slug"),
+                        close_time=None,
+                        theme=str(rejected.get("theme") or "Uncategorized"),
+                        current_yes_odds=None,
+                        current_no_odds=None,
+                        volume_usd=None,
+                        liquidity_usd=None,
+                        description=None,
+                        outcome_labels=[],
+                        event_slug=None,
+                        best_bid_cents=None,
+                        best_ask_cents=None,
+                        spread_cents=None,
+                        force_include=False,
+                        raw=None,
+                    )
+                    reasons = rejected.get("reasons") or []
+                for reason in reasons:
                     _record_rejected_candidate(
                         rejected_candidate_map,
-                        market=ScannedMarket(
-                            market_id=rejected.market_id,
-                            question=rejected.question,
-                            market_url=rejected.market_url,
-                            slug=rejected.slug,
-                            close_time=None,
-                            theme="Uncategorized",
-                            current_yes_odds=None,
-                            current_no_odds=None,
-                            volume_usd=None,
-                            liquidity_usd=None,
-                            description=None,
-                            outcome_labels=[],
-                            event_slug=None,
-                            best_bid_cents=None,
-                            best_ask_cents=None,
-                            spread_cents=None,
-                            force_include=False,
-                            raw=None,
+                        market=(
+                            rejected_market
+                            if isinstance(rejected_market, ScannedMarket)
+                            else ScannedMarket(
+                                market_id=rejected_market.market_id,
+                                question=rejected_market.question,
+                                market_url=rejected_market.market_url,
+                                slug=rejected_market.slug,
+                                close_time=None,
+                                theme="Uncategorized",
+                                current_yes_odds=None,
+                                current_no_odds=None,
+                                volume_usd=None,
+                                liquidity_usd=None,
+                                description=None,
+                                outcome_labels=[],
+                                event_slug=None,
+                                best_bid_cents=None,
+                                best_ask_cents=None,
+                                spread_cents=None,
+                                force_include=False,
+                                raw=None,
+                            )
                         ),
-                        reason=reason,
+                        reason=str(reason),
                     )
 
             # Only accepted ScannedMarket objects are used by later review stages.
