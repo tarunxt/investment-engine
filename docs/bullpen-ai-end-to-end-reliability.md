@@ -106,7 +106,10 @@ publication, Beat republishes the missing profiles. Trigger-batch coordination
 and its 15-second execution-lane rechecks also stay on the Beat queue; they never
 consume the single Auto-Live pool slot needed by the Stage 1 planning task.
 Messages left on the Auto-Live queue by an older release self-reroute to Beat
-and return immediately. A successful publication is cooldown-marked to avoid
+and return immediately. A run in `confirming` has already handed Stage 3 to
+durable order-intent workers, so it remains visible for reconciliation but does
+not own the Stage 1/2 planning lane or block the next scan's filters. A
+successful publication is cooldown-marked to avoid
 broker amplification while the single Auto-Live lane is busy; deterministic
 run IDs make an ambiguous replay idempotent. The marker is complete only after
 both workspace run records exist.
