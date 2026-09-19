@@ -611,7 +611,7 @@ def queue_bullpen_workflow_trigger_batch(
             "profile_index": 0,
             "workspace_profiles": list(workspace_profiles),
         },
-        queue=AUTO_LIVE_QUEUE,
+        queue="beat",
     )
 
 
@@ -634,10 +634,34 @@ def dispatch_bullpen_workflow_trigger_batch(
 
     A user has one guarded execution lane. The batch therefore waits for the
     preceding workflow to become terminal instead of allowing one trigger to
-    cancel, skip, or overwrite another workflow's Stage 1.
+    cancel, skip, or overwrite another workflow's Stage 1. Coordination stays
+    on the short-task Beat queue so its 15-second retries cannot starve the
+    single Auto-Live planning worker that must make the active run terminal.
     """
 
     resolved_profiles = tuple(workspace_profiles or WORKFLOW_TRIGGER_PROFILES)
+    delivery_queue = _task_delivery_queue(self)
+    if delivery_queue == AUTO_LIVE_QUEUE:
+        # Drain coordinator messages published by older releases away from the
+        # single-consumer planning queue. Returning here releases that worker
+        # before the actual Stage 1 execution message is claimed.
+        dispatch_bullpen_workflow_trigger_batch.apply_async(
+            kwargs={
+                "user_id": user_id,
+                "triggered_by": triggered_by,
+                "batch_id": batch_id,
+                "universal_export_id": universal_export_id,
+                "profile_index": profile_index,
+                "workspace_profiles": list(resolved_profiles),
+            },
+            queue="beat",
+        )
+        return {
+            "status": "rerouted",
+            "batch_id": batch_id,
+            "from_queue": delivery_queue,
+            "to_queue": "beat",
+        }
     if any(profile not in WORKFLOW_TRIGGER_PROFILES for profile in resolved_profiles):
         raise ValueError("Unknown Bullpen workflow trigger profile.")
     if profile_index >= len(resolved_profiles):
@@ -676,7 +700,7 @@ def dispatch_bullpen_workflow_trigger_batch(
                 "workspace_profiles": list(resolved_profiles),
             },
             countdown=1,
-            queue=AUTO_LIVE_QUEUE,
+            queue="beat",
         )
         return {
             "status": "advanced",
@@ -745,7 +769,7 @@ def dispatch_bullpen_workflow_trigger_batch(
             "workspace_profiles": list(resolved_profiles),
         },
         countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS,
-        queue=AUTO_LIVE_QUEUE,
+        queue="beat",
     )
     return {
         "status": "queued",

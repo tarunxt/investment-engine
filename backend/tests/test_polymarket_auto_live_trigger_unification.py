@@ -44,13 +44,25 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             ROOT / "backend/app/domains/polymarket_auto_live/tasks.py"
         ).read_text(encoding="utf-8")
         trigger_batch = source.split("def dispatch_bullpen_workflow_trigger_batch(", 1)[1].split(
-            "def enqueue_due_polymarket_auto_live_runs", 1
+            "def bullpen_workflow_trigger_run_id", 1
         )[0]
 
         self.assertIn("WORKFLOW_TRIGGER_PROFILES", trigger_batch)
         self.assertIn("ACTIVE_AUTO_LIVE_RUN_STATUSES", trigger_batch)
         self.assertIn("BullpenAutoLiveBot(user_id=user_id).run_once(", trigger_batch)
         self.assertIn("source_scan_completed_at=source_completed_at", trigger_batch)
+        self.assertIn('queue="beat"', trigger_batch)
+        self.assertIn("delivery_queue == AUTO_LIVE_QUEUE", trigger_batch)
+        self.assertIn('"status": "rerouted"', trigger_batch)
+        self.assertNotIn("queue=AUTO_LIVE_QUEUE", trigger_batch)
+
+        celery_source = (
+            ROOT / "backend/app/infrastructure/messaging/celery_app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '"app.domains.polymarket_auto_live.tasks.dispatch_bullpen_workflow_trigger_batch": {"queue": "beat"}',
+            celery_source,
+        )
 
     def test_start_now_queues_this_workflow_on_latest_universal_scan(self) -> None:
         source = (
