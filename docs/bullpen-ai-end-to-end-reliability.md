@@ -102,10 +102,14 @@ with deterministic per-export run IDs.
 
 The Beat worker reconciles this marker every ten seconds. If the scan worker is
 recycled, killed, or loses Redis after committing completion but before broker
-publication, Beat republishes the missing profiles. A successful publication is
-cooldown-marked to avoid broker amplification while the single Auto-Live lane is
-busy; deterministic run IDs make an ambiguous replay idempotent. The marker is
-complete only after both workspace run records exist.
+publication, Beat republishes the missing profiles. Trigger-batch coordination
+and its 15-second execution-lane rechecks also stay on the Beat queue; they never
+consume the single Auto-Live pool slot needed by the Stage 1 planning task.
+Messages left on the Auto-Live queue by an older release self-reroute to Beat
+and return immediately. A successful publication is cooldown-marked to avoid
+broker amplification while the single Auto-Live lane is busy; deterministic
+run IDs make an ambiguous replay idempotent. The marker is complete only after
+both workspace run records exist.
 
 ## Queue topology
 
