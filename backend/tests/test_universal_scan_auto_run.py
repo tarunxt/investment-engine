@@ -204,7 +204,10 @@ def test_workflow_stage1_filters_the_saved_universal_scan(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    completed_export = latest_completed_universal_export(user_id)
+    completed_export = latest_completed_universal_export(
+        user_id,
+        export_id=export_id,
+    )
     assert completed_export is not None
     assert completed_export[0]["scannedAt"] == now.isoformat()
 
