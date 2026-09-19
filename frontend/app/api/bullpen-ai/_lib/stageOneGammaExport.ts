@@ -189,13 +189,20 @@ export async function cacheUniversalScanSummary({
   metadata,
   ownerKey,
   summary,
+  directory,
 }: {
   metadata: StageOneGammaExportMetadata;
   ownerKey: string;
   summary: UniversalScanSummary;
+  directory?: string;
 }) {
-  const located = await findReadableMetadata(metadata.exportId);
-  if (!located || located.metadata.ownerHash !== ownerHash(ownerKey)) {
+  const located = directory
+    ? {
+        metadata: await readMetadata(metadata.exportId, directory).catch(() => null),
+        directory,
+      }
+    : await findReadableMetadata(metadata.exportId);
+  if (!located || !located.metadata || located.metadata.ownerHash !== ownerHash(ownerKey)) {
     throw new Error("Stage 1 export does not belong to this session.");
   }
   if (!located.metadata.completed || located.metadata.updatedAt !== metadata.updatedAt) return;
