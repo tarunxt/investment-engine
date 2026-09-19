@@ -60,25 +60,13 @@ function waitForRetry(milliseconds: number, signal: AbortSignal) {
   });
 }
 
-async function scanResponseJson(response: Response): Promise<UniversalScanPageResponse> {
-  const body = await response.text();
-  try {
-    return JSON.parse(body) as UniversalScanPageResponse;
-  } catch {
-    throw new Error(`Scan returned a non-JSON response (HTTP ${response.status}).`);
-  }
-}
-
 export function UniversalPolymarketScan() {
   const [snapshot, setSnapshot] = useState<BullpenScanSnapshot | null>(null);
   const [summary, setSummary] = useState<UniversalScanSummary | null>(null);
   const [running, setRunning] = useState(false);
-  const [count, setCount] = useState(0);
-  const [pages, setPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
   const [autoRunRunning, setAutoRunRunning] = useState(false);
-  const controller = useRef<AbortController | null>(null);
   const autoRunRefreshController = useRef<AbortController | null>(null);
   const lastAutoRunCompletion = useRef<string | null>(null);
 
@@ -122,7 +110,7 @@ export function UniversalPolymarketScan() {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setError(String(error.message));
     });
-    return () => { abort.abort(); controller.current?.abort(); autoRunRefreshController.current?.abort(); };
+    return () => { abort.abort(); autoRunRefreshController.current?.abort(); };
   }, []);
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -135,47 +123,36 @@ export function UniversalPolymarketScan() {
     return () => window.clearInterval(interval);
   }, []);
 
-  async function scan() {
-    if (controller.current) { controller.current.abort(); return; }
-    const abort = new AbortController();
-    controller.current = abort;
-    setRunning(true); setError(null); setCount(0); setPages(0);
-    const params = new URLSearchParams({ universal: "true" });
-    let pageCount = 0;
-    let consecutiveFailures = 0;
-    const started = Date.now();
+  async function queueScan() {
+    if (running || autoRunRunning) return;
+    setRunning(true);
+    setError(null);
     try {
-      while (true) {
-        if (Date.now() - started > 45 * 60 * 1000) throw new Error("Scan reached its 45-minute limit. The last completed scan remains available.");
-        let response: Response;
-        let result: UniversalScanPageResponse;
-        try {
-          response = await fetch(`/api/bullpen-ai?${params}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: abort.signal });
-          result = await scanResponseJson(response);
-          if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : `Scan failed (HTTP ${response.status}).`);
-          consecutiveFailures = 0;
-        } catch (requestError) {
-          if (abort.signal.aborted) throw requestError;
-          consecutiveFailures += 1;
-          if (consecutiveFailures > 8) throw requestError;
-          const delay = Math.min(15_000, 1_500 * 2 ** (consecutiveFailures - 1));
-          setError(`Temporary scan interruption. Retrying the current page (${consecutiveFailures}/8)…`);
-          await waitForRetry(delay, abort.signal);
-          continue;
-        }
-        if (result.retryReason) setError(result.retryReason);
-        else { setError(null); pageCount += 1; setPages(pageCount); }
-        if (result.scanExportId) params.set("scanExportId", result.scanExportId);
-        if (result.scanStartedAt) params.set("scanStartedAt", result.scanStartedAt);
-        if (typeof result.cumulativeTotalCandidates === "number") setCount(result.cumulativeTotalCandidates);
-        if (response.status !== 202) break;
-        if (result.nextCursor) params.set("scanCursor", result.nextCursor);
-        await waitForRetry(typeof result.retryAfterMs === "number" ? result.retryAfterMs : 250, abort.signal);
+      const response = await fetch("/api/universal-polymarket-scan/auto-run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "run-now" }),
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        running?: boolean;
+        last_completed_at?: string | null;
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.error || payload.detail || `Could not queue Universal Scan (HTTP ${response.status}).`,
+        );
       }
-      await loadSnapshot(abort.signal);
-    } catch (error) {
-      setError(abort.signal.aborted ? "Scan stopped. Only completed scans are available to workflows." : error instanceof Error ? error.message : String(error));
-    } finally { controller.current = null; setRunning(false); }
+      handleAutoRunStatus({
+        running: Boolean(payload.running),
+        last_completed_at: payload.last_completed_at ?? null,
+      });
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : String(scanError));
+    } finally {
+      setRunning(false);
+    }
   }
 
   const scanActive = running || autoRunRunning;
@@ -192,7 +169,7 @@ export function UniversalPolymarketScan() {
       <h2 className={headingClass}>Universal Polymarket Scan</h2>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <div className={`inline-flex overflow-hidden rounded-lg text-white ${scanActive ? "bg-amber-600" : "bg-blue-600"}`}>
-          <button type="button" onClick={() => void scan()} className="px-3 py-2 text-sm font-semibold">{running ? "Stop Scan" : "Scan Now"}</button>
+          <button type="button" disabled={scanActive} onClick={() => void queueScan()} className="px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60">{scanActive ? "Scan Running" : "Scan Now"}</button>
           <button type="button" disabled={!snapshot} aria-label="Open latest saved Universal Polymarket Scan" onClick={() => setShowSaved(true)} className={`border-l px-2 disabled:opacity-40 ${scanActive ? "border-amber-400" : "border-blue-400"}`}><Menu className="h-4 w-4" /></button>
         </div>
       </div>
@@ -217,7 +194,7 @@ export function UniversalPolymarketScan() {
           </article>)}
         </div>}
       </>}
-      <p role="status" className={`mt-4 text-sm font-semibold ${scanActive ? "text-amber-900" : "text-emerald-900"}`}>{running ? `${count.toLocaleString("en-IN")} events scanned · ${pages} pages` : snapshot ? "Latest Full Universe scan is complete." : "No completed universal scan yet. Select Scan Now to capture the Full Universe."}</p>
+      <p role="status" className={`mt-4 text-sm font-semibold ${scanActive ? "text-amber-900" : "text-emerald-900"}`}>{snapshot ? "Latest Full Universe scan is complete." : scanActive ? "Universal Scan is queued or running. Progress is shown below." : "No completed universal scan yet. Select Scan Now to queue the Full Universe worker."}</p>
       {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {showSaved && snapshot && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/50 p-4">
         <div role="dialog" aria-modal="true" aria-label="Latest saved Universal Polymarket Scan" className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6">
