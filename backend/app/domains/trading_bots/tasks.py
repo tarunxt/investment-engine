@@ -35,6 +35,32 @@ def _workflow_trigger_batch_id(universal_export_id: str) -> str:
     return f"universal-export-{universal_export_id}"
 
 
+def _workflow_run_completed_stage1(record: object | None) -> bool:
+    """Only a terminal Stage 1 result completes an export/profile handoff."""
+
+    if record is None:
+        return False
+    payload = getattr(record, "payload", None)
+    if not isinstance(payload, dict):
+        return False
+    stages = payload.get("stage_results")
+    if not isinstance(stages, list):
+        return False
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        outputs = stage.get("outputs")
+        is_scan = (
+            stage.get("workflow_stage_key") == "scan"
+            or isinstance(outputs, dict)
+            and outputs.get("workflow_stage_key") == "scan"
+            or stage.get("stage_number") == 1
+        )
+        if is_scan and stage.get("completed_at"):
+            return True
+    return False
+
+
 def ensure_completed_universal_scan_workflow_trigger(
     *,
     user_id: int,
@@ -67,7 +93,7 @@ def ensure_completed_universal_scan_workflow_trigger(
         WORKFLOW_TRIGGER_PROFILES,
     )
 
-    batch_id = _workflow_trigger_batch_id(export_id)
+    base_batch_id = _workflow_trigger_batch_id(export_id)
     now = utc_now()
     with SyncSessionLocal() as session:
         record = session.scalar(
@@ -76,10 +102,14 @@ def ensure_completed_universal_scan_workflow_trigger(
             .with_for_update()
         )
         state = read_state(record)
-        missing_profiles = tuple(
-            profile
-            for profile in WORKFLOW_TRIGGER_PROFILES
-            if session.get(
+        saved_batch_id = (
+            str(state.get("workflow_trigger_batch_id") or "").strip()
+            if state.get("workflow_trigger_export_id") == export_id
+            else ""
+        )
+        batch_id = saved_batch_id or base_batch_id
+        profile_records = {
+            profile: session.get(
                 PolymarketAutoLiveRunRecord,
                 bullpen_workflow_trigger_run_id(
                     user_id=user_id,
@@ -88,7 +118,12 @@ def ensure_completed_universal_scan_workflow_trigger(
                     workspace_profile=profile,
                 ),
             )
-            is None
+            for profile in WORKFLOW_TRIGGER_PROFILES
+        }
+        missing_profiles = tuple(
+            profile
+            for profile, profile_record in profile_records.items()
+            if not _workflow_run_completed_stage1(profile_record)
         )
         if not missing_profiles:
             state["workflow_trigger_export_id"] = export_id
@@ -114,6 +149,18 @@ def ensure_completed_universal_scan_workflow_trigger(
                 "missing_profiles": list(missing_profiles),
             }
 
+        # A deterministic base ID makes the first delivery idempotent. If
+        # that run reached a terminal state without completing Stage 1, issue a
+        # new repair batch so the coordinator does not simply advance past the
+        # failed record forever.
+        terminal_failure_exists = any(
+            profile_records[profile] is not None
+            and getattr(profile_records[profile], "status", None) not in {"running"}
+            for profile in missing_profiles
+        )
+        if terminal_failure_exists:
+            batch_id = f"{base_batch_id}-repair-{int(now.timestamp())}"
+
         queue_bullpen_workflow_trigger_batch(
             user_id=user_id,
             triggered_by="universal_scan",
@@ -122,6 +169,7 @@ def ensure_completed_universal_scan_workflow_trigger(
             workspace_profiles=missing_profiles,
         )
         state["workflow_trigger_export_id"] = export_id
+        state["workflow_trigger_batch_id"] = batch_id
         state["workflow_trigger_dispatched_at"] = now.isoformat()
         save_state(session, user_id, state)
         session.commit()
@@ -230,6 +278,7 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
                 total_events=total_events,
             )
             state["workflow_trigger_export_id"] = writer.export_id
+            state["workflow_trigger_batch_id"] = None
             state["workflow_trigger_dispatched_at"] = None
             save_state(session, user_id, state)
             session.commit()

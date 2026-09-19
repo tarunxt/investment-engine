@@ -129,6 +129,7 @@ def read_state(record: UniversalScanStateRecord | None) -> dict[str, Any]:
         "last_failed_at": saved.get("last_failed_at"),
         "last_error": saved.get("last_error"),
         "workflow_trigger_export_id": saved.get("workflow_trigger_export_id"),
+        "workflow_trigger_batch_id": saved.get("workflow_trigger_batch_id"),
         "workflow_trigger_dispatched_at": saved.get("workflow_trigger_dispatched_at"),
         "workflow_trigger_completed_export_id": saved.get(
             "workflow_trigger_completed_export_id"
