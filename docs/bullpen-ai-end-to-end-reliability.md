@@ -1,6 +1,6 @@
 # Bullpen X AI reliability map
 
-Last updated: 2026-07-27
+Last updated: 2026-09-19
 
 This document is the route, ownership, performance, and rollback record for the
 Bullpen X AI Auto-Live console. Frozen run-audit facts remain governed by
@@ -92,6 +92,20 @@ before any live BUY write. A separate v2 singleton-cash proof also preserves
 the balance timestamp and counts consumed fills newer than that balance, so a
 different-market BUY cannot spend collateral already consumed by a concurrent
 fill.
+
+## Universal Scan to Stage 1 handoff
+
+A completed Universal Scan records its export ID as a pending Bullpen workflow
+handoff in the same database transaction that records scan completion. The
+worker immediately publishes the Bullpen 007 and Bullpen Sports trigger batch
+with deterministic per-export run IDs.
+
+The Beat worker reconciles this marker every ten seconds. If the scan worker is
+recycled, killed, or loses Redis after committing completion but before broker
+publication, Beat republishes the missing profiles. A successful publication is
+cooldown-marked to avoid broker amplification while the single Auto-Live lane is
+busy; deterministic run IDs make an ambiguous replay idempotent. The marker is
+complete only after both workspace run records exist.
 
 ## Queue topology
 
