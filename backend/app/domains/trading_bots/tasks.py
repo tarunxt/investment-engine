@@ -225,6 +225,7 @@ def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object
 @celery.task(
     name="app.domains.trading_bots.tasks.execute_universal_polymarket_scan",
     bind=True,
+    queue="ai",
     soft_time_limit=2_700,
     time_limit=3_000,
 )
