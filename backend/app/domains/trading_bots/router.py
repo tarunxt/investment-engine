@@ -22,6 +22,7 @@ from app.domains.trading_bots.tasks import (
 )
 from app.domains.trading_bots.universal_scan import (
     control_run,
+    latest_completed_universal_export,
     status_for_user,
     update_schedule,
 )
@@ -72,6 +73,26 @@ def _control_universal_run(user_id: int, action: str) -> dict[str, object]:
         result = status_for_user(session, user_id)
         session.commit()
         return result
+
+
+@router.get("/universal-scan/export-reference")
+async def universal_scan_export_reference(current_user: User = Depends(get_current_user)):
+    resolved = await asyncio.to_thread(
+        latest_completed_universal_export,
+        current_user.id,
+    )
+    if resolved is None:
+        return {"export": None}
+    metadata, rows_path = resolved
+    return {
+        "export": {
+            "metadata": metadata,
+            "rows_path": str(rows_path),
+            "filtered_rows_path": str(
+                rows_path.with_name(f"{rows_path.stem}.filtered.jsonl")
+            ),
+        }
+    }
 
 
 @router.get("/universal-scan/auto-run", response_model=UniversalScanAutoRunStatus)
