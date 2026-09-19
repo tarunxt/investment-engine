@@ -20,6 +20,19 @@ const EXPORT_DIRECTORY = process.env.BULLPEN_STAGE_ONE_EXPORT_DIRECTORY?.trim() 
       ? join(DEPLOYED_APP_ROOT, "backend", ".stage-one-exports")
       : join(homedir(), ".local", "share", "credx-bullpen-stage-one-exports")
     : join(tmpdir(), "credx-bullpen-stage-one-exports"));
+const READABLE_EXPORT_DIRECTORIES = Array.from(new Set([
+  EXPORT_DIRECTORY,
+  ...(process.env.NODE_ENV === "production"
+    ? [
+        ...(DEPLOYED_APP_ROOT ? [join(DEPLOYED_APP_ROOT, "backend", ".stage-one-exports")] : []),
+        "/srv/investor/backend/.stage-one-exports",
+        "/srv/investment-engine/backend/.stage-one-exports",
+        join(homedir(), ".local", "share", "credx-bullpen-stage-one-exports"),
+        "/home/investor/.local/share/credx-bullpen-stage-one-exports",
+        "/home/investment-engine/.local/share/credx-bullpen-stage-one-exports",
+      ]
+    : []),
+]));
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const ORPHAN_EXPORT_GRACE_MS = 2 * 60 * 1_000;
 const EXPORT_ID_PATTERN = /^[0-9a-f-]{36}$/;
@@ -78,12 +91,12 @@ function assertExportId(exportId: string) {
   }
 }
 
-function exportPaths(exportId: string) {
+function exportPaths(exportId: string, directory = EXPORT_DIRECTORY) {
   assertExportId(exportId);
   return {
-    rows: join(EXPORT_DIRECTORY, `${exportId}.jsonl`),
-    filteredRows: join(EXPORT_DIRECTORY, `${exportId}.filtered.jsonl`),
-    metadata: join(EXPORT_DIRECTORY, `${exportId}.json`),
+    rows: join(directory, `${exportId}.jsonl`),
+    filteredRows: join(directory, `${exportId}.filtered.jsonl`),
+    metadata: join(directory, `${exportId}.json`),
   };
 }
 
@@ -153,15 +166,23 @@ async function cleanupSupersededOwnerExports(ownerKey: string, preserveCompleted
   );
 }
 
-async function readMetadata(exportId: string) {
-  const { metadata } = exportPaths(exportId);
+async function readMetadata(exportId: string, directory = EXPORT_DIRECTORY) {
+  const { metadata } = exportPaths(exportId, directory);
   const raw = await readFile(metadata, "utf8");
   return JSON.parse(raw) as StageOneGammaExportMetadata;
 }
 
-async function saveMetadata(metadata: StageOneGammaExportMetadata) {
-  const paths = exportPaths(metadata.exportId);
+async function saveMetadata(metadata: StageOneGammaExportMetadata, directory = EXPORT_DIRECTORY) {
+  const paths = exportPaths(metadata.exportId, directory);
   await writeFile(paths.metadata, JSON.stringify(metadata), "utf8");
+}
+
+async function findReadableMetadata(exportId: string) {
+  for (const directory of READABLE_EXPORT_DIRECTORIES) {
+    const metadata = await readMetadata(exportId, directory).catch(() => null);
+    if (metadata) return { metadata, directory };
+  }
+  return null;
 }
 
 export async function cacheUniversalScanSummary({
@@ -173,12 +194,15 @@ export async function cacheUniversalScanSummary({
   ownerKey: string;
   summary: UniversalScanSummary;
 }) {
-  const current = await readMetadata(metadata.exportId);
-  if (current.ownerHash !== ownerHash(ownerKey)) {
+  const located = await findReadableMetadata(metadata.exportId);
+  if (!located || located.metadata.ownerHash !== ownerHash(ownerKey)) {
     throw new Error("Stage 1 export does not belong to this session.");
   }
-  if (!current.completed || current.updatedAt !== metadata.updatedAt) return;
-  await saveMetadata({ ...current, universalSummary: summary });
+  if (!located.metadata.completed || located.metadata.updatedAt !== metadata.updatedAt) return;
+  await saveMetadata(
+    { ...located.metadata, universalSummary: summary },
+    located.directory,
+  );
 }
 
 export async function appendStageOneGammaExportPage({
@@ -335,28 +359,33 @@ export async function openLatestStageOneGammaExport({
 }) {
   await cleanupExpiredExports();
   const expectedOwnerHash = ownerHash(ownerKey);
-  const names = await readdir(EXPORT_DIRECTORY).catch(() => [] as string[]);
   const matching = (
     await Promise.all(
-      names
-        .filter((name) => name.endsWith(".json"))
-        .map(async (name) => {
-          const exportId = name.slice(0, -".json".length);
-          if (!EXPORT_ID_PATTERN.test(exportId)) return null;
-          const metadata = await readMetadata(exportId).catch(() => null);
-          return metadata?.completed && !metadata.filterPending && metadata.ownerHash === expectedOwnerHash
-            ? metadata
-            : null;
-        }),
+      READABLE_EXPORT_DIRECTORIES.map(async (directory) => {
+        const names = await readdir(directory).catch(() => [] as string[]);
+        return Promise.all(
+          names
+            .filter((name) => name.endsWith(".json"))
+            .map(async (name) => {
+              const exportId = name.slice(0, -".json".length);
+              if (!EXPORT_ID_PATTERN.test(exportId)) return null;
+              const metadata = await readMetadata(exportId, directory).catch(() => null);
+              return metadata?.completed && !metadata.filterPending && metadata.ownerHash === expectedOwnerHash
+                ? { metadata, directory }
+                : null;
+            }),
+        );
+      }),
     )
   )
-    .filter((metadata): metadata is StageOneGammaExportMetadata => Boolean(metadata))
-    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-  const metadata = matching[0];
-  if (!metadata) return null;
-  const paths = exportPaths(metadata.exportId);
+    .flat()
+    .filter((item): item is { metadata: StageOneGammaExportMetadata; directory: string } => Boolean(item))
+    .sort((left, right) => Date.parse(right.metadata.updatedAt) - Date.parse(left.metadata.updatedAt));
+  const latest = matching[0];
+  if (!latest) return null;
+  const paths = exportPaths(latest.metadata.exportId, latest.directory);
   return {
-    metadata,
+    metadata: latest.metadata,
     rowsPath: paths.rows,
     filteredRowsPath: paths.filteredRows,
   };
@@ -370,11 +399,12 @@ export async function readStageOneGammaExport({
   ownerKey: string;
 }) {
   await cleanupExpiredExports();
-  const metadata = await readMetadata(exportId);
-  if (metadata.ownerHash !== ownerHash(ownerKey)) {
+  const located = await findReadableMetadata(exportId);
+  if (!located || located.metadata.ownerHash !== ownerHash(ownerKey)) {
     throw new Error("Stage 1 export does not belong to this session.");
   }
-  const raw = await readFile(exportPaths(exportId).rows, "utf8");
+  const metadata = located.metadata;
+  const raw = await readFile(exportPaths(exportId, located.directory).rows, "utf8");
   const rows = raw
     .split("\n")
     .filter(Boolean)
@@ -390,11 +420,12 @@ export async function openStageOneGammaExport({
   ownerKey: string;
 }) {
   await cleanupExpiredExports();
-  const metadata = await readMetadata(exportId);
-  if (metadata.ownerHash !== ownerHash(ownerKey)) {
+  const located = await findReadableMetadata(exportId);
+  if (!located || located.metadata.ownerHash !== ownerHash(ownerKey)) {
     throw new Error("Stage 1 export does not belong to this session.");
   }
-  const paths = exportPaths(exportId);
+  const metadata = located.metadata;
+  const paths = exportPaths(exportId, located.directory);
   return {
     metadata,
     rowsPath: paths.rows,
