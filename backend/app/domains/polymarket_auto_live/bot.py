@@ -1149,6 +1149,22 @@ class BullpenAutoLiveBot:
                 await session.commit()
                 return run
 
+            # A confirming run has handed Stage 3 to durable intent workers.
+            # It remains non-terminal for order visibility, but it no longer
+            # owns the Stage 1/2 planning lane needed by the next scan.
+            if (
+                running_run is not None
+                and running_run.status == "confirming"
+                and request is not None
+                and request.wait_for_execution_lane
+            ):
+                logger.info(
+                    "Allowing workflow trigger to use the planning lane while "
+                    "run %s continues durable Stage 3 confirmation.",
+                    running_run.id,
+                )
+                running_run = None
+
             superseded_run: BullpenAutoLiveRun | None = None
             if (
                 running_run is not None
