@@ -61,6 +61,7 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace": {"queue": AUTO_LIVE_QUEUE},
     "app.domains.trading_bots.tasks.execute_universal_polymarket_scan": {"queue": AUTO_LIVE_QUEUE},
     "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans": {"queue": "beat"},
+    "app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers": {"queue": "beat"},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
@@ -122,6 +123,10 @@ celery.conf.beat_schedule = {
     },
     "universal-polymarket-scan-due-run-scan": {
         "task": "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans",
+        "schedule": schedule(run_every=10.0),
+    },
+    "universal-polymarket-stage1-handoff-recovery": {
+        "task": "app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers",
         "schedule": schedule(run_every=10.0),
     },
     "bullpen008-shadow-due-run-scan": {
