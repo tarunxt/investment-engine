@@ -75,10 +75,21 @@ def _control_universal_run(user_id: int, action: str) -> dict[str, object]:
         return result
 
 
+def _universal_export_reference(user_id: int):
+    with SyncSessionLocal() as session:
+        state = status_for_user(session, user_id)
+        session.commit()
+    export_id = state.get("workflow_trigger_export_id")
+    return latest_completed_universal_export(
+        user_id,
+        export_id=export_id if isinstance(export_id, str) and export_id else None,
+    )
+
+
 @router.get("/universal-scan/export-reference")
 async def universal_scan_export_reference(current_user: User = Depends(get_current_user)):
     resolved = await asyncio.to_thread(
-        latest_completed_universal_export,
+        _universal_export_reference,
         current_user.id,
     )
     if resolved is None:
