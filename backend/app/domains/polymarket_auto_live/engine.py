@@ -5657,6 +5657,7 @@ class BullpenAutoLiveEngine:
 
         latest_scan_progress: dict[str, object] = {}
         stage1_candidate_scan_completed_at: str | None = None
+        filter_ledger: dict[str, object] | None = None
 
         def report_stage1_progress(
             reason: str,
@@ -6157,6 +6158,7 @@ class BullpenAutoLiveEngine:
                 completed_items=scanned.total_candidates,
             )
             scan_source_label = scanned.source_label
+            filter_ledger = getattr(scanned, "filter_ledger", None)
             scan_source_url = scanned.source_url
             scan_warning = getattr(scanned, "warning", None)
             scan_details = getattr(scanned, "details", None)
@@ -6388,6 +6390,7 @@ class BullpenAutoLiveEngine:
                 "scan_source_url": scan_source_url,
                 "scanned_candidates": scanned_total_candidates,
                 "accepted_candidates_count": len(stage1_accepted_candidates),
+                "filter_ledger": filter_ledger,
                 "accepted_candidates": stage1_accepted_candidates,
                 "rejected_candidates_count": len(stage1_rejected_candidates),
                 "wallet_snapshot_status": "refreshing",
@@ -7205,6 +7208,7 @@ class BullpenAutoLiveEngine:
                     ],
                     "accepted_candidates": stage1_accepted_candidates,
                     "accepted_candidates_count": len(stage1_accepted_candidates),
+                    "filter_ledger": filter_ledger,
                     "rejected_candidates": stage1_rejected_candidates,
                     "rejected_candidates_count": len(stage1_rejected_candidates),
                     "scan_source_label": scan_source_label,
@@ -7614,6 +7618,7 @@ class BullpenAutoLiveEngine:
                         ],
                         "accepted_candidates": stage1_accepted_candidates,
                         "accepted_candidates_count": len(stage1_accepted_candidates),
+                        "filter_ledger": filter_ledger,
                         "rejected_candidates": stage1_rejected_candidates,
                         "rejected_candidates_count": len(stage1_rejected_candidates),
                         "scan_source_label": scan_source_label,

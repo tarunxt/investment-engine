@@ -1,5 +1,31 @@
 # Bullpen Run Audit
 
+## UPS source integrity and filtering (2026-09-20)
+
+Manifest v2 captures the immutable export ID, byte size, SHA-256 and row count.
+The writer publishes pending ownership before writing rows, fsyncs and validates
+the source and retained archive before publishing completion. Frontend read
+cleanup cannot delete orphan or Universal files. New UPS runs no longer delete
+previous captures needed by queued profiles. The archive is a separate persistent
+directory (`UNIVERSAL_SCAN_ARCHIVE_DIRECTORY`, default sibling
+`.universal-scan-archive`); on the systemd host this is shared host storage, not an
+off-host backup. It can be mounted on EFS; provisioning EFS/S3 is not implicit.
+No automatic archival deletion is performed. Monitor free space and only remove
+captures after checking all dependent workflows and the chosen retention policy.
+
+The reader pins the export identity, verifies checksums and decoded counts, and
+can recover a missing/corrupt primary from its archive. Malformed or missing rows
+fail closed, never becoming a successful zero result. Handoff repair requires a
+successful completed Stage 1, not merely a terminal failure timestamp. Missing
+exports do not create requests with fabricated scan timestamps.
+
+Additive schema-v2 `stage_1.filter_ledger` records source identity/hash, expected,
+evaluated, accepted and rejected row counts, and overlapping per-reason reject
+counts. `UPS_FILTER_LEDGER_INVALID` blocks inconsistent new evidence; legacy
+snapshots without a ledger remain readable and are not rewritten. Registry/rule
+v32 captures this behavior. The UI labels failed pre-filter attempts Not evaluated
+and dependent stages Blocked, with no 100% success bar.
+
 ## Sports ranking evidence (2026-09-18)
 
 Sports history uses the canonical `sports-ranking-v2` resolver. The parent event provides the competition tag and participant identities. Reviewed competition-scoped names and provider IDs resolve teams; spelling similarity and generated initials cannot select a ranking. Imported null placeholders never enter the ranked identity index. Provider IDs, season, group, source status, successful retrieval timestamp and content hash accompany each selected row.

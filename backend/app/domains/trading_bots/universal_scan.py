@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import os
+import shutil
 import zlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -440,10 +441,43 @@ def _readable_export_directories() -> tuple[Path, ...]:
         Path("/home/investment-engine/.local/share/credx-bullpen-stage-one-exports"),
     )
     directories: list[Path] = []
-    for directory in (primary, *deployed, *legacy):
+    for directory in (primary, *deployed, *legacy, archive_directory()):
         if directory not in directories:
             directories.append(directory)
     return tuple(directories)
+
+
+def archive_directory() -> Path:
+    """Retained recovery copies, outside the frontend's export cleanup scope.
+
+    Production can mount this directory on EFS. The default is persistent on
+    the systemd host, shared by API and workers; it is not a cross-host backup.
+    """
+    configured = os.environ.get("UNIVERSAL_SCAN_ARCHIVE_DIRECTORY", "").strip()
+    return Path(configured) if configured else export_directory().parent / ".universal-scan-archive"
+
+
+def file_integrity(path: Path) -> tuple[int, str, int]:
+    digest = hashlib.sha256()
+    size = count = 0
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+            size += len(block)
+            count += block.count(b"\n")
+    return size, digest.hexdigest(), count
+
+
+def validate_export(metadata: dict[str, Any], rows_path: Path) -> bool:
+    try:
+        size, digest, count = file_integrity(rows_path)
+        return (
+            count == int(metadata["rowCount"])
+            and (metadata.get("rowsSha256") is None or digest == metadata["rowsSha256"])
+            and (metadata.get("rowsBytes") is None or size == metadata["rowsBytes"])
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def latest_completed_universal_export(
@@ -487,11 +521,22 @@ def latest_completed_universal_export(
         candidates.append((updated_at, metadata, metadata_path))
     if not candidates:
         return None
-    _, metadata, metadata_path = max(candidates, key=lambda item: item[0])
-    rows_path = metadata_path.with_suffix(".jsonl")
-    if not rows_path.is_file():
-        return None
-    return metadata, rows_path
+    # Pin one identity, but try all copies of it. Never silently substitute an
+    # older scan if the newest scan is corrupt or unavailable.
+    selected_id = max(candidates, key=lambda item: item[0])[1].get("exportId")
+    for _, metadata, metadata_path in candidates:
+        if metadata.get("exportId") != selected_id:
+            continue
+        rows_path = metadata_path.with_suffix(".jsonl")
+        try:
+            if rows_path.is_file() and (
+                metadata.get("rowsBytes") is None
+                or rows_path.stat().st_size == metadata["rowsBytes"]
+            ):
+                return metadata, rows_path
+        except OSError:
+            continue
+    return None
 
 
 def _optional_float(value: object) -> float | None:
@@ -512,13 +557,21 @@ def iter_universal_scan_markets(
 
     resolved = latest_completed_universal_export(user_id, export_id=export_id)
     if resolved is None:
-        raise FileNotFoundError("No completed Universal Polymarket Scan is available.")
+        raise FileNotFoundError("UPS_SOURCE_UNAVAILABLE: No completed Universal Polymarket Scan is available. Filters were not evaluated; restore the exact export or run a new UPS.")
     metadata, rows_path = resolved
 
     def rows() -> Iterator[Any]:
         from app.domains.polymarket_auto_live.scanner import ScannedMarket
 
-        with rows_path.open("r", encoding="utf-8") as handle:
+        readable_rows = rows_path
+        if not validate_export(metadata, readable_rows):
+            archived_rows = archive_directory() / rows_path.name
+            if archived_rows != rows_path and validate_export(metadata, archived_rows):
+                readable_rows = archived_rows
+            else:
+                raise ValueError("UPS_SOURCE_CORRUPT: Universal Scan row count or checksum mismatch; filters are blocked.")
+        decoded_count = 0
+        with readable_rows.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
@@ -538,7 +591,7 @@ def iter_universal_scan_markets(
                     market = payload.get("market", {})
                     event = payload.get("event", {})
                     if not isinstance(candidate, dict) or not isinstance(market, dict):
-                        continue
+                        raise ValueError("Invalid candidate or market")
                     event = event if isinstance(event, dict) else {}
                     outcomes = candidate.get("outcomeLabels")
                     if not isinstance(outcomes, list):
@@ -556,7 +609,8 @@ def iter_universal_scan_markets(
                     ).strip()
                     question = str(candidate.get("question") or "").strip()
                     if not market_id or not question:
-                        continue
+                        raise ValueError("Missing market identity or question")
+                    decoded_count += 1
                     raw = {**market, "_export_event": event}
                     yield ScannedMarket(
                         market_id=market_id,
@@ -579,8 +633,10 @@ def iter_universal_scan_markets(
                         force_include=False,
                         raw=raw,
                     )
-                except (ValueError, TypeError, KeyError, zlib.error):
-                    continue
+                except (ValueError, TypeError, KeyError, AttributeError, zlib.error) as exc:
+                    raise ValueError("UPS_SOURCE_CORRUPT: An unreadable Universal Scan row blocks filtering.") from exc
+        if decoded_count != int(metadata["rowCount"]):
+            raise ValueError("UPS_SOURCE_CORRUPT: Decoded row count does not match the Universal Scan manifest.")
 
     return metadata, rows()
 
@@ -605,6 +661,14 @@ class UniversalExportWriter:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.handle = self.rows_path.open("x", encoding="utf-8")
         self.filtered_path.write_text("", encoding="utf-8")
+        # Publish ownership BEFORE writing rows, preventing cleanup from
+        # mistaking a running capture for an abandoned orphan.
+        self.metadata_path.write_text(json.dumps({
+            "exportId": self.export_id,
+            "ownerHash": hashlib.sha256(f"{self.user_id}:universal".encode()).hexdigest(),
+            "universalSource": True, "completed": False,
+            "createdAt": self.started_at.isoformat(), "rowCount": 0,
+        }), encoding="utf-8")
         return self
 
     def add(self, market: Any) -> None:
@@ -665,6 +729,10 @@ class UniversalExportWriter:
         os.fsync(self.handle.fileno())
         self.handle.close()
         self.handle = None
+        rows_bytes, rows_sha256, stored_count = file_integrity(self.rows_path)
+        self.rows_sha256 = rows_sha256
+        if stored_count != self.count:
+            raise ValueError("UPS_SOURCE_CORRUPT: Written UPS row count failed validation.")
         completed_at = utc_now().isoformat()
         metadata = {
             "exportId": self.export_id,
@@ -676,6 +744,9 @@ class UniversalExportWriter:
             "scannedAt": self.started_at.isoformat(),
             "rowCount": self.count,
             "completed": True,
+            "manifestVersion": 2,
+            "rowsBytes": rows_bytes,
+            "rowsSha256": rows_sha256,
             "processedPages": [f"__AUTO_{number:06d}__" for number in range(1, self.pages + 1)],
             "identityKeys": sorted(self.identity_keys),
             "mode": "30-days",
@@ -697,25 +768,27 @@ class UniversalExportWriter:
             encoding="utf-8",
         )
         participant_temporary.replace(participant_path)
+        # Retain an immutable recovery copy before making this scan consumable.
+        archive = archive_directory()
+        archive.mkdir(parents=True, exist_ok=True)
+        if shutil.disk_usage(archive).free < rows_bytes + 2 * 1024**3:
+            raise OSError("UPS_STORAGE_CAPACITY: Archive needs space for this export plus a 2 GiB reserve. No existing scan was deleted.")
+        archived_rows = archive / self.rows_path.name
+        archived_tmp = archived_rows.with_suffix(".jsonl.tmp")
+        shutil.copyfile(self.rows_path, archived_tmp)
+        with archived_tmp.open("rb") as persisted:
+            os.fsync(persisted.fileno())
+        if not validate_export(metadata, archived_tmp):
+            raise ValueError("UPS_SOURCE_CORRUPT: Archived UPS failed integrity verification.")
+        archived_tmp.replace(archived_rows)
+        archived_meta = archive / self.metadata_path.name
+        archived_meta_tmp = archived_meta.with_suffix(".json.tmp")
+        archived_meta_tmp.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+        archived_meta_tmp.replace(archived_meta)
         temporary = self.metadata_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
         temporary.replace(self.metadata_path)
-        self._cleanup_previous()
-
-    def _cleanup_previous(self) -> None:
-        owner_hash = hashlib.sha256(f"{self.user_id}:universal".encode()).hexdigest()
-        for metadata_path in self.directory.glob("*.json"):
-            if metadata_path == self.metadata_path:
-                continue
-            try:
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if metadata.get("ownerHash") != owner_hash or not metadata.get("universalSource"):
-                continue
-            old_id = metadata_path.stem
-            for suffix in (".json", ".jsonl", ".filtered.jsonl", ".sports-participants.json"):
-                (self.directory / f"{old_id}{suffix}").unlink(missing_ok=True)
+        # Do not delete older exports: delayed/retried workflows pin their IDs.
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         if self.handle is not None:

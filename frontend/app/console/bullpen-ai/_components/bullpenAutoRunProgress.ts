@@ -811,6 +811,7 @@ export function buildBullpenAutoRunWorkflowView(
     }
 
     const tone: WorkflowTone =
+      explicitPhase === "failed" ||
       explicitPhase === "aborted" ||
       explicitPhase === "blocked" ||
       (definition.key === "invest" &&
@@ -852,7 +853,7 @@ export function buildBullpenAutoRunWorkflowView(
           readString(stage?.inputs?.llm_execution_mode))
         : null;
     const progressLabel = !shouldShowStageData
-      ? "Queued"
+      ? runStatus === "failed" ? "Blocked by upstream failure" : "Queued"
       : explicitPhase === "cancelled"
         ? "Cancelled"
       : explicitPhase === "aborted"

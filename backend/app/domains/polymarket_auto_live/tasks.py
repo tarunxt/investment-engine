@@ -724,12 +724,16 @@ def dispatch_bullpen_workflow_trigger_batch(
         user_id,
         export_id=universal_export_id,
     )
-    metadata = resolved[0] if resolved is not None else {}
+    if resolved is None:
+        logger.error("UPS_SOURCE_UNAVAILABLE user=%s profile=%s export=%s batch=%s; filters not evaluated", user_id, workspace_profile, universal_export_id, batch_id)
+        return {"status": "source_unavailable", "batch_id": batch_id,
+                "workspace_profile": workspace_profile, "universal_export_id": universal_export_id}
+    metadata = resolved[0]
     snapshot_id = str(
         metadata.get("exportId") or universal_export_id or f"missing-{batch_id}"
     )
     source_completed_at = str(
-        metadata.get("updatedAt") or metadata.get("completedAt") or batch_id
+        metadata.get("updatedAt") or metadata.get("completedAt") or ""
     )
     request = BullpenAutoLiveRunOnceRequest(
         client_run_id=run_id,

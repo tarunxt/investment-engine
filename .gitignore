@@ -45,6 +45,8 @@ tmp/
 temp/
 .runtime/
 backend/.runtime-tools/
+backend/.stage-one-exports/
+backend/.universal-scan-archive/
 frontend/.runtime/
 
 # Database

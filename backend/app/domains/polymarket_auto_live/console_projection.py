@@ -70,6 +70,7 @@ _STAGE_INPUT_KEYS = {
     "source_run_id",
 }
 _STAGE_OUTPUT_KEYS = {
+    "filter_ledger",
     "scan_scope",
     "scan_completeness",
     "scan_warning",

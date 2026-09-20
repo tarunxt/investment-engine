@@ -225,7 +225,7 @@ export async function GET(request: NextRequest) {
           ownerKey,
           summary: universalSummary,
           directory: dirname(latest.rowsPath),
-        });
+        }).catch(() => undefined); // Authenticated backend exports may use a different owner namespace.
         await rm(progressPath, { force: true }).catch(() => undefined);
       } else {
         await writeFile(progressPath, JSON.stringify(buildState), "utf8");

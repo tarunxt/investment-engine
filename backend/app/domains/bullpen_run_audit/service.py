@@ -1160,6 +1160,7 @@ def _build_bundle(
             "missing_fields": missing_fields,
         },
         "stage_1": {
+            "filter_ledger": stage1_outputs.get("filter_ledger"),
             "sports_ranking_evidence": [
                 {"market_id": row.get("market_id"),
                  "ranking": row.get("sports_ranking_at_scan"),

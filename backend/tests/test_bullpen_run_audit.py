@@ -2727,11 +2727,11 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert BULLPEN_RUN_AUDIT_SCHEMA_VERSION == 2
     assert (
         BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION
-        == "2026-09-18-sports-ranking-evidence-v31"
+        == "2026-09-20-ups-filter-integrity-v32"
     )
     assert (
         BULLPEN_RUN_AUDIT_RULE_VERSION
-        == "2026-09-18-sports-ranking-evidence-v31"
+        == "2026-09-20-ups-filter-integrity-v32"
     )
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert "stage1_common_scan_filters_and_wallet_union" in keys

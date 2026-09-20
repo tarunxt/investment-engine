@@ -34,7 +34,8 @@ const READABLE_EXPORT_DIRECTORIES = Array.from(new Set([
     : []),
 ]));
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
-const ORPHAN_EXPORT_GRACE_MS = 2 * 60 * 1_000;
+// Writers may run for 50 minutes. A missing counterpart is not proof that an
+// export is abandoned; only a dedicated retention job may remove orphan files.
 const EXPORT_ID_PATTERN = /^[0-9a-f-]{36}$/;
 const EXPORT_FILE_PATTERN = /^([0-9a-f-]{36})\.(json|jsonl|filtered\.jsonl)$/;
 
@@ -126,13 +127,7 @@ async function cleanupExpiredExports() {
       const isExpired = Boolean(
         details && !isDurableUniversal && now - details.mtimeMs > EXPORT_RETENTION_MS,
       );
-      const isAbandonedOrphan = Boolean(
-        details &&
-          counterpart &&
-          !nameSet.has(counterpart) &&
-          now - details.mtimeMs > ORPHAN_EXPORT_GRACE_MS,
-      );
-      if (isExpired || isAbandonedOrphan) {
+      if (isExpired && exportMetadata && !exportMetadata.universalSource && counterpart && nameSet.has(counterpart)) {
         await rm(path, { force: true });
       }
     }),
