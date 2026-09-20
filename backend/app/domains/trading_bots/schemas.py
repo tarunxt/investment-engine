@@ -90,6 +90,8 @@ class UniversalScanHistoryItem(BaseModel):
     completed_at: str | None = None
     total_events: int | None = None
     error: str | None = None
+    export_id: str | None = None
+    rows_sha256: str | None = None
 
 
 class UniversalScanAutoRunStatus(BaseModel):

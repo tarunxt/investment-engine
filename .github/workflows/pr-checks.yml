@@ -56,6 +56,8 @@ jobs:
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_universal_scan_auto_run.py
+          backend/tests/test_universal_export_integrity.py
+          backend/tests/test_universal_stage1_handoff_repair.py
           backend/tests/test_bullpen_sports_filter_profile.py
           backend/tests/test_polymarket_auto_live_trigger_unification.py
           backend/tests/test_polymarket_auto_live_stage1_runtime.py
@@ -130,6 +132,7 @@ jobs:
         run: >-
           node --test
           tests/api-read-fallbacks.test.mjs
+          tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs
           tests/bounded-api-transport.test.mjs
           tests/bullpen-proxy-timeout-budget.test.mjs

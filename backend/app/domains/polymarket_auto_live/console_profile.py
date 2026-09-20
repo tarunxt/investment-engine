@@ -260,6 +260,7 @@ class ConsoleScanResult:
     # When a callback externalizes their raw source, retain only the serialized
     # candidate dictionaries and release the heavier wrapper/market objects.
     serialized_rejected: list[dict[str, object]] | None = None
+    filter_ledger: dict[str, object] | None = None
 
 
 def _market_identity_keys(market: ScannedMarket) -> set[str]:
@@ -1124,6 +1125,8 @@ async def scan_console_profile_markets(
             [] if rejected_callback is not None else None
         )
         total_candidates = 0
+        rejection_counts: dict[str, int] = {}
+        rejected_total = 0
         for total_candidates, market in enumerate(universal_rows, 1):
             reasons = console_market_filter_reasons(
                 market,
@@ -1148,6 +1151,9 @@ async def scan_console_profile_markets(
                 custom_exclude_phrases=custom_exclude_phrases,
             ) if apply_base_filters else []
             if reasons:
+                rejected_total += 1
+                for reason in set(reasons):
+                    rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
                 rejected_market = ScanRejectedMarket(
                     market_id=market.market_id,
                     question=market.question,
@@ -1185,6 +1191,14 @@ async def scan_console_profile_markets(
             complete_universe=True,
             catalogue_candidates=total_candidates,
             serialized_rejected=serialized_rejected,
+            filter_ledger={
+                "version": 1, "source_export_id": metadata.get("exportId"),
+                "source_sha256": metadata.get("rowsSha256"),
+                "expected_rows": metadata["rowCount"], "evaluated_rows": total_candidates,
+                "accepted_rows": len(accepted), "rejected_rows": rejected_total,
+                "rejection_reasons": rejection_counts,
+                "reason_counts_overlap": True, "source_status": "validated",
+            },
         )
 
     scanned_at = datetime.now(UTC).isoformat()

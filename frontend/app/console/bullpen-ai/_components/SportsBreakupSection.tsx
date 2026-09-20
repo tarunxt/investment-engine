@@ -264,6 +264,12 @@ function BreakdownCard({ table, totalEvents }: { table: BreakdownTable; totalEve
 
 export function SportsBreakupSection({ snapshot }: { snapshot: BullpenScanSnapshot | null }) {
   const summary = buildSportsBreakup(snapshot);
+  if (!snapshot) return (
+    <section aria-label="Sports Breakup" className="rounded-3xl border border-amber-200 bg-amber-50 p-6">
+      <h2 className="text-xl font-semibold">Sports Breakup</h2>
+      <p className="mt-2">Not evaluated — no completed filter snapshot is available. Check Stage 1 for source or worker errors.</p>
+    </section>
+  );
   return (
     <section aria-label="Sports Breakup" className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">

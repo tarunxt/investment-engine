@@ -26,13 +26,22 @@ def test_workflow_handoff_accepts_completed_stage1() -> None:
             "stage_results": [
                 {
                     "stage_number": 1,
-                    "outputs": {"workflow_stage_key": "scan"},
+                    "status": "pass",
+                    "outputs": {"workflow_stage_key": "scan", "phase_status": "completed"},
                     "completed_at": "2026-09-19T04:00:00+00:00",
                 }
             ]
         }
     )
     assert _workflow_run_completed_stage1(completed)
+
+
+def test_failed_terminal_stage_is_not_a_successful_handoff():
+    failed = SimpleNamespace(payload={"stage_results": [{
+        "stage_number": 1, "status": "fail", "completed_at": "2026-09-20T08:00:00Z",
+        "outputs": {"workflow_stage_key": "scan", "phase_status": "failed"},
+    }]})
+    assert not _workflow_run_completed_stage1(failed)
 
 
 def test_universal_state_preserves_repair_batch_identity() -> None:

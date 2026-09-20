@@ -56,7 +56,10 @@ def _workflow_run_completed_stage1(record: object | None) -> bool:
             and outputs.get("workflow_stage_key") == "scan"
             or stage.get("stage_number") == 1
         )
-        if is_scan and stage.get("completed_at"):
+        if (is_scan and stage.get("completed_at")
+            and stage.get("status") in {"pass", "warning"}
+            and isinstance(outputs, dict)
+            and outputs.get("phase_status") == "completed"):
             return True
     return False
 
@@ -73,6 +76,10 @@ def ensure_completed_universal_scan_workflow_trigger(
     while deterministic workflow run IDs keep a replay idempotent.
     """
 
+    # Bind repair to the DB-selected export; directory ordering is not lineage.
+    if universal_export_id is None:
+        with SyncSessionLocal() as session:
+            universal_export_id = read_state(session.get(UniversalScanStateRecord, user_id)).get("workflow_trigger_export_id")
     resolved = latest_completed_universal_export(
         user_id,
         export_id=universal_export_id,
@@ -279,6 +286,11 @@ def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[
                 total_events=total_events,
             )
             state["workflow_trigger_export_id"] = writer.export_id
+            state["history"] = [
+                {**item, "export_id": writer.export_id, "rows_sha256": writer.rows_sha256}
+                if item.get("id") == run_id else item
+                for item in state["history"]
+            ]
             state["workflow_trigger_batch_id"] = None
             state["workflow_trigger_dispatched_at"] = None
             save_state(session, user_id, state)

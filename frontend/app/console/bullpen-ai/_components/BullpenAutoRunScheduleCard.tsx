@@ -1524,6 +1524,11 @@ function getStageOneStats(stage: WorkflowStageView) {
   return { activePositions, claimablePositions, totalScanned, passedFilters };
 }
 
+function stageOneNotEvaluated(stage: WorkflowStageView) {
+  return ["failed", "blocked", "aborted", "cancelled"].includes(String(stage.outputs.phase_status))
+    && !stage.outputs.filters_completed_at;
+}
+
 function getStageOneEvidenceTimestamp(stage: WorkflowStageView) {
   const timestamps = [
     readStageOutputString(stage.outputs.filters_completed_at),
@@ -2204,6 +2209,7 @@ function StageOneRunStats({
     !hideNumbers && includedActiveCount !== null
       ? ` (Includes ${includedActiveCount} active event${includedActiveCount === 1 ? "" : "s"})`
       : "";
+  hideNumbers = hideNumbers || stageOneNotEvaluated(stage);
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
   const scanScope = readStageOutputString(stage.outputs.scan_scope);
   const scanCompleteness = readStageOutputString(
@@ -2304,7 +2310,7 @@ function StageOneRunStats({
 
   if (filtersOnly) {
     const formattedPassedFilters = hideNumbers
-      ? "—"
+      ? "Not evaluated"
       : stats.passedFilters.toLocaleString("en-IN");
     const formattedIncludedActive =
       hideNumbers || includedActiveCount === null
@@ -15183,7 +15189,12 @@ export function BullpenAutoRunScheduleCard({
                 (stage.key === "scan" &&
                   stageOneResultSource === "independent" &&
                   independentStageOneView !== null);
-              const stageStatusLabel = isIncompleteUniverse
+              const upstreamBlocked = stage.state === "queued" && workflowRunForMonitor?.status === "failed";
+              const stageStatusLabel = upstreamBlocked
+                ? "Blocked"
+                : stage.outputs.phase_status === "failed"
+                ? "Failed"
+                : isIncompleteUniverse
                 ? "Incomplete"
                 : isStageOneActive
                 ? "Working"
@@ -15205,7 +15216,7 @@ export function BullpenAutoRunScheduleCard({
                   ? 100
                   : stage.progressPercent;
               const stageProgressLabel =
-                isIncompleteUniverse
+                upstreamBlocked ? "Blocked by upstream failure" : isIncompleteUniverse
                   ? "Partial results · full catalogue not verified"
                   : isStageOneActive
                   ? `${scanProgressScanned.toLocaleString("en-IN")}${scanProgressTotal ? ` / ${scanProgressTotal.toLocaleString("en-IN")}` : ""} markets scanned · ${scanProgressPercent.toFixed(1)}% · Page ${displayedScanProgress?.currentPage ?? 1}`
@@ -15230,12 +15241,13 @@ export function BullpenAutoRunScheduleCard({
 
               if (["scan"].includes(stage.key)) {
                 const filterStage = stage;
+                const notEvaluated = stageOneNotEvaluated(filterStage);
                 const stats = getStageOneStats(filterStage);
                 const workflowStartedAt =
                   workflowRunForMonitor?.started_at ?? null;
                 const universalScanStartedAt =
                   universalTriggerStatus?.last_completed_run_started_at ?? null;
-                const universalScanAt =
+                const universalScanCandidate =
                   readStageOutputString(filterStage.outputs.scanned_at) ??
                   readStageOutputString(filterStage.outputs.source_scan_completed_at) ??
                   workflowRunForMonitor?.request_context?.console_profile?.scanned_at ??
@@ -15243,12 +15255,14 @@ export function BullpenAutoRunScheduleCard({
                     ?.source_scan_completed_at ??
                   universalScanStartedAt ??
                   null;
+                const universalScanAt = universalScanCandidate && Number.isFinite(Date.parse(universalScanCandidate))
+                  ? universalScanCandidate : universalScanStartedAt;
                 const filtersCompletedAt =
                   readStageOutputString(filterStage.outputs.filters_completed_at) ??
                   filterStage.timerCompletedAt ??
                   readStageOutputString(filterStage.outputs.scanned_at);
                 return (
-                  <div key="scan" data-testid="bullpen-stage-one-filters" data-stage-state={isStageOneActive ? "working" : stage.state} className={`flex h-full min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}>
+                  <div key="scan" data-testid="bullpen-stage-one-filters" data-stage-state={notEvaluated ? "failed" : isStageOneActive ? "working" : stage.state} className={`flex h-full min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm transition ${notEvaluated ? "border-red-300 bg-red-50" : toneClasses.container}`}>
                     <div className="mb-4 flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-sm ${isStageOneActive ? "bg-amber-500 shadow-amber-900/15" : "bg-emerald-700 shadow-emerald-900/15"}`}>
@@ -15273,7 +15287,7 @@ export function BullpenAutoRunScheduleCard({
                           <p>
                             <span className="font-semibold">Filters run:</span>{" "}
                             <span className="tabular-nums">
-                              {formatIstDateTime(filtersCompletedAt)}
+                              {notEvaluated ? "Not evaluated — source or worker failure" : formatIstDateTime(filtersCompletedAt)}
                             </span>
                           </p>
                         </div>
@@ -15327,16 +15341,16 @@ export function BullpenAutoRunScheduleCard({
                           ) : (
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                           )}
-                          {isStageOneActive ? "Filter progress" : "Scan coverage"}
+                          {notEvaluated ? "Filtering blocked" : isStageOneActive ? "Filter progress" : "Scan coverage"}
                         </span>
                         <span className="tabular-nums">
-                          {isStageOneActive
+                          {notEvaluated ? "Not evaluated" : isStageOneActive
                             ? `${scanProgressScanned.toLocaleString("en-IN")} / ${scanProgressTotal?.toLocaleString("en-IN") ?? "—"}`
                             : `${stats.totalScanned.toLocaleString("en-IN")} / ${stats.totalScanned.toLocaleString("en-IN")}`}
                         </span>
                       </div>
                       <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
-                        <div className={`h-full rounded-full transition-[width] duration-500 ${toneClasses.progress}`} style={{ width: `${isStageOneActive ? stageProgressPercent : 100}%` }} />
+                        <div className={`h-full rounded-full transition-[width] duration-500 ${toneClasses.progress}`} style={{ width: `${notEvaluated ? 0 : isStageOneActive ? stageProgressPercent : 100}%` }} />
                       </div>
                     </div>
                   </div>

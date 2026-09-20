@@ -850,6 +850,23 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     stage_3 = bundle.get("stage_3") if isinstance(bundle.get("stage_3"), dict) else {}
     raw = bundle.get("raw") if isinstance(bundle.get("raw"), dict) else {}
 
+    ledger = stage_1.get("filter_ledger")
+    if isinstance(ledger, dict):
+        expected = ledger.get("expected_rows")
+        evaluated = ledger.get("evaluated_rows")
+        accepted = ledger.get("accepted_rows")
+        rejected = ledger.get("rejected_rows")
+        if (not all(isinstance(value, int) and value >= 0 for value in (expected, evaluated, accepted, rejected))
+            or expected != evaluated or evaluated != accepted + rejected
+            or ledger.get("source_status") != "validated"):
+            findings.append(_finding(
+                code="UPS_FILTER_LEDGER_INVALID", severity="critical", stage="stage-1",
+                category="source-integrity", title="Universal Scan filtering is incomplete",
+                explanation="The exact source must validate and evaluated rows must reconcile to accepted plus rejected rows.",
+                suggested_remediation="Restore or recapture the UPS source, then rerun filtering. Do not treat missing input as zero eligible events.",
+                evidence_pointers=["/stage_1/filter_ledger"], blocking=True,
+            ))
+
     for index, evidence in enumerate(stage_1.get("sports_ranking_evidence") or []):
         ranking = evidence.get("ranking") or {}
         unsafe_delta = not ranking.get("comparable") and any(
