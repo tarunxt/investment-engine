@@ -309,6 +309,13 @@ jobs:
               node -e 'console.log({ node: process.version, nextauthUrl: process.env.NEXTAUTH_URL || null, frontendUrl: process.env.NEXT_PUBLIC_FRONTEND_URL || null, apiUrl: process.env.NEXT_PUBLIC_API_URL || null, trustHost: process.env.AUTH_TRUST_HOST || null })'
             "
 
+            echo "==> Frontend V8 runtime and request latency"
+            frontend_pid="$(sudo ss -ltnpH 2>/dev/null | sed -n '/127.0.0.1:3000 /s/.*pid=\\([0-9][0-9]*\\).*/\\1/p' | head -n 1)"
+            if [[ -n "$frontend_pid" ]]; then
+              sudo ps -o pid,ppid,%cpu,%mem,rss,etime,args -p "$frontend_pid" || true
+              sudo tr '\\0' '\\n' <"/proc/$frontend_pid/environ" | grep '^NODE_OPTIONS=' || true
+            fi
+            curl -sS -o /dev/null -w 'local_bullpen_http=%{http_code} elapsed=%{time_total}\\n' --max-time 30 http://127.0.0.1:3000/console/bullpen-sports || true
             echo "==> Runtime contention snapshot"
             uptime
             free -h
