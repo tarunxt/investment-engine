@@ -25,7 +25,7 @@ jobs:
             sudo find "$cache" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf -- {} +
             echo '==> Rotate rsyslog with explicit root user'
             config="$(sudo mktemp /run/investor-rsyslog-rotate.XXXXXX)"
-            printf 'su root root\\ninclude /etc/logrotate.d/rsyslog\\n' | sudo tee "$config" >/dev/null
+            printf 'su root root\ninclude /etc/logrotate.d/rsyslog\n' | sudo tee "$config" >/dev/null
             sudo logrotate -f "$config"
             sudo rm -f -- "$config"
             echo '==> Disk and memory'
