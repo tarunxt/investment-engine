@@ -38,6 +38,13 @@ jobs:
             sudo du -xhd2 "$(readlink -f /srv/investor)" /tmp /home/investor /var/log 2>/dev/null | sort -hr | head -n 35 || true
             echo '==> Export subdirectories'
             sudo du -xhd2 /home/deploy/apps/myapp/backend/.stage-one-exports 2>/dev/null | sort -hr | head -n 28 || true
+            echo '==> Replayable scan page cache age'
+            cache=/home/deploy/apps/myapp/backend/.stage-one-exports/scan-pages-v1
+            for hours in 24 48 72; do
+              find "$cache" -mindepth 1 -maxdepth 1 -type d -mmin "+$((hours*60))" -print0 |
+                xargs -0 -r du -sk |
+                awk -v hours="$hours" '{n++; kb+=$1} END {printf "older_than_%sh: %d directories, %.2f GiB\\n",hours,n,kb/1048576}'
+            done
             echo '==> Scan export storage categories'
             sudo python3 - <<'PY'
             import collections, json
