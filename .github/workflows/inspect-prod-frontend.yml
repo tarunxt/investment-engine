@@ -309,6 +309,15 @@ jobs:
               node -e 'console.log({ node: process.version, nextauthUrl: process.env.NEXTAUTH_URL || null, frontendUrl: process.env.NEXT_PUBLIC_FRONTEND_URL || null, apiUrl: process.env.NEXT_PUBLIC_API_URL || null, trustHost: process.env.AUTH_TRUST_HOST || null })'
             "
 
+            echo "==> Backend direct health after failed rollout"
+            for path in /health/live /health/ready; do
+              curl -sS -o /dev/null -w "backend_$path HTTP %{http_code} elapsed %{time_total}\\n" --max-time 12 "http://127.0.0.1:8000$path" || true
+            done
+            sudo systemctl status investor-backend --no-pager || true
+            sudo journalctl -u investor-backend --since "2026-09-26 12:05:00 UTC" -n 100 --no-pager |
+              grep -E "ERROR|CRITICAL|timeout|worker|Started|Stopped|OOM|Killed|MemoryError" | tail -n 80 || true
+            echo "==> Top CPU and memory processes"
+            ps -eo pid,ppid,%cpu,%mem,rss,etime,comm --sort=-%cpu | head -n 20
             echo "==> Post-rollout frontend crashes and request status since 11:52 UTC"
             sudo journalctl -u "$FRONTEND_SERVICE_NAME" --since "2026-09-26 11:52:00 UTC" --no-pager | grep -E "FATAL ERROR|Started investor-frontend|Stopped investor-frontend|Ready in" || true
             echo "==> Post metadata-lookup rollout: September 26 11:55 UTC"
