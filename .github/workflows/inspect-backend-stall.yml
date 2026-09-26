@@ -59,6 +59,16 @@ jobs:
             sudo systemctl show investor-backend -p MemoryLow -p MemoryHigh -p MemoryMax -p MemorySwapMax --no-pager
             free -h
             echo "==> Post-deploy verification after 6972284b"
+            echo "==> Frontend deployment and local route verification"
+            active="$(cat /srv/investor/frontend/.next-active-dir 2>/dev/null || true)"
+            echo "active_frontend_slot=$active"
+            if [[ "$active" == .next || "$active" == .next-candidate ]]; then
+              sudo python3 -c 'import json,sys; p="/srv/investor/frontend/"+sys.argv[1]+"/deployment-manifest.json"; print("build_sha="+json.load(open(p)).get("build_sha","missing"))' "$active" || true
+            fi
+            for route in /login /backend-api/health/live /console/bullpen-sports; do
+              curl -sS -o /dev/null -w "frontend_$route HTTP %{http_code} in %{time_total}s\\n" --max-time 12 "http://127.0.0.1:3000$route" || true
+            done
+            df -h /
             echo "==> Direct health"
             curl -sS --max-time 7 -o /dev/null -w 'backend HTTP %{http_code} in %{time_total}s\n' http://127.0.0.1:8000/health/live || true
             echo "==> Recent backend performance"
