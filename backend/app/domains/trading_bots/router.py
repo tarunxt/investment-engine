@@ -98,7 +98,12 @@ async def universal_scan_export_reference(current_user: User = Depends(get_curre
     metadata, rows_path = resolved
     return {
         "export": {
-            "metadata": metadata,
+            # Identity lists are retained in the immutable metadata file for
+            # scan recovery. Polling clients only need the display fields.
+            "metadata": {
+                key: value for key, value in metadata.items()
+                if key not in {"identityKeys", "eventKeys", "marketKeys"}
+            },
             "rows_path": str(rows_path),
             "filtered_rows_path": str(
                 rows_path.with_name(f"{rows_path.stem}.filtered.jsonl")
