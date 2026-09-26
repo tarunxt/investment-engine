@@ -1,7 +1,7 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -118,9 +118,10 @@ async function cleanupExpiredExports() {
       const counterpart = match
         ? `${match[1]}.${match[2] === "json" ? "jsonl" : "json"}`
         : null;
-      const exportMetadata = match
-        ? await readMetadata(match[1]).catch(() => null)
-        : null;
+      // Most exports are recent and their metadata can contain tens of MB of
+      // identity keys. Never parse every metadata file on a routine read.
+      if (!match || !details || now - details.mtimeMs <= EXPORT_RETENTION_MS) return;
+      const exportMetadata = await readMetadata(match[1]).catch(() => null);
       const isDurableUniversal = Boolean(
         exportMetadata?.universalSource && exportMetadata.completed,
       );
@@ -354,36 +355,34 @@ export async function cacheStageOneGammaExportSummary({
   });
 }
 
-export async function openLatestStageOneGammaExport({
+const latestExportReads = new Map<string, Promise<Awaited<ReturnType<typeof findLatestStageOneGammaExport>>>>();
+
+async function findLatestStageOneGammaExport({
   ownerKey,
 }: {
   ownerKey: string;
 }) {
-  await cleanupExpiredExports();
   const expectedOwnerHash = ownerHash(ownerKey);
-  const matching = (
-    await Promise.all(
-      READABLE_EXPORT_DIRECTORIES.map(async (directory) => {
-        const names = await readdir(directory).catch(() => [] as string[]);
-        return Promise.all(
-          names
-            .filter((name) => name.endsWith(".json"))
-            .map(async (name) => {
-              const exportId = name.slice(0, -".json".length);
-              if (!EXPORT_ID_PATTERN.test(exportId)) return null;
-              const metadata = await readMetadata(exportId, directory).catch(() => null);
-              return metadata?.completed && !metadata.filterPending && metadata.ownerHash === expectedOwnerHash
-                ? { metadata, directory }
-                : null;
-            }),
-        );
-      }),
-    )
-  )
-    .flat()
-    .filter((item): item is { metadata: StageOneGammaExportMetadata; directory: string } => Boolean(item))
-    .sort((left, right) => Date.parse(right.metadata.updatedAt) - Date.parse(left.metadata.updatedAt));
-  const latest = matching[0];
+  const seenDirectories = new Set<string>();
+  let latest: { metadata: StageOneGammaExportMetadata; directory: string } | null = null;
+  for (const directory of READABLE_EXPORT_DIRECTORIES) {
+    const canonical = await realpath(directory).catch(() => null);
+    if (!canonical || seenDirectories.has(canonical)) continue;
+    seenDirectories.add(canonical);
+    const names = await readdir(canonical).catch(() => [] as string[]);
+    for (const name of names) {
+      const exportId = name.slice(0, -".json".length);
+      if (!name.endsWith(".json") || !EXPORT_ID_PATTERN.test(exportId)) continue;
+      const metadata = await readMetadata(exportId, canonical).catch(() => null);
+      if (
+        metadata?.completed && !metadata.filterPending &&
+        metadata.ownerHash === expectedOwnerHash &&
+        (!latest || Date.parse(metadata.updatedAt) > Date.parse(latest.metadata.updatedAt))
+      ) {
+        latest = { metadata, directory: canonical };
+      }
+    }
+  }
   if (!latest) return null;
   const paths = exportPaths(latest.metadata.exportId, latest.directory);
   return {
@@ -393,6 +392,18 @@ export async function openLatestStageOneGammaExport({
   };
 }
 
+export async function openLatestStageOneGammaExport({ ownerKey }: { ownerKey: string }) {
+  const pending = latestExportReads.get(ownerKey);
+  if (pending) return pending;
+  const read = findLatestStageOneGammaExport({ ownerKey });
+  latestExportReads.set(ownerKey, read);
+  try {
+    return await read;
+  } finally {
+    latestExportReads.delete(ownerKey);
+  }
+}
+
 export async function readStageOneGammaExport({
   exportId,
   ownerKey,
@@ -400,7 +411,6 @@ export async function readStageOneGammaExport({
   exportId: string;
   ownerKey: string;
 }) {
-  await cleanupExpiredExports();
   const located = await findReadableMetadata(exportId);
   if (!located || located.metadata.ownerHash !== ownerHash(ownerKey)) {
     throw new Error("Stage 1 export does not belong to this session.");
@@ -421,7 +431,6 @@ export async function openStageOneGammaExport({
   exportId: string;
   ownerKey: string;
 }) {
-  await cleanupExpiredExports();
   const located = await findReadableMetadata(exportId);
   if (!located || located.metadata.ownerHash !== ownerHash(ownerKey)) {
     throw new Error("Stage 1 export does not belong to this session.");
