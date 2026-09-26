@@ -452,9 +452,15 @@ jobs:
             # UPS exports need a separate 2 GiB reserve. Rotate the already
             # oversized system log before deployment consumes the remaining
             # headroom; logrotate retains compressed history for diagnostics.
-            if (( AVAILABLE_KB < 4194304 )) && sudo test -f /etc/logrotate.d/rsyslog; then
+            if (( AVAILABLE_KB < 4194304 )); then
               echo "==> Rotating system logs under disk pressure"
-              sudo logrotate -f /etc/logrotate.d/rsyslog || true
+              if sudo test -f /etc/logrotate.d/rsyslog; then
+                rotate_config="$(sudo mktemp /run/investor-rsyslog-rotate.XXXXXX)"
+                printf 'su root root\ninclude /etc/logrotate.d/rsyslog\n' |
+                  sudo tee "$rotate_config" >/dev/null
+                sudo logrotate -f "$rotate_config" || true
+                sudo rm -f -- "$rotate_config"
+              fi
               AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
             fi
             if (( AVAILABLE_KB < MIN_FREE_KB )); then

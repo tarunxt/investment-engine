@@ -119,7 +119,12 @@ jobs:
               # Keep log history, but compress the previous oversized syslog
               # before a scan or deployment needs its disk reserve.
               if sudo test -f /etc/logrotate.d/rsyslog; then
-                sudo logrotate -f /etc/logrotate.d/rsyslog || true
+                local rotate_config
+                rotate_config="$(sudo mktemp /run/investor-rsyslog-rotate.XXXXXX)"
+                printf 'su root root\ninclude /etc/logrotate.d/rsyslog\n' |
+                  sudo tee "$rotate_config" >/dev/null
+                sudo logrotate -f "$rotate_config" || true
+                sudo rm -f -- "$rotate_config"
               fi
               sudo journalctl --rotate || true
               sudo journalctl --vacuum-time=3d --vacuum-size=96M || true
