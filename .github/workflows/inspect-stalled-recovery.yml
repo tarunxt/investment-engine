@@ -32,7 +32,9 @@ jobs:
             echo '==> Rotation and system log sizes'
             stat -c '%a %U:%G %n' /var/log
             ls -lh /var/log/syslog* 2>/dev/null || true
+            echo '==> Canonical app directory'
+            readlink -f /srv/investor /srv/investment-engine || true
             echo '==> Largest app and temporary directories'
-            sudo du -xhd2 /srv/investment-engine /srv/investor /tmp /home/investor /var/log 2>/dev/null | sort -hr | head -n 35 || true
+            sudo du -xhd2 "$(readlink -f /srv/investor)" /tmp /home/investor /var/log 2>/dev/null | sort -hr | head -n 35 || true
             echo '==> Top processes by memory'
             ps -eo pid,comm,%mem,%cpu --sort=-%mem | head -n 14
