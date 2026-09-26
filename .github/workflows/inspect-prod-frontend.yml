@@ -309,6 +309,35 @@ jobs:
               node -e 'console.log({ node: process.version, nextauthUrl: process.env.NEXTAUTH_URL || null, frontendUrl: process.env.NEXT_PUBLIC_FRONTEND_URL || null, apiUrl: process.env.NEXT_PUBLIC_API_URL || null, trustHost: process.env.AUTH_TRUST_HOST || null })'
             "
 
+            echo "==> Recent frontend nginx route activity"
+            sudo python3 - <<'PY'
+            from collections import Counter
+            from pathlib import Path
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            counts = Counter()
+            for log in (Path("/var/log/nginx/access.log"), Path("/var/log/nginx/cred-x.in.access.log")):
+                if not log.exists():
+                    continue
+                for line in log.open(errors="replace"):
+                    parts = line.split('"')
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        timestamp = datetime.strptime(parts[0].split("[")[-1].split("]")[0], "%d/%b/%Y:%H:%M:%S %z")
+                    except ValueError:
+                        continue
+                    if timestamp < now - timedelta(minutes=12):
+                        continue
+                    request = parts[1].split()
+                    status = parts[2].strip().split()
+                    if len(request) < 2 or not status:
+                        continue
+                    route = request[1].split("?")[0]
+                    counts[(status[0], route)] += 1
+            for (status, route), count in counts.most_common(40):
+                print(f"{count:5d} {status} {route}")
+            PY
             echo "==> Frontend V8 runtime and request latency"
             frontend_pid="$(sudo ss -ltnpH 2>/dev/null | sed -n '/127.0.0.1:3000 /s/.*pid=\\([0-9][0-9]*\\).*/\\1/p' | head -n 1)"
             if [[ -n "$frontend_pid" ]]; then
