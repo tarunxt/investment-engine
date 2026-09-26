@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 from app.domains.polymarket_auto_live.console_profile import scan_console_profile_markets
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
+from app.domains.trading_bots import router as trading_bots_router
+from app.domains.trading_bots import universal_scan as universal_scan_module
 from app.domains.trading_bots.universal_scan import (
     UniversalExportWriter,
     _readable_export_directories,
@@ -250,3 +252,63 @@ def test_workflow_stage1_filters_the_saved_universal_scan(tmp_path, monkeypatch)
     assert result.total_candidates == 2
     assert [market.market_id for market in result.accepted] == ["politics-1"]
     assert [market.market_id for market in result.rejected] == ["sports-1"]
+
+def test_pinned_export_resolves_symlink_alias_only_once(tmp_path, monkeypatch):
+    directory = tmp_path / "exports"
+    directory.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(directory, target_is_directory=True)
+    export_id = "00000000-0000-0000-0000-000000000062"
+    metadata_path = directory / f"{export_id}.json"
+    metadata_path.write_text(json.dumps({
+        "exportId": export_id,
+        "ownerHash": hashlib.sha256(b"42:universal").hexdigest(),
+        "universalSource": True,
+        "completed": True,
+        "updatedAt": "2026-09-26T00:00:00+00:00",
+        "rowCount": 1,
+        "identityKeys": [f"market-{i}" for i in range(1000)],
+    }), encoding="utf-8")
+    (directory / f"{export_id}.jsonl").write_text("{}\\n", encoding="utf-8")
+    monkeypatch.setattr(universal_scan_module, "_readable_export_directories", lambda: (directory, alias))
+    original_read_text = Path.read_text
+    reads = []
+
+    def count_reads(path, *args, **kwargs):
+        if path == metadata_path:
+            reads.append(path)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", count_reads)
+    resolved = latest_completed_universal_export(42, export_id=export_id)
+    assert resolved is not None
+    assert resolved[1] == directory / f"{export_id}.jsonl"
+    assert reads == [metadata_path]
+
+
+def test_export_reference_omits_internal_identity_lists(tmp_path, monkeypatch):
+    export_id = "00000000-0000-0000-0000-000000000063"
+    metadata = {
+        "exportId": export_id,
+        "rowCount": 42,
+        "processedPages": ["page-1"],
+        "identityKeys": ["private-identity"],
+        "eventKeys": ["internal-event"],
+        "marketKeys": ["internal-market"],
+    }
+    rows_path = tmp_path / f"{export_id}.jsonl"
+    monkeypatch.setattr(
+        trading_bots_router,
+        "_universal_export_reference",
+        lambda _user_id: (metadata, rows_path),
+    )
+    result = asyncio.run(
+        trading_bots_router.universal_scan_export_reference(
+            SimpleNamespace(id=42),
+        )
+    )
+    assert result["export"]["metadata"] == {
+        "exportId": export_id,
+        "rowCount": 42,
+        "processedPages": ["page-1"],
+    }
