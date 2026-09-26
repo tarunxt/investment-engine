@@ -2136,6 +2136,11 @@ A new run has a separate cache. A corrupt page is refetched. Completion still
 requires the terminal cursor; cached pages do not fabricate completion. This
 preserves original fetched source evidence rather than silently replacing it on
 retry. Existing runs without cached pages cannot recover work from before rollout.
+When the production host is below 4 GiB free, deployment and scheduled recovery
+reclaim run-scoped page-cache directories idle for more than 72 hours. This is
+past the worker recovery window; missing cache pages are fetched again if a run
+is retried. The immutable scan exports, source packs, archived copies, audit
+records, and completed snapshots are not part of this cleanup.
 
 Accepted markets now spool exhaustive source data during pagination as rejected
 markets already did. In-memory raw values keep scalar identity/routing fields and
