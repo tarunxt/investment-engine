@@ -486,47 +486,64 @@ def latest_completed_universal_export(
     export_id: str | None = None,
     trusted_export_id: bool = False,
 ) -> tuple[dict[str, Any], Path] | None:
-    """Resolve the immutable Universal Scan selected by a workflow trigger."""
+    """Resolve one immutable capture without retaining every historical metadata document."""
 
     owner_hash = hashlib.sha256(f"{user_id}:universal".encode()).hexdigest()
-    candidates: list[tuple[datetime, dict[str, Any], Path]] = []
-    metadata_paths = (
-        (
-            directory / f"{export_id}.json"
-            for directory in _readable_export_directories()
-        )
-        if export_id
-        else (
-            metadata_path
-            for directory in _readable_export_directories()
-            for metadata_path in directory.glob("*.json")
-        )
-    )
-    for metadata_path in metadata_paths:
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+    selected_at = datetime.min.replace(tzinfo=UTC)
+    selected_id: str | None = None
+    selected: list[tuple[dict[str, Any], Path]] = []
+    seen_directories: set[Path] = set()
+
+    for directory in _readable_export_directories():
+        canonical = directory.resolve()
+        if canonical in seen_directories:
             continue
-        owner_matches = metadata.get("ownerHash") == owner_hash
-        state_bound_export = bool(export_id and trusted_export_id)
-        if (
-            (not owner_matches and not state_bound_export)
-            or not metadata.get("universalSource")
-            or not metadata.get("completed")
-        ):
-            continue
-        updated_at = parse_datetime(metadata.get("updatedAt")) or datetime.min.replace(
-            tzinfo=UTC
+        seen_directories.add(canonical)
+        metadata_paths = (
+            (canonical / f"{export_id}.json",)
+            if export_id else canonical.glob("*.json")
         )
-        candidates.append((updated_at, metadata, metadata_path))
-    if not candidates:
+        for metadata_path in metadata_paths:
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (
+                (metadata.get("ownerHash") != owner_hash and not (
+                    export_id and trusted_export_id
+                ))
+                or not metadata.get("universalSource")
+                or not metadata.get("completed")
+            ):
+                continue
+
+            updated_at = parse_datetime(metadata.get("updatedAt")) or datetime.min.replace(
+                tzinfo=UTC
+            )
+            metadata_id = metadata.get("exportId")
+            if updated_at > selected_at:
+                selected_at = updated_at
+                selected_id = metadata_id
+                selected = [(metadata, metadata_path)]
+            elif metadata_id == selected_id:
+                selected.append((metadata, metadata_path))
+
+            # A trusted workflow pin has one identity. Return its first valid
+            # copy without parsing unrelated archive metadata.
+            if export_id:
+                rows_path = metadata_path.with_suffix(".jsonl")
+                try:
+                    if rows_path.is_file() and (
+                        metadata.get("rowsBytes") is None
+                        or rows_path.stat().st_size == metadata["rowsBytes"]
+                    ):
+                        return metadata, rows_path
+                except OSError:
+                    pass
+
+    if selected_id is None:
         return None
-    # Pin one identity, but try all copies of it. Never silently substitute an
-    # older scan if the newest scan is corrupt or unavailable.
-    selected_id = max(candidates, key=lambda item: item[0])[1].get("exportId")
-    for _, metadata, metadata_path in candidates:
-        if metadata.get("exportId") != selected_id:
-            continue
+    for metadata, metadata_path in selected:
         rows_path = metadata_path.with_suffix(".jsonl")
         try:
             if rows_path.is_file() and (
