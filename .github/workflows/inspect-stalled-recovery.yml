@@ -36,6 +36,8 @@ jobs:
             readlink -f /srv/investor /srv/investment-engine || true
             echo '==> Largest app and temporary directories'
             sudo du -xhd2 "$(readlink -f /srv/investor)" /tmp /home/investor /var/log 2>/dev/null | sort -hr | head -n 35 || true
+            echo '==> Export subdirectories'
+            sudo du -xhd2 /home/deploy/apps/myapp/backend/.stage-one-exports 2>/dev/null | sort -hr | head -n 28 || true
             echo '==> Scan export storage categories'
             sudo python3 - <<'PY'
             import collections, json
