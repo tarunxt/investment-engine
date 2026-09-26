@@ -1,6 +1,8 @@
 name: Inspect Production Frontend
 
 on:
+  push:
+    branches: [codex/inspect-stalled-recovery]
   workflow_dispatch:
 
 permissions:
