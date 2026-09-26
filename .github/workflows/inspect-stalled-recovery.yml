@@ -36,6 +36,29 @@ jobs:
             readlink -f /srv/investor /srv/investment-engine || true
             echo '==> Largest app and temporary directories'
             sudo du -xhd2 "$(readlink -f /srv/investor)" /tmp /home/investor /var/log 2>/dev/null | sort -hr | head -n 35 || true
+            echo '==> Scan export storage categories'
+            sudo python3 - <<'PY'
+            import collections, json
+            from pathlib import Path
+            root = Path('/home/deploy/apps/myapp/backend')
+            for directory in (root / '.stage-one-exports', root / '.universal-scan-archive'):
+                counts = collections.Counter()
+                sizes = collections.Counter()
+                for f in directory.iterdir():
+                    if not f.is_file():
+                        continue
+                    suffix = 'filtered' if f.name.endswith('.filtered.jsonl') else 'rows' if f.suffix == '.jsonl' else 'manifest' if f.suffix == '.json' else 'temporary' if f.name.endswith('.tmp') else 'other'
+                    if suffix == 'rows':
+                        meta = f.with_suffix('.json')
+                        try:
+                            state = json.loads(meta.read_text()).get('completed')
+                        except (OSError, ValueError):
+                            state = 'missing_or_invalid'
+                        suffix += ':' + str(state)
+                    counts[suffix] += 1
+                    sizes[suffix] += f.stat().st_size
+                print(directory.name, [(key, counts[key], round(value/1024**3,2)) for key,value in sizes.most_common()])
+            PY
             echo '==> Busy node process'
             ps -p 3076556 -o pid,ppid,etime,cmd || true
             echo '==> Top processes by memory'
