@@ -521,7 +521,7 @@ def latest_completed_universal_export(
                 tzinfo=UTC
             )
             metadata_id = metadata.get("exportId")
-            if updated_at > selected_at:
+            if not selected or updated_at > selected_at:
                 selected_at = updated_at
                 selected_id = metadata_id
                 selected = [(metadata, metadata_path)]
@@ -541,7 +541,7 @@ def latest_completed_universal_export(
                 except OSError:
                     pass
 
-    if selected_id is None:
+    if not selected:
         return None
     for metadata, metadata_path in selected:
         rows_path = metadata_path.with_suffix(".jsonl")
