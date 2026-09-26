@@ -116,6 +116,11 @@ jobs:
             }
 
             cleanup_caches() {
+              # Keep log history, but compress the previous oversized syslog
+              # before a scan or deployment needs its disk reserve.
+              if sudo test -f /etc/logrotate.d/rsyslog; then
+                sudo logrotate -f /etc/logrotate.d/rsyslog || true
+              fi
               sudo journalctl --rotate || true
               sudo journalctl --vacuum-time=3d --vacuum-size=96M || true
               sudo apt-get clean || true
