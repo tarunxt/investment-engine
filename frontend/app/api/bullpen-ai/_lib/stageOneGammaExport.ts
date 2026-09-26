@@ -356,6 +356,46 @@ export async function cacheStageOneGammaExportSummary({
 }
 
 const latestExportReads = new Map<string, Promise<Awaited<ReturnType<typeof findLatestStageOneGammaExport>>>>();
+type MetadataIndexEntry = {
+  mtimeMs: number;
+  size: number;
+  ownerHash: string;
+  completed: boolean;
+  filterPending: boolean;
+  updatedAt: string;
+};
+const metadataIndex = new Map<string, MetadataIndexEntry>();
+const latestMetadataCache = new Map<string, {
+  path: string;
+  mtimeMs: number;
+  size: number;
+  metadata: StageOneGammaExportMetadata;
+}>();
+
+async function indexedMetadata(exportId: string, directory: string) {
+  const path = exportPaths(exportId, directory).metadata;
+  const details = await stat(path).catch(() => null);
+  if (!details) return null;
+  const cached = metadataIndex.get(path);
+  if (cached?.mtimeMs === details.mtimeMs && cached.size === details.size) {
+    return { index: cached, metadata: null };
+  }
+  const metadata = await readMetadata(exportId, directory).catch(() => null);
+  if (!metadata) return null;
+  const index: MetadataIndexEntry = {
+    mtimeMs: details.mtimeMs,
+    size: details.size,
+    ownerHash: metadata.ownerHash,
+    completed: metadata.completed,
+    filterPending: Boolean(metadata.filterPending),
+    updatedAt: metadata.updatedAt,
+  };
+  // This index stores only small selection fields, never the large identity
+  // lists or row samples from all historical exports.
+  if (metadataIndex.size > 2048) metadataIndex.clear();
+  metadataIndex.set(path, index);
+  return { index, metadata };
+}
 
 async function findLatestStageOneGammaExport({
   ownerKey,
@@ -364,7 +404,7 @@ async function findLatestStageOneGammaExport({
 }) {
   const expectedOwnerHash = ownerHash(ownerKey);
   const seenDirectories = new Set<string>();
-  let latest: { metadata: StageOneGammaExportMetadata; directory: string } | null = null;
+  let latest: { exportId: string; directory: string; index: MetadataIndexEntry; metadata: StageOneGammaExportMetadata | null } | null = null;
   for (const directory of READABLE_EXPORT_DIRECTORIES) {
     const canonical = await realpath(directory).catch(() => null);
     if (!canonical || seenDirectories.has(canonical)) continue;
@@ -373,20 +413,38 @@ async function findLatestStageOneGammaExport({
     for (const name of names) {
       const exportId = name.slice(0, -".json".length);
       if (!name.endsWith(".json") || !EXPORT_ID_PATTERN.test(exportId)) continue;
-      const metadata = await readMetadata(exportId, canonical).catch(() => null);
+      const candidate = await indexedMetadata(exportId, canonical);
       if (
-        metadata?.completed && !metadata.filterPending &&
-        metadata.ownerHash === expectedOwnerHash &&
-        (!latest || Date.parse(metadata.updatedAt) > Date.parse(latest.metadata.updatedAt))
+        candidate?.index.completed && !candidate.index.filterPending &&
+        candidate.index.ownerHash === expectedOwnerHash &&
+        (!latest || Date.parse(candidate.index.updatedAt) > Date.parse(latest.index.updatedAt))
       ) {
-        latest = { metadata, directory: canonical };
+        latest = { ...candidate, exportId, directory: canonical };
       }
     }
   }
   if (!latest) return null;
-  const paths = exportPaths(latest.metadata.exportId, latest.directory);
+  const paths = exportPaths(latest.exportId, latest.directory);
+  const cachedLatest = latestMetadataCache.get(ownerKey);
+  const metadata = latest.metadata ?? (
+    cachedLatest?.path === paths.metadata &&
+    cachedLatest.mtimeMs === latest.index.mtimeMs &&
+    cachedLatest.size === latest.index.size
+      ? cachedLatest.metadata
+      : await readMetadata(latest.exportId, latest.directory).catch(() => null)
+  );
+  if (!metadata || !metadata.completed || metadata.filterPending || metadata.ownerHash !== expectedOwnerHash) return null;
+  if (latestMetadataCache.size >= 8 && !latestMetadataCache.has(ownerKey)) {
+    latestMetadataCache.delete(latestMetadataCache.keys().next().value!);
+  }
+  latestMetadataCache.set(ownerKey, {
+    path: paths.metadata,
+    mtimeMs: latest.index.mtimeMs,
+    size: latest.index.size,
+    metadata,
+  });
   return {
-    metadata: latest.metadata,
+    metadata,
     rowsPath: paths.rows,
     filteredRowsPath: paths.filteredRows,
   };
