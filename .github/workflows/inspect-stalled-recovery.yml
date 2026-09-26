@@ -18,6 +18,16 @@ jobs:
           command_timeout: 120s
           script: |
             set -euo pipefail
+            echo '==> Reclaim stale replayable Gamma page cache'
+            cache=/home/deploy/apps/myapp/backend/.stage-one-exports/scan-pages-v1
+            test -d "$cache"
+            test "$(readlink -f "$cache")" = "$cache"
+            sudo find "$cache" -mindepth 1 -maxdepth 1 -type d -mmin +4320 -exec rm -rf -- {} +
+            echo '==> Rotate rsyslog with explicit root user'
+            config="$(sudo mktemp /run/investor-rsyslog-rotate.XXXXXX)"
+            printf 'su root root\\ninclude /etc/logrotate.d/rsyslog\\n' | sudo tee "$config" >/dev/null
+            sudo logrotate -f "$config"
+            sudo rm -f -- "$config"
             echo '==> Disk and memory'
             df -h / /srv/investor
             free -h
