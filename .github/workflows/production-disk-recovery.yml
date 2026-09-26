@@ -116,6 +116,13 @@ jobs:
             }
 
             cleanup_caches() {
+              # Only replayable Gamma page caches older than 72 hours; the
+              # completed UPS exports, source packs and run records remain.
+              local page_cache="$APP_ROOT/backend/.stage-one-exports/scan-pages-v1"
+              if sudo test -d "$page_cache"; then
+                sudo find "$page_cache" -mindepth 1 -maxdepth 1 -type d \
+                  -mmin +4320 -exec rm -rf -- {} +
+              fi
               # Keep log history, but compress the previous oversized syslog
               # before a scan or deployment needs its disk reserve.
               if sudo test -f /etc/logrotate.d/rsyslog; then
