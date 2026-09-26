@@ -82,6 +82,18 @@ jobs:
             echo "==> Disk and logs"
             df -h /
             sudo du -xsh /var/log /srv/investor/backend/.stage-one-exports/scan-pages-v1 /srv/investor/backend/.stage-one-exports/scan-sources 2>/dev/null || true
+            echo "==> Attached block devices and mounts"
+            lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS,TYPE
+            findmnt -n -o SOURCE,FSTYPE,SIZE,AVAIL /
+            echo "==> AWS CLI and instance identity availability"
+            if command -v aws >/dev/null 2>&1; then
+              aws --version 2>&1
+              timeout 7 aws sts get-caller-identity --query 'Arn' --output text 2>&1 || true
+            fi
+            echo "==> Immutable scan artifact counts by age"
+            sudo find /srv/investor/backend/.stage-one-exports/scan-sources -maxdepth 1 -name '*.pack' -type f -printf '%s %TY-%Tm-%Td\n' 2>/dev/null | awk '{sizes[$2]+=$1;counts[$2]++} END {for (d in sizes) printf "%s %.2f GiB %d packs\\n",d,sizes[d]/1073741824,counts[d]}' | sort | tail -n 20 || true
+            echo "==> Source and export cross volume feasibility"
+            stat -f -c '%T %a blocks available' /srv/investor/backend/.stage-one-exports
             echo "==> Direct health"
             curl -sS --max-time 7 -o /dev/null -w 'backend HTTP %{http_code} in %{time_total}s\n' http://127.0.0.1:8000/health/live || true
             echo "==> Recent backend performance"
