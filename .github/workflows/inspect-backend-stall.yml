@@ -58,6 +58,7 @@ jobs:
             echo "==> Memory cgroup limits and host availability"
             sudo systemctl show investor-backend -p MemoryLow -p MemoryHigh -p MemoryMax -p MemorySwapMax --no-pager
             free -h
+            echo "==> Post-deploy verification after 6972284b"
             echo "==> Direct health"
             curl -sS --max-time 7 -o /dev/null -w 'backend HTTP %{http_code} in %{time_total}s\n' http://127.0.0.1:8000/health/live || true
             echo "==> Recent backend performance"
