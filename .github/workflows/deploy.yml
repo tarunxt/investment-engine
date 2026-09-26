@@ -449,6 +449,14 @@ jobs:
             esac
 
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+            # UPS exports need a separate 2 GiB reserve. Rotate the already
+            # oversized system log before deployment consumes the remaining
+            # headroom; logrotate retains compressed history for diagnostics.
+            if (( AVAILABLE_KB < 4194304 )) && sudo test -f /etc/logrotate.d/rsyslog; then
+              echo "==> Rotating system logs under disk pressure"
+              sudo logrotate -f /etc/logrotate.d/rsyslog || true
+              AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+            fi
             if (( AVAILABLE_KB < MIN_FREE_KB )); then
               echo "==> Low disk space (${AVAILABLE_KB} KiB); pruning bounded caches without touching the active frontend slot"
               if [[ "$DEPLOY_SCOPE" != "frontend-only" ]]; then
