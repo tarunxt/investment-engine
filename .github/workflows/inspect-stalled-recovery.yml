@@ -1,0 +1,36 @@
+name: Inspect Stalled Production Recovery
+on:
+  push:
+    branches: [codex/inspect-stalled-recovery]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 60s
+          command_timeout: 120s
+          script: |
+            set -euo pipefail
+            echo '==> Disk and memory'
+            df -h / /srv/investor
+            free -h
+            echo '==> Service states'
+            for unit in investor-frontend investor-backend investor-celery-worker postgresql; do
+              printf '%s: ' "$unit"
+              systemctl is-active "$unit" || true
+            done
+            echo '==> Local health'
+            curl -sS -o /dev/null --max-time 8 -w 'frontend HTTP %{http_code}\n' http://127.0.0.1:3000/login || true
+            curl -sS -o /dev/null --max-time 8 -w 'backend HTTP %{http_code}\n' http://127.0.0.1:8000/health/live || true
+            echo '==> Rotation and system log sizes'
+            stat -c '%a %U:%G %n' /var/log
+            ls -lh /var/log/syslog* 2>/dev/null || true
+            echo '==> Top processes by memory'
+            ps -eo pid,comm,%mem,%cpu --sort=-%mem | head -n 14
