@@ -40,7 +40,7 @@ test("latest export lookup reuses unchanged metadata and detects a newer complet
   try {
     const source = readFileSync(new URL("../app/api/bullpen-ai/_lib/stageOneGammaExport.ts", import.meta.url), "utf8");
     const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
-    const module = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+    const module = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}#metadata-index`);
     const ownerKey = "metadata-index-owner";
     const ownerHash = createHash("sha256").update(ownerKey).digest("hex");
     const firstId = "00000000-0000-0000-0000-000000000051";
