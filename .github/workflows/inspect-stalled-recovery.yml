@@ -36,5 +36,7 @@ jobs:
             readlink -f /srv/investor /srv/investment-engine || true
             echo '==> Largest app and temporary directories'
             sudo du -xhd2 "$(readlink -f /srv/investor)" /tmp /home/investor /var/log 2>/dev/null | sort -hr | head -n 35 || true
+            echo '==> Busy node process'
+            ps -p 3076556 -o pid,ppid,etime,cmd || true
             echo '==> Top processes by memory'
             ps -eo pid,comm,%mem,%cpu --sort=-%mem | head -n 14
