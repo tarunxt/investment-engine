@@ -1,0 +1,55 @@
+name: Recover Stalled Backend Health
+
+on:
+  push:
+    branches: [codex/recover-stalled-backend]
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Restart unresponsive backend and verify both local paths
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 900s
+          command_timeout: 900s
+          script: |
+            set -Eeuo pipefail
+            LOCK=/run/investor-production-deploy.lock
+            sudo touch "$LOCK"
+            sudo chown "$(id -u):$(id -g)" "$LOCK"
+            exec 9>"$LOCK"
+            flock -w 900 9
+            SERVICE=investor-backend
+            if ! sudo systemctl cat "$SERVICE" >/dev/null 2>&1; then
+              SERVICE=investment-engine-backend
+            fi
+            echo "==> Backend service: $SERVICE"
+            if curl -fsS --max-time 5 http://127.0.0.1:8000/health/live >/dev/null; then
+              echo "Backend is responding; no restart needed."
+            else
+              echo "Backend liveness stalled; restarting service."
+              sudo systemctl restart "$SERVICE"
+            fi
+            ready=false
+            for attempt in $(seq 1 30); do
+              if curl -fsS --max-time 5 http://127.0.0.1:8000/health/live >/dev/null; then
+                echo "Direct backend health passed on attempt $attempt"
+                ready=true
+                break
+              fi
+              sleep 2
+            done
+            [[ "$ready" == true ]]
+            curl -fsS --max-time 12 http://127.0.0.1:3000/backend-api/health/live
+            echo
+            sudo systemctl show "$SERVICE" --property=ActiveState,MemoryCurrent,MemoryPeak --no-pager
+            df -h /
