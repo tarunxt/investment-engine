@@ -110,6 +110,9 @@ jobs:
                 done
               fi
             fi
+            echo "==> Ext4 reserve read only"
+            sudo tune2fs -l /dev/nvme0n1p1 | grep -E 'Block count:|Reserved block count:|Free blocks:|Block size:|Reserved block percentage:|Reserved blocks uid:|Reserved blocks gid:' || true
+            df -B1 --output=size,used,avail,target /
             echo "==> Direct health"
             curl -sS --max-time 7 -o /dev/null -w 'backend HTTP %{http_code} in %{time_total}s\n' http://127.0.0.1:8000/health/live || true
             echo "==> Recent backend performance"
