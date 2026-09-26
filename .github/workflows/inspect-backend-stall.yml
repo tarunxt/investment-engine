@@ -69,6 +69,19 @@ jobs:
               curl -sS -o /dev/null -w "frontend_$route HTTP %{http_code} in %{time_total}s\\n" --max-time 12 "http://127.0.0.1:3000$route" || true
             done
             df -h /
+            echo "==> Scan storage breakdown"
+            sudo du -xhd1 /srv/investor/backend/.stage-one-exports /srv/investor/backend/.universal-scan-archive 2>/dev/null | sort -h | tail -n 30 || true
+            echo "==> Cache ages and sizes"
+            sudo find /srv/investor/backend/.stage-one-exports/scan-pages-v1 -mindepth 1 -maxdepth 1 -type d -printf '%T@ %s %p\n' 2>/dev/null | sort -n | head -n 5 || true
+            for mins in 180 360 720 1440 2880 4320; do
+              echo "cache_dirs_older_than_${mins}m=$(sudo find /srv/investor/backend/.stage-one-exports/scan-pages-v1 -mindepth 1 -maxdepth 1 -type d -mmin +$mins 2>/dev/null | wc -l)"
+              sudo find /srv/investor/backend/.stage-one-exports/scan-pages-v1 -mindepth 1 -maxdepth 1 -type d -mmin +$mins -print0 2>/dev/null | sudo du -sch --files0-from=- 2>/dev/null | tail -n 1 || true
+            done
+            echo "==> Largest recent export rows"
+            sudo find /srv/investor/backend/.stage-one-exports -maxdepth 2 -type f -name '*.jsonl*' -printf '%s %TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | sort -nr | head -n 12 || true
+            echo "==> Disk and logs"
+            df -h /
+            sudo du -xsh /var/log /srv/investor/backend/.stage-one-exports/scan-pages-v1 /srv/investor/backend/.stage-one-exports/scan-sources 2>/dev/null || true
             echo "==> Direct health"
             curl -sS --max-time 7 -o /dev/null -w 'backend HTTP %{http_code} in %{time_total}s\n' http://127.0.0.1:8000/health/live || true
             echo "==> Recent backend performance"
