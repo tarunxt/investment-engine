@@ -58,6 +58,7 @@ jobs:
           backend/tests/test_indmoney_us_parser.py
           backend/tests/test_portfolio_analysis_read_projection.py
           backend/tests/test_trade_analysis_display.py
+          backend/tests/test_jwt_signing.py
           backend/tests/test_universal_scan_auto_run.py
           backend/tests/test_universal_export_integrity.py
           backend/tests/test_universal_stage1_handoff_repair.py

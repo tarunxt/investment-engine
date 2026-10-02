@@ -352,8 +352,13 @@ validate_frontend_env_file() {
 validate_backend_env_file() {
   run_as_app_user "
     set -euo pipefail
+    set +x
     source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
     load_env_file '$BACKEND_ENV_FILE'
+
+    # Check the signing key before installing units, migrating, or restarting.
+    # The validator uses only the standard library and never prints the key.
+    python3 '$APP_ROOT/backend/app/core/jwt_configuration.py'
 
     if [[ -z \"\${DATABASE_URL:-}\" ]]; then
       echo 'Required environment variable missing: DATABASE_URL' >&2
