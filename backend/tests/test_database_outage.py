@@ -198,3 +198,116 @@ def test_redeemed_history_cancellation_waits_for_transaction_cleanup(monkeypatch
         assert lifecycle == ["enter", "commit_started", "commit_finished", "exit"]
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("second_user_id", [17, 18])
+@pytest.mark.parametrize("cancel_first", [False, True])
+def test_redeemed_history_serializes_only_same_user(
+    monkeypatch, second_user_id, cancel_first
+):
+    first_started = Event()
+    second_started = Event()
+    release_first = Event()
+    lifecycle: list[str] = []
+
+    def sync_history(*, user_id, redeemed_trades):
+        del user_id
+        name = next(iter(redeemed_trades))
+        lifecycle.append(f"{name}:start")
+        if name == "first":
+            first_started.set()
+            release_first.wait(timeout=2)
+        else:
+            second_started.set()
+        lifecycle.append(f"{name}:end")
+
+    monkeypatch.setattr(service, "_sync_redeemed_trades_sync", sync_history)
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        first = asyncio.create_task(
+            service.sync_redeemed_trades_async(user_id=17, redeemed_trades=["first"])
+        )
+        second = None
+        try:
+            assert await asyncio.to_thread(first_started.wait, 1)
+            if cancel_first:
+                first.cancel()
+                await asyncio.sleep(0)
+            second = asyncio.create_task(
+                service.sync_redeemed_trades_async(
+                    user_id=second_user_id,
+                    redeemed_trades=["second"],
+                )
+            )
+            entered_before_first_completed = await asyncio.to_thread(
+                second_started.wait,
+                0.05 if second_user_id == 17 else 1,
+            )
+            assert entered_before_first_completed is (second_user_id != 17)
+        finally:
+            release_first.set()
+            results = await asyncio.gather(
+                first, *([second] if second else []), return_exceptions=True
+            )
+        if cancel_first:
+            assert isinstance(results[0], asyncio.CancelledError)
+        else:
+            assert results[0] is None
+        assert results[1] is None
+        assert (loop, 17) not in service._redeemed_history_sync_locks
+        assert (loop, second_user_id) not in service._redeemed_history_sync_locks
+
+    # A fresh loop must not inherit a previously bound asyncio lock.
+    for _ in range(2):
+        first_started.clear()
+        second_started.clear()
+        release_first.clear()
+        lifecycle.clear()
+        asyncio.run(scenario())
+        if second_user_id == 17:
+            assert lifecycle == ["first:start", "first:end", "second:start", "second:end"]
+        else:
+            assert lifecycle == ["first:start", "second:start", "second:end", "first:end"]
+
+
+def test_redeemed_history_cancelled_waiter_never_starts_transaction(monkeypatch):
+    first_started = Event()
+    release_first = Event()
+    entered: list[str] = []
+
+    def sync_history(*, user_id, redeemed_trades):
+        del user_id
+        name = next(iter(redeemed_trades))
+        entered.append(name)
+        if name == "first":
+            first_started.set()
+            release_first.wait(timeout=2)
+
+    monkeypatch.setattr(service, "_sync_redeemed_trades_sync", sync_history)
+
+    async def scenario():
+        first = asyncio.create_task(
+            service.sync_redeemed_trades_async(user_id=17, redeemed_trades=["first"])
+        )
+        waiter = None
+        try:
+            assert await asyncio.to_thread(first_started.wait, 1)
+            waiter = asyncio.create_task(
+                service.sync_redeemed_trades_async(user_id=17, redeemed_trades=["waiter"])
+            )
+            await asyncio.sleep(0)
+            waiter.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await waiter
+            assert entered == ["first"]
+            assert not first.done()
+        finally:
+            release_first.set()
+            await first
+            if waiter is not None:
+                await asyncio.gather(waiter, return_exceptions=True)
+        await service.sync_redeemed_trades_async(user_id=17, redeemed_trades=["next"])
+
+    asyncio.run(scenario())
+    assert entered == ["first", "next"]

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from sqlalchemy import Select, and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +59,9 @@ from app.infrastructure.database.session import AsyncSessionLocal
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
 logger = logging.getLogger(__name__)
+_redeemed_history_sync_locks: WeakValueDictionary[
+    tuple[asyncio.AbstractEventLoop, int], asyncio.Lock
+] = WeakValueDictionary()
 
 
 @dataclass(frozen=True)
@@ -2004,29 +2008,40 @@ async def sync_redeemed_trades_async(
     user_id: int,
     redeemed_trades: Iterable[object],
 ) -> None:
-    # The balance refresher runs on the API event loop. Keep the entire sync
-    # session lifecycle in one worker thread so a slow lookup or commit cannot
-    # block unrelated requests, including liveness probes.
-    worker = asyncio.create_task(
-        asyncio.to_thread(
-            _sync_redeemed_trades_sync,
-            user_id=user_id,
-            redeemed_trades=redeemed_trades,
-        )
-    )
+    # Manual redeem and background balance refresh use different caller locks.
+    # Preserve the old loop's serialized same-user history transactions without
+    # retaining locks (or closed Celery event loops) after their last waiter.
+    lock_key = (asyncio.get_running_loop(), user_id)
+    lock = _redeemed_history_sync_locks.get(lock_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _redeemed_history_sync_locks[lock_key] = lock
     try:
-        await asyncio.shield(worker)
-    except asyncio.CancelledError:
-        # A running thread cannot be cancelled. Do not release the caller's
-        # balance-refresh lock while its transaction is still running, which
-        # would allow a later refresh to overlap the same history writes.
-        while not worker.done():
+        async with lock:
+            # Keep the entire sync session lifecycle in one worker thread so a slow
+            # lookup or commit cannot block unrelated requests or liveness probes.
+            worker = asyncio.create_task(
+                asyncio.to_thread(
+                    _sync_redeemed_trades_sync,
+                    user_id=user_id,
+                    redeemed_trades=redeemed_trades,
+                )
+            )
             try:
                 await asyncio.shield(worker)
             except asyncio.CancelledError:
-                continue
-        worker.result()
-        raise
+                # A running thread cannot be cancelled. Retain serialization until
+                # its transaction closes, even if the caller is cancelled again.
+                while not worker.done():
+                    try:
+                        await asyncio.shield(worker)
+                    except asyncio.CancelledError:
+                        continue
+                worker.result()
+                raise
+    finally:
+        # Cancelled task tracebacks must not retain the completed lock.
+        del lock
 
 
 def _sync_redeemed_trades_sync(
