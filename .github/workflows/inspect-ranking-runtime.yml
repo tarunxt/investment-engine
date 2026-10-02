@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check production availability without publishing internal diagnostics
+      - name: Measure approved aggregate storage sizes without changing data
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -23,22 +23,68 @@ jobs:
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
           command_timeout: 120s
           script: |
-            set -eu
-            # Output deliberately contains only bounded aggregate/status values.
-            # Never print environment, paths, logs, process arguments or DB data.
+            set -euo pipefail
             free_kib="$(df -Pk / | awk 'NR==2 {print $4}')"
-            printf 'available_disk_kib=%s\n' "$free_kib"
-            for role in backend frontend; do
-              state=unknown
-              for prefix in investor investment-engine; do
-                if sudo systemctl is-active --quiet "${prefix}-${role}" 2>/dev/null; then
-                  state=active
-                  break
+            if ! sudo -n true 2>/dev/null; then
+              printf 'available_disk_kib=%s\n' "$free_kib"
+              printf 'redownloadable_package_cache_kib=unavailable\n'
+              printf 'temporary_deploy_bundle_kib=unavailable\n'
+              exit 0
+            fi
+            app_user="$(sudo -n systemctl show investor-backend --property=User --value 2>/dev/null || true)"
+            app_home=''
+            if [[ -n "$app_user" ]]; then
+              app_home="$(getent passwd "$app_user" | cut -d: -f6)"
+            fi
+            paths=(/var/cache/apt/archives)
+            if [[ -n "$app_home" && "$app_home" == /* ]]; then
+              paths+=("$app_home/.cache/pip" "$app_home/.npm/_cacache")
+            fi
+            cache_kib=0
+            complete=true
+            for path in "${paths[@]}"; do
+              if sudo -n test -d "$path" 2>/dev/null; then
+                if measured="$(sudo -n timeout 20s du -skx -- "$path" 2>/dev/null)"; then
+                  value="${measured%%[[:space:]]*}"
+                  if [[ "$value" =~ ^[0-9]+$ ]]; then
+                    cache_kib=$((cache_kib + value))
+                  else
+                    complete=false
+                  fi
+                else
+                  complete=false
                 fi
-              done
-              printf '%s_service=%s\n' "$role" "$state"
+              fi
             done
-            for probe in live ready; do
-              printf 'backend_%s ' "$probe"
-              curl -s -o /dev/null --max-time 8 -w 'http=%{http_code} elapsed=%{time_total}\n' "http://127.0.0.1:8000/health/$probe" || true
+            [[ -n "$app_home" ]] || complete=false
+            printf 'available_disk_kib=%s\n' "$free_kib"
+            if [[ "$complete" == true ]]; then
+              printf 'redownloadable_package_cache_kib=%s\n' "$cache_kib"
+            else
+              printf 'redownloadable_package_cache_kib=unavailable\n'
+            fi
+            
+            # Uploaded deployment archives are separate from active/rollback build slots.
+            # Inspect only aggregate allocated size; never print names or contents.
+            shopt -s nullglob
+            bundle_kib=0
+            bundles_complete=true
+            for path in /tmp/investor-deploy-*; do
+              if sudo -n test -d "$path" 2>/dev/null; then
+                if measured="$(sudo -n timeout 20s du -skx -- "$path" 2>/dev/null)"; then
+                  value="${measured%%[[:space:]]*}"
+                  if [[ "$value" =~ ^[0-9]+$ ]]; then
+                    bundle_kib=$((bundle_kib + value))
+                  else
+                    bundles_complete=false
+                  fi
+                else
+                  bundles_complete=false
+                fi
+              fi
             done
+            if [[ "$bundles_complete" == true ]]; then
+              printf 'temporary_deploy_bundle_kib=%s\n' "$bundle_kib"
+            else
+              printf 'temporary_deploy_bundle_kib=unavailable\n'
+            fi
