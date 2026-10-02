@@ -8,6 +8,7 @@ import {
   readCookieNames,
   resolveSessionCookieSecurity,
 } from "@/lib/authSessionCookie";
+import { ApiTransportDeadlineError } from "@/lib/boundedApiTransport";
 import { SingleFlightByKey } from "@/lib/singleFlight";
 
 import {
@@ -38,6 +39,9 @@ export type BackendSessionContext = {
 };
 
 const refreshFlights = new SingleFlightByKey<RotatedBackendTokens>();
+// Leave time for the authenticated retry inside the standard four-second BFF
+// budget. The shared flight owns this deadline, independently of its waiters.
+const BACKEND_REFRESH_TIMEOUT_MS = 3_000;
 
 function refreshFlightKey(refreshToken: string) {
   return createHash("sha256").update(refreshToken).digest("hex");
@@ -128,6 +132,9 @@ export async function rotateBackendTokens(
   context: BackendSessionContext,
   signal?: AbortSignal,
 ) {
+  if (signal?.aborted) {
+    throw new DOMException("Request aborted", "AbortError");
+  }
   if (!context.refreshToken) {
     throw new BackendRuntimeHttpError(
       401,
@@ -139,12 +146,22 @@ export async function rotateBackendTokens(
   const currentRefreshToken = context.refreshToken;
   const key = refreshFlightKey(currentRefreshToken);
   const flight = refreshFlights.run(key, async () => {
-      const refreshed = await fetchBackendRuntimeJson<BackendRefreshResponse>(
-        "/auth/refresh",
-        {
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      BACKEND_REFRESH_TIMEOUT_MS,
+    );
+    try {
+      // Abort the upstream fetch and retire the flight even if a stalled body
+      // or transport does not settle on abort. Otherwise every later request
+      // for this session can rejoin the same hung promise after its own 504.
+      const refreshed = await waitIndependently(
+        fetchBackendRuntimeJson<BackendRefreshResponse>("/auth/refresh", {
           method: "POST",
           body: { refresh_token: currentRefreshToken },
-        },
+          signal: controller.signal,
+        }),
+        controller.signal,
       );
       const accessToken = refreshed.access_token?.trim() || null;
       const refreshToken = refreshed.refresh_token?.trim() || null;
@@ -159,7 +176,13 @@ export async function rotateBackendTokens(
         throw new Error("Backend token refresh returned incomplete credentials.");
       }
       return { accessToken, refreshToken, expiresIn };
-    });
+    } catch (error) {
+      if (controller.signal.aborted) throw new ApiTransportDeadlineError();
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 
   const rotated = await waitIndependently(flight, signal);
   context.accessToken = rotated.accessToken;
