@@ -57,15 +57,18 @@ export async function fetchBackendRuntimeJson<T = unknown>(
     accessToken,
     body,
     method = "GET",
+    signal,
   }: {
     accessToken?: string | null;
     body?: unknown;
     method?: "GET" | "POST";
+    signal?: AbortSignal;
   } = {},
 ): Promise<T> {
   const response = await fetch(`${resolveBackendBaseUrl()}${path}`, {
     method,
     cache: "no-store",
+    signal,
     headers: {
       ...(accessToken
         ? {
