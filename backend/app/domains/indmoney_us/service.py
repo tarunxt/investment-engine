@@ -6,7 +6,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
-from app.shared.portfolio_summary import build_persisted_portfolio_summary
+from app.shared.portfolio_summary import (
+    build_persisted_portfolio_summary,
+    signed_holding_return_percent,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -412,6 +415,11 @@ class IndMoneyUsPortfolioService:
             current_value = holding.get("current_value")
             average_price = holding.get("average_price")
             market_price = holding.get("market_price")
+            holding["total_pnl_percent"] = signed_holding_return_percent(
+                holding.get("total_pnl_percent"),
+                pnl=holding.get("total_pnl"),
+                invested_value=holding.get("invested_value"),
+            )
             if denominator and current_value is not None:
                 holding["portfolio_weight_percent"] = (current_value / denominator) * 100
             else:

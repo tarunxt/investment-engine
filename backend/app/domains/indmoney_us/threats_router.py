@@ -32,6 +32,7 @@ from app.domains.indmoney_us.threats_schemas import (
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.jobs.use_cases.create_job import CreateJobCommand, CreateJobUseCase
+from app.domains.portfolio_events.job_projection import portfolio_analysis_job_projection
 from app.domains.portfolio_events.urgent_actionables import (
     HoldingContext,
     build_holding_context_index,
@@ -92,7 +93,7 @@ async def get_threat_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    jobs = await _get_threat_jobs(db, current_user.id, limit)
+    jobs = await _get_threat_jobs(db, current_user.id, limit, include_details=False)
     return IndMoneyUsThreatHistoryResponse(history=[_serialize_threat_history_item(job) for job in jobs])
 
 
@@ -188,28 +189,15 @@ async def _get_latest_threat_job(db: AsyncSession, user_id: int) -> Job | None:
     return jobs[0] if jobs else None
 
 
-async def _get_threat_jobs(db: AsyncSession, user_id: int, limit: int) -> list[Job]:
+async def _get_threat_jobs(
+    db: AsyncSession, user_id: int, limit: int, *, include_details: bool = True,
+) -> list[Job]:
     result = await db.execute(
         select(Job)
         .options(
-            load_only(
-                Job.id,
-                Job.user_id,
-                Job.prompt,
-                Job.provider,
-                Job.model,
-                Job.status,
-                Job.response,
-                Job.error_message,
-                Job.runtime_metadata_json,
-                Job.tokens_in,
-                Job.tokens_out,
-                Job.estimated_cost,
-                Job.auto_rebalance_portfolio,
-                Job.auto_rebalance_sequence,
-                Job.auto_rebalance_label,
-                Job.created_at,
-                Job.updated_at,
+            portfolio_analysis_job_projection(
+                include_details=include_details,
+                include_runtime_metadata=True,
             )
         )
         .where(

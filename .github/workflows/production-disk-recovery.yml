@@ -13,11 +13,6 @@ on:
         required: true
         default: true
         type: boolean
-  workflow_run:
-    workflows: ['Deploy to Production']
-    types: [completed]
-  schedule:
-    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
@@ -28,7 +23,8 @@ concurrency:
 
 jobs:
   recover:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
+    # Destructive recovery must never run as a consequence of a failed deploy.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

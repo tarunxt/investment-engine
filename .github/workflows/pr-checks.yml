@@ -55,6 +55,9 @@ jobs:
           backend/tests/test_database_outage.py
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py
+          backend/tests/test_indmoney_us_parser.py
+          backend/tests/test_portfolio_analysis_read_projection.py
+          backend/tests/test_trade_analysis_display.py
           backend/tests/test_universal_scan_auto_run.py
           backend/tests/test_universal_export_integrity.py
           backend/tests/test_universal_stage1_handoff_repair.py
@@ -102,6 +105,7 @@ jobs:
             deploy/no-docker/frontend-artifact.test.mjs \
             deploy/no-docker/postgres-recovery.test.mjs \
             deploy/no-docker/redeploy-contract.test.mjs \
+            deploy/no-docker/deploy-storage-safety.test.mjs \
             deploy/no-docker/redeploy-transaction.test.mjs \
             deploy/no-docker/repair-next-runtime-artifacts.test.mjs
 
@@ -145,6 +149,11 @@ jobs:
           tests/auto-rebalance-provider-errors-ist.test.mjs
           tests/bullpen-auto-run-status.test.mjs
           tests/bullpen-auto-run-history.test.mjs
+          tests/runs-history-loading.test.mjs
+          tests/full-run-history.test.mjs
+          tests/portfolio-analysis-read-budgets.test.mjs
+          tests/trade-analysis-execution.test.mjs
+          tests/bullpen-auto-live-passive-read.test.mjs
           tests/bullpen-sports-workspace.test.mjs
           tests/bullpen-event-clusters.test.mjs
           tests/bullpen-claim-returns.test.mjs

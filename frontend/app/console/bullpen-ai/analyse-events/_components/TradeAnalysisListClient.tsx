@@ -13,6 +13,7 @@ import {
   writeTradeAnalysisCache,
 } from "@/lib/bullpenTradeAnalysisFallback";
 import { URLs } from "@/lib/urls";
+import { tradeExecutionFill, tradeOutcomeLabel } from "@/lib/tradeAnalysisExecution";
 import { apiService } from "@/services/api";
 import { useAuth } from "@/hooks/useAuth";
 import type {
@@ -109,10 +110,7 @@ function exitTimestamp(item: BullpenTradeAnalysisListItem) {
 }
 
 function pnlOutcomeLabel(item: BullpenTradeAnalysisListItem) {
-  if (item.pnl_outcome_tag && item.pnl_outcome_tag !== "OPEN") {
-    return humanizeTag(item.pnl_outcome_tag);
-  }
-  return item.is_squared_off ? "REALIZED" : "OPEN";
+  return humanizeTag(tradeOutcomeLabel(item));
 }
 
 function LearningCard({
@@ -390,7 +388,7 @@ export function TradeAnalysisListClient() {
           value={loading ? "…" : String(summary?.total_executed_trades ?? 0)}
         />
         <StatCard
-          label="Open Positions"
+          label="Confirmed Open Positions"
           value={loading ? "…" : String(summary?.open_positions ?? 0)}
         />
         <StatCard
@@ -475,10 +473,10 @@ export function TradeAnalysisListClient() {
                     <div className="space-y-2">
                       <CardTitle className="text-lg text-slate-950">{item.title}</CardTitle>
                       <div className="flex flex-wrap gap-2">
-                        <TradeAnalysisBadge value={item.final_tag} />
+                        <TradeAnalysisBadge value={item.final_tag === "OPEN" ? tradeOutcomeLabel(item) : item.final_tag} />
                         <TradeAnalysisBadge value={item.status} />
                         {item.pnl_outcome_tag !== item.final_tag ? (
-                          <TradeAnalysisBadge value={item.pnl_outcome_tag} />
+                          <TradeAnalysisBadge value={tradeOutcomeLabel(item)} />
                         ) : null}
                         {item.is_squared_off ? (
                           <TradeAnalysisBadge value="SQUARED_OFF" className="border-slate-200 bg-white text-slate-700" />
@@ -505,12 +503,7 @@ export function TradeAnalysisListClient() {
                         price: item.buy_requested_price ?? item.buy_price,
                         odds: item.buy_requested_odds ?? item.buy_odds,
                       })}</p>
-                      <p>Filled: {formatExecutionSummary({
-                        amount: item.buy_filled_amount ?? item.buy_amount,
-                        shares: item.buy_filled_shares ?? item.buy_shares,
-                        price: item.buy_average_fill_price ?? item.buy_price,
-                        odds: item.buy_average_fill_odds ?? item.buy_odds,
-                      })}</p>
+                      <p>Filled: {formatExecutionSummary(tradeExecutionFill(item, "buy"))}</p>
                       <p>Status: {item.buy_status || "—"}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
@@ -524,12 +517,7 @@ export function TradeAnalysisListClient() {
                         price: item.sell_requested_price ?? item.exit_price,
                         odds: item.sell_requested_odds ?? item.exit_odds,
                       })}</p>
-                      <p>Filled: {formatExecutionSummary({
-                        amount: item.sell_filled_amount ?? item.exit_amount,
-                        shares: item.sell_filled_shares ?? item.exit_shares,
-                        price: item.sell_average_fill_price ?? item.exit_price,
-                        odds: item.sell_average_fill_odds ?? item.exit_odds,
-                      })}</p>
+                      <p>Filled: {formatExecutionSummary(tradeExecutionFill(item, "sell"))}</p>
                       <p>Status: {item.sell_status || (item.is_squared_off ? "completed" : "—")}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">

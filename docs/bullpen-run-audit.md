@@ -350,6 +350,15 @@ inside the Refresh control; the browser saves and reuses the last valid setting
 refresh requests from overlapping. This polling changes only the live console
 projection and does not mutate frozen run-audit snapshots.
 
+The shared `/console/runs` page keeps complete Bullpen run counts and the API's
+newest-first ordering while fetching history in batches of at most two pages.
+Its browser history deadline outlives the 12-second backend and 14-second BFF
+deadlines. A failed page leaves the previous complete list visible with an
+explicit error; it never presents a partially loaded list as complete. Navigation
+or a newer refresh cancels queued Bullpen reads and prevents stale responses
+from replacing the current results. These are read-only presentation changes;
+audit capture, frozen snapshots, schema versions, and trading behavior are unchanged.
+
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
 including independent previews and scheduled runs, use the saved value until it
@@ -2619,3 +2628,33 @@ Live traffic exposed a remaining CPU bottleneck after moving comparisons off the
 ### 2026-09-17 — Render successful history enrichment promptly
 
 Live browser verification found that successful comparison responses were followed by a detail-request fan-out for every unmatched event. The page withheld all comparisons and the portfolio until those redundant reads finished. Successful comparison batches are now authoritative, including legitimate missing/ambiguous rankings; independent detail recovery remains available after a failed batch request. The wallet-primed portfolio becomes visible before optional event enrichment. Behavioral frontend tests cover successful unmatched responses and failed-request recovery.
+
+### October 2026: Passive legacy Auto-Live console reads
+
+The legacy Auto-Live console now loads `/summary/dashboard` with a bounded
+20-second read budget instead of the operational `/summary` and global
+`/decisions` readers. Opening or refreshing this screen no longer invokes their
+scheduler-recovery or decision-reconciliation paths. The summary's latest-run
+projection remains authoritative, degraded sections remain visible, and saved
+run history remains reachable for complete evidence. A failed summary can fall
+back to passive `/state`, with the settings editor unavailable. Superseded or
+unmounted reads are cancelled and cannot replace a newer result.
+
+Guardrail saves and exports include only fields owned by that editor. Omitted
+LLM prompts, targets, strategy profiles, and other hidden settings cannot be
+reset by defaults in a bounded projection. Existing explicit execution controls,
+confirmations, backend validation, and frozen Stage 1/2/3 audit evidence are
+unchanged. Regression coverage checks passive endpoints, failure/cancellation,
+degraded results, and hidden-setting preservation.
+
+### October 2026: Distinguish requested trades from confirmed positions
+
+Trade Analysis no longer substitutes requested or generic order values for
+missing filled amounts, shares, prices, or odds. Records without execution
+provenance display `EXECUTION_UNCONFIRMED` rather than an inferred `OPEN` outcome.
+The open-position summary now requires the same recorded buy-execution timestamp
+as the executed-trade count, and the UI calls this `Confirmed Open Positions`.
+Explicit zero/partial fills remain visible. These are read-time presentation and
+summary corrections only: raw records, execution capture, broker actions,
+reconciliation, and frozen audit evidence are unchanged. Regression tests cover
+failed/pending requests, explicit fills, and open versus closed confirmed buys.

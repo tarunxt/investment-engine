@@ -432,15 +432,12 @@ jobs:
             case "$DEPLOY_SCOPE" in
               frontend-only)
                 MIN_FREE_KB=1048576
-                REQUIRED_FREE_KB=524288
                 ;;
               backend-only)
                 MIN_FREE_KB=1048576
-                REQUIRED_FREE_KB=262144
                 ;;
               full-stack)
                 MIN_FREE_KB=2097152
-                REQUIRED_FREE_KB=1048576
                 ;;
               *)
                 echo "Invalid resolved deployment scope: $DEPLOY_SCOPE" >&2
@@ -449,59 +446,11 @@ jobs:
             esac
 
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
-            # UPS exports need a separate 2 GiB reserve. Rotate the already
-            # oversized system log before deployment consumes the remaining
-            # headroom; logrotate retains compressed history for diagnostics.
-            if (( AVAILABLE_KB < 4194304 )); then
-              echo "==> Rotating system logs under disk pressure"
-              if sudo test -f /etc/logrotate.d/rsyslog; then
-                rotate_config="$(sudo mktemp /run/investor-rsyslog-rotate.XXXXXX)"
-                printf 'su root root\ninclude /etc/logrotate.d/rsyslog\n' |
-                  sudo tee "$rotate_config" >/dev/null
-                sudo logrotate -f "$rotate_config" || true
-                sudo rm -f -- "$rotate_config"
-              fi
-              # Gamma page caches are only used to replay recent scan fetches.
-              # Retain every immutable scan export and source pack; old pages
-              # can be refetched after the worker's recovery window has ended.
-              page_cache="$APP_ROOT/backend/.stage-one-exports/scan-pages-v1"
-              if sudo test -d "$page_cache"; then
-                sudo find "$page_cache" -mindepth 1 -maxdepth 1 -type d \
-                  -mmin +4320 -exec rm -rf -- {} +
-              fi
-              AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
-            fi
+            # Deployment never reclaims space by deleting diagnostics, audit
+            # records, source caches or rollback artifacts. Capacity recovery
+            # requires a separately reviewed operational action.
             if (( AVAILABLE_KB < MIN_FREE_KB )); then
-              echo "==> Low disk space (${AVAILABLE_KB} KiB); pruning bounded caches without touching the active frontend slot"
-              if [[ "$DEPLOY_SCOPE" != "frontend-only" ]]; then
-                sudo journalctl --vacuum-time=3d --vacuum-size=64M || true
-                sudo apt-get clean || true
-                sudo find /var/cache/apt/archives -maxdepth 1 -type f -name '*.deb' -delete || true
-                if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
-                  sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
-                fi
-              fi
-              if [[ "$DEPLOY_SCOPE" != "backend-only" && -d "$APP_ROOT/frontend" ]]; then
-                active_build=".next"
-                if sudo test -f "$APP_ROOT/frontend/.next-active-dir"; then
-                  active_build="$(sudo -u "$APP_USER" -H tr -d '\r\n' <"$APP_ROOT/frontend/.next-active-dir")"
-                fi
-                case "$active_build" in
-                  .next) inactive_build="$APP_ROOT/frontend/.next-candidate" ;;
-                  .next-candidate) inactive_build="$APP_ROOT/frontend/.next" ;;
-                  *)
-                    echo "Invalid active frontend slot: ${active_build:-<empty>}" >&2
-                    exit 1
-                    ;;
-                esac
-                sudo -u "$APP_USER" -H rm -rf -- "$inactive_build"
-              fi
-              AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
-              echo "==> Disk space after bounded cleanup: ${AVAILABLE_KB} KiB"
-            fi
-            if (( AVAILABLE_KB < REQUIRED_FREE_KB )); then
-              echo "Deployment requires ${REQUIRED_FREE_KB} KiB free." >&2
-              df -h "$APP_ROOT" >&2
+              echo "STORAGE_BLOCKED: deployment requires ${MIN_FREE_KB} KiB free; ${AVAILABLE_KB} KiB available. No files or logs were deleted." >&2
               exit 1
             fi
 

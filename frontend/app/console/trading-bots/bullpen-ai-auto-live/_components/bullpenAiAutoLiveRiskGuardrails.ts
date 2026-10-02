@@ -1,6 +1,6 @@
 "use client";
 
-import type { BullpenAutoLiveSettings } from "@/types/api";
+import type { BullpenAutoLiveSettings, BullpenAutoLiveSettingsUpdate } from "@/types/api";
 
 export type BullpenAiAutoLiveGuardrailTag =
   | "HARD BLOCK"
@@ -957,10 +957,21 @@ export function buildBullpenAiAutoLiveSafeDefaultDraft() {
   return bullpenAiAutoLiveSettingsToDraft(BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS);
 }
 
+/** Only editor-owned fields may be sent from a bounded settings projection. */
+export function buildBullpenAiAutoLiveGuardrailUpdate(
+  settings: BullpenAutoLiveSettings,
+): BullpenAutoLiveSettingsUpdate {
+  const update: BullpenAutoLiveSettingsUpdate = {};
+  for (const field of BULLPEN_AI_AUTO_LIVE_GUARDRAIL_FIELDS) {
+    update[field.key] = settings[field.key] as never;
+  }
+  return update;
+}
+
 export function serializeBullpenAiAutoLiveGuardrails(
   settings: BullpenAutoLiveSettings,
 ) {
-  return JSON.stringify(settings, null, 2);
+  return JSON.stringify(buildBullpenAiAutoLiveGuardrailUpdate(settings), null, 2);
 }
 
 function addFieldError(

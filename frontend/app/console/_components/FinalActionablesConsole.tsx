@@ -3104,21 +3104,7 @@ function filterRunsBySelectedActionablesInputs(
 }
 
 export async function fetchAllFullRuns() {
-  const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
-  if (firstPage.pages <= 1) return firstPage.items;
-
-  const remainingPages = Array.from(
-    { length: firstPage.pages - 1 },
-    (_, index) => index + 2,
-  );
-  const remainingResults = await Promise.all(
-    remainingPages.map((page) => apiService.getFullRuns({ page, limit: 100 })),
-  );
-
-  return [
-    ...firstPage.items,
-    ...remainingResults.flatMap((page) => page.items),
-  ];
+  return apiService.getAllFullRuns();
 }
 
 type DashboardRecentRunStage = "swing" | "rebalance" | "technical";

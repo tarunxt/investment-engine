@@ -477,7 +477,10 @@ def _build_summary(
         total_executed_trades=len(
             [record for record in records if record.buy_executed_at is not None]
         ),
-        open_positions=len([record for record in records if record.closed_at is None]),
+        open_positions=len([
+            record for record in records
+            if record.buy_executed_at is not None and record.closed_at is None
+        ]),
         closed_positions=len(closed),
         total_net_pnl=round(sum(record.net_pnl or 0 for record in records), 4),
         win_rate=round(len(wins) / len(closed), 4) if closed else 0,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementType } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -58,6 +58,7 @@ type PortfolioTab = Exclude<RunTab, 'bullpen'>;
 const PAGE_SIZE = 20;
 const API_PAGE_SIZE = 100;
 const BULLPEN_API_PAGE_SIZE = 50;
+const BULLPEN_HISTORY_PAGE_CONCURRENCY = 2;
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -133,22 +134,35 @@ async function loadAllPortfolioRuns() {
   return [first, ...remaining].flatMap((response) => response.items);
 }
 
-async function loadAllBullpenRuns() {
-  const first = await apiService.getBullpenAutoLiveHistory({
-    page: 1,
-    size: BULLPEN_API_PAGE_SIZE,
-  });
+async function loadAllBullpenRuns(signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const first = await apiService.getBullpenAutoLiveHistory(
+    { page: 1, size: BULLPEN_API_PAGE_SIZE },
+    { signal },
+  );
+  signal?.throwIfAborted();
   if (!first.has_next) return first.items;
 
-  const remaining = await Promise.all(
-    Array.from({ length: Math.max(0, first.pages - 1) }, (_, index) =>
-      apiService.getBullpenAutoLiveHistory({
-        page: index + 2,
-        size: BULLPEN_API_PAGE_SIZE,
-      }),
-    ),
-  );
-  return [first, ...remaining].flatMap((response) => response.items);
+  const items = [...first.items];
+  // Keep the complete-list counts and client-side pagination, but avoid
+  // exhausting the backend connection pool with every history page at once.
+  // A rejected page fails the whole refresh rather than publishing a partial
+  // list as complete; previous successful results remain visible in the UI.
+  for (let page = 2; page <= first.pages; page += BULLPEN_HISTORY_PAGE_CONCURRENCY) {
+    signal?.throwIfAborted();
+    const batch = await Promise.all(
+      Array.from(
+        { length: Math.min(BULLPEN_HISTORY_PAGE_CONCURRENCY, first.pages - page + 1) },
+        (_, index) => apiService.getBullpenAutoLiveHistory(
+          { page: page + index, size: BULLPEN_API_PAGE_SIZE },
+          { signal },
+        ),
+      ),
+    );
+    signal?.throwIfAborted();
+    items.push(...batch.flatMap((response) => response.items));
+  }
+  return items;
 }
 
 function StatusBadge({ status }: { status?: string | null }) {
@@ -275,14 +289,19 @@ export default function RunsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
 
   const loadRuns = useCallback(async () => {
+    loadAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortControllerRef.current = controller;
     setLoading(true);
     setError(null);
     const [portfolioResult, bullpenResult] = await Promise.allSettled([
       loadAllPortfolioRuns(),
-      loadAllBullpenRuns(),
+      loadAllBullpenRuns(controller.signal),
     ]);
+    if (controller.signal.aborted) return;
 
     const errors: string[] = [];
     if (portfolioResult.status === 'fulfilled') {
@@ -303,7 +322,11 @@ export default function RunsPage() {
   }, []);
 
   useEffect(() => {
-    void loadRuns();
+    const timer = window.setTimeout(() => void loadRuns(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      loadAbortControllerRef.current?.abort();
+    };
   }, [loadRuns]);
 
   const categorizedRuns = useMemo(
