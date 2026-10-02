@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -1999,6 +2000,36 @@ def capture_auto_live_exit_result_sync(
 
 
 async def sync_redeemed_trades_async(
+    *,
+    user_id: int,
+    redeemed_trades: Iterable[object],
+) -> None:
+    # The balance refresher runs on the API event loop. Keep the entire sync
+    # session lifecycle in one worker thread so a slow lookup or commit cannot
+    # block unrelated requests, including liveness probes.
+    worker = asyncio.create_task(
+        asyncio.to_thread(
+            _sync_redeemed_trades_sync,
+            user_id=user_id,
+            redeemed_trades=redeemed_trades,
+        )
+    )
+    try:
+        await asyncio.shield(worker)
+    except asyncio.CancelledError:
+        # A running thread cannot be cancelled. Do not release the caller's
+        # balance-refresh lock while its transaction is still running, which
+        # would allow a later refresh to overlap the same history writes.
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                continue
+        worker.result()
+        raise
+
+
+def _sync_redeemed_trades_sync(
     *,
     user_id: int,
     redeemed_trades: Iterable[object],
