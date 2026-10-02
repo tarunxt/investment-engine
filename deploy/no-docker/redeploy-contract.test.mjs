@@ -323,3 +323,90 @@ test("frontend launcher supports standalone slots and legacy rollback slots", ()
   assert.match(launcher, /node_modules\/\.bin\/next/);
   assert.match(launcher, /\bstart\b/);
 });
+
+test("backend signing configuration is checked before any service changes", () => {
+  const backendValidation = section(
+    "validate_backend_env_file() {",
+    "validate_canonical_bullpen_backend_env() {",
+  );
+  assert.match(backendValidation, /set \+x/);
+  assert.match(backendValidation, /python3 '\$APP_ROOT\/backend\/app\/core\/jwt_configuration\.py'/);
+  assert.ok(backendValidation.indexOf("set +x") < backendValidation.indexOf("load_env_file"));
+  const environmentValidation = redeploy.lastIndexOf('start_phase "environment-validation"');
+  const validateKey = redeploy.indexOf("  validate_backend_env_file", environmentValidation);
+  const configuration = redeploy.lastIndexOf('start_phase "configuration"');
+  const migrations = redeploy.lastIndexOf('start_phase "backend-dependencies-migrations"');
+  assert.ok(environmentValidation >= 0 && validateKey > environmentValidation);
+  assert.ok(configuration > validateKey && migrations > validateKey);
+});
+
+test("JWT deployment preflight fails safely without disclosing configuration", async () => {
+  const validator = fileURLToPath(
+    new URL("../../backend/app/core/jwt_configuration.py", import.meta.url),
+  );
+  // Public deterministic fixture only. Never use this key in a runtime env file.
+  const validKey = Array.from({ length: 32 }, (_, index) =>
+    index.toString(16).padStart(2, "0"),
+  ).join("");
+  for (const key of [undefined, "", "invalid-synthetic-sensitive-input", "ab".repeat(32)]) {
+    const env = { ...process.env };
+    delete env.JWT_SECRET_KEY;
+    if (key !== undefined) env.JWT_SECRET_KEY = key;
+    await assert.rejects(
+      execFileAsync("python3", [validator], { env }),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /JWT_SECRET_KEY/);
+        assert.equal(error.stdout, "");
+        assert.doesNotMatch(error.stderr, /Traceback/);
+        if (key) assert.ok(!error.stderr.includes(key));
+        return true;
+      },
+    );
+  }
+  const { stdout, stderr } = await execFileAsync("python3", [validator], {
+    env: { ...process.env, JWT_SECRET_KEY: validKey },
+  });
+  assert.equal(stdout, "JWT configuration valid\n");
+  assert.equal(stderr, "");
+});
+
+test("backend env preflight stops before rollout and disables secret tracing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "investor-jwt-preflight-"));
+  const envPath = join(directory, "backend.env");
+  const appRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const validateBackendEnv = section(
+    "validate_backend_env_file() {",
+    "validate_canonical_bullpen_backend_env() {",
+  );
+  const script = `
+set -euo pipefail
+APP_ROOT="$1"
+BACKEND_ENV_FILE="$2"
+run_as_app_user() { bash -xc "$1"; }
+${validateBackendEnv}
+validate_backend_env_file
+printf 'preflight-finished\\n'
+`;
+  const invalidKey = "synthetic-invalid-private-input";
+  try {
+    await writeFile(envPath, [
+      `JWT_SECRET_KEY=${invalidKey}`,
+      "DATABASE_URL=postgresql://test",
+      "REDIS_URL=redis://test",
+      "FRONTEND_URL=https://cred-x.test",
+    ].join("\n"));
+    await assert.rejects(
+      execFileAsync("bash", ["-c", script, "--", appRoot, envPath]),
+      (error) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /JWT_SECRET_KEY/);
+        assert.ok(!`${error.stdout}${error.stderr}`.includes(invalidKey));
+        assert.doesNotMatch(error.stdout, /preflight-finished/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

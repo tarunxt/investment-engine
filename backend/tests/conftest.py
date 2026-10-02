@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 
@@ -10,3 +11,6 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-deepseek-key")
+
+# Public deterministic fixture for tests only; never use as a runtime credential.
+os.environ["JWT_SECRET_KEY"] = hashlib.sha256(b"credx-unit-tests-only").hexdigest()
