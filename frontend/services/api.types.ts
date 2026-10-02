@@ -142,6 +142,7 @@ export interface IApiService {
     getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
     getJob(id: number): Promise<JobResponse>;
     getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>>;
+    getAllFullRuns(): Promise<RunResponse[]>;
     getFullRuns(
         params?: { page?: number; limit?: number },
         options?: ApiRequestControl,

@@ -94,7 +94,7 @@ test("dedicated Bullpen run page prefers the bounded console projection", () => 
 test("Bullpen history requests bypass caches and remain abortable", () => {
   assert.match(
     apiService,
-    /getBullpenAutoLiveHistory\([\s\S]*?\{ cache: "no-store", \.\.\.options \}/,
+    /getBullpenAutoLiveHistory\([\s\S]*?\{ cache: "no-store", timeoutMs: BULLPEN_HISTORY_READ_TIMEOUT_MS, \.\.\.options \}/,
   );
   assert.match(
     apiService,

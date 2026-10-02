@@ -30,6 +30,10 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
 const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
+// Captured portfolio reports can wait for a DB connection and parse stored
+// model output. Keep these read-only routes inside the browser's 20s budget.
+const CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS = 18_000;
 const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
 const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
 const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
@@ -241,6 +245,14 @@ function isBullpenAutoLiveRead(method: string, path: string) {
   );
 }
 
+function getCapturedPortfolioAnalysisReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  const match = /^(zerodha|indmoney-us)\/(events|threats)\/(?:latest|history|[0-9]+)$/.exec(path);
+  // Four fixed scopes isolate DB-only reads from wallet/broker failures;
+  // never key circuit state by a user or captured job ID.
+  return match ? `${match[1]}/${match[2]}` : undefined;
+}
+
 function isBullpen008Read(method: string, path: string) {
   return (
     SAFE_FALLBACK_METHODS.has(method) &&
@@ -305,6 +317,9 @@ function isSportsEventComparisonsRead(method: string, path: string) {
 }
 
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (getCapturedPortfolioAnalysisReadScope(method, path)) {
+    return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
   if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
   if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
@@ -353,6 +368,9 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (getCapturedPortfolioAnalysisReadScope(method, path)) {
+    return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;
+  }
   if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
   if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
@@ -457,7 +475,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     (path === "polymarket/auto-live/history" ||
       path === "polymarket/auto-live/history/event-trends")
       ? path
-      : undefined;
+      : getCapturedPortfolioAnalysisReadScope(request.method, path);
   const resolvedCandidates = resolveBackendApiCandidates(request).map(
     (candidate) => ({ ...candidate, circuitScope: readCircuitScope }),
   );

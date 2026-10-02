@@ -121,7 +121,10 @@ function SortIcon({ isActive, direction }: { isActive: boolean; direction: SortD
   );
 }
 
+type SetupCountsStatus = 'loading' | 'ready' | 'error';
+
 type SetupTableWithGroupsProps = SetupTableProps & {
+  countsStatus: SetupCountsStatus;
   setupGroups: Record<string, SetupStockGroup>;
   onSetupClick: (group: SetupStockGroup) => void;
   defaultSortByStockCount?: boolean;
@@ -136,6 +139,7 @@ function SetupTable({
   targetSetup,
   targetTone,
   setupGroups,
+  countsStatus,
   onSetupClick,
   defaultSortByStockCount = false,
 }: SetupTableWithGroupsProps) {
@@ -243,7 +247,7 @@ function SetupTable({
                       targetClasses?.cell || populatedToneClasses?.cell || 'text-gray-950'
                     }`}
                   >
-                    <SetupNameCell row={row} group={setupGroups[row.setup]} onSetupClick={onSetupClick} />
+                    <SetupNameCell row={row} group={setupGroups[row.setup]} countsStatus={countsStatus} onSetupClick={onSetupClick} />
                   </td>
                   <td
                     className={`${baseCellClass} text-right font-semibold ${
@@ -388,12 +392,18 @@ function SetupActionCountBreakdown({ group }: { group: SetupStockGroup }) {
 function SetupNameCell({
   row,
   group,
+  countsStatus,
   onSetupClick,
 }: {
   row: SetupRow;
   group?: SetupStockGroup;
+  countsStatus: SetupCountsStatus;
   onSetupClick: (group: SetupStockGroup) => void;
 }) {
+  if (countsStatus !== 'ready') {
+    return <span>{row.setup} ({countsStatus === 'loading' ? 'Loading…' : 'Unavailable'})</span>;
+  }
+
   if (!group?.stocks.length) {
     return <span>{row.setup} (0)</span>;
   }
@@ -513,6 +523,9 @@ function readTargetSetupFromLocation() {
 
 export default function TechnicalSetupsPage() {
   const [targetSetup] = useState<string | null>(() => readTargetSetupFromLocation());
+  const [countsStatus, setCountsStatus] = useState<SetupCountsStatus>('loading');
+  const [countsError, setCountsError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [setupGroups, setSetupGroups] = useState<Record<string, SetupStockGroup>>({});
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
 
@@ -530,16 +543,22 @@ export default function TechnicalSetupsPage() {
             india: zerodhaOverview.latest,
             us: indmoneyOverview.latest,
           }));
+          setCountsStatus('ready');
+          setCountsError(null);
         }
       })
       .catch((error: unknown) => {
         console.warn('Failed to load final actionables setup counts:', error);
+        if (!ignore) {
+          setCountsStatus('error');
+          setCountsError(error instanceof Error ? error.message : 'Unable to load run history or portfolio snapshots.');
+        }
       });
 
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   return (
     <div className="space-y-6">
@@ -552,6 +571,27 @@ export default function TechnicalSetupsPage() {
         </p>
       </div>
 
+      {countsStatus === 'loading' ? (
+        <p role="status" className="text-sm text-gray-600">Loading setup counts from run history and portfolio snapshots…</p>
+      ) : null}
+      {countsStatus === 'error' ? (
+        <div role="alert" className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-semibold">Setup counts are unavailable. They have not been reported as zero.</p>
+          <p>{countsError}</p>
+          <button
+            type="button"
+            className="rounded-md border border-amber-500 px-3 py-1.5 font-semibold hover:bg-amber-100"
+            onClick={() => {
+              setCountsStatus('loading');
+              setCountsError(null);
+              setLoadAttempt((attempt) => attempt + 1);
+            }}
+          >
+            Retry counts
+          </button>
+        </div>
+      ) : null}
+
       <SetupTable
         title="Bullish Setups"
         description="Long-entry and continuation structures sorted by stock count, then confidence score."
@@ -561,6 +601,7 @@ export default function TechnicalSetupsPage() {
         targetSetup={targetSetup}
         targetTone="bullish"
         setupGroups={setupGroups}
+        countsStatus={countsStatus}
         onSetupClick={setSelectedSetupGroup}
         defaultSortByStockCount
       />
@@ -574,6 +615,7 @@ export default function TechnicalSetupsPage() {
         targetSetup={targetSetup}
         targetTone="bearish"
         setupGroups={setupGroups}
+        countsStatus={countsStatus}
         onSetupClick={setSelectedSetupGroup}
       />
 

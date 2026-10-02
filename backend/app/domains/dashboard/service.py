@@ -29,6 +29,7 @@ from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.core.request_timing import add_redis_duration
+from app.shared.portfolio_summary import signed_holding_return_percent
 
 DASHBOARD_HISTORY_LIMIT = 12
 DASHBOARD_TOP_HOLDINGS_LIMIT = 4
@@ -80,6 +81,9 @@ def _top_holdings(
         pnl_percent = _number(
             raw.get("pnl_percent", raw.get("total_pnl_percent")),
         )
+        pnl_percent = signed_holding_return_percent(
+            pnl_percent, pnl=pnl, invested_value=invested_value,
+        ) or 0
         weight = _optional_number(
             raw.get("weight_percent", raw.get("portfolio_weight_percent"))
         )

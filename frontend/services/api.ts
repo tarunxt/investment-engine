@@ -6,6 +6,7 @@ import {
 } from "@/lib/apiReadCircuitBreaker";
 import { isBullpenTradeAnalysisListResponse } from "@/lib/bullpenTradeAnalysisFallback";
 import { PrivateRequestDeduplicator } from "@/lib/privateRequestDeduplicator";
+import { loadFullRunHistory } from "@/lib/fullRunHistory";
 import { signOut } from "next-auth/react";
 import {
   ApiUsageSummaryResponse,
@@ -146,6 +147,10 @@ const DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000;
 const DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500;
 const CAPTURED_DETAILS_READ_TIMEOUT_MS = 20_000;
 const FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS = 20_000;
+// History can use the backend's 12-second database deadline and the BFF's
+// 14-second transport budget. The generic five-second browser cap cuts these
+// valid reads off before either layer can return its result or bounded error.
+const BULLPEN_HISTORY_READ_TIMEOUT_MS = 20_000;
 const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
 const BULLPEN_RUN_START_SECONDARY_DELAY_MS = 250;
 const BULLPEN_RUN_START_TERTIARY_DELAY_MS = 750;
@@ -1073,6 +1078,18 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  getAllFullRuns(): Promise<RunResponse[]> {
+    // Share only active reads, using the existing session-scoped deduplicator.
+    // No settled history is cached, so an explicit refresh always reads anew.
+    const identity = { method: "GET", url: `${URLs.runs.list()}?view=hydrated-history` };
+    const sessionKey = this.readDeduplicator.key(identity);
+    return this.readDeduplicator.run(identity, () => loadFullRunHistory(this, () => {
+      if (this.readDeduplicator.key(identity) !== sessionKey) {
+        throw new Error("The session changed while loading run history. Please retry.");
+      }
+    }));
+  }
+
   getFullRuns(
     params?: { page?: number; limit?: number },
     options?: ApiRequestControl,
@@ -1271,11 +1288,14 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ZerodhaEventsHistoryResponse>(
       `${URLs.zerodha.eventsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   zerodhaEventJob(jobId: number): Promise<ZerodhaEventsAnalysis> {
-    return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId));
+    return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   async zerodhaRunEvents(
@@ -1325,11 +1345,14 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ZerodhaThreatHistoryResponse>(
       `${URLs.zerodha.threatsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   zerodhaThreatJob(jobId: number): Promise<ZerodhaThreatAnalysis> {
-    return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId));
+    return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   async zerodhaRunThreats(
@@ -1398,11 +1421,14 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<IndMoneyUsEventsHistoryResponse>(
       `${URLs.indmoneyUs.eventsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   indmoneyUsEventJob(jobId: number): Promise<IndMoneyUsEventsAnalysis> {
-    return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId));
+    return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   async indmoneyUsRunEvents(
@@ -1460,11 +1486,14 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<IndMoneyUsThreatHistoryResponse>(
       `${URLs.indmoneyUs.threatsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis> {
-    return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId));
+    return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   async indmoneyUsRunThreats(
@@ -1840,7 +1869,7 @@ class apiServiceClass implements IApiService {
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.get<BullpenAutoLiveHistoryPage>(
       `${URLs.bullpenAutoLive.history()}${suffix}`,
-      { cache: "no-store", ...options },
+      { cache: "no-store", timeoutMs: BULLPEN_HISTORY_READ_TIMEOUT_MS, ...options },
     );
   }
 

@@ -14,6 +14,7 @@ from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.jobs.use_cases.create_job import CreateJobCommand, CreateJobUseCase
 from app.domains.portfolio_events.common import ensure_event_table_covers_prompt_holdings
+from app.domains.portfolio_events.job_projection import portfolio_analysis_job_projection
 from app.domains.portfolio_events.schemas import (
     PortfolioAnalysisHistoryItemResponse,
     PortfolioEventRunRequest,
@@ -67,7 +68,7 @@ async def get_events_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    jobs = await _get_events_jobs(db, current_user.id, limit)
+    jobs = await _get_events_jobs(db, current_user.id, limit, include_details=False)
     return ZerodhaEventsHistoryResponse(history=[_serialize_events_history_item(job) for job in jobs])
 
 
@@ -166,9 +167,12 @@ async def _get_latest_events_job(db: AsyncSession, user_id: int) -> Job | None:
     return jobs[0] if jobs else None
 
 
-async def _get_events_jobs(db: AsyncSession, user_id: int, limit: int) -> list[Job]:
+async def _get_events_jobs(
+    db: AsyncSession, user_id: int, limit: int, *, include_details: bool = True,
+) -> list[Job]:
     result = await db.execute(
         select(Job)
+        .options(portfolio_analysis_job_projection(include_details=include_details))
         .where(
             Job.user_id == user_id,
             Job.prompt.ilike(f"%{EVENT_JOB_MARKER}%"),
