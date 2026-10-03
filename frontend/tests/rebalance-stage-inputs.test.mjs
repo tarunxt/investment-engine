@@ -24,6 +24,8 @@ modules['@/lib/rebalanceRunIdentity'] = load(read('../lib/rebalanceRunIdentity.t
 modules['@/lib/rebalanceStageInputs'] = load(read('../lib/rebalanceStageInputs.ts'));
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
+const portfolioSnapshot = { parse_status: 'parsed', reported_holdings_count: 1,
+  holdings: [{ symbol: 'ABC', quantity: 0.125 }] };
 const swing = load(read('../lib/swingTrade.ts'));
 const scope = { market: 'us', stage: 'swing' };
 const timestamp = '2026-10-02T20:30:00Z';
@@ -141,13 +143,31 @@ test('threat identity removes repeated delivery but retains distinct job IDs eve
 test('the final swing bundle deduplicates sources while preserving signed, repeated and dissenting rows', () => {
   const generated = run();
   generated.run_jobs[0].job.response = '| STOCK | +3 | Same rationale |\n| STOCK | -3 | Same rationale |\n| STOCK | -3 | Same rationale |';
-  const result = rebalance.buildRebalanceInputBundle({ market: 'us', portfolio: null, threats: null,
+  const result = rebalance.buildRebalanceInputBundle({ market: 'us', portfolio: {
+    parse_status: 'parsed', holdings: [{ symbol: 'ABC', quantity: 0.125 }],
+  }, threats: null,
     previousClose: new Date('2026-10-02T20:00:00Z'), swingRuns: [generated, structuredClone(generated)],
   });
   assert.equal(result.match(/## Swing Trade Run #50/g)?.length, 1);
   assert.equal(result.match(/\| STOCK \| \+3 \|/g)?.length, 1);
   assert.equal(result.match(/\| STOCK \| -3 \|/g)?.length, 2);
   assert.match(result, /Bearish dissent 502/);
+});
+
+test('INDmoney rejects Explore, missing, incomplete and ambiguous holdings before rebalance', () => {
+  const valid = { parse_status: 'parsed', reported_holdings_count: 1,
+    holdings: [{ symbol: 'ABC', quantity: 0.125 }] };
+  for (const snapshot of [null, { parse_status: 'unparsed', holdings: [] },
+    { ...valid, reported_holdings_count: 2 },
+    { ...valid, holdings: [{ symbol: 'ABC', quantity: null }] },
+    { ...valid, reported_holdings_count: 2, holdings: [...valid.holdings, ...valid.holdings] }]) {
+    assert.throws(() => rebalance.buildRebalanceInputBundle({ market: 'us', portfolio: snapshot,
+      threats: null, previousClose: new Date(), swingRuns: [] }), /My US Stocks/);
+  }
+  assert.doesNotThrow(() => rebalance.assertIndmoneyHoldingsSnapshot(valid));
+  assert.doesNotThrow(() => rebalance.assertIndmoneyHoldingsSnapshot({ ...valid, parse_status: 'partial' }));
+  assert.doesNotThrow(() => rebalance.buildRebalanceInputBundle({ market: 'india', portfolio: null,
+    threats: null, previousClose: new Date(), swingRuns: [] }));
 });
 
 const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');
@@ -163,7 +183,7 @@ visit(ast);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
 const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`);
 
-async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {} } = {}) {
+async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot } = {}) {
   const created = [];
   const completed = [];
   const errors = [];
@@ -183,7 +203,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   const noop = () => {};
   const apiService = {
     getProviders: async () => [],
-    indmoneyUsPortfolioOverview: async () => ({ latest: null }),
+    indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
     indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99 }; },
     indmoneyUsThreatJob: async (id) => { threatReads.push(id); return threatOverrides[id] ?? threat(id).analysis; },
     indmoneyUsThreatsLatest: async () => ({ analysis: threat(99).analysis }),
@@ -223,6 +243,14 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   await execute('indmoneyUs');
   return { created, completed, errors, threatReads, runReads, consensusInputs, targets };
 }
+
+test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
+  const result = await executeWorkflow({ snapshot: { parse_status: 'unparsed', holdings: [] } });
+  assert.deepEqual(result.created, []);
+  assert.deepEqual(result.completed, []);
+  assert.equal(result.errors[0].stage, 'sync');
+  assert.match(result.errors[0].error, /My US Stocks/);
+});
 
 test('offline full workflow keeps six stages and independent model samples while emitting each selected source once', async () => {
   const result = await executeWorkflow();
@@ -279,7 +307,7 @@ test('manual rebalance shows actionable validation errors and blocks submit with
   const manualAst = ts.createSourceFile('manual.tsx', manualSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const extracted = manualAst.statements.filter((node) => ['normalizeError', 'buildRebalanceInputPreviews'].includes(node.name?.getText(manualAst))).map((node) => node.getText(manualAst)).join('\n');
   const { buildRebalanceInputPreviews } = load(`${extracted}\nexport { buildRebalanceInputPreviews };`, rebalance);
-  const valid = { market: 'us', portfolio: null, threats: null, previousClose: new Date('2026-10-02T20:00:00Z'), swingRuns: [run()] };
+  const valid = { market: 'us', portfolio: portfolioSnapshot, threats: null, previousClose: new Date('2026-10-02T20:00:00Z'), swingRuns: [run()] };
   const previews = buildRebalanceInputPreviews(valid);
   assert.equal(previews.error, null);
   assert.match(previews.prompt, /Bullish rationale 501/);

@@ -19,6 +19,7 @@ from app.domains.indmoney_us.schemas import (
     IndMoneyUsPortfolioSnapshotSummaryResponse,
 )
 from app.domains.indmoney_us.service import IndMoneyUsPortfolioService
+from app.domains.indmoney_us.snapshot_validation import validate_holdings_snapshot
 from app.infrastructure.database.session import get_async_db
 from app.shared.exceptions import NotFoundException
 
@@ -60,6 +61,7 @@ async def create_portfolio_snapshot(
         request.raw_text,
         captured_at=request.captured_at,
     )
+    validate_holdings_snapshot(snapshot_data)
     snapshot = await repo.create_snapshot(
         {
             **snapshot_data,
