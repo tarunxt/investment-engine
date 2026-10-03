@@ -21,10 +21,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  inferRebalanceMarketFromPrompt,
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { getAnalysisRunIdentity, isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import {
   BULLISH_SETUPS,
   BEARISH_SETUPS,
@@ -42,7 +42,7 @@ import {
   isScoreMatrixRowOutOfBounds,
   type ScoreMatrixWeightedRow,
 } from "@/lib/scoreMatrixMath";
-import { getAutoRebalanceRunDisplayLabel, getRunScanTypeLabelFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -468,10 +468,10 @@ const TECHNICAL_SCAN_ACTIVE_STATUSES = new Set([
 const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 
-const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
-const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
+const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 2;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 2;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 2;
+const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 3;
 const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
@@ -544,7 +544,7 @@ function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingT
   }
 
   runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .forEach((run) => cacheableRuns.set(run.id, run));
 
   return Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id);
@@ -2717,7 +2717,7 @@ function parseTechnicalScanResponse(
 
 export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
   const scanRows = runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
@@ -2745,7 +2745,7 @@ export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
 
 function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistoryItem[] {
   return runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
@@ -2793,7 +2793,7 @@ export function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: Stock
 
 function hasActiveTechnicalScan(runs: RunResponse[]) {
   return runs.some((run) =>
-    run.prompt?.includes(TECHNICAL_SCAN_MARKER)
+    isAnalysisRunForStage(run, "technical")
     && (
       TECHNICAL_SCAN_ACTIVE_STATUSES.has(run.status)
       || (run.run_jobs ?? []).some((link) =>
@@ -3003,7 +3003,7 @@ export function hasUsableRebalanceLlmOutput(run: RunResponse) {
 
 export function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
   return (
-    inferRebalanceMarketFromPrompt(run.prompt) === market &&
+    isAnalysisRunForStage(run, "rebalance", market) &&
     (isUsableModelOutputStatus(run.status) || hasUsableRebalanceLlmOutput(run))
   );
 }
@@ -3017,10 +3017,8 @@ function hasUsableTechnicalScanLlmOutput(run: RunResponse) {
 }
 
 function isCompletedTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
-  const prompt = run.prompt || "";
   return (
-    prompt.includes(TECHNICAL_SCAN_MARKER) &&
-    prompt.includes(market === "us" ? "Market: US equities" : "Market: India equities") &&
+    isAnalysisRunForStage(run, "technical", market) &&
     (isUsableModelOutputStatus(run.status) || hasUsableTechnicalScanLlmOutput(run))
   );
 }
@@ -3115,47 +3113,13 @@ const DASHBOARD_RECENT_RUN_GROUP_LIMIT = 6;
 const DASHBOARD_RECENT_RUN_GROUP_WINDOW_MS = 30 * 60 * 1000;
 const DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY = 6;
 
-function getDashboardSummaryMarket(
-  run: RunListItem,
-): SwingTradeMarket | null {
-  if (run.auto_rebalance_portfolio === "india") return "india";
-  if (run.auto_rebalance_portfolio === "indmoney_us") return "us";
-
-  const prompt = run.prompt_preview || "";
-  const rebalanceMarket = inferRebalanceMarketFromPrompt(prompt);
-  if (rebalanceMarket) return rebalanceMarket;
-  if (/Market:\s*US equities/i.test(prompt)) return "us";
-  if (/Market:\s*India equities/i.test(prompt)) return "india";
-  if (isRunInSwingTradeMarket(prompt, "india")) return "india";
-  if (isRunInSwingTradeMarket(prompt, "us")) return "us";
-  return null;
+function getDashboardSummaryMarket(run: RunListItem): SwingTradeMarket | null {
+  return getAnalysisRunIdentity(run).market;
 }
 
-function getDashboardSummaryStage(
-  run: RunListItem,
-): DashboardRecentRunStage | null {
-  const label = (run.auto_rebalance_label || "").toLowerCase();
-  const prompt = run.prompt_preview || "";
-  if (
-    label.includes("technical scan") ||
-    prompt.includes(TECHNICAL_SCAN_MARKER)
-  ) {
-    return "technical";
-  }
-  if (
-    label.includes("rebalance") ||
-    inferRebalanceMarketFromPrompt(prompt)
-  ) {
-    return "rebalance";
-  }
-  if (
-    label.includes("swing scan") ||
-    isRunInSwingTradeMarket(prompt, "india") ||
-    isRunInSwingTradeMarket(prompt, "us")
-  ) {
-    return "swing";
-  }
-  return null;
+function getDashboardSummaryStage(run: RunListItem): DashboardRecentRunStage | null {
+  const stage = getAnalysisRunIdentity(run).stage;
+  return stage === "threats" ? null : stage;
 }
 
 function selectLatestDashboardSummaryGroup(
@@ -3329,22 +3293,9 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
 }
 
 
-function getAutoRebalanceRunMarket(run: RunResponse): SwingTradeMarket | null {
-  if (run.auto_rebalance_portfolio === "india") return "india";
-  if (run.auto_rebalance_portfolio === "indmoney_us") return "us";
-  return null;
-}
 
 function isSwingScanRunForMarket(run: RunResponse, market: SwingTradeMarket) {
-  const metadataMarket = getAutoRebalanceRunMarket(run);
-  const isSwingScan =
-    /\(swing scan\)/i.test(run.auto_rebalance_label || "") ||
-    getRunScanTypeLabelFromPrompt(run.prompt) === "Swing Scan";
-  const isSameMarket = metadataMarket
-    ? metadataMarket === market
-    : isRunInSwingTradeMarket(run.prompt, market);
-
-  return isSwingScan && isSameMarket;
+  return isAnalysisRunForStage(run, "swing", market);
 }
 
 function getSwingScanBreakupEntriesForStock(
@@ -3395,16 +3346,31 @@ function getSwingScanBreakupEntriesForStock(
     .sort((a, b) => parseTimestampMs(b.meta.createdAt) - parseTimestampMs(a.meta.createdAt));
 }
 
+function uniqueRunJobSources(runs: RunResponse[]): RunResponse[] {
+  const seen = new Set<string>();
+  return runs.flatMap((run) => {
+    const runJobs = (run.run_jobs ?? []).filter((link) => {
+      const key = `${run.id}:${link.job_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return runJobs.length ? [{ ...run, run_jobs: runJobs }] : [];
+  });
+}
+
 export function buildConsensusRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
   portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
   allRuns: RunResponse[] = runs,
 ): StockConsensus[] {
+  const sourceRuns = uniqueRunJobSources(runs);
+  const sourceHistoryRuns = allRuns === runs ? sourceRuns : uniqueRunJobSources(allRuns);
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
-  const llmMetas = runs.flatMap(getRunJobMetas);
-  const parsedRows = runs
+  const llmMetas = sourceRuns.flatMap(getRunJobMetas);
+  const parsedRows = sourceRuns
     .flatMap(parseRunRows)
     .filter((row) => Object.values(row.cells).some((value) => value.trim()));
   const outputMetaKeys = new Set(parsedRows.map((row) => getMetaKey(row.meta)));
@@ -3455,7 +3421,7 @@ export function buildConsensusRows(
       const totalSuggestions = consensusDenominator || rows.length;
 
       const first = getRepresentativeConsensusRow(rows);
-      const swingScanEntries = getSwingScanBreakupEntriesForStock(allRuns, market, first);
+      const swingScanEntries = getSwingScanBreakupEntriesForStock(sourceHistoryRuns, market, first);
       const representative = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
@@ -6674,7 +6640,12 @@ function ActionablesInputSelectionDialog({
   );
 }
 
-function ActionablesCalculationsModal({
+function ActionablesCalculationsModal(props: Parameters<typeof OpenActionablesCalculationsModal>[0]) {
+  if (!props.open) return null;
+  return <OpenActionablesCalculationsModal {...props} />;
+}
+
+function OpenActionablesCalculationsModal({
   open,
   onClose,
   title,
@@ -7197,7 +7168,7 @@ export function buildHistoricalDashboardActionRows(
     );
 }
 
-function buildFinalActionableHistoryItems(
+export function buildFinalActionableHistoryItems(
   rows: HistoricalDashboardActionRow[],
   runs: RunResponse[],
 ): FinalActionableHistoryCreateItem[] {
@@ -7257,15 +7228,6 @@ function buildCanonicalCurrentHistoryRows(
   }));
 }
 
-async function persistFinalActionableHistoryRows(
-  rows: HistoricalDashboardActionRow[],
-  runs: RunResponse[],
-) {
-  const items = buildFinalActionableHistoryItems(rows, runs);
-  for (let index = 0; index < items.length; index += 100) {
-    await apiService.saveFinalActionableHistory({ items: items.slice(index, index + 100) });
-  }
-}
 
 function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
   return {
@@ -7710,27 +7672,9 @@ export function DashboardFinalActionablesTables() {
     if (!runs.length) return;
     writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
     writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
-    const allRows = [
-      ...buildCanonicalCurrentHistoryRows(
-        actionRowsByMarket.india,
-        runs,
-        "india",
-      ),
-      ...buildCanonicalCurrentHistoryRows(
-        actionRowsByMarket.us,
-        runs,
-        "us",
-      ),
-    ];
-    if (allRows.length) {
-      void persistFinalActionableHistoryRows(allRows, runs).catch((error) => {
-        console.warn("Failed to persist immutable final actionables history:", error);
-      });
-    }
-    void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
-      console.warn("Unable to queue legacy final actionables history backfill:", error);
-    });
-  }, [actionRowsByMarket, historicalActionRowsByMarket, runs]);
+    // Persisted history is reconstructed by the server's terminal-run hook.
+    // Display reads and Refresh must not write history or enqueue a backfill.
+  }, [historicalActionRowsByMarket, runs]);
 
   const updateFinalActionableColumnWidth = useCallback((column: FinalActionableColumnKey, width: number) => {
     setFinalActionableLayout((current) => ({
@@ -8336,20 +8280,8 @@ export function FinalActionablesConsole({
   useEffect(() => {
     if (!runs.length) return;
     writeHistoricalActionRowsCache(market, historicalActionRows);
-    const currentHistoryRows = buildCanonicalCurrentHistoryRows(
-      currentActionRows,
-      runs,
-      market,
-    );
-    if (currentHistoryRows.length) {
-      void persistFinalActionableHistoryRows(currentHistoryRows, runs).catch((error) => {
-        console.warn("Failed to persist immutable final actionables history:", error);
-      });
-    }
-    void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
-      console.warn("Unable to queue legacy final actionables history backfill:", error);
-    });
-  }, [currentActionRows, historicalActionRows, market, runs]);
+    // Keep this read path local-only; durable reconstruction belongs to workers.
+  }, [historicalActionRows, market, runs]);
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
