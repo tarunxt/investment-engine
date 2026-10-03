@@ -7330,16 +7330,6 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
     async def fake_bullpen_state():
         return _fake_polymarket_state()
 
-    async def fake_direct_state():
-        return _fake_polymarket_state(
-            running=False,
-            mode="mock",
-            doctor_ok=False,
-            doctor_message="Direct execution not configured",
-            tracked_accounts=[],
-            next_poll_at=None,
-        )
-
     auto_live_summary = BullpenAutoLiveSummary(
         state=BullpenAutoLiveState(
             running=True,
@@ -7367,33 +7357,19 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
         ),
     )
 
-    class FakeBot:
-        def __init__(self, state):
-            self._state = state
-
-        async def get_state(self):
-            return await self._state()
-
     class FakeSummaryBot:
-        async def get_summary(self):
+        async def get_dashboard_summary(self):
             return auto_live_summary
 
-    async def fake_get_bullpen_bot(user_id: int):
-        return FakeBot(fake_bullpen_state)
-
-    async def fake_get_direct_bot(user_id: int):
-        return FakeBot(fake_direct_state)
+    async def fake_read_bullpen_state(user_id: int):
+        return await fake_bullpen_state()
 
     async def fake_get_auto_live_bot(user_id: int):
         return FakeSummaryBot()
 
     monkeypatch.setattr(
-        "app.domains.trading_bots.service.polymarket_bot_manager.get_bot",
-        fake_get_bullpen_bot,
-    )
-    monkeypatch.setattr(
-        "app.domains.trading_bots.service.polymarket_direct_bot_manager.get_bot",
-        fake_get_direct_bot,
+        "app.domains.trading_bots.service.polymarket_bot_manager.read_state",
+        fake_read_bullpen_state,
     )
     monkeypatch.setattr(
         "app.domains.trading_bots.service.polymarket_auto_live_bot_manager.get_bot",
@@ -7410,7 +7386,7 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
         "bullpen-ai-auto-live",
     ]
     assert summary.cards[0].name == "Bullpen x Polymarket"
-    assert summary.cards[1].status == "not-configured"
+    assert summary.cards[1].status == "unavailable"
     assert summary.cards[2].source == "placeholder"
     assert summary.cards[3].route == "/console/trading-bots/bullpen-ai-auto-live"
 

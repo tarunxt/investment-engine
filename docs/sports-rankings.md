@@ -155,6 +155,39 @@ All endpoints require the existing authenticated backend session via the BFF.
   formats require an explicit head-to-head qualifier. Missing metadata is rejected.
   This endpoint is not wired into Bullpen trading or scan filters.
 
+### Passive read cost
+
+The catalogue selects snapshot metadata and a guarded `json_array_length(rows)` only. It
+does not transfer or deserialize every ranking payload merely to count rows.
+Participant/event memberships and source status, errors and publication metadata
+are unchanged. Competition detail still reads its complete source ranking and
+merges every participant, including explicit unranked placeholders.
+Only JSON arrays contribute ranking counts. SQL NULL, JSON null and invalid
+object/scalar payloads produce a zero catalogue count with an explicit
+unavailable status and error, retaining any previous source error text; they are
+not presented as valid empty datasets or converted into ranking entries.
+This guard does not repair malformed stored payloads or change existing detail
+validation/error behavior.
+
+Sports participant reads may reuse the complete compact index after checking the
+current export directories and every JSON/JSONL file's identity, size and
+nanosecond modification/change times. New, changed, removed and in-flight export
+records therefore invalidate reuse immediately on the next read; no time-based
+freshness window is used. The existing Universal Scan resolver still decides
+ownership, latest-completed selection and JSONL validity. Its trading consumers
+and policy are unchanged. The cache contains only participant indexes, never
+ranking metrics or trading decisions, with at most eight users and 1 MiB of
+encoded data per user. A file set exceeding 4,096 relevant files, a larger index,
+or an unstable/unreadable fingerprint uses the complete original read rather
+than truncating results. Caller changes cannot modify retained results.
+
+These are process-local read optimizations; cold reads still scan the metadata.
+Missing/invalid indexes continue to contribute no dynamic participants, while
+seed entries and explicit unavailable/pending ranking states remain visible.
+GET requests neither fetch providers nor enqueue refreshes. The synthetic offline
+profile is `backend/tests/bench_sports_rankings_passive_reads.py`; its timings
+measure local fixture work, not a proven cause of any production proxy timeout.
+
 Search includes sport/category/scope and switches the selected list when the old
 selection falls outside the filters. Groups, ratings, points and records are shown
 separately. Duplicate references to an identical source row collapse in resolution;

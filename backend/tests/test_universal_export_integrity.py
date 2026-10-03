@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -78,6 +79,32 @@ def test_owner_isolation_and_no_fallback_to_older_id(storage):
     (archive_directory() / second.rows_path.name).unlink()
     assert latest_completed_universal_export(42, export_id=second.export_id) is None
     assert latest_completed_universal_export(42, export_id=first.export_id) is not None
+
+
+@pytest.mark.parametrize("malformed", [None, [], "not metadata", 7, True])
+def test_non_object_json_artifacts_preserve_latest_owner_selection(tmp_path, monkeypatch, malformed):
+    from app.domains.trading_bots import universal_scan
+
+    monkeypatch.setattr(universal_scan, "_readable_export_directories", lambda: (tmp_path,))
+    for export_id, user_id, minute in [("older", 42, 1), ("latest", 42, 2), ("other-owner", 43, 3)]:
+        (tmp_path / f"{export_id}.json").write_text(json.dumps({
+            "ownerHash": hashlib.sha256(f"{user_id}:universal".encode()).hexdigest(),
+            "exportId": export_id, "universalSource": True, "completed": True,
+            "updatedAt": f"2026-10-03T08:{minute:02}:00+00:00", "rowsBytes": 3,
+        }))
+        (tmp_path / f"{export_id}.jsonl").write_text("{}\n")
+    (tmp_path / "latest.sports-participants.json").write_text(json.dumps(malformed))
+    (tmp_path / "malformed.json").write_text(json.dumps(malformed))
+    selected, rows = latest_completed_universal_export(42)
+    assert selected["exportId"] == "latest" and rows == tmp_path / "latest.jsonl"
+    assert latest_completed_universal_export(43)[0]["exportId"] == "other-owner"
+    assert latest_completed_universal_export(44) is None
+    assert latest_completed_universal_export(42, export_id="malformed") is None
+    assert latest_completed_universal_export(42, export_id="malformed", trusted_export_id=True) is None
+    # Ignoring non-metadata artifacts must not weaken the existing prohibition
+    # on silently choosing an older export when the newest rows are unavailable.
+    (tmp_path / "latest.jsonl").unlink()
+    assert latest_completed_universal_export(42) is None
 
 
 def test_filter_ledger_reconciles_every_source_row(storage):

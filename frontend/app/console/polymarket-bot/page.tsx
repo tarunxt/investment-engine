@@ -321,6 +321,9 @@ function getLiveCriticalBanner(
   state: PolymarketBotState,
   options?: { suppressStaleDoctorLogin?: boolean },
 ) {
+  if (state.read_source && state.read_source !== "runtime") {
+    return "Current runtime checks are unavailable.";
+  }
   const issues: string[] = [];
   const doctorMessage =
     state.live.doctor.message || "No doctor details returned.";
@@ -351,6 +354,26 @@ function getLiveCriticalBanner(
   if (issues.length === 0) return null;
 
   return issues.join(" ");
+}
+
+function getRuntimeSubtitle(state: PolymarketBotState) {
+  if (state.read_source && state.read_source !== "runtime") {
+    return "Runtime, execution mode and lock status unavailable | Saved evidence only";
+  }
+  return `${state.running ? "Running" : "Stopped"} | ${state.paused ? "Paused" : "Active"} | ${state.mode} | Bullpen real-money trading`;
+}
+
+function runtimeMetricItems(available: boolean, items: MetricItem[]): MetricItem[] {
+  return available ? items : items.map((item) => ({
+    ...item,
+    value: "Unavailable",
+    helper: "No current runtime evidence is available.",
+    tone: "default",
+  }));
+}
+
+function unavailableRedeemMessage(runtimeAvailable: boolean) {
+  return runtimeAvailable ? null : "Current claim eligibility and redeemed-wallet history are unavailable. Saved trade records do not establish current wallet status.";
 }
 
 function trackedAccountKey(value?: string | null) {
@@ -691,6 +714,9 @@ function getActionStatusMessage(
     return "Resuming proposals… new matches can be queued again.";
   }
   if (pendingAction === "update-live-limit") return "Saving live trade limit…";
+  if (state.read_source && state.read_source !== "runtime") {
+    return "Current runtime status is unavailable; showing saved evidence only.";
+  }
   if (state.running) {
     return state.paused
       ? "Bot is running, but proposals are paused."
@@ -720,6 +746,9 @@ function getSkippedBreakup(state: PolymarketBotState) {
 }
 
 function getLiveParsingStatusMessage(state: PolymarketBotState) {
+  if (state.read_source && state.read_source !== "runtime") {
+    return "Current discovery and parsing status are unavailable.";
+  }
   const source = state.live.source_status;
   if (!state.running) return "Trade parsing is idle until the bot starts.";
   if (source.last_live_read_error) {
@@ -1152,7 +1181,9 @@ function buildRedeemedTradeRows(state: PolymarketBotState): RedeemedTradeRow[] {
       (row) => `${row.marketId}::${row.outcome}`,
     ),
   );
-  const claimableRows = buildClaimableLiveRows(state, redeemedKeys);
+  const claimableRows = !state.read_source || state.read_source === "runtime"
+    ? buildClaimableLiveRows(state, redeemedKeys)
+    : [];
   const rows = [...claimableRows, ...bullpenRows, ...liveRows, ...paperRows];
 
   return rows
@@ -1518,7 +1549,6 @@ export default function PolymarketBotPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [autoDoctorRefreshing, setAutoDoctorRefreshing] = useState(false);
   const [activeCopyTradingTab, setActiveCopyTradingTab] = useState<
     "bullpen" | "polymarket"
   >("bullpen");
@@ -1603,10 +1633,6 @@ export default function PolymarketBotPage() {
     useState(0);
   const lastMutationAt = useRef(0);
   const actionInFlight = useRef(false);
-  const doctorAutoRefreshInFlight = useRef(false);
-  const lastDoctorAutoRefreshAt = useRef(0);
-  const balanceAutoRefreshInFlight = useRef(false);
-  const lastBalanceAutoRefreshAt = useRef(0);
   const deferredCopiedSearchQuery = useDeferredValue(copiedSearchQuery);
 
   useEffect(() => {
@@ -1705,104 +1731,6 @@ export default function PolymarketBotPage() {
       window.clearInterval(interval);
     };
   }, []);
-
-  useEffect(() => {
-    if (!state) return;
-    if (pendingAction !== null || actionInFlight.current) return;
-    if (state.live.doctor.ok) return;
-    if (!isBullpenLoginRequired(state.live.doctor.message, null)) return;
-
-    const now = Date.now();
-    if (doctorAutoRefreshInFlight.current) return;
-    if (now - lastDoctorAutoRefreshAt.current < STATE_REFRESH_INTERVAL_MS) return;
-
-    doctorAutoRefreshInFlight.current = true;
-    lastDoctorAutoRefreshAt.current = now;
-    setAutoDoctorRefreshing(true);
-
-    apiService
-      .polymarketLiveDoctor()
-      .then((nextState) => {
-        lastMutationAt.current = Date.now();
-        const receivedAt = Date.now();
-        setState(nextState);
-        setLastStateRefreshAt(receivedAt);
-        if (nextState.live.doctor.ok) {
-          setLastDoctorPassAt(receivedAt);
-        }
-        if (isUsableBullpenBalance(nextState.live.balance)) {
-          setLastSettledBalance((previous) =>
-            mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
-          );
-        }
-      })
-      .catch((doctorError) => {
-        setActionError(normalizeError(doctorError));
-      })
-      .finally(() => {
-        doctorAutoRefreshInFlight.current = false;
-        setAutoDoctorRefreshing(false);
-      });
-  }, [pendingAction, state]);
-
-  useEffect(() => {
-    if (!state) return;
-    if (pendingAction !== null || actionInFlight.current) return;
-    if (isUsableBullpenBalance(state.live.balance)) return;
-    if (
-      !isBullpenBalanceUnrefreshed(
-        state.live.balance.message,
-        state.live.balance.status,
-      )
-    ) {
-      return;
-    }
-    if (
-      isBullpenLoginRequired(
-        state.live.balance.message,
-        state.live.balance.status,
-      ) &&
-      !hasActiveBullpenDoctorSession(
-        state.live.doctor,
-        state.live.doctor.bullpen_jwt_seconds_remaining,
-      )
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    if (balanceAutoRefreshInFlight.current) return;
-    if (now - lastBalanceAutoRefreshAt.current < STATE_REFRESH_INTERVAL_MS) return;
-
-    balanceAutoRefreshInFlight.current = true;
-    actionInFlight.current = true;
-    lastBalanceAutoRefreshAt.current = now;
-    lastMutationAt.current = now;
-
-    apiService
-      .polymarketLiveBalanceRefresh()
-      .then((nextState) => {
-        lastMutationAt.current = Date.now();
-        const receivedAt = Date.now();
-        setState(nextState);
-        setLastStateRefreshAt(receivedAt);
-        if (nextState.live.doctor.ok) {
-          setLastDoctorPassAt(receivedAt);
-        }
-        if (isUsableBullpenBalance(nextState.live.balance)) {
-          setLastSettledBalance((previous) =>
-            mergeBullpenBalanceSnapshot(previous, nextState.live.balance),
-          );
-        }
-      })
-      .catch((balanceError) => {
-        setActionError(normalizeError(balanceError));
-      })
-      .finally(() => {
-        balanceAutoRefreshInFlight.current = false;
-        actionInFlight.current = false;
-      });
-  }, [pendingAction, state]);
 
   async function runAction(
     label: string,
@@ -2250,13 +2178,14 @@ export default function PolymarketBotPage() {
     );
   }
 
-  const subtitle = `${state.running ? "Running" : "Stopped"} | ${state.paused ? "Paused" : "Active"} | ${state.mode} | Bullpen real-money trading`;
+  const runtimeAvailable = !state.read_source || state.read_source === "runtime";
+  const subtitle = getRuntimeSubtitle(state);
   const manualInvalid = state.live.source_status.manual_wallets_invalid;
   const isActionPending = pendingAction !== null;
   const startDisabled = state.running || isActionPending;
-  const stopDisabled = !state.running || isActionPending;
-  const stoppedWarning = !state.running
-    ? "Warning: Bot is Stopped. It will only stay active after Start succeeds; press Start now if you did not intentionally stop it. If it stops while showing Running, the backend watchdog automatically restarts the poller and logs a warning in Recent Bullpen Activity."
+  const stopDisabled = (runtimeAvailable && !state.running) || isActionPending;
+  const stoppedWarning = runtimeAvailable && !state.running
+    ? "Bot is stopped. Press Start to begin polling tracked traders."
     : null;
   const actionStatusMessage = getActionStatusMessage(pendingAction, state);
   const pendingActionDetail = getPendingActionDetail(pendingAction);
@@ -2294,7 +2223,9 @@ export default function PolymarketBotPage() {
   const pendingActionLabel = getActionLabel(pendingAction);
 
   const visibleBalance =
-    state.live.balance.status === "loading" && lastSettledBalance
+    !runtimeAvailable
+      ? state.live.balance
+      : state.live.balance.status === "loading" && lastSettledBalance
       ? lastSettledBalance
       : mergeBullpenBalanceSnapshot(lastSettledBalance, state.live.balance);
   const hasUsableVisibleBalance = isUsableBullpenBalance(visibleBalance);
@@ -2388,7 +2319,9 @@ export default function PolymarketBotPage() {
   );
   const claimableRedeemedCount = claimPendingTradeRows.length;
   const redeemStatusMessage =
-    pendingAction === "redeem"
+    !runtimeAvailable && pendingAction !== "redeem" && pendingAction !== "redeem-refresh"
+      ? unavailableRedeemMessage(runtimeAvailable)
+      : pendingAction === "redeem"
       ? getRedeemStatusMessage(
           pendingActionElapsedSeconds,
           claimableRedeemedCount,
@@ -2432,7 +2365,7 @@ export default function PolymarketBotPage() {
   const botStatusItems: MetricItem[] = [
     {
       label: "Bot Status",
-      value: state.running ? "RUNNING" : "STOPPED",
+      value: !runtimeAvailable ? "UNAVAILABLE" : state.running ? "RUNNING" : "STOPPED",
       tone: state.running ? "positive" : "negative",
     },
     { label: "Mode", value: state.mode },
@@ -2677,6 +2610,9 @@ export default function PolymarketBotPage() {
             ) : null}
           </div>
           <p className="text-sm text-slate-500">{subtitle}</p>
+          {state.read_message ? (
+            <p role="status" className="mt-2 text-sm text-amber-800">{state.read_message}</p>
+          ) : null}
         </div>
         {activeCopyTradingTab === "bullpen" ? (
           <div className="flex flex-wrap gap-2 xl:justify-end">
@@ -3019,14 +2955,14 @@ export default function PolymarketBotPage() {
                     size="sm"
                     variant="outline"
                     className="rounded-full border-amber-400 bg-white px-5 text-amber-950 hover:bg-amber-100"
-                    disabled={pendingAction !== null || autoDoctorRefreshing}
+                    disabled={pendingAction !== null}
                     onClick={() =>
                       runAction("doctor", () =>
                         apiService.polymarketLiveDoctor(),
                       )
                     }
                   >
-                    {pendingAction === "doctor" || autoDoctorRefreshing ? (
+                    {pendingAction === "doctor" ? (
                       <Loader2
                         className="mr-2 size-3.5 animate-spin"
                         aria-hidden="true"
@@ -3177,15 +3113,15 @@ export default function PolymarketBotPage() {
                     </div>
                     <div className="mt-2 flex items-center gap-2 text-xl font-semibold">
                       <Activity className="size-4 text-sky-300" />
-                      {activeCopiedEventGroups.length}
+                      {runtimeAvailable ? activeCopiedEventGroups.length : "Unavailable"}
                     </div>
                   </div>
                   <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
-                      Live Trades Today
+                      {runtimeAvailable ? "Live Trades Today" : "Recorded Live Trades Today"}
                     </div>
                     <div className="mt-2 text-xl font-semibold">
-                      {state.live.live_trades_today}
+                      {state.read_source === "unavailable" ? "Unavailable" : state.live.live_trades_today}
                     </div>
                   </div>
                   <div className="rounded-[20px] border border-white/10 bg-white/10 px-4 py-3">
@@ -3829,11 +3765,11 @@ export default function PolymarketBotPage() {
                       {
                         key: "claim-pending" as const,
                         label: "Claim Pending",
-                        count: claimPendingTradeRows.length,
+                        count: runtimeAvailable ? claimPendingTradeRows.length : "Unavailable",
                       },
                       {
                         key: "redeemed" as const,
-                        label: "Redeemed",
+                        label: runtimeAvailable ? "Redeemed" : "Saved closed trades",
                         count: previouslyRedeemedTradeRows.length,
                       },
                     ].map((tab) => {
@@ -3892,7 +3828,9 @@ export default function PolymarketBotPage() {
                               className="px-4 py-6 text-sm text-slate-500"
                               colSpan={10}
                             >
-                              {redeemedTradesTab === "claim-pending"
+                              {!runtimeAvailable
+                                ? unavailableRedeemMessage(runtimeAvailable)
+                                : redeemedTradesTab === "claim-pending"
                                 ? "No resolved winning positions are currently available to claim."
                                 : "No previously redeemed trades are visible yet."}
                             </td>
@@ -4354,7 +4292,7 @@ export default function PolymarketBotPage() {
                 </CardHeader>
                 <CardContent className="pt-4">
                   <MetricGrid
-                    items={botStatusItems}
+                    items={runtimeMetricItems(runtimeAvailable, botStatusItems)}
                     columns="md:grid-cols-2 xl:grid-cols-5"
                   />
                 </CardContent>
@@ -4365,13 +4303,14 @@ export default function PolymarketBotPage() {
                     Live Trading Control
                   </CardTitle>
                   <CardDescription>
-                    Sandbox execution is disabled. Real Polymarket orders route
-                    through Bullpen after live guards pass.
+                    {runtimeAvailable
+                      ? "Sandbox execution is disabled. Real Polymarket orders route through Bullpen after live guards pass."
+                      : "Current execution and lock status are unavailable. Controls run only when selected."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-4">
                   <MetricGrid
-                    items={liveControlItems}
+                    items={runtimeMetricItems(runtimeAvailable, liveControlItems)}
                     columns="md:grid-cols-2 xl:grid-cols-4"
                   />
 
@@ -4389,7 +4328,7 @@ export default function PolymarketBotPage() {
                         )
                       }
                     >
-                      {state.live.unlocked ? "Lock live" : "Unlock live"}
+                      {!runtimeAvailable ? "Request live unlock" : state.live.unlocked ? "Lock live" : "Unlock live"}
                     </Button>
                     <Button
                       size="sm"
@@ -4483,21 +4422,10 @@ export default function PolymarketBotPage() {
                           backend responds.
                         </p>
                       </div>
-                    ) : autoDoctorRefreshing ? (
-                      <div className="flex items-center gap-2 font-semibold text-slate-950">
-                        <Loader2
-                          className="size-4 animate-spin text-sky-600"
-                          aria-hidden="true"
-                        />
-                        Auto-refreshing Bullpen doctor after login-required
-                        status…
-                      </div>
                     ) : (
                       <p>
                         No control action is running. If you just completed
-                        Bullpen login, the page now automatically retries the
-                        doctor check; you can also click Refresh Doctor
-                        manually.
+                        Bullpen login, click Refresh Doctor to check the session.
                       </p>
                     )}
                   </div>
@@ -4516,7 +4444,7 @@ export default function PolymarketBotPage() {
                 </CardHeader>
                 <CardContent className="space-y-4 pt-4">
                   <MetricGrid
-                    items={discoveryItems}
+                    items={runtimeMetricItems(runtimeAvailable, discoveryItems)}
                     columns="md:grid-cols-2 xl:grid-cols-4"
                   />
                   <div className="rounded-[20px] border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
@@ -4545,7 +4473,7 @@ export default function PolymarketBotPage() {
                 </CardHeader>
                 <CardContent className="pt-4">
                   <MetricGrid
-                    items={liveSourceItems}
+                    items={runtimeMetricItems(runtimeAvailable, liveSourceItems)}
                     columns="md:grid-cols-2 xl:grid-cols-4"
                   />
                 </CardContent>
@@ -4586,9 +4514,11 @@ export default function PolymarketBotPage() {
                     <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                       Environment wallets
                     </div>
-                    <ManualWalletsTable
-                      wallets={state.live.source_status.manual_tracked_wallets}
-                    />
+                    {runtimeAvailable ? (
+                      <ManualWalletsTable wallets={state.live.source_status.manual_tracked_wallets} />
+                    ) : (
+                      <p className="text-sm text-slate-500">Current discovered wallet evidence is unavailable.</p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -5085,8 +5015,9 @@ export default function PolymarketBotPage() {
                     Skipped detail breakup
                   </h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Last poll skipped {skippedBreakup.total} source trades
-                    across filter, limit, duplicate, and uncategorized buckets.
+                    {runtimeAvailable
+                      ? `Last poll skipped ${skippedBreakup.total} source trades across filter, limit, duplicate, and uncategorized buckets.`
+                      : "Current poll and skip counts are unavailable."}
                   </p>
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -5113,7 +5044,7 @@ export default function PolymarketBotPage() {
                         {item.label}
                       </div>
                       <div className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">
-                        {item.value}
+                        {runtimeAvailable ? item.value : "Unavailable"}
                       </div>
                     </div>
                   ))}

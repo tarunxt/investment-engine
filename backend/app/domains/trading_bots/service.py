@@ -10,7 +10,6 @@ from app.domains.polymarket_auto_live.bot import (
 )
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
 from app.domains.polymarket_direct.schemas import PolymarketBotState as DirectPolymarketState
-from app.domains.polymarket_direct.service import polymarket_direct_bot_manager
 from app.domains.trading_bots.schemas import (
     TradingBotCardSummary,
     TradingBotGuardrail,
@@ -129,11 +128,33 @@ def build_guardrails_summary(guardrails: list[TradingBotGuardrail]) -> str:
     )
 
 
+def build_unavailable_polymarket_card(bot_id: str, note: str) -> TradingBotCardSummary:
+    bullpen = bot_id == "bullpen-x-polymarket"
+    return TradingBotCardSummary(
+        id=bot_id,
+        name="Bullpen x Polymarket" if bullpen else "Polymarket Direct",
+        route="/console/polymarket-bot" if bullpen else "/console/polymarket-direct-bot",
+        status="unavailable",
+        mode="unknown",
+        guardrails_summary="Current runtime guardrails are unavailable.",
+        strategy_summary=(
+            "Copies eligible tracked trader activity after execution guardrails pass."
+        ),
+        risk_summary="Current execution status cannot be established from this overview.",
+        note=note,
+        source="api",
+    )
+
+
 def build_polymarket_card(
     state: BullpenPolymarketState | DirectPolymarketState,
     *,
     bot_id: str,
 ) -> TradingBotCardSummary:
+    if getattr(state, "read_source", "runtime") != "runtime":
+        return build_unavailable_polymarket_card(
+            bot_id, state.read_message or "Current runtime status is unavailable.",
+        )
     is_bullpen_variant = bot_id == "bullpen-x-polymarket"
     route = "/console/polymarket-bot" if is_bullpen_variant else "/console/polymarket-direct-bot"
     invested = round_money(
@@ -272,7 +293,7 @@ def build_bullpen_ai_placeholder_card() -> TradingBotCardSummary:
         id="bullpen-x-ai",
         name="Bullpen x AI",
         route="/console/bullpen-ai",
-        status="stopped",
+        status="unavailable",
         mode="analysis-only",
         invested_usd=None,
         current_value_usd=None,
@@ -356,74 +377,35 @@ async def build_trading_bots_summary(user_id: int) -> TradingBotsSummaryResponse
     cards: list[TradingBotCardSummary] = []
 
     try:
-        bullpen_bot = await polymarket_bot_manager.get_bot(user_id)
         cards.append(
             build_polymarket_card(
-                await bullpen_bot.get_state(),
+                await polymarket_bot_manager.read_state(user_id),
                 bot_id="bullpen-x-polymarket",
             )
         )
     except Exception as exc:
-        cards.append(
-            TradingBotCardSummary(
-                id="bullpen-x-polymarket",
-                name="Bullpen x Polymarket",
-                route="/console/polymarket-bot",
-                status="error",
-                mode="paper",
-                guardrails_summary="Unable to load guardrails right now.",
-                strategy_summary=(
-                    "Copies eligible Bullpen trader activity into Polymarket positions after live-read filters, exposure checks, and execution guardrails pass."
-                ),
-                risk_summary=(
-                    "Copied trades can arrive late, liquidity can disappear fast, and session issues can delay exits."
-                ),
-                note=str(exc),
-                source="fallback",
-            )
-        )
+        cards.append(build_unavailable_polymarket_card("bullpen-x-polymarket", str(exc)))
 
-    try:
-        direct_bot = await polymarket_direct_bot_manager.get_bot(user_id)
-        cards.append(
-            build_polymarket_card(
-                await direct_bot.get_state(),
-                bot_id="polymarket-direct",
-            )
-        )
-    except Exception as exc:
-        cards.append(
-            TradingBotCardSummary(
-                id="polymarket-direct",
-                name="Polymarket Direct",
-                route="/console/polymarket-direct-bot",
-                status="error",
-                mode="paper",
-                guardrails_summary="Unable to load guardrails right now.",
-                strategy_summary=(
-                    "Mirrors configured trader activity through the direct execution workflow with live-read discovery, live controls, and execution checks."
-                ),
-                risk_summary=(
-                    "Direct execution depends on account readiness, liquidity, and correct market mapping under live conditions."
-                ),
-                note=str(exc),
-                source="fallback",
-            )
-        )
+    # Direct has no passive projection yet. Even warm get_state() can restore
+    # a poller, so an overview must not enter that operational path.
+    cards.append(build_unavailable_polymarket_card(
+        "polymarket-direct",
+        "Direct runtime status is unavailable in this overview; no runtime was initialized.",
+    ))
 
     cards.append(build_bullpen_ai_placeholder_card())
 
     try:
         auto_live_bot = await polymarket_auto_live_bot_manager.get_bot(user_id)
-        cards.append(build_auto_live_card_from_summary(await auto_live_bot.get_summary()))
+        cards.append(build_auto_live_card_from_summary(await auto_live_bot.get_dashboard_summary()))
     except Exception as exc:
         cards.append(
             TradingBotCardSummary(
                 id="bullpen-ai-auto-live",
                 name="Bullpen AI Auto-Live",
                 route="/console/trading-bots/bullpen-ai-auto-live",
-                status="error",
-                mode="dry-run",
+                status="unavailable",
+                mode="unknown",
                 guardrails_summary=(
                     "Sizing, exposure, evidence, disagreement, and loss-stop guardrails are scaffolded and waiting for live config."
                 ),

@@ -355,6 +355,10 @@ export function getTradingBotWarnings(
   if (bot.id === "bullpen-x-polymarket" || bot.id === "polymarket-direct") {
     const state = details[bot.id];
     if (!state) return warnings;
+    if (state.read_source && state.read_source !== "runtime") {
+      pushWarning(warnings, state.read_message || "Current runtime status is unavailable.");
+      return warnings;
+    }
 
     if (state.live.emergency_stopped) {
       pushWarning(warnings, "Emergency stop is active.");
@@ -443,6 +447,9 @@ export function getTradingBotDecisionItems(
 }
 
 export function getTradingBotExecutionModeDetail(bot: TradingBotSummary) {
+  if (bot.mode === "unknown") {
+    return "Current execution mode is unavailable. No execution posture can be inferred from this overview.";
+  }
   if (bot.id === "bullpen-x-ai") {
     return "Analysis-only mode. It scans, scores, and supports manual trade decisions, but does not auto-execute live orders from this workflow.";
   }
@@ -474,6 +481,14 @@ export function getTradingBotRiskStatus(
   bot: TradingBotSummary,
   details: TradingBotsOverviewDetails,
 ): TradingBotRiskStatus {
+  if (bot.status === "unavailable") {
+    return {
+      label: "Unknown",
+      detail: bot.note || "Current runtime status and guardrails are unavailable.",
+      tone: "warning",
+      score: 70,
+    };
+  }
   const warnings = getTradingBotWarnings(bot, details);
   const hasCriticalWarning = warnings.some((warning) =>
     hasText(warning, [
@@ -602,7 +617,7 @@ export function buildTradingBotsPortfolioSummary(
     ),
     totalTradesToday: sumNumbers(bots.map((bot) => bot.tradesToday ?? null)),
     botsRunning: bots.filter((bot) => bot.status === "running").length,
-    botsPausedStopped: bots.filter((bot) => bot.status !== "running").length,
+    botsPausedStopped: bots.filter((bot) => bot.status === "paused" || bot.status === "stopped").length,
     liveExposure,
     dryRunExposure,
     highestRiskBot: highestRiskEntry?.bot ?? null,
@@ -618,8 +633,21 @@ export function buildTradingBotsLiveWarnings(
   const warnings: TradingBotsLiveWarning[] = [];
   const botNameById = new Map(bots.map((bot) => [bot.id, bot.name]));
 
+  for (const id of ["bullpen-x-polymarket", "polymarket-direct"] as const) {
+    const state = details[id];
+    if (state?.read_source && state.read_source !== "runtime") {
+      warnings.push({
+        key: `${id}-runtime-unavailable`, botId: id,
+        botName: botNameById.get(id) || id,
+        label: "Runtime unavailable",
+        detail: state.read_message || "Only saved evidence is available.",
+        tone: "warning",
+      });
+    }
+  }
+
   const bullpenState = details["bullpen-x-polymarket"];
-  if (bullpenState) {
+  if (bullpenState && (!bullpenState.read_source || bullpenState.read_source === "runtime")) {
     if (bullpenState.live.emergency_stopped) {
       warnings.push({
         key: "bullpen-emergency-stop",
@@ -677,7 +705,7 @@ export function buildTradingBotsLiveWarnings(
   }
 
   const directState = details["polymarket-direct"];
-  if (directState) {
+  if (directState && (!directState.read_source || directState.read_source === "runtime")) {
     if (directState.live.emergency_stopped) {
       warnings.push({
         key: "direct-emergency-stop",

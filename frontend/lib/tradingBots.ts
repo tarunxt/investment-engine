@@ -224,8 +224,8 @@ function getBaseTradingBotSummary(
         name: "Bullpen x Polymarket",
         href: URLs.routes.console.polymarketBot(),
         detailsHref: URLs.routes.console.polymarketBot(),
-        status: "stopped",
-        mode: "paper",
+        status: "unavailable",
+        mode: "unknown",
         moneyInvested: null,
         currentValue: null,
         profitLoss: null,
@@ -250,8 +250,8 @@ function getBaseTradingBotSummary(
         name: "Polymarket Direct",
         href: URLs.routes.console.polymarketDirectBot(),
         detailsHref: URLs.routes.console.polymarketDirectBot(),
-        status: "stopped",
-        mode: "paper",
+        status: "unavailable",
+        mode: "unknown",
         moneyInvested: null,
         currentValue: null,
         profitLoss: null,
@@ -276,7 +276,7 @@ function getBaseTradingBotSummary(
         name: "Bullpen x AI",
         href: URLs.routes.console.bullpenAi(),
         detailsHref: URLs.routes.console.bullpenAi(),
-        status: "stopped",
+        status: "unavailable",
         mode: "analysis-only",
         moneyInvested: null,
         currentValue: null,
@@ -303,8 +303,8 @@ function getBaseTradingBotSummary(
         name: "Bullpen AI Auto-Live",
         href: URLs.routes.console.bullpenAiAutoLive(),
         detailsHref: URLs.routes.console.bullpenAiAutoLive(),
-        status: "not-configured",
-        mode: "dry-run",
+        status: "unavailable",
+        mode: "unknown",
         moneyInvested: null,
         currentValue: null,
         profitLoss: null,
@@ -479,6 +479,11 @@ export function buildPolymarketTradingBotSummary(
   id: "bullpen-x-polymarket" | "polymarket-direct",
   state: PolymarketBotState,
 ): TradingBotSummary {
+  if (state.read_source && state.read_source !== "runtime") {
+    return buildUnavailableTradingBotSummary(
+      id, state.read_message || "Current runtime status is unavailable.",
+    );
+  }
   const isBullpenVariant = id === "bullpen-x-polymarket";
   const variant: PolymarketSummaryVariant = isBullpenVariant ? "bullpen" : "direct";
   const invested = roundCurrency(
@@ -695,7 +700,10 @@ export function buildUnavailableTradingBotSummary(
 ): TradingBotSummary {
   return {
     ...getBaseTradingBotSummary(id),
-    status: "error",
+    status: "unavailable",
+    mode: "unknown",
+    guardrailsSummary: "Current runtime guardrails are unavailable.",
+    guardrails: [],
     note,
     source: "fallback",
   };

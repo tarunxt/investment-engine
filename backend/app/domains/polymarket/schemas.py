@@ -475,6 +475,9 @@ class PolymarketLiveControlState(BaseModel):
 
 
 class PolymarketBotState(BaseModel):
+    # A cold display projection cannot establish this process's runtime state.
+    read_source: Literal["runtime", "persisted", "unavailable"] = "runtime"
+    read_message: str | None = None
     running: bool
     paused: bool
     mode: BotMode
@@ -497,6 +500,8 @@ class PolymarketBotState(BaseModel):
 
 
 class PolymarketHistoryResponse(BaseModel):
+    read_source: Literal["runtime", "persisted", "unavailable"] = "runtime"
+    read_message: str | None = None
     paper_trades: list[PolymarketPaperTrade] = Field(default_factory=list)
     live_decisions: list[PolymarketLiveTradeDecision] = Field(default_factory=list)
     redeemed_trades: list[PolymarketBullpenRedeemedTrade] = Field(default_factory=list)

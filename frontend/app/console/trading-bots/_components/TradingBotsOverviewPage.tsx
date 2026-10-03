@@ -19,10 +19,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
 import {
   buildBullpenAiAutoLiveTradingBotSummary,
-  buildBullpenAiTradingBotSummary,
   buildPolymarketTradingBotSummary,
   buildTradingBotsOverviewShell,
   mergeTradingBotsOverview,
@@ -46,10 +44,9 @@ import {
   type TradingBotsOverviewDetails,
 } from "./tradingBotsOverviewData";
 
-const OVERVIEW_CACHE_KEY = "investment-engine:trading-bots-overview:v2";
+const OVERVIEW_CACHE_KEY = "investment-engine:trading-bots-overview:v3";
 const PREFERRED_OVERVIEW_TIMEOUT_MS = 2_000;
 const FAST_BOT_TIMEOUT_MS = 2_500;
-const BULLPEN_AI_TIMEOUT_MS = 2_500;
 const AUTO_LIVE_TIMEOUT_MS = 2_500;
 const INITIAL_OVERVIEW = buildTradingBotsOverviewShell(
   "Loading latest trading bot status in the background.",
@@ -62,6 +59,7 @@ const INITIAL_DETAILS: TradingBotsOverviewDetails = {
 };
 
 const STATUS_LABELS: Record<TradingBotSummary["status"], string> = {
+  unavailable: "Unavailable",
   running: "Running",
   paused: "Paused",
   stopped: "Stopped",
@@ -70,6 +68,7 @@ const STATUS_LABELS: Record<TradingBotSummary["status"], string> = {
 };
 
 const MODE_LABELS: Record<TradingBotSummary["mode"], string> = {
+  unknown: "Unknown",
   paper: "Paper",
   "live-read": "Live-read",
   "live-trading": "Live-trading",
@@ -361,35 +360,6 @@ function withTimeout<T>(
       },
     );
   });
-}
-
-async function fetchBullpenAiPositions(timeoutMs = BULLPEN_AI_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timerId = window.setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch("/api/bullpen-ai/positions", {
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    const payload = (await response.json()) as BullpenPositionsResponse;
-
-    if (!response.ok) {
-      throw new Error(
-        payload.error || "Unable to load Bullpen x AI position data right now.",
-      );
-    }
-
-    return payload;
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Bullpen x AI positions timed out after ${timeoutMs}ms.`);
-    }
-
-    throw error;
-  } finally {
-    window.clearTimeout(timerId);
-  }
 }
 
 function MetricTile({
@@ -839,50 +809,6 @@ export function TradingBotsOverviewPage() {
                     "bullpen-x-polymarket",
                     state,
                   ),
-                ),
-              );
-            });
-          })
-          .catch((error) => {
-            if (!isTimeoutError(error)) {
-              errors.push(normalizeError(error));
-            }
-          }),
-        withTimeout(
-          apiService.polymarketDirectState(),
-          FAST_BOT_TIMEOUT_MS,
-          "Polymarket Direct state",
-        )
-          .then((state) => {
-            startTransition(() => {
-              setDetails((current) => ({
-                ...current,
-                "polymarket-direct": state,
-              }));
-              setOverview((current) =>
-                upsertBotSummary(
-                  current,
-                  buildPolymarketTradingBotSummary("polymarket-direct", state),
-                ),
-              );
-            });
-          })
-          .catch((error) => {
-            if (!isTimeoutError(error)) {
-              errors.push(normalizeError(error));
-            }
-          }),
-        fetchBullpenAiPositions()
-          .then((payload) => {
-            startTransition(() => {
-              setDetails((current) => ({
-                ...current,
-                "bullpen-x-ai": payload,
-              }));
-              setOverview((current) =>
-                upsertBotSummary(
-                  current,
-                  buildBullpenAiTradingBotSummary(payload),
                 ),
               );
             });

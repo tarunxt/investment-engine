@@ -692,11 +692,11 @@ class PolymarketPaperCopyBot:
         finally:
             self._lock.release()
 
-    def get_state_snapshot(self) -> PolymarketBotState:
-        return self._build_state_unlocked()
+    def get_state_snapshot(self, *, restore_poller: bool = True) -> PolymarketBotState:
+        return self._build_state_unlocked(restore_poller=restore_poller)
 
-    def _build_state_unlocked(self) -> PolymarketBotState:
-        if self.running and (self._poll_task is None or self._poll_task.done()):
+    def _build_state_unlocked(self, *, restore_poller: bool = True) -> PolymarketBotState:
+        if restore_poller and self.running and (self._poll_task is None or self._poll_task.done()):
             self._add_activity(
                 "Warning: Bot poller stopped automatically; restarting it now."
             )
