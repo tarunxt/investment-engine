@@ -59,6 +59,7 @@ import {
 } from "./dashboardEvents";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
+  assertIndmoneyHoldingsSnapshot,
   buildRebalanceInputBundle,
   buildRebalancePrompt,
   ensureRebalanceFlowMarker,
@@ -7611,6 +7612,7 @@ ${zerodhaExecutionMode === "direct_market"
               await apiService.indmoneyUsCreatePortfolioSnapshot(
                 indmoneyPayload,
               );
+            assertIndmoneyHoldingsSnapshot(snapshot);
             markCompleted(portfolio, "sync", {
               completedAt: snapshot.captured_at,
               runStatus: snapshot.parse_status,
@@ -7621,6 +7623,7 @@ ${zerodhaExecutionMode === "direct_market"
               "IndMoney portfolio overview",
               () => cancelRequestedRef.current,
             );
+            assertIndmoneyHoldingsSnapshot(overview.latest);
             markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
               runStatus: overview.latest?.parse_status ?? "last snapshot",
@@ -8226,12 +8229,14 @@ ${zerodhaExecutionMode === "direct_market"
         } else if (payload) {
           const snapshot =
             await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
+          assertIndmoneyHoldingsSnapshot(snapshot);
           markCompleted(portfolio, "sync", {
             completedAt: snapshot.captured_at,
             runStatus: snapshot.parse_status,
           });
         } else {
           const overview = await apiService.indmoneyUsPortfolioOverview();
+          assertIndmoneyHoldingsSnapshot(overview.latest);
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
             runStatus: overview.latest?.parse_status ?? "last snapshot",

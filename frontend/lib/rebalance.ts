@@ -16,6 +16,24 @@ type PortfolioSnapshot =
   | null;
 type ThreatAnalysis = ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
 
+export function assertIndmoneyHoldingsSnapshot(snapshot: IndMoneyUsPortfolioSnapshotDetail | null) {
+  const instruction = "Open INDmoney > My US Stocks and paste the complete Current Holdings section, including quantities. The Explore page is not a portfolio snapshot.";
+  if (!snapshot?.holdings.length || snapshot.parse_status === "unparsed") {
+    throw new Error(`No INDmoney holdings could be parsed. ${instruction}`);
+  }
+  if (snapshot.reported_holdings_count != null && snapshot.reported_holdings_count !== snapshot.holdings.length) {
+    throw new Error(`The INDmoney holdings snapshot is incomplete. ${instruction}`);
+  }
+  const symbols = new Set<string>();
+  for (const holding of snapshot.holdings) {
+    const symbol = holding.symbol.trim().toUpperCase();
+    if (!symbol || symbols.has(symbol) || typeof holding.quantity !== "number" || !Number.isFinite(holding.quantity) || holding.quantity < 0) {
+      throw new Error(`INDmoney holdings have missing quantities or ambiguous symbols. ${instruction}`);
+    }
+    symbols.add(symbol);
+  }
+}
+
 const SWING_COLUMN_LEGEND = [
   "LLM=LLM Name + Model",
   "Ex=Exchange Symbol",
@@ -611,6 +629,7 @@ export function buildRebalanceInputBundle({
   previousClose: Date;
   swingDisplayMode?: "full" | "summary";
 }) {
+  if (market === "us") assertIndmoneyHoldingsSnapshot(portfolio as IndMoneyUsPortfolioSnapshotDetail | null);
   const copy = MARKET_COPY[market];
   const uniqueSwingRuns = deduplicateStageRunInputs(swingRuns, { market, stage: "swing" });
   return `# Inputs considered at current time
