@@ -19,6 +19,31 @@ test('500 and 504 reads recover with bounded sequential backoff', async () => {
   assert.ok(calls.every(c => !c.options.method && c.options.cache === 'no-store'));
 });
 
+test('summary reads preserve the opt-in query through bounded retries', async () => {
+  const calls = [], pauses = [], controller = new AbortController();
+  const card = { id: 'nhl', participants: [{ name: 'Full team name', aliases: ['Full alias'] }], ranked_count: 32 };
+  const result = await readRankingJson('?view=summary', controller.signal, async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ competitions: [card] }), { status: calls.length < 3 ? 504 : 200 });
+  }, async ms => pauses.push(ms));
+  assert.deepEqual(result.competitions, [card]);
+  assert.deepEqual(pauses, [1500, 3000]);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(call => call.url === '/backend-api/api/sports-rankings?view=summary'));
+  assert.ok(calls.every(call => !call.options.method && call.options.cache === 'no-store'));
+  controller.abort();
+  assert.ok(calls.every(call => call.options.signal.aborted));
+});
+
+test('aborting a summary read cancels remaining retries', async () => {
+  const controller = new AbortController(), urls = [];
+  await assert.rejects(readRankingJson('?view=summary', controller.signal, async url => {
+    urls.push(url);
+    return new Response('{}', { status: 503 });
+  }, async () => controller.abort()), { name: 'AbortError' });
+  assert.deepEqual(urls, ['/backend-api/api/sports-rankings?view=summary']);
+});
+
 test('outage retries are capped; 401 and permanent failures are never retried', async () => {
   for (const [status, expected] of [[503, 3], [401, 1], [403, 1]]) {
     let calls = 0;
