@@ -1108,7 +1108,10 @@ class apiServiceClass implements IApiService {
   }
 
   getRun(id: number, options?: ApiRequestControl): Promise<RunResponse> {
-    return this.get<RunResponse>(URLs.runs.get(id), options);
+    return this.get<RunResponse>(URLs.runs.get(id), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+      ...options,
+    });
   }
 
   cancelRun(id: number): Promise<RunResponse> {
@@ -1146,7 +1149,10 @@ class apiServiceClass implements IApiService {
     if (prompt?.trim()) qs.set("prompt", prompt.trim());
     const query = qs.toString();
     const url = `${URLs.providers.list()}${query ? `?${query}` : ""}`;
-    return this.get<ProviderInfo[]>(url, { signal });
+    return this.get<ProviderInfo[]>(url, {
+      signal,
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   getApiUsageSummary(params?: {

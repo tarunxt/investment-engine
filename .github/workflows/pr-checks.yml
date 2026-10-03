@@ -57,6 +57,8 @@ jobs:
           backend/tests/test_dashboard_summary.py
           backend/tests/test_indmoney_us_parser.py
           backend/tests/test_portfolio_analysis_read_projection.py
+          backend/tests/test_cost_dashboard_cache.py
+          backend/tests/test_cost_drivers_router.py
           backend/tests/test_trade_analysis_display.py
           backend/tests/test_universal_scan_auto_run.py
           backend/tests/test_universal_export_integrity.py
@@ -72,6 +74,7 @@ jobs:
           backend/tests/test_bullpen_trend_snapshot.py
           backend/tests/test_polymarket_auto_live_router.py
           backend/tests/test_polymarket_auto_live_console_projection.py
+          backend/tests/test_polymarket_auto_live_history_pagination.py
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
