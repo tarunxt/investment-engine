@@ -199,6 +199,12 @@ def write_participant_index(
 
 def load_participant_index(user_id: int) -> dict[str, dict[str, Any]]:
     """Load the latest completed user's compact index without scanning JSONL."""
+    from .participant_read_cache import load_with_export_reuse
+
+    return load_with_export_reuse(user_id, _load_participant_index)
+
+
+def _load_participant_index(user_id: int) -> dict[str, dict[str, Any]]:
     from app.domains.trading_bots.universal_scan import latest_completed_universal_export
 
     resolved = latest_completed_universal_export(user_id)
@@ -210,7 +216,7 @@ def load_participant_index(user_id: int) -> dict[str, dict[str, Any]]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if payload.get("schema_version") not in (1, INDEX_SCHEMA_VERSION) or not isinstance(payload.get("codes"), dict):
+    if not isinstance(payload, dict) or payload.get("schema_version") not in (1, INDEX_SCHEMA_VERSION) or not isinstance(payload.get("codes"), dict):
         return {}
     return {
         str(code).casefold(): value

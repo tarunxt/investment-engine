@@ -23,7 +23,7 @@ def source_status(snapshot, source_id):
     return snapshot.status
 
 
-def summary(competition, snapshot=None):
+def summary(competition, snapshot=None, *, ranked_count=None):
     source_id = competition["source_id"]
     return {
         **competition,
@@ -35,7 +35,7 @@ def summary(competition, snapshot=None):
         "checked_at": snapshot.checked_at if snapshot else None,
         "successful_at": snapshot.successful_at if snapshot else None,
         "error": snapshot.error if snapshot else None,
-        "ranked_count": len(snapshot.rows) if snapshot else 0,
+        "ranked_count": ranked_count if ranked_count is not None else len(snapshot.rows) if snapshot else 0,
         "note": (
             FEEDS[source_id]["note"] if source_id in FEEDS else
             "Calculated from completed results: 3 points per win, 1 per draw; sorted by points, goal difference, goals scored. Excludes deductions, head-to-head rules and playoff adjustments. Not official standings."

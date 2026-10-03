@@ -2088,6 +2088,8 @@ export interface PolymarketPaperTrade {
 }
 
 export interface PolymarketBotState {
+  read_source?: 'runtime' | 'persisted' | 'unavailable';
+  read_message?: string | null;
   running: boolean;
   paused: boolean;
   mode: 'mock' | 'live-read' | 'live-trading';
@@ -3348,9 +3350,11 @@ export type TradingBotStatus =
   | "paused"
   | "stopped"
   | "error"
-  | "not-configured";
+  | "not-configured"
+  | "unavailable";
 
 export type TradingBotMode =
+  | "unknown"
   | "paper"
   | "live-read"
   | "live-trading"

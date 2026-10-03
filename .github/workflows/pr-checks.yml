@@ -50,6 +50,8 @@ jobs:
           backend/tests/test_sports_ranking_integrity.py
           backend/tests/test_bullpen_run_audit.py
           backend/tests/test_sports_ranking_participants.py
+          backend/tests/test_sports_rankings_read_projection.py
+          backend/tests/test_sports_participant_read_cache.py
           backend/tests/test_sports_master.py
           backend/tests/test_cricket_rankings.py
           backend/tests/test_database_outage.py
@@ -91,6 +93,11 @@ jobs:
           backend/tests/test_polymarket_auto_live_router.py
           backend/tests/test_polymarket_auto_live_console_projection.py
           backend/tests/test_polymarket_auto_live_history_pagination.py
+          backend/tests/test_polymarket_passive_reads.py
+          backend/tests/test_polymarket_runtime_router.py
+          backend/tests/test_bullpen_passive_healthcheck.py
+          backend/tests/test_trading_bots_passive_summary.py
+          backend/tests/test_polymarket_auto_live.py::test_trading_bots_summary_returns_four_cards_in_order
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
@@ -182,6 +189,9 @@ jobs:
           tests/portfolio-analysis-read-budgets.test.mjs
           tests/trade-analysis-execution.test.mjs
           tests/bullpen-auto-live-passive-read.test.mjs
+          tests/polymarket-bot-passive-read.test.mjs
+          tests/polymarket-bot-ec2-commands.test.mjs
+          tests/trading-bots-passive-summary.test.mjs
           tests/bullpen-sports-workspace.test.mjs
           tests/bullpen-event-clusters.test.mjs
           tests/bullpen-claim-returns.test.mjs

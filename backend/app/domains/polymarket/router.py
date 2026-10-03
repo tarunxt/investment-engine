@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
+from app.domains.polymarket.passive_projection import PassiveProjectionUnavailable
 from app.domains.polymarket.runtime_broker import (
     BullpenPositionsSnapshot,
     BullpenPositionsSnapshotMetadata,
@@ -122,10 +123,23 @@ def _http_error_detail(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: {exc!r}"
 
 
+def _snapshot_is_current(snapshot: BullpenPositionsSnapshot | None, max_age_seconds: int) -> bool:
+    if snapshot is None:
+        return False
+    try:
+        fetched_at = datetime.fromisoformat(snapshot.fetched_at.replace("Z", "+00:00"))
+        age = (datetime.now(UTC) - fetched_at).total_seconds()
+        return 0 <= age <= max_age_seconds
+    except (TypeError, ValueError):
+        return False
+
+
 @router.get("/state", response_model=PolymarketBotState)
 async def get_polymarket_state(current_user: User = Depends(get_current_user)):
-    bot = await _get_bot(current_user)
-    return await bot.get_state()
+    try:
+        return await polymarket_bot_manager.read_state(current_user.id)
+    except PassiveProjectionUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/history", response_model=PolymarketHistoryResponse)
@@ -135,12 +149,10 @@ async def get_polymarket_history(
 ):
     """Explicit bounded history; ordinary state responses include only 50 rows."""
 
-    bot = await _get_bot(current_user)
-    return PolymarketHistoryResponse(
-        paper_trades=list(reversed(bot.trade_history[-limit:])),
-        live_decisions=list(reversed(bot.live_trade_history[-limit:])),
-        redeemed_trades=bot.bullpen_redeemed_trades[:limit],
-    )
+    try:
+        return await polymarket_bot_manager.read_history(current_user.id, limit)
+    except PassiveProjectionUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/runtime/positions", response_model=BullpenRuntimePositionsResponse)
@@ -158,6 +170,26 @@ async def get_bullpen_runtime_positions(
             detail="Passive Bullpen positions requests cannot force a refresh.",
         )
     broker = get_bullpen_runtime_broker()
+    if passive:
+        snapshot = await broker.read_cached_positions_snapshot(delete_invalid=False)
+        if snapshot is None:
+            snapshot = await broker.read_display_positions_snapshot(delete_invalid=False)
+        health = await broker.read_passive_health(strict_read_only=True)
+        current = _snapshot_is_current(snapshot, max_age_seconds)
+        if snapshot is not None:
+            snapshot = snapshot.model_copy(update={"freshness_state": "cached" if current else "stale"})
+        return BullpenRuntimePositionsResponse(
+            ok=current,
+            snapshot=snapshot if current else None,
+            stale_snapshot=snapshot if not current else None,
+            broker_health=health.broker_health,
+            auth_checked_at=health.auth_checked_at,
+            latest_snapshot=health.latest_snapshot,
+            last_failure=health.last_failure,
+            active_auth=health.active_auth,
+            cli_version=health.cli_version,
+            error=None if current else "No current cached positions snapshot is available; passive reads do not refresh providers.",
+        )
     stale_snapshot = await broker.read_cached_positions_snapshot()
     if stale_snapshot is None:
         stale_snapshot = await broker.read_display_positions_snapshot()
@@ -220,6 +252,28 @@ async def get_bullpen_runtime_display_positions(
             detail="Passive Bullpen positions requests cannot force a refresh.",
         )
     broker = get_bullpen_runtime_broker()
+    if passive:
+        # Read both existing cache candidates only. Do not wait for an in-flight
+        # provider refresh or fetch an expected wallet when its cache is absent.
+        snapshot = await broker.read_display_positions_snapshot(delete_invalid=False)
+        expected = (expected_account_identity or "").strip().lower()
+        if snapshot is not None and expected and (snapshot.account_identity or "").strip().lower() != expected:
+            snapshot = None
+        if not _snapshot_is_current(snapshot, max_age_seconds):
+            cached = await broker.read_cached_positions_snapshot(delete_invalid=False)
+            if cached is not None and expected and (cached.account_identity or "").strip().lower() != expected:
+                cached = None
+            if cached is not None and (snapshot is None or _snapshot_is_current(cached, max_age_seconds)):
+                snapshot = cached
+        current = _snapshot_is_current(snapshot, max_age_seconds)
+        if snapshot is not None:
+            snapshot = snapshot.model_copy(update={"freshness_state": "cached" if current else "stale"})
+        return BullpenRuntimeDisplayPositionsResponse(
+            ok=current,
+            snapshot=_sanitize_bullpen_display_snapshot(snapshot) if current else None,
+            stale_snapshot=_sanitize_bullpen_display_snapshot(snapshot) if not current else None,
+            error=None if current else "No current cached positions snapshot is available for this account; passive reads do not refresh providers.",
+        )
     stale_snapshot = await broker.read_display_positions_snapshot()
     if stale_snapshot is None:
         stale_snapshot = await broker.read_cached_positions_snapshot()
@@ -285,7 +339,7 @@ async def get_bullpen_runtime_health(
 ):
     del current_user
     broker = get_bullpen_runtime_broker()
-    passive_health = await broker.read_passive_health()
+    passive_health = await broker.read_passive_health(strict_read_only=True)
     return BullpenRuntimeHealthResponse(
         ok=passive_health.ok,
         checked_at=passive_health.checked_at,
