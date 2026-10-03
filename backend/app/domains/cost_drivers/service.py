@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import calendar
 import os
+from _thread import LockType
 from datetime import date, datetime, timedelta, timezone
+from threading import Lock
 from typing import Any
+from weakref import WeakValueDictionary
 
 from sqlalchemy import desc
 
@@ -33,6 +36,21 @@ from .recommendations import (
 from .transfer import summarize_transfer_usage_types
 
 logger = get_logger(__name__)
+
+_DASHBOARD_LOCKS_GUARD = Lock()
+_DASHBOARD_LOCKS: WeakValueDictionary[str, LockType] = WeakValueDictionary()
+
+
+def _dashboard_lock(cache_key: str) -> LockType:
+    # Offloaded HTTP handlers may reach a cache miss concurrently. Serialize
+    # the fill and refresh cooldown per month/mode without retaining old locks.
+    with _DASHBOARD_LOCKS_GUARD:
+        lock = _DASHBOARD_LOCKS.get(cache_key)
+        if lock is None:
+            lock = Lock()
+            _DASHBOARD_LOCKS[cache_key] = lock
+        return lock
+
 
 FREE_TRANSFER_GB = 100.0
 TRANSFER_RATE_PER_GB_DEFAULT = 0.09
@@ -1513,37 +1531,38 @@ def get_dashboard(force_refresh: bool = False, month: str | None = None) -> dict
     ttl_seconds = dashboard_cache_ttl_seconds(is_current_month)
     cache_key = f"{selected_month}:{'mock' if mock else 'live'}"
 
-    if force_refresh:
-        claim_refresh_cooldown(cache_key)
-    else:
-        cached = load_cached_dashboard(cache_key)
-        if cached is not None:
-            cached.data.setdefault("debug", {})
-            cached.data["debug"]["lastAwsRefreshTime"] = cached.cached_at
-            cached.data["debug"]["cacheTtlSeconds"] = ttl_seconds
-            cached.data["debug"]["servedStaleData"] = False
-            return cached.data
+    with _dashboard_lock(cache_key):
+        if force_refresh:
+            claim_refresh_cooldown(cache_key)
+        else:
+            cached = load_cached_dashboard(cache_key)
+            if cached is not None:
+                cached.data.setdefault("debug", {})
+                cached.data["debug"]["lastAwsRefreshTime"] = cached.cached_at
+                cached.data["debug"]["cacheTtlSeconds"] = ttl_seconds
+                cached.data["debug"]["servedStaleData"] = False
+                return cached.data
 
-    if mock:
-        data = _mock_dashboard(selected_month)
-        data["debug"]["mockMode"] = True
-    else:
-        data = _live_dashboard(selected_month)
-        stale = load_stale_good_dashboard(cache_key)
-        if _should_use_stale_dashboard(
-            data,
-            stale.data if stale is not None else None,
-        ):
-            return _annotate_stale_dashboard(
-                stale.data,
-                stale.cached_at if stale is not None else None,
-                list(data.get("diagnostics") or []),
-                ttl_seconds,
-            )
+        if mock:
+            data = _mock_dashboard(selected_month)
+            data["debug"]["mockMode"] = True
+        else:
+            data = _live_dashboard(selected_month)
+            stale = load_stale_good_dashboard(cache_key)
+            if _should_use_stale_dashboard(
+                data,
+                stale.data if stale is not None else None,
+            ):
+                return _annotate_stale_dashboard(
+                    stale.data,
+                    stale.cached_at if stale is not None else None,
+                    list(data.get("diagnostics") or []),
+                    ttl_seconds,
+                )
 
-    cached_at = store_dashboard(cache_key, data, ttl_seconds)
-    data.setdefault("debug", {})
-    data["debug"]["lastAwsRefreshTime"] = cached_at
-    data["debug"]["cacheTtlSeconds"] = ttl_seconds
-    data["debug"]["servedStaleData"] = False
-    return data
+        cached_at = store_dashboard(cache_key, data, ttl_seconds)
+        data.setdefault("debug", {})
+        data["debug"]["lastAwsRefreshTime"] = cached_at
+        data["debug"]["cacheTtlSeconds"] = ttl_seconds
+        data["debug"]["servedStaleData"] = False
+        return data

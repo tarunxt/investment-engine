@@ -359,6 +359,12 @@ or a newer refresh cancels queued Bullpen reads and prevents stale responses
 from replacing the current results. These are read-only presentation changes;
 audit capture, frozen snapshots, schema versions, and trading behavior are unchanged.
 
+History database pagination materializes the requested page of scalar run IDs
+before extracting stage metadata from console JSON. This prevents PostgreSQL
+from reparsing skipped pages' projections for every later `OFFSET` page. The
+user/workspace filters, total counts, ordering, response fields, and existing
+JSON compatibility remain unchanged; no stored snapshot or schema is rewritten.
+
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
 including independent previews and scheduled runs, use the saved value until it

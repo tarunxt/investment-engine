@@ -2,7 +2,7 @@
 
 import { AuthContextType, AuthContext, type User } from "@/hooks/useAuth";
 import { clearAuthCookies } from "@/services/cookies";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
@@ -186,7 +186,10 @@ export function AuthProvider({
     }
   }, [session, status]);
 
-  useEffect(() => {
+  // Child pages begin private reads in passive effects. Register the already
+  // authenticated identity during commit, before any of those reads capture
+  // the singleton's session key. This also runs before StrictMode effect replay.
+  useLayoutEffect(() => {
     apiService.setSessionGeneration(
       session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
     );

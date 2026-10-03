@@ -1368,6 +1368,19 @@ class AsyncPolymarketAutoLiveRepository:
             )
             or 0
         )
+        # PostgreSQL can evaluate SELECT projections before discarding OFFSET
+        # rows. Paginate narrow IDs first so page N does not parse all of the
+        # previous pages' large console JSON again. Materialization keeps this
+        # boundary explicit instead of relying on the planner to defer it.
+        history_page = (
+            select(record.id)
+            .where(*filters)
+            .order_by(desc(record.started_at), desc(record.created_at))
+            .offset((normalized_page - 1) * normalized_size)
+            .limit(normalized_size)
+            .cte("history_page")
+            .prefix_with("MATERIALIZED", dialect="postgresql")
+        )
         rows = (
             await self.session.execute(
                 select(
@@ -1387,10 +1400,9 @@ class AsyncPolymarketAutoLiveRepository:
                     history_console_projection(record).label("console_projection"),
                     record.updated_at,
                 )
-                .where(*filters)
+                .select_from(record)
+                .join(history_page, record.id == history_page.c.id)
                 .order_by(desc(record.started_at), desc(record.created_at))
-                .offset((normalized_page - 1) * normalized_size)
-                .limit(normalized_size)
             )
         ).all()
         items = []
