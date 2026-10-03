@@ -69,8 +69,9 @@ class LocalAsyncSession:
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("view", ["full", "summary"])
 async def test_catalogue_nulls_and_non_array_payloads_cannot_fail_array_count(
-    monkeypatch, forbid_external_work,
+    monkeypatch, forbid_external_work, view,
 ):
     def forbidden_decode(value):
         raise AssertionError("Projection must not transfer or decode ranking JSON")
@@ -102,7 +103,7 @@ async def test_catalogue_nulls_and_non_array_payloads_cannot_fail_array_count(
     ])
     monkeypatch.setattr(router, "load_participant_index", lambda user_id: {})
     with Session(engine) as session:
-        result = await router.catalogue(Response(), LocalAsyncSession(session), SimpleNamespace(id=17))
+        result = await router.catalogue(Response(), LocalAsyncSession(session), SimpleNamespace(id=17), view=view)
     assert {row["source_id"]: row["ranked_count"] for row in result["competitions"]} == {
         source_id: count for source_id, (_, count) in cases.items()
     }

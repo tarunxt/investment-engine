@@ -91,12 +91,17 @@ CopyTrader page.
 
 The overview's automatic Direct state fallback and Bullpen AI positions
 fallback are removed because they can initialize a runtime or enrich data from
-providers. The remaining automatic requests are summary, passive CopyTrader
+providers. The remaining bot-card requests are summary, passive CopyTrader
 state and passive Auto-Live dashboard summary. Bullpen AI's unavailable metrics
 stay visible as a placeholder. Unavailable cards are not counted as stopped,
 and cold defaults do not produce doctor-failed or armed/locked claims. The
 overview cache namespace changes so older operationally derived cards are not
 reused by this bundle. Explicit operational controls are unchanged.
+
+The embedded Universal Scan widget retains its separate existing read paths.
+Those can rebuild derived summary caches and persist stale-scan status or
+schedule bookkeeping. They are outside these bot-card projection changes;
+this is not a claim that every widget performs zero cache or state writes.
 
 This boundary does not certify every legacy route as passive: the dedicated
 Direct console, runtime diagnostics/discovery endpoints, and the Bullpen AI

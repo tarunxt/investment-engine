@@ -41,11 +41,10 @@ def participant_aliases(code: str, name: str, declared=()):
     return list(dict.fromkeys(aliases))
 
 
-def augment_competition(competition, participant_registry):
+def augment_competition(competition, participant_registry, *, include_events=True):
     """Merge current Polymarket participants/events into a catalogue entry."""
     imported = participant_registry.get(competition["code"], {}) if competition.get("code") else {}
     dynamic_names = imported.get("participants") if isinstance(imported, dict) else []
-    dynamic_events = imported.get("events") if isinstance(imported, dict) else []
     participants = [
         {
             **participant,
@@ -66,6 +65,15 @@ def augment_competition(competition, participant_registry):
         })
         known.add(normalize_name(name))
 
+    if not include_events:
+        # Catalogue cards/search require complete participants, but only the
+        # selected detail view consumes events. Do not copy or merge that list.
+        return {
+            **{key: value for key, value in competition.items() if key != "events"},
+            "participants": participants,
+        }
+
+    dynamic_events = imported.get("events") if isinstance(imported, dict) else []
     events = [dict(event) for event in competition["events"]]
     event_keys = {
         (event.get("slug") or "", event.get("title") or "")
@@ -85,8 +93,11 @@ def augment_competition(competition, participant_registry):
     return {**competition, "participants": participants, "events": events}
 
 
-def augment_catalogue(catalogue, participant_registry):
-    result = [augment_competition(competition, participant_registry) for competition in catalogue]
+def augment_catalogue(catalogue, participant_registry, *, include_events=True):
+    result = [
+        augment_competition(competition, participant_registry, include_events=include_events)
+        for competition in catalogue
+    ]
     known_codes = {competition["code"] for competition in result if competition.get("code")}
     for code, imported in participant_registry.items():
         if code in known_codes or not isinstance(imported, dict):
@@ -112,7 +123,9 @@ def augment_catalogue(catalogue, participant_registry):
             "participants": [],
             "events": [],
         }
-        result.append(augment_competition(competition, participant_registry))
+        result.append(augment_competition(
+            competition, participant_registry, include_events=include_events,
+        ))
     return result
 
 

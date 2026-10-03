@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
@@ -52,11 +53,13 @@ async def catalogue(
     response: Response,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    view: Literal["full", "summary"] = "full",
 ):
     response.headers["Cache-Control"] = "private, no-store"
     current_catalogue = augment_catalogue(
         CATALOGUE,
         await asyncio.to_thread(load_participant_index, current_user.id),
+        include_events=view != "summary",
     )
     snapshots = {s.source_id: s for s in (await db.execute(snapshot_summaries_query())).all()}
     competitions = []

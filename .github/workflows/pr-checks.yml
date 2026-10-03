@@ -51,6 +51,7 @@ jobs:
           backend/tests/test_bullpen_run_audit.py
           backend/tests/test_sports_ranking_participants.py
           backend/tests/test_sports_rankings_read_projection.py
+          backend/tests/test_sports_catalogue_summary.py
           backend/tests/test_sports_participant_read_cache.py
           backend/tests/test_sports_master.py
           backend/tests/test_cricket_rankings.py
@@ -164,6 +165,8 @@ jobs:
           tests/api-read-fallbacks.test.mjs
           tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs
+          tests/sports-rankings-summary.test.mjs
+          tests/sports-rankings-error-dialog.test.mjs
           tests/bounded-api-transport.test.mjs
           tests/bullpen-proxy-timeout-budget.test.mjs
           tests/bullpen-history-portfolio.test.mjs
