@@ -45,7 +45,7 @@ def inherit_legacy_preferences(preferences, saved):
 
 
 def stock_segment(portfolio):
-    return {"india": "zerodha", "us": "indmoney"}.get(portfolio)
+    return {"india": "zerodha", "us": "indmoney", "indmoney_us": "indmoney"}.get(portfolio)
 
 
 def stock_run_preference(run):

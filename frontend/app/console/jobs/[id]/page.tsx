@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { WSClient } from '@/services/websocket';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
+import { OutputConsistencyNotice } from '@/components/OutputConsistencyNotice';
 import ExportToSheetsModal from './_components/ExportToSheetsModal';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -204,6 +205,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           </div>
 
           <div className="p-5 max-w-full">
+            <OutputConsistencyNotice metadata={job.runtime_metadata_json} />
             {job.status === 'failed' && job.error_message ? (
               <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>

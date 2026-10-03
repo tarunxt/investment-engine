@@ -39,7 +39,7 @@ jobs:
       - name: Install backend test dependencies
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
-          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check pytest aiosqlite==0.22.1
 
       - name: Run dashboard and Bullpen scan contract tests
         env:
@@ -57,15 +57,22 @@ jobs:
           backend/tests/test_cricket_rankings.py
           backend/tests/test_database_outage.py
           backend/tests/test_completion_notifications.py
+          backend/tests/test_auto_rebalance_audit_durability.py
+          backend/tests/test_auto_rebalance_run_sequence.py
+          backend/tests/test_run_completion_email.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_indmoney_us_parser.py
+          backend/tests/test_indmoney_snapshot_validation.py
           backend/tests/test_portfolio_analysis_read_projection.py
           backend/tests/test_cost_dashboard_cache.py
           backend/tests/test_cost_drivers_router.py
           backend/tests/test_api_usage_attempts.py
+          backend/tests/test_api_usage_coverage.py
           backend/tests/test_api_usage_reconciliation.py
           backend/tests/test_job_usage_identity.py
           backend/tests/test_output_contracts.py
+          backend/tests/test_output_consistency.py
+          backend/tests/test_output_source_context.py
           backend/tests/test_output_runtime.py
           backend/tests/test_output_runtime_cancellation.py
           backend/tests/test_job_table_validation.py
@@ -99,6 +106,46 @@ jobs:
           backend/tests/test_bullpen_passive_healthcheck.py
           backend/tests/test_trading_bots_passive_summary.py
           backend/tests/test_polymarket_auto_live.py::test_trading_bots_summary_returns_four_cards_in_order
+
+  backend-audit-concurrency:
+    name: Workflow audit PostgreSQL concurrency
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: audit_test
+          POSTGRES_PASSWORD: audit_test
+          POSTGRES_DB: credx_audit_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U audit_test -d credx_audit_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest aiosqlite==0.22.1
+      - name: Verify workflow concurrency and bounded source queries
+        env:
+          PYTHONPATH: backend
+          CREDX_AUDIT_TEST_DATABASE_URL: postgresql+asyncpg://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
+          CREDX_AUDIT_TEST_DATABASE_ACK: disposable-local-only
+        run: pytest -q backend/tests/test_auto_rebalance_audit_postgres.py backend/tests/test_output_source_context_postgres.py
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
@@ -175,7 +222,10 @@ jobs:
           tests/dashboard-refresh-errors.test.mjs
           tests/dashboard-portfolio-totals.test.mjs
           tests/rebalance-workflow-resilience.test.mjs
+          tests/auto-rebalance-audit-persistence.test.mjs
           tests/rebalance-stage-inputs.test.mjs
+          tests/output-source-jobs.test.mjs
+          tests/output-consistency-notice.test.mjs
           tests/auto-rebalance-provider-errors-ist.test.mjs
           tests/bullpen-auto-run-status.test.mjs
           tests/bullpen-auto-run-history.test.mjs
@@ -189,6 +239,7 @@ jobs:
           tests/actionable-quantity-display.test.mjs
           tests/final-actionables-optional-cache.test.mjs
           tests/investment-recommendation-fallback.test.mjs
+          tests/investment-recommendation-schema.test.mjs
           tests/portfolio-analysis-read-budgets.test.mjs
           tests/trade-analysis-execution.test.mjs
           tests/bullpen-auto-live-passive-read.test.mjs

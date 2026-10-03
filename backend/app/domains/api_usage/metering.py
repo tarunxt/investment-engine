@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 import hashlib
 import json
 import logging
-import math
 import re
 from time import perf_counter
 from uuid import uuid4
@@ -16,6 +15,9 @@ from sqlalchemy.exc import IntegrityError
 
 from app.domains.api_usage.models import ApiUsageAttemptEvent
 from app.domains.api_usage.recorder import get_provider_usage_context
+from app.domains.api_usage.usage_metadata import (
+    conflicting_usage_fields, extract_usage, has_reported_usage, number,
+)
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
 logger = logging.getLogger("app")
@@ -52,9 +54,7 @@ def _text(value: object, limit: int = 128) -> str | None:
 
 
 def _number(value: object) -> int | float | None:
-    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
-        return value
-    return None
+    return number(value)
 
 
 def _first(obj: object, *names: str):
@@ -63,36 +63,6 @@ def _first(obj: object, *names: str):
         if value is not None:
             return value
     return None
-
-
-def _reported_usage(response: object, provider: str) -> dict | None:
-    usage = _first(response, "usage", "usage_metadata")
-    if usage is None:
-        return None
-    aliases = {
-        "input_tokens": ("input_tokens", "prompt_tokens", "prompt_token_count"),
-        "output_tokens": ("output_tokens", "completion_tokens", "candidates_token_count"),
-        "total_tokens": ("total_tokens", "total_token_count"),
-        "cache_read_input_tokens": ("cache_read_input_tokens", "prompt_cache_hit_tokens", "cached_content_token_count"),
-        "cache_write_input_tokens": ("cache_creation_input_tokens",),
-        "cache_miss_input_tokens": ("prompt_cache_miss_tokens",),
-        "reasoning_tokens": ("thoughts_token_count",),
-        "tool_use_prompt_tokens": ("tool_use_prompt_token_count",),
-        "search_units": ("credits",),
-    }
-    result = {key: _number(_first(usage, *names)) for key, names in aliases.items()}
-    for container_name, fields in {
-        "input_tokens_details": ("cached_tokens", "audio_tokens"),
-        "prompt_tokens_details": ("cached_tokens", "audio_tokens"),
-        "output_tokens_details": ("reasoning_tokens", "audio_tokens"),
-        "completion_tokens_details": ("reasoning_tokens", "audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens"),
-        "server_tool_use": ("web_search_requests", "web_fetch_requests"),
-    }.items():
-        details = _attr(usage, container_name)
-        if details is not None:
-            result[container_name] = {key: _number(_attr(details, key)) for key in fields}
-    # No unknown provider fields are retained: usage objects can contain text/secrets.
-    return result
 
 
 def _merge_usage(previous: dict | None, snapshot: dict) -> dict:
@@ -107,7 +77,10 @@ def _merge_usage(previous: dict | None, snapshot: dict) -> dict:
 
 
 def _estimate(usage: dict | None, rates: dict | None) -> tuple[float | None, dict | None]:
-    if usage is None or rates is None:
+    if usage is None or not isinstance(rates, dict):
+        return None, None
+    rate_keys = ("cache_hit_input", "cache_miss_input", "output") if "cache_hit_input" in rates else ("input", "output")
+    if any(_number(rates.get(key)) is None for key in rate_keys):
         return None, None
     tokens_in, tokens_out = usage.get("input_tokens"), usage.get("output_tokens")
     if tokens_in is None or tokens_out is None:
@@ -132,7 +105,7 @@ def _estimate(usage: dict | None, rates: dict | None) -> tuple[float | None, dic
     else:
         cost = tokens_in * rates["input"] + tokens_out * rates["output"]
         inferred = {"basis": "listed_input_output_rates_only_excludes_unpriced_cache_reasoning_tools"}
-    return round(cost / 1_000_000, 12), inferred
+    return (round(cost / 1_000_000, 12) if _number(cost) is not None else None), inferred
 
 
 def _persist_attempt(values: dict) -> None:
@@ -166,12 +139,30 @@ def _persist_attempt(values: dict) -> None:
                     if not matches:
                         raise
                     canonical = matches[0]
+                    canonical_id = canonical.duplicate_of_attempt_id or canonical.attempt_id
+                    if canonical.duplicate_of_attempt_id:
+                        canonical = db.scalar(select(ApiUsageAttemptEvent).where(
+                            ApiUsageAttemptEvent.attempt_id == canonical_id,
+                            ApiUsageAttemptEvent.event_kind == "finished",
+                        )) or canonical
                     candidate = dict(
                         values,
-                        duplicate_of_attempt_id=canonical.duplicate_of_attempt_id or canonical.attempt_id,
+                        duplicate_of_attempt_id=canonical_id,
                         tariff_estimated_cost_usd=None,
                         tool_tariff_estimated_cost_usd=None,
                     )
+                    conflicts = conflicting_usage_fields(canonical.reported_usage, values.get("reported_usage"))
+                    old_cost = _number(canonical.tariff_estimated_cost_usd)
+                    new_cost = _number(values.get("tariff_estimated_cost_usd"))
+                    roots = {match.duplicate_of_attempt_id or match.attempt_id for match in matches}
+                    if len(roots) > 1 or conflicts or (old_cost is not None and new_cost is not None and old_cost != new_cost):
+                        inferred = dict(values.get("inferred_usage") or {})
+                        coverage = dict(inferred.get("coverage") or {})
+                        coverage.update(
+                            cost_status="ambiguous", cost_reason="conflicting_provider_identity",
+                            conflicting_fields=sorted(set(coverage.get("conflicting_fields", [])) | set(conflicts)),
+                        )
+                        candidate["inferred_usage"] = {**inferred, "coverage": coverage}
                     # Preserve a newly learned, unclaimed identity alias on the
                     # duplicate event. A later request-only/response-only replay
                     # can then resolve to the same original charge.
@@ -237,21 +228,90 @@ class ApiAttempt:
                 value = None
             self.values[field] = value
         self._start = perf_counter()
+        self._response_seen = False
+        self._usage_sources: set[str] = set()
+        self._malformed_usage_fields: set[str] = set()
+        self._conflicting_usage_fields: set[str] = set()
 
     def __enter__(self):
         if self.context:
             self.context.last_attempt["attempt_id"] = self.values["attempt_id"]
+        self._update_coverage()
         _persist_attempt(self.values)
         self._start = perf_counter()
         return self
 
-    def observe(self, response: object) -> None:
+    def observe(self, response: object, *, source: str = "response") -> None:
+        self._response_seen = True
+        # Usage is independent of optional identity/choice/result metadata.
+        self._observe_usage(response, source=source)
         try:
             self._observe_response(response)
         except Exception:
             # SDK metadata evolves independently of the business response API.
             # An unexpected telemetry field must not fail a successful request.
             logger.warning("API usage metadata could not be read: attempt=%s", self.values["attempt_id"])
+
+    def _observe_usage(self, response: object, *, source: str) -> None:
+        try:
+            usage, malformed, conflicts = extract_usage(response)
+            self._malformed_usage_fields.update(malformed)
+            conflicts.update(conflicting_usage_fields(self.values.get("reported_usage"), usage, cumulative=True))
+            self._conflicting_usage_fields.update(conflicts)
+            if usage is not None or malformed:
+                self._usage_sources.add(source)
+            if usage is not None:
+                usage = _merge_usage(self.values.get("reported_usage"), usage)
+                # A contradictory snapshot must not silently reuse an earlier
+                # field or infer a cache split from the rejected observation.
+                for field in self._conflicting_usage_fields:
+                    path = field.split(".")
+                    target = usage if len(path) == 1 else usage.get(path[0], {})
+                    target[path[-1]] = None
+                self.values["reported_usage"] = usage
+                pricing_fields = {"input_tokens", "output_tokens"}
+                rates = self.values.get("tariff_rates")
+                if isinstance(rates, dict) and "cache_hit_input" in rates:
+                    pricing_fields.update({"cache_read_input_tokens", "cache_miss_input_tokens"})
+                invalid_pricing_fields = self._conflicting_usage_fields | {
+                    field for field in self._malformed_usage_fields if usage.get(field) is None
+                }
+                cost, inferred = (None, None) if pricing_fields & invalid_pricing_fields else _estimate(usage, rates)
+                self.values["tariff_estimated_cost_usd"] = cost
+                self.values["inferred_usage"] = inferred
+        except Exception:
+            self._malformed_usage_fields.add("usage")
+            logger.warning("API usage metadata could not be read: attempt=%s", self.values["attempt_id"])
+
+    def _update_coverage(self) -> None:
+        values = self.values
+        usage = values.get("reported_usage")
+        if has_reported_usage(usage):
+            usage_status = "reported"
+        elif self._malformed_usage_fields or self._conflicting_usage_fields:
+            usage_status = "malformed"
+        else:
+            usage_status = "omitted" if self._response_seen else "unavailable"
+        if values.get("tariff_estimated_cost_usd") is not None:
+            cost_status, reason = "estimated_token_only", "listed_token_tariff"
+        elif usage_status != "reported":
+            cost_status, reason = "unavailable", f"usage_{usage_status}"
+        elif not values.get("tariff_rates"):
+            cost_status, reason = "unpriced", "tariff_unavailable"
+        elif usage.get("input_tokens") is None or usage.get("output_tokens") is None:
+            cost_status, reason = "unavailable", "required_token_counts_missing"
+        else:
+            cost_status, reason = "unavailable", "invalid_tariff_or_usage"
+        values["inferred_usage"] = {
+            **(values.get("inferred_usage") or {}),
+            "coverage": {
+                "version": 1, "usage_status": usage_status,
+                "usage_sources": sorted(self._usage_sources),
+                "malformed_fields": sorted(self._malformed_usage_fields),
+                "conflicting_fields": sorted(self._conflicting_usage_fields),
+                "cost_status": cost_status, "cost_reason": reason,
+            },
+        }
 
     def observe_search_results(self, count: int | None) -> None:
         """Record only an aggregate, never result bodies, URLs or queries."""
@@ -293,31 +353,42 @@ class ApiAttempt:
             results = response if isinstance(response, (list, tuple)) else _attr(response, "results")
             if isinstance(results, (list, tuple)):
                 self.observe_search_results(len(results))
-        usage = _reported_usage(response, values["actual_provider"])
-        if usage is not None:
-            # Streaming providers report cumulative snapshots, not deltas;
-            # later partial snapshots must not erase already observed usage.
-            usage = _merge_usage(values.get("reported_usage"), usage)
-            values["reported_usage"] = usage
-            values["tariff_estimated_cost_usd"], values["inferred_usage"] = _estimate(usage, values.get("tariff_rates"))
 
     def __exit__(self, exc_type, exc, traceback):
         if exc is not None:
             values = self.values
+            # Read only available SDK metadata; never fetch, decode a raw body,
+            # invoke response.json(), or serialize an exception to find usage.
+            self._observe_usage(exc, source="exception")
+            response = _attr(exc, "response")
+            if response is not None:
+                self.observe(response, source="exception_response")
+            for name in ("body", "details"):
+                payload = _attr(exc, name)
+                if isinstance(payload, Mapping):
+                    self._response_seen = True
+                    self._observe_usage(payload, source=f"exception_{name}")
             values["status"] = "cancelled" if not isinstance(exc, Exception) or exc.__class__.__name__ in {"CancelledError", "SoftTimeLimitExceeded"} else "error"
             values["error_type"] = exc.__class__.__name__[:128]
-            status = _first(exc, "status_code", "http_status")
+            status = _first(exc, "status_code", "http_status", "code")
             if isinstance(status, int):
                 values["http_status"] = status
             request_id = _text(_attr(exc, "request_id"), 255)
             if request_id:
                 values["provider_request_id"] = request_id
+                values["request_dedupe_key"] = content_hash([values["actual_provider"], "request", request_id])
         else:
             self.values["status"] = "success"
+        if self.values.get("tariff_estimated_cost_usd") is None:
+            # Unpriced evidence must not claim the charge identity and suppress
+            # a later priced delivery. Retain raw provider IDs on every event.
+            self.values["request_dedupe_key"] = None
+            self.values["response_dedupe_key"] = None
         self.values["event_id"] = str(uuid4())
         self.values["event_kind"] = "finished"
         self.values["finished_at"] = datetime.now(UTC)
         self.values["latency_ms"] = max(0.0, (perf_counter() - self._start) * 1000)
+        self._update_coverage()
         _persist_attempt(self.values)
         return False
 

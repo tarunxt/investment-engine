@@ -227,7 +227,14 @@ function buildEmptyCanonicalRow(headers: readonly CanonicalHeader[]): CanonicalR
 
 function canonicalHeadersForSource(source: Record<string, unknown>): readonly CanonicalHeader[] {
   const mappedHeaders = Object.keys(source).map((key) => HEADER_ALIAS_TO_EXACT[normalizeHeader(key)]);
-  return mappedHeaders.some((header) => REBALANCE_HEADER_ORDER.includes(header as RebalanceHeader))
+  // Stock identity, prices and rationales are shared by both schemas. Only
+  // position/action columns distinguish Rebalance from a Swing recommendation.
+  return mappedHeaders.some((header) =>
+    header === 'Current Units' ||
+    header === 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)' ||
+    header === 'Units Change' ||
+    header === 'Final Units',
+  )
     ? REBALANCE_HEADER_ORDER
     : SWING_HEADER_ORDER;
 }

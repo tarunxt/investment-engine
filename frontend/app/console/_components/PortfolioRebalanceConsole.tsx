@@ -249,7 +249,7 @@ function RebalanceInputBox({
   market: SwingTradeMarket;
   basePrompt: string;
 }) {
-  const { setPrompt } = useDashboard();
+  const { setPrompt, setOutputSourceSelection } = useDashboard();
   const [portfolioSnapshot, setPortfolioSnapshot] =
     useState<PortfolioSnapshot>(null);
   const [threatAnalysis, setThreatAnalysis] = useState<ThreatAnalysis>(null);
@@ -350,6 +350,13 @@ function RebalanceInputBox({
   const promptInputBundle = inputPreviews.prompt;
   const displayInputBundle = inputPreviews.display;
   const inputError = inputPreviews.error;
+
+  useEffect(() => {
+    setOutputSourceSelection(inputError ? null : {
+      market, runs: selectedSwingRuns, inputBundle: promptInputBundle,
+    });
+    return () => setOutputSourceSelection(null);
+  }, [inputError, market, promptInputBundle, selectedSwingRuns, setOutputSourceSelection]);
 
   useEffect(() => {
     if (inputError) return;

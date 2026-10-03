@@ -35,6 +35,7 @@ def ledger(monkeypatch):
     monkeypatch.setattr(metering, "_persist_attempt", PERSIST)
     # All tests use mocks; any accidental external request fails immediately.
     monkeypatch.setattr("socket.socket.connect", Mock(side_effect=AssertionError("offline test")))
+    monkeypatch.setattr("socket.socket.connect_ex", Mock(side_effect=AssertionError("offline test")))
     token = set_provider_usage_context(
         user_id=7, job_id=9, execution_id="task-1", job_attempt=0,
         run_id="run-1", workflow_id="workflow-1", market="india",
@@ -512,6 +513,10 @@ def test_tavily_records_aggregate_results_and_reported_units(ledger, monkeypatch
         "results": [{"title": "PRIVATE TITLE", "url": "https://private.test", "content": "PRIVATE BODY"}]}
     monkeypatch.setitem(sys.modules, "tavily", NS(TavilyClient=lambda **kwargs: tavily))
     payload = json.loads(web_search._tavily_search("PRIVATE QUERY", 5))
+    tavily.search.assert_called_once_with(
+        query="PRIVATE QUERY", max_results=5, search_depth="advanced",
+        include_answer=True, include_usage=True,
+    )
     row, = ledger()
     assert len(payload["results"]) == row.search_result_count == 1
     assert row.reuse_status == "not_reused" and row.provider_request_id == "search-request"
@@ -554,3 +559,287 @@ def test_job_phase_does_not_hide_research_tool_rounds(ledger):
         call(response('repair'),phase='request')
         call(response('repair-research'),phase='tool_round')
     assert [row.phase for row in ledger()]==['initial_generation','tool_round','row_repair','tool_round']
+
+
+@pytest.mark.parametrize("usage,expected_status,reason", [
+    (None, "omitted", "usage_omitted"),
+    ({}, "omitted", "usage_omitted"),
+    ({"unknown_private_field": "PRIVATE"}, "omitted", "usage_omitted"),
+    ("PRIVATE", "malformed", "usage_malformed"),
+    ({"input_tokens": "10", "output_tokens": True}, "malformed", "usage_malformed"),
+    ({"input_tokens": -1, "output_tokens": float("nan")}, "malformed", "usage_malformed"),
+    ({"input_tokens": 1.5, "output_tokens": float("inf")}, "malformed", "usage_malformed"),
+    ({"input_tokens": 0}, "reported", "required_token_counts_missing"),
+    ({"input_tokens": 0, "output_tokens": 0}, "reported", "listed_token_tariff"),
+])
+def test_coverage_preserves_omitted_malformed_partial_and_explicit_zero(ledger, usage, expected_status, reason):
+    call(NS(usage=usage))
+    row, = ledger()
+    coverage = row.inferred_usage["coverage"]
+    assert coverage["usage_status"] == expected_status
+    assert coverage["cost_reason"] == reason
+    assert (row.tariff_estimated_cost_usd == 0) if reason == "listed_token_tariff" else (row.tariff_estimated_cost_usd is None)
+    assert row.provider_billed_cost_usd is None
+    assert "PRIVATE" not in json.dumps(row.inferred_usage)
+    assert "PRIVATE" not in json.dumps(row.reported_usage)
+
+
+def test_unavailable_usage_before_response_is_separate_from_unpriced_usage(ledger):
+    with pytest.raises(RuntimeError):
+        metered_call(Mock(side_effect=RuntimeError("PRIVATE")), provider="openai", meter_model="m")
+    metered_call(lambda: response("unpriced"), provider="openai", meter_model="unknown-tariff")
+    unavailable, unpriced = ledger()
+    assert unavailable.inferred_usage["coverage"]["usage_status"] == "unavailable"
+    assert unavailable.inferred_usage["coverage"]["cost_reason"] == "usage_unavailable"
+    assert unpriced.inferred_usage["coverage"]["usage_status"] == "reported"
+    assert unpriced.inferred_usage["coverage"]["cost_status"] == "unpriced"
+    assert unpriced.inferred_usage["coverage"]["cost_reason"] == "tariff_unavailable"
+    assert unavailable.tariff_estimated_cost_usd is unpriced.tariff_estimated_cost_usd is None
+
+
+def test_malformed_optional_metadata_does_not_hide_valid_usage(ledger):
+    result = response()
+    result.choices = 42  # Accessing choices[0] used to skip usage extraction.
+    result.usage.prompt_tokens_details = "PRIVATE"
+    call(result)
+    row, = ledger()
+    assert row.status == "success"
+    assert row.reported_usage["input_tokens"] == 100
+    assert row.tariff_estimated_cost_usd == pytest.approx(0.00014)
+    assert row.inferred_usage["coverage"]["malformed_fields"] == ["prompt_tokens_details"]
+
+
+def test_broken_usage_alias_does_not_hide_valid_fallback_or_zero(ledger):
+    class Usage:
+        @property
+        def input_tokens(self):
+            raise ValueError("PRIVATE")
+        prompt_tokens = 0
+        output_tokens = 0
+        completion_tokens = 0
+
+    call(NS(usage=Usage()))
+    row, = ledger()
+    assert row.reported_usage["input_tokens"] == row.reported_usage["output_tokens"] == 0
+    assert row.tariff_estimated_cost_usd == 0
+    assert row.inferred_usage["coverage"]["malformed_fields"] == ["input_tokens"]
+
+
+@pytest.mark.parametrize("location", ["exception", "response", "body", "details"])
+def test_failed_outcomes_keep_available_allowlisted_usage(ledger, location):
+    error = RuntimeError("PRIVATE error body")
+    error.status_code = 503
+    error.request_id = "error-request"
+    payload = {"usage": {"input_tokens": 8, "output_tokens": 0, "secret": "PRIVATE"}}
+    if location == "exception":
+        error.usage = payload["usage"]
+    else:
+        setattr(error, location, payload)
+    with pytest.raises(RuntimeError) as caught:
+        metered_call(Mock(side_effect=error), provider="openai", meter_model="m", tariff_rates=RATES)
+    row, = ledger()
+    assert caught.value is error
+    assert row.status == "error" and row.http_status == 503
+    assert row.reported_usage["input_tokens"] == 8 and row.reported_usage["output_tokens"] == 0
+    assert row.tariff_estimated_cost_usd == pytest.approx(0.000008)
+    assert row.provider_request_id == "error-request" and row.request_dedupe_key
+    assert row.inferred_usage["coverage"]["usage_sources"] == ["exception" if location == "exception" else f"exception_{location}"]
+    assert row.provider_billed_cost_usd is None
+    assert "PRIVATE" not in json.dumps(row.reported_usage)
+
+
+def test_partial_stream_usage_survives_malformed_error_metadata_and_cancellation(ledger):
+    error = KeyboardInterrupt("PRIVATE")
+    error.body = {"usage": {"input_tokens": "bad", "output_tokens": None}}
+    with pytest.raises(KeyboardInterrupt):
+        with ApiAttempt(provider="gemini", model="m", request="private", tariff_rates=RATES) as attempt:
+            attempt.observe(NS(usage_metadata=NS(prompt_token_count=10, candidates_token_count=0)))
+            raise error
+    row, = ledger()
+    assert row.status == "cancelled"
+    assert row.reported_usage["input_tokens"] == 10 and row.reported_usage["output_tokens"] == 0
+    assert row.tariff_estimated_cost_usd == pytest.approx(0.00001)
+    assert row.inferred_usage["coverage"]["malformed_fields"] == ["input_tokens"]
+    assert row.inferred_usage["coverage"]["usage_sources"] == ["exception_body", "response"]
+
+
+def test_error_response_json_method_is_never_invoked(ledger):
+    error = RuntimeError("PRIVATE")
+    error.response = NS(status_code=503, headers={}, json=Mock(side_effect=AssertionError("do not parse bodies")))
+    with pytest.raises(RuntimeError):
+        metered_call(Mock(side_effect=error), provider="openai", meter_model="m")
+    error.response.json.assert_not_called()
+    row, = ledger()
+    assert row.inferred_usage["coverage"]["usage_status"] == "omitted"
+    assert row.reported_usage is row.tariff_estimated_cost_usd is None
+
+
+def test_real_tavily_sdk_requests_only_usage_metadata_addition(ledger, monkeypatch):
+    from tavily import TavilyClient
+    from app.domains.ai_providers.tools import web_search
+    import tavily
+
+    client = TavilyClient(api_key="test-placeholder")
+    upstream = Mock(status_code=200)
+    upstream.json.return_value = {"usage": {"credits": 0}, "results": []}
+    monkeypatch.setattr(client.session, "post", Mock(return_value=upstream))
+    monkeypatch.setattr(tavily, "TavilyClient", lambda **kwargs: client)
+    web_search._tavily_search("private query", 5)
+    assert client.session.post.call_count == 1
+    kwargs = client.session.post.call_args.kwargs
+    assert json.loads(kwargs["data"]) == {
+        "query": "private query", "max_results": 5, "search_depth": "advanced",
+        "include_answer": True, "include_usage": True,
+    }
+    row, = ledger()
+    assert row.reported_usage["search_units"] == 0
+    assert row.inferred_usage["coverage"]["cost_status"] == "unpriced"
+    assert row.tariff_estimated_cost_usd is row.tool_tariff_estimated_cost_usd is None
+
+
+@pytest.mark.parametrize("second_value,expected", [(0, 0), (1, None)])
+@pytest.mark.parametrize("other_container", [False, True])
+def test_disagreeing_usage_aliases_and_containers_are_unknown_for_costing(ledger, second_value, expected, other_container):
+    result = NS(usage={"input_tokens": 0, "output_tokens": 0})
+    if other_container:
+        result.usage_metadata = {"prompt_token_count": second_value}
+    else:
+        result.usage["prompt_tokens"] = second_value
+    call(result)
+    row, = ledger()
+    assert row.reported_usage["input_tokens"] == expected
+    assert row.tariff_estimated_cost_usd == expected
+    assert row.inferred_usage["coverage"]["conflicting_fields"] == ([] if expected == 0 else ["input_tokens"])
+
+
+def test_conflicting_cache_snapshot_never_turns_into_inferred_cache_price(ledger):
+    rates = {"cache_hit_input": 0.1, "cache_miss_input": 1, "output": 2}
+    with ApiAttempt(provider="deepseek", model="m", request="private", tariff_rates=rates) as attempt:
+        attempt.observe(NS(usage={"input_tokens": 10, "output_tokens": 0, "prompt_cache_hit_tokens": 10}))
+        attempt.observe(NS(usage={"cache_read_input_tokens": 0, "prompt_cache_hit_tokens": 10}))
+    row, = ledger()
+    assert row.reported_usage["input_tokens"] == 10
+    assert row.reported_usage["cache_read_input_tokens"] is None
+    assert row.tariff_estimated_cost_usd is None
+    assert row.inferred_usage["coverage"]["conflicting_fields"] == ["cache_read_input_tokens"]
+    assert row.inferred_usage["coverage"]["cost_reason"] == "invalid_tariff_or_usage"
+
+
+def test_unpriced_error_does_not_suppress_later_available_estimate(ledger):
+    error = RuntimeError("PRIVATE")
+    error.request_id = "same-request"
+    error.response = NS(status_code=503, headers={"x-request-id": "same-request"})
+    with pytest.raises(RuntimeError):
+        metered_call(Mock(side_effect=error), provider="openai", meter_model="m", tariff_rates=RATES)
+    recovered = response("recovered")
+    recovered._request_id = "same-request"
+    call(recovered)
+    failed, succeeded = ledger()
+    assert failed.provider_request_id == succeeded.provider_request_id == "same-request"
+    assert failed.tariff_estimated_cost_usd is None
+    assert failed.request_dedupe_key is None
+    assert succeeded.tariff_estimated_cost_usd == pytest.approx(0.00014)
+    assert succeeded.duplicate_of_attempt_id is None
+
+
+@pytest.mark.parametrize("first_is_error", [True, False])
+def test_conflicting_priced_deliveries_preserve_evidence_and_flag_identity_ambiguity(ledger, first_is_error):
+    if first_is_error:
+        error = RuntimeError("PRIVATE")
+        error.request_id = "same-request"
+        error.usage = {"input_tokens": 0, "output_tokens": 0}
+        with pytest.raises(RuntimeError):
+            metered_call(Mock(side_effect=error), provider="openai", meter_model="m", tariff_rates=RATES)
+    else:
+        first = response("first", tokens_in=0, tokens_out=0)
+        first._request_id = "same-request"
+        call(first)
+    positive = response("positive")
+    positive._request_id = "same-request"
+    call(positive)
+    first, conflicting = ledger()
+    assert first.reported_usage["input_tokens"] == 0
+    assert first.tariff_estimated_cost_usd == 0
+    assert first.status == ("error" if first_is_error else "success")
+    assert conflicting.reported_usage["input_tokens"] == 100
+    assert conflicting.duplicate_of_attempt_id == first.attempt_id
+    assert conflicting.tariff_estimated_cost_usd is None
+    assert conflicting.inferred_usage["coverage"]["cost_status"] == "ambiguous"
+    assert conflicting.inferred_usage["coverage"]["cost_reason"] == "conflicting_provider_identity"
+    assert conflicting.inferred_usage["coverage"]["conflicting_fields"] == ["input_tokens", "output_tokens"]
+    from app.domains.api_usage.coverage import summarize_attempt_coverage
+    coverage = summarize_attempt_coverage(ledger(None))
+    assert coverage["summary"]["ambiguous_attempts"] == 2
+    assert coverage["summary"]["known_token_estimate_subtotal_usd"] is None
+    assert coverage["invoice_total_usd"] is None
+
+
+def test_identity_alias_replay_compares_to_original_priced_evidence(ledger):
+    first = response(None, tokens_in=0, tokens_out=0)
+    first._request_id = "same-request"
+    alias = response("new-response", tokens_in=0, tokens_out=0)
+    alias._request_id = "same-request"
+    conflicting = response("new-response")
+    conflicting._request_id = None
+    for item in (first, alias, conflicting):
+        call(item)
+    first_row, alias_row, conflict_row = ledger()
+    assert alias_row.duplicate_of_attempt_id == conflict_row.duplicate_of_attempt_id == first_row.attempt_id
+    assert conflict_row.inferred_usage["coverage"]["cost_status"] == "ambiguous"
+    assert first_row.tariff_estimated_cost_usd == 0
+
+
+def test_omitted_success_usage_does_not_suppress_later_available_estimate(ledger):
+    call(response("same-id", usage=False))
+    call(response("same-id"))
+    omitted, priced = ledger()
+    assert omitted.status == priced.status == "success"
+    assert omitted.provider_request_id == priced.provider_request_id
+    assert omitted.provider_response_id == priced.provider_response_id
+    assert omitted.request_dedupe_key is omitted.response_dedupe_key is None
+    assert priced.tariff_estimated_cost_usd == pytest.approx(0.00014)
+    assert priced.duplicate_of_attempt_id is None
+
+
+def test_decreasing_cumulative_usage_is_conflicting_not_a_lower_settled_cost(ledger):
+    with ApiAttempt(provider="gemini", model="m", request="private", tariff_rates=RATES) as attempt:
+        attempt.observe(NS(usage_metadata=NS(prompt_token_count=10, candidates_token_count=5)))
+        attempt.observe(NS(usage_metadata=NS(prompt_token_count=10, candidates_token_count=0)))
+        attempt.observe(NS(usage_metadata=NS(prompt_token_count=10, candidates_token_count=7)))
+    row, = ledger()
+    assert row.reported_usage["input_tokens"] == 10
+    assert row.reported_usage["output_tokens"] is None
+    assert row.tariff_estimated_cost_usd is None
+    assert row.inferred_usage["coverage"]["conflicting_fields"] == ["output_tokens"]
+
+
+def test_malformed_cache_usage_is_not_replaced_by_an_inferred_cache_split(ledger):
+    rates = {"cache_hit_input": 0.1, "cache_miss_input": 1, "output": 2}
+    with ApiAttempt(provider="deepseek", model="m", request="private", tariff_rates=rates) as attempt:
+        attempt.observe(NS(usage={"input_tokens": 10, "output_tokens": 0, "prompt_cache_hit_tokens": -5}))
+    row, = ledger()
+    assert row.reported_usage["cache_read_input_tokens"] is None
+    assert row.tariff_estimated_cost_usd is None
+    assert row.inferred_usage["coverage"]["malformed_fields"] == ["cache_read_input_tokens"]
+    assert row.inferred_usage["coverage"]["cost_reason"] == "invalid_tariff_or_usage"
+
+
+def test_request_response_identity_bridge_quarantines_both_prior_estimates(ledger):
+    request_only = response(None)
+    request_only._request_id = "request-Q"
+    response_only = response("response-R")
+    response_only._request_id = None
+    bridge = response("response-R")
+    bridge._request_id = "request-Q"
+    for item in (request_only, response_only, bridge):
+        call(item)
+    first, second, linked = ledger()
+    assert first.tariff_estimated_cost_usd == second.tariff_estimated_cost_usd == pytest.approx(0.00014)
+    assert linked.tariff_estimated_cost_usd is None
+    assert linked.inferred_usage["coverage"]["cost_reason"] == "conflicting_provider_identity"
+    assert linked.provider_request_id == first.provider_request_id
+    assert linked.provider_response_id == second.provider_response_id
+    from app.domains.api_usage.coverage import summarize_attempt_coverage
+    coverage = summarize_attempt_coverage(ledger(None))
+    assert coverage["summary"]["ambiguous_attempts"] == 3
+    assert coverage["summary"]["known_token_estimate_subtotal_usd"] is None
