@@ -58,6 +58,7 @@ jobs:
             from pathlib import Path
             import re
             import shutil
+            import stat
             import subprocess
             
             GIB = 1024 ** 3
@@ -73,9 +74,10 @@ jobs:
                     raise StopResize(reason)
             
             
-            def command(argv, timeout=15, accepted=(0,)):
+            def command(argv, timeout=15, accepted=(0,), ram_temp=False):
                 try:
-                    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+                    env = dict(os.environ, TMPDIR="/run") if ram_temp else None
+                    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False, env=env)
                 except (OSError, subprocess.SubprocessError):
                     raise StopResize("command_unavailable_or_timed_out") from None
                 checked(result.returncode in accepted, "command_failed")
@@ -134,19 +136,34 @@ jobs:
                 return device, disk, part_number, root["fstype"], info["size"]
             
             
+            def verify_ram_temporary_space():
+                directory = os.lstat("/run")
+                checked(stat.S_ISDIR(directory.st_mode) and directory.st_uid == 0 and not directory.st_mode & (stat.S_IWGRP | stat.S_IWOTH), "ram_temporary_directory_not_private")
+                mounts = json_command(["findmnt", "--json", "--target", "/run", "--output", "TARGET,FSTYPE,OPTIONS"]).get("filesystems", [])
+                checked(len(mounts) == 1 and mounts[0].get("target") == "/run" and mounts[0].get("fstype") == "tmpfs" and "rw" in mounts[0].get("options", "").split(","), "ram_temporary_mount_unavailable")
+                stats = os.statvfs("/run")
+                checked(stats.f_bavail * stats.f_frsize >= 64 * 1024 ** 2 and stats.f_favail >= 64, "insufficient_ram_temporary_space")
+                try:
+                    memory = Path("/proc/meminfo").read_text()
+                    available = re.search(r"^MemAvailable:\s+(\d+) kB$", memory, re.MULTILINE)
+                    checked(available is not None and int(available.group(1)) >= 128 * 1024, "insufficient_available_memory")
+                except OSError:
+                    raise StopResize("available_memory_unverified") from None
+            
+            
             def grow_root():
                 checked(os.geteuid() == 0, "root_privilege_required")
                 device, disk, part_number, fstype, before_device_bytes = inspect_root()
                 before_fs_bytes, before_free_bytes = metrics()
-                checked(before_free_bytes >= 64 * 1024 ** 2, "insufficient_temporary_space")
                 resizer = "resize2fs" if fstype == "ext4" else "xfs_growfs"
                 checked(shutil.which(resizer) is not None, "filesystem_resizer_unavailable")
                 if part_number is not None:
                     checked(shutil.which("growpart") is not None, "partition_resizer_unavailable")
-                    dry = command(["growpart", "-N", disk, part_number], accepted=(0, 1))
+                    verify_ram_temporary_space()
+                    dry = command(["growpart", "-N", disk, part_number], accepted=(0, 1), ram_temp=True)
                     if dry.returncode == 0:
                         checked(dry.stdout.startswith("CHANGE:"), "unexpected_partition_preview")
-                        command(["growpart", disk, part_number], timeout=120)
+                        command(["growpart", disk, part_number], timeout=120, ram_temp=True)
                     else:
                         checked(dry.stdout.startswith("NOCHANGE:"), "partition_preview_failed")
                 device2, disk2, part2, fs2, after_device_bytes = inspect_root()
