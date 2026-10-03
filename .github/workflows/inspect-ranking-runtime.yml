@@ -1,7 +1,13 @@
-name: Inspect Rankings Runtime
+name: Grow Approved Root Filesystem
 
 on:
   workflow_dispatch:
+    inputs:
+      snapshot_complete_and_volume_90gib:
+        description: Confirm backup snapshot completed and root EBS expansion reached optimizing or completed
+        required: true
+        default: false
+        type: boolean
   push:
     branches: [codex/diagnose-credx-timeouts-20261002]
     paths: [.github/workflows/inspect-ranking-runtime.yml]
@@ -9,82 +15,176 @@ on:
 permissions:
   contents: read
 
+# Share the Actions deployment lock and the existing host lock used by recovery.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
-  inspect:
+  resize:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.snapshot_complete_and_volume_90gib == true) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[approved-root-grow-90gib]'))
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: Measure approved aggregate storage sizes without changing data
+      - name: Grow the verified mounted root without deleting data or restarting services
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          command_timeout: 120s
+          command_timeout: 420s
           script: |
-            set -euo pipefail
-            free_kib="$(df -Pk / | awk 'NR==2 {print $4}')"
+            set -eu
             if ! sudo -n true 2>/dev/null; then
-              printf 'available_disk_kib=%s\n' "$free_kib"
-              printf 'redownloadable_package_cache_kib=unavailable\n'
-              printf 'temporary_deploy_bundle_kib=unavailable\n'
-              exit 0
+              printf 'resize_status=blocked\nreason=root_privilege_required\n'
+              exit 1
             fi
-            app_user="$(sudo -n systemctl show investor-backend --property=User --value 2>/dev/null || true)"
-            app_home=''
-            if [[ -n "$app_user" ]]; then
-              app_home="$(getent passwd "$app_user" | cut -d: -f6)"
+            if ! sudo -n test -f /run/investor-production-deploy.lock 2>/dev/null || ! command -v flock >/dev/null 2>&1; then
+              printf 'resize_status=blocked\nreason=host_lock_unavailable\n'
+              exit 1
             fi
-            paths=(/var/cache/apt/archives)
-            if [[ -n "$app_home" && "$app_home" == /* ]]; then
-              paths+=("$app_home/.cache/pip" "$app_home/.npm/_cacache")
-            fi
-            cache_kib=0
-            complete=true
-            for path in "${paths[@]}"; do
-              if sudo -n test -d "$path" 2>/dev/null; then
-                if measured="$(sudo -n timeout 20s du -skx -- "$path" 2>/dev/null)"; then
-                  value="${measured%%[[:space:]]*}"
-                  if [[ "$value" =~ ^[0-9]+$ ]]; then
-                    cache_kib=$((cache_kib + value))
-                  else
-                    complete=false
-                  fi
-                else
-                  complete=false
-                fi
-              fi
-            done
-            [[ -n "$app_home" ]] || complete=false
-            printf 'available_disk_kib=%s\n' "$free_kib"
-            if [[ "$complete" == true ]]; then
-              printf 'redownloadable_package_cache_kib=%s\n' "$cache_kib"
-            else
-              printf 'redownloadable_package_cache_kib=unavailable\n'
-            fi
+            set +e
+            sudo -n flock --wait 30 --conflict-exit-code 75 /run/investor-production-deploy.lock python3 - 2>/dev/null <<'PY_ROOT_RESIZE'
+            #!/usr/bin/env python3
+            """Online growth of the already-mounted root after approved 90 GiB EBS expansion.
+            No credentials, paths, topology, command output or application data are emitted.
+            This program never formats, deletes, shrinks, remounts or restarts anything.
+            """
+            import json
+            import os
+            from pathlib import Path
+            import re
+            import shutil
+            import subprocess
             
-            # Uploaded deployment archives are separate from active/rollback build slots.
-            # Inspect only aggregate allocated size; never print names or contents.
-            shopt -s nullglob
-            bundle_kib=0
-            bundles_complete=true
-            for path in /tmp/investor-deploy-*; do
-              if sudo -n test -d "$path" 2>/dev/null; then
-                if measured="$(sudo -n timeout 20s du -skx -- "$path" 2>/dev/null)"; then
-                  value="${measured%%[[:space:]]*}"
-                  if [[ "$value" =~ ^[0-9]+$ ]]; then
-                    bundle_kib=$((bundle_kib + value))
-                  else
-                    bundles_complete=false
-                  fi
-                else
-                  bundles_complete=false
-                fi
-              fi
-            done
-            if [[ "$bundles_complete" == true ]]; then
-              printf 'temporary_deploy_bundle_kib=%s\n' "$bundle_kib"
-            else
-              printf 'temporary_deploy_bundle_kib=unavailable\n'
+            GIB = 1024 ** 3
+            EXPECTED_DISK_BYTES = 90 * GIB
+            
+            
+            class StopResize(Exception):
+                pass
+            
+            
+            def checked(condition, reason):
+                if not condition:
+                    raise StopResize(reason)
+            
+            
+            def command(argv, timeout=15, accepted=(0,)):
+                try:
+                    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
+                except (OSError, subprocess.SubprocessError):
+                    raise StopResize("command_unavailable_or_timed_out") from None
+                checked(result.returncode in accepted, "command_failed")
+                return result
+            
+            
+            def json_command(argv):
+                try:
+                    return json.loads(command(argv).stdout)
+                except (ValueError, TypeError):
+                    raise StopResize("unexpected_inspection_response") from None
+            
+            
+            def metrics():
+                stats = os.statvfs("/")
+                return stats.f_blocks * stats.f_frsize, stats.f_bavail * stats.f_frsize
+            
+            
+            def block_info(device):
+                rows = json_command(["lsblk", "--json", "--bytes", "--paths", "--output", "NAME,TYPE,SIZE,PKNAME", device]).get("blockdevices", [])
+                checked(len(rows) == 1 and rows[0].get("name") == device, "ambiguous_block_device")
+                row = rows[0]
+                checked(isinstance(row.get("size"), int) and row["size"] > 0, "invalid_device_capacity")
+                return row
+            
+            
+            def inspect_root():
+                mounts = json_command(["findmnt", "--json", "--target", "/", "--output", "SOURCE,TARGET,FSTYPE,OPTIONS"]).get("filesystems", [])
+                checked(len(mounts) == 1, "ambiguous_root_mount")
+                root = mounts[0]
+                checked(root.get("target") == "/" and "rw" in root.get("options", "").split(","), "root_not_read_write")
+                checked(root.get("fstype") in ("ext4", "xfs"), "unsupported_root_filesystem")
+                source = root.get("source", "")
+                checked(isinstance(source, str) and source.startswith("/dev/"), "unsupported_root_source")
+                device = str(Path(source).resolve())
+                checked(re.fullmatch(r"/dev/[A-Za-z0-9_-]+", device) is not None, "unsupported_root_device")
+                info = block_info(device)
+                checked(info.get("type") in ("part", "disk"), "unsupported_root_topology")
+                part_number = None
+                if info["type"] == "part":
+                    disk = info.get("pkname", "")
+                    checked(isinstance(disk, str) and re.fullmatch(r"/dev/[A-Za-z0-9_-]+", disk) is not None, "ambiguous_parent_device")
+                    parent = block_info(disk)
+                    try:
+                        part_number = Path("/sys/class/block", Path(device).name, "partition").read_text().strip()
+                    except OSError:
+                        raise StopResize("partition_number_unavailable") from None
+                    checked(re.fullmatch(r"[1-9][0-9]*", part_number) is not None, "invalid_partition_number")
+                    checked(any(c.get("name") == device and c.get("type") == "part" for c in parent.get("children", [])), "parent_partition_mismatch")
+                else:
+                    disk, parent = device, info
+                    checked(not parent.get("children"), "unexpected_disk_children")
+                checked(parent.get("type") == "disk" and not parent.get("pkname"), "unsupported_parent_topology")
+                checked(parent["size"] == EXPECTED_DISK_BYTES, "approved_90gib_disk_not_visible")
+                checked(75 * GIB <= info["size"] <= parent["size"], "unexpected_root_capacity")
+                return device, disk, part_number, root["fstype"], info["size"]
+            
+            
+            def grow_root():
+                checked(os.geteuid() == 0, "root_privilege_required")
+                device, disk, part_number, fstype, before_device_bytes = inspect_root()
+                before_fs_bytes, before_free_bytes = metrics()
+                checked(before_free_bytes >= 64 * 1024 ** 2, "insufficient_temporary_space")
+                resizer = "resize2fs" if fstype == "ext4" else "xfs_growfs"
+                checked(shutil.which(resizer) is not None, "filesystem_resizer_unavailable")
+                if part_number is not None:
+                    checked(shutil.which("growpart") is not None, "partition_resizer_unavailable")
+                    dry = command(["growpart", "-N", disk, part_number], accepted=(0, 1))
+                    if dry.returncode == 0:
+                        checked(dry.stdout.startswith("CHANGE:"), "unexpected_partition_preview")
+                        command(["growpart", disk, part_number], timeout=120)
+                    else:
+                        checked(dry.stdout.startswith("NOCHANGE:"), "partition_preview_failed")
+                device2, disk2, part2, fs2, after_device_bytes = inspect_root()
+                checked((device, disk, part_number, fstype) == (device2, disk2, part2, fs2), "root_changed_during_resize")
+                checked(after_device_bytes >= before_device_bytes and after_device_bytes >= 85 * GIB, "partition_growth_not_verified")
+                # Both official filesystem tools safely report a no-op when already current.
+                command([resizer, device] if fstype == "ext4" else [resizer, "-d", "/"], timeout=180)
+                after_fs_bytes, after_free_bytes = metrics()
+                checked(after_fs_bytes >= before_fs_bytes and after_fs_bytes >= 85 * GIB, "filesystem_growth_not_verified")
+                if before_fs_bytes < 85 * GIB:
+                    checked(after_fs_bytes - before_fs_bytes >= 8 * GIB, "filesystem_growth_smaller_than_expected")
+                print("resize_status=" + ("already_current" if after_fs_bytes == before_fs_bytes else "complete"))
+                print("available_disk_kib=" + str(after_free_bytes // 1024))
+                print("deployment_reserve_satisfied=" + str(after_free_bytes >= 2 * GIB).lower())
+            
+            
+            def main():
+                try:
+                    grow_root()
+                except StopResize as exc:
+                    print("resize_status=blocked")
+                    print("reason=" + str(exc))
+                    return 1
+                except Exception:
+                    print("resize_status=blocked")
+                    print("reason=unexpected_error")
+                    return 1
+                return 0
+            
+            
+            if __name__ == "__main__":
+                raise SystemExit(main())
+            PY_ROOT_RESIZE
+            resize_exit=$?
+            set -e
+            if [ "$resize_exit" -eq 75 ]; then
+              printf 'resize_status=blocked\nreason=host_lock_busy\n'
+            elif [ "$resize_exit" -ne 0 ]; then
+              printf 'resize_command_status=failed\n'
             fi
+            exit "$resize_exit"
