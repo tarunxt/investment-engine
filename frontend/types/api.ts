@@ -905,10 +905,17 @@ export interface AutoRebalanceHistoryDetailResponse
   standalone_jobs: AutoRebalanceJobDetailResponse[];
 }
 
+export interface OutputSourceJobReference {
+  run_id: number;
+  job_id: number;
+  response_sha256: string;
+}
+
 export interface RunCreate {
   prompt: string;
   targets: RunModelTarget[];
   polymarket_event_context?: PolymarketEventRunContext | null;
+  output_source_jobs?: OutputSourceJobReference[];
   prompt_id?: number | null;
   scheduled_at?: string | null;
   auto_export_enabled?: boolean;

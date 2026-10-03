@@ -20,6 +20,7 @@ import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
 import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
+import { OutputConsistencyNotice } from '@/components/OutputConsistencyNotice';
 import {
   getAutoRebalanceRunDisplayLabel,
   getJobSheetsPresentation,
@@ -500,6 +501,7 @@ export default function RunDetailPage() {
                   </div>
                 </div>
                 <div className="max-w-full p-5">
+                  <OutputConsistencyNotice metadata={job.runtime_metadata_json} />
                   {job.status === 'failed' && job.error_message ? (
                     <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                       <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>

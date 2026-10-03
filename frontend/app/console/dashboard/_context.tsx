@@ -13,6 +13,7 @@ import {
 import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
 import { isRunInSwingTradeMarket } from '@/lib/runPresentation';
 import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
+import { outputSourceJobsForPrompt, type OutputSourceSelection } from '@/lib/outputSourceJobs';
 import { apiService } from '@/services/api';
 import {
   type GoogleSheetsStatusResponse,
@@ -101,6 +102,7 @@ interface DashboardContextValue {
   // Form state
   prompt: string;
   setPrompt: React.Dispatch<React.SetStateAction<string>>;
+  setOutputSourceSelection: React.Dispatch<React.SetStateAction<OutputSourceSelection | null>>;
   providers: ProviderInfo[];
   scheduledAt: string;
   setScheduledAt: (val: string) => void;
@@ -204,6 +206,7 @@ export function DashboardProvider({
     promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : '',
   );
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [outputSourceSelection, setOutputSourceSelection] = useState<OutputSourceSelection | null>(null);
   const [scheduledAt, setScheduledAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -661,6 +664,7 @@ export function DashboardProvider({
         const run = await apiService.createRun({
           prompt: trimmedPrompt,
           targets,
+          output_source_jobs: await outputSourceJobsForPrompt(trimmedPrompt, outputSourceSelection),
           scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           allow_parallel: allowParallel,
           auto_export_enabled: autoExportEnabled,
@@ -683,6 +687,7 @@ export function DashboardProvider({
     },
     [
       prompt,
+      outputSourceSelection,
       runs,
       parseTargets,
       scheduledAt,
@@ -748,6 +753,7 @@ export function DashboardProvider({
         runScopeKind,
         prompt,
         setPrompt,
+        setOutputSourceSelection,
         providers,
         scheduledAt,
         setScheduledAt,

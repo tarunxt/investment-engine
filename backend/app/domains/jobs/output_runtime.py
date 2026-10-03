@@ -19,6 +19,8 @@ from app.domains.jobs.output_contracts import (
 )
 from app.domains.jobs.output_contracts.document import parse_markdown, split_row
 from app.domains.jobs.output_contracts.schemas import Finding
+from app.domains.jobs.output_contracts.consistency import FrozenSwingSource, inspect_output_consistency
+from app.domains.jobs.output_sources import frozen_sources_from_context
 from app.domains.jobs.output_contracts.validation import aliases, header_key, identity, prepare_holdings
 from app.domains.runs.run_identity import analysis_run_identity
 
@@ -29,6 +31,7 @@ class OutputContext:
     metadata: Mapping[str, Any]
     holdings: tuple[Mapping[str, Any], ...] | None
     expected_rows: int | None
+    swing_sources: tuple[FrozenSwingSource, ...] | None = None
 
 
 _context: ContextVar[OutputContext | None] = ContextVar('validated_output_context', default=None)
@@ -113,7 +116,9 @@ def configure_output_context(job: Any, dimensions: Mapping[str, str | None]) -> 
         metadata.update(run_date=local.strftime('%Y-%m-%d'), run_time=local.strftime('%H:%M:%S'))
     counts = {int(value) for value in re.findall(r'(?i)\b(?:choose|select)\s+exactly\s+([1-9][0-9]*)\s+(?:unique\s+)?stocks?\b', _instruction_prefix(prompt))} if kind == 'swing' else set()
     expected = next(iter(counts)) if len(counts) == 1 else None
-    return _context.set(OutputContext(kind, metadata, holdings, expected))
+    sources = frozen_sources_from_context(getattr(job, 'request_context_json', None),
+                                          market=analysis_run_identity(job).market)
+    return _context.set(OutputContext(kind, metadata, holdings, expected, sources))
 
 
 def reset_output_context(token: Token | None) -> None:
@@ -180,4 +185,7 @@ def output_validation_metadata(content: str | None) -> dict[str, Any] | None:
         'coverage': asdict(result.coverage),
         'finding_counts': dict(Counter(f.code for f in result.findings)),
         'semantic_research_quality': 'not_evaluated',
+        'consistency': asdict(inspect_output_consistency(
+            result, swing_sources=current_output_context().swing_sources,
+        )),
     }

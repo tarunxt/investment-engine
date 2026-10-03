@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { webcrypto } from 'node:crypto';
 import * as jsxRuntime from 'react/jsx-runtime';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -22,6 +23,8 @@ function load(source, bindings = {}) {
 }
 modules['@/lib/rebalanceRunIdentity'] = load(read('../lib/rebalanceRunIdentity.ts'));
 modules['@/lib/rebalanceStageInputs'] = load(read('../lib/rebalanceStageInputs.ts'));
+modules['@/lib/autoRebalanceAudit'] = load(read('../lib/autoRebalanceAudit.ts'));
+modules['@/lib/outputSourceJobs'] = load(read('../lib/outputSourceJobs.ts'), { crypto: webcrypto });
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
 const portfolioSnapshot = { parse_status: 'parsed', reported_holdings_count: 1,
@@ -183,7 +186,8 @@ visit(ast);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
 const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`);
 
-async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot } = {}) {
+async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
+  sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false } } = {}) {
   const created = [];
   const completed = [];
   const errors = [];
@@ -218,11 +222,16 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
-    ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'], apiService,
+    ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
+    ...modules['@/lib/autoRebalanceAudit'], ...modules['@/lib/outputSourceJobs'], buildOutputSourceJobs: sourceHasher, apiService,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,
     isWorkflowExecutingRef: { current: false }, activeExecutionRefsRef: { current: [] },
-    activeAutoRebalanceMetadataRef: { current: {} }, cancelRequestedRef: { current: false }, pauseRequestedRef: { current: false },
-    setRunningPortfolio: noop, resetPortfolio: noop, setWorkflowPaused: noop, setActiveAutoRebalanceMetadata: noop,
+    activeAutoRebalanceMetadataRef: { current: {} }, cancelRequestedRef, pauseRequestedRef: { current: false },
+    auditSessionsRef: { current: {} }, setAuditStates: noop, setCompletionEmailWarnings: noop,
+    // Persistence behavior is exercised by auto-rebalance-audit-persistence;
+    // this harness isolates the existing source-selection/model-call contract.
+    getAuditSession: () => ({ key: 'indmoney_us:100', verifyCompletion: async () => true, drain: async () => {} }),
+    setRunningPortfolio: noop, resetPortfolio: noop, setWorkflowPaused: noop, setActiveAutoRebalanceMetadata: noop, setStates: noop,
     updateStage: (_portfolio, stage, info) => { if (info.error) errors.push({ stage, error: info.error }); },
     markRunning: noop, markCompleted: (_portfolio, stage) => { completed.push(stage); },
     completeSkippedStage: noop, onDashboardRefresh: async () => {}, recordAutoRebalanceStage: async () => {},
@@ -265,6 +274,28 @@ test('offline full workflow keeps six stages and independent model samples while
   for (const jobId of [501, 502, 503]) assert.equal(rebalancePrompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
   assert.deepEqual(keys(result.consensusInputs[1]), ['60:601', '60:602', '61:603']);
   assert.deepEqual(result.created.find((call) => call.stage === 'swing').targets, result.targets);
+});
+
+test('Kill during deferred source hashing prevents the next paid Rebalance call', { timeout: 5000 }, async () => {
+  const cancelRequestedRef = { current: false };
+  let releaseHashing;
+  let signalHashing;
+  const held = new Promise((resolve) => { releaseHashing = resolve; });
+  const hashingStarted = new Promise((resolve) => { signalHashing = resolve; });
+  const pending = executeWorkflow({ cancelRequestedRef, sourceHasher: async (...args) => {
+    const sources = await modules['@/lib/outputSourceJobs'].buildOutputSourceJobs(...args);
+    signalHashing();
+    await held;
+    return sources;
+  } });
+  await hashingStarted;
+  cancelRequestedRef.current = true;
+  releaseHashing();
+  const result = await pending;
+  assert.deepEqual(result.created.map((call) => call.stage), ['threats', 'swing']);
+  assert.ok(!result.completed.includes('rebalance'));
+  assert.ok(!result.completed.includes('technical'));
+  assert.ok(result.errors.some((entry) => entry.stage === 'rebalance' && /killed by user/.test(entry.error)));
 });
 
 test('offline workflow rejects stale/conflicting and out-of-scope sources before the next paid stage', async () => {

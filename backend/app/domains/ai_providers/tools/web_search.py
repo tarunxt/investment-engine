@@ -124,6 +124,7 @@ def _tavily_search(query: str, max_results: int) -> str:
         max_results=max_results,
         search_depth="advanced",
         include_answer=True,
+        include_usage=True,
     )
     logger.info("Tavily search returned %d results", len(response.get("results", [])))
     results = [

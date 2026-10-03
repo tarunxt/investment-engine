@@ -30,9 +30,12 @@ provider/request-ID hashes in separate namespaces. A request-only delivery and a
 later delivery with the same request ID plus a response ID remain one estimated
 charge. Credentials are server-wide, so this response scope
 is shared across app users; replay does not create a second charge merely by
-changing user context. No credential is read or hashed for this identity. A different attempt delivering the same identified response
+changing user context. No credential is read or hashed for this identity. A different priced attempt delivering the same claimed response
 keeps its own events and reported usage, links `duplicate_of_attempt_id`, and has
-no second tariff charge. A new identity alias learned on that duplicate event is
+no second tariff charge. Unpriced finished events retain raw provider IDs but
+leave charge-identity keys unclaimed, so omitted/partial usage cannot suppress a
+later observed estimate. Their IDs remain available for reconciliation; they are
+not evidence of an additional charge. A new identity alias learned on a priced duplicate event is
 retained so a later partial-ID delivery also resolves to the original charge.
 Identical model/prompt/sample settings are never dedupe
 keys. Missing provider IDs still produce complete attempt/event identity and do
@@ -137,3 +140,91 @@ have disjoint identifiers and a later delivery reveals that they are related,
 the append-only rows retain those identifiers for reconciliation; a raw sum is
 not a proven invoice total. Missing identifiers, hidden SDK retries, persistence
 failures, and unattributed provider-day billing remain explicit limitations.
+
+## Bounded coverage summaries
+
+New start/finish events record a versioned `coverage` explanation inside the
+existing `inferred_usage` JSON, separately from provider-returned numeric facts.
+`usage_status` distinguishes `unavailable` (no observable response/usage),
+`omitted` (observed response without usable allowlisted counters), `malformed`
+(unusable usage metadata), and `reported` (at least one valid numeric counter).
+Fixed allowlisted field names identify malformed counters even when other valid
+usage is retained. Explicit zero is valid; booleans, negative/nonfinite numbers,
+numeric strings, and fractional token counts are rejected rather than coerced.
+Partial usage remains partial: no missing input/output/cache counter is filled
+into provider-reported evidence.
+Disagreeing valid aliases/containers or decreasing cumulative counters set the
+affected reported field to null and retain fixed `conflicting_fields` diagnostics
+for the attempt. Later larger snapshots do not erase that ambiguity. Malformed
+or conflicting required cache counts do not trigger an inferred cache price.
+
+Usage extraction runs independently of optional response identity/choice metadata.
+Errors retain any observed stream usage and available allowlisted usage on the
+exception, its response, or already-decoded SDK `body`/`details` mappings, while
+the lifecycle status remains error/cancelled. This does not call `response.json()`,
+read raw response bodies, or request extra upstream data. If the SDK discarded
+usage, it remains unavailable. Numeric snapshots are cumulative, not summed.
+
+`cost_status` distinguishes a partial listed-token estimate, reported but
+unpriced usage, and unavailable estimates; `cost_reason` identifies missing
+usage, required token counts, tariff, or invalid tariff/cache data. Tool fees and
+provider bills stay null. An estimate is never represented as complete billing.
+No historical rows, existing prices, accounting endpoints, or schemas change.
+
+Tavily now passes only the metadata flag `include_usage=True` in the existing
+search call. The [official Search API reference](https://docs.tavily.com/documentation/api-reference/endpoint/search)
+and pinned `tavily-python==0.7.24` SDK define this as returned credit-usage metadata.
+The query, advanced depth, result count, answer flag, fallback order, and retries
+are unchanged. Observed credits, including zero, are preserved; no dollar tariff
+is invented. DDG/Bing result counts are not billable usage counters.
+
+`api_usage.coverage.summarize_attempt_coverage(events, max_event_rows=10_000)`
+is a pure helper for an already selected, authorized event window. It performs no
+database queries and exposes no endpoint. The hard cap is 10,000 event rows; it
+reads at most one additional item to flag truncation. Invalid rows and repeated
+`(attempt_id, event_kind)` events are counted separately. Identical bounded
+accounting/coverage projections count as replays. Contradictory projections count
+as `conflicting_event_rows`, mark the attempt ambiguous, and quarantine all of
+its token and tool estimates. Conflicting group labels become `unknown`, and
+unsupported provider, phase, and status strings are always mapped to `unknown`.
+A finish takes precedence over its start regardless of input order; conflicting
+representations of a start still quarantine that attempt's finished estimate.
+
+The report groups attempts by actual provider, phase, and status, with separate
+usage status, evidence source, malformed-field, cost status, and reason counts.
+Missing or unsupported coverage metadata remains `legacy_unknown`; the report
+does not infer whether historical usage was omitted or unavailable. Numeric cost
+and usage observations remain independent of that provenance classification.
+`known_reported_usage_attempts` counts an attempt with at least one valid numeric
+allowlisted usage value, including zero; `missing_reported_usage_attempts` counts
+the rest, even when metadata claims usage was reported. These counts include
+duplicates and unmatched starts, whose lifecycle counts remain separate. For a
+conflicting event, numeric availability means that some supplied representation
+contains usage, with an `ambiguous` usage classification; no quantity is trusted.
+Only finite, nonnegative estimates on finished, nonduplicate, unambiguous attempts contribute to known
+token and tool subtotals. An explicit zero is counted as known; no known estimate
+produces a null subtotal. Search attempts lacking tool estimates remain visible.
+
+Unmatched starts and finishes without a start refer only to the supplied window;
+truncation can split a lifecycle pair. These counts do not prove process death or
+lost events. The report never revises historical rows, fills billing gaps, or
+combines legacy ledger totals. `invoice_total_usd` remains null, and hidden SDK
+retries, persistence gaps, and unpriced native tools remain stated limitations.
+
+A persisted `conflicting_provider_identity` flag propagates through the supplied
+`duplicate_of_attempt_id` links and shared raw provider request/response IDs,
+quarantining canonical estimates and other linked attempts in the window. Raw
+IDs are matched only within a recognized provider, with separate request and
+response namespaces. A later response containing both IDs can therefore connect
+previously disjoint request-only and response-only estimates. These links only
+propagate a recorded ambiguity flag; they do not establish invoice deduplication
+or suppress unflagged estimates. Linked identities outside the window are counted
+explicitly, without fetching or assigning costs to them. Missing IDs and unknown
+provider scope cannot establish such a bridge. All identifiers stay internal to
+lifecycle matching and conflict propagation.
+The recorder adds that flag only to the new duplicate event when overlapping
+known usage or known tariff estimates disagree with the canonical priced event,
+or when its request/response IDs bridge multiple distinct canonical roots.
+The earlier event remains immutable, including an earlier explicit zero. Reports
+must use the conflict-aware helper over the relevant window instead of treating
+a raw sum of canonical estimates as settled cost.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from html import escape
 
 import redis
@@ -18,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 
 def build_completion_email(data):
+    if data.get("kind") == "auto_rebalance_success":
+        from app.domains.runs.tasks import _build_auto_rebalance_success_email
+
+        return _build_auto_rebalance_success_email(
+            label=data["workflow_label"], portfolio=data["portfolio"],
+            completed_at=datetime.fromisoformat(data["completed_at"]),
+            total_cost_inr=data.get("total_cost_inr"), total_llm_time=data.get("total_llm_time"),
+            stages_completed=data["stages_completed"],
+        )
     segment = {"zerodha": "Zerodha", "indmoney": "IndMoney", "bullpen": "Bullpen"}[data["segment"]]
     label = data["label"].replace(" · ", " - ")
     # Stable, exact subject reserved for the GPT Work clustering trigger.
@@ -70,7 +80,8 @@ def deliver_completion_email(self, event_id):
                 return
             subject, html, text = build_completion_email(data)
             delivery = send_logged_email_sync(
-                session, user_id=row.user_id, action="mail.stage_completion",
+                session, user_id=row.user_id,
+                action="mail.auto_rebalance_success" if data.get("kind") == "auto_rebalance_success" else "mail.stage_completion",
                 trigger=f"{data['segment']} {data['label']}", category=MAIL_CATEGORY_RUNS,
                 completion_preference=f"completion.{data['segment']}.{data['stage']}",
                 recipients=completion_recipients(data, user.email), subject=subject, html_content=html,
