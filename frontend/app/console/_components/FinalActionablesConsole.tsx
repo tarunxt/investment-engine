@@ -43,6 +43,7 @@ import {
   type ScoreMatrixWeightedRow,
 } from "@/lib/scoreMatrixMath";
 import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
+import { writeOptionalBrowserCache } from "@/lib/optionalBrowserCache";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -133,6 +134,12 @@ type CurrentValueSnapshot = {
 };
 
 type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
+
+type PositionContext = {
+  source: "portfolio-snapshot" | "captured-model-rows";
+  currentUnits: number | null;
+  currentInvestmentAmount: number | null;
+};
 
 type ScoreMatrixEntry = {
   id: string;
@@ -315,6 +322,7 @@ export type StockConsensus = {
   actionAverages: Record<ActionCategory, ActionEstimate>;
   totalSuggestions: number;
   representative: CanonicalRow;
+  positionContext: PositionContext;
   rows: LlmBreakupRow[];
   breakupEntries: ConsensusBreakupEntry[];
   swingScanEntries: SwingScanBreakupEntry[];
@@ -471,7 +479,7 @@ const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 2;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 2;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 3;
+const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 4;
 const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
@@ -518,12 +526,11 @@ function writeFinalActionablesRunCache(cacheKey: string, runs: RunResponse[]) {
   if (typeof window === "undefined") return;
 
   try {
-    const payload: CachedFinalActionablesRuns = {
+    writeOptionalBrowserCache(cacheKey, (): CachedFinalActionablesRuns => ({
       version: FINAL_ACTIONABLES_RUN_CACHE_VERSION,
       cachedAt: Date.now(),
       runs,
-    };
-    window.localStorage.setItem(cacheKey, JSON.stringify(payload));
+    }));
   } catch (error) {
     console.warn("Failed to cache final actionables runs:", error);
   }
@@ -601,18 +608,17 @@ function writeHistoricalActionRowsCache(market: SwingTradeMarket, rows: Historic
   if (typeof window === "undefined") return;
 
   try {
-    const cacheableRows = mergeHistoricalActionRows(
-      rows,
-      readHistoricalActionRowsCache(market),
-    ).slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
-    window.localStorage.setItem(
-      getHistoricalActionRowsCacheKey(market),
-      JSON.stringify({
+    writeOptionalBrowserCache(getHistoricalActionRowsCacheKey(market), () => {
+      const cacheableRows = mergeHistoricalActionRows(
+        rows,
+        readHistoricalActionRowsCache(market),
+      ).slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
+      return {
         version: HISTORICAL_ACTION_ROWS_CACHE_VERSION,
         cachedAt: Date.now(),
         rows: cacheableRows,
-      }),
-    );
+      };
+    });
   } catch (error) {
     console.warn("Failed to cache final actionables history rows:", error);
   }
@@ -666,17 +672,17 @@ function writeDashboardFinalActionablesCache(
   if (typeof window === "undefined") return;
 
   try {
-    const cacheableRuns = new Map<number, RunResponse>();
-    selectCacheableFinalActionablesRuns(runs, "india").forEach((run) => cacheableRuns.set(run.id, run));
-    selectCacheableFinalActionablesRuns(runs, "us").forEach((run) => cacheableRuns.set(run.id, run));
-
-    const payload: CachedDashboardFinalActionables = {
-      version: DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION,
-      cachedAt: Date.now(),
-      runs: Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id),
-      portfolioSnapshots,
-    };
-    window.localStorage.setItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY, JSON.stringify(payload));
+    writeOptionalBrowserCache(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY, (): CachedDashboardFinalActionables => {
+      const cacheableRuns = new Map<number, RunResponse>();
+      selectCacheableFinalActionablesRuns(runs, "india").forEach((run) => cacheableRuns.set(run.id, run));
+      selectCacheableFinalActionablesRuns(runs, "us").forEach((run) => cacheableRuns.set(run.id, run));
+      return {
+        version: DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION,
+        cachedAt: Date.now(),
+        runs: Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id),
+        portfolioSnapshots,
+      };
+    });
   } catch (error) {
     console.warn("Failed to cache dashboard final actionables:", error);
   }
@@ -1318,6 +1324,57 @@ function getCurrentValueAmount(row: CanonicalRow, snapshotMap?: CurrentValueSnap
     : getCurrentInvestmentAmount(row);
 }
 
+function buildPositionContext(
+  rows: LlmBreakupRow[],
+  snapshotMap?: CurrentValueSnapshotMap,
+  hasPortfolioSnapshot = false,
+): PositionContext {
+  const snapshot = rows.map((row) => getCurrentValueSnapshotForRow(row.cells, snapshotMap)).find(Boolean);
+  if (hasPortfolioSnapshot) {
+    // A complete holdings snapshot also captures stocks that are no longer held.
+    return {
+      source: "portfolio-snapshot",
+      currentUnits: snapshot ? snapshot.units : 0,
+      currentInvestmentAmount: snapshot ? snapshot.currentValue : 0,
+    };
+  }
+  return {
+    source: "captured-model-rows",
+    currentUnits: average(rows.map((row) => parseNumericCell(row.cells["Current Units"]))
+      .filter((value): value is number => value !== null)),
+    currentInvestmentAmount: average(rows.map((row) => getCurrentValueAmount(row.cells))
+      .filter((value): value is number => value !== null)),
+  };
+}
+
+function getStockPositionContext(stock: StockConsensus): PositionContext {
+  return stock.positionContext ?? buildPositionContext(stock.rows);
+}
+
+function getPositionContextLabel(stock: StockConsensus) {
+  return getStockPositionContext(stock).source === "portfolio-snapshot"
+    ? "Latest portfolio snapshot"
+    : "Captured model holdings (snapshot unavailable)";
+}
+
+function buildConsolidatedPositionCells(
+  position: PositionContext,
+  unitsChange: number | null,
+  amount: number | null,
+): CanonicalRow {
+  const value = (number: number | null) => number === null ? "" : String(number);
+  return {
+    "Current Units": value(position.currentUnits),
+    [CURRENT_INVESTMENT_AMOUNT_HEADER]: value(position.currentInvestmentAmount),
+    "Units Change": value(unitsChange),
+    "Final Units": value(position.currentUnits === null || unitsChange === null ? null : position.currentUnits + unitsChange),
+    "Units to Sell/Buy": value(unitsChange === null ? null : Math.abs(unitsChange)),
+    "Units to Buy": value(unitsChange === null ? null : Math.max(0, unitsChange)),
+    "Total Buy Amount": value(unitsChange === null ? null : unitsChange > 0 ? amount : 0),
+    "Amount": value(amount),
+  };
+}
+
 function getActionAmount(
   row: CanonicalRow,
   units: number | null,
@@ -1896,7 +1953,7 @@ function buildDetailedRationaleScoreRows(
     },
     {
       id: "mean-mode-action",
-      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
+      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in Model consensus (Mean and Mode) row",
       score: meanModeActionScore,
       multiplier: config.detailedRationaleMultipliers["mean-mode-action"],
       validationRule: {
@@ -1986,6 +2043,7 @@ function resolveMatrixUnitsForAction(
   action: ActionCategory,
   context: ScoreMatrixContext,
 ) {
+  if ((action === "Sell All" || action === "Trim") && context.currentUnits === 0) return 0;
   if (action === "Sell All") {
     if ((context.currentUnits ?? 0) > 0) return -Math.abs(context.currentUnits || 0);
     if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
@@ -2103,11 +2161,7 @@ function buildScoreMatrixDetail(
     };
   });
 
-  const currentUnits = average(
-    stock.rows
-      .map((row) => parseNumericCell(row.cells["Current Units"]))
-      .filter((value): value is number => value !== null),
-  ) ?? parseNumericCell(stock.representative["Current Units"]);
+  const { currentUnits } = getStockPositionContext(stock);
 
   const meanScore = average(
     entries
@@ -2212,20 +2266,20 @@ function buildScoreMatrixDetail(
       ...entries,
       {
         id: `${stock.key}-matrix-mean-mode`,
-        source: "Consolidated (Mean and Mode)",
+        source: "Model consensus (Mean and Mode)",
         action: modeAction,
         actionScore: meanScore,
         unitsChange: meanUnitsChange,
-        note: "Action follows the mode. Units Change uses the signed mean across all LLM rows.",
+        note: "Model action follows the mode. Units Change uses the signed mean across all LLM rows.",
         isSummary: true,
       },
       {
         id: `${stock.key}-matrix-calculated`,
-        source: "Consolidated (Formula)",
+        source: "Current formula",
         action: calculatedAction,
         actionScore: calculatedScore,
         unitsChange: calculatedUnitsChange,
-        note: matchedRule.summary,
+        note: `${matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
         isSummary: true,
         isCalculated: true,
       },
@@ -3386,6 +3440,7 @@ export function buildConsensusRows(
 
   return Array.from(grouped.entries())
     .map(([key, rows]) => {
+      const positionContext = buildPositionContext(rows, currentValueSnapshots, Boolean(portfolioSnapshot));
       const actionCounts = ACTION_CATEGORIES.reduce(
         (acc, action) => {
           acc[action] = 0;
@@ -3395,7 +3450,11 @@ export function buildConsensusRows(
       );
       const actionAverages = ACTION_CATEGORIES.reduce(
         (acc, action) => {
-          acc[action] = summarizeActionEstimate(rows, action, currentValueSnapshots);
+          acc[action] = {
+            ...summarizeActionEstimate(rows, action),
+            currentUnits: positionContext.currentUnits,
+            currentInvestmentAmount: positionContext.currentInvestmentAmount,
+          };
           return acc;
         },
         {} as Record<ActionCategory, ActionEstimate>,
@@ -3433,13 +3492,11 @@ export function buildConsensusRows(
       );
       representative["Rationale Cruxx"] = summarizeRationales(rows);
       const consensusEstimate = actionAverages[consensusAction];
-      representative["Current Units"] = formatQuantity(
-        consensusEstimate.currentUnits ?? getCurrentUnits(first, currentValueSnapshots),
-      );
-      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(
-        consensusEstimate.currentInvestmentAmount ?? getCurrentValueAmount(first, currentValueSnapshots),
-        market,
-      );
+      const consensusUnitsChange = consensusAction === "Hold" ? 0
+        : consensusEstimate.units === null ? null
+          : (consensusAction === "Trim" || consensusAction === "Sell All" ? -1 : 1) * consensusEstimate.units;
+      Object.assign(representative, buildConsolidatedPositionCells(positionContext, consensusUnitsChange, consensusEstimate.amount));
+      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(positionContext.currentInvestmentAmount, market);
       representative["Units to Sell/Buy"] = ACTION_ESTIMATE_CATEGORIES.has(
         consensusAction,
       )
@@ -3458,6 +3515,7 @@ export function buildConsensusRows(
         actionAverages,
         totalSuggestions,
         representative,
+        positionContext,
         rows,
         breakupEntries,
         swingScanEntries,
@@ -3928,26 +3986,8 @@ export function StockDetailsButton({
     () => mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)),
     [historicalRows, market],
   );
-  const displayedPersistedHistory = useMemo(
-    () => persistedHistory.map((item) => {
-      const currentRow = effectiveHistoricalRows.find(
-        (row) => row.runId === item.rebalance_run_id && stockConsensusMatches(row.stock, stock),
-      );
-      if (!currentRow) return item;
-      return {
-        ...item,
-        action: currentRow.formulaAction,
-        score: currentRow.formulaScore,
-        consensus_numerator: currentRow.stock.actionCounts[currentRow.formulaAction],
-        consensus_denominator: currentRow.stock.totalSuggestions,
-        historical_current_units: currentRow.formulaEstimate.currentUnits,
-        historical_current_value: currentRow.formulaEstimate.currentInvestmentAmount,
-        action_units: currentRow.formulaEstimate.units,
-        amount: currentRow.formulaEstimate.amount,
-      };
-    }),
-    [effectiveHistoricalRows, persistedHistory, stock],
-  );
+  // Persisted evidence is authoritative; today's holdings/formula must never overwrite it.
+  const displayedPersistedHistory = persistedHistory;
   const persistedRunIds = useMemo(
     () => new Set(displayedPersistedHistory.map((item) => item.rebalance_run_id)),
     [displayedPersistedHistory],
@@ -4260,6 +4300,7 @@ export function StockDetailsButton({
                 ) : null}
                 {matchingHistoricalRows.length ? (
                   <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
+                    <p className="px-3 py-2 text-xs text-slate-500">Reconstructed using captured model holdings and current formula settings. Technical coverage is conservatively limited to before this rebalance started because its original completion time is unavailable. Saved server records above remain authoritative.</p>
                     <table className="min-w-[70rem] text-xs">
                       <thead>
                         <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
@@ -4491,7 +4532,7 @@ function ActionSummarySections({
           >
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+                <CardTitle className="text-sm">Model consensus: {ACTION_CATEGORY_LABEL[action]}</CardTitle>
                 <span className="text-xs font-semibold text-slate-600">
                   {stocks.length} stock{stocks.length === 1 ? "" : "s"}
                 </span>
@@ -4583,6 +4624,7 @@ function ActionSummaryStockTile({
         </span>
       </div>
 
+      <p className="mt-2 text-[11px] text-slate-500">Position: {getPositionContextLabel(stock)}. Quantities are model estimates before market rounding.</p>
       <dl className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -4743,9 +4785,9 @@ function ScoreMatrixSection({
           Consolidated score matrix
         </div>
         <p className="mt-1 text-xs leading-5 text-slate-600">
-          The Mean and Mode row keeps the mode action and the signed mean units change. The
-          Formula row applies the Calculated Score matrix to fill the final Action and Units
-          Change. Click the formula action to inspect the matched score range.
+          Model consensus keeps the mode action and signed mean units change. Current formula
+          uses the Calculated Score matrix and {getPositionContextLabel(stock).toLowerCase()}.
+          Quantities here precede market rounding; India action tables use whole units.
         </p>
         {matchedRule ? (
           <div className="mt-2 text-xs font-medium text-blue-700">
@@ -5582,7 +5624,7 @@ export function ScoreMatrixModal({
               </table>
             </div>
             <p className="mt-3 text-xs leading-5 text-slate-600">
-              The highlighted score range drives the Consolidated (Formula) action and units change.
+              The highlighted score range drives the Current formula action and units change.
               Actions and manual Units Change values are editable here for what-if formula changes; blank units use the default auto sizing.
             </p>
           </section>
@@ -5940,12 +5982,15 @@ function buildSummaryRowCells(
   action: ActionCategory | null,
   unitsChange: number | null,
 ): CanonicalRow {
+  const price = parseNumericCell(stock.representative["Price Per Unit"]);
   const summaryCells = {
     ...stock.representative,
+    ...buildConsolidatedPositionCells(
+      { ...getStockPositionContext(stock), currentUnits: detail.currentUnits },
+      unitsChange,
+      unitsChange !== null && price !== null ? Math.abs(unitsChange * price) : null,
+    ),
     [ACTION_HEADER]: action ? ACTION_CATEGORY_LABEL[action] : "",
-    "Units Change": unitsChange === null ? "" : String(unitsChange),
-    "Final Units": unitsChange === null || detail.currentUnits === null ? "" : String(detail.currentUnits + unitsChange),
-    "Units to Buy": unitsChange !== null && unitsChange > 0 ? String(unitsChange) : stock.representative["Units to Buy"] || "",
   };
 
   RATIONALE_TEXT_HEADERS.forEach((header) => {
@@ -6051,7 +6096,7 @@ function buildActionablesCalculationRows(
       {
         id: `${stock.key}-mean-mode`,
         jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: "Consolidated (Mean and Mode)",
+        llmName: "Model consensus (Mean and Mode)",
         cells: meanModeCells,
         rowClassName: "bg-amber-100/70 font-semibold",
         isConsolidated: true,
@@ -6059,7 +6104,7 @@ function buildActionablesCalculationRows(
       {
         id: `${stock.key}-formula`,
         jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: "Consolidated (Formula)",
+        llmName: "Current formula",
         cells: formulaCells,
         rowClassName: "bg-rose-100/75 font-semibold",
         detail,
@@ -6366,8 +6411,9 @@ function ActionablesFormulaModal({
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="font-semibold text-slate-950">Consolidation rules</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Consolidated (Mean and Mode) uses the mode action across LLM rows and averages numeric sizing/rationale columns.</li>
-              <li>Consolidated (Formula) uses the weighted Calculated Score and the Calculated Score matrix to set Action and Units Change.</li>
+              <li>Model consensus (Mean and Mode) retains the model actions and signed mean units change. Raw model rows retain their captured holdings.</li>
+              <li>Current formula uses the weighted Calculated Score and latest portfolio holdings when available; otherwise it uses captured model holdings. Consolidated Final Units equals the displayed Current Units plus Units Change.</li>
+              <li>Calculation quantities precede market rounding. India action tables use whole units; US quantities retain fractions.</li>
               <li>Technical Setup, Premarket trend, Last 5 candles trend, and Confidence Score are appended from the latest Technical Scan for the stock.</li>
               <li>Rows with no stocks for Sell All, Add More, Buy New, Trim, or Hold are hidden.</li>
             </ul>
@@ -7151,21 +7197,37 @@ type DashboardActionSortState = {
 export function buildHistoricalDashboardActionRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
-  portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
-  technicalScans: TechnicalScanMap,
+  _portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  _technicalScans: TechnicalScanMap,
   formulaConfig: ScoreMatrixFormulaConfig,
 ): HistoricalDashboardActionRow[] {
   return runs
     .filter((run) => isCompletedRebalanceRun(run, market))
     .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))
-    .flatMap((run) =>
-      buildDashboardActionRows(
-        buildConsensusRows([run], market, portfolioSnapshot),
+    .flatMap((run) => {
+      // Run.updated_at also changes on export. No immutable completion time is exposed,
+      // so never advance the historical cutoff beyond this run's creation time.
+      const cutoff = parseTimestampMs(run.created_at);
+      const historicalTechnicalRuns = runs
+        .filter((source) => isAnalysisRunForStage(source, "technical", market)
+          && parseTimestampMs(source.created_at) > 0
+          && parseTimestampMs(source.created_at) <= cutoff)
+        .map((source) => ({
+          ...source,
+          run_jobs: (source.run_jobs ?? []).filter(({ job }) => {
+            const createdAt = parseTimestampMs(job?.created_at);
+            const updatedAt = parseTimestampMs(job?.updated_at);
+            // Missing or later output timestamps cannot establish historical availability.
+            return createdAt > 0 && updatedAt >= createdAt && updatedAt <= cutoff;
+          }),
+        }));
+      return buildDashboardActionRows(
+        buildConsensusRows([run], market),
         market,
-        technicalScans,
+        buildTechnicalScanMap(historicalTechnicalRuns),
         formulaConfig,
-      ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id })),
-    );
+      ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id }));
+    });
 }
 
 export function buildFinalActionableHistoryItems(
@@ -7214,21 +7276,6 @@ export function buildFinalActionableHistoryItems(
   });
 }
 
-function buildCanonicalCurrentHistoryRows(
-  rows: DashboardActionRow[],
-  runs: RunResponse[],
-  market: SwingTradeMarket,
-): HistoricalDashboardActionRow[] {
-  const latestRun = getLatestMatchingRuns(runs, market)[0];
-  if (!latestRun) return [];
-  return rows.map((row) => ({
-    ...row,
-    coveredAt: latestRun.created_at,
-    runId: latestRun.id,
-  }));
-}
-
-
 function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
   return {
     key: "score",
@@ -7258,8 +7305,7 @@ function buildFormulaActionEstimate(
   unitsChange: number | null,
   market: SwingTradeMarket,
 ): ActionEstimate {
-  const currentUnits = parseNumericCell(stock.representative["Current Units"]);
-  const currentInvestmentAmount = getCurrentValueAmount(stock.representative);
+  const { currentUnits, currentInvestmentAmount } = getStockPositionContext(stock);
   const units = getMarketActionUnits(unitsChange, action, market);
   const price = parseNumericCell(stock.representative["Price Per Unit"]);
   let amount: number | null = null;
@@ -7740,10 +7786,7 @@ export function DashboardFinalActionablesTables() {
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
-    const historicalActionRows = mergeHistoricalActionRows(
-      buildCanonicalCurrentHistoryRows(actionRows, runs, market),
-      historicalActionRowsByMarket[market],
-    );
+    const historicalActionRows = historicalActionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
     const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
     const latestTechnicalAt = Object.values(technicalScans)
@@ -8251,15 +8294,6 @@ export function FinalActionablesConsole({
     ),
     [detailsData.portfolioSnapshot, market, runs, scoreMatrixFormulaConfig, technicalScans],
   );
-  const currentActionRows = useMemo(
-    () => buildDashboardActionRows(
-      consensus,
-      market,
-      technicalScans,
-      scoreMatrixFormulaConfig,
-    ),
-    [consensus, market, scoreMatrixFormulaConfig, technicalScans],
-  );
   const setupStockGroups = useMemo(
     () => getSetupStockGroups(consensus, technicalScans, market),
     [consensus, market, technicalScans],
@@ -8437,10 +8471,7 @@ export function FinalActionablesConsole({
               technicalScans={technicalScans}
               setupGroups={setupStockGroups}
               detailsData={detailsData}
-              historicalRows={mergeHistoricalActionRows(
-                buildCanonicalCurrentHistoryRows(currentActionRows, runs, market),
-                historicalActionRows,
-              )}
+              historicalRows={historicalActionRows}
               onSetupClick={setSelectedSetupGroup}
               onFocusCalculation={(target) => {
                 setCalculationFocusTarget(target);
@@ -8455,7 +8486,7 @@ export function FinalActionablesConsole({
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-lg">
-                  Stock-wise Consolidated Rebalance Output
+                  Stock-wise Model Consensus
                 </CardTitle>
                 <button
                   type="button"
@@ -8730,6 +8761,7 @@ function FragmentRows({
               </TradingViewSymbolLink>
               <div className="text-xs text-gray-500">{stock.exchange || "—"}</div>
               <div className="text-xs text-gray-600">{stock.representative["Stock Name"] || stock.symbol}</div>
+              <div className="mt-1 max-w-64 whitespace-normal text-[11px] text-gray-500">Position: {getPositionContextLabel(stock)}</div>
             </div>
           </div>
         </td>

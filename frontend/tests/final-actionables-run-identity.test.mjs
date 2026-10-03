@@ -123,6 +123,8 @@ test('workflow and stock-flow selectors share authoritative identities instead o
 
 test('duplicate selected/generated run sources never inflate votes above the unique LLM denominator', () => {
   const bindings = {
+    buildPositionContext: () => ({ source: 'captured-model-rows', currentUnits: 1, currentInvestmentAmount: 0 }),
+    buildConsolidatedPositionCells: () => ({}),
     buildCurrentValueSnapshotMap: () => new Map(),
     getRunJobMetas: (run) => run.run_jobs.map((link) => ({ runId: run.id, jobId: link.job_id })),
     parseRunRows: (run) => run.run_jobs.map((link) => ({ cells: { action: 'Hold', 'Stock Symbol': 'TEST' }, meta: { runId: run.id, jobId: link.job_id } })),

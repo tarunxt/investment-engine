@@ -275,16 +275,19 @@ function isHeaderLikeRow(row: string[], headers: string[]): boolean {
   return matches >= Math.max(3, Math.floor(headers.length / 2));
 }
 
-function parseJsonContent(content: string): JsonRecommendationPayload | JsonRecommendationRow[] | null {
+function parseJsonContent(content: string): {
+  data: JsonRecommendationPayload | JsonRecommendationRow[] | null;
+  error?: unknown;
+} {
   const trimmed = content.trim();
   if (!trimmed || !/^(?:```json\s*|```[\s\S]*[{[]|[{[])/i.test(trimmed)) {
-    return null;
+    return { data: null };
   }
 
   try {
     const parsed = JSON.parse(trimmed.replace(/```json/gi, '').replace(/```/g, '').trim()) as unknown;
     if (Array.isArray(parsed)) {
-      return parsed as JsonRecommendationRow[];
+      return { data: parsed as JsonRecommendationRow[] };
     }
     if (
       parsed &&
@@ -292,12 +295,13 @@ function parseJsonContent(content: string): JsonRecommendationPayload | JsonReco
       'stocks' in parsed &&
       Array.isArray((parsed as JsonRecommendationPayload).stocks)
     ) {
-      return parsed as JsonRecommendationPayload;
+      return { data: parsed as JsonRecommendationPayload };
     }
-    return null;
+    return { data: null };
   } catch (error) {
-    console.error('Error parsing investment recommendation data:', error);
-    return null;
+    // A failed JSON probe may still be a valid Markdown recommendation table.
+    // Report it only if the supported fallbacks also fail.
+    return { data: null, error };
   }
 }
 
@@ -719,10 +723,14 @@ export function parseInvestmentRecommendationContent(
   context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string } = {},
 ): CanonicalTable | null {
   const parsedJson = parseJsonContent(content);
-  if (parsedJson) {
-    return normalizeJsonTable(parsedJson, context);
+  if (parsedJson.data) {
+    return normalizeJsonTable(parsedJson.data, context);
   }
-  return normalizeMarkdownRecommendationTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
+  const table = normalizeMarkdownRecommendationTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
+  if (!table && parsedJson.error) {
+    console.error('Error parsing investment recommendation data:', parsedJson.error);
+  }
+  return table;
 }
 
 export default function InvestmentRecommendationTable({

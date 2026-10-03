@@ -18,7 +18,7 @@ test("stock details historical suggestions match stock identifiers, not a shared
   assert.ok(aliases, "expected the historical stock identity matcher");
   assert.match(
     source,
-    /effectiveHistoricalRows\.filter\(\(row\) => stockConsensusMatches\(row\.stock, stock\)\)/,
+    /effectiveHistoricalRows\.filter\(\s*\(row\) => stockConsensusMatches\(row\.stock, stock\) && !persistedRunIds\.has\(row\.runId\)/,
   );
   assert.doesNotMatch(aliases, /stock\.exchange/);
   assert.doesNotMatch(aliases, /\["Exchange Symbol"\]/);
