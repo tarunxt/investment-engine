@@ -175,6 +175,8 @@ jobs:
           tests/final-actionables-consensus-denominator.test.mjs
           tests/final-actionables-history-persistence.test.mjs
           tests/final-actionables-position-context.test.mjs
+          tests/final-actionables-calculation-performance.test.mjs
+          tests/actionable-quantity-display.test.mjs
           tests/final-actionables-optional-cache.test.mjs
           tests/investment-recommendation-fallback.test.mjs
           tests/portfolio-analysis-read-budgets.test.mjs

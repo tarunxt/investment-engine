@@ -44,6 +44,7 @@ import {
 } from "@/lib/scoreMatrixMath";
 import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
 import { writeOptionalBrowserCache } from "@/lib/optionalBrowserCache";
+import { formatConsolidatedQuantityCell } from "@/lib/actionableQuantityDisplay";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -108,6 +109,11 @@ type SwingScanBreakupEntry = {
   meta: LlmMeta;
   row: CanonicalRow;
 };
+
+type SwingScanParseCache = Map<RunResponse, Map<
+  NonNullable<RunResponse["run_jobs"]>[number],
+  ReturnType<typeof parseInvestmentRecommendationContent>
+>>;
 
 function getInputMarketLabel(market?: SwingTradeMarket) {
   if (market === "india") return "India";
@@ -348,6 +354,12 @@ export type TechnicalScanResult = {
 };
 
 export type TechnicalScanMap = Record<string, TechnicalScanResult>;
+
+type TechnicalScanParseCache = Map<NonNullable<RunResponse["run_jobs"]>[number], {
+  response: string;
+  metadataKey: string;
+  rows: TechnicalScanResult[];
+}>;
 
 export type StockDetailsData = {
   portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
@@ -2769,21 +2781,27 @@ function parseTechnicalScanResponse(
   return results;
 }
 
-export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
+export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: TechnicalScanParseCache): TechnicalScanMap {
   const scanRows = runs
     .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
         if (!job || job.status !== "completed" || !job.response) return [];
-        return parseTechnicalScanResponse(job.response, {
+        const meta = {
           runId: run.id,
           jobId: link.job_id,
           provider: job.provider,
           model: job.model,
           createdAt: job.updated_at ?? job.created_at,
           runLabel: getAutoRebalanceRunDisplayLabel(run),
-        });
+        };
+        const metadataKey = JSON.stringify(meta);
+        const cached = parsedSources?.get(link);
+        if (cached?.response === job.response && cached.metadataKey === metadataKey) return cached.rows;
+        const rows = parseTechnicalScanResponse(job.response, meta);
+        parsedSources?.set(link, { response: job.response, metadataKey, rows });
+        return rows;
       }),
     )
     .sort((a, b) => parseTimestampMs(a.createdAt) - parseTimestampMs(b.createdAt));
@@ -3356,6 +3374,7 @@ function getSwingScanBreakupEntriesForStock(
   runs: RunResponse[],
   market: SwingTradeMarket,
   stockRow: CanonicalRow,
+  parsedSources: SwingScanParseCache,
 ): SwingScanBreakupEntry[] {
   const stockSymbols = new Set(
     [stockRow["Stock Symbol"], stockRow["Stock Name"]]
@@ -3370,12 +3389,20 @@ function getSwingScanBreakupEntriesForStock(
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
         if (!job || !isUsableModelOutputStatus(job.status) || !job.response) return [];
-        const parsed = parseInvestmentRecommendationContent(job.response, {
-          provider: job.provider,
-          model: job.model,
-          runNumber: run.id,
-          runCreatedAt: run.created_at,
-        });
+        let parsedRun = parsedSources.get(run);
+        if (!parsedRun) {
+          parsedRun = new Map();
+          parsedSources.set(run, parsedRun);
+        }
+        if (!parsedRun.has(link)) {
+          parsedRun.set(link, parseInvestmentRecommendationContent(job.response, {
+            provider: job.provider,
+            model: job.model,
+            runNumber: run.id,
+            runCreatedAt: run.created_at,
+          }));
+        }
+        const parsed = parsedRun.get(link);
         if (!parsed) return [];
 
         const meta: LlmMeta = {
@@ -3421,6 +3448,8 @@ export function buildConsensusRows(
 ): StockConsensus[] {
   const sourceRuns = uniqueRunJobSources(runs);
   const sourceHistoryRuns = allRuns === runs ? sourceRuns : uniqueRunJobSources(allRuns);
+  // Keep parsing local to this calculation, while retaining every independent job's rows.
+  const parsedSwingSources: SwingScanParseCache = new Map();
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
   const llmMetas = sourceRuns.flatMap(getRunJobMetas);
@@ -3480,7 +3509,7 @@ export function buildConsensusRows(
       const totalSuggestions = consensusDenominator || rows.length;
 
       const first = getRepresentativeConsensusRow(rows);
-      const swingScanEntries = getSwingScanBreakupEntriesForStock(sourceHistoryRuns, market, first);
+      const swingScanEntries = getSwingScanBreakupEntriesForStock(sourceHistoryRuns, market, first, parsedSwingSources);
       const representative = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
@@ -3972,19 +4001,19 @@ export function StockDetailsButton({
   const [resolvedDetailsData, setResolvedDetailsData] = useState<StockDetailsData | null>(null);
   const effectiveDetailsData = resolvedDetailsData ?? detailsData;
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
-  const zerodhaHolding = market === "india" ? getZerodhaHoldingForStock(effectiveDetailsData.portfolioSnapshot, stock) : null;
+  const zerodhaHolding = open && market === "india" ? getZerodhaHoldingForStock(effectiveDetailsData.portfolioSnapshot, stock) : null;
   const zerodhaBuyTransactions = useMemo(
     () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
     [stock, zerodhaHolding, zerodhaOrders],
   );
-  const eventRows = getAnalysisTableRowsForStock(
+  const eventRows = open ? getAnalysisTableRowsForStock(
     effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
     stock,
-  );
-  const threatRows = getAnalysisTableRowsForStock(effectiveDetailsData.threatsAnalysis?.report?.tables, stock);
+  ) : [];
+  const threatRows = open ? getAnalysisTableRowsForStock(effectiveDetailsData.threatsAnalysis?.report?.tables, stock) : [];
   const effectiveHistoricalRows = useMemo(
-    () => mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)),
-    [historicalRows, market],
+    () => open ? mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)) : [],
+    [historicalRows, market, open],
   );
   // Persisted evidence is authoritative; today's holdings/formula must never overwrite it.
   const displayedPersistedHistory = persistedHistory;
@@ -4039,6 +4068,7 @@ export function StockDetailsButton({
   }, [detailsData, market]);
 
   const directHistoricalEvidenceRows = useMemo(() => {
+    if (!open) return [];
     const seen = new Set<string>();
     const rows: Array<{
       id: string;
@@ -4085,7 +4115,7 @@ export function StockDetailsButton({
     });
 
     return rows.sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt));
-  }, [stock]);
+  }, [open, stock]);
 
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
@@ -4695,6 +4725,7 @@ function RebalanceCell({
   setupGroups,
   onSetupClick,
   preferActionTag,
+  isConsolidated = false,
 }: {
   row: CanonicalRow;
   header: ConsolidatedDisplayHeader;
@@ -4703,6 +4734,7 @@ function RebalanceCell({
   setupGroups?: Record<string, SetupStockGroup>;
   onSetupClick?: (group: SetupStockGroup) => void;
   preferActionTag?: boolean;
+  isConsolidated?: boolean;
 }) {
   if (header === "Technical Setup") {
     const setup = formatTechnicalSetup(technicalScan || null, row);
@@ -4757,7 +4789,10 @@ function RebalanceCell({
       </TradingViewSymbolLink>
     );
   }
-  return cellValue || "";
+  const quantity = isConsolidated ? formatConsolidatedQuantityCell(row, header) : null;
+  return quantity !== null && quantity !== cellValue
+    ? <span title={cellValue}>{quantity}</span>
+    : cellValue || "";
 }
 
 function ScoreMatrixSection({
@@ -6211,7 +6246,10 @@ function buildActionablesCalculationRows(
         }
         const shouldClearConsolidatedCell = source.isConsolidated && header === "Analyst/Source";
         const cellValue = shouldClearConsolidatedCell ? "" : source.cells[header as RebalanceHeader] || "";
-        values[header] = cellValue;
+        const quantity = source.isConsolidated ? formatConsolidatedQuantityCell(source.cells, header) : null;
+        values[header] = quantity !== null && quantity !== cellValue
+          ? <span title={cellValue}>{quantity}</span>
+          : cellValue;
         sortValues[header] = getCalculationCellSortValue(cellValue);
       });
 
@@ -7201,6 +7239,9 @@ export function buildHistoricalDashboardActionRows(
   _technicalScans: TechnicalScanMap,
   formulaConfig: ScoreMatrixFormulaConfig,
 ): HistoricalDashboardActionRow[] {
+  // Historical cutoffs reuse only the exact source link, response and parsing metadata.
+  // This cache lives for one reconstruction and cannot retain another account's data.
+  const parsedTechnicalSources: TechnicalScanParseCache = new Map();
   return runs
     .filter((run) => isCompletedRebalanceRun(run, market))
     .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))
@@ -7224,7 +7265,7 @@ export function buildHistoricalDashboardActionRows(
       return buildDashboardActionRows(
         buildConsensusRows([run], market),
         market,
-        buildTechnicalScanMap(historicalTechnicalRuns),
+        buildTechnicalScanMap(historicalTechnicalRuns, parsedTechnicalSources),
         formulaConfig,
       ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id }));
     });
@@ -8782,6 +8823,7 @@ function FragmentRows({
                 />
                 <RebalanceCell
                   row={stock.representative}
+                  isConsolidated
                   header={header}
                   market={market}
                   technicalScan={technicalScan}
@@ -8790,6 +8832,7 @@ function FragmentRows({
             ) : (
               <RebalanceCell
                 row={stock.representative}
+                isConsolidated
                 header={header}
                 market={market}
                 technicalScan={technicalScan}
