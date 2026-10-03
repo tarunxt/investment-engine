@@ -15,7 +15,15 @@ from app.domains.ai_providers.availability import is_provider_capacity_error
 from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.api_usage.recorder import (
     reset_provider_usage_context,
+    provider_usage_phase,
     set_provider_usage_context,
+)
+from app.domains.api_usage.metering import content_hash
+from app.domains.jobs.usage_identity import resolve_job_usage_identity
+from app.domains.jobs.output_runtime import (
+    OutputPreflightError, active_contract_hash, configure_output_context, contract_issue,
+    current_output_context, merge_swing_fragments, normalize_runtime_output,
+    output_validation_metadata, reset_output_context,
 )
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
@@ -201,16 +209,24 @@ def _count_markdown_table_data_rows(content: str) -> int:
 
 
 def _requires_generic_table_output(prompt: str) -> bool:
+    if current_output_context() is not None:
+        return True
     text = (prompt or "").lower()
     return "return only one markdown table" in text or _requires_stock_recommendation_output(prompt)
 
 
 def _is_rebalance_output(prompt: str) -> bool:
+    context = current_output_context()
+    if context is not None:
+        return context.kind == "rebalance"
     text = (prompt or "").lower()
     return "[rebalance_flow:" in text or "recommended rebalance" in text
 
 
 def _requires_stock_recommendation_output(prompt: str) -> bool:
+    context = current_output_context()
+    if context is not None:
+        return context.kind == "swing"
     text = (prompt or "").lower()
     if _is_rebalance_output(prompt):
         return False
@@ -271,6 +287,13 @@ def _failed_job_has_exportable_partial_stock_rows(job: Job) -> bool:
 
 def _validate_stock_table_content(content: str) -> tuple[str, str | None, list[dict]]:
     """Validate stock recommendation output and return normalized markdown when possible."""
+    normalized = normalize_runtime_output(content, kind="swing")
+    if normalized is not None:
+        return (
+            normalized.content,
+            None if normalized.safe_to_replace else contract_issue(normalized),
+            [dict(row.values) for row in normalized.rows if row.valid],
+        )
     normalized_content = (content or "").strip()
     data_rows = _count_markdown_table_data_rows(normalized_content)
 
@@ -396,6 +419,13 @@ def _rebalance_missing_current_holdings_issue(prompt: str, parsed_rows: list[dic
 
 def _validate_rebalance_table_content(content: str, prompt: str = "") -> tuple[str, str | None, list[dict]]:
     """Validate rebalance output and return canonical markdown when possible."""
+    normalized = normalize_runtime_output(content, kind="rebalance")
+    if normalized is not None:
+        return (
+            normalized.content,
+            None if normalized.safe_to_replace else contract_issue(normalized),
+            [dict(row.values) for row in normalized.rows if row.valid],
+        )
     normalized_content = (content or "").strip()
     data_rows = _count_markdown_table_data_rows(normalized_content)
     if data_rows < 1:
@@ -446,6 +476,13 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
 
 
 def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    context = current_output_context()
+    target_rows = (context.expected_rows if context else None) or _STOCK_TARGET_ROW_COUNT
+    allocation_rule = (
+        "- Keep numeric fields numeric-only and preserve the original market, currency, and allocation budget.\n"
+        if context is not None
+        else "- Keep numeric fields numeric-only and ensure the total allocation stays close to INR 50,000.\n"
+    )
     return (
         f"{prompt}\n\n"
         "[STOCK_TABLE_REPAIR]\n"
@@ -453,10 +490,10 @@ def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: 
         f"Issue: {reason}.\n"
         "Regenerate the FULL answer and return ONLY one markdown table that follows the original title and exact column order.\n"
         "Requirements:\n"
-        "- Include exactly 5 unique stock recommendation rows.\n"
+        f"- Include exactly {target_rows} unique stock recommendation rows.\n"
         "- Every row must be complete with all columns populated.\n"
         "- Do not output placeholder rows, separators, notes, or any prose before/after the table.\n"
-        "- Keep numeric fields numeric-only and ensure the total allocation stays close to INR 50,000.\n"
+        f"{allocation_rule}"
         "- If some earlier rows were valid, you may reuse them, but the final table must be complete and self-contained.\n\n"
         "Previous invalid output:\n"
         f"{previous_output}"
@@ -467,13 +504,14 @@ def _build_stock_table_top_up_prompt(
     prompt: str,
     existing_rows: list[dict],
     missing_count: int,
+    original_output: str | None = None,
 ) -> str:
     existing_symbols = ", ".join(
         str(row.get("stock_symbol", "")).strip().upper()
         for row in existing_rows
         if str(row.get("stock_symbol", "")).strip()
     )
-    existing_table = _to_markdown_table_from_stocks(existing_rows) or ""
+    existing_table = original_output if original_output is not None else _to_markdown_table_from_stocks(existing_rows) or ""
     return (
         f"{prompt}\n\n"
         "[STOCK_TABLE_TOP_UP]\n"
@@ -692,7 +730,7 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Everything else retries after 30 s.
     """
 
-    if is_provider_capacity_error(exc):
+    if isinstance(exc, OutputPreflightError) or is_provider_capacity_error(exc):
         return False, 0
 
     text = str(exc).lower()
@@ -701,6 +739,7 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
         for marker in (
             "returned malformed table output",
             "returned insufficient recommendations",
+            "returned invalid output contract",
         )
     ):
         return False, 0
@@ -1084,6 +1123,9 @@ def _mark_failed(
         db.rollback()
         job = repo.get(job_id)
         if job:
+            if job.status == JobStatus.FAILED and "cancelled" in (job.error_message or "").lower():
+                logger.info("Preserving cancellation for job %s", job_id)
+                return
             _update_job_status(
                 repo,
                 job,
@@ -1121,7 +1163,8 @@ def _update_job_status(repo, job, status, **kwargs) -> None:
 
 
 def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
-    latest = repo.get(job_id)
+    get_fresh = getattr(repo, "get_fresh", None)
+    latest = get_fresh(job_id) if callable(get_fresh) else repo.get(job_id)
     return bool(
         latest
         and latest.status == JobStatus.FAILED
@@ -1154,10 +1197,15 @@ def execute_ai_job(self, job_id: int) -> None:
     runtime_metadata_json: dict | None = None
     job: Job | None = None
     provider_usage_token = None
+    output_context_token = None
+
+    def with_output_validation(metadata: dict | None) -> dict | None:
+        validation = output_validation_metadata(content)
+        return {**(metadata or {}), "deterministic_output": validation} if validation is not None else metadata
 
     def failure_metadata(exc: Exception, *, retry_safe: bool) -> dict[str, object]:
         return merge_failure_diagnostics(
-            runtime_metadata_json,
+            with_output_validation(runtime_metadata_json),
             build_failure_diagnostics(
                 exc,
                 provider=job.provider if job else None,
@@ -1177,13 +1225,25 @@ def execute_ai_job(self, job_id: int) -> None:
         if not job:
             logger.warning("Job %s not found", job_id)
             return
-        provider_usage_token = set_provider_usage_context(
-            user_id=getattr(job, "user_id", None),
-            job_id=job.id,
-        )
+        if job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
+            logger.info("Skipping terminal job redelivery %s", job_id)
+            return
+        usage_dimensions = resolve_job_usage_identity(db, job)
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
             return
+        output_context_token = configure_output_context(job, usage_dimensions)
+        provider_usage_token = set_provider_usage_context(
+            user_id=getattr(job, "user_id", None),
+            job_id=job.id,
+            execution_id=getattr(self.request, "id", None),
+            job_attempt=getattr(self.request, "retries", None),
+            requested_provider=job.provider,
+            requested_model=job.model,
+            evidence_hash=content_hash(getattr(job, "request_context_json", None)),
+            schema_hash=active_contract_hash(),
+            **usage_dimensions,
+        )
 
         WorkerLogHelper.log_task_start("execute_ai_job", "n/a", job_id)
         repo.update_status(job, JobStatus.PROCESSING)
@@ -1306,7 +1366,10 @@ def execute_ai_job(self, job_id: int) -> None:
                 return
 
         provider = ProviderFactory.create(job.provider)
-        result = provider.generate(prompt=prompt_to_execute, model=job.model)
+        with provider_usage_phase("initial_generation"):
+            result = provider.generate(prompt=prompt_to_execute, model=job.model)
+        if _job_was_cancelled(repo, job_id):
+            return
         tokens_in = result.tokens_in
         tokens_out = result.tokens_out
         estimated_cost = result.cost
@@ -1339,14 +1402,17 @@ def execute_ai_job(self, job_id: int) -> None:
                         attempt + 1,
                         _MAX_STOCK_REPAIR_ATTEMPTS,
                     )
-                    repair_result = provider.generate(
-                        prompt=_build_rebalance_table_repair_prompt(
-                            job.prompt,
-                            content,
-                            rebalance_table_issue,
-                        ),
-                        model=job.model,
-                    )
+                    with provider_usage_phase("row_repair" if rebalance_table_issue.startswith("partial rebalance table") else "format_repair"):
+                        repair_result = provider.generate(
+                            prompt=_build_rebalance_table_repair_prompt(
+                                job.prompt,
+                                content,
+                                rebalance_table_issue,
+                            ),
+                            model=job.model,
+                        )
+                    if _job_was_cancelled(repo, job_id):
+                        return
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
                     tokens_out = (tokens_out or 0) + repair_result.tokens_out
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
@@ -1372,7 +1438,8 @@ def execute_ai_job(self, job_id: int) -> None:
                         )
                     )
                     if should_keep_partial_rebalance:
-                        repo.update_status(
+                        _update_job_status(
+                            repo,
                             job,
                             JobStatus.PARTIAL,
                             response=content,
@@ -1383,6 +1450,7 @@ def execute_ai_job(self, job_id: int) -> None:
                             web_search_used=web_search_used,
                             web_search_queries=web_search_queries,
                             web_sources=web_sources,
+                            runtime_metadata_json=with_output_validation(runtime_metadata_json),
                         )
                         _publish_job_update(job)
                         _refresh_run_status(db, job_id)
@@ -1408,13 +1476,16 @@ def execute_ai_job(self, job_id: int) -> None:
                         attempt + 1,
                         _MAX_STOCK_REPAIR_ATTEMPTS,
                     )
-                    missing_count = max(1, _STOCK_TARGET_ROW_COUNT - len(parsed_stocks))
+                    output_context = current_output_context()
+                    target_rows = (output_context.expected_rows if output_context else None) or _STOCK_TARGET_ROW_COUNT
+                    missing_count = max(1, target_rows - len(parsed_stocks))
                     use_top_up_prompt = _is_insufficient_stock_issue(stock_table_issue) and bool(parsed_stocks)
                     repair_prompt = (
                         _build_stock_table_top_up_prompt(
                             job.prompt,
                             parsed_stocks,
                             missing_count,
+                            original_output=content if output_context is not None else None,
                         )
                         if use_top_up_prompt
                         else _build_stock_table_repair_prompt(
@@ -1423,10 +1494,13 @@ def execute_ai_job(self, job_id: int) -> None:
                             stock_table_issue,
                         )
                     )
-                    repair_result = provider.generate(
-                        prompt=repair_prompt,
-                        model=job.model,
-                    )
+                    with provider_usage_phase("row_repair" if use_top_up_prompt else "format_repair"):
+                        repair_result = provider.generate(
+                            prompt=repair_prompt,
+                            model=job.model,
+                        )
+                    if _job_was_cancelled(repo, job_id):
+                        return
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
                     tokens_out = (tokens_out or 0) + repair_result.tokens_out
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
@@ -1441,16 +1515,20 @@ def execute_ai_job(self, job_id: int) -> None:
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
                         if use_top_up_prompt:
-                            supplemental_rows = _parse_normalized_stock_rows(repaired_content)
-                            merged_rows = _merge_unique_stock_rows(parsed_stocks, supplemental_rows)
-                            merged_content = _to_markdown_table_from_stocks(merged_rows)
-                            content = (merged_content or repaired_content).strip()
+                            if output_context is not None:
+                                content = merge_swing_fragments(content, repaired_content)
+                            else:
+                                supplemental_rows = _parse_normalized_stock_rows(repaired_content)
+                                merged_rows = _merge_unique_stock_rows(parsed_stocks, supplemental_rows)
+                                merged_content = _to_markdown_table_from_stocks(merged_rows)
+                                content = (merged_content or repaired_content).strip()
                         else:
                             content = repaired_content
                     content, stock_table_issue, parsed_stocks = _validate_stock_table_content(content)
                 if stock_table_issue:
                     if _is_insufficient_stock_issue(stock_table_issue) and parsed_stocks:
-                        repo.update_status(
+                        _update_job_status(
+                            repo,
                             job,
                             JobStatus.PARTIAL,
                             response=content,
@@ -1461,6 +1539,7 @@ def execute_ai_job(self, job_id: int) -> None:
                             web_search_used=web_search_used,
                             web_search_queries=web_search_queries,
                             web_sources=web_sources,
+                            runtime_metadata_json=with_output_validation(runtime_metadata_json),
                         )
                         _publish_job_update(job)
                         _refresh_run_status(db, job_id)
@@ -1483,10 +1562,13 @@ def execute_ai_job(self, job_id: int) -> None:
                     logger.info("Stopping cancelled portfolio events job %s", job_id)
                     return
                 logger.info("Retrying portfolio events job %s because %s", job_id, retry_reason)
-                repair_result = provider.generate(
-                    prompt=_build_portfolio_event_repair_prompt(job.prompt, content, retry_reason),
-                    model=job.model,
-                )
+                with provider_usage_phase("row_repair"):
+                    repair_result = provider.generate(
+                        prompt=_build_portfolio_event_repair_prompt(job.prompt, content, retry_reason),
+                        model=job.model,
+                    )
+                if _job_was_cancelled(repo, job_id):
+                    return
                 tokens_in = (tokens_in or 0) + repair_result.tokens_in
                 tokens_out = (tokens_out or 0) + repair_result.tokens_out
                 estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
@@ -1516,7 +1598,7 @@ def execute_ai_job(self, job_id: int) -> None:
             web_search_used=web_search_used,
             web_search_queries=web_search_queries,
             web_sources=web_sources,
-            runtime_metadata_json=runtime_metadata_json,
+            runtime_metadata_json=with_output_validation(runtime_metadata_json),
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
@@ -1542,6 +1624,13 @@ def execute_ai_job(self, job_id: int) -> None:
         logger.exception("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
+        try:
+            if _job_was_cancelled(repo, job_id):
+                return
+        except Exception:
+            # A failed database transaction cannot service another state read.
+            # Preserve the original failure for rollback/retry classification.
+            logger.warning("Cancellation state unavailable after failure for job %s", job_id)
         error_summary = str(exc).split('\n')[0][:200]
         WorkerLogHelper.log_task_error("execute_ai_job", "n/a", error_summary, job_id)
 
@@ -1584,5 +1673,6 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        reset_output_context(output_context_token)
         reset_provider_usage_context(provider_usage_token)
         db.close()

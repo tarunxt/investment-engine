@@ -7,6 +7,7 @@ import re
 
 from openai import OpenAI
 
+from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.ai_providers.base import (
     AIProviderResponse,
@@ -78,7 +79,9 @@ class OpenAIProvider(BaseAIProvider):
         model: str,
     ) -> AIProviderResponse:
 
-        response = self.client.responses.create(
+        response = metered_call(
+            self.client.responses.create, provider=self.provider_name, meter_model=model,
+            phase="request", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             input=prompt,
         )
@@ -94,7 +97,9 @@ class OpenAIProvider(BaseAIProvider):
         needs_stock_recommendation_table = self._requires_stock_recommendation_output(prompt)
         if needs_table and not self._looks_like_markdown_table(content):
             minimum_rows = 5 if needs_stock_recommendation_table else 1
-            rewrite = self.client.responses.create(
+            rewrite = metered_call(
+                self.client.responses.create, provider=self.provider_name, meter_model=model,
+                phase="format_repair", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 input=(
                     "Return ONLY one valid markdown table. "
@@ -163,7 +168,9 @@ class OpenAIProvider(BaseAIProvider):
         web_sources: list[str] = []
 
         for _round in range(self._max_tool_rounds):
-            response = self.client.chat.completions.create(
+            response = metered_call(
+                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                phase="request" if _round == 0 else "tool_round", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 messages=messages,
                 tools=web_search_tool.TOOL_DEFINITIONS,
@@ -228,7 +235,9 @@ class OpenAIProvider(BaseAIProvider):
         needs_stock_recommendation_table = self._requires_stock_recommendation_output(prompt)
         if needs_table and not self._looks_like_markdown_table(content):
             minimum_rows = 5 if needs_stock_recommendation_table else 1
-            rewrite = self.client.responses.create(
+            rewrite = metered_call(
+                self.client.responses.create, provider=self.provider_name, meter_model=model,
+                phase="format_repair", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 input=(
                     "Return ONLY one valid markdown table. "

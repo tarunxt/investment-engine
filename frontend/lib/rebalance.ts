@@ -6,6 +6,7 @@ import type {
   ZerodhaThreatAnalysis,
 } from "@/types/api";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { deduplicateStageRunInputs } from "@/lib/rebalanceStageInputs";
 
 export type RebalancePortfolioKey = "zerodha" | "indmoneyUs";
 
@@ -427,7 +428,6 @@ function compactSwingRecommendationResponse(response?: string | null) {
   if (!response?.trim()) return "_No response captured yet._";
 
   const compactedLines: string[] = [];
-  const seenContentLines = new Set<string>();
   let previousWasBlank = false;
 
   for (const rawLine of response.split(/\r?\n/)) {
@@ -449,11 +449,6 @@ function compactSwingRecommendationResponse(response?: string | null) {
     }
 
     const compactLine = line.replace(/\s+/g, " ");
-    const normalizedLine = normalizeTableCell(compactLine);
-    if (seenContentLines.has(normalizedLine)) {
-      continue;
-    }
-    seenContentLines.add(normalizedLine);
     compactedLines.push(compactLine);
     previousWasBlank = false;
   }
@@ -617,6 +612,7 @@ export function buildRebalanceInputBundle({
   swingDisplayMode?: "full" | "summary";
 }) {
   const copy = MARKET_COPY[market];
+  const uniqueSwingRuns = deduplicateStageRunInputs(swingRuns, { market, stage: "swing" });
   return `# Inputs considered at current time
 
 Market: ${copy.label}
@@ -627,7 +623,7 @@ Generated at: ${new Date().toISOString()}
 ${formatPortfolioSnapshot(market, portfolio)}
 
 ## 2. Completed Swing Trade Runs After Previous Market Close
-${formatSwingRuns(swingRuns, previousClose, market, swingDisplayMode)}
+${formatSwingRuns(uniqueSwingRuns, previousClose, market, swingDisplayMode)}
 
 ## 3. Latest Threats Report
 ${formatPortfolioThreats(threats)}`;

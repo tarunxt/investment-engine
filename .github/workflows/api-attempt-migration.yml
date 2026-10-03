@@ -1,0 +1,56 @@
+name: API Attempt Migration
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/api-attempt-migration.yml'
+      - 'backend/alembic/**'
+      - 'backend/alembic.ini'
+      - 'backend/app/**'
+      - 'backend/requirements.txt'
+      - 'backend/scripts/verify_api_attempt_migration.py'
+      - 'backend/scripts/test_verify_api_attempt_migration.py'
+
+permissions:
+  contents: read
+
+jobs:
+  migration-roundtrip:
+    name: API attempt PostgreSQL migration roundtrip
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # This is the backend test container. Alembic never runs on the host runner.
+    container: python:3.13-slim
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: migration_test
+          POSTGRES_PASSWORD: migration_test
+          POSTGRES_DB: api_attempt_migration_test
+        options: >-
+          --health-cmd "pg_isready -U migration_test -d api_attempt_migration_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CI: 'true'
+      ENVIRONMENT: test
+      API_ATTEMPT_MIGRATION_TEST: disposable-postgres-only
+      DATABASE_URL: postgresql+psycopg2://migration_test:migration_test@postgres:5432/api_attempt_migration_test
+      REDIS_URL: redis://127.0.0.1:6379/15
+      PYTHONPATH: .
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install backend dependencies from PyPI
+        run: python -m pip install --disable-pip-version-check --index-url https://pypi.org/simple -r requirements.txt
+      - name: Check migration verification safety guards
+        run: python -m unittest discover -s scripts -p test_verify_api_attempt_migration.py -v
+      - name: Upgrade, verify, downgrade, and re-upgrade disposable database
+        run: python scripts/verify_api_attempt_migration.py

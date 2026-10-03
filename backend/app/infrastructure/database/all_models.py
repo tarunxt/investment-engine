@@ -3,6 +3,7 @@
 from app.domains.cost_drivers.models import CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
 from app.domains.api_usage.models import (  # noqa: F401
+    ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
     LlmProviderUsageDailySnapshot,
 )
