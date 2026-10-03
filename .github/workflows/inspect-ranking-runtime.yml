@@ -37,16 +37,22 @@ jobs:
             OOM_PATTERN = 'oom-kill|Killed process|killed by the OOM killer|Memory cgroup out of memory|Out of memory:'
             
             
-            def read(args):
+            def read(args, *, allow_no_match=False):
                 try:
                     result = subprocess.run(args, capture_output=True, text=True, timeout=8, check=False)
-                    return result.stdout if result.returncode == 0 else None
+                    if result.returncode == 0:
+                        return result.stdout
+                    # journalctl --grep returns 1 with no output when no record matches.
+                    # Keep permission/command errors unavailable instead of calling them false.
+                    if allow_no_match and result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
+                        return ""
+                    return None
                 except (OSError, subprocess.SubprocessError):
                     return None
             
             
             def seen_memory_kill(args):
-                result = read(['journalctl', '--quiet', '--no-pager', '--output=cat', '--since', SINCE, '--until', UNTIL, '--grep', OOM_PATTERN, *args])
+                result = read(['journalctl', '--quiet', '--no-pager', '--output=cat', '--since', SINCE, '--until', UNTIL, '--grep', OOM_PATTERN, *args], allow_no_match=True)
                 return 'unavailable' if result is None else str(bool(result.strip())).lower()
             
             
