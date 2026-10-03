@@ -2664,3 +2664,19 @@ Explicit zero/partial fills remain visible. These are read-time presentation and
 summary corrections only: raw records, execution capture, broker actions,
 reconciliation, and frozen audit evidence are unchanged. Regression tests cover
 failed/pending requests, explicit fills, and open versus closed confirmed buys.
+
+### October 2026: Isolate portfolio analysis sources and read-only displays
+
+Scanner, Final Actionables, and automated-rebalance display selectors now resolve
+market and stage from explicit run metadata and leading prompt headers. Quoted
+historical input bundles cannot relabel a US Swing run as an India Rebalance run;
+contradictory or ambiguous source identities fail closed. Previously derived
+browser run/history caches use new versions, while workflow control state and
+persisted historical records remain unchanged. Consensus input sources are
+deduplicated by run/job ID, retaining separate jobs from the same model.
+
+Actionables page loads and Refresh no longer POST history or queue backfills.
+Server terminal-run reconstruction remains the durable history path. This does
+not repair or rewrite historical records created before source validation.
+Closed Calculations dialogs no longer mount their expensive computation child.
+No action formulas, execution controls, or frozen audit evidence are changed.

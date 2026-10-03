@@ -64,7 +64,6 @@ import {
   ensureRebalanceFlowMarker,
   getPreviousMarketClose,
   getRebalanceDefaultExportSheetName,
-  inferRebalanceMarketFromPrompt,
 } from "@/lib/rebalance";
 import {
   buildSwingTradePrompt,
@@ -78,8 +77,9 @@ import {
   syncZerodhaBasketBuySelection,
   type ZerodhaBasketSelectableOrder,
 } from "@/lib/zerodhaBasketSelection";
-import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt } from "@/lib/runPresentation";
 import { APIError, NetworkError, apiService } from "@/services/api";
+import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import { URLs } from "@/lib/urls";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
@@ -1962,10 +1962,7 @@ function sortRunsByLatestTimestamp(runs: RunResponse[]) {
 }
 
 function isTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
-  if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
-  return market === "us"
-    ? /Market:\s*US equities/i.test(run.prompt)
-    : /Market:\s*India equities/i.test(run.prompt);
+  return isAnalysisRunForStage(run, "technical", market);
 }
 
 function isCompletedTechnicalScanRun(
@@ -1981,7 +1978,7 @@ function isCompletedTechnicalScanRun(
 }
 
 function isRebalanceRunForMarket(run: RunResponse, market: SwingTradeMarket) {
-  return inferRebalanceMarketFromPrompt(run.prompt) === market;
+  return isAnalysisRunForStage(run, "rebalance", market);
 }
 
 function getLatestStageRun(
@@ -1990,7 +1987,7 @@ function getLatestStageRun(
   market: SwingTradeMarket,
 ) {
   const matchingRuns = runs.filter((run) => {
-    if (stage === "swing") return isRunInSwingTradeMarket(run.prompt, market);
+    if (stage === "swing") return isAnalysisRunForStage(run, "swing", market);
     if (stage === "rebalance") return isRebalanceRunForMarket(run, market);
     return isTechnicalScanRun(run, market);
   });
@@ -2355,7 +2352,7 @@ function getAutoRebalanceStageForRun(
   const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
   if (isCompletedRebalanceRun(run, market)) return "rebalance";
   if (isCompletedTechnicalScanRun(run, market)) return "technical";
-  if (isRunInSwingTradeMarket(run.prompt || "", market)) return "swing";
+  if (isAnalysisRunForStage(run, "swing", market)) return "swing";
   return null;
 }
 
@@ -2595,7 +2592,7 @@ function isRunForStageHistory(
 ) {
   const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
   const prompt = run.prompt || "";
-  if (stage === "swing") return isRunInSwingTradeMarket(prompt, market);
+  if (stage === "swing") return isAnalysisRunForStage(run, "swing", market);
   if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
   if (stage === "technical") return isTechnicalScanRun(run, market);
   if (stage === "threats") {
@@ -6813,7 +6810,7 @@ ${zerodhaExecutionMode === "direct_market"
                         previousClose.getTime(),
                     )
                     .filter((run) =>
-                      isRunInSwingTradeMarket(run.prompt, market),
+                      isAnalysisRunForStage(run, "swing", market),
                     ),
                 ),
                 "Swing Scan",
@@ -7201,7 +7198,7 @@ ${zerodhaExecutionMode === "direct_market"
           selectedRun = sortRunsByLatestTimestamp(
             runs.filter((run) => {
               if (stage === "swing")
-                return isRunInSwingTradeMarket(run.prompt, market);
+                return isAnalysisRunForStage(run, "swing", market);
               if (stage === "rebalance")
                 return isCompletedRebalanceRun(run, market);
               if (stage === "technical")
@@ -7901,7 +7898,7 @@ ${zerodhaExecutionMode === "direct_market"
           );
           const swingCandidates = buildRunJobCandidates(
             fullRunCandidates.filter((run) =>
-              isRunInSwingTradeMarket(run.prompt, market),
+              isAnalysisRunForStage(run, "swing", market),
             ),
             "Swing Scan",
             market,
@@ -7921,7 +7918,7 @@ ${zerodhaExecutionMode === "direct_market"
             ...(selectedSwingRuns.length
               ? selectedSwingRuns
               : fullRunCandidates
-                  .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
+                  .filter((run) => isAnalysisRunForStage(run, "swing", market))
                   .slice(0, 12)),
           ];
           const inputBundle = buildRebalanceInputBundle({

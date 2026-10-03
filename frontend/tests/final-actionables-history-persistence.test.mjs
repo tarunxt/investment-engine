@@ -53,7 +53,7 @@ test("captured-detail failures are independently recoverable and explain how to 
 });
 
 test("historical cache merges rather than replacing older rows", () => {
-  assert.match(source, /HISTORICAL_ACTION_ROWS_CACHE_VERSION = 2/);
+  assert.match(source, /HISTORICAL_ACTION_ROWS_CACHE_VERSION = 3/);
   assert.match(source, /mergeHistoricalActionRows\(\s*rows,\s*readHistoricalActionRowsCache\(market\)/);
   assert.match(source, /mergeHistoricalActionRows\(historicalRows, readHistoricalActionRowsCache\(market\)\)/);
   assert.match(source, /const displayedPersistedHistory = useMemo\(/);
@@ -67,13 +67,10 @@ test("historical cache merges rather than replacing older rows", () => {
 
 test("dashboard remains bounded while history persists separately", () => {
   assert.match(source, /DASHBOARD_RECENT_RUN_DETAIL_LIMIT = 24/);
-  assert.match(source, /apiService\.saveFinalActionableHistory\(/);
-  assert.match(source, /queueFinalActionableHistoryBackfill\(/);
+  assert.doesNotMatch(source, /apiService\.saveFinalActionableHistory\(/);
+  assert.doesNotMatch(source, /queueFinalActionableHistoryBackfill\(/);
   assert.match(source, /function buildCanonicalCurrentHistoryRows\(/);
-  assert.match(
-    source,
-    /buildCanonicalCurrentHistoryRows\(\s*actionRowsByMarket\.india/,
-  );
+  assert.match(taskSource, /if is_rebalance_run\(run\):\s*backfill_final_actionable_history_task\.delay\(run\.user_id\)/);
   assert.match(persistenceSource, /on_conflict_do_update\(/);
   assert.match(
     persistenceSource,

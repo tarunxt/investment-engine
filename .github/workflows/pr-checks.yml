@@ -60,6 +60,11 @@ jobs:
           backend/tests/test_cost_dashboard_cache.py
           backend/tests/test_cost_drivers_router.py
           backend/tests/test_trade_analysis_display.py
+          backend/tests/test_final_actionable_history_identity.py
+          backend/tests/test_final_actionable_history_parser.py
+          backend/tests/test_final_actionable_history_completion_trigger.py
+          backend/tests/test_final_actionable_history_task_contract.py
+          backend/tests/test_urgent_actionables_history.py
           backend/tests/test_universal_scan_auto_run.py
           backend/tests/test_universal_export_integrity.py
           backend/tests/test_universal_stage1_handoff_repair.py
@@ -154,6 +159,9 @@ jobs:
           tests/bullpen-auto-run-history.test.mjs
           tests/runs-history-loading.test.mjs
           tests/full-run-history.test.mjs
+          tests/final-actionables-run-identity.test.mjs
+          tests/final-actionables-consensus-denominator.test.mjs
+          tests/final-actionables-history-persistence.test.mjs
           tests/portfolio-analysis-read-budgets.test.mjs
           tests/trade-analysis-execution.test.mjs
           tests/bullpen-auto-live-passive-read.test.mjs
