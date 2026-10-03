@@ -59,6 +59,17 @@ jobs:
           backend/tests/test_portfolio_analysis_read_projection.py
           backend/tests/test_cost_dashboard_cache.py
           backend/tests/test_cost_drivers_router.py
+          backend/tests/test_api_usage_attempts.py
+          backend/tests/test_api_usage_reconciliation.py
+          backend/tests/test_job_usage_identity.py
+          backend/tests/test_output_contracts.py
+          backend/tests/test_output_runtime.py
+          backend/tests/test_output_runtime_cancellation.py
+          backend/tests/test_job_table_validation.py
+          backend/tests/test_deepseek_provider.py
+          backend/tests/test_openai_provider.py
+          backend/tests/test_google_sheets_output_contracts.py
+          backend/tests/test_google_sheets_tasks.py
           backend/tests/test_trade_analysis_display.py
           backend/tests/test_final_actionable_history_identity.py
           backend/tests/test_final_actionable_history_parser.py
@@ -154,6 +165,7 @@ jobs:
           tests/dashboard-refresh-errors.test.mjs
           tests/dashboard-portfolio-totals.test.mjs
           tests/rebalance-workflow-resilience.test.mjs
+          tests/rebalance-stage-inputs.test.mjs
           tests/auto-rebalance-provider-errors-ist.test.mjs
           tests/bullpen-auto-run-status.test.mjs
           tests/bullpen-auto-run-history.test.mjs

@@ -228,6 +228,18 @@ function getSelectedSwingRuns(
     .filter((run) => run.run_jobs.length > 0);
 }
 
+function buildRebalanceInputPreviews(inputs: Parameters<typeof buildRebalanceInputBundle>[0]) {
+  try {
+    return {
+      prompt: buildRebalanceInputBundle({ ...inputs, swingDisplayMode: "full" }),
+      display: buildRebalanceInputBundle({ ...inputs, swingDisplayMode: "summary" }),
+      error: null,
+    };
+  } catch (error) {
+    return { prompt: "", display: "", error: normalizeError(error) };
+  }
+}
+
 function RebalanceInputBox({
   portfolio,
   market,
@@ -313,19 +325,18 @@ function RebalanceInputBox({
     [selectedSwingJobIds, swingRuns],
   );
 
-  const promptInputBundle = useMemo(() => {
-    if (loading) return "Loading rebalance inputs…";
-    if (error) {
-      return "Failed to load one or more rebalance inputs. Refresh to try again.";
+  const inputPreviews = useMemo(() => {
+    if (loading || error) {
+      const message = loading ? "Loading rebalance inputs…" : error!;
+      return { prompt: message, display: message, error: message };
     }
 
-    return buildRebalanceInputBundle({
+    return buildRebalanceInputPreviews({
       market,
       previousClose,
       portfolio: portfolioSnapshot,
       threats: threatAnalysis,
       swingRuns: selectedSwingRuns,
-      swingDisplayMode: "full",
     });
   }, [
     error,
@@ -336,32 +347,12 @@ function RebalanceInputBox({
     selectedSwingRuns,
     threatAnalysis,
   ]);
-
-  const displayInputBundle = useMemo(() => {
-    if (loading) return "Loading rebalance inputs…";
-    if (error) {
-      return "Failed to load one or more rebalance inputs. Refresh to try again.";
-    }
-
-    return buildRebalanceInputBundle({
-      market,
-      previousClose,
-      portfolio: portfolioSnapshot,
-      threats: threatAnalysis,
-      swingRuns: selectedSwingRuns,
-      swingDisplayMode: "summary",
-    });
-  }, [
-    error,
-    loading,
-    market,
-    portfolioSnapshot,
-    previousClose,
-    selectedSwingRuns,
-    threatAnalysis,
-  ]);
+  const promptInputBundle = inputPreviews.prompt;
+  const displayInputBundle = inputPreviews.display;
+  const inputError = inputPreviews.error;
 
   useEffect(() => {
+    if (inputError) return;
     const nextPrompt = composePrompt(basePrompt, promptInputBundle);
     setPrompt((current) => {
       if (
@@ -374,7 +365,7 @@ function RebalanceInputBox({
       }
       return current;
     });
-  }, [basePrompt, promptInputBundle, setPrompt]);
+  }, [basePrompt, inputError, promptInputBundle, setPrompt]);
 
   const inputCount = promptInputBundle.length.toLocaleString("en-IN");
   const inputSections = useMemo(
@@ -484,6 +475,7 @@ function RebalanceInputBox({
   }
 
   return (
+    <>
     <Card
       className="overflow-hidden border border-gray-200 shadow-sm"
       size="sm"
@@ -587,10 +579,10 @@ function RebalanceInputBox({
       </CardHeader>
       {isExpanded ? (
         <CardContent className="space-y-4 pt-4">
-          {error ? (
+          {inputError && !loading ? (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
-              <span>{error}</span>
+              <span>{inputError}</span>
             </div>
           ) : null}
 
@@ -838,6 +830,15 @@ function RebalanceInputBox({
         </CardContent>
       ) : null}
     </Card>
+    <CreateJobCard
+      title="Create Job"
+      collapsible
+      defaultExpanded
+      runActionLabel="Run Rebalance"
+      runButtonClassName="bg-emerald-600 text-white hover:bg-emerald-500 focus-visible:border-emerald-600 focus-visible:ring-emerald-300"
+      submitBlockedReason={inputError}
+    />
+    </>
   );
 }
 
@@ -888,13 +889,6 @@ export function PortfolioRebalanceConsole({
             portfolio={portfolio}
             market={market}
             basePrompt={basePrompt}
-          />
-          <CreateJobCard
-            title="Create Job"
-            collapsible
-            defaultExpanded
-            runActionLabel="Run Rebalance"
-            runButtonClassName="bg-emerald-600 text-white hover:bg-emerald-500 focus-visible:border-emerald-600 focus-visible:ring-emerald-300"
           />
           <RecentJobsTable />
         </div>

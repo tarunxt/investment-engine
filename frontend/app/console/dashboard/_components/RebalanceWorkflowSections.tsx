@@ -80,6 +80,14 @@ import {
 import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt } from "@/lib/runPresentation";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
+import {
+  deduplicateStageRunInputs,
+  deduplicateThreatStageInputs,
+  getSelectedStageRunIds,
+  getSelectedThreatJobIds,
+  selectStageRunInputs,
+  type ThreatStageInput,
+} from "@/lib/rebalanceStageInputs";
 import { URLs } from "@/lib/urls";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
@@ -1896,31 +1904,6 @@ This dashboard queues the server-side ${portfolioName} threat prompt through the
 Runtime inputs are appended here from the Select Inputs popup: latest portfolio snapshot, latest Threat Scan output, and all selected Swing Scan outputs run after the previous market close.`;
   }
   return buildTechnicalScanPrompt([], market);
-}
-
-function filterRunToSelectedJobs(
-  run: RunResponse,
-  selectedIds: Set<string>,
-): RunResponse | null {
-  const runJobs = (run.run_jobs ?? []).filter((link) =>
-    selectedIds.has(`run:${run.id}:job:${link.job?.id}`),
-  );
-  if (runJobs.length === 0) return null;
-  return { ...run, run_jobs: runJobs };
-}
-
-function uniqueRunsBySelectedCandidates(
-  candidates: InputSelectionCandidate[],
-  selectedIds: Set<string>,
-) {
-  const byRun = new Map<number, RunResponse>();
-  candidates.forEach((candidate) => {
-    if (!candidate.run) return;
-    byRun.set(candidate.run.id, candidate.run);
-  });
-  return Array.from(byRun.values())
-    .map((run) => filterRunToSelectedJobs(run, selectedIds))
-    .filter(Boolean) as RunResponse[];
 }
 
 function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
@@ -7600,7 +7583,7 @@ ${zerodhaExecutionMode === "direct_market"
         // recorded in the run history.
         throw new RecordedWorkflowStageFailure(message, error);
       };
-      let generatedThreatMarkdown = "";
+      let generatedThreatInput: ThreatStageInput | null = null;
       let generatedSwingRun: RunResponse | null = null;
       let generatedRebalanceRun: RunResponse | null = null;
 
@@ -7766,7 +7749,11 @@ ${zerodhaExecutionMode === "direct_market"
               throw new Error(
                 `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
               );
-            generatedThreatMarkdown = completedThreat.report?.raw_markdown ?? "";
+            generatedThreatInput = {
+              identity: { kind: "threat-job", market, stage: "threats", jobId: queuedThreat.job_id },
+              analysis: completedThreat,
+              origin: "generated",
+            };
             markCompleted(portfolio, "threats", {
               ...summarizeThreat(completedThreat),
               completedLlms: 1,
@@ -7793,35 +7780,24 @@ ${zerodhaExecutionMode === "direct_market"
             completedLlms: 0,
           });
           const swingInputSelection = selectedInputs[portfolio].swing;
-          const selectedThreatParts: string[] = [];
-          if (
-            swingInputSelection.has("swing:next") &&
-            generatedThreatMarkdown.trim()
-          ) {
-            selectedThreatParts.push(
-              `## Next Threat Scan output\n\n${generatedThreatMarkdown.trim()}`,
-            );
-          }
-          if ([...swingInputSelection].some((id) => id.startsWith("threat:"))) {
-            const latestThreat = (
-              await retryWorkflowRead(
-                () =>
-                  portfolio === "zerodha"
-                    ? apiService.zerodhaThreatsLatest()
-                    : apiService.indmoneyUsThreatsLatest(),
-                "latest threats scan",
-                () => cancelRequestedRef.current,
-              )
-            ).analysis;
-            if (
-              latestThreat?.report?.raw_markdown &&
-              swingInputSelection.has(`threat:${latestThreat.job_id}`)
-            ) {
-              selectedThreatParts.push(
-                `## Selected Threat Scan #${latestThreat.job_id}\n\n${latestThreat.report.raw_markdown.trim()}`,
-              );
-            }
-          }
+          const selectedThreatIds = getSelectedThreatJobIds(swingInputSelection);
+          const selectedThreatInputs: ThreatStageInput[] = await retryWorkflowRead(
+            () => Promise.all(selectedThreatIds.map(async (jobId): Promise<ThreatStageInput> => ({
+              identity: { kind: "threat-job", market, stage: "threats", jobId },
+              analysis: portfolio === "zerodha"
+                ? await apiService.zerodhaThreatJob(jobId)
+                : await apiService.indmoneyUsThreatJob(jobId),
+              origin: "selected",
+            }))),
+            "selected threat scan inputs",
+            () => cancelRequestedRef.current,
+          );
+          const selectedThreatParts = deduplicateThreatStageInputs([
+            ...(swingInputSelection.has("swing:next") && generatedThreatInput ? [generatedThreatInput] : []),
+            ...selectedThreatInputs,
+          ], market).map(({ analysis, origin }) =>
+            `## ${origin === "generated" ? "Next" : "Selected"} Threat Scan #${analysis.job_id}\n\n${analysis.report!.raw_markdown.trim()}`,
+          );
           const threatAppendix = selectedThreatParts.length
             ? `\n\n---\n\n# User-selected Threat Scan Inputs\n\n${selectedThreatParts.join("\n\n---\n\n")}`
             : "";
@@ -7884,6 +7860,8 @@ ${zerodhaExecutionMode === "direct_market"
             () => cancelRequestedRef.current,
           );
           const previousClose = getPreviousMarketClose(market);
+          const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
+          const selectedSwingRunIds = getSelectedStageRunIds(selectedRebalanceInputs, "swing");
           const recentCompletedRuns = runsRes.items
             .filter((run) => (run.status || "").toLowerCase() === "completed")
             .filter(
@@ -7892,24 +7870,16 @@ ${zerodhaExecutionMode === "direct_market"
             )
             .slice(0, 24);
           const fullRunCandidates = await retryWorkflowRead(
-            () => Promise.all(recentCompletedRuns.map((run) => apiService.getRun(run.id))),
+            () => Promise.all([...new Set([
+              ...selectedSwingRunIds,
+              ...recentCompletedRuns.map((run) => run.id),
+            ])].map((runId) => apiService.getRun(runId))),
             "completed swing scan inputs",
             () => cancelRequestedRef.current,
           );
-          const swingCandidates = buildRunJobCandidates(
-            fullRunCandidates.filter((run) =>
-              isAnalysisRunForStage(run, "swing", market),
-            ),
-            "Swing Scan",
-            market,
+          const selectedSwingRuns = selectStageRunInputs(
+            fullRunCandidates, selectedRebalanceInputs, { market, stage: "swing" },
           );
-          const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
-          const selectedSwingRuns = selectedRebalanceInputs.size
-            ? uniqueRunsBySelectedCandidates(
-                swingCandidates,
-                selectedRebalanceInputs,
-              )
-            : [];
           const swingRuns = [
             ...(selectedRebalanceInputs.has("rebalance:next") &&
             generatedSwingRun
@@ -7975,23 +7945,19 @@ ${zerodhaExecutionMode === "direct_market"
             totalLlms: 1,
             completedLlms: 0,
           });
+          const selectedTechnicalInputs = selectedInputs[portfolio].technical;
+          const selectedRebalanceRunIds = getSelectedStageRunIds(selectedTechnicalInputs, "rebalance");
           const allRuns = await retryWorkflowRead(
-            () => fetchAllFullRuns(),
+            () => selectedRebalanceRunIds.length
+              ? Promise.all(selectedRebalanceRunIds.map((runId) => apiService.getRun(runId)))
+              : fetchAllFullRuns(),
             "technical scan input runs",
             () => cancelRequestedRef.current,
           );
-          const selectedTechnicalInputs = selectedInputs[portfolio].technical;
-          const selectedRebalanceRuns = selectedTechnicalInputs.size
-            ? uniqueRunsBySelectedCandidates(
-                buildRunJobCandidates(
-                  allRuns.filter((run) => isCompletedRebalanceRun(run, market)),
-                  "Rebalance Scan",
-                  market,
-                ),
-                selectedTechnicalInputs,
-              )
-            : [];
-          const rebalanceInputs = [
+          const selectedRebalanceRuns = selectStageRunInputs(
+            allRuns, selectedTechnicalInputs, { market, stage: "rebalance" },
+          );
+          const rebalanceInputs = deduplicateStageRunInputs([
             ...(selectedTechnicalInputs.has("technical:next") &&
             generatedRebalanceRun
               ? [generatedRebalanceRun]
@@ -7999,7 +7965,7 @@ ${zerodhaExecutionMode === "direct_market"
             ...(selectedRebalanceRuns.length
               ? selectedRebalanceRuns
               : getLatestMatchingRebalanceRuns(allRuns, market)),
-          ];
+          ], { market, stage: "rebalance" });
           const consensus = buildConsensusRows(rebalanceInputs, market);
           if (consensus.length === 0)
             throw new Error(

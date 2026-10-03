@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 
 import requests
 
+from app.domains.api_usage.metering import ApiAttempt, metered_call
 from app.core.config import settings
 
 logger = logging.getLogger("app")
@@ -55,12 +56,12 @@ TOOL_DEFINITIONS: list[dict] = [
 def execute(name: str, args: dict[str, Any]) -> str:
     try:
         if name == "web_search":
-            logger.info(f"Executing tool: {name} with args: {args}")
+            logger.info("Executing web_search tool")
             return _web_search(args["query"], int(args.get("max_results", 5)))
-        logger.warning(f"Unknown tool requested: {name}")
+        logger.warning("Unknown tool requested")
         return json.dumps({"error": f"Unknown tool: {name}"})
     except Exception as exc:
-        logger.error(f"Error executing tool '{name}': {exc}")
+        logger.error("Search tool failed (%s)", type(exc).__name__)
         return json.dumps(
             {
                 "query": args.get("query"),
@@ -83,7 +84,7 @@ def _web_search(query: str, max_results: int = 5) -> str:
                 return tavily_payload
             errors.append("Tavily returned no results")
         except Exception as exc:
-            logger.warning("Tavily search failed for '%s': %s", query, exc)
+            logger.warning("Tavily search failed (%s)", type(exc).__name__)
             errors.append(f"Tavily failed: {exc}")
     else:
         logger.warning("TAVILY_API_KEY not configured — falling back to alternative search providers")
@@ -99,7 +100,7 @@ def _web_search(query: str, max_results: int = 5) -> str:
                 return payload
             errors.append(f"{search_name} returned no results")
         except Exception as exc:
-            logger.warning("%s search failed for '%s': %s", search_name, query, exc)
+            logger.warning("%s search failed (%s)", search_name, type(exc).__name__)
             errors.append(f"{search_name} failed: {exc}")
 
     return json.dumps(
@@ -117,13 +118,14 @@ def _tavily_search(query: str, max_results: int) -> str:
     from tavily import TavilyClient
 
     client = TavilyClient(api_key=settings.tavily_api_key)
-    response = client.search(
+    response = metered_call(
+        client.search, provider="tavily", meter_model=None, phase="search",
         query=query,
         max_results=max_results,
         search_depth="advanced",
         include_answer=True,
     )
-    logger.info("Tavily search '%s' returned %d results", query, len(response.get("results", [])))
+    logger.info("Tavily search returned %d results", len(response.get("results", [])))
     results = [
         {
             "title": r.get("title"),
@@ -143,8 +145,11 @@ def _tavily_search(query: str, max_results: int) -> str:
 def _ddg_search(query: str, max_results: int) -> str:
     from duckduckgo_search import DDGS
 
-    raw = DDGS().text(query, max_results=max_results)
-    logger.info("DuckDuckGo search '%s' returned %d results", query, len(raw))
+    raw = metered_call(
+        DDGS().text, query, provider="duckduckgo", meter_model=None, phase="search",
+        max_results=max_results,
+    )
+    logger.info("DuckDuckGo search returned %d results", len(raw))
     results = [
         {"title": r.get("title"), "url": r.get("href"), "content": r.get("body")}
         for r in (raw or [])
@@ -157,29 +162,35 @@ def _ddg_search(query: str, max_results: int) -> str:
 
 def _bing_rss_search(query: str, max_results: int) -> str:
     url = f"https://www.bing.com/search?{urlencode({'format': 'rss', 'q': query})}"
-    response = requests.get(url, headers=_SEARCH_HEADERS, timeout=15)
-    response.raise_for_status()
+    with ApiAttempt(
+        provider="bing", model=None, request={"query": query, "max_results": max_results},
+        phase="search", instrumentation_scope="http_call_redirects_unmeasured",
+    ) as attempt:
+        response = requests.get(url, headers=_SEARCH_HEADERS, timeout=15)
+        attempt.observe(response)
+        response.raise_for_status()
 
-    root = ElementTree.fromstring(response.text)
-    items = root.findall("./channel/item")
-    results = []
-    for item in items[:max_results]:
-        title = _clean_xml_text(item.findtext("title"))
-        link = _clean_xml_text(item.findtext("link"))
-        description = _strip_html(_clean_xml_text(item.findtext("description")))
-        published_date = _clean_xml_text(item.findtext("pubDate"))
-        if not title and not link and not description:
-            continue
-        results.append(
-            {
-                "title": title,
-                "url": link,
-                "content": description,
-                "published_date": published_date,
-            }
-        )
+        root = ElementTree.fromstring(response.text)
+        items = root.findall("./channel/item")
+        results = []
+        for item in items[:max_results]:
+            title = _clean_xml_text(item.findtext("title"))
+            link = _clean_xml_text(item.findtext("link"))
+            description = _strip_html(_clean_xml_text(item.findtext("description")))
+            published_date = _clean_xml_text(item.findtext("pubDate"))
+            if not title and not link and not description:
+                continue
+            results.append(
+                {
+                    "title": title,
+                    "url": link,
+                    "content": description,
+                    "published_date": published_date,
+                }
+            )
+        attempt.observe_search_results(len(results))
 
-    logger.info("Bing RSS search '%s' returned %d results", query, len(results))
+    logger.info("Bing RSS search returned %d results", len(results))
     return json.dumps(
         {"query": query, "answer": None, "results": results},
         ensure_ascii=False,

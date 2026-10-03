@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import logging
 
@@ -15,8 +16,22 @@ logger = logging.getLogger("app")
 
 @dataclass(frozen=True)
 class ProviderUsageContext:
-    user_id: int
+    user_id: int | None
     job_id: int | None
+    execution_id: str | None = None
+    job_attempt: int | None = None
+    run_id: str | None = None
+    workflow_id: str | None = None
+    market: str | None = None
+    stage: str | None = None
+    sample_id: str | None = None
+    requested_provider: str | None = None
+    requested_model: str | None = None
+    phase: str | None = None
+    evidence_hash: str | None = None
+    schema_hash: str | None = None
+    # Per execution, never shared across jobs or independent samples.
+    last_attempt: dict[str, str] = field(default_factory=dict, compare=False)
 
 
 _provider_usage_context: ContextVar[ProviderUsageContext | None] = ContextVar(
@@ -25,13 +40,40 @@ _provider_usage_context: ContextVar[ProviderUsageContext | None] = ContextVar(
 
 
 def set_provider_usage_context(
-    *, user_id: int | None, job_id: int | None
+    *, user_id: int | None, job_id: int | None,
+    execution_id: str | None = None, job_attempt: int | None = None,
+    run_id: str | None = None, workflow_id: str | None = None,
+    market: str | None = None, stage: str | None = None,
+    sample_id: str | None = None, requested_provider: str | None = None,
+    requested_model: str | None = None, evidence_hash: str | None = None,
+    schema_hash: str | None = None,
 ) -> Token[ProviderUsageContext | None] | None:
-    if user_id is None:
-        return None
     return _provider_usage_context.set(
-        ProviderUsageContext(user_id=int(user_id), job_id=job_id)
+        ProviderUsageContext(
+            user_id=int(user_id) if user_id is not None else None, job_id=job_id,
+            execution_id=execution_id, job_attempt=job_attempt,
+            run_id=str(run_id) if run_id is not None else None,
+            workflow_id=str(workflow_id) if workflow_id is not None else None,
+            market=market, stage=stage, sample_id=sample_id,
+            requested_provider=requested_provider, requested_model=requested_model,
+            evidence_hash=evidence_hash, schema_hash=schema_hash,
+        )
     )
+
+
+def get_provider_usage_context() -> ProviderUsageContext | None:
+    return _provider_usage_context.get()
+
+
+@contextmanager
+def provider_usage_phase(phase: str):
+    """Label a job-level repair without passing telemetry into a provider API."""
+    context = get_provider_usage_context()
+    token = _provider_usage_context.set(replace(context, phase=phase)) if context else None
+    try:
+        yield
+    finally:
+        reset_provider_usage_context(token)
 
 
 def reset_provider_usage_context(
@@ -56,7 +98,7 @@ def record_provider_usage_call(
     """Persist one provider response without risking the underlying AI request."""
 
     context = _provider_usage_context.get()
-    if context is None or not provider_request_id:
+    if context is None or context.user_id is None or not provider_request_id:
         return
 
     timestamp = occurred_at or datetime.now(UTC)

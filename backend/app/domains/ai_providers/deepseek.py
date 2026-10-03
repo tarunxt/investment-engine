@@ -8,6 +8,7 @@ import re
 
 from openai import OpenAI
 
+from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.api_usage.recorder import record_provider_usage_call
 from app.domains.ai_providers.base import (
@@ -267,7 +268,9 @@ class DeepSeekProvider(BaseAIProvider):
                 "Return the clean final answer immediately in the exact format requested by the user."
             )
 
-        recovery_response = self.client.chat.completions.create(
+        recovery_response = metered_call(
+            self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+            phase="recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             messages=[
                 {
@@ -344,10 +347,14 @@ class DeepSeekProvider(BaseAIProvider):
         web_search_queries: list[str] = []
         web_sources: list[str] = []
 
-        logger.info(f"DeepSeek request with kwargs: {kwargs}")
+        logger.info("DeepSeek generation started")
         for round_num in range(_MAX_TOOL_ROUNDS):
-            response = self.client.chat.completions.create(**kwargs)
-            logger.info(f"DeepSeek response round {round_num + 1}: {response}")
+            response = metered_call(
+                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                phase="request" if round_num == 0 else "tool_round", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                **kwargs,
+            )
+            logger.info("DeepSeek response round %d received", round_num + 1)
             usage = getattr(response, "usage", None)
             token_usage = self._token_usage_from_response_usage(usage)
             self._record_response_usage(response, model, token_usage)
@@ -429,7 +436,9 @@ class DeepSeekProvider(BaseAIProvider):
             # response and make bounded no-tool recovery attempts before handing the
             # job back to Celery's retry policy.
             for recovery_attempt in range(_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS):
-                final_response = self.client.chat.completions.create(
+                final_response = metered_call(
+                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    phase="empty_recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                     model=model,
                     messages=messages
                     + [
@@ -498,7 +507,9 @@ class DeepSeekProvider(BaseAIProvider):
 
             needs_rewrite = _looks_like_tool_trace(cleaned) or normalized_json is None
             if needs_rewrite:
-                rewrite_response = self.client.chat.completions.create(
+                rewrite_response = metered_call(
+                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                     model=model,
                     messages=[
                         {
@@ -528,18 +539,36 @@ class DeepSeekProvider(BaseAIProvider):
                     ).strip()
                     cleaned = _normalize_json_output_text(rewritten) or rewritten
         elif output_kind == "markdown_table":
+            # Only the current declared stock contracts opt into deterministic
+            # rendering. Unknown or invalid values still need the existing
+            # repair path; no facts are synthesized merely to avoid a call.
+            from app.domains.jobs.output_runtime import current_output_context, normalize_runtime_output
+
+            output_context = current_output_context()
+            deterministic = normalize_runtime_output(
+                cleaned, fragment="[STOCK_TABLE_TOP_UP]" in prompt,
+            )
+            if deterministic is not None and deterministic.safe_to_replace:
+                cleaned = deterministic.content
             needs_rewrite = _looks_like_tool_trace(
                 cleaned
             ) or not _looks_like_valid_markdown_table(cleaned)
             if needs_rewrite:
-                rewrite_response = self.client.chat.completions.create(
+                rewrite_response = metered_call(
+                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                     model=model,
                     messages=[
                         {
                             "role": "system",
                             "content": (
                                 "Convert the following assistant output into a clean final answer. "
-                                "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
+                                + (
+                                    "Preserve all supplied rows and facts, and follow the exact columns and row coverage in the user's current request. "
+                                    if output_context is not None
+                                    else "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
+                                )
+                                +
                                 "No tool traces, no XML/DSML tags, no extra commentary."
                             ),
                         },
@@ -561,7 +590,9 @@ class DeepSeekProvider(BaseAIProvider):
                         getattr(rewrite_choices[0].message, "content", "") or ""
                     ).strip()
         elif _looks_like_tool_trace(cleaned):
-            rewrite_response = self.client.chat.completions.create(
+            rewrite_response = metered_call(
+                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 messages=[
                     {
