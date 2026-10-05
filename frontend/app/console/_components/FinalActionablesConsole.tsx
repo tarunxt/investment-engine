@@ -3994,6 +3994,7 @@ export function StockDetailsButton({
   const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
   const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
   const [persistedHistory, setPersistedHistory] = useState<FinalActionableHistoryItem[]>([]);
+  const [showUncoveredHistory, setShowUncoveredHistory] = useState(false);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -4016,10 +4017,15 @@ export function StockDetailsButton({
     [historicalRows, market, open],
   );
   // Persisted evidence is authoritative; today's holdings/formula must never overwrite it.
-  const displayedPersistedHistory = persistedHistory;
+  const displayedPersistedHistory = useMemo(
+    () => showUncoveredHistory
+      ? persistedHistory
+      : persistedHistory.filter((item) => item.coverage_status !== "run_failed" && item.coverage_status !== "not_mentioned"),
+    [persistedHistory, showUncoveredHistory],
+  );
   const persistedRunIds = useMemo(
-    () => new Set(displayedPersistedHistory.map((item) => item.rebalance_run_id)),
-    [displayedPersistedHistory],
+    () => new Set(persistedHistory.map((item) => item.rebalance_run_id)),
+    [persistedHistory],
   );
   const matchingHistoricalRows = useMemo(
     () => effectiveHistoricalRows.filter(
@@ -4148,6 +4154,7 @@ export function StockDetailsButton({
           event.stopPropagation();
           setResolvedDetailsData(null);
           setPersistedHistory([]);
+          setShowUncoveredHistory(false);
           setHistoryCursor(null);
           setHistoryHasMore(false);
           setOpen(true);
@@ -4258,7 +4265,20 @@ export function StockDetailsButton({
 
 
               <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <h3 className="mb-3 font-semibold text-slate-950">Historical LLM suggestions</h3>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-semibold text-slate-950">Historical LLM suggestions</h3>
+                  <button
+                    type="button"
+                    aria-pressed={showUncoveredHistory}
+                    onClick={() => setShowUncoveredHistory((show) => !show)}
+                    className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <span aria-hidden="true" className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", showUncoveredHistory ? "border-blue-600" : "border-slate-400")}>
+                      {showUncoveredHistory ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
+                    </span>
+                    Show Run Failed / Not Mentioned
+                  </button>
+                </div>
                 {historyError ? (
                   <div className="mb-3">
                     <OperationalErrorNotice
@@ -4314,18 +4334,20 @@ export function StockDetailsButton({
                         ))}
                       </tbody>
                     </table>
-                    {historyHasMore ? (
-                      <div className="border-t border-slate-200 p-3 text-center">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={historyLoading || !historyCursor}
-                          onClick={() => void loadPersistedHistory(historyCursor, true)}
-                        >
-                          {historyLoading ? "Loading…" : "Load older suggestions"}
-                        </Button>
-                      </div>
-                    ) : null}
+                  </div>
+                ) : persistedHistory.length > 0 ? (
+                  <p className="mb-3 text-sm text-slate-500">No visible suggestions in the loaded history. Use the control above to show Run Failed / Not Mentioned rows.</p>
+                ) : null}
+                {historyHasMore ? (
+                  <div className="mb-3 p-3 text-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={historyLoading || !historyCursor}
+                      onClick={() => void loadPersistedHistory(historyCursor, true)}
+                    >
+                      {historyLoading ? "Loading…" : "Load older suggestions"}
+                    </Button>
                   </div>
                 ) : null}
                 {matchingHistoricalRows.length ? (
