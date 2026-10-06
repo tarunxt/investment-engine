@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import require_indmoney_analysis
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -52,6 +54,7 @@ class CreateJobUseCase:
         self._idempotency = idempotency
 
     async def execute(self, cmd: CreateJobCommand) -> CreateJobResult:
+        require_indmoney_analysis(cmd.auto_rebalance_portfolio)
         # ── 1. Idempotency fast-path ─────────────────────────────────────────
         if cmd.idempotency_key:
             if cached := await self._idempotency.get(cmd.idempotency_key):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import require_financial_writes_allowed
+
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -68,6 +70,8 @@ class ZerodhaService:
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
+        if method.upper() not in {"GET", "HEAD"}:
+            require_financial_writes_allowed()
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
@@ -94,6 +98,8 @@ class ZerodhaService:
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
+        if method.upper() not in {"GET", "HEAD"}:
+            require_financial_writes_allowed()
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))

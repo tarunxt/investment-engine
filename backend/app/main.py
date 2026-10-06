@@ -1,3 +1,7 @@
+
+from app.core.recovery import RecoveryMiddleware
+
+from app.core.recovery import recovery_mode
 import json
 import time
 from contextlib import asynccontextmanager
@@ -115,6 +119,7 @@ cors_allowed_origins = _build_cors_allowed_origins()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    recovery_mode()  # Refuse malformed recovery configuration before startup work.
     logger.info("Starting AI Investment Platform Backend")
     logger.info("Database: %s", settings.database_url.split("@")[-1])
     logger.info("Redis: %s", settings.redis_url)
@@ -273,6 +278,8 @@ async def correlation_id_middleware(request: Request, call_next):
     finally:
         end_request_timing(timing_token)
 
+
+app.add_middleware(RecoveryMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
