@@ -5,6 +5,9 @@ on:
 permissions:
   contents: read
   actions: read
+env:
+  FRONTEND_ARTIFACT_NAME: frontend-runtime-${{ github.sha }}
+  FRONTEND_ARTIFACT_FILE: frontend-runtime-${{ github.sha }}.tar.gz
 jobs:
   build-frontend:
     name: Build production frontend artifact
