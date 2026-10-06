@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import gzip
+import io
+from pathlib import Path
+from app.domains.trading_bots.storage_budget import StorageBudget, ReservedFile, enabled as storage_budget_enabled
 import hashlib
 import json
 import logging
@@ -41,10 +44,24 @@ class ScanPageCache:
         self.root.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=self.root, suffix='.tmp')
         os.close(fd)
+        budget = None
         try:
-            with gzip.open(temporary, 'wt', encoding='utf-8', compresslevel=1) as target:
-                json.dump({'version': 1, 'rows': rows, 'next_cursor': next_cursor}, target,
-                          ensure_ascii=False, separators=(',', ':'))
+            if storage_budget_enabled():
+                budget = StorageBudget(
+                    Path(os.environ.get('BULLPEN_STORAGE_RESERVATION_DIRECTORY') or scan_source_store.SOURCE_ROOT.parent),
+                    identity=f'scan-page:{self.root.name}',
+                )
+                with open(temporary, 'wb', buffering=0) as raw:
+                    target = ReservedFile(raw, budget, self.root)
+                    with io.TextIOWrapper(gzip.GzipFile(fileobj=target, mode='wb', compresslevel=1), encoding='utf-8') as text:
+                        json.dump({'version': 1, 'rows': rows, 'next_cursor': next_cursor}, text,
+                                  ensure_ascii=False, separators=(',', ':'))
+                    raw.flush()
+                    os.fsync(raw.fileno())
+            else:
+                with gzip.open(temporary, 'wt', encoding='utf-8', compresslevel=1) as target:
+                    json.dump({'version': 1, 'rows': rows, 'next_cursor': next_cursor}, target,
+                              ensure_ascii=False, separators=(',', ':'))
             with open(temporary, 'rb') as target:
                 os.fsync(target.fileno())
             os.replace(temporary, self.path(cursor, end_date_min))
@@ -56,3 +73,5 @@ class ScanPageCache:
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
+            if budget is not None:
+                budget.release()

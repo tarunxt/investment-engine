@@ -7,6 +7,8 @@ import json
 import os
 import shutil
 import zlib
+from app.domains.trading_bots import export_payloads
+from app.domains.trading_bots.storage_budget import StorageBudget, enabled as storage_budget_enabled
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from collections.abc import Iterator
@@ -541,7 +543,8 @@ def latest_completed_universal_export(
                         metadata.get("rowsBytes") is None
                         or rows_path.stat().st_size == metadata["rowsBytes"]
                     ):
-                        return metadata, rows_path
+                        if not metadata.get("immutableRowsStorage") or validate_export(metadata, rows_path):
+                            return metadata, rows_path
                 except OSError:
                     pass
 
@@ -554,7 +557,8 @@ def latest_completed_universal_export(
                 metadata.get("rowsBytes") is None
                 or rows_path.stat().st_size == metadata["rowsBytes"]
             ):
-                return metadata, rows_path
+                if not metadata.get("immutableRowsStorage") or validate_export(metadata, rows_path):
+                    return metadata, rows_path
         except OSError:
             continue
     return None
@@ -677,20 +681,56 @@ class UniversalExportWriter:
         self.identity_keys: set[str] = set()
         self.pages = 0
         self.sports_participants = SportsParticipantCollector()
+        self.budget = None
+        self.reserved_archive_bytes = 0
+        self.row_budget_bytes = 0
+        self.pending_primary_allocated = 0
 
     def __enter__(self) -> "UniversalExportWriter":
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.handle = self.rows_path.open("x", encoding="utf-8")
-        self.filtered_path.write_text("", encoding="utf-8")
-        # Publish ownership BEFORE writing rows, preventing cleanup from
-        # mistaking a running capture for an abandoned orphan.
-        self.metadata_path.write_text(json.dumps({
-            "exportId": self.export_id,
-            "ownerHash": hashlib.sha256(f"{self.user_id}:universal".encode()).hexdigest(),
-            "universalSource": True, "completed": False,
-            "createdAt": self.started_at.isoformat(), "rowCount": 0,
-        }), encoding="utf-8")
+        if export_payloads.enabled() and not storage_budget_enabled():
+            raise OSError("UPS_STORAGE_CAPACITY: Canonical sharing requires storage reservations to be enabled across writers.")
+        if storage_budget_enabled():
+            archive_directory().mkdir(parents=True, exist_ok=True)
+            self.budget = StorageBudget(
+                Path(os.environ.get('BULLPEN_STORAGE_RESERVATION_DIRECTORY') or self.directory),
+                identity=f'universal:{self.export_id}',
+            )
+            self.budget.reserve_many([(self.directory, 0), (archive_directory(), 0)])
+        try:
+            self.handle = self.rows_path.open("x", encoding="utf-8")
+        except BaseException:
+            if self.budget is not None:
+                self.budget.release()
+            raise
+        try:
+            self._write_text(self.filtered_path, "")
+            # Publish ownership BEFORE writing rows, preventing cleanup from
+            # mistaking a running capture for an abandoned orphan.
+            self._write_text(self.metadata_path, json.dumps({
+                "exportId": self.export_id,
+                "ownerHash": hashlib.sha256(f"{self.user_id}:universal".encode()).hexdigest(),
+                "universalSource": True, "completed": False,
+                "createdAt": self.started_at.isoformat(), "rowCount": 0,
+            }))
+        except BaseException:
+            self.handle.close()
+            self.handle = None
+            if self.budget is not None:
+                self.budget.release()
+            raise
         return self
+
+    def _write_text(self, path: Path, value: str) -> None:
+        size = len(value.encode("utf-8"))
+        if self.budget is not None:
+            self.budget.reserve(path.parent, size)
+        with path.open("w", encoding="utf-8") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if self.budget is not None:
+            self.budget.consume(path.parent, size)
 
     def add(self, market: Any) -> None:
         self.sports_participants.add(market)
@@ -733,7 +773,23 @@ class UniversalExportWriter:
             json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 1
         )).decode("ascii")
         assert self.handle is not None
-        self.handle.write(json.dumps({"compressedRowV1": encoded}, separators=(",", ":")) + "\n")
+        line = json.dumps({"compressedRowV1": encoded}, separators=(",", ":")) + "\n"
+        size = len(line.encode("utf-8"))
+        if self.budget is not None and self.row_budget_bytes < size:
+            amount = max(size, 4 * 1024**2)
+            self.budget.reserve_many([(self.directory, amount), (archive_directory(), amount)])
+            self.row_budget_bytes += amount
+        self.handle.write(line)
+        if self.budget is not None:
+            # Allocate the primary bytes before giving their reservation back;
+            # keep the separate recovery allocation reserved until completion.
+            self.handle.flush()
+            self.row_budget_bytes -= size
+            self.pending_primary_allocated += size
+            self.reserved_archive_bytes += size
+            if self.pending_primary_allocated >= 4 * 1024**2:
+                self.budget.consume(self.directory, self.pending_primary_allocated)
+                self.pending_primary_allocated = 0
         self.count += 1
         if len(self.sample) < 500:
             self.sample.append(candidate)
@@ -750,6 +806,9 @@ class UniversalExportWriter:
         os.fsync(self.handle.fileno())
         self.handle.close()
         self.handle = None
+        if self.budget is not None and self.pending_primary_allocated:
+            self.budget.consume(self.directory, self.pending_primary_allocated)
+            self.pending_primary_allocated = 0
         rows_bytes, rows_sha256, stored_count = file_integrity(self.rows_path)
         self.rows_sha256 = rows_sha256
         if stored_count != self.count:
@@ -780,13 +839,12 @@ class UniversalExportWriter:
         }
         participant_path = participant_index_path(self.rows_path)
         participant_temporary = participant_path.with_suffix(participant_path.suffix + ".tmp")
-        participant_temporary.write_text(
+        self._write_text(participant_temporary,
             json.dumps(
                 self.sports_participants.payload(export_id=self.export_id),
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
-            encoding="utf-8",
         )
         participant_temporary.replace(participant_path)
         # Retain an immutable recovery copy before making this scan consumable.
@@ -794,30 +852,49 @@ class UniversalExportWriter:
         archive.mkdir(parents=True, exist_ok=True)
         if shutil.disk_usage(archive).free < rows_bytes + 2 * 1024**3:
             raise OSError("UPS_STORAGE_CAPACITY: Archive needs space for this export plus a 2 GiB reserve. No existing scan was deleted.")
-        archived_rows = archive / self.rows_path.name
-        archived_tmp = archived_rows.with_suffix(".jsonl.tmp")
-        shutil.copyfile(self.rows_path, archived_tmp)
-        with archived_tmp.open("rb") as persisted:
-            os.fsync(persisted.fileno())
-        if not validate_export(metadata, archived_tmp):
-            raise ValueError("UPS_SOURCE_CORRUPT: Archived UPS failed integrity verification.")
-        archived_tmp.replace(archived_rows)
+        if export_payloads.enabled():
+            if self.budget is not None:
+                # Worst-case fallback copies plus the publication temporary.
+                # Existing per-row claims already hold one archive copy.
+                self.budget.reserve_many([(self.directory, 2 * rows_bytes), (archive, rows_bytes)])
+            metadata['immutableRowsStorage'] = export_payloads.publish_payload(
+                self.rows_path, archive, size=rows_bytes, digest=rows_sha256,
+            )
+            metadata['immutableRowsStorage']['recoveryOwnerHash'] = metadata['ownerHash']
+        else:
+            archived_rows = archive / self.rows_path.name
+            archived_tmp = archived_rows.with_suffix(".jsonl.tmp")
+            shutil.copyfile(self.rows_path, archived_tmp)
+            with archived_tmp.open("rb") as persisted:
+                os.fsync(persisted.fileno())
+            if not validate_export(metadata, archived_tmp):
+                raise ValueError("UPS_SOURCE_CORRUPT: Archived UPS failed integrity verification.")
+            archived_tmp.replace(archived_rows)
+        if self.budget is not None:
+            self.budget.consume(archive, self.reserved_archive_bytes)
+        # Completed ownership is published only after independently validated recovery.
         archived_meta = archive / self.metadata_path.name
         archived_meta_tmp = archived_meta.with_suffix(".json.tmp")
-        archived_meta_tmp.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+        self._write_text(archived_meta_tmp, json.dumps(metadata, separators=(",", ":")))
         archived_meta_tmp.replace(archived_meta)
         temporary = self.metadata_path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+        self._write_text(temporary, json.dumps(metadata, separators=(",", ":")))
         temporary.replace(self.metadata_path)
+        export_payloads.sync_directory(archive)
+        export_payloads.sync_directory(self.directory)
         # Do not delete older exports: delayed/retried workflows pin their IDs.
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        if self.handle is not None:
-            self.handle.close()
-        if exc_type is not None:
-            self.rows_path.unlink(missing_ok=True)
-            self.filtered_path.unlink(missing_ok=True)
-            self.metadata_path.unlink(missing_ok=True)
-            participant_path = participant_index_path(self.rows_path)
-            participant_path.unlink(missing_ok=True)
-            participant_path.with_suffix(participant_path.suffix + ".tmp").unlink(missing_ok=True)
+        try:
+            if self.handle is not None:
+                self.handle.close()
+            if exc_type is not None:
+                self.rows_path.unlink(missing_ok=True)
+                self.filtered_path.unlink(missing_ok=True)
+                self.metadata_path.unlink(missing_ok=True)
+                participant_path = participant_index_path(self.rows_path)
+                participant_path.unlink(missing_ok=True)
+                participant_path.with_suffix(participant_path.suffix + ".tmp").unlink(missing_ok=True)
+        finally:
+            if self.budget is not None:
+                self.budget.release()

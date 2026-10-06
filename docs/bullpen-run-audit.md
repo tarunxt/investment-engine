@@ -2680,3 +2680,68 @@ Server terminal-run reconstruction remains the durable history path. This does
 not repair or rewrite historical records created before source validation.
 Closed Calculations dialogs no longer mount their expensive computation child.
 No action formulas, execution controls, or frozen audit evidence are changed.
+
+### Source pack storage compatibility (local optimization phase)
+
+`ScanSourceWriter` may map multiple identical compressed payloads in one writer
+session to the same `source-v1` pack/offset/length/SHA256. It verifies exact bytes
+before reuse. This changes physical allocation only: source decoding, candidate
+text, frozen snapshot content, audit schema and algorithm semantics remain the
+same. No historical pack is rewritten, and no source is deleted. Writer counters
+`bytes_written` and `bytes_reused` describe actual session allocation and reuse;
+they are not estimates of production reclaimable space. Missing/corrupt sources
+still fail closed. Cross-run reference sharing and lifecycle deletion are deferred.
+
+
+### Optional immutable sharing and reference inventory
+
+New optional `immutableRowsStorage` metadata binds a logical export to its exact
+SHA256/byte count and independently allocated archive copy. UUID JSONL paths remain
+readable by legacy readers. Workflow source lineage and owner hashes remain separate
+from physical byte identity. Wallet augmentation copies the workflow alias before
+writing; archived and Universal raw rows remain unchanged. Frozen audit schemas and
+algorithm inputs are unchanged. Raw source reuse may point a new logical run to an
+older source-v1 slice only when compressed bytes are exactly identical; the new run's
+logical capture/audit timestamps and export metadata are retained. Physical source
+identity is not a claim that the new run was fetched at the old pack's creation time.
+
+Storage/reuse switches are inactive by default. Reference inventory traverses frozen
+run/audit/state/financial JSON and text through an injected read-only SQLAlchemy
+session without autoflush or commits. Queue, external and snapshot consistency gaps
+are reported; zero observed references never authorizes deletion. No destructive
+lifecycle or new retention period is implemented. Operational source logs distinguish
+written, cross-run reused, unreferenced partial-write and hint-index bytes.
+
+### Storage V3 transaction compatibility
+
+Optional local storage transactions add `storageRevision` and
+`storageTransactionVersion: 1` to export manifests. These identify a physical
+publication generation, not a changed scan/filter/financial algorithm. Frozen
+Bullpen audit schemas and logical export/source IDs remain unchanged. Summary
+writers reread the current owner-bound manifest under an OS export lock and reject
+stale generations; they never republish a supplied historical manifest wholesale.
+
+Configured frontend writers stage independently allocated JSONL/filtered payloads
+and manifests under shared admission reservations. A checksummed redo journal is
+fsynced before publishing files; payload names and directory persistence precede
+mutable metadata. Restart validates every remaining staged or already published
+file and ownership before finishing a known transaction. Unknown/corrupt artifacts
+and unresolved reservation claims remain pinned. This supports retries; no queue or
+trading worker is resumed by recovery. Existing old writers must be quiesced before
+sharing is activated, since they do not participate in these filesystem locks.
+
+The Excel reader pins regular-file descriptors with the authoritative manifest
+while holding the same export lock. Concurrent later publication cannot change the
+pinned generation. Missing legacy filtered ledgers are filtered from the pinned
+raw generation without writing a shared filtered file. Handles are closed on stream
+success, failure or cancellation. Existing path-based APIs remain compatible, but
+paths returned after lock release alone are not an immutable generation guarantee;
+streaming consumers needing one use `openStageOneGammaExportSnapshot`.
+
+Turning feature flags off does not detach existing aliases. Keep transaction
+configuration available until each caller-selected alias is verified and separately
+materialized with writers quiescent. Explicit rollback persists private payload and
+directory before removing immutable routing/transaction fields from the manifest;
+original storage provenance remains under `storageRollback`. Do not restore older
+mutable writers while aliases or incomplete transactions remain. Power-loss and
+cross-host failure-domain recovery have not been proven by local interruption tests.

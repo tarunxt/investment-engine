@@ -1,6 +1,5 @@
 import exhaustiveHeaders from "@/lib/bullpenStageOneExcelColumns.json";
-import { createReadStream } from "node:fs";
-import { access, open as openFile, rename, rm } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { createInterface } from "node:readline";
 
 import { strToU8, Zip, ZipDeflate, ZipPassThrough } from "fflate";
@@ -8,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createBackendSessionContext } from "../_lib/serverBackendSession";
 import {
-  openStageOneGammaExport,
+  openStageOneGammaExportSnapshot,
   type StageOneGammaExportRow,
   parseStageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
@@ -62,11 +61,11 @@ function safeValue(value: unknown): string | number | boolean {
 }
 
 async function forEachRow(
-  path: string,
+  path: FileHandle,
   visitor: (row: StageOneGammaExportRow, index: number) => void | Promise<void>,
 ) {
   const lines = createInterface({
-    input: createReadStream(path, { encoding: "utf8" }),
+    input: path.createReadStream({ encoding: "utf8", start: 0, autoClose: false }),
     crlfDelay: Infinity,
   });
   let index = 0;
@@ -77,7 +76,7 @@ async function forEachRow(
   return index;
 }
 
-async function discoverHeaders(path: string) {
+async function discoverHeaders(path: FileHandle) {
   const eventKeys = new Set<string>();
   const marketKeys = new Set<string>();
   const rowCount = await forEachRow(path, (row) => {
@@ -95,52 +94,6 @@ async function discoverHeaders(path: string) {
 
 function includeExportRow(row: StageOneGammaExportRow, scope: ExportScope) {
   return scope === "all-scanned" || row.scanStatus === "passed";
-}
-
-async function prepareFilteredRows(
-  rowsPath: string,
-  filteredRowsPath: string,
-  expectedRows: number | null,
-) {
-  try {
-    await access(filteredRowsPath);
-    if (expectedRows !== null) {
-      return { path: filteredRowsPath, rowCount: expectedRows };
-    }
-    return {
-      path: filteredRowsPath,
-      rowCount: await forEachRow(filteredRowsPath, () => undefined),
-    };
-  } catch (error: unknown) {
-    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  // Backward compatibility for scans created before the compact filtered
-  // ledger existed. Materialize it completely before starting the HTTP body,
-  // so the proxy never sees a long idle gap after the ZIP headers.
-  const temporaryPath = `${filteredRowsPath}.${process.pid}.${Date.now()}.tmp`;
-  const output = await openFile(temporaryPath, "wx");
-  let rowCount = 0;
-  try {
-    await forEachRow(rowsPath, async (row) => {
-      if (!includeExportRow(row, "filtered")) return;
-      await output.write(`${JSON.stringify(row)}\n`);
-      rowCount += 1;
-    });
-  } catch (error: unknown) {
-    await output.close();
-    await rm(temporaryPath, { force: true });
-    throw error;
-  }
-  await output.close();
-  if (expectedRows !== null && rowCount !== expectedRows) {
-    await rm(temporaryPath, { force: true });
-    throw new Error(`Stage 1 filtered export row count changed (${rowCount}/${expectedRows}).`);
-  }
-  await rename(temporaryPath, filteredRowsPath);
-  return { path: filteredRowsPath, rowCount };
 }
 
 function legacyValues(row: StageOneGammaExportRow, index: number) {
@@ -195,10 +148,11 @@ function addText(zip: Zip, name: string, content: string) {
 }
 
 function buildWorkbookStream(
-  path: string,
+  path: FileHandle,
   expectedRows: number,
   indexedGammaHeaders: string[] | null,
   scope: ExportScope,
+  close: () => Promise<void>,
 ) {
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -268,8 +222,9 @@ function buildWorkbookStream(
         if (written !== expectedRows) throw new Error(`Stage 1 export row count changed (${written}/${expectedRows}).`);
         sheet.push(strToU8(`</sheetData><autoFilter ref="A1:${lastColumn}${expectedRows + 1}"/></worksheet>`), true);
         zip.end();
-      })().catch(fail);
+      })().catch(fail).finally(close);
     },
+    async cancel() { await close(); },
   });
 }
 
@@ -283,6 +238,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid Stage 1 export scope." }, { status: 400 });
   }
   const scope: ExportScope = requestedScope;
+  let snapshot: Awaited<ReturnType<typeof openStageOneGammaExportSnapshot>> | null = null;
+  let handedToStream = false;
   try {
     const isUniversal = request.nextUrl.searchParams.get("universal") === "true";
     const sessionOwner = session.sessionSubject ?? session.sessionGeneration;
@@ -295,19 +252,21 @@ export async function GET(request: NextRequest) {
       : workspaceProfile === "bullpen007"
         ? sessionOwner
         : `${sessionOwner}:${workspaceProfile}`;
-    const { metadata, rowsPath, filteredRowsPath } =
-      await openStageOneGammaExport({ exportId, ownerKey });
+    snapshot = await openStageOneGammaExportSnapshot({ exportId, ownerKey });
+    const { metadata, rows, filteredRows } = snapshot;
     if (!metadata.rowCount) return NextResponse.json({ error: "This Stage 1 scan has no retained rows." }, { status: 409 });
     if (!metadata.completed) return NextResponse.json({ error: "This Stage 1 scan is still running." }, { status: 409 });
-    const preparedFilteredRows = scope === "filtered"
-      ? await prepareFilteredRows(
-          rowsPath,
-          filteredRowsPath,
-          typeof metadata.acceptedCount === "number" ? metadata.acceptedCount : null,
-        )
-      : null;
-    const exportRowsPath = preparedFilteredRows?.path ?? rowsPath;
-    const exportRowCount = preparedFilteredRows?.rowCount ?? metadata.rowCount;
+    const exportRowsPath = scope === "filtered" && filteredRows ? filteredRows : rows;
+    let exportRowCount = metadata.rowCount;
+    if (scope === "filtered") {
+      exportRowCount = 0;
+      await forEachRow(exportRowsPath, row => { if (includeExportRow(row, scope)) exportRowCount += 1; });
+      if (typeof metadata.acceptedCount === "number" && exportRowCount !== metadata.acceptedCount) {
+        throw new Error(`Stage 1 filtered export row count changed (${exportRowCount}/${metadata.acceptedCount}).`);
+      }
+    }
+    // Missing legacy filtered files are read from the pinned raw generation;
+    // downloads never publish or overwrite the live filtered ledger.
     if (!exportRowCount) return NextResponse.json({ error: "This Stage 1 export has no matching rows." }, { status: 409 });
     const stamp = metadata.createdAt.replace(/[:.]/g, "-");
     const indexedGammaHeaders = metadata.eventKeys?.length && metadata.marketKeys?.length
@@ -316,7 +275,8 @@ export async function GET(request: NextRequest) {
           ...metadata.marketKeys.map((key) => `market.${key}`),
         ]
       : null;
-    return new NextResponse(buildWorkbookStream(exportRowsPath, exportRowCount, indexedGammaHeaders, scope), {
+    handedToStream = true;
+    return new NextResponse(buildWorkbookStream(exportRowsPath, exportRowCount, indexedGammaHeaders, scope, snapshot.close), {
       headers: {
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "content-disposition": `attachment; filename="bullpen-stage-1-${scope}-events-${stamp}.xlsx"`,
@@ -327,5 +287,7 @@ export async function GET(request: NextRequest) {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Stage 1 Excel export failed.";
     return NextResponse.json({ error: message }, { status: /ENOENT/.test(message) ? 410 : 500 });
+  } finally {
+    if (!handedToStream) await snapshot?.close();
   }
 }

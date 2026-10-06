@@ -281,8 +281,18 @@ def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", e
     handle = tempfile.NamedTemporaryFile(prefix="bullpen-stage-one-", suffix=".xlsx", delete=False)
     handle.close()
     path = Path(handle.name)
+    budget = None
+    budget_handle = None
+    output = path
     try:
-        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as workbook:
+        from app.domains.trading_bots.storage_budget import StorageBudget, ReservedFile, enabled as storage_budget_enabled
+        if storage_budget_enabled():
+            from app.domains.polymarket_auto_live.scan_source_store import SOURCE_ROOT
+            budget = StorageBudget(Path(os.environ.get('BULLPEN_STORAGE_RESERVATION_DIRECTORY') or SOURCE_ROOT.parent),
+                                   identity=f"stage-one-excel:{getattr(run, 'id', path.name)}")
+            budget_handle = path.open('w+b', buffering=0)
+            output = ReservedFile(budget_handle, budget, path.parent)
+        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as workbook:
             workbook.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
             workbook.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
             workbook.writestr("xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="All Scanned Events" sheetId="1" r:id="rId1"/></sheets></workbook>')
@@ -291,9 +301,17 @@ def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", e
             workbook.writestr("xl/sharedStrings.xml", '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="1"><si><t>N/A</t></si></sst>')
             with workbook.open("xl/worksheets/sheet1.xml", "w", force_zip64=True) as sheet:
                 _write_sheet(sheet, _iter_candidates(accepted, rejected), row_count, headers, progress_callback)
+        if budget_handle is not None:
+            budget_handle.flush()
+            os.fsync(budget_handle.fileno())
     except Exception:
         path.unlink(missing_ok=True)
         raise
+    finally:
+        if budget_handle is not None:
+            budget_handle.close()
+        if budget is not None:
+            budget.release()
     return path, filename, row_count
 
 

@@ -1,0 +1,186 @@
+name: Reviewed storage V3 artifact only
+on:
+  push:
+    branches: [credx/storage-v3-e401-contained]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build-frontend:
+    name: Build production frontend artifact
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    outputs:
+      checkout_seconds: ${{ steps.checkout-timing.outputs.seconds }}
+      dependency_seconds: ${{ steps.dependency-timing.outputs.seconds }}
+      build_seconds: ${{ steps.build.outputs.seconds }}
+      package_seconds: ${{ steps.package.outputs.seconds }}
+      upload_seconds: ${{ steps.upload-timing.outputs.seconds }}
+
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_STANDALONE_BUILD: "true"
+      NEXT_PUBLIC_API_URL: ${{ vars.PROD_NEXT_PUBLIC_API_URL || 'https://api.cred-x.in' }}
+      NEXT_PUBLIC_FRONTEND_URL: ${{ vars.PROD_NEXT_PUBLIC_FRONTEND_URL || 'https://cred-x.in' }}
+      NEXT_PUBLIC_BRAND_PREFIX: ${{ vars.PROD_NEXT_PUBLIC_BRAND_PREFIX || 'Cred-X' }}
+      NEXT_PUBLIC_BRAND_ACRONYM: ${{ vars.PROD_NEXT_PUBLIC_BRAND_ACRONYM || 'TIE' }}
+      NEXT_PUBLIC_BRAND_EXPANSION: ${{ vars.PROD_NEXT_PUBLIC_BRAND_EXPANSION || 'Tarun''s Investment Engine' }}
+      NEXT_PUBLIC_DISABLE_AUTH: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_AUTH || 'false' }}
+      NEXT_PUBLIC_DISABLE_API_PROXY: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_API_PROXY || 'false' }}
+      NEXT_PUBLIC_API_DEBUG: ${{ vars.PROD_NEXT_PUBLIC_API_DEBUG || 'false' }}
+      NEXTAUTH_URL: ${{ vars.PROD_NEXTAUTH_URL || 'https://cred-x.in' }}
+      NEXTAUTH_SECRET: build-only-runtime-secret-is-loaded-on-ec2
+      AUTH_TRUST_HOST: "true"
+      BACKEND_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - name: Start checkout timer
+        run: echo "CHECKOUT_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Record checkout duration
+        id: checkout-timing
+        run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start dependency restore timer
+        run: echo "DEPENDENCIES_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Restore reusable Next.js Webpack cache
+        uses: actions/cache@v6
+        with:
+          path: frontend/.next/cache
+          key: >-
+            ${{ runner.os }}-node22-next-webpack-${{
+              hashFiles('frontend/package-lock.json')
+            }}-${{
+              hashFiles('frontend/app/**', 'frontend/components/**', 'frontend/hooks/**',
+              'frontend/lib/**', 'frontend/providers/**', 'frontend/services/**',
+              'frontend/types/**', 'frontend/next.config.ts', 'frontend/tsconfig.json')
+            }}
+          restore-keys: |
+            ${{ runner.os }}-node22-next-webpack-${{ hashFiles('frontend/package-lock.json') }}-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Record dependency restore duration
+        id: dependency-timing
+        run: echo "seconds=$(( $(date +%s) - DEPENDENCIES_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Log build runner resources
+        run: |
+          echo "==> CPU"
+          nproc
+          echo "==> Memory"
+          free -h
+          echo "==> Swap"
+          swapon --show || true
+          echo "==> Disk"
+          df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}"
+
+      - name: Stamp production build fingerprint
+        run: |
+          build_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node scripts/stamp-frontend-build.mjs \
+            frontend/lib/generatedBuildInfo.ts \
+            "${GITHUB_SHA}" \
+            "${build_timestamp}"
+          echo "BUILD_TIMESTAMP=${build_timestamp}" >>"${GITHUB_ENV}"
+
+      - name: Build production frontend with Webpack
+        id: build
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          started_at="$(date +%s)"
+          set +e
+          /usr/bin/time -v -o "${RUNNER_TEMP}/frontend-webpack-resources.txt" \
+            npm run build 2>&1 | tee "${RUNNER_TEMP}/frontend-webpack-build.log"
+          build_status="${PIPESTATUS[0]}"
+          set -e
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+          echo "==> Frontend build resource usage"
+          cat "${RUNNER_TEMP}/frontend-webpack-resources.txt"
+          exit "$build_status"
+
+      - name: Package standalone frontend runtime
+        id: package
+        run: |
+          started_at="$(date +%s)"
+          deploy/no-docker/package-frontend-artifact.sh \
+            frontend/.next \
+            "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            "${GITHUB_SHA}" \
+            "${BUILD_TIMESTAMP}" \
+            webpack
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify packaged frontend runtime before upload
+        run: |
+          mkdir "${RUNNER_TEMP}/production-frontend-runtime"
+          tar -xzf "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            -C "${RUNNER_TEMP}/production-frontend-runtime"
+          node scripts/verify-frontend-artifact-runtime.mjs \
+            "${RUNNER_TEMP}/production-frontend-runtime" \
+            "${GITHUB_SHA}"
+
+      - name: Start artifact upload timer
+        if: success()
+        run: echo "UPLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Upload production frontend artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: |
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Record artifact upload duration
+        id: upload-timing
+        if: always() && env.UPLOAD_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - UPLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload raw frontend timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/frontend-webpack-build.log
+            ${{ runner.temp }}/frontend-webpack-resources.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Frontend build timing summary
+        if: always()
+        run: |
+          {
+            echo "### Production frontend build"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Checkout | ${{ steps.checkout-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Dependency/cache restore + npm ci | ${{ steps.dependency-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Webpack production build | ${{ steps.build.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact packaging | ${{ steps.package.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact upload | ${{ steps.upload-timing.outputs.seconds || 'n/a' }}s |"
+            echo
+            echo "Production remains on Webpack; Turbopack is benchmarked separately in PR checks."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
