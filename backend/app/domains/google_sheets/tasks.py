@@ -13,9 +13,19 @@ from app.domains.google_sheets.stock_service import (
     parse_complete_stock_recommendations,
 )
 from app.domains.jobs.models import Job
+from app.domains.jobs.output_contracts import NormalizationResult, export_tables
+from app.domains.jobs.output_contracts.schemas import SWING_COLUMNS
+from app.domains.jobs.output_contracts.validation import aliases, header_key
+from app.domains.jobs.output_runtime import (
+    configure_output_context,
+    declares_output_contract,
+    normalize_runtime_output,
+    reset_output_context,
+)
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.repository import SyncRunRepository
+from app.domains.runs.run_identity import analysis_run_identity
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
@@ -56,7 +66,8 @@ def _extract_exportable_stocks(response: str | None) -> list[dict]:
 
 def _job_can_export_partial_rows(job: Job) -> bool:
     return (
-        _job_status_value(job) == "failed"
+        _current_output_kind(job) is None
+        and _job_status_value(job) == "failed"
         and INSUFFICIENT_RECOMMENDATIONS_ERROR_MARKER in (job.error_message or "").lower()
         and bool(_extract_exportable_stocks(job.response))
     )
@@ -73,7 +84,104 @@ def _with_run_metadata_columns(
     run_date = run_dt_ist.strftime("%Y-%m-%d")
     run_time = run_dt_ist.strftime("%H:%M:%S")
     meta = [run_number, run_date, run_time, llm_label]
-    return headers + meta_headers, [row + meta for row in rows]
+    known = aliases(SWING_COLUMNS)
+    present = {known.get(header_key(header)) for header in headers}
+    additions = [
+        (header, value)
+        for header, value in zip(meta_headers, meta)
+        if known.get(header_key(header)) not in present
+    ]
+    return (
+        headers + [header for header, _ in additions],
+        [row + [value for _, value in additions] for row in rows],
+    )
+
+
+def _current_output_kind(job: Job) -> str | None:
+    """Opt in only the current, explicitly declared workflow output schema."""
+    kind = analysis_run_identity(job).stage
+    prompt = getattr(job, "prompt", "") or ""
+    return kind if kind in {"swing", "rebalance"} and declares_output_contract(prompt, kind) else None
+
+
+def _validated_output_for_export(job: Job, run_id: int | None) -> NormalizationResult | None:
+    if _current_output_kind(job) is None:
+        return None
+    token = configure_output_context(job, {"run_id": str(run_id) if run_id is not None else None})
+    try:
+        result = normalize_runtime_output(job.response or "")
+    finally:
+        reset_output_context(token)
+    if result is None or not result.safe_to_replace:
+        detail = "; ".join(
+            f"{finding.code}: {finding.message}"
+            for finding in result.findings if finding.severity == "error"
+        ) if result is not None else "The declared output contract could not be validated."
+        raise ValueError(f"Current output contract failed validation; no rows exported. {detail}"[:500])
+    return result
+
+
+def _format_validated_output_for_sheet(
+    result: NormalizationResult,
+    *,
+    job_id: int,
+    run_number: int,
+    run_dt_ist: datetime,
+    llm_label: str,
+    stage: int | None = None,
+) -> tuple[list[str], list[list[object]]]:
+    """Keep ordered source tables/prose and per-row provenance without projection.
+
+    Different table schemas are separate sections in one append operation. JSON
+    null is an explicit 'null' cell because Sheets otherwise silently skips it;
+    zero, false, and empty strings are kept as supplied.
+    """
+    tables = {table.fragment: table for table in export_tables(result)}
+    headers: list[str] = []
+    rows: list[list[object]] = []
+    for block in result.blocks:
+        table = tables.get(block.index)
+        if table is None:
+            if block.text:
+                rows.append([block.text])
+            continue
+        table_headers, table_rows = _with_run_metadata_columns(
+            list(table.headers),
+            [["null" if value is None else value for value in row] for row in table.rows],
+            run_number, run_dt_ist, llm_label,
+        )
+        provenance_headers = ["Export Job ID", "Source Fragment", "Source Row", "Source Line"]
+        if stage is not None:
+            provenance_headers.append("Export Stage")
+        # Source columns may use any name; never overwrite or rename them.
+        for label in provenance_headers:
+            unique = label
+            suffix = 2
+            while unique in table_headers:
+                unique = f"{label} ({suffix})"
+                suffix += 1
+            table_headers.append(unique)
+        for row, source in zip(table_rows, table.provenance):
+            row.extend([job_id, source.fragment, source.row, source.line if source.line is not None else ""])
+            if stage is not None:
+                row.append(stage)
+        if not headers:
+            headers = table_headers
+            if rows:
+                rows.append(table_headers)
+        else:
+            rows.append(table_headers)
+        rows.extend(table_rows)
+    if result.findings:
+        rows.append(["Validation findings", "Severity", "Code", "Message", "Source Fragment", "Source Row", "Source Line", "Field"])
+        rows.extend([
+            "", finding.severity, finding.code, finding.message,
+            finding.source.fragment if finding.source else "",
+            finding.source.row if finding.source else "",
+            finding.source.line if finding.source and finding.source.line is not None else "",
+            finding.field or "",
+        ] for finding in result.findings)
+    return headers, rows
 
 
 @celery.task(bind=True, max_retries=3, soft_time_limit=120, time_limit=180)
@@ -158,6 +266,15 @@ def export_job_to_sheets_task(
                 _refresh_run_status(db, job.id)
                 return {"status": "failed", "error": export_block_reason[:500]}
 
+            try:
+                validated = _validated_output_for_export(job, run_id)
+            except ValueError as exc:
+                reason = _error_text(exc)
+                job_repo.update_export_state(job, export_status="failed", export_error=reason)
+                _publish_job_update(job)
+                _refresh_run_status(db, job.id)
+                return {"status": "failed", "error": reason}
+
             access_token = decrypt_token(cred.access_token_enc)
             refresh_token = (
                 decrypt_token(cred.refresh_token_enc)
@@ -165,9 +282,10 @@ def export_job_to_sheets_task(
                 else None
             )
 
-            stocks = _extract_exportable_stocks(job.response)
+            stocks = _extract_exportable_stocks(job.response) if validated is None else []
+            stocks_count = validated.coverage.canonical_rows if validated is not None else len(stocks)
 
-            if not stocks:
+            if not stocks_count:
                 response_preview = " ".join((job.response or "").split())[:220]
                 response_hint = (
                     f" Response preview: {response_preview}"
@@ -195,7 +313,22 @@ def export_job_to_sheets_task(
             now_ist = datetime.now(IST)
             formatted_title = format_sheet_title(now_ist, investment_amount)
 
-            headers, rows = format_stocks_for_sheet(stocks)
+            meta_run_number = run_id if run_id else job_id
+            if validated is not None:
+                created = getattr(job, "created_at", None)
+                if isinstance(created, datetime):
+                    created = created if created.tzinfo else created.replace(tzinfo=timezone.utc)
+                export_run_dt = created.astimezone(IST) if isinstance(created, datetime) else now_ist
+                headers, rows = _format_validated_output_for_sheet(
+                    validated, job_id=job_id, run_number=meta_run_number,
+                    run_dt_ist=export_run_dt, llm_label=f"{job.provider}/{job.model}", stage=stage,
+                )
+            else:
+                headers, rows = format_stocks_for_sheet(stocks)
+                headers, rows = _with_run_metadata_columns(
+                    headers=headers, rows=rows, run_number=meta_run_number,
+                    run_dt_ist=now_ist, llm_label=f"{job.provider}/{job.model}",
+                )
 
             if spreadsheet_url:
                 spreadsheet_id = _svc.extract_spreadsheet_id(spreadsheet_url)
@@ -203,15 +336,6 @@ def export_job_to_sheets_task(
                 spreadsheet_id = _svc.create_spreadsheet(
                     access_token, refresh_token, formatted_title
                 )
-
-            meta_run_number = run_id if run_id else job_id
-            headers, rows = _with_run_metadata_columns(
-                headers=headers,
-                rows=rows,
-                run_number=meta_run_number,
-                run_dt_ist=now_ist,
-                llm_label=f"{job.provider}/{job.model}",
-            )
 
             _, sheet_gid = _svc.append_sheet(
                 access_token,
@@ -247,14 +371,14 @@ def export_job_to_sheets_task(
             logger.info(
                 "Exported job %d (%d stocks) to Google Sheets for user %d",
                 job_id,
-                len(stocks),
+                stocks_count,
                 user_id,
             )
             return {
                 "status": "completed",
-                "message": f"Exported {len(stocks)} stock recommendations to Google Sheets",
+                "message": f"Exported {stocks_count} stock recommendations to Google Sheets",
                 "spreadsheet_url": sheet_url,
-                "stocks_count": len(stocks),
+                "stocks_count": stocks_count,
             }
 
         except Exception as exc:
@@ -325,6 +449,8 @@ def export_run_to_sheets_task(
             )
 
             all_stocks: list[dict] = []
+            output_sections: list[tuple[Job, int, NormalizationResult | None, list[dict]]] = []
+            canonical_count = 0
             model_names = set()
             skipped_malformed_jobs = 0
 
@@ -337,6 +463,17 @@ def export_run_to_sheets_task(
                     continue
                 if _job_status_value(job) != "completed" and not _job_can_export_partial_rows(job):
                     continue
+                try:
+                    validated = _validated_output_for_export(job, run_id)
+                except ValueError as exc:
+                    reason = f"Job {job.id}: {_error_text(exc)}"[:500]
+                    run_repo.update_export_state(run, export_status="failed", export_error=reason)
+                    return {"status": "failed", "error": reason}
+                if validated is not None:
+                    output_sections.append((job, run_job.stage, validated, []))
+                    canonical_count += validated.coverage.canonical_rows
+                    model_names.add(f"{job.provider} ({job.model})")
+                    continue
                 stocks = _extract_exportable_stocks(job.response)
                 if not stocks:
                     continue
@@ -344,9 +481,11 @@ def export_run_to_sheets_task(
                 for stock in stocks:
                     stock["stage"] = f"Stage {run_job.stage}"
                 all_stocks.extend(stocks)
+                output_sections.append((job, run_job.stage, None, stocks))
                 model_names.add(f"{job.provider} ({job.model})")
 
-            if not all_stocks:
+            stocks_count = len(all_stocks) + canonical_count
+            if not stocks_count:
                 terminal_jobs = [
                     rj.job
                     for rj in run_jobs
@@ -378,7 +517,32 @@ def export_run_to_sheets_task(
             now_ist = datetime.now(IST)
             formatted_title = format_sheet_title(now_ist, investment_amount)
 
-            headers, rows = format_stocks_for_sheet(all_stocks)
+            if canonical_count:
+                headers, rows = [], []
+                for job, stage, validated, stocks in output_sections:
+                    if validated is not None:
+                        section_headers, section_rows = _format_validated_output_for_sheet(
+                            validated, job_id=job.id, run_number=run.id,
+                            run_dt_ist=run.created_at.astimezone(IST),
+                            llm_label=f"{job.provider}/{job.model}", stage=stage,
+                        )
+                    else:
+                        section_headers, section_rows = format_stocks_for_sheet(stocks)
+                        section_headers, section_rows = _with_run_metadata_columns(
+                            section_headers, section_rows, run.id, run.created_at.astimezone(IST),
+                            f"{job.provider}/{job.model}",
+                        )
+                    if not headers:
+                        headers = section_headers
+                    else:
+                        rows.extend([[], ["Export Job ID", job.id, "Export Stage", stage], section_headers])
+                    rows.extend(section_rows)
+            else:
+                headers, rows = format_stocks_for_sheet(all_stocks)
+                headers, rows = _with_run_metadata_columns(
+                    headers=headers, rows=rows, run_number=run.id,
+                    run_dt_ist=run.created_at.astimezone(IST), llm_label="multi-llm",
+                )
 
             if spreadsheet_url:
                 spreadsheet_id = _svc.extract_spreadsheet_id(spreadsheet_url)
@@ -387,13 +551,6 @@ def export_run_to_sheets_task(
                     access_token, refresh_token, formatted_title
                 )
 
-            headers, rows = _with_run_metadata_columns(
-                headers=headers,
-                rows=rows,
-                run_number=run.id,
-                run_dt_ist=run.created_at.astimezone(IST),
-                llm_label="multi-llm",
-            )
             _, sheet_gid = _svc.append_sheet(
                 access_token,
                 refresh_token,
@@ -414,15 +571,15 @@ def export_run_to_sheets_task(
             logger.info(
                 "Exported run %d (%d stocks from %d models) to Google Sheets for user %d",
                 run_id,
-                len(all_stocks),
+                stocks_count,
                 len(model_names),
                 user_id,
             )
             return {
                 "status": "completed",
-                "message": f"Exported {len(all_stocks)} stock recommendations from {len(model_names)} models to Google Sheets",
+                "message": f"Exported {stocks_count} stock recommendations from {len(model_names)} models to Google Sheets",
                 "spreadsheet_url": sheet_url,
-                "stocks_count": len(all_stocks),
+                "stocks_count": stocks_count,
                 "models_count": len(model_names),
             }
 

@@ -10,8 +10,9 @@ TradingBotSummaryId = Literal[
     "bullpen-x-ai",
     "bullpen-ai-auto-live",
 ]
-TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
+TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured", "unavailable"]
 TradingBotMode = Literal[
+    "unknown",
     "paper",
     "live-read",
     "live-trading",

@@ -167,3 +167,76 @@ test('all full-history consumers delegate to the summary-first service and Scann
   assert.match(scanner, /\}, \[loadAttempt\]\)/);
   assert.match(scanner, /if \(!ignore\) \{\s*setCountsStatus\('error'\)/);
 });
+
+function authSessionRegistration(service, session, user) {
+  const source = ts.createSourceFile('AuthProvider.tsx', read('../providers/AuthProvider.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let registration;
+  function visit(node) {
+    if (ts.isCallExpression(node) && /^use(?:Layout)?Effect$/.test(node.expression.getText(source)) && node.arguments[0]?.getText(source).includes('apiService.setSessionGeneration(')) registration = node;
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.ok(registration);
+  const register = new Function('apiService', 'session', 'user', `return (${registration.arguments[0].getText(source)});`)(service, session, user);
+  return { phase: registration.expression.getText(source), register };
+}
+
+test('server-authenticated identity registers before descendant passive history effects', async () => {
+  const service = loadHistoryService({ getRuns: pages([71], 100), getRun: async (id) => ({ id }) });
+  const registration = authSessionRegistration(service, { generation: 'fixture-session-71' }, { id: 71 });
+  const errors = [];
+  let request;
+  // React commits layout effects before passive effects; passive effects visit
+  // children before parents. Execute both branches so reverting to useEffect
+  // reproduces the signed-in initial-load failure rather than only a regex fail.
+  if (registration.phase === 'useLayoutEffect') registration.register();
+  request = service.getAllFullRuns().catch((error) => { errors.push(error); return []; });
+  if (registration.phase === 'useEffect') registration.register();
+  assert.deepEqual(await request, [{ id: 71 }]);
+  assert.deepEqual(errors, []);
+});
+
+test('StrictMode registration replay and same-session refresh do not cancel active history', async () => {
+  let release;
+  const service = loadHistoryService({
+    getRuns: () => new Promise((resolve) => { release = () => resolve({ items: [{ id: 71 }], pages: 1 }); }),
+    getRun: async (id) => ({ id }),
+  });
+  const registration = authSessionRegistration(service, { generation: 'fixture-session-71' }, { id: 71 });
+  registration.register();
+  const request = service.getAllFullRuns();
+  registration.register();
+  authSessionRegistration(service, { generation: 'fixture-session-71', expires: 'later' }, { id: 71 }).register();
+  assert.equal(service.getAllFullRuns(), request);
+  release();
+  assert.deepEqual(await request, [{ id: 71 }]);
+});
+
+test('real account switch through AuthProvider still invalidates the old history flight', async () => {
+  let release;
+  const service = loadHistoryService({
+    getRuns: () => new Promise((resolve) => { release = () => resolve({ items: [{ id: 71 }], pages: 1 }); }),
+    getRun: () => assert.fail('Old account details must not be requested'),
+  });
+  authSessionRegistration(service, { generation: 'fixture-session-71' }, { id: 71 }).register();
+  const oldRead = service.getAllFullRuns();
+  authSessionRegistration(service, { generation: 'fixture-session-72' }, { id: 72 }).register();
+  release();
+  await assert.rejects(oldRead, /session changed/);
+});
+
+test('Auth.js token refresh preserves the existing authenticated session generation', async () => {
+  const source = ts.createSourceFile('auth.ts', read('../auth.ts'), ts.ScriptTarget.Latest, true);
+  let jwtCallback;
+  function visit(node) {
+    if (ts.isMethodDeclaration(node) && node.name.getText(source) === 'jwt') jwtCallback = node;
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.ok(jwtCallback);
+  const callback = new Function(compile(`${jwtCallback.getText(source).replace(/^async jwt\(/, 'async function jwt(')}\nreturn jwt;`))();
+  const token = { id: '71', sessionGeneration: 'fixture-session-71', accessToken: 'synthetic-before', refreshToken: 'synthetic-refresh-before' };
+  const refreshed = await callback({ token, trigger: 'update', session: { accessToken: 'synthetic-after', refreshToken: 'synthetic-refresh-after', expiresIn: 900 } });
+  assert.equal(refreshed.sessionGeneration, 'fixture-session-71');
+  assert.equal(refreshed.accessToken, 'synthetic-after');
+});

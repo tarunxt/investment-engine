@@ -13,6 +13,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.indmoney_us.repository import IndMoneyUsPortfolioSnapshotRepository
+from app.domains.indmoney_us.snapshot_validation import validate_holdings_snapshot
 from app.domains.indmoney_us.threats import (
     THREAT_ANALYSIS_MODEL,
     THREAT_ANALYSIS_PROVIDER,
@@ -126,6 +127,11 @@ async def run_threat_analysis(
             detail="No INDmoney US portfolio snapshot found. Paste a snapshot first.",
         )
 
+    validate_holdings_snapshot({
+        "holdings": latest_snapshot.holdings,
+        "parse_status": latest_snapshot.parse_status,
+        "reported_holdings_count": latest_snapshot.reported_holdings_count,
+    })
     prompt = build_indmoney_us_threat_prompt(latest_snapshot)
     redis = _get_redis()
     try:

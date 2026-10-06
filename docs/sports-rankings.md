@@ -144,6 +144,8 @@ separate assistant reminder is needed. This does not enable trading analysis.
 All endpoints require the existing authenticated backend session via the BFF.
 
 * GET /api/sports-rankings: catalogue, sources, status and publication dates.
+* GET /api/sports-rankings?view=summary: the same catalogue and complete participant
+  search data, with only each competition's `events` field omitted.
 * GET /api/sports-rankings/competitions/{id}: source rows plus unmatched imported names.
 * POST /api/sports-rankings/refresh: {source_id}; returns queued, not completed.
 * POST /api/sports-rankings/resolve: {code, name, competition_id?}; returns
@@ -154,6 +156,47 @@ All endpoints require the existing authenticated backend session via the BFF.
   totals, lines, statistics and outrights are rejected. Racing/battle-royale/golf
   formats require an explicit head-to-head qualifier. Missing metadata is rejected.
   This endpoint is not wired into Bullpen trading or scan filters.
+
+### Passive read cost
+
+The console opts into `view=summary` for catalogue reads. This preserves every
+card, participant name/alias, count, status and metadata field while skipping
+event copying and merging for catalogue cards. Events are still returned in full
+by the selected competition's detail endpoint. The default catalogue request
+(and `view=full`) keeps the original full response, including events; no lists
+are truncated. Summary and detail requests use the same owner-scoped participant
+index and existing passive read behavior.
+
+The catalogue selects snapshot metadata and a guarded `json_array_length(rows)` only. It
+does not transfer or deserialize every ranking payload merely to count rows.
+Participant/event memberships and source status, errors and publication metadata
+are unchanged. Competition detail still reads its complete source ranking and
+merges every participant, including explicit unranked placeholders.
+Only JSON arrays contribute ranking counts. SQL NULL, JSON null and invalid
+object/scalar payloads produce a zero catalogue count with an explicit
+unavailable status and error, retaining any previous source error text; they are
+not presented as valid empty datasets or converted into ranking entries.
+This guard does not repair malformed stored payloads or change existing detail
+validation/error behavior.
+
+Sports participant reads may reuse the complete compact index after checking the
+current export directories and every JSON/JSONL file's identity, size and
+nanosecond modification/change times. New, changed, removed and in-flight export
+records therefore invalidate reuse immediately on the next read; no time-based
+freshness window is used. The existing Universal Scan resolver still decides
+ownership, latest-completed selection and JSONL validity. Its trading consumers
+and policy are unchanged. The cache contains only participant indexes, never
+ranking metrics or trading decisions, with at most eight users and 1 MiB of
+encoded data per user. A file set exceeding 4,096 relevant files, a larger index,
+or an unstable/unreadable fingerprint uses the complete original read rather
+than truncating results. Caller changes cannot modify retained results.
+
+These are process-local read optimizations; cold reads still scan the metadata.
+Missing/invalid indexes continue to contribute no dynamic participants, while
+seed entries and explicit unavailable/pending ranking states remain visible.
+GET requests neither fetch providers nor enqueue refreshes. The synthetic offline
+profile is `backend/tests/bench_sports_rankings_passive_reads.py`; its timings
+measure local fixture work, not a proven cause of any production proxy timeout.
 
 Search includes sport/category/scope and switches the selected list when the old
 selection falls outside the filters. Groups, ratings, points and records are shown
@@ -186,3 +229,14 @@ or history requests. Matching thresholds, scope boundaries and ambiguity rules
 are unchanged.
 
 Imported unranked placeholders are exact-name/alias matches only. Fuzzy matching is limited to published ranking rows, with character-count upper bounds before expensive similarity scoring. Exact lookup uses an incremental index so importing large participant lists does not cause quadratic fuzzy matching.
+
+Compact catalogue validation: the required local backend suite passed 734 tests
+and the frontend suite passed 250 tests. Full TypeScript checking, Python
+compilation and whitespace checks passed. Independent review passed 71 backend
+and 13 frontend checks, overlapping those totals. Page ESLint retains the same
+pre-existing `react-hooks/set-state-in-effect` deep-link initialization error as
+the baseline; the new test files pass lint. In a synthetic 266-card fixture with
+5,000 imported names and 25,000 events, JSON shrank from 32,679,374 to 3,546,182
+bytes (89.1%) while preserving all 60,388 participant memberships and every
+non-event field. This measures the projection's effect, not the production
+input size or the cause of a live timeout. Cache behavior is unchanged.

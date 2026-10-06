@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
 
 from app.domains.jobs.schemas import JobResponse
+from app.domains.jobs.output_sources import MAX_OUTPUT_SOURCE_JOBS, OutputSourceJobReference
 from app.domains.polymarket.stage2_models import (
     EvidencePacketV2,
     Stage2MarketContext,
@@ -350,6 +351,7 @@ class RunCreate(BaseModel):
     prompt: str
     targets: list[RunModelTarget]
     polymarket_event_context: PolymarketEventRunContext | None = None
+    output_source_jobs: list[OutputSourceJobReference] | None = Field(default=None, max_length=MAX_OUTPUT_SOURCE_JOBS)
     prompt_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
     # Auto-export settings
@@ -382,6 +384,8 @@ class RunCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_auto_rebalance_metadata(self) -> "RunCreate":
+        if self.output_source_jobs is not None and self.polymarket_event_context is not None:
+            raise ValueError("Equity output sources cannot be combined with Polymarket context")
         metadata_values = [
             self.auto_rebalance_portfolio,
             self.auto_rebalance_sequence,

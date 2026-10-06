@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.ai_providers.availability import filter_recently_available_targets
 from app.domains.jobs.models import Job
+from app.domains.jobs.output_sources import OutputSourceJobReference, freeze_output_source_context
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.presentation import build_run_prompt_preview
@@ -34,6 +35,7 @@ class CreateRunCommand:
     targets: list[RunModelTarget]
     user_id: UserId
     polymarket_event_context: dict[str, Any] | None = None
+    output_source_jobs: list[OutputSourceJobReference] | None = None
     prompt_id: int | None = None
     scheduled_at: datetime | None = None
     auto_export_enabled: bool = False
@@ -57,6 +59,11 @@ class CreateRunUseCase:
     async def execute(self, cmd: CreateRunCommand) -> Run:
         if not cmd.targets:
             raise ValidationException("At least one (provider, model) target is required.")
+        if cmd.output_source_jobs is not None and cmd.polymarket_event_context is not None:
+            raise ValidationException("Equity output sources cannot be combined with Polymarket context.")
+        output_source_context = await freeze_output_source_context(
+            self._session, user_id=int(cmd.user_id), target=cmd, references=cmd.output_source_jobs,
+        )
 
         targets, blocked_targets = await filter_recently_available_targets(
             self._session,
@@ -140,7 +147,8 @@ class CreateRunUseCase:
                         model=target.model,
                         user_id=cmd.user_id,
                         status=initial_status,
-                        request_context_json=cmd.polymarket_event_context,
+                        request_context_json=(output_source_context if output_source_context is not None
+                                              else cmd.polymarket_event_context),
                         scheduled_at=scheduled_at,
                         auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
                         auto_rebalance_sequence=cmd.auto_rebalance_sequence,

@@ -20,10 +20,10 @@ RESOURCE = "completion_notification"
 SESSION_KEY = "completion_notification_rows"
 
 
-def add_completion_event(session, *, user_id, payload):
+def add_completion_event(session, *, user_id, payload, resource_id=None):
     row = ActivityLog(
         user_id=user_id, action=PENDING_ACTION, resource_type=RESOURCE,
-        resource_id=None, details=json.dumps(payload, ensure_ascii=False),
+        resource_id=resource_id, details=json.dumps(payload, ensure_ascii=False),
     )
     session.add(row)
     session.info.setdefault(SESSION_KEY, []).append(row)

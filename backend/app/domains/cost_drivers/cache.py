@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import redis as sync_redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -18,6 +20,8 @@ CURRENT_MONTH_CACHE_TTL_SECONDS = 6 * 60 * 60
 HISTORICAL_MONTH_CACHE_TTL_SECONDS = 24 * 60 * 60
 MANUAL_REFRESH_COOLDOWN_SECONDS = 15 * 60
 STALE_GOOD_TTL_SECONDS = 7 * 24 * 60 * 60
+REDIS_CONNECT_TIMEOUT_SECONDS = 0.5
+REDIS_READ_TIMEOUT_SECONDS = 0.5
 
 _CACHE_NAMESPACE = "cost-drivers:v2"
 _LOCAL_CACHE: dict[str, dict[str, Any]] = {}
@@ -57,7 +61,16 @@ def _cache_key(kind: str, cache_key: str) -> str:
 
 def _redis_client() -> sync_redis.Redis | None:
     try:
-        return sync_redis.from_url(settings.redis_url, decode_responses=True)
+        return sync_redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_READ_TIMEOUT_SECONDS,
+            # The cache already has a local fallback. Redis retries would
+            # multiply the wait on every cache/cooldown operation during outages.
+            retry=Retry(NoBackoff(), 0),
+            retry_on_timeout=False,
+        )
     except Exception:
         logger.exception("Unable to create Redis client for cost dashboard cache")
         return None

@@ -508,6 +508,10 @@ def latest_completed_universal_export(
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
+            # Directory discovery includes sibling JSON artifacts, including
+            # participant indexes. Non-object JSON cannot be export metadata.
+            if not isinstance(metadata, dict):
+                continue
             if (
                 (metadata.get("ownerHash") != owner_hash and not (
                     export_id and trusted_export_id

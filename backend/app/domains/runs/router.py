@@ -11,7 +11,7 @@ import re
 from app.core.config import settings
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
-from app.domains.auth.models import User
+from app.domains.auth.models import ActivityLog, User
 from app.domains.jobs.models import Job
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
@@ -20,6 +20,8 @@ from app.domains.runs.models import (
     RunJob,
 )
 from app.domains.runs.repository import PostgresRunRepository
+from app.domains.runs.auto_rebalance_audit import LLM_STAGES, validate_execution
+from app.domains.runs.run_identity import analysis_run_identity
 from app.domains.runs.schemas import (
     AutoRebalanceCompletionEmailRequest,
     AutoRebalanceHistoryDetailResponse,
@@ -390,11 +392,21 @@ async def _build_auto_rebalance_history(
         events = {event.stage: event for event in (workflow.stages if workflow else [])}
         runs_by_stage: dict[AutoRebalanceStageKey, list[Run]] = {}
         jobs_by_stage: dict[AutoRebalanceStageKey, list[Job]] = {}
+        # Group the execution itself, not earlier-stage text quoted inside its
+        # inputs. Keep the historical heuristic only for unclassified records.
         for run in group_runs:
-            stage = _infer_auto_rebalance_stage(run.auto_rebalance_label, run.prompt)
+            canonical_stage = analysis_run_identity(run).stage
+            stage = (
+                canonical_stage if canonical_stage in LLM_STAGES
+                else _infer_auto_rebalance_stage(run.auto_rebalance_label, run.prompt)
+            )
             runs_by_stage.setdefault(stage, []).append(run)
         for job in group_jobs:
-            stage = _infer_auto_rebalance_stage(job.auto_rebalance_label, job.prompt)
+            canonical_stage = analysis_run_identity(job).stage
+            stage = (
+                canonical_stage if canonical_stage in LLM_STAGES
+                else _infer_auto_rebalance_stage(job.auto_rebalance_label, job.prompt)
+            )
             jobs_by_stage.setdefault(stage, []).append(job)
         stage_responses = [
             _stage_response(
@@ -434,20 +446,23 @@ async def _build_auto_rebalance_history(
             *(job.updated_at for job in group_jobs),
         ]) or created_at
         error_message = (
-            failed[-1].error_message if failed else (workflow.error_message if workflow else None)
+            workflow.error_message if workflow else (failed[-1].error_message if failed else None)
         )
         result.append((
             AutoRebalanceHistoryItemResponse(
                 portfolio=portfolio,
                 sequence=sequence,
                 label=label,
-                status=derived_status if not workflow or workflow.status in AUTO_REBALANCE_ACTIVE_STATUSES else workflow.status,
-                current_stage=current_stage or (workflow.current_stage if workflow else None),
+                # A subset of finished child jobs is not a finished workflow.
+                # Preserve the durable parent's lifecycle; derivation is only
+                # a compatibility fallback for runs predating workflow audits.
+                status=workflow.status if workflow else derived_status,
+                current_stage=workflow.current_stage if workflow else current_stage,
                 error_message=error_message,
                 created_at=created_at,
                 updated_at=updated_at,
                 completed_at=(
-                    workflow.completed_at if workflow and workflow.completed_at else _latest_timestamp([stage.completed_at for stage in stage_responses])
+                    workflow.completed_at if workflow else _latest_timestamp([stage.completed_at for stage in stage_responses])
                 ),
                 total_estimated_cost=round(sum(job.estimated_cost or 0 for job in all_jobs), 8),
                 stages=stage_responses,
@@ -671,75 +686,81 @@ async def update_auto_rebalance_stage(
         )
         .with_for_update()
         .options(selectinload(AutoRebalanceWorkflow.stages))
+        .execution_options(populate_existing=True)
     )).scalar_one_or_none()
     if not workflow:
         raise HTTPException(404, detail="Auto-rebalance run not found")
-    if body.run_id is not None:
-        run = (await db.execute(
-            select(Run).where(Run.id == body.run_id, Run.user_id == current_user.id)
-        )).scalar_one_or_none()
-        if not run:
-            raise HTTPException(404, detail="Referenced run not found")
-        if (
-            run.auto_rebalance_portfolio != portfolio
-            or run.auto_rebalance_sequence != sequence
-        ):
-            raise HTTPException(422, detail="Referenced run belongs to another auto-rebalance")
-    if body.job_id is not None:
-        job = (await db.execute(
-            select(Job).where(Job.id == body.job_id, Job.user_id == current_user.id)
-        )).scalar_one_or_none()
-        if not job:
-            raise HTTPException(404, detail="Referenced job not found")
-        if (
-            job.auto_rebalance_portfolio != portfolio
-            or job.auto_rebalance_sequence != sequence
-        ):
-            raise HTTPException(422, detail="Referenced job belongs to another auto-rebalance")
-
     stage_record = next((item for item in workflow.stages if item.stage == stage), None)
-    if not stage_record:
-        stage_record = AutoRebalanceWorkflowStage(workflow_id=workflow.id, stage=stage)
-        db.add(stage_record)
-    existing_status = stage_record.status.lower()
-    requested_status = body.status
-    # Audit writes are deliberately asynchronous in the client. Once a stage
-    # has a terminal outcome, an in-flight older update must not regress it to
-    # a different outcome. We still accept IDs and non-empty summary fields
-    # from that delayed write.
-    status = (
-        existing_status
-        if existing_status in AUTO_REBALANCE_TERMINAL_STATUSES
-        else requested_status
+    existing_status = stage_record.status.lower() if stage_record else "queued"
+    was_terminal = existing_status in AUTO_REBALANCE_TERMINAL_STATUSES
+    status = existing_status if was_terminal else body.status
+    if existing_status in {"processing", "running"} and body.status == "queued":
+        status = existing_status
+    existing_run_id = stage_record.run_id if stage_record else None
+    existing_job_id = stage_record.job_id if stage_record else None
+    effective_run_id = existing_run_id if was_terminal and existing_run_id is not None else body.run_id or existing_run_id
+    effective_job_id = existing_job_id if was_terminal and existing_job_id is not None else body.job_id or existing_job_id
+    if body.run_id is not None or body.job_id is not None:
+        # Validate even ignored incoming IDs, but the effective pair below is
+        # authoritative when a late callback names superseded execution.
+        await validate_execution(
+            db, user_id=current_user.id, portfolio=portfolio, sequence=sequence,
+            stage=stage, run_id=body.run_id, job_id=body.job_id, verify_pair=False,
+        )
+    await validate_execution(
+        db, user_id=current_user.id, portfolio=portfolio, sequence=sequence,
+        stage=stage, run_id=effective_run_id, job_id=effective_job_id,
+        expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
+    if stage_record is None:
+        # Defaults run at flush; linking the relationship also keeps the
+        # loaded stages collection current for first-write serialization.
+        stage_record = AutoRebalanceWorkflowStage(workflow=workflow, stage=stage, status="queued")
+        db.add(stage_record)
     stage_record.status = status
-    stage_record.run_id = body.run_id or stage_record.run_id
-    stage_record.job_id = body.job_id or stage_record.job_id
-    stage_record.summary_json = body.summary or stage_record.summary_json
-    if body.error_message is not None:
+    stage_record.run_id = effective_run_id
+    stage_record.job_id = effective_job_id
+    # Delayed ID-linking writes may fill missing metadata, but cannot replace
+    # facts already attached to a terminal outcome.
+    stage_record.summary_json = (
+        {**body.summary, **(stage_record.summary_json or {})}
+        if was_terminal else {**(stage_record.summary_json or {}), **body.summary}
+    )
+    if not was_terminal and body.error_message is not None:
         stage_record.error_message = body.error_message
-    stage_record.started_at = body.started_at or stage_record.started_at or datetime.now(timezone.utc)
-    if body.completed_at is not None:
-        stage_record.completed_at = body.completed_at
-    elif status in AUTO_REBALANCE_TERMINAL_STATUSES:
-        stage_record.completed_at = datetime.now(timezone.utc)
+    stage_record.started_at = stage_record.started_at or body.started_at or datetime.now(timezone.utc)
+    if not was_terminal and status in AUTO_REBALANCE_TERMINAL_STATUSES:
+        stage_record.completed_at = body.completed_at or datetime.now(timezone.utc)
 
-    workflow.current_stage = stage
-    if status == "failed":
-        workflow.status = "failed"
-        workflow.error_message = stage_record.error_message or f"{stage} stage failed"
-        workflow.completed_at = stage_record.completed_at
-    elif status in {"paused", "cancelled", "interrupted"}:
-        workflow.status = status
-        workflow.error_message = stage_record.error_message or f"{stage} stage {status}"
-        workflow.completed_at = stage_record.completed_at
-    elif stage == "actionables" and status in {"completed", "partial", "skipped"}:
-        workflow.status = "completed" if status != "partial" else "partial"
-        workflow.error_message = None
-        workflow.completed_at = stage_record.completed_at
-    else:
-        workflow.status = "processing" if status != "skipped" else workflow.status
-        if status != "failed":
+    # The parent lock serializes different stage writers too. A delayed sync
+    # update cannot move a later stage backward or reopen a terminal workflow.
+    if workflow.status not in AUTO_REBALANCE_TERMINAL_STATUSES:
+        stage_rank = AUTO_REBALANCE_STAGE_ORDER.index(stage)
+        current_rank = (
+            AUTO_REBALANCE_STAGE_ORDER.index(workflow.current_stage)
+            if workflow.current_stage in AUTO_REBALANCE_STAGE_ORDER else -1
+        )
+        if stage_rank >= current_rank:
+            workflow.current_stage = stage
+        if status in {"failed", "paused", "cancelled", "interrupted"}:
+            workflow.status = status
+            workflow.error_message = stage_record.error_message or f"{stage} stage {status}"
+            workflow.completed_at = stage_record.completed_at
+        elif all(
+            any(
+                event.stage == required_stage
+                and event.status in {"completed", "partial", "skipped"}
+                and event.completed_at is not None
+                for event in workflow.stages
+            )
+            for required_stage in AUTO_REBALANCE_STAGE_ORDER
+        ):
+            workflow.status = "partial" if any(event.status == "partial" for event in workflow.stages) else "completed"
+            workflow.current_stage = "actionables"
+            workflow.error_message = None
+            workflow.completed_at = _latest_timestamp([event.completed_at for event in workflow.stages])
+        else:
+            workflow.status = "processing" if status != "skipped" else workflow.status
             workflow.error_message = None
     if status in {"completed", "partial"} and existing_status not in AUTO_REBALANCE_TERMINAL_STATUSES:
         from app.domains.mails.completion_events import add_completion_event
@@ -772,27 +793,94 @@ async def update_auto_rebalance_stage(
 async def queue_auto_rebalance_completion_email(
     body: AutoRebalanceCompletionEmailRequest,
     current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
+    workflow = (await db.execute(
+        select(AutoRebalanceWorkflow)
+        .where(
+            AutoRebalanceWorkflow.user_id == current_user.id,
+            AutoRebalanceWorkflow.portfolio == body.portfolio,
+            AutoRebalanceWorkflow.sequence == body.sequence,
+        )
+        .with_for_update()
+        .options(selectinload(AutoRebalanceWorkflow.stages))
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
+    if not workflow:
+        raise HTTPException(404, detail="Auto-rebalance run not found")
+    stages = {event.stage: event for event in workflow.stages}
+    if (
+        workflow.status not in {"completed", "partial"}
+        or workflow.completed_at is None
+        or any(
+            stage not in stages
+            or stages[stage].status not in {"completed", "partial", "skipped"}
+            or stages[stage].completed_at is None
+            for stage in AUTO_REBALANCE_STAGE_ORDER
+        )
+    ):
+        raise HTTPException(
+            409,
+            detail="Auto-rebalance completion audit is incomplete or unsuccessful; retry after audit persistence succeeds",
+        )
+    for stage in LLM_STAGES:
+        record = stages[stage]
+        if record.status == "skipped":
+            continue
+        try:
+            await validate_execution(
+                db, user_id=current_user.id, portfolio=body.portfolio, sequence=body.sequence,
+                stage=stage, run_id=record.run_id, job_id=record.job_id, expected_status=record.status,
+            )
+        except HTTPException as exc:
+            raise HTTPException(
+                409,
+                detail=f"Auto-rebalance {stage} completion is not verified by matching persisted execution evidence",
+            ) from exc
+    from app.domains.mails.completion_events import PENDING_ACTION, RESOURCE, add_completion_event
+    from app.domains.mails.completion_preferences import STOCK_STAGES
+
+    # Client labels and timestamps are retained in the request schema for
+    # compatibility, but cannot claim stages that were never persisted.
+    completed_stages = [
+        label + (" (partial)" if stages[stage].status == "partial" else "")
+        for stage, label in STOCK_STAGES
+        if stages[stage].status in {"completed", "partial"}
+    ]
+    if not completed_stages:
+        raise HTTPException(409, detail="Auto-rebalance has no completed stages")
+    # The workflow lock makes this one durable outbox event per workflow.
+    # Broker failures leave it pending for the existing beat recovery job;
+    # repeated publishes share its delivery lock and idempotency reservation.
+    existing_event = (await db.execute(select(ActivityLog.id).where(
+        ActivityLog.user_id == current_user.id,
+        ActivityLog.resource_type == RESOURCE,
+        ActivityLog.resource_id == workflow.id,
+        ActivityLog.action.in_((PENDING_ACTION, "completion.processed", "completion.failed")),
+    ).limit(1))).scalar_one_or_none()
+    if existing_event is not None:
+        return {"status": "already_queued"}
+
+    # Honor markers created by the previous endpoint, without creating new
+    # non-durable claims. Historical ambiguous delivery is not retried here.
     dedupe_key = f"auto_rebalance_success_email_sent:{current_user.id}:{body.portfolio}:{body.sequence}"
     redis = _get_redis()
     try:
-        queued = await redis.set(dedupe_key, "1", nx=True, ex=60 * 60 * 24 * 30)
+        legacy_queued = await redis.get(dedupe_key)
     finally:
         await redis.aclose()
-    if not queued:
+    if legacy_queued:
         return {"status": "already_queued"}
-
-    from app.domains.runs.tasks import send_auto_rebalance_success_email_task
-
-    send_auto_rebalance_success_email_task.delay(  # type: ignore
-        current_user.id,
-        body.portfolio,
-        body.label,
-        body.completed_at.isoformat(),
-        body.total_cost_inr,
-        body.total_llm_time,
-        body.stages_completed,
-    )
+    add_completion_event(db, user_id=current_user.id, resource_id=workflow.id, payload={
+        "schema_version": 1, "kind": "auto_rebalance_success",
+        "segment": "zerodha" if body.portfolio == "india" else "indmoney",
+        "stage": "overall", "label": "Overall completion",
+        "run_id": f"{body.portfolio}:{body.sequence}", "portfolio": body.portfolio,
+        "workflow_label": workflow.label, "completed_at": workflow.completed_at.isoformat(),
+        "total_cost_inr": body.total_cost_inr, "total_llm_time": body.total_llm_time,
+        "stages_completed": completed_stages,
+    })
+    await db.commit()
     return {"status": "queued"}
 
 
@@ -846,6 +934,7 @@ async def create_run(
                     if body.polymarket_event_context is not None
                     else None
                 ),
+                output_source_jobs=body.output_source_jobs,
                 prompt_id=body.prompt_id,
                 scheduled_at=body.scheduled_at,
                 auto_export_enabled=body.auto_export_enabled,

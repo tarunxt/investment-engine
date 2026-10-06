@@ -16,9 +16,19 @@ development, auth-disabled, or old-key fallback.
 
 Do not merge/deploy this change until the operator has installed the new value.
 Missing or invalid configuration stops the backend and Celery processes at
-startup. The deployment runs the same JWT validation during environment preflight, before
-installing systemd units, running migrations, or restarting services. It fails
-without printing the value if configuration is missing or invalid.
+startup. `deploy/no-docker/redeploy.sh` runs the same JWT validation during its
+environment preflight, before its own systemd changes, migrations, or service
+restarts. It fails without printing the value if configuration is missing or
+invalid.
+
+This inner preflight is not a no-mutation guarantee for the full deployment
+workflow. `.github/workflows/deploy.yml` can run
+`configure-postgres-recovery.sh --restart-backend` before invoking `redeploy.sh`.
+Validate signing configuration independently before triggering that workflow,
+and resolve storage, database-recovery, and worker-safety blockers first. A
+full-stack release restarts backend workers and beat; do not treat this change
+as an authentication-only restart or deploy while financial tasks are unsafe to
+interrupt.
 
 ## Secure operator entry
 
@@ -83,3 +93,10 @@ lifetimes, signature/algorithm/expiry checks, and both token types becoming
 invalid after a signing-key change. Other non-pytest smoke processes that import
 backend settings need an explicitly supplied test-only key in their isolated
 test environment.
+
+The disposable API attempt migration verifier supplies its own public,
+deterministic signing fixture after checking the exact CI/container environment.
+It replaces any inherited signing value rather than forwarding host credentials.
+Its offline regression test imports the complete model registry in a fresh
+process using that sanitized environment; the PostgreSQL roundtrip remains a
+separate container-only check.

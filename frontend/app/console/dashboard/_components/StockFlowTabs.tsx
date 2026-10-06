@@ -24,8 +24,7 @@ import {
   getStandardActionBadgeClass,
   type StandardActionCategory,
 } from "@/lib/actionColorScheme";
-import { inferRebalanceMarketFromPrompt } from "@/lib/rebalance";
-import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
 import { apiService } from "@/services/api";
 import type {
@@ -449,7 +448,7 @@ function RebalanceStockFlowSubwidget({
 
   const flow = useMemo(() => {
     const portfolio = PORTFOLIOS.find((item) => item.id === portfolioId)!;
-    const swingRun = newest(runs.filter((run) => isRunInSwingTradeMarket(run.prompt, portfolio.market)));
+    const swingRun = newest(runs.filter((run) => isAnalysisRunForStage(run, "swing", portfolio.market)));
     const matchingRebalanceRuns = latestMatchingRebalanceRuns(runs, portfolio.market);
     const rebalanceRun = newest(matchingRebalanceRuns);
     const swing = swingRun ? buildConsensusRows([swingRun], portfolio.market, portfolioSnapshot, runs) : [];
@@ -546,7 +545,7 @@ function RebalanceStockFlowSubwidget({
                 )}
               >
                 {flow.actionables.length ? flow.actionables.map((row) => (
-                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${inferRebalanceMarketFromPrompt(flow.rebalanceRun?.prompt || "") ? "Latest rebalance scan" : "Rebalance scan"}`]} />
+                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${flow.rebalanceRun && isAnalysisRunForStage(flow.rebalanceRun, "rebalance", flow.portfolio.market) ? "Latest rebalance scan" : "Rebalance scan"}`]} />
                 )) : <EmptyStage />}
               </Stage>
             </div>

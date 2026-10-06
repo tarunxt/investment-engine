@@ -2,6 +2,7 @@
 
 from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
 from app.domains.api_usage.models import (
+    ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
     LlmProviderUsageDailySnapshot,
 )
@@ -131,6 +132,7 @@ __all__ = [
     "GoogleSheetsCredential",
     "IndMoneyUsPortfolioSnapshot",
     "Job",
+    "ApiUsageAttemptEvent",
     "LlmProviderUsageCallRecord",
     "LlmProviderUsageDailySnapshot",
     "OutboxMessage",

@@ -59,12 +59,12 @@ import {
 } from "./dashboardEvents";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
+  assertIndmoneyHoldingsSnapshot,
   buildRebalanceInputBundle,
   buildRebalancePrompt,
   ensureRebalanceFlowMarker,
   getPreviousMarketClose,
   getRebalanceDefaultExportSheetName,
-  inferRebalanceMarketFromPrompt,
 } from "@/lib/rebalance";
 import {
   buildSwingTradePrompt,
@@ -78,8 +78,25 @@ import {
   syncZerodhaBasketBuySelection,
   type ZerodhaBasketSelectableOrder,
 } from "@/lib/zerodhaBasketSelection";
-import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt } from "@/lib/runPresentation";
 import { APIError, NetworkError, apiService } from "@/services/api";
+import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
+import { buildOutputSourceJobs } from "@/lib/outputSourceJobs";
+import {
+  AutoRebalanceAuditSession,
+  assertAutoRebalanceRunMetadata,
+  autoRebalanceAuditKey,
+  restoreAutoRebalanceAuditState,
+  type AutoRebalanceAuditState,
+} from "@/lib/autoRebalanceAudit";
+import {
+  deduplicateStageRunInputs,
+  deduplicateThreatStageInputs,
+  getSelectedStageRunIds,
+  getSelectedThreatJobIds,
+  selectStageRunInputs,
+  type ThreatStageInput,
+} from "@/lib/rebalanceStageInputs";
 import { URLs } from "@/lib/urls";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
@@ -405,6 +422,7 @@ type PersistedWorkflow = {
     Record<WorkflowPortfolio, AutoRebalanceRunMetadata>
   >;
   lastAutoRebalanceCosts?: Record<WorkflowPortfolio, number | null>;
+  auditStates?: Partial<Record<WorkflowPortfolio, AutoRebalanceAuditState>>;
   savedAt: string;
 };
 
@@ -487,8 +505,8 @@ function getQueuedStages(
   );
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 function isZerodhaAuthPropagationError(error: unknown) {
@@ -1898,31 +1916,6 @@ Runtime inputs are appended here from the Select Inputs popup: latest portfolio 
   return buildTechnicalScanPrompt([], market);
 }
 
-function filterRunToSelectedJobs(
-  run: RunResponse,
-  selectedIds: Set<string>,
-): RunResponse | null {
-  const runJobs = (run.run_jobs ?? []).filter((link) =>
-    selectedIds.has(`run:${run.id}:job:${link.job?.id}`),
-  );
-  if (runJobs.length === 0) return null;
-  return { ...run, run_jobs: runJobs };
-}
-
-function uniqueRunsBySelectedCandidates(
-  candidates: InputSelectionCandidate[],
-  selectedIds: Set<string>,
-) {
-  const byRun = new Map<number, RunResponse>();
-  candidates.forEach((candidate) => {
-    if (!candidate.run) return;
-    byRun.set(candidate.run.id, candidate.run);
-  });
-  return Array.from(byRun.values())
-    .map((run) => filterRunToSelectedJobs(run, selectedIds))
-    .filter(Boolean) as RunResponse[];
-}
-
 function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
   if (
     typeof info.costUsd !== "number" ||
@@ -1962,10 +1955,7 @@ function sortRunsByLatestTimestamp(runs: RunResponse[]) {
 }
 
 function isTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
-  if (!/##\s*Technical Scan Input Bundle/i.test(run.prompt)) return false;
-  return market === "us"
-    ? /Market:\s*US equities/i.test(run.prompt)
-    : /Market:\s*India equities/i.test(run.prompt);
+  return isAnalysisRunForStage(run, "technical", market);
 }
 
 function isCompletedTechnicalScanRun(
@@ -1981,7 +1971,7 @@ function isCompletedTechnicalScanRun(
 }
 
 function isRebalanceRunForMarket(run: RunResponse, market: SwingTradeMarket) {
-  return inferRebalanceMarketFromPrompt(run.prompt) === market;
+  return isAnalysisRunForStage(run, "rebalance", market);
 }
 
 function getLatestStageRun(
@@ -1990,7 +1980,7 @@ function getLatestStageRun(
   market: SwingTradeMarket,
 ) {
   const matchingRuns = runs.filter((run) => {
-    if (stage === "swing") return isRunInSwingTradeMarket(run.prompt, market);
+    if (stage === "swing") return isAnalysisRunForStage(run, "swing", market);
     if (stage === "rebalance") return isRebalanceRunForMarket(run, market);
     return isTechnicalScanRun(run, market);
   });
@@ -2355,7 +2345,7 @@ function getAutoRebalanceStageForRun(
   const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
   if (isCompletedRebalanceRun(run, market)) return "rebalance";
   if (isCompletedTechnicalScanRun(run, market)) return "technical";
-  if (isRunInSwingTradeMarket(run.prompt || "", market)) return "swing";
+  if (isAnalysisRunForStage(run, "swing", market)) return "swing";
   return null;
 }
 
@@ -2595,7 +2585,7 @@ function isRunForStageHistory(
 ) {
   const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
   const prompt = run.prompt || "";
-  if (stage === "swing") return isRunInSwingTradeMarket(prompt, market);
+  if (stage === "swing") return isAnalysisRunForStage(run, "swing", market);
   if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
   if (stage === "technical") return isTechnicalScanRun(run, market);
   if (stage === "threats") {
@@ -5307,11 +5297,31 @@ export function RebalanceWorkflowSections({
   );
   const [activeAutoRebalanceMetadata, setActiveAutoRebalanceMetadata] = useState<
     Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>>
-  >(() =>
-    initialRunningPortfolio
-      ? (initialPersisted?.activeAutoRebalanceMetadata ?? {})
-      : {},
-  );
+  >(() => {
+    const restored: Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>> = {};
+    if (!initialRunningPortfolio) return restored;
+    for (const portfolio of ["zerodha", "indmoneyUs"] as const) {
+      const metadata = initialPersisted?.activeAutoRebalanceMetadata?.[portfolio];
+      try {
+        assertAutoRebalanceRunMetadata(metadata, portfolio === "zerodha" ? "india" : "indmoney_us");
+        restored[portfolio] = metadata;
+      } catch {
+        // Invalid cached identity is ignored; saved stage output stays visible.
+      }
+    }
+    return restored;
+  });
+  const [auditStates, setAuditStates] = useState<
+    Partial<Record<WorkflowPortfolio, AutoRebalanceAuditState>>
+  >(() => Object.fromEntries(
+    Object.entries(initialPersisted?.auditStates ?? {}).flatMap(([portfolio, state]) => {
+      const restored = restoreAutoRebalanceAuditState(state);
+      return restored && ["zerodha", "indmoneyUs"].includes(portfolio) ? [[portfolio, restored]] : [];
+    }),
+  ));
+  const [completionEmailWarnings, setCompletionEmailWarnings] = useState<
+    Partial<Record<WorkflowPortfolio, string>>
+  >({});
   const [inputDialog, setInputDialog] = useState<{
     portfolio: WorkflowPortfolio;
     stage: InputSelectionStage;
@@ -5407,6 +5417,7 @@ export function RebalanceWorkflowSections({
   const activeAutoRebalanceMetadataRef = useRef<
     Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>>
   >(activeAutoRebalanceMetadata);
+  const auditSessionsRef = useRef<Partial<Record<WorkflowPortfolio, AutoRebalanceAuditSession>>>({});
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
   const isWorkflowExecutingRef = useRef(false);
@@ -5437,11 +5448,13 @@ export function RebalanceWorkflowSections({
         },
       },
       activeAutoRebalanceMetadata,
+      auditStates,
       lastAutoRebalanceCosts,
       savedAt: new Date().toISOString(),
     });
   }, [
     activeAutoRebalanceMetadata,
+    auditStates,
     lastAutoRebalanceCosts,
     runningPortfolio,
     selectedInputs,
@@ -5455,7 +5468,7 @@ export function RebalanceWorkflowSections({
     return () => window.clearInterval(timer);
   }, []);
 
-  const isBusy = Boolean(runningPortfolio);
+  const isBusy = Boolean(runningPortfolio) || isWorkflowExecutingRef.current;
 
   const openAutoRebalanceCostHistory = useCallback(async (portfolio: WorkflowPortfolio) => {
     setCostHistoryPortfolio(portfolio);
@@ -6367,6 +6380,39 @@ ${zerodhaExecutionMode === "direct_market"
     [],
   );
 
+  const getAuditSession = useCallback((
+    portfolio: WorkflowPortfolio,
+    metadata: AutoRebalanceRunMetadata,
+  ) => {
+    const key = autoRebalanceAuditKey(metadata);
+    const existing = auditSessionsRef.current[portfolio];
+    if (existing?.key === key) return existing;
+    // These closures retain this run's identity through retries and teardown.
+    const captured = { ...metadata };
+    const session = new AutoRebalanceAuditSession(captured, {
+      persist: (stage, payload) => apiService.updateAutoRebalanceStage(
+        captured.auto_rebalance_portfolio,
+        captured.auto_rebalance_sequence,
+        stage,
+        payload,
+      ),
+      read: () => apiService.getAutoRebalanceHistoryDetail(
+        captured.auto_rebalance_portfolio,
+        captured.auto_rebalance_sequence,
+      ),
+      delay: sleep,
+      onFailure: (stage, error) => {
+        console.error("Could not persist auto-rebalance stage audit", key, stage, error);
+      },
+      onChange: (state) => {
+        if (auditSessionsRef.current[portfolio]?.key !== key) return;
+        setAuditStates((current) => ({ ...current, [portfolio]: state }));
+      },
+    });
+    auditSessionsRef.current[portfolio] = session;
+    return session;
+  }, []);
+
   const recordAutoRebalanceStage = useCallback(
     async (
       portfolio: WorkflowPortfolio,
@@ -6405,25 +6451,9 @@ ${zerodhaExecutionMode === "direct_market"
         started_at: info.startedAt ?? undefined,
         completed_at: info.completedAt ?? info.endedAt ?? undefined,
       };
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          await apiService.updateAutoRebalanceStage(
-            metadata.auto_rebalance_portfolio,
-            metadata.auto_rebalance_sequence,
-            stage as AutoRebalanceStageKey,
-            payload,
-          );
-          return;
-        } catch (error) {
-          if (attempt === 2) {
-            console.error("Could not persist auto-rebalance stage audit", error);
-            return;
-          }
-          await sleep(500 * (attempt + 1));
-        }
-      }
+      return getAuditSession(portfolio, metadata).record(stage as AutoRebalanceStageKey, payload);
     },
-    [],
+    [getAuditSession],
   );
 
   const resetPortfolio = useCallback((portfolio: WorkflowPortfolio) => {
@@ -6513,7 +6543,7 @@ ${zerodhaExecutionMode === "direct_market"
         activeRunId: null,
         ...infoWithInrCost,
       });
-      void recordAutoRebalanceStage(
+      return recordAutoRebalanceStage(
         portfolio,
         stage,
         infoWithInrCost.runStatus?.toLowerCase() === "partial"
@@ -6813,7 +6843,7 @@ ${zerodhaExecutionMode === "direct_market"
                         previousClose.getTime(),
                     )
                     .filter((run) =>
-                      isRunInSwingTradeMarket(run.prompt, market),
+                      isAnalysisRunForStage(run, "swing", market),
                     ),
                 ),
                 "Swing Scan",
@@ -7201,7 +7231,7 @@ ${zerodhaExecutionMode === "direct_market"
           selectedRun = sortRunsByLatestTimestamp(
             runs.filter((run) => {
               if (stage === "swing")
-                return isRunInSwingTradeMarket(run.prompt, market);
+                return isAnalysisRunForStage(run, "swing", market);
               if (stage === "rebalance")
                 return isCompletedRebalanceRun(run, market);
               if (stage === "technical")
@@ -7481,6 +7511,9 @@ ${zerodhaExecutionMode === "direct_market"
       portfolio: WorkflowPortfolio,
       indmoneyPayload?: IndMoneyUsPortfolioSnapshotCreateRequest,
     ) => {
+      // Kill may clear the visible running portfolio before its asynchronous
+      // work has unwound. Do not let a new run steal that work's identity.
+      if (isWorkflowExecutingRef.current) return;
       const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
       const runSpecificMode = specificMode[portfolio];
       const stagesToRun = new Set(selectedStages[portfolio]);
@@ -7522,8 +7555,11 @@ ${zerodhaExecutionMode === "direct_market"
       });
 
       let runMetadata: AutoRebalanceRunMetadata;
+      let auditSession: AutoRebalanceAuditSession;
       try {
         runMetadata = await reserveAutoRebalanceRunMetadata(portfolio);
+        assertAutoRebalanceRunMetadata(runMetadata, portfolio === "zerodha" ? "india" : "indmoney_us");
+        auditSession = getAuditSession(portfolio, runMetadata);
       } catch (error) {
         zerodhaPopup?.close();
         const failedAt = new Date().toISOString();
@@ -7542,13 +7578,34 @@ ${zerodhaExecutionMode === "direct_market"
         return;
       }
 
+      setAuditStates((current) => ({
+        ...current,
+        [portfolio]: {
+          key: auditSession.key,
+          label: runMetadata.auto_rebalance_label,
+          status: "pending",
+          pending: 0,
+          message: null,
+        },
+      }));
+      setCompletionEmailWarnings((current) => ({ ...current, [portfolio]: undefined }));
       activeAutoRebalanceMetadataRef.current[portfolio] = runMetadata;
       setActiveAutoRebalanceMetadata((current) => ({
         ...current,
         [portfolio]: runMetadata,
       }));
-      const stopIfPaused = () => {
-        if (!pauseRequestedRef.current) return false;
+      const finishedStages = new Set<WorkflowStageKey>();
+      const stopIfRequested = () => {
+        const wasCancelled = cancelRequestedRef.current;
+        if (!pauseRequestedRef.current && !wasCancelled) return false;
+        const stoppedStage = STAGE_ORDER.find((stage) => !finishedStages.has(stage) && (wasCancelled || shouldRunCurrentStage(stage)));
+        if (!stoppedStage) {
+          // The last selected stage has already finished. Only metadata for
+          // skipped stages remains, so finish saving it without a false pause.
+          pauseRequestedRef.current = false;
+          setWorkflowPaused(false);
+          return false;
+        }
         const timestamp = new Date().toISOString();
         setStates((current) => ({
           ...current,
@@ -7566,10 +7623,19 @@ ${zerodhaExecutionMode === "direct_market"
             return acc;
           }, {} as WorkflowState),
         }));
-        void recordAutoRebalanceStage(portfolio, currentStage, "paused", {
+        updateStage(portfolio, stoppedStage, {
+          state: wasCancelled ? "failed" : "idle",
+          activeRunId: null,
           endedAt: timestamp,
-          runStatus: "paused",
-          error: "Auto-rebalance was paused before this stage could be launched.",
+          runStatus: wasCancelled ? "cancelled" : "Paused before this stage",
+          error: wasCancelled ? "Auto-rebalance flow was killed by user." : null,
+        });
+        void recordAutoRebalanceStage(portfolio, stoppedStage, wasCancelled ? "cancelled" : "paused", {
+          endedAt: timestamp,
+          runStatus: wasCancelled ? "cancelled" : "paused",
+          error: wasCancelled
+            ? "Auto-rebalance flow was killed by user."
+            : "Auto-rebalance was paused before this stage could be launched.",
         });
         pauseRequestedRef.current = false;
         return true;
@@ -7603,11 +7669,15 @@ ${zerodhaExecutionMode === "direct_market"
         // recorded in the run history.
         throw new RecordedWorkflowStageFailure(message, error);
       };
-      let generatedThreatMarkdown = "";
+      let generatedThreatInput: ThreatStageInput | null = null;
       let generatedSwingRun: RunResponse | null = null;
       let generatedRebalanceRun: RunResponse | null = null;
 
       try {
+        if (stopIfRequested()) {
+          zerodhaPopup?.close();
+          return;
+        }
         currentStage = "sync";
         if (shouldRunCurrentStage("sync")) {
           markRunning(portfolio, "sync");
@@ -7619,7 +7689,7 @@ ${zerodhaExecutionMode === "direct_market"
               previousOverview.latest?.captured_at,
               () => cancelRequestedRef.current,
             );
-            markCompleted(portfolio, "sync", {
+            await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
               runStatus:
                 overview.latest?.captured_at !== previousOverview.latest?.captured_at
@@ -7631,7 +7701,8 @@ ${zerodhaExecutionMode === "direct_market"
               await apiService.indmoneyUsCreatePortfolioSnapshot(
                 indmoneyPayload,
               );
-            markCompleted(portfolio, "sync", {
+            assertIndmoneyHoldingsSnapshot(snapshot);
+            await markCompleted(portfolio, "sync", {
               completedAt: snapshot.captured_at,
               runStatus: snapshot.parse_status,
             });
@@ -7641,7 +7712,8 @@ ${zerodhaExecutionMode === "direct_market"
               "IndMoney portfolio overview",
               () => cancelRequestedRef.current,
             );
-            markCompleted(portfolio, "sync", {
+            assertIndmoneyHoldingsSnapshot(overview.latest);
+            await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
               runStatus: overview.latest?.parse_status ?? "last snapshot",
             });
@@ -7654,6 +7726,7 @@ ${zerodhaExecutionMode === "direct_market"
           );
         }
 
+        finishedStages.add("sync");
         const nextStageAfterSync = STAGE_ORDER.find(
           (stage) => stage !== "sync" && shouldRunCurrentStage(stage),
         );
@@ -7670,7 +7743,7 @@ ${zerodhaExecutionMode === "direct_market"
           });
         }
 
-        if (stopIfPaused()) return;
+        if (stopIfRequested()) return;
 
         const needsModelMix =
           shouldRunCurrentStage("swing") || shouldRunCurrentStage("rebalance");
@@ -7769,8 +7842,12 @@ ${zerodhaExecutionMode === "direct_market"
               throw new Error(
                 `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
               );
-            generatedThreatMarkdown = completedThreat.report?.raw_markdown ?? "";
-            markCompleted(portfolio, "threats", {
+            generatedThreatInput = {
+              identity: { kind: "threat-job", market, stage: "threats", jobId: queuedThreat.job_id },
+              analysis: completedThreat,
+              origin: "generated",
+            };
+            await markCompleted(portfolio, "threats", {
               ...summarizeThreat(completedThreat),
               completedLlms: 1,
               totalLlms: 1,
@@ -7786,7 +7863,8 @@ ${zerodhaExecutionMode === "direct_market"
           );
         }
 
-        if (stopIfPaused()) return;
+        finishedStages.add("threats");
+        if (stopIfRequested()) return;
 
         currentStage = "swing";
         if (shouldRunCurrentStage("swing")) {
@@ -7796,35 +7874,24 @@ ${zerodhaExecutionMode === "direct_market"
             completedLlms: 0,
           });
           const swingInputSelection = selectedInputs[portfolio].swing;
-          const selectedThreatParts: string[] = [];
-          if (
-            swingInputSelection.has("swing:next") &&
-            generatedThreatMarkdown.trim()
-          ) {
-            selectedThreatParts.push(
-              `## Next Threat Scan output\n\n${generatedThreatMarkdown.trim()}`,
-            );
-          }
-          if ([...swingInputSelection].some((id) => id.startsWith("threat:"))) {
-            const latestThreat = (
-              await retryWorkflowRead(
-                () =>
-                  portfolio === "zerodha"
-                    ? apiService.zerodhaThreatsLatest()
-                    : apiService.indmoneyUsThreatsLatest(),
-                "latest threats scan",
-                () => cancelRequestedRef.current,
-              )
-            ).analysis;
-            if (
-              latestThreat?.report?.raw_markdown &&
-              swingInputSelection.has(`threat:${latestThreat.job_id}`)
-            ) {
-              selectedThreatParts.push(
-                `## Selected Threat Scan #${latestThreat.job_id}\n\n${latestThreat.report.raw_markdown.trim()}`,
-              );
-            }
-          }
+          const selectedThreatIds = getSelectedThreatJobIds(swingInputSelection);
+          const selectedThreatInputs: ThreatStageInput[] = await retryWorkflowRead(
+            () => Promise.all(selectedThreatIds.map(async (jobId): Promise<ThreatStageInput> => ({
+              identity: { kind: "threat-job", market, stage: "threats", jobId },
+              analysis: portfolio === "zerodha"
+                ? await apiService.zerodhaThreatJob(jobId)
+                : await apiService.indmoneyUsThreatJob(jobId),
+              origin: "selected",
+            }))),
+            "selected threat scan inputs",
+            () => cancelRequestedRef.current,
+          );
+          const selectedThreatParts = deduplicateThreatStageInputs([
+            ...(swingInputSelection.has("swing:next") && generatedThreatInput ? [generatedThreatInput] : []),
+            ...selectedThreatInputs,
+          ], market).map(({ analysis, origin }) =>
+            `## ${origin === "generated" ? "Next" : "Selected"} Threat Scan #${analysis.job_id}\n\n${analysis.report!.raw_markdown.trim()}`,
+          );
           const threatAppendix = selectedThreatParts.length
             ? `\n\n---\n\n# User-selected Threat Scan Inputs\n\n${selectedThreatParts.join("\n\n---\n\n")}`
             : "";
@@ -7846,7 +7913,7 @@ ${zerodhaExecutionMode === "direct_market"
             swingRun.id,
           );
           generatedSwingRun = completedSwingRun;
-          markCompleted(portfolio, "swing", {
+          await markCompleted(portfolio, "swing", {
             ...summarizeRun(completedSwingRun),
             ...getRunProgress(completedSwingRun),
             lastRunId: completedSwingRun.id,
@@ -7863,7 +7930,8 @@ ${zerodhaExecutionMode === "direct_market"
           );
         }
 
-        if (stopIfPaused()) return;
+        finishedStages.add("swing");
+        if (stopIfRequested()) return;
 
         currentStage = "rebalance";
         if (shouldRunCurrentStage("rebalance")) {
@@ -7887,6 +7955,8 @@ ${zerodhaExecutionMode === "direct_market"
             () => cancelRequestedRef.current,
           );
           const previousClose = getPreviousMarketClose(market);
+          const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
+          const selectedSwingRunIds = getSelectedStageRunIds(selectedRebalanceInputs, "swing");
           const recentCompletedRuns = runsRes.items
             .filter((run) => (run.status || "").toLowerCase() === "completed")
             .filter(
@@ -7895,24 +7965,16 @@ ${zerodhaExecutionMode === "direct_market"
             )
             .slice(0, 24);
           const fullRunCandidates = await retryWorkflowRead(
-            () => Promise.all(recentCompletedRuns.map((run) => apiService.getRun(run.id))),
+            () => Promise.all([...new Set([
+              ...selectedSwingRunIds,
+              ...recentCompletedRuns.map((run) => run.id),
+            ])].map((runId) => apiService.getRun(runId))),
             "completed swing scan inputs",
             () => cancelRequestedRef.current,
           );
-          const swingCandidates = buildRunJobCandidates(
-            fullRunCandidates.filter((run) =>
-              isRunInSwingTradeMarket(run.prompt, market),
-            ),
-            "Swing Scan",
-            market,
+          const selectedSwingRuns = selectStageRunInputs(
+            fullRunCandidates, selectedRebalanceInputs, { market, stage: "swing" },
           );
-          const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
-          const selectedSwingRuns = selectedRebalanceInputs.size
-            ? uniqueRunsBySelectedCandidates(
-                swingCandidates,
-                selectedRebalanceInputs,
-              )
-            : [];
           const swingRuns = [
             ...(selectedRebalanceInputs.has("rebalance:next") &&
             generatedSwingRun
@@ -7921,7 +7983,7 @@ ${zerodhaExecutionMode === "direct_market"
             ...(selectedSwingRuns.length
               ? selectedSwingRuns
               : fullRunCandidates
-                  .filter((run) => isRunInSwingTradeMarket(run.prompt, market))
+                  .filter((run) => isAnalysisRunForStage(run, "swing", market))
                   .slice(0, 12)),
           ];
           const inputBundle = buildRebalanceInputBundle({
@@ -7932,15 +7994,17 @@ ${zerodhaExecutionMode === "direct_market"
             swingRuns,
             swingDisplayMode: "full",
           });
+          const outputSourceJobs = await buildOutputSourceJobs(swingRuns, market);
+          if (cancelRequestedRef.current) throw new Error("Auto-rebalance flow was cancelled by user.");
           const rebalanceRun = await apiService.createRun(
-            buildRunPayload({
+            { ...buildRunPayload({
               prompt:
                 `${ensureRebalanceFlowMarker(buildRebalancePrompt(market), market)}\n\n---\n\n${inputBundle}`.trim(),
               targets: rebalanceTargets,
               sheetName: getRebalanceDefaultExportSheetName(market),
               runMetadata,
               scanLabel: "Rebalance Scan",
-            }),
+            }), output_source_jobs: outputSourceJobs },
           );
           const completedRebalanceRun = await waitForRunWithStageHandling(
             portfolio,
@@ -7948,7 +8012,7 @@ ${zerodhaExecutionMode === "direct_market"
             rebalanceRun.id,
           );
           generatedRebalanceRun = completedRebalanceRun;
-          markCompleted(portfolio, "rebalance", {
+          await markCompleted(portfolio, "rebalance", {
             ...summarizeRun(completedRebalanceRun),
             ...getRunProgress(completedRebalanceRun),
             lastRunId: completedRebalanceRun.id,
@@ -7969,7 +8033,8 @@ ${zerodhaExecutionMode === "direct_market"
           );
         }
 
-        if (stopIfPaused()) return;
+        finishedStages.add("rebalance");
+        if (stopIfRequested()) return;
 
         currentStage = "technical";
         if (shouldRunCurrentStage("technical")) {
@@ -7978,23 +8043,19 @@ ${zerodhaExecutionMode === "direct_market"
             totalLlms: 1,
             completedLlms: 0,
           });
+          const selectedTechnicalInputs = selectedInputs[portfolio].technical;
+          const selectedRebalanceRunIds = getSelectedStageRunIds(selectedTechnicalInputs, "rebalance");
           const allRuns = await retryWorkflowRead(
-            () => fetchAllFullRuns(),
+            () => selectedRebalanceRunIds.length
+              ? Promise.all(selectedRebalanceRunIds.map((runId) => apiService.getRun(runId)))
+              : fetchAllFullRuns(),
             "technical scan input runs",
             () => cancelRequestedRef.current,
           );
-          const selectedTechnicalInputs = selectedInputs[portfolio].technical;
-          const selectedRebalanceRuns = selectedTechnicalInputs.size
-            ? uniqueRunsBySelectedCandidates(
-                buildRunJobCandidates(
-                  allRuns.filter((run) => isCompletedRebalanceRun(run, market)),
-                  "Rebalance Scan",
-                  market,
-                ),
-                selectedTechnicalInputs,
-              )
-            : [];
-          const rebalanceInputs = [
+          const selectedRebalanceRuns = selectStageRunInputs(
+            allRuns, selectedTechnicalInputs, { market, stage: "rebalance" },
+          );
+          const rebalanceInputs = deduplicateStageRunInputs([
             ...(selectedTechnicalInputs.has("technical:next") &&
             generatedRebalanceRun
               ? [generatedRebalanceRun]
@@ -8002,7 +8063,7 @@ ${zerodhaExecutionMode === "direct_market"
             ...(selectedRebalanceRuns.length
               ? selectedRebalanceRuns
               : getLatestMatchingRebalanceRuns(allRuns, market)),
-          ];
+          ], { market, stage: "rebalance" });
           const consensus = buildConsensusRows(rebalanceInputs, market);
           if (consensus.length === 0)
             throw new Error(
@@ -8021,7 +8082,7 @@ ${zerodhaExecutionMode === "direct_market"
             "technical",
             technicalRun.id,
           );
-          markCompleted(portfolio, "technical", {
+          await markCompleted(portfolio, "technical", {
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
             lastRunId: completedTechnicalRun.id,
@@ -8038,7 +8099,8 @@ ${zerodhaExecutionMode === "direct_market"
           );
         }
 
-        if (stopIfPaused()) return;
+        finishedStages.add("technical");
+        if (stopIfRequested()) return;
 
         currentStage = "actionables";
         if (shouldRunCurrentStage("actionables")) {
@@ -8055,7 +8117,7 @@ ${zerodhaExecutionMode === "direct_market"
           });
           await onDashboardRefresh();
           const actionablesCompletedAt = new Date().toISOString();
-          markCompleted(portfolio, "actionables", {
+          await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt,
             runStatus: "fresh data loaded",
             rebalanceInputs: rebalanceInputCount || null,
@@ -8067,19 +8129,6 @@ ${zerodhaExecutionMode === "direct_market"
               completedAt: actionablesCompletedAt,
             },
           }));
-          try {
-            await apiService.queueAutoRebalanceCompletionEmail({
-              portfolio: runMetadata.auto_rebalance_portfolio,
-              sequence: runMetadata.auto_rebalance_sequence,
-              label: runMetadata.auto_rebalance_label,
-              completed_at: actionablesCompletedAt,
-              stages_completed: STAGE_ORDER.filter(shouldRunCurrentStage).map(
-                getStageTileLabel,
-              ),
-            });
-          } catch (emailError) {
-            console.error("Failed to queue auto-rebalance success email", emailError);
-          }
           } catch (error) {
             continueAfterStageFailure("actionables", error);
           }
@@ -8090,9 +8139,33 @@ ${zerodhaExecutionMode === "direct_market"
             "Leaving current actionables unchanged",
           );
         }
+        // Computation is complete, but history and completion notifications
+        // must wait for every metadata write and matching durable server truth.
+        const historySaved = await auditSession.verifyCompletion(STAGE_ORDER);
+        if (!historySaved || cancelRequestedRef.current) return;
+        if (shouldRunCurrentStage("actionables")) {
+          try {
+            await apiService.queueAutoRebalanceCompletionEmail({
+              portfolio: runMetadata.auto_rebalance_portfolio,
+              sequence: runMetadata.auto_rebalance_sequence,
+              label: runMetadata.auto_rebalance_label,
+              completed_at: new Date().toISOString(),
+              stages_completed: STAGE_ORDER.filter(shouldRunCurrentStage).map(
+                getStageTileLabel,
+              ),
+            });
+          } catch (emailError) {
+            setCompletionEmailWarnings((current) => ({
+              ...current,
+              [portfolio]: `Completion email was not confirmed: ${normalizeError(emailError)}`,
+            }));
+            console.error("Failed to queue auto-rebalance success email", emailError);
+          }
+        }
         if (pauseRequestedRef.current) pauseRequestedRef.current = false;
         setWorkflowPaused(false);
         window.setTimeout(() => {
+          if (isWorkflowExecutingRef.current || auditSessionsRef.current[portfolio]?.key !== auditSession.key) return;
           setStates((current) => {
             const lastCost = getWorkflowRunCost(current[portfolio], usdInrRate);
             setLastAutoRebalanceCosts((costs) => ({
@@ -8154,6 +8227,7 @@ ${zerodhaExecutionMode === "direct_market"
           );
         }
         window.setTimeout(() => {
+          if (isWorkflowExecutingRef.current || auditSessionsRef.current[portfolio]?.key !== auditSession.key) return;
           setStates((current) => ({
             ...current,
             [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
@@ -8170,6 +8244,9 @@ ${zerodhaExecutionMode === "direct_market"
           }));
         }, WORKFLOW_COMPLETION_RESET_DELAY_MS);
       } finally {
+        // Pauses, cancellations and genuine model failures also retain their
+        // pending audit writes until bounded persistence attempts finish.
+        await auditSession.drain();
         const wasCancelled = cancelRequestedRef.current;
         activeExecutionRefsRef.current = [];
         delete activeAutoRebalanceMetadataRef.current[portfolio];
@@ -8199,6 +8276,7 @@ ${zerodhaExecutionMode === "direct_market"
             }, {} as WorkflowState),
           }));
           window.setTimeout(() => {
+            if (isWorkflowExecutingRef.current || auditSessionsRef.current[portfolio]?.key !== auditSession.key) return;
             setStates((current) => ({
               ...current,
               [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
@@ -8220,6 +8298,7 @@ ${zerodhaExecutionMode === "direct_market"
     [
       buildZerodhaPopupFeatures,
       completeSkippedStage,
+      getAuditSession,
       markCompleted,
       markRunning,
       ensureZerodhaConnectedForSync,
@@ -8263,12 +8342,14 @@ ${zerodhaExecutionMode === "direct_market"
         } else if (payload) {
           const snapshot =
             await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
+          assertIndmoneyHoldingsSnapshot(snapshot);
           markCompleted(portfolio, "sync", {
             completedAt: snapshot.captured_at,
             runStatus: snapshot.parse_status,
           });
         } else {
           const overview = await apiService.indmoneyUsPortfolioOverview();
+          assertIndmoneyHoldingsSnapshot(overview.latest);
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
             runStatus: overview.latest?.parse_status ?? "last snapshot",
@@ -8378,6 +8459,8 @@ ${zerodhaExecutionMode === "direct_market"
   );
 
   const renderSectionCard = (section: (typeof sections)[number]) => {
+    const audit = auditStates[section.portfolio];
+    const emailWarning = completionEmailWarnings[section.portfolio];
     const isSectionRunning = runningPortfolio === section.portfolio;
     const hasActiveStage = hasActiveWorkflowStage(section.portfolio, states);
     const showPauseKillControls = isSectionRunning || hasActiveStage;
@@ -8416,6 +8499,20 @@ ${zerodhaExecutionMode === "direct_market"
               Last run on{" "}
               {formatTimestamp(lastRunByPortfolio[section.portfolio])}
             </p>
+            {audit?.status === "pending" ? (
+              <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
+                <Loader2 className="size-4 shrink-0 animate-spin" />
+                {audit.label}: run history confirmation pending. Completed outputs remain available.
+              </p>
+            ) : audit?.status === "failed" ? (
+              <div role="alert" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                <p className="font-semibold">{audit.label}: run history was not confirmed.</p>
+                <p className="mt-1">Completed outputs remain available. A completion email has not been queued. Do not rerun model work to repair history.</p>
+                {audit.message ? <p className="mt-1">{audit.message}</p> : null}
+                <Link href={URLs.routes.console.autoRebalanceRuns(section.portfolio)} className="mt-2 inline-block font-semibold underline">Check saved run history</Link>
+              </div>
+            ) : null}
+            {emailWarning ? <p role="alert" className="mt-2 text-sm text-amber-800">{emailWarning}</p> : null}
           </div>
           <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
             <div

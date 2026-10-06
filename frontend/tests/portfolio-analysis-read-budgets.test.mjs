@@ -18,7 +18,7 @@ function loadModule(path, imports = {}, suffix = "") {
 function loadProxyBudgets() {
   return loadModule("../app/backend-api/[...path]/route.ts", {
     "@/lib/boundedApiTransport": { ApiOriginCircuitBreaker: class {} },
-  }, "\nexport { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs, getCapturedPortfolioAnalysisReadScope };\n");
+  }, "\nexport { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs, getCapturedPortfolioAnalysisReadScope, getResearchHistoryReadScope };\n");
 }
 
 function loadApiService() {
@@ -32,7 +32,7 @@ function loadApiService() {
   });
   return loadModule("../services/api.ts", {
     "@/lib/urls": {
-      URLs: { zerodha: providerUrls("zerodha"), indmoneyUs: providerUrls("indmoney-us") },
+      URLs: { zerodha: providerUrls("zerodha"), indmoneyUs: providerUrls("indmoney-us"), runs: { get: (id) => `/backend-api/runs/${id}` }, providers: { list: () => "/backend-api/providers" } },
     },
     "@/lib/apiReadCircuitBreaker": loadModule("../lib/apiReadCircuitBreaker.ts"),
     "@/lib/privateRequestDeduplicator": loadModule("../lib/privateRequestDeduplicator.ts"),
@@ -97,4 +97,36 @@ test("captured reads use bounded circuit scopes separate from generic broker rea
   }
   assert.equal(scopes.size, 4);
   assert.equal(getCapturedPortfolioAnalysisReadScope("GET", "zerodha/portfolio"), undefined);
+});
+
+
+test("stored run details and provider estimates have coherent isolated read deadlines", async () => {
+  const api = loadApiService();
+  const { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs, getResearchHistoryReadScope } = loadProxyBudgets();
+  const calls = [];
+  const controller = new AbortController();
+  api.get = async (url, options) => { calls.push({ url, options }); return {}; };
+  await api.getRun(12, { signal: controller.signal });
+  await api.getProviders({ signal: controller.signal, prompt: "example" });
+  for (const { url, options } of calls) {
+    const path = url.replace("/backend-api/", "").split("?")[0];
+    assert.equal(options.signal, controller.signal);
+    assert.equal(options.timeoutMs, 20_000);
+    assert.equal(getProxyAttemptTimeoutMs("GET", path), 16_000);
+    assert.equal(getProxyTotalTimeoutMs("GET", path), 18_000);
+    assert.equal(getProxyTotalTimeoutMs("HEAD", path), 18_000);
+  }
+  assert.equal(getResearchHistoryReadScope("GET", "runs/12"), "runs/detail");
+  assert.equal(getResearchHistoryReadScope("GET", "runs/999999"), "runs/detail");
+  assert.equal(getResearchHistoryReadScope("GET", "providers"), "providers");
+  for (const path of ["runs", "runs/12/cancel", "runs/auto-rebalance-history", "providers/extra"]) {
+    assert.equal(getResearchHistoryReadScope("GET", path), undefined);
+    assert.equal(getProxyTotalTimeoutMs("GET", path), 4_000);
+  }
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    for (const path of ["runs/12", "providers"]) {
+      assert.equal(getResearchHistoryReadScope(method, path), undefined);
+      assert.equal(getProxyTotalTimeoutMs(method, path), 8_000);
+    }
+  }
 });

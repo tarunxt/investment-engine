@@ -53,27 +53,21 @@ test("captured-detail failures are independently recoverable and explain how to 
 });
 
 test("historical cache merges rather than replacing older rows", () => {
-  assert.match(source, /HISTORICAL_ACTION_ROWS_CACHE_VERSION = 2/);
+  assert.match(source, /HISTORICAL_ACTION_ROWS_CACHE_VERSION = 4/);
   assert.match(source, /mergeHistoricalActionRows\(\s*rows,\s*readHistoricalActionRowsCache\(market\)/);
   assert.match(source, /mergeHistoricalActionRows\(historicalRows, readHistoricalActionRowsCache\(market\)\)/);
-  assert.match(source, /const displayedPersistedHistory = useMemo\(/);
-  assert.match(source, /action: currentRow\.formulaAction/);
-  assert.match(source, /score: currentRow\.formulaScore/);
-  assert.match(
-    source,
-    /buildCanonicalCurrentHistoryRows\(actionRows, runs, market\),\s*historicalActionRowsByMarket\[market\]/,
-  );
+  assert.match(source, /new Set\(persistedHistory\.map\(\(item\) => item\.rebalance_run_id\)\)/);
+  assert.doesNotMatch(source, /action: currentRow\.formulaAction/);
+  assert.doesNotMatch(source, /score: currentRow\.formulaScore/);
+  assert.doesNotMatch(source, /buildCanonicalCurrentHistoryRows/);
 });
 
 test("dashboard remains bounded while history persists separately", () => {
   assert.match(source, /DASHBOARD_RECENT_RUN_DETAIL_LIMIT = 24/);
-  assert.match(source, /apiService\.saveFinalActionableHistory\(/);
-  assert.match(source, /queueFinalActionableHistoryBackfill\(/);
-  assert.match(source, /function buildCanonicalCurrentHistoryRows\(/);
-  assert.match(
-    source,
-    /buildCanonicalCurrentHistoryRows\(\s*actionRowsByMarket\.india/,
-  );
+  assert.doesNotMatch(source, /apiService\.saveFinalActionableHistory\(/);
+  assert.doesNotMatch(source, /queueFinalActionableHistoryBackfill\(/);
+  assert.doesNotMatch(source, /function buildCanonicalCurrentHistoryRows\(/);
+  assert.match(taskSource, /if is_rebalance_run\(run\):\s*backfill_final_actionable_history_task\.delay\(run\.user_id\)/);
   assert.match(persistenceSource, /on_conflict_do_update\(/);
   assert.match(
     persistenceSource,
@@ -87,4 +81,22 @@ test("dashboard remains bounded while history persists separately", () => {
     migrationSource,
     /"stock_symbol",\s*"formula_version",\s*name="uq_final_actionable_history/,
   );
+});
+
+test("history coverage toggle filters display without changing saved evidence", () => {
+  const filterBody = source.match(/const displayedPersistedHistory = useMemo\(\s*\(\) => ([\s\S]*?),\s*\[persistedHistory, showUncoveredHistory\]/)?.[1];
+  assert.ok(filterBody, "history display filter must exist");
+  const selectRows = new Function("persistedHistory", "showUncoveredHistory", "return (" + filterBody + ");");
+  const rows = Object.freeze([
+    Object.freeze({ id: 1, coverage_status: "suggested", score: 2.67 }),
+    Object.freeze({ id: 2, coverage_status: "run_failed", score: null }),
+    Object.freeze({ id: 3, coverage_status: "not_mentioned", score: null }),
+  ]);
+  assert.deepEqual(selectRows(rows, false), [rows[0]]);
+  assert.equal(selectRows(rows, false)[0], rows[0]);
+  assert.equal(selectRows(rows, true), rows);
+  assert.deepEqual(selectRows(rows.slice(1), false), []);
+  assert.deepEqual(selectRows([], false), []);
+  assert.match(source, /\[showUncoveredHistory, setShowUncoveredHistory\] = useState\(false\)/);
+  assert.match(source, /setPersistedHistory\(\[\]\);\s*setShowUncoveredHistory\(false\);/);
 });

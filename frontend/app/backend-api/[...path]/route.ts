@@ -253,6 +253,15 @@ function getCapturedPortfolioAnalysisReadScope(method: string, path: string) {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
+function getResearchHistoryReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  // Full stored run details and model cost estimates read historical model
+  // output. Keep their deadline and circuit separate from wallet/broker reads.
+  if (/^runs\/[0-9]+$/.test(path)) return "runs/detail";
+  if (path === "providers") return "providers";
+  return undefined;
+}
+
 function isBullpen008Read(method: string, path: string) {
   return (
     SAFE_FALLBACK_METHODS.has(method) &&
@@ -317,7 +326,7 @@ function isSportsEventComparisonsRead(method: string, path: string) {
 }
 
 function getProxyAttemptTimeoutMs(method: string, path: string) {
-  if (getCapturedPortfolioAnalysisReadScope(method, path)) {
+  if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
   }
   if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
@@ -368,7 +377,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
-  if (getCapturedPortfolioAnalysisReadScope(method, path)) {
+  if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;
   }
   if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
@@ -475,7 +484,8 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     (path === "polymarket/auto-live/history" ||
       path === "polymarket/auto-live/history/event-trends")
       ? path
-      : getCapturedPortfolioAnalysisReadScope(request.method, path);
+      : getCapturedPortfolioAnalysisReadScope(request.method, path)
+        ?? getResearchHistoryReadScope(request.method, path);
   const resolvedCandidates = resolveBackendApiCandidates(request).map(
     (candidate) => ({ ...candidate, circuitScope: readCircuitScope }),
   );

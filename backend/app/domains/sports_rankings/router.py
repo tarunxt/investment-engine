@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from app.infrastructure.database.session import get_async_db
 from .catalogue import CATALOGUE, REFRESH_SECONDS, SOURCE_IDS, augment_catalogue
 from .models import SportsRankingSnapshot
 from .polymarket_participants import load_participant_index
+from .read_projection import snapshot_summaries_query
 from .schemas import EventComparisonsQuery, RankingQuery, RefreshRequest
 from .service import event_comparisons, ranking_rows, resolve, summary
 from .master import SPORTS
@@ -51,14 +53,29 @@ async def catalogue(
     response: Response,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    view: Literal["full", "summary"] = "full",
 ):
     response.headers["Cache-Control"] = "private, no-store"
     current_catalogue = augment_catalogue(
         CATALOGUE,
         await asyncio.to_thread(load_participant_index, current_user.id),
+        include_events=view != "summary",
     )
-    snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
-    return {"schema_version": 3, "sports": SPORTS, "refresh_seconds": REFRESH_SECONDS, "automatic_analysis_enabled": False, "competitions": [summary(c, snapshots.get(c["source_id"])) for c in current_catalogue]}
+    snapshots = {s.source_id: s for s in (await db.execute(snapshot_summaries_query())).all()}
+    competitions = []
+    for item in current_catalogue:
+        snapshot = snapshots.get(item["source_id"])
+        item_summary = summary(
+            item, snapshot, ranked_count=snapshot.ranked_count if snapshot else 0,
+        )
+        if snapshot is not None and snapshot.rows_type != "array":
+            error = "Stored ranking payload is not a JSON array; ranking data is unavailable."
+            item_summary.update(
+                status="unavailable",
+                error=f"{snapshot.error}; {error}" if snapshot.error else error,
+            )
+        competitions.append(item_summary)
+    return {"schema_version": 3, "sports": SPORTS, "refresh_seconds": REFRESH_SECONDS, "automatic_analysis_enabled": False, "competitions": competitions}
 
 
 @router.post("/classify")

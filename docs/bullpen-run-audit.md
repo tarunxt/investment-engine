@@ -359,6 +359,12 @@ or a newer refresh cancels queued Bullpen reads and prevents stale responses
 from replacing the current results. These are read-only presentation changes;
 audit capture, frozen snapshots, schema versions, and trading behavior are unchanged.
 
+History database pagination materializes the requested page of scalar run IDs
+before extracting stage metadata from console JSON. This prevents PostgreSQL
+from reparsing skipped pages' projections for every later `OFFSET` page. The
+user/workspace filters, total counts, ordering, response fields, and existing
+JSON compatibility remain unchanged; no stored snapshot or schema is rewritten.
+
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
 including independent previews and scheduled runs, use the saved value until it
@@ -2658,3 +2664,19 @@ Explicit zero/partial fills remain visible. These are read-time presentation and
 summary corrections only: raw records, execution capture, broker actions,
 reconciliation, and frozen audit evidence are unchanged. Regression tests cover
 failed/pending requests, explicit fills, and open versus closed confirmed buys.
+
+### October 2026: Isolate portfolio analysis sources and read-only displays
+
+Scanner, Final Actionables, and automated-rebalance display selectors now resolve
+market and stage from explicit run metadata and leading prompt headers. Quoted
+historical input bundles cannot relabel a US Swing run as an India Rebalance run;
+contradictory or ambiguous source identities fail closed. Previously derived
+browser run/history caches use new versions, while workflow control state and
+persisted historical records remain unchanged. Consensus input sources are
+deduplicated by run/job ID, retaining separate jobs from the same model.
+
+Actionables page loads and Refresh no longer POST history or queue backfills.
+Server terminal-run reconstruction remains the durable history path. This does
+not repair or rewrite historical records created before source validation.
+Closed Calculations dialogs no longer mount their expensive computation child.
+No action formulas, execution controls, or frozen audit evidence are changed.

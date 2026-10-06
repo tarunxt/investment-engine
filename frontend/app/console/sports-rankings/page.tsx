@@ -5,6 +5,7 @@ import { RankingReadError, readRankingJson as read, type RankingErrorDetails } f
 
 type RankingRow = { name: string; rank: number | null; points: number | null; imported_names: string[]; rating?: number; nrr?: number; group?: string; record?: string; rank_label?: string; country?: string; played?: number; won?: number; drawn?: number; lost?: number; goal_difference?: number; roster?: string };
 type Competition = { id: string; code: string; code_verified?: boolean; name: string; sport: string; sport_id: string; category: string; scope: string; entry_kind: string; reference_url: string; source_id: string | null; status: string; ranking_kind: string; source_url: string | null; source_as_of: string | null; checked_at: string | null; successful_at: string | null; season: string | null; ranked_count: number; note: string; error: string | null; participants: { name: string; aliases: string[] }[]; events: { title: string; slug: string }[] };
+type CompetitionSummary = Omit<Competition, 'events'>;
 type Detail = Competition & { rows: RankingRow[] };
 const base = '/backend-api/api/sports-rankings';
 
@@ -32,7 +33,7 @@ function detailsFor(error: unknown) {
 }
 
 export default function SportsRankingsPage() {
-  const [competitions, setCompetitions] = useState<Competition[]>([]);
+  const [competitions, setCompetitions] = useState<CompetitionSummary[]>([]);
   const [selected, setSelected] = useState('epl');
   const [loadedDetail, setDetail] = useState<Detail | null>(null);
   const [query, setQuery] = useState('');
@@ -71,7 +72,7 @@ export default function SportsRankingsPage() {
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       try {
-        const data = await read<{ competitions: Competition[] }>('', controller.signal);
+        const data = await read<{ competitions: CompetitionSummary[] }>('?view=summary', controller.signal);
         setCompetitions(data.competitions);
         setError(null);
       } catch (e) {

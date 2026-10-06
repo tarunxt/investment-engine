@@ -10,7 +10,7 @@ const source = readFileSync(
 test("final actionables consensus denominator uses only LLMs with parsed output", () => {
   assert.match(
     source,
-    /const parsedRows = runs\s*\.flatMap\(parseRunRows\)\s*\.filter\(\(row\) => Object\.values\(row\.cells\)\.some\(\(value\) => value\.trim\(\)\)\);/,
+    /const parsedRows = sourceRuns\s*\.flatMap\(parseRunRows\)\s*\.filter\(\(row\) => Object\.values\(row\.cells\)\.some\(\(value\) => value\.trim\(\)\)\);/,
   );
   assert.match(
     source,

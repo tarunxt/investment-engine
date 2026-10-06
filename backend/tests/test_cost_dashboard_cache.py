@@ -129,3 +129,110 @@ def test_get_dashboard_preserves_stale_good_data_when_live_refresh_fails(monkeyp
     assert fallback["summary"]["monthToDateAwsCost"] == 42
     assert fallback["debug"]["servedStaleData"] is True
     assert fallback["diagnostics"][-1]["status"] == "stale"
+
+
+def test_redis_cache_waits_are_bounded_without_retries():
+    # Construction is lazy and never opens a Redis connection.
+    client = cache._redis_client()
+    assert client is not None
+    try:
+        config = client.connection_pool.connection_kwargs
+        assert config["socket_connect_timeout"] == 0.5
+        assert config["socket_timeout"] == 0.5
+        assert config["retry"].get_retries() == 0
+        assert not config.get("retry_on_timeout", False)
+    finally:
+        client.close()
+
+
+def test_cache_socket_timeout_preserves_local_fallback(monkeypatch):
+    cache.reset_local_cost_dashboard_cache_state()
+    monkeypatch.setattr(cache, "_redis_client", lambda: None)
+    payload = {"summary": {"monthToDateAwsCost": 10}, "debug": {}}
+    cache.store_dashboard("fixture", payload, ttl_seconds=60)
+    closed = []
+
+    class TimedOutRedis:
+        def get(self, _key):
+            raise cache.sync_redis.TimeoutError("synthetic cache timeout")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(cache, "_redis_client", TimedOutRedis)
+    assert cache.load_cached_dashboard("fixture").data == payload
+    assert cache.load_stale_good_dashboard("fixture").data == payload
+    assert closed == [True, True]
+    cache.reset_local_cost_dashboard_cache_state()
+
+
+def test_concurrent_cache_misses_collect_once(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    cache.reset_local_cost_dashboard_cache_state()
+    monkeypatch.setattr(cache, "_redis_client", lambda: None)
+    monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
+    started = Event()
+    release = Event()
+    second_attempted = Event()
+    calls = []
+
+    def live_dashboard(month):
+        calls.append(month)
+        started.set()
+        release.wait(timeout=2)
+        return service._empty_live_dashboard(month)
+
+    def second_read():
+        second_attempted.set()
+        return service.get_dashboard(month="2026-07")
+
+    monkeypatch.setattr(service, "_live_dashboard", live_dashboard)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        first = workers.submit(service.get_dashboard, month="2026-07")
+        try:
+            assert started.wait(timeout=1)
+            second = workers.submit(second_read)
+            assert second_attempted.wait(timeout=1)
+            # Let the second request reach the same missing cache while the
+            # first request still owns collection.
+            time.sleep(0.05)
+            assert calls == ["2026-07"]
+        finally:
+            release.set()
+        assert first.result(timeout=1) == second.result(timeout=1)
+    assert calls == ["2026-07"]
+    assert "2026-07:live" not in service._DASHBOARD_LOCKS
+    cache.reset_local_cost_dashboard_cache_state()
+
+
+def test_concurrent_manual_refresh_preserves_local_cooldown(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    cache.reset_local_cost_dashboard_cache_state()
+    monkeypatch.setattr(cache, "_redis_client", lambda: None)
+    monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
+    callers = Barrier(2)
+    calls = []
+
+    def live_dashboard(month):
+        calls.append(month)
+        return service._empty_live_dashboard(month)
+
+    def refresh():
+        callers.wait(timeout=1)
+        try:
+            service.get_dashboard(force_refresh=True, month="2026-07")
+            return "ok"
+        except RefreshCooldownError as exc:
+            assert 0 <= exc.retry_after_seconds <= 900
+            return "cooldown"
+
+    monkeypatch.setattr(service, "_live_dashboard", live_dashboard)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(lambda _index: refresh(), range(2)))
+    assert sorted(results) == ["cooldown", "ok"]
+    assert calls == ["2026-07"]
+    cache.reset_local_cost_dashboard_cache_state()

@@ -21,10 +21,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  inferRebalanceMarketFromPrompt,
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { getAnalysisRunIdentity, isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import {
   BULLISH_SETUPS,
   BEARISH_SETUPS,
@@ -42,7 +42,9 @@ import {
   isScoreMatrixRowOutOfBounds,
   type ScoreMatrixWeightedRow,
 } from "@/lib/scoreMatrixMath";
-import { getAutoRebalanceRunDisplayLabel, getRunScanTypeLabelFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
+import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
+import { writeOptionalBrowserCache } from "@/lib/optionalBrowserCache";
+import { formatConsolidatedQuantityCell } from "@/lib/actionableQuantityDisplay";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -108,6 +110,11 @@ type SwingScanBreakupEntry = {
   row: CanonicalRow;
 };
 
+type SwingScanParseCache = Map<RunResponse, Map<
+  NonNullable<RunResponse["run_jobs"]>[number],
+  ReturnType<typeof parseInvestmentRecommendationContent>
+>>;
+
 function getInputMarketLabel(market?: SwingTradeMarket) {
   if (market === "india") return "India";
   if (market === "us") return "US";
@@ -133,6 +140,12 @@ type CurrentValueSnapshot = {
 };
 
 type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
+
+type PositionContext = {
+  source: "portfolio-snapshot" | "captured-model-rows";
+  currentUnits: number | null;
+  currentInvestmentAmount: number | null;
+};
 
 type ScoreMatrixEntry = {
   id: string;
@@ -315,6 +328,7 @@ export type StockConsensus = {
   actionAverages: Record<ActionCategory, ActionEstimate>;
   totalSuggestions: number;
   representative: CanonicalRow;
+  positionContext: PositionContext;
   rows: LlmBreakupRow[];
   breakupEntries: ConsensusBreakupEntry[];
   swingScanEntries: SwingScanBreakupEntry[];
@@ -340,6 +354,12 @@ export type TechnicalScanResult = {
 };
 
 export type TechnicalScanMap = Record<string, TechnicalScanResult>;
+
+type TechnicalScanParseCache = Map<NonNullable<RunResponse["run_jobs"]>[number], {
+  response: string;
+  metadataKey: string;
+  rows: TechnicalScanResult[];
+}>;
 
 export type StockDetailsData = {
   portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
@@ -468,10 +488,10 @@ const TECHNICAL_SCAN_ACTIVE_STATUSES = new Set([
 const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 
-const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
-const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
+const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 2;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 2;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 2;
+const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 4;
 const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
@@ -518,12 +538,11 @@ function writeFinalActionablesRunCache(cacheKey: string, runs: RunResponse[]) {
   if (typeof window === "undefined") return;
 
   try {
-    const payload: CachedFinalActionablesRuns = {
+    writeOptionalBrowserCache(cacheKey, (): CachedFinalActionablesRuns => ({
       version: FINAL_ACTIONABLES_RUN_CACHE_VERSION,
       cachedAt: Date.now(),
       runs,
-    };
-    window.localStorage.setItem(cacheKey, JSON.stringify(payload));
+    }));
   } catch (error) {
     console.warn("Failed to cache final actionables runs:", error);
   }
@@ -544,7 +563,7 @@ function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingT
   }
 
   runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .forEach((run) => cacheableRuns.set(run.id, run));
 
   return Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id);
@@ -601,18 +620,17 @@ function writeHistoricalActionRowsCache(market: SwingTradeMarket, rows: Historic
   if (typeof window === "undefined") return;
 
   try {
-    const cacheableRows = mergeHistoricalActionRows(
-      rows,
-      readHistoricalActionRowsCache(market),
-    ).slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
-    window.localStorage.setItem(
-      getHistoricalActionRowsCacheKey(market),
-      JSON.stringify({
+    writeOptionalBrowserCache(getHistoricalActionRowsCacheKey(market), () => {
+      const cacheableRows = mergeHistoricalActionRows(
+        rows,
+        readHistoricalActionRowsCache(market),
+      ).slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
+      return {
         version: HISTORICAL_ACTION_ROWS_CACHE_VERSION,
         cachedAt: Date.now(),
         rows: cacheableRows,
-      }),
-    );
+      };
+    });
   } catch (error) {
     console.warn("Failed to cache final actionables history rows:", error);
   }
@@ -666,17 +684,17 @@ function writeDashboardFinalActionablesCache(
   if (typeof window === "undefined") return;
 
   try {
-    const cacheableRuns = new Map<number, RunResponse>();
-    selectCacheableFinalActionablesRuns(runs, "india").forEach((run) => cacheableRuns.set(run.id, run));
-    selectCacheableFinalActionablesRuns(runs, "us").forEach((run) => cacheableRuns.set(run.id, run));
-
-    const payload: CachedDashboardFinalActionables = {
-      version: DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION,
-      cachedAt: Date.now(),
-      runs: Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id),
-      portfolioSnapshots,
-    };
-    window.localStorage.setItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY, JSON.stringify(payload));
+    writeOptionalBrowserCache(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY, (): CachedDashboardFinalActionables => {
+      const cacheableRuns = new Map<number, RunResponse>();
+      selectCacheableFinalActionablesRuns(runs, "india").forEach((run) => cacheableRuns.set(run.id, run));
+      selectCacheableFinalActionablesRuns(runs, "us").forEach((run) => cacheableRuns.set(run.id, run));
+      return {
+        version: DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION,
+        cachedAt: Date.now(),
+        runs: Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id),
+        portfolioSnapshots,
+      };
+    });
   } catch (error) {
     console.warn("Failed to cache dashboard final actionables:", error);
   }
@@ -1318,6 +1336,57 @@ function getCurrentValueAmount(row: CanonicalRow, snapshotMap?: CurrentValueSnap
     : getCurrentInvestmentAmount(row);
 }
 
+function buildPositionContext(
+  rows: LlmBreakupRow[],
+  snapshotMap?: CurrentValueSnapshotMap,
+  hasPortfolioSnapshot = false,
+): PositionContext {
+  const snapshot = rows.map((row) => getCurrentValueSnapshotForRow(row.cells, snapshotMap)).find(Boolean);
+  if (hasPortfolioSnapshot) {
+    // A complete holdings snapshot also captures stocks that are no longer held.
+    return {
+      source: "portfolio-snapshot",
+      currentUnits: snapshot ? snapshot.units : 0,
+      currentInvestmentAmount: snapshot ? snapshot.currentValue : 0,
+    };
+  }
+  return {
+    source: "captured-model-rows",
+    currentUnits: average(rows.map((row) => parseNumericCell(row.cells["Current Units"]))
+      .filter((value): value is number => value !== null)),
+    currentInvestmentAmount: average(rows.map((row) => getCurrentValueAmount(row.cells))
+      .filter((value): value is number => value !== null)),
+  };
+}
+
+function getStockPositionContext(stock: StockConsensus): PositionContext {
+  return stock.positionContext ?? buildPositionContext(stock.rows);
+}
+
+function getPositionContextLabel(stock: StockConsensus) {
+  return getStockPositionContext(stock).source === "portfolio-snapshot"
+    ? "Latest portfolio snapshot"
+    : "Captured model holdings (snapshot unavailable)";
+}
+
+function buildConsolidatedPositionCells(
+  position: PositionContext,
+  unitsChange: number | null,
+  amount: number | null,
+): CanonicalRow {
+  const value = (number: number | null) => number === null ? "" : String(number);
+  return {
+    "Current Units": value(position.currentUnits),
+    [CURRENT_INVESTMENT_AMOUNT_HEADER]: value(position.currentInvestmentAmount),
+    "Units Change": value(unitsChange),
+    "Final Units": value(position.currentUnits === null || unitsChange === null ? null : position.currentUnits + unitsChange),
+    "Units to Sell/Buy": value(unitsChange === null ? null : Math.abs(unitsChange)),
+    "Units to Buy": value(unitsChange === null ? null : Math.max(0, unitsChange)),
+    "Total Buy Amount": value(unitsChange === null ? null : unitsChange > 0 ? amount : 0),
+    "Amount": value(amount),
+  };
+}
+
 function getActionAmount(
   row: CanonicalRow,
   units: number | null,
@@ -1896,7 +1965,7 @@ function buildDetailedRationaleScoreRows(
     },
     {
       id: "mean-mode-action",
-      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
+      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in Model consensus (Mean and Mode) row",
       score: meanModeActionScore,
       multiplier: config.detailedRationaleMultipliers["mean-mode-action"],
       validationRule: {
@@ -1986,6 +2055,7 @@ function resolveMatrixUnitsForAction(
   action: ActionCategory,
   context: ScoreMatrixContext,
 ) {
+  if ((action === "Sell All" || action === "Trim") && context.currentUnits === 0) return 0;
   if (action === "Sell All") {
     if ((context.currentUnits ?? 0) > 0) return -Math.abs(context.currentUnits || 0);
     if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
@@ -2103,11 +2173,7 @@ function buildScoreMatrixDetail(
     };
   });
 
-  const currentUnits = average(
-    stock.rows
-      .map((row) => parseNumericCell(row.cells["Current Units"]))
-      .filter((value): value is number => value !== null),
-  ) ?? parseNumericCell(stock.representative["Current Units"]);
+  const { currentUnits } = getStockPositionContext(stock);
 
   const meanScore = average(
     entries
@@ -2212,20 +2278,20 @@ function buildScoreMatrixDetail(
       ...entries,
       {
         id: `${stock.key}-matrix-mean-mode`,
-        source: "Consolidated (Mean and Mode)",
+        source: "Model consensus (Mean and Mode)",
         action: modeAction,
         actionScore: meanScore,
         unitsChange: meanUnitsChange,
-        note: "Action follows the mode. Units Change uses the signed mean across all LLM rows.",
+        note: "Model action follows the mode. Units Change uses the signed mean across all LLM rows.",
         isSummary: true,
       },
       {
         id: `${stock.key}-matrix-calculated`,
-        source: "Consolidated (Formula)",
+        source: "Current formula",
         action: calculatedAction,
         actionScore: calculatedScore,
         unitsChange: calculatedUnitsChange,
-        note: matchedRule.summary,
+        note: `${matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
         isSummary: true,
         isCalculated: true,
       },
@@ -2715,21 +2781,27 @@ function parseTechnicalScanResponse(
   return results;
 }
 
-export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
+export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: TechnicalScanParseCache): TechnicalScanMap {
   const scanRows = runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
         if (!job || job.status !== "completed" || !job.response) return [];
-        return parseTechnicalScanResponse(job.response, {
+        const meta = {
           runId: run.id,
           jobId: link.job_id,
           provider: job.provider,
           model: job.model,
           createdAt: job.updated_at ?? job.created_at,
           runLabel: getAutoRebalanceRunDisplayLabel(run),
-        });
+        };
+        const metadataKey = JSON.stringify(meta);
+        const cached = parsedSources?.get(link);
+        if (cached?.response === job.response && cached.metadataKey === metadataKey) return cached.rows;
+        const rows = parseTechnicalScanResponse(job.response, meta);
+        parsedSources?.set(link, { response: job.response, metadataKey, rows });
+        return rows;
       }),
     )
     .sort((a, b) => parseTimestampMs(a.createdAt) - parseTimestampMs(b.createdAt));
@@ -2745,7 +2817,7 @@ export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
 
 function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistoryItem[] {
   return runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
@@ -2793,7 +2865,7 @@ export function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: Stock
 
 function hasActiveTechnicalScan(runs: RunResponse[]) {
   return runs.some((run) =>
-    run.prompt?.includes(TECHNICAL_SCAN_MARKER)
+    isAnalysisRunForStage(run, "technical")
     && (
       TECHNICAL_SCAN_ACTIVE_STATUSES.has(run.status)
       || (run.run_jobs ?? []).some((link) =>
@@ -3003,7 +3075,7 @@ export function hasUsableRebalanceLlmOutput(run: RunResponse) {
 
 export function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
   return (
-    inferRebalanceMarketFromPrompt(run.prompt) === market &&
+    isAnalysisRunForStage(run, "rebalance", market) &&
     (isUsableModelOutputStatus(run.status) || hasUsableRebalanceLlmOutput(run))
   );
 }
@@ -3017,10 +3089,8 @@ function hasUsableTechnicalScanLlmOutput(run: RunResponse) {
 }
 
 function isCompletedTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
-  const prompt = run.prompt || "";
   return (
-    prompt.includes(TECHNICAL_SCAN_MARKER) &&
-    prompt.includes(market === "us" ? "Market: US equities" : "Market: India equities") &&
+    isAnalysisRunForStage(run, "technical", market) &&
     (isUsableModelOutputStatus(run.status) || hasUsableTechnicalScanLlmOutput(run))
   );
 }
@@ -3115,47 +3185,13 @@ const DASHBOARD_RECENT_RUN_GROUP_LIMIT = 6;
 const DASHBOARD_RECENT_RUN_GROUP_WINDOW_MS = 30 * 60 * 1000;
 const DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY = 6;
 
-function getDashboardSummaryMarket(
-  run: RunListItem,
-): SwingTradeMarket | null {
-  if (run.auto_rebalance_portfolio === "india") return "india";
-  if (run.auto_rebalance_portfolio === "indmoney_us") return "us";
-
-  const prompt = run.prompt_preview || "";
-  const rebalanceMarket = inferRebalanceMarketFromPrompt(prompt);
-  if (rebalanceMarket) return rebalanceMarket;
-  if (/Market:\s*US equities/i.test(prompt)) return "us";
-  if (/Market:\s*India equities/i.test(prompt)) return "india";
-  if (isRunInSwingTradeMarket(prompt, "india")) return "india";
-  if (isRunInSwingTradeMarket(prompt, "us")) return "us";
-  return null;
+function getDashboardSummaryMarket(run: RunListItem): SwingTradeMarket | null {
+  return getAnalysisRunIdentity(run).market;
 }
 
-function getDashboardSummaryStage(
-  run: RunListItem,
-): DashboardRecentRunStage | null {
-  const label = (run.auto_rebalance_label || "").toLowerCase();
-  const prompt = run.prompt_preview || "";
-  if (
-    label.includes("technical scan") ||
-    prompt.includes(TECHNICAL_SCAN_MARKER)
-  ) {
-    return "technical";
-  }
-  if (
-    label.includes("rebalance") ||
-    inferRebalanceMarketFromPrompt(prompt)
-  ) {
-    return "rebalance";
-  }
-  if (
-    label.includes("swing scan") ||
-    isRunInSwingTradeMarket(prompt, "india") ||
-    isRunInSwingTradeMarket(prompt, "us")
-  ) {
-    return "swing";
-  }
-  return null;
+function getDashboardSummaryStage(run: RunListItem): DashboardRecentRunStage | null {
+  const stage = getAnalysisRunIdentity(run).stage;
+  return stage === "threats" ? null : stage;
 }
 
 function selectLatestDashboardSummaryGroup(
@@ -3329,28 +3365,16 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
 }
 
 
-function getAutoRebalanceRunMarket(run: RunResponse): SwingTradeMarket | null {
-  if (run.auto_rebalance_portfolio === "india") return "india";
-  if (run.auto_rebalance_portfolio === "indmoney_us") return "us";
-  return null;
-}
 
 function isSwingScanRunForMarket(run: RunResponse, market: SwingTradeMarket) {
-  const metadataMarket = getAutoRebalanceRunMarket(run);
-  const isSwingScan =
-    /\(swing scan\)/i.test(run.auto_rebalance_label || "") ||
-    getRunScanTypeLabelFromPrompt(run.prompt) === "Swing Scan";
-  const isSameMarket = metadataMarket
-    ? metadataMarket === market
-    : isRunInSwingTradeMarket(run.prompt, market);
-
-  return isSwingScan && isSameMarket;
+  return isAnalysisRunForStage(run, "swing", market);
 }
 
 function getSwingScanBreakupEntriesForStock(
   runs: RunResponse[],
   market: SwingTradeMarket,
   stockRow: CanonicalRow,
+  parsedSources: SwingScanParseCache,
 ): SwingScanBreakupEntry[] {
   const stockSymbols = new Set(
     [stockRow["Stock Symbol"], stockRow["Stock Name"]]
@@ -3365,12 +3389,20 @@ function getSwingScanBreakupEntriesForStock(
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
         if (!job || !isUsableModelOutputStatus(job.status) || !job.response) return [];
-        const parsed = parseInvestmentRecommendationContent(job.response, {
-          provider: job.provider,
-          model: job.model,
-          runNumber: run.id,
-          runCreatedAt: run.created_at,
-        });
+        let parsedRun = parsedSources.get(run);
+        if (!parsedRun) {
+          parsedRun = new Map();
+          parsedSources.set(run, parsedRun);
+        }
+        if (!parsedRun.has(link)) {
+          parsedRun.set(link, parseInvestmentRecommendationContent(job.response, {
+            provider: job.provider,
+            model: job.model,
+            runNumber: run.id,
+            runCreatedAt: run.created_at,
+          }));
+        }
+        const parsed = parsedRun.get(link);
         if (!parsed) return [];
 
         const meta: LlmMeta = {
@@ -3395,16 +3427,33 @@ function getSwingScanBreakupEntriesForStock(
     .sort((a, b) => parseTimestampMs(b.meta.createdAt) - parseTimestampMs(a.meta.createdAt));
 }
 
+function uniqueRunJobSources(runs: RunResponse[]): RunResponse[] {
+  const seen = new Set<string>();
+  return runs.flatMap((run) => {
+    const runJobs = (run.run_jobs ?? []).filter((link) => {
+      const key = `${run.id}:${link.job_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return runJobs.length ? [{ ...run, run_jobs: runJobs }] : [];
+  });
+}
+
 export function buildConsensusRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
   portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
   allRuns: RunResponse[] = runs,
 ): StockConsensus[] {
+  const sourceRuns = uniqueRunJobSources(runs);
+  const sourceHistoryRuns = allRuns === runs ? sourceRuns : uniqueRunJobSources(allRuns);
+  // Keep parsing local to this calculation, while retaining every independent job's rows.
+  const parsedSwingSources: SwingScanParseCache = new Map();
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
-  const llmMetas = runs.flatMap(getRunJobMetas);
-  const parsedRows = runs
+  const llmMetas = sourceRuns.flatMap(getRunJobMetas);
+  const parsedRows = sourceRuns
     .flatMap(parseRunRows)
     .filter((row) => Object.values(row.cells).some((value) => value.trim()));
   const outputMetaKeys = new Set(parsedRows.map((row) => getMetaKey(row.meta)));
@@ -3420,6 +3469,7 @@ export function buildConsensusRows(
 
   return Array.from(grouped.entries())
     .map(([key, rows]) => {
+      const positionContext = buildPositionContext(rows, currentValueSnapshots, Boolean(portfolioSnapshot));
       const actionCounts = ACTION_CATEGORIES.reduce(
         (acc, action) => {
           acc[action] = 0;
@@ -3429,7 +3479,11 @@ export function buildConsensusRows(
       );
       const actionAverages = ACTION_CATEGORIES.reduce(
         (acc, action) => {
-          acc[action] = summarizeActionEstimate(rows, action, currentValueSnapshots);
+          acc[action] = {
+            ...summarizeActionEstimate(rows, action),
+            currentUnits: positionContext.currentUnits,
+            currentInvestmentAmount: positionContext.currentInvestmentAmount,
+          };
           return acc;
         },
         {} as Record<ActionCategory, ActionEstimate>,
@@ -3455,7 +3509,7 @@ export function buildConsensusRows(
       const totalSuggestions = consensusDenominator || rows.length;
 
       const first = getRepresentativeConsensusRow(rows);
-      const swingScanEntries = getSwingScanBreakupEntriesForStock(allRuns, market, first);
+      const swingScanEntries = getSwingScanBreakupEntriesForStock(sourceHistoryRuns, market, first, parsedSwingSources);
       const representative = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
@@ -3467,13 +3521,11 @@ export function buildConsensusRows(
       );
       representative["Rationale Cruxx"] = summarizeRationales(rows);
       const consensusEstimate = actionAverages[consensusAction];
-      representative["Current Units"] = formatQuantity(
-        consensusEstimate.currentUnits ?? getCurrentUnits(first, currentValueSnapshots),
-      );
-      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(
-        consensusEstimate.currentInvestmentAmount ?? getCurrentValueAmount(first, currentValueSnapshots),
-        market,
-      );
+      const consensusUnitsChange = consensusAction === "Hold" ? 0
+        : consensusEstimate.units === null ? null
+          : (consensusAction === "Trim" || consensusAction === "Sell All" ? -1 : 1) * consensusEstimate.units;
+      Object.assign(representative, buildConsolidatedPositionCells(positionContext, consensusUnitsChange, consensusEstimate.amount));
+      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(positionContext.currentInvestmentAmount, market);
       representative["Units to Sell/Buy"] = ACTION_ESTIMATE_CATEGORIES.has(
         consensusAction,
       )
@@ -3492,6 +3544,7 @@ export function buildConsensusRows(
         actionAverages,
         totalSuggestions,
         representative,
+        positionContext,
         rows,
         breakupEntries,
         swingScanEntries,
@@ -3941,6 +3994,7 @@ export function StockDetailsButton({
   const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
   const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
   const [persistedHistory, setPersistedHistory] = useState<FinalActionableHistoryItem[]>([]);
+  const [showUncoveredHistory, setShowUncoveredHistory] = useState(false);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -3948,43 +4002,30 @@ export function StockDetailsButton({
   const [resolvedDetailsData, setResolvedDetailsData] = useState<StockDetailsData | null>(null);
   const effectiveDetailsData = resolvedDetailsData ?? detailsData;
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
-  const zerodhaHolding = market === "india" ? getZerodhaHoldingForStock(effectiveDetailsData.portfolioSnapshot, stock) : null;
+  const zerodhaHolding = open && market === "india" ? getZerodhaHoldingForStock(effectiveDetailsData.portfolioSnapshot, stock) : null;
   const zerodhaBuyTransactions = useMemo(
     () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
     [stock, zerodhaHolding, zerodhaOrders],
   );
-  const eventRows = getAnalysisTableRowsForStock(
+  const eventRows = open ? getAnalysisTableRowsForStock(
     effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
     stock,
-  );
-  const threatRows = getAnalysisTableRowsForStock(effectiveDetailsData.threatsAnalysis?.report?.tables, stock);
+  ) : [];
+  const threatRows = open ? getAnalysisTableRowsForStock(effectiveDetailsData.threatsAnalysis?.report?.tables, stock) : [];
   const effectiveHistoricalRows = useMemo(
-    () => mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)),
-    [historicalRows, market],
+    () => open ? mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)) : [],
+    [historicalRows, market, open],
   );
+  // Persisted evidence is authoritative; today's holdings/formula must never overwrite it.
   const displayedPersistedHistory = useMemo(
-    () => persistedHistory.map((item) => {
-      const currentRow = effectiveHistoricalRows.find(
-        (row) => row.runId === item.rebalance_run_id && stockConsensusMatches(row.stock, stock),
-      );
-      if (!currentRow) return item;
-      return {
-        ...item,
-        action: currentRow.formulaAction,
-        score: currentRow.formulaScore,
-        consensus_numerator: currentRow.stock.actionCounts[currentRow.formulaAction],
-        consensus_denominator: currentRow.stock.totalSuggestions,
-        historical_current_units: currentRow.formulaEstimate.currentUnits,
-        historical_current_value: currentRow.formulaEstimate.currentInvestmentAmount,
-        action_units: currentRow.formulaEstimate.units,
-        amount: currentRow.formulaEstimate.amount,
-      };
-    }),
-    [effectiveHistoricalRows, persistedHistory, stock],
+    () => showUncoveredHistory
+      ? persistedHistory
+      : persistedHistory.filter((item) => item.coverage_status !== "run_failed" && item.coverage_status !== "not_mentioned"),
+    [persistedHistory, showUncoveredHistory],
   );
   const persistedRunIds = useMemo(
-    () => new Set(displayedPersistedHistory.map((item) => item.rebalance_run_id)),
-    [displayedPersistedHistory],
+    () => new Set(persistedHistory.map((item) => item.rebalance_run_id)),
+    [persistedHistory],
   );
   const matchingHistoricalRows = useMemo(
     () => effectiveHistoricalRows.filter(
@@ -4033,6 +4074,7 @@ export function StockDetailsButton({
   }, [detailsData, market]);
 
   const directHistoricalEvidenceRows = useMemo(() => {
+    if (!open) return [];
     const seen = new Set<string>();
     const rows: Array<{
       id: string;
@@ -4079,7 +4121,7 @@ export function StockDetailsButton({
     });
 
     return rows.sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt));
-  }, [stock]);
+  }, [open, stock]);
 
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
@@ -4112,6 +4154,7 @@ export function StockDetailsButton({
           event.stopPropagation();
           setResolvedDetailsData(null);
           setPersistedHistory([]);
+          setShowUncoveredHistory(false);
           setHistoryCursor(null);
           setHistoryHasMore(false);
           setOpen(true);
@@ -4222,7 +4265,20 @@ export function StockDetailsButton({
 
 
               <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
-                <h3 className="mb-3 font-semibold text-slate-950">Historical LLM suggestions</h3>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-semibold text-slate-950">Historical LLM suggestions</h3>
+                  <button
+                    type="button"
+                    aria-pressed={showUncoveredHistory}
+                    onClick={() => setShowUncoveredHistory((show) => !show)}
+                    className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <span aria-hidden="true" className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", showUncoveredHistory ? "border-blue-600" : "border-slate-400")}>
+                      {showUncoveredHistory ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
+                    </span>
+                    Show Run Failed / Not Mentioned
+                  </button>
+                </div>
                 {historyError ? (
                   <div className="mb-3">
                     <OperationalErrorNotice
@@ -4278,22 +4334,25 @@ export function StockDetailsButton({
                         ))}
                       </tbody>
                     </table>
-                    {historyHasMore ? (
-                      <div className="border-t border-slate-200 p-3 text-center">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={historyLoading || !historyCursor}
-                          onClick={() => void loadPersistedHistory(historyCursor, true)}
-                        >
-                          {historyLoading ? "Loading…" : "Load older suggestions"}
-                        </Button>
-                      </div>
-                    ) : null}
+                  </div>
+                ) : persistedHistory.length > 0 ? (
+                  <p className="mb-3 text-sm text-slate-500">No visible suggestions in the loaded history. Use the control above to show Run Failed / Not Mentioned rows.</p>
+                ) : null}
+                {historyHasMore ? (
+                  <div className="mb-3 p-3 text-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={historyLoading || !historyCursor}
+                      onClick={() => void loadPersistedHistory(historyCursor, true)}
+                    >
+                      {historyLoading ? "Loading…" : "Load older suggestions"}
+                    </Button>
                   </div>
                 ) : null}
                 {matchingHistoricalRows.length ? (
                   <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
+                    <p className="px-3 py-2 text-xs text-slate-500">Reconstructed using captured model holdings and current formula settings. Technical coverage is conservatively limited to before this rebalance started because its original completion time is unavailable. Saved server records above remain authoritative.</p>
                     <table className="min-w-[70rem] text-xs">
                       <thead>
                         <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
@@ -4525,7 +4584,7 @@ function ActionSummarySections({
           >
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+                <CardTitle className="text-sm">Model consensus: {ACTION_CATEGORY_LABEL[action]}</CardTitle>
                 <span className="text-xs font-semibold text-slate-600">
                   {stocks.length} stock{stocks.length === 1 ? "" : "s"}
                 </span>
@@ -4617,6 +4676,7 @@ function ActionSummaryStockTile({
         </span>
       </div>
 
+      <p className="mt-2 text-[11px] text-slate-500">Position: {getPositionContextLabel(stock)}. Quantities are model estimates before market rounding.</p>
       <dl className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -4687,6 +4747,7 @@ function RebalanceCell({
   setupGroups,
   onSetupClick,
   preferActionTag,
+  isConsolidated = false,
 }: {
   row: CanonicalRow;
   header: ConsolidatedDisplayHeader;
@@ -4695,6 +4756,7 @@ function RebalanceCell({
   setupGroups?: Record<string, SetupStockGroup>;
   onSetupClick?: (group: SetupStockGroup) => void;
   preferActionTag?: boolean;
+  isConsolidated?: boolean;
 }) {
   if (header === "Technical Setup") {
     const setup = formatTechnicalSetup(technicalScan || null, row);
@@ -4749,7 +4811,10 @@ function RebalanceCell({
       </TradingViewSymbolLink>
     );
   }
-  return cellValue || "";
+  const quantity = isConsolidated ? formatConsolidatedQuantityCell(row, header) : null;
+  return quantity !== null && quantity !== cellValue
+    ? <span title={cellValue}>{quantity}</span>
+    : cellValue || "";
 }
 
 function ScoreMatrixSection({
@@ -4777,9 +4842,9 @@ function ScoreMatrixSection({
           Consolidated score matrix
         </div>
         <p className="mt-1 text-xs leading-5 text-slate-600">
-          The Mean and Mode row keeps the mode action and the signed mean units change. The
-          Formula row applies the Calculated Score matrix to fill the final Action and Units
-          Change. Click the formula action to inspect the matched score range.
+          Model consensus keeps the mode action and signed mean units change. Current formula
+          uses the Calculated Score matrix and {getPositionContextLabel(stock).toLowerCase()}.
+          Quantities here precede market rounding; India action tables use whole units.
         </p>
         {matchedRule ? (
           <div className="mt-2 text-xs font-medium text-blue-700">
@@ -5616,7 +5681,7 @@ export function ScoreMatrixModal({
               </table>
             </div>
             <p className="mt-3 text-xs leading-5 text-slate-600">
-              The highlighted score range drives the Consolidated (Formula) action and units change.
+              The highlighted score range drives the Current formula action and units change.
               Actions and manual Units Change values are editable here for what-if formula changes; blank units use the default auto sizing.
             </p>
           </section>
@@ -5974,12 +6039,15 @@ function buildSummaryRowCells(
   action: ActionCategory | null,
   unitsChange: number | null,
 ): CanonicalRow {
+  const price = parseNumericCell(stock.representative["Price Per Unit"]);
   const summaryCells = {
     ...stock.representative,
+    ...buildConsolidatedPositionCells(
+      { ...getStockPositionContext(stock), currentUnits: detail.currentUnits },
+      unitsChange,
+      unitsChange !== null && price !== null ? Math.abs(unitsChange * price) : null,
+    ),
     [ACTION_HEADER]: action ? ACTION_CATEGORY_LABEL[action] : "",
-    "Units Change": unitsChange === null ? "" : String(unitsChange),
-    "Final Units": unitsChange === null || detail.currentUnits === null ? "" : String(detail.currentUnits + unitsChange),
-    "Units to Buy": unitsChange !== null && unitsChange > 0 ? String(unitsChange) : stock.representative["Units to Buy"] || "",
   };
 
   RATIONALE_TEXT_HEADERS.forEach((header) => {
@@ -6085,7 +6153,7 @@ function buildActionablesCalculationRows(
       {
         id: `${stock.key}-mean-mode`,
         jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: "Consolidated (Mean and Mode)",
+        llmName: "Model consensus (Mean and Mode)",
         cells: meanModeCells,
         rowClassName: "bg-amber-100/70 font-semibold",
         isConsolidated: true,
@@ -6093,7 +6161,7 @@ function buildActionablesCalculationRows(
       {
         id: `${stock.key}-formula`,
         jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: "Consolidated (Formula)",
+        llmName: "Current formula",
         cells: formulaCells,
         rowClassName: "bg-rose-100/75 font-semibold",
         detail,
@@ -6200,7 +6268,10 @@ function buildActionablesCalculationRows(
         }
         const shouldClearConsolidatedCell = source.isConsolidated && header === "Analyst/Source";
         const cellValue = shouldClearConsolidatedCell ? "" : source.cells[header as RebalanceHeader] || "";
-        values[header] = cellValue;
+        const quantity = source.isConsolidated ? formatConsolidatedQuantityCell(source.cells, header) : null;
+        values[header] = quantity !== null && quantity !== cellValue
+          ? <span title={cellValue}>{quantity}</span>
+          : cellValue;
         sortValues[header] = getCalculationCellSortValue(cellValue);
       });
 
@@ -6400,8 +6471,9 @@ function ActionablesFormulaModal({
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="font-semibold text-slate-950">Consolidation rules</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Consolidated (Mean and Mode) uses the mode action across LLM rows and averages numeric sizing/rationale columns.</li>
-              <li>Consolidated (Formula) uses the weighted Calculated Score and the Calculated Score matrix to set Action and Units Change.</li>
+              <li>Model consensus (Mean and Mode) retains the model actions and signed mean units change. Raw model rows retain their captured holdings.</li>
+              <li>Current formula uses the weighted Calculated Score and latest portfolio holdings when available; otherwise it uses captured model holdings. Consolidated Final Units equals the displayed Current Units plus Units Change.</li>
+              <li>Calculation quantities precede market rounding. India action tables use whole units; US quantities retain fractions.</li>
               <li>Technical Setup, Premarket trend, Last 5 candles trend, and Confidence Score are appended from the latest Technical Scan for the stock.</li>
               <li>Rows with no stocks for Sell All, Add More, Buy New, Trim, or Hold are hidden.</li>
             </ul>
@@ -6674,7 +6746,12 @@ function ActionablesInputSelectionDialog({
   );
 }
 
-function ActionablesCalculationsModal({
+function ActionablesCalculationsModal(props: Parameters<typeof OpenActionablesCalculationsModal>[0]) {
+  if (!props.open) return null;
+  return <OpenActionablesCalculationsModal {...props} />;
+}
+
+function OpenActionablesCalculationsModal({
   open,
   onClose,
   title,
@@ -7180,24 +7257,43 @@ type DashboardActionSortState = {
 export function buildHistoricalDashboardActionRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
-  portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
-  technicalScans: TechnicalScanMap,
+  _portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  _technicalScans: TechnicalScanMap,
   formulaConfig: ScoreMatrixFormulaConfig,
 ): HistoricalDashboardActionRow[] {
+  // Historical cutoffs reuse only the exact source link, response and parsing metadata.
+  // This cache lives for one reconstruction and cannot retain another account's data.
+  const parsedTechnicalSources: TechnicalScanParseCache = new Map();
   return runs
     .filter((run) => isCompletedRebalanceRun(run, market))
     .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))
-    .flatMap((run) =>
-      buildDashboardActionRows(
-        buildConsensusRows([run], market, portfolioSnapshot),
+    .flatMap((run) => {
+      // Run.updated_at also changes on export. No immutable completion time is exposed,
+      // so never advance the historical cutoff beyond this run's creation time.
+      const cutoff = parseTimestampMs(run.created_at);
+      const historicalTechnicalRuns = runs
+        .filter((source) => isAnalysisRunForStage(source, "technical", market)
+          && parseTimestampMs(source.created_at) > 0
+          && parseTimestampMs(source.created_at) <= cutoff)
+        .map((source) => ({
+          ...source,
+          run_jobs: (source.run_jobs ?? []).filter(({ job }) => {
+            const createdAt = parseTimestampMs(job?.created_at);
+            const updatedAt = parseTimestampMs(job?.updated_at);
+            // Missing or later output timestamps cannot establish historical availability.
+            return createdAt > 0 && updatedAt >= createdAt && updatedAt <= cutoff;
+          }),
+        }));
+      return buildDashboardActionRows(
+        buildConsensusRows([run], market),
         market,
-        technicalScans,
+        buildTechnicalScanMap(historicalTechnicalRuns, parsedTechnicalSources),
         formulaConfig,
-      ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id })),
-    );
+      ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id }));
+    });
 }
 
-function buildFinalActionableHistoryItems(
+export function buildFinalActionableHistoryItems(
   rows: HistoricalDashboardActionRow[],
   runs: RunResponse[],
 ): FinalActionableHistoryCreateItem[] {
@@ -7243,30 +7339,6 @@ function buildFinalActionableHistoryItems(
   });
 }
 
-function buildCanonicalCurrentHistoryRows(
-  rows: DashboardActionRow[],
-  runs: RunResponse[],
-  market: SwingTradeMarket,
-): HistoricalDashboardActionRow[] {
-  const latestRun = getLatestMatchingRuns(runs, market)[0];
-  if (!latestRun) return [];
-  return rows.map((row) => ({
-    ...row,
-    coveredAt: latestRun.created_at,
-    runId: latestRun.id,
-  }));
-}
-
-async function persistFinalActionableHistoryRows(
-  rows: HistoricalDashboardActionRow[],
-  runs: RunResponse[],
-) {
-  const items = buildFinalActionableHistoryItems(rows, runs);
-  for (let index = 0; index < items.length; index += 100) {
-    await apiService.saveFinalActionableHistory({ items: items.slice(index, index + 100) });
-  }
-}
-
 function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
   return {
     key: "score",
@@ -7296,8 +7368,7 @@ function buildFormulaActionEstimate(
   unitsChange: number | null,
   market: SwingTradeMarket,
 ): ActionEstimate {
-  const currentUnits = parseNumericCell(stock.representative["Current Units"]);
-  const currentInvestmentAmount = getCurrentValueAmount(stock.representative);
+  const { currentUnits, currentInvestmentAmount } = getStockPositionContext(stock);
   const units = getMarketActionUnits(unitsChange, action, market);
   const price = parseNumericCell(stock.representative["Price Per Unit"]);
   let amount: number | null = null;
@@ -7710,27 +7781,9 @@ export function DashboardFinalActionablesTables() {
     if (!runs.length) return;
     writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
     writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
-    const allRows = [
-      ...buildCanonicalCurrentHistoryRows(
-        actionRowsByMarket.india,
-        runs,
-        "india",
-      ),
-      ...buildCanonicalCurrentHistoryRows(
-        actionRowsByMarket.us,
-        runs,
-        "us",
-      ),
-    ];
-    if (allRows.length) {
-      void persistFinalActionableHistoryRows(allRows, runs).catch((error) => {
-        console.warn("Failed to persist immutable final actionables history:", error);
-      });
-    }
-    void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
-      console.warn("Unable to queue legacy final actionables history backfill:", error);
-    });
-  }, [actionRowsByMarket, historicalActionRowsByMarket, runs]);
+    // Persisted history is reconstructed by the server's terminal-run hook.
+    // Display reads and Refresh must not write history or enqueue a backfill.
+  }, [historicalActionRowsByMarket, runs]);
 
   const updateFinalActionableColumnWidth = useCallback((column: FinalActionableColumnKey, width: number) => {
     setFinalActionableLayout((current) => ({
@@ -7796,10 +7849,7 @@ export function DashboardFinalActionablesTables() {
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
-    const historicalActionRows = mergeHistoricalActionRows(
-      buildCanonicalCurrentHistoryRows(actionRows, runs, market),
-      historicalActionRowsByMarket[market],
-    );
+    const historicalActionRows = historicalActionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
     const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
     const latestTechnicalAt = Object.values(technicalScans)
@@ -8307,15 +8357,6 @@ export function FinalActionablesConsole({
     ),
     [detailsData.portfolioSnapshot, market, runs, scoreMatrixFormulaConfig, technicalScans],
   );
-  const currentActionRows = useMemo(
-    () => buildDashboardActionRows(
-      consensus,
-      market,
-      technicalScans,
-      scoreMatrixFormulaConfig,
-    ),
-    [consensus, market, scoreMatrixFormulaConfig, technicalScans],
-  );
   const setupStockGroups = useMemo(
     () => getSetupStockGroups(consensus, technicalScans, market),
     [consensus, market, technicalScans],
@@ -8336,20 +8377,8 @@ export function FinalActionablesConsole({
   useEffect(() => {
     if (!runs.length) return;
     writeHistoricalActionRowsCache(market, historicalActionRows);
-    const currentHistoryRows = buildCanonicalCurrentHistoryRows(
-      currentActionRows,
-      runs,
-      market,
-    );
-    if (currentHistoryRows.length) {
-      void persistFinalActionableHistoryRows(currentHistoryRows, runs).catch((error) => {
-        console.warn("Failed to persist immutable final actionables history:", error);
-      });
-    }
-    void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
-      console.warn("Unable to queue legacy final actionables history backfill:", error);
-    });
-  }, [currentActionRows, historicalActionRows, market, runs]);
+    // Keep this read path local-only; durable reconstruction belongs to workers.
+  }, [historicalActionRows, market, runs]);
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
@@ -8505,10 +8534,7 @@ export function FinalActionablesConsole({
               technicalScans={technicalScans}
               setupGroups={setupStockGroups}
               detailsData={detailsData}
-              historicalRows={mergeHistoricalActionRows(
-                buildCanonicalCurrentHistoryRows(currentActionRows, runs, market),
-                historicalActionRows,
-              )}
+              historicalRows={historicalActionRows}
               onSetupClick={setSelectedSetupGroup}
               onFocusCalculation={(target) => {
                 setCalculationFocusTarget(target);
@@ -8523,7 +8549,7 @@ export function FinalActionablesConsole({
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-lg">
-                  Stock-wise Consolidated Rebalance Output
+                  Stock-wise Model Consensus
                 </CardTitle>
                 <button
                   type="button"
@@ -8798,6 +8824,7 @@ function FragmentRows({
               </TradingViewSymbolLink>
               <div className="text-xs text-gray-500">{stock.exchange || "—"}</div>
               <div className="text-xs text-gray-600">{stock.representative["Stock Name"] || stock.symbol}</div>
+              <div className="mt-1 max-w-64 whitespace-normal text-[11px] text-gray-500">Position: {getPositionContextLabel(stock)}</div>
             </div>
           </div>
         </td>
@@ -8818,6 +8845,7 @@ function FragmentRows({
                 />
                 <RebalanceCell
                   row={stock.representative}
+                  isConsolidated
                   header={header}
                   market={market}
                   technicalScan={technicalScan}
@@ -8826,6 +8854,7 @@ function FragmentRows({
             ) : (
               <RebalanceCell
                 row={stock.representative}
+                isConsolidated
                 header={header}
                 market={market}
                 technicalScan={technicalScan}

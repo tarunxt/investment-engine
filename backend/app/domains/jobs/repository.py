@@ -136,6 +136,10 @@ class SyncJobRepository:
     def get(self, job_id: int) -> Job | None:
         return self._session.get(Job, job_id)
 
+    def get_fresh(self, job_id: int) -> Job | None:
+        """Re-read cancellation state changed by an API session during generation."""
+        return self._session.get(Job, job_id, populate_existing=True)
+
     def update_status(
         self,
         job: Job,
