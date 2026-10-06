@@ -1,0 +1,39 @@
+name: Recovery isolated Redis transport
+on:
+  push:
+    branches: [credx/recovery-analysis-e401]
+permissions:
+  contents: read
+jobs:
+  isolated-transport:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: [6387:6379]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install existing pinned transport dependencies
+        run: python -m pip install --disable-pip-version-check celery==5.6.3 kombu==5.6.2 redis==7.4.0
+      - name: Real disposable Redis consumption, ACK and crash redelivery
+        env:
+          PYTHONPATH: backend:backend/tests
+          CREDX_RECOVERY_MODE: '1'
+          RECOVERY_TEST_REDIS_URL: redis://127.0.0.1:6387/15
+        run: python backend/tests/recovery_redis_smoke.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: recovery-transport-evidence
+          path: |
+            recovery-redis-smoke.json
+            recovery-worker-*.log
+          if-no-files-found: warn
+          retention-days: 7
