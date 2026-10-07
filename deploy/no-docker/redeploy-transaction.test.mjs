@@ -321,6 +321,7 @@ for (const phase of [
   "dashboard-smoke",
   "bullpen-smoke",
   "backend-proxy-verification",
+  "contained-release-guard",
   "nginx-validation",
 ]) {
   test(`post-promotion ${phase} failure executes and verifies rollback`, async () => {

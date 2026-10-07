@@ -1933,6 +1933,13 @@ if [[ "$DEPLOY_BACKEND" == "true" ]]; then
 fi
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
   sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
+  if [[ -n "${CREDX_CONTAINED_RELEASE_DRIVER:-}" ]]; then
+    [[ "$DEPLOY_BACKEND" == false ]]
+    [[ "$CREDX_CONTAINED_RELEASE_DRIVER" == /tmp/investor-contained-driver.*/deploy-recovery.sh ]]
+    # Both frontend pointer/config rollback remain armed during this outer gate.
+    bash "$CREDX_CONTAINED_RELEASE_DRIVER" --post-frontend-check
+  fi
+  deployment_test_hook "contained-release-guard"
   discard_previous_frontend_build
 fi
 

@@ -397,13 +397,33 @@ jobs:
             FRONTEND_ENV_FILE="/etc/investor/frontend.env"
             DEPLOY_LOCK_FILE="/run/investor-production-deploy.lock"
             remote_artifact=""
+            contained_driver=""
+            rollback_armed=false
+            export CREDX_RECOVERY_ROLLBACK_OWNER=workflow
 
             cleanup_remote_artifact() {
               if [[ -n "${REMOTE_ARTIFACT_DIR:-}" && "$REMOTE_ARTIFACT_DIR" == /tmp/investor-deploy-* ]]; then
                 rm -rf -- "$REMOTE_ARTIFACT_DIR"
               fi
             }
-            trap cleanup_remote_artifact EXIT
+            finish_deployment() {
+              status=$?
+              rollback_failed=false
+              trap - EXIT
+              if [[ "$rollback_armed" == true ]]; then
+                echo 'Contained promotion failed; restoring the complete previous backend artifact.' >&2
+                APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                  bash "$contained_driver/deploy-recovery.sh" --restore || { status=1; rollback_failed=true; }
+              fi
+              cleanup_remote_artifact
+              if [[ "$rollback_failed" == true ]]; then
+                echo "ROLLBACK_BLOCKED: stable recovery driver retained at $contained_driver" >&2
+              elif [[ -n "$contained_driver" && "$contained_driver" == /tmp/investor-contained-driver.* ]]; then
+                rm -rf -- "$contained_driver"
+              fi
+              exit "$status"
+            }
+            trap finish_deployment EXIT
 
             command -v flock >/dev/null
             sudo touch "$DEPLOY_LOCK_FILE"
@@ -455,9 +475,25 @@ jobs:
             fi
 
             source_sync_started_at="$(date +%s)"
-            sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" diff --quiet
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" diff --cached --quiet
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" cat-file -e "${DEPLOY_COMMIT_SHA}^{commit}"
+            # Driver and rollback handler survive checkout and source restoration.
+            contained_driver=$(mktemp -d /tmp/investor-contained-driver.XXXXXX)
+            chmod 0755 "$contained_driver"
+            for driver_file in deploy-recovery.sh backend-recovery-artifact.py; do
+              sudo -u "$APP_USER" git -C "$APP_ROOT" show "$DEPLOY_COMMIT_SHA:deploy/no-docker/$driver_file" > "$contained_driver/$driver_file"
+              chmod 0644 "$contained_driver/$driver_file"
+            done
+            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+              bash "$contained_driver/deploy-recovery.sh" --preflight
+            export CREDX_RECOVERY_ROLLBACK_DIR="$APP_ROOT/.recovery-release-${DEPLOY_COMMIT_SHA:0:12}-$(date +%s)-$$"
+            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+              bash "$contained_driver/deploy-recovery.sh" --prepare
+            rollback_armed=true
+            # Stop the contained processes before mutating their application source.
+            sudo systemctl stop investor-backend investor-recovery-analysis
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard "$DEPLOY_COMMIT_SHA"
             actual_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
             if [[ "$actual_sha" != "$DEPLOY_COMMIT_SHA" ]]; then
@@ -474,48 +510,26 @@ jobs:
               chmod 0644 "$remote_artifact" "$remote_artifact.sha256"
             fi
 
-            RECOVERY_DEPLOY=false
-            if [[ "$DEPLOY_SCOPE" != "frontend-only" ]]; then
-              recovery_mode=$(APP_ROOT="$APP_ROOT" bash "$APP_ROOT/deploy/no-docker/deploy-recovery.sh" --detect)
-              if [[ "$recovery_mode" == 1 ]]; then
-                APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
-                  bash "$APP_ROOT/deploy/no-docker/deploy-recovery.sh"
-                RECOVERY_DEPLOY=true
-                if [[ "$DEPLOY_SCOPE" == full-stack ]]; then DEPLOY_SCOPE=frontend-only; fi
-              elif [[ "$recovery_mode" != 0 ]]; then
-                echo 'Invalid recovery mode; refusing normal deployment.' >&2
-                exit 1
-              fi
-            fi
-            if [[ "$DEPLOY_SCOPE" != "frontend-only" && "$RECOVERY_DEPLOY" != true ]]; then
-              bash "$APP_ROOT/deploy/no-docker/scripts/configure-postgres-recovery.sh" --restart-backend
-            fi
-            if [[ "$DEPLOY_SCOPE" != "frontend-only" && "$RECOVERY_DEPLOY" != true ]] && command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-              echo "==> PostgreSQL is not ready; restarting it after disk recovery"
-              sudo systemctl restart postgresql
-              for attempt in $(seq 1 30); do
-                pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1 && break
-                sleep 1
-              done
-              pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1
-            fi
-
-            if [[ "$RECOVERY_DEPLOY" != true || "$DEPLOY_SCOPE" == frontend-only ]]; then
+            RECOVERY_DEPLOY=true
+            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+              bash "$contained_driver/deploy-recovery.sh"
+            if [[ "$DEPLOY_SCOPE" == full-stack ]]; then DEPLOY_SCOPE=frontend-only; fi
+            if [[ "$DEPLOY_SCOPE" == frontend-only ]]; then
             SKIP_GIT_SYNC=true \
             APP_ROOT="$APP_ROOT" \
             APP_USER="$APP_USER" \
+            BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+            CREDX_CONTAINED_RELEASE_DRIVER="$contained_driver/deploy-recovery.sh" \
             FRONTEND_ARTIFACT="$remote_artifact" \
             EXPECTED_FRONTEND_SHA="$DEPLOY_COMMIT_SHA" \
               bash "$APP_ROOT/deploy/no-docker/redeploy.sh" "$DEPLOY_SCOPE"
             fi
 
-            if [[ "$DEPLOY_SCOPE" == "full-stack" ]]; then
-              echo "==> Install/update passive Bullpen runtime health timer"
-              APP_ROOT="$APP_ROOT" \
-                APP_USER="$APP_USER" \
-                BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
-                bash "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh"
+            if [[ "$DEPLOY_SCOPE" == backend-only ]]; then
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --post-frontend-check
             fi
+            rollback_armed=false
 
             echo "==> EC2 deployment total: $(( $(date +%s) - deploy_started_at ))s"
 

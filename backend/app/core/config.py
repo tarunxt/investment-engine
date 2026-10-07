@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str
     
+    # Disabled by default; local review must opt in after schema checks.
+    recommendation_audit_enabled: bool = False
+    recommendation_audit_external_enabled: bool = False
+    recommendation_audit_fundamentals_enabled: bool = False
+    recommendation_audit_daily_cap_usd: float = Field(default=0, ge=0, le=100)
+    recommendation_audit_kite_incremental_cost_usd: float | None = Field(default=None, ge=0, le=100)
+
     # API Keys
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None

@@ -79,3 +79,7 @@ from app.domains.trading_bots.models import (  # noqa: F401
     UniversalScanSettingsRecord,
     UniversalScanStateRecord,
 )
+
+from app.domains.recommendation_audit.models import (  # noqa: F401
+    EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
+)

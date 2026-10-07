@@ -155,3 +155,7 @@ __all__ = [
     "ZerodhaCredential",
     "ZerodhaPortfolioSnapshot",
 ]
+
+from app.domains.recommendation_audit.models import (  # noqa: F401
+    EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
+)

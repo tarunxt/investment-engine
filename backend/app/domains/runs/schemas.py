@@ -347,7 +347,11 @@ class FinalActionableHistoryBackfillResponse(BaseModel):
     task_id: str | None = None
 
 
+from app.domains.recommendation_audit.schemas import AuditRunContext
+
+
 class RunCreate(BaseModel):
+    recommendation_audit: AuditRunContext | None = None
     prompt: str
     targets: list[RunModelTarget]
     polymarket_event_context: PolymarketEventRunContext | None = None

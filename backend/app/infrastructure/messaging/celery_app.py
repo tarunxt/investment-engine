@@ -27,6 +27,12 @@ _backend = settings.celery_result_backend or settings.redis_url
 
 celery = RecoveryCelery("worker", broker=_broker, backend=_backend, task_cls=RecoveryTask)
 
+# Recovery of advisory verification requests lives in the consumer service,
+# rather than adding a recurring Beat task or touching financial workflows.
+if not recovery_mode():
+    from app.domains.recommendation_audit.outbox import AuditOutboxRelay
+    celery.steps["consumer"].add(AuditOutboxRelay)
+
 # ── Queue definitions ────────────────────────────────────────────────────────
 # Separate queues prevent long AI tasks from starving short email/beat tasks.
 celery.conf.task_queues = (
@@ -45,6 +51,7 @@ celery.conf.task_routes = {
     "app.domains.sports_rankings.tasks.reconcile_cricket": {"queue": "ai"},
     "app.domains.sports_rankings.tasks.refresh_source": {"queue": "ai"},
     "app.domains.jobs.tasks.*": {"queue": "ai"},
+    "app.domains.recommendation_audit.tasks.*": {"queue": "ai"},
     "app.domains.mails.tasks.deliver_completion_email": {"queue": "email"},
     "app.domains.mails.tasks.recover_completion_emails": {"queue": "beat"},
     "app.domains.auth.tasks.*": {"queue": "email"},
@@ -187,6 +194,7 @@ celery.autodiscover_tasks(["app.domains.jobs", "app.domains.zerodha"] if recover
     "app.domains.auth",
     "app.domains.mails",
     "app.domains.runs",
+    "app.domains.recommendation_audit",
     "app.domains.google_sheets",
     "app.domains.bullpen_run_audit",
     "app.domains.bullpen008",

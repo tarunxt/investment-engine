@@ -70,12 +70,14 @@ def revision(engine: sa.Engine) -> str:
         return connection.execute(sa.select(table.c.version_num)).scalar_one()
 
 
-def baseline_snapshot(engine: sa.Engine) -> dict:
+def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABLE}), include_tables=None) -> dict:
     """Capture every baseline table's schema and synthetic rows, excluding the revision."""
     inspector = sa.inspect(engine)
     snapshot = {}
     with engine.connect() as connection:
-        for name in sorted(set(inspector.get_table_names()) - {"alembic_version", EVENT_TABLE}):
+        names=set(inspector.get_table_names()) - {"alembic_version"} - set(exclude_tables)
+        if include_tables is not None: names &= set(include_tables)
+        for name in sorted(names):
             table = sa.Table(name, sa.MetaData(), autoload_with=connection)
             snapshot[name] = {
                 "columns": [
@@ -217,15 +219,35 @@ def main() -> None:
         require(revision(engine) == BASELINE, "Downgrade revision mismatch")
         require(set(sa.inspect(engine).get_table_names()) == baseline_tables, "Downgrade removed unrelated tables")
         require(baseline_snapshot(engine) == original, "Downgrade changed baseline schema/data")
-        alembic("upgrade", "head")
-        require(revision(engine) == REVISION, "Re-upgrade did not reach the attempt migration head")
-        alembic("current", "--check-heads")
+        # Round-trip only this reversible named revision. Later audit history
+        # migrations are forward-only and must never enter this downgrade path.
+        alembic("upgrade", REVISION)
+        require(revision(engine) == REVISION, "Re-upgrade did not reach the named attempt migration")
         verify_schema(engine)
         require(baseline_snapshot(engine) == original, "Re-upgrade changed baseline schema/data")
         table = sa.Table(EVENT_TABLE, sa.MetaData(), autoload_with=engine)
         with engine.connect() as connection:
             require(connection.scalar(sa.select(sa.func.count()).select_from(table)) == 0, "Recreated event table is not empty")
-        print("PASS: baseline upgrade; attempt schema, indexes, append and uniqueness; isolated downgrade; head re-upgrade; baseline data preserved.")
+        verify_events(engine)
+        before=baseline_snapshot(engine,exclude_tables=frozenset())
+        # Exercise env.py and the complete revision chain, including version
+        # stamping. Calling a migration's upgrade() directly cannot prove this.
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        scripts=ScriptDirectory.from_config(Config(str(BACKEND/"alembic.ini")))
+        head=scripts.get_current_head()
+        require(bool(head), "Migration chain has no single head")
+        require(REVISION in {item.revision for item in scripts.walk_revisions()}, "Named revision absent from chain")
+        alembic("upgrade", "head")
+        require(revision(engine)==head, "Full-chain upgrade did not stamp its exact head")
+        alembic("current", "--check-heads")
+        verify_schema(engine)
+        require(baseline_snapshot(engine,exclude_tables=frozenset(),include_tables=before)==before, "Forward head upgrade changed existing schema/data")
+        after=baseline_snapshot(engine,exclude_tables=frozenset())
+        alembic("upgrade", "head")
+        require(revision(engine)==head, "Idempotent upgrade changed head stamp")
+        require(baseline_snapshot(engine,exclude_tables=frozenset())==after, "Repeated head upgrade changed schema/data")
+        print(f"PASS: named attempt migration roundtrip; complete forward chain stamped {head}; prior synthetic data and schema preserved; repeated upgrade unchanged.")
     finally:
         engine.dispose()
 

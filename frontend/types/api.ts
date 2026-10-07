@@ -912,6 +912,7 @@ export interface OutputSourceJobReference {
 }
 
 export interface RunCreate {
+  recommendation_audit?: import("./recommendationAudit").AuditRunContext;
   prompt: string;
   targets: RunModelTarget[];
   polymarket_event_context?: PolymarketEventRunContext | null;

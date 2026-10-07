@@ -148,6 +148,70 @@ jobs:
           CREDX_AUDIT_TEST_DATABASE_ACK: disposable-local-only
         run: pytest -q backend/tests/test_auto_rebalance_audit_postgres.py backend/tests/test_output_source_context_postgres.py
 
+  recommendation-audit-release-gates:
+    name: Recommendation audit migration, concurrency and authenticated delivery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: audit_test
+          POSTGRES_PASSWORD: audit_test
+          POSTGRES_DB: credx_audit_test_recommendations
+        options: --health-cmd "pg_isready -U audit_test -d credx_audit_test_recommendations" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PYTHONPATH: backend
+      CREDX_RECOVERY_MODE: "0"
+      RECOMMENDATION_AUDIT_ENABLED: "false"
+      RECOMMENDATION_AUDIT_EXTERNAL_ENABLED: "false"
+      RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED: "false"
+      RECOMMENDATION_AUDIT_DAILY_CAP_USD: "0"
+      CREDX_AUDIT_DISPOSABLE_DB: "1"
+      CREDX_AUDIT_TEST_POSTGRES_URL: postgresql+psycopg2://audit_test:audit_test@postgres:5432/credx_audit_test_recommendations
+      CREDX_AUDIT_TEST_REDIS_URL: redis://redis:6379/15
+      CREDX_AUDIT_TEST_REDIS_ACK: disposable-local-only
+      DATABASE_URL: postgresql+asyncpg://audit_test:audit_test@postgres:5432/credx_audit_test_recommendations
+      REDIS_URL: redis://redis:6379/15
+    steps:
+      - name: Checkout exact proposed commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install isolated test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Run advisory audit release gates inside Docker
+        run: >-
+          pytest -q --junitxml=/tmp/recommendation-audit.xml
+          backend/tests/test_recommendation_audit.py
+          backend/tests/test_recommendation_audit_integration.py
+          backend/tests/test_recommendation_audit_adapters.py
+          backend/tests/test_recommendation_audit_queue.py
+          backend/tests/test_recommendation_audit_outbox.py
+          backend/tests/test_recommendation_audit_fundamentals.py
+          backend/tests/test_recommendation_audit_postgres.py
+          backend/tests/test_output_contracts.py
+          backend/tests/test_output_runtime.py
+          backend/tests/test_recovery_containment.py
+      - name: Require every recommendation audit release check to execute
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/recommendation-audit.xml').getroot()
+          skipped=root.findall('.//testcase/skipped')
+          assert not skipped, f'{len(skipped)} release checks were skipped'
+          print('All selected release checks executed, including PostgreSQL and Redis fixtures.')
+          PY
+      - name: Verify contained deployment and complete backend rollback using fixtures
+        run: |
+          python -m unittest discover -s deploy/no-docker -p 'test_*recovery*.py' -v
+
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
     runs-on: ubuntu-latest
@@ -166,6 +230,7 @@ jobs:
         run: |
           bash -n \
             deploy/no-docker/redeploy.sh \
+            deploy/no-docker/deploy-recovery.sh \
             deploy/no-docker/scripts/configure-postgres-recovery.sh \
             deploy/no-docker/package-frontend-artifact.sh \
             deploy/no-docker/scripts/run-frontend.sh \
@@ -276,7 +341,6 @@ jobs:
       NEXT_PUBLIC_DISABLE_API_PROXY: "false"
       NEXT_PUBLIC_API_DEBUG: "false"
       NEXTAUTH_URL: https://cred-x.in
-      NEXTAUTH_SECRET: ci-runtime-secret
       AUTH_TRUST_HOST: "true"
       BACKEND_API_URL: http://127.0.0.1:8000
 
@@ -294,6 +358,16 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Generate ephemeral benchmark authentication fixture
+        run: |
+          node - <<'JS'
+          const { randomBytes } = require('node:crypto');
+          const { appendFileSync } = require('node:fs');
+          const value = randomBytes(32).toString('hex');
+          console.log(`::add-mask::${value}`);
+          appendFileSync(process.env.GITHUB_ENV, `NEXTAUTH_SECRET=${value}\n`);
+          JS
 
       - name: Log cold-build runner resources
         run: |
