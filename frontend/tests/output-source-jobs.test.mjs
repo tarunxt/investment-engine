@@ -70,7 +70,7 @@ test('manual prompt binding checks exact bundle; removed or changed selection st
 
 test('both submission paths add evidence beside existing prompts/options', () => {
   const automatic = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');
-  assert.match(automatic, /\.\.\.buildRunPayload\(\{[\s\S]*?scanLabel: "Rebalance Scan",\s*\}\), output_source_jobs: outputSourceJobs/);
+  assert.match(automatic, /\.\.\.buildRunPayload\(\{[\s\S]*?scanLabel: "Rebalance Scan",[\s\S]*?\}\), output_source_jobs: outputSourceJobs/);
   const manual = read('../app/console/dashboard/_context.tsx');
   assert.match(manual, /prompt: trimmedPrompt,\s*targets,\s*output_source_jobs: await outputSourceJobsForPrompt\(trimmedPrompt, outputSourceSelection\)/);
   for (const option of ['scheduled_at', 'allow_parallel', 'auto_export_enabled', 'export_spreadsheet_url',
