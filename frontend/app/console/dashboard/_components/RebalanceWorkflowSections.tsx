@@ -5159,10 +5159,14 @@ function StageLlmSelectorDialog({
   );
 }
 
+const NO_DASHBOARD_REFRESH = async () => {};
+
 export function RebalanceWorkflowSections({
-  onDashboardRefresh,
+  // Standalone workflows refresh stage data and dispatch final-actionables-refresh
+  // themselves; only embedded consumers need an additional dashboard refresh.
+  onDashboardRefresh = NO_DASHBOARD_REFRESH,
 }: {
-  onDashboardRefresh: () => Promise<void>;
+  onDashboardRefresh?: () => Promise<void>;
 }) {
   const usdInrRate = useUsdInrRate();
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
