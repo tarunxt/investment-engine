@@ -64,10 +64,26 @@ test("captured event and threat reads use coherent browser and proxy budgets", a
   }
 });
 
+test("Zerodha sync routes have their own bounded connection and snapshot budgets", () => {
+  const { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs } = loadProxyBudgets();
+  for (const [method, path] of [
+    ["GET", "zerodha/status"], ["HEAD", "zerodha/status"],
+    ["GET", "zerodha/login-url"], ["GET", "zerodha/portfolio"],
+    ["POST", "zerodha/callback"], ["POST", "zerodha/portfolio/sync"],
+  ]) {
+    assert.equal(getProxyAttemptTimeoutMs(method, path), 16_000, path);
+    assert.equal(getProxyTotalTimeoutMs(method, path), 18_000, path);
+  }
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    assert.equal(getProxyAttemptTimeoutMs(method, "zerodha/orders"), 8_000);
+    assert.equal(getProxyTotalTimeoutMs(method, "zerodha/orders"), 8_000);
+  }
+});
+
 test("captured-read budgets do not expand unrelated reads or mutations", () => {
   const { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs } = loadProxyBudgets();
   for (const path of [
-    "zerodha/portfolio", "indmoney-us/portfolio", "runs", "jobs/42",
+    "zerodha/orders", "zerodha/portfolio/2026-10-07", "indmoney-us/portfolio", "runs", "jobs/42",
     "zerodha/events/run", "zerodha/events/42/extra", "other/events/latest",
     "indmoney-us/threats/not-an-id",
   ]) {
