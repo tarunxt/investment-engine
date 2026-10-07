@@ -46,6 +46,7 @@ jobs:
             import asyncio,json
             from types import SimpleNamespace
             from sqlalchemy import select
+            import app.main  # Match API model registration before ORM reads.
             from app.infrastructure.database.session import AsyncSessionLocal
             from app.domains.zerodha.models import ZerodhaCredential
             from app.domains.zerodha.router import get_status,get_portfolio_overview,_svc
