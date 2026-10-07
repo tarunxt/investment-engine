@@ -28,9 +28,13 @@ jobs:
               sudo systemctl show "$unit" --property=Id,ActiveState,MainPID,NRestarts
             done
             echo '== Public endpoint timing =='
-            for url in https://api.cred-x.in/health/ready https://api.cred-x.in/zerodha/status https://api.cred-x.in/zerodha/login-url https://api.cred-x.in/zerodha/portfolio; do
+            for url in https://api.cred-x.in/health/ready https://api.cred-x.in/zerodha/status https://api.cred-x.in/zerodha/login-url https://api.cred-x.in/zerodha/portfolio https://api.cred-x.in/zerodha/threats/latest https://api.cred-x.in/zerodha/events/latest; do
               echo "$url"
               curl -sS --max-time 8 -o /dev/null -w 'http=%{http_code} total=%{time_total}\n' "$url"
+            done
+            for path in /zerodha/threats/run /zerodha/events/run; do
+              echo "$path"
+              curl -sS --max-time 8 -X POST -H 'Content-Type: application/json' --data '{}' -o /dev/null -w 'http=%{http_code} total=%{time_total}\n' "https://api.cred-x.in$path"
             done
             echo '== Runtime fingerprint =='
             curl -fsS --max-time 8 https://cred-x.in/api/runtime-fingerprint
@@ -48,14 +52,21 @@ jobs:
             from sqlalchemy import select
             import app.main  # Match API model registration before ORM reads.
             from app.infrastructure.database.session import AsyncSessionLocal
+            from app.core.recovery import require_equity_analysis
             from app.domains.zerodha.models import ZerodhaCredential
             from app.domains.zerodha.router import get_status,get_portfolio_overview,_svc
+            from app.domains.zerodha.threats_router import get_latest_threat_analysis
+            from app.domains.zerodha.events_router import get_latest_events_analysis
+            require_equity_analysis("india", {"kind": "equity_output_sources_v1", "market": "india"})
+            require_equity_analysis("indmoney_us", {"kind": "equity_output_sources_v1", "market": "us"})
             async def verify():
                 async with AsyncSessionLocal() as db:
                     user_id=(await db.execute(select(ZerodhaCredential.user_id).limit(1))).scalar_one_or_none()
                     status=await get_status(db=db,current_user=SimpleNamespace(id=user_id or 0))
                     portfolio=await get_portfolio_overview(limit=1,db=db,current_user=SimpleNamespace(id=user_id or 0))
-                    print(json.dumps({"zerodha_configured":_svc.is_configured,"status_db_read":"passed","portfolio_db_read":"passed","existing_session_connected":status.connected}))
+                    await get_latest_threat_analysis(include_history=False,db=db,current_user=SimpleNamespace(id=user_id or 0))
+                    await get_latest_events_analysis(db=db,current_user=SimpleNamespace(id=user_id or 0))
+                    print(json.dumps({"india_policy":"passed","us_policy":"passed","threats_db_read":"passed","events_db_read":"passed","zerodha_configured":_svc.is_configured,"status_db_read":"passed","portfolio_db_read":"passed","existing_session_connected":status.connected}))
             asyncio.run(verify())
             PYCODE
             SH
