@@ -22,38 +22,15 @@ jobs:
             set -euo pipefail
             APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
             if [[ ! -d "$APP" && -d /srv/investor ]]; then APP=/srv/investor; fi
-            echo '== Runtime service states =='
-            for family in investor investment-engine; do
-              for role in backend frontend celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
-                sudo systemctl show "$family-$role.service" --property=Id,LoadState,ActiveState,SubState,MainPID,NRestarts 2>/dev/null || true
-              done
+            echo '== Runtime source locations =='
+            for service in investor-backend investor-celery-recovery-analysis investor-recovery-analysis credx-recovery-analysis; do
+              sudo systemctl show "$service" --property=Id,LoadState,ActiveState,MainPID,WorkingDirectory,DropInPaths
+              pid=$(sudo systemctl show "$service" --property=MainPID --value)
+              if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then sudo readlink "/proc/$pid/cwd"; fi
             done
-            echo '== Capacity =='
-            df -h "$APP"
-            free -m
-            echo '== Backend listeners =='
-            sudo ss -lntp | awk '$4 ~ /:8000$|:8001$|:3000$/ {print}'
-            echo '== Direct backend and BFF response timing =='
-            for url in http://127.0.0.1:8000/health/live http://127.0.0.1:8000/health/ready http://127.0.0.1:8000/zerodha/status http://127.0.0.1:8000/zerodha/login-url http://127.0.0.1:3000/backend-api/health/live https://api.cred-x.in/health/live; do
-              echo "$url"
-              curl -sS --max-time 12 -o /dev/null -w 'http=%{http_code} connect=%{time_connect} first_byte=%{time_starttransfer} total=%{time_total}\n' "$url" || true
-            done
-            echo '== Recovery code presence =='
-            sudo test ! -f "$APP/backend/app/core/recovery.py" || echo recovery_module_present
-            sudo rg -n 'RecoveryMiddleware|recovery_mode' "$APP/backend/app/main.py" 2>/dev/null || true
-            echo '== Selected operational log markers, without payloads =='
-            for service in investor-backend investment-engine-backend investor-frontend; do
-              sudo journalctl -u "$service" --since '25 minutes ago' --no-pager -o cat 2>/dev/null | python3 -c '
-            import sys,re,collections
-            counts=collections.Counter()
-            for line in sys.stdin:
-                for marker in ("RECOVERY_CONTAINMENT","Endpoint unavailable during analysis-only recovery","UndefinedColumnError","UndefinedTableError","OperationalError","InterfaceError","PendingRollbackError","TimeoutError","QueuePool limit","No space left on device","ModuleNotFoundError","ImportError","Traceback","backend-api-proxy"):
-                    if marker in line: counts[marker]+=1
-                if "backend-api-proxy" in line:
-                    for m in re.findall(r"(?:outcome|status|durationMs|path)[=:][^,}]+",line):
-                        if not re.search("token|secret|password|cookie",m,re.I): print(m[:160])
-            print(dict(counts))
-            '
-            done
-            echo '== PostgreSQL wait states (no query text) =='
-            sudo -u postgres psql -X -d aidb -P pager=off -c "BEGIN READ ONLY; SELECT backend_type,state,wait_event_type,wait_event,count(*) FROM pg_stat_activity GROUP BY 1,2,3,4 ORDER BY 5 DESC; SELECT count(*) FILTER (WHERE cardinality(pg_blocking_pids(pid)) > 0) AS blocked_sessions FROM pg_stat_activity; SELECT pid,state,wait_event_type,wait_event,extract(epoch FROM now()-query_start)::int AS query_age_seconds FROM pg_stat_activity WHERE state <> 'idle' ORDER BY query_start LIMIT 15; COMMIT;" || true
+            sudo systemctl list-units --all --no-pager '*recovery*' '*analysis*'
+            sudo systemctl list-unit-files --no-pager '*recovery*' '*analysis*'
+            echo '== Recovery middleware response =='
+            curl -sS --max-time 8 http://127.0.0.1:8000/zerodha/status | python3 -c 'import json,sys; d=json.load(sys.stdin); print({k:d.get(k) for k in ("code","detail")})'
+            echo '== Candidate directories =='
+            sudo find /srv /opt -maxdepth 4 -name recovery.py -o -name '*recovery*' -type d 2>/dev/null
