@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.recovery import recovery_mode, require_indmoney_analysis
+from app.core.recovery import recovery_mode, require_equity_analysis
 
 import logging
 from dataclasses import dataclass, replace
@@ -59,7 +59,7 @@ class CreateRunUseCase:
         self._lock = lock
 
     async def execute(self, cmd: CreateRunCommand) -> Run:
-        require_indmoney_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
+        require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
         if recovery_mode():
             # Existing six-stage UI requests sheet exports; contain that optional
             # side effect while preserving queued analysis and database results.
