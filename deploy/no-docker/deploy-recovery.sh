@@ -64,6 +64,9 @@ SH
 # Preserve a known contained rollback, including its runtime guards, rather
 # than restarting the previous main checkout without recovery policy.
 ROLLBACK_SHA=084423dce552d524aab2b1f7d89f168a2c3f701f
+if ! sudo -u "$APP_USER" git -C "$APP_ROOT" cat-file -e "$ROLLBACK_SHA^{commit}" 2>/dev/null; then
+  sudo -u "$APP_USER" git -C "$APP_ROOT" fetch origin credx/recovery-analysis-e401
+fi
 sudo -u "$APP_USER" git -C "$APP_ROOT" cat-file -e "$ROLLBACK_SHA^{commit}"
 rollback_dir=$(sudo -u "$APP_USER" mktemp -d "$APP_ROOT/.recovery-rollback-XXXXXX")
 while IFS= read -r path; do
