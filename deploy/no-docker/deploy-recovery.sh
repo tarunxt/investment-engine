@@ -48,9 +48,10 @@ source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
 load_env_file "$BACKEND_ENV_FILE"
 export CREDX_RECOVERY_MODE=1
 .venv/bin/python - <<'PY'
-from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,ZERODHA_SYNC_TASK
+from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,ZERODHA_SYNC_TASK,require_equity_analysis
 from app.infrastructure.messaging.celery_app import celery
 celery.loader.import_default_modules()
+require_equity_analysis("india", {"kind": "equity_output_sources_v1", "market": "india"})
 assert celery.conf.task_default_queue == ANALYSIS_QUEUE
 assert celery.conf.broker_transport_options['global_keyprefix'] == TRANSPORT_PREFIX
 assert celery.conf.result_backend_transport_options['global_keyprefix'] == TRANSPORT_PREFIX
@@ -97,8 +98,13 @@ done
 curl -fsS --max-time 5 http://127.0.0.1:8000/health/ready >/dev/null
 [[ "$(mode_for_service investor-backend)" == 1 ]]
 [[ "$(mode_for_service investor-recovery-analysis)" == 1 ]]
-for path in /zerodha/status /zerodha/login-url /zerodha/portfolio; do
+for path in /zerodha/status /zerodha/login-url /zerodha/portfolio /zerodha/threats/latest /zerodha/events/latest; do
   code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
+  [[ "$code" == 401 ]]
+  echo "$path now reaches authentication (HTTP $code)."
+done
+for path in /zerodha/threats/run /zerodha/events/run; do
+  code=$(curl -sS --max-time 5 -X POST -H 'Content-Type: application/json' --data '{}' -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
   [[ "$code" == 401 ]]
   echo "$path now reaches authentication (HTTP $code)."
 done

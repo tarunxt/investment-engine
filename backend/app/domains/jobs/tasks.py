@@ -1,5 +1,5 @@
 
-from app.core.recovery import recovery_mode, require_indmoney_analysis
+from app.core.recovery import recovery_mode, require_equity_analysis
 import json
 from datetime import date, datetime
 import re
@@ -1191,7 +1191,7 @@ def execute_ai_job(self, job_id: int) -> None:
         # Validate before task registration, status writes, or provider work.
         with SyncSessionLocal() as recovery_db:
             recovery_job = SyncJobRepository(recovery_db).get(job_id)
-            require_indmoney_analysis(
+            require_equity_analysis(
                 getattr(recovery_job, "auto_rebalance_portfolio", None),
                 getattr(recovery_job, "request_context_json", None),
             )

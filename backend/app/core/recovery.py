@@ -42,18 +42,22 @@ def require_bullpen_command_allowed(args):
         raise RecoveryBlocked("Bullpen runtime command")
 
 
-def require_indmoney_analysis(portfolio, context=None, *, auto_export=False):
+def require_equity_analysis(portfolio, context=None, *, auto_export=False):
     if not recovery_mode():
         return
-    if portfolio != "indmoney_us" or auto_export:
-        raise RecoveryBlocked("Non-INDmoney or externally exported job")
+    market = {"indmoney_us": "us", "india": "india"}.get(portfolio)
+    if market is None or auto_export:
+        raise RecoveryBlocked("Non-equity or externally exported job")
     if context is not None and (
         not isinstance(context, dict)
         or context.get("kind") != "equity_output_sources_v1"
-        or context.get("market") != "us"
+        or context.get("market") != market
     ):
         raise RecoveryBlocked("Non-equity analysis context")
 
+
+# Keep the old import name compatible with existing recovery callers.
+require_indmoney_analysis = require_equity_analysis
 
 def require_task_allowed(name):
     if recovery_mode() and name not in RECOVERY_TASKS:
@@ -66,7 +70,9 @@ def recovery_http_allowed(method, path):
         return True
     if method in {"GET", "HEAD"} and (
         path in {"/zerodha/status", "/zerodha/login-url", "/zerodha/portfolio"}
-        or path.startswith("/zerodha/portfolio/")
+        or any(path == prefix or path.startswith(prefix + "/") for prefix in (
+            "/zerodha/portfolio", "/zerodha/events", "/zerodha/threats",
+        ))
     ):
         return True
     if method == "POST" and path in {"/zerodha/callback", "/zerodha/portfolio/sync"}:
@@ -80,7 +86,8 @@ def recovery_http_allowed(method, path):
         return path in {
             "/auth/login", "/auth/refresh", "/auth/logout", "/auth/websocket-ticket",
             "/indmoney-us/portfolio", "/indmoney-us/prices/current",
-            "/indmoney-us/events/run", "/indmoney-us/threats/run", "/runs", "/jobs",
+            "/indmoney-us/events/run", "/indmoney-us/threats/run",
+            "/zerodha/events/run", "/zerodha/threats/run", "/runs", "/jobs",
             "/runs/auto-rebalance-label", "/runs/final-actionables/history",
         }
     # Workflow audit updates persist stage results only; no queue/bot invocation.

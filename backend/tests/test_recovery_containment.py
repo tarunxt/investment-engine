@@ -97,7 +97,8 @@ def test_zerodha_mutation_denied_before_http(recovery):
 
 
 @pytest.mark.parametrize("portfolio,context,export", [
-    (None, None, False), ("india", None, False),
+    (None, None, False), ("zerodha", None, False),
+    ("india", {"kind": "equity_output_sources_v1", "market": "us"}, False),
     ("indmoney_us", {"kind": "polymarket_bullpen_event"}, False),
     ("indmoney_us", {"kind": "equity_output_sources_v1", "market": "india"}, False),
     ("indmoney_us", {}, False), ("indmoney_us", None, True),
@@ -143,7 +144,8 @@ def test_producers_reject_before_session_or_locks(recovery):
 
 
 @pytest.mark.parametrize("stage", ["holdings", "events", "threats", "swing", "rebalance", "technical"])
-def test_indmoney_fanout_preserves_identity_and_uses_only_recovery_queue(recovery, monkeypatch, stage):
+@pytest.mark.parametrize("portfolio,market", [("indmoney_us", "us"), ("india", "india")])
+def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery, monkeypatch, stage, portfolio, market):
     from contextlib import asynccontextmanager
     from unittest.mock import AsyncMock
     from app.domains.runs.use_cases import create_run as producer
@@ -186,15 +188,15 @@ def test_indmoney_fanout_preserves_identity_and_uses_only_recovery_queue(recover
     uc = object.__new__(producer.CreateRunUseCase)
     uc._session, uc._run_repo, uc._lock = Session(), Repo(), Lock()
     run = asyncio.run(uc.execute(producer.CreateRunCommand(
-        prompt=f"Fixture INDmoney {stage}", targets=targets, user_id=2,
-        auto_rebalance_portfolio="indmoney_us", auto_rebalance_sequence=7,
+        prompt=f"Fixture {portfolio} {stage}", targets=targets, user_id=2,
+        auto_rebalance_portfolio=portfolio, auto_rebalance_sequence=7,
         auto_rebalance_label=f"INDmoney Run 7 ({stage})", allow_parallel=True,
         auto_export_enabled=True, export_sheet_name="requested-by-existing-ui",
     )))
     assert len(jobs) == len(publications) == 2
     assert run.auto_export_enabled is False
     assert run.export_status == "disabled"
-    assert all(j.auto_rebalance_portfolio == "indmoney_us" and
+    assert all(j.auto_rebalance_portfolio == portfolio and
                j.auto_rebalance_sequence == 7 and stage in j.auto_rebalance_label for j in jobs)
     assert all(name == ANALYSIS_TASK and options["queue"] == ANALYSIS_QUEUE and
                options["exchange"] == ANALYSIS_QUEUE and
@@ -353,6 +355,9 @@ def test_worker_ready_hooks_do_not_dispatch_or_touch_legacy_state(recovery):
     ("GET", "/zerodha/status", True), ("GET", "/zerodha/login-url", True),
     ("GET", "/zerodha/portfolio", True), ("GET", "/zerodha/portfolio/2026-10-07", True),
     ("POST", "/zerodha/callback", True), ("POST", "/zerodha/portfolio/sync", True),
+    ("POST", "/zerodha/threats/run", True), ("POST", "/zerodha/events/run", True),
+    ("GET", "/zerodha/threats/latest", True), ("GET", "/zerodha/events/history", True),
+    ("POST", "/zerodha/threats/unknown-write", False),
     ("POST", "/zerodha/orders", False), ("GET", "/zerodha/orders", False),
     ("POST", "/zerodha/portfolio/unknown-write", False),
     ("DELETE", "/zerodha/portfolio/2026-10-07", False), ("POST", "/runs/123/cancel", False),
@@ -459,4 +464,80 @@ def test_authenticated_zerodha_sync_http_flow_retains_containment(recovery, monk
     assert name == ZERODHA_SYNC_TASK
     assert list(options["args"]) == [123, "manual"]
     assert options["queue"] == ANALYSIS_QUEUE
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("portfolio,market", [("indmoney_us", "us"), ("india", "india")])
+def test_recovery_accepts_matching_equity_market_identity(recovery, portfolio, market):
+    from app.core.recovery import require_equity_analysis
+    require_equity_analysis(portfolio)
+    require_equity_analysis(portfolio, {"kind": "equity_output_sources_v1", "market": market})
+    with pytest.raises(RecoveryBlocked):
+        require_equity_analysis(portfolio, {"kind": "equity_output_sources_v1", "market": "us" if market == "india" else "india"})
+    with pytest.raises(RecoveryBlocked):
+        require_equity_analysis(portfolio, auto_export=True)
+
+
+def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, monkeypatch):
+    from contextlib import asynccontextmanager
+    from datetime import date, datetime, timezone
+    from unittest.mock import AsyncMock
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.domains.zerodha import threats_router as routes
+    from app.domains.jobs.use_cases import create_job as producer
+    from app.domains.jobs.tasks import execute_ai_job
+    from app.domains.auth.dependencies import get_current_user
+    from app.infrastructure.database.session import get_async_db
+    now = datetime.now(timezone.utc)
+    snapshot = SimpleNamespace(snapshot_date=date.today(), captured_at=now)
+    jobs, publications = [], []
+    class Repo:
+        def __init__(self, db): pass
+        async def create(self, job):
+            job.id, job.created_at = 123, now
+            jobs.append(job)
+        async def get(self, job_id): return jobs[0]
+    class Lock:
+        def __init__(self, *args): pass
+        @asynccontextmanager
+        async def acquire(self, *args, **kwargs): yield None
+    monkeypatch.setattr(producer, "PostgresJobRepository", Repo)
+    monkeypatch.setattr(producer, "register_job_task", AsyncMock())
+    monkeypatch.setattr(routes, "PostgresJobRepository", Repo)
+    monkeypatch.setattr(routes, "ZerodhaPortfolioSnapshotRepository", lambda _: SimpleNamespace(get_latest_by_user=AsyncMock(return_value=snapshot)))
+    monkeypatch.setattr(routes, "_resolve_threat_target", AsyncMock(return_value=("fixture-provider", "fixture-model")))
+    monkeypatch.setattr(routes, "build_zerodha_threat_prompt", lambda _: "Fixture Zerodha threats prompt")
+    monkeypatch.setattr(routes, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
+    monkeypatch.setattr(routes, "RedisLock", Lock)
+    monkeypatch.setattr(routes, "IdempotencyStore", lambda _: SimpleNamespace())
+    monkeypatch.setattr(routes, "event_bus", SimpleNamespace(publish=AsyncMock()))
+    app = FastAPI()
+    app.add_middleware(RecoveryMiddleware)
+    app.include_router(routes.router)
+    db = SimpleNamespace(add=lambda _: None, commit=AsyncMock())
+    async def session(): yield db
+    app.dependency_overrides[get_async_db] = session
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=123)
+    celery_app = execute_ai_job.app
+    for key in ("task_queues", "task_default_queue", "task_default_exchange", "task_default_routing_key",
+                "task_routes", "task_create_missing_queues", "broker_transport_options", "result_backend_transport_options",
+                "beat_schedule", "task_always_eager", "worker_enable_remote_control", "imports"):
+        monkeypatch.setitem(celery_app.conf, key, celery_app.conf.get(key))
+    configure_recovery_queue(celery_app)
+    def publish(self, name, **kwargs):
+        publications.append((name, kwargs))
+        return SimpleNamespace(id="fixture-threat-task")
+    monkeypatch.setattr(Celery, "send_task", publish)
+    with TestClient(app) as client:
+        result = client.post("/zerodha/threats/run", json={
+            "auto_rebalance_portfolio": "india", "auto_rebalance_sequence": 12,
+            "auto_rebalance_label": "Zerodha Run 12 (threats)",
+        })
+        assert result.status_code == 200, result.text
+        assert result.json()["job_id"] == 123
+    assert jobs[0].auto_rebalance_portfolio == "india"
+    assert jobs[0].auto_rebalance_sequence == 12
+    assert publications[0][0] == ANALYSIS_TASK
+    assert publications[0][1]["queue"] == ANALYSIS_QUEUE
     db.commit.assert_awaited_once()

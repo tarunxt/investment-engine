@@ -1,4 +1,4 @@
-# INDmoney analysis-only recovery
+# Equity analysis-only recovery
 
 This opt-in mode contains execution during disk/storage recovery without changing
 credentials, permissions, schemas, historical records or the normal application
@@ -8,12 +8,14 @@ Invalid values refuse startup/execution. Mode changes require fresh processes.
 
 ## Boundaries
 
-The API admits login, INDmoney holdings/prices/events/threats, prompts/providers,
+The API admits login, INDmoney holdings/prices/events/threats and Zerodha portfolio analysis, prompts/providers,
 usage data and run/job result paths. Zerodha login, connection status and portfolio snapshots
 are also admitted; callback and manual sync may enqueue only the portfolio-read task. Transaction/bot endpoints, cancellation,
 backfill, external-export requests and websocket handlers are unavailable.
-Run creation requires `auto_rebalance_portfolio=indmoney_us` and either no context
-or US `equity_output_sources_v1` context. Worker execution checks this identity
+Run creation requires `auto_rebalance_portfolio=indmoney_us` or `india`, and
+either no context or matching US/India `equity_output_sources_v1` context.
+Zerodha threats/events reads and run endpoints are admitted so India threats,
+swing, rebalance, technical and final-actionable stages can complete. Worker execution checks this identity
 before registration/status changes; generic or Polymarket jobs are refused.
 The existing UI may request a sheet export; recovery disables that optional
 export, retains database results, and suppresses completion mail publication.
