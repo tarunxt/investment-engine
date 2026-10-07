@@ -1,3 +1,5 @@
+
+from app.core.recovery import recovery_mode, require_indmoney_analysis
 import json
 from datetime import date, datetime
 import re
@@ -840,6 +842,8 @@ def _publish_run_update(
 
 def _queue_run_completion_email_once(run_id: int, status: JobStatus) -> None:
     """Queue a single completion email for this run/status using Redis SETNX."""
+    if recovery_mode():
+        return  # Do not enqueue emails or consume old outbox work.
     if status not in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
         return
 
@@ -984,7 +988,8 @@ def _refresh_run_status(db, job_id: int) -> None:
             # Trigger auto-export per model as soon as a model completes, or when
             # a failed model still produced complete stock rows that can be exported.
             if (
-                updated_job is not None
+                not recovery_mode()
+                and updated_job is not None
                 and updated_job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}
                 and auto_export_enabled
                 and export_spreadsheet_url
@@ -1182,6 +1187,14 @@ def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
     queue="ai",
 )
 def execute_ai_job(self, job_id: int) -> None:
+    if recovery_mode():
+        # Validate before task registration, status writes, or provider work.
+        with SyncSessionLocal() as recovery_db:
+            recovery_job = SyncJobRepository(recovery_db).get(job_id)
+            require_indmoney_analysis(
+                getattr(recovery_job, "auto_rebalance_portfolio", None),
+                getattr(recovery_job, "request_context_json", None),
+            )
     from app.domains.ai_providers.factory import ProviderFactory
 
     db = SyncSessionLocal()

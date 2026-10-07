@@ -1,7 +1,8 @@
 import logging
 import os
 
-from celery import Celery
+from app.infrastructure.messaging.recovery_celery import RecoveryCelery, RecoveryTask, configure_recovery_queue
+from app.core.recovery import recovery_mode
 from celery.signals import task_received, worker_ready
 from kombu import Queue
 from celery.schedules import crontab, schedule
@@ -24,7 +25,7 @@ install_bullpen_ui_positions_refresh()
 _broker = settings.celery_broker_url or settings.redis_url
 _backend = settings.celery_result_backend or settings.redis_url
 
-celery = Celery("worker", broker=_broker, backend=_backend)
+celery = RecoveryCelery("worker", broker=_broker, backend=_backend, task_cls=RecoveryTask)
 
 # ── Queue definitions ────────────────────────────────────────────────────────
 # Separate queues prevent long AI tasks from starving short email/beat tasks.
@@ -180,7 +181,7 @@ except ValueError:
     _prefetch_multiplier = 1
 celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 
-celery.autodiscover_tasks([
+celery.autodiscover_tasks(["app.domains.jobs", "app.domains.zerodha"] if recovery_mode() else [
     "app.domains.sports_rankings",
     "app.domains.jobs",
     "app.domains.auth",
@@ -201,6 +202,8 @@ celery.autodiscover_tasks([
 
 @task_received.connect
 def mark_received_auto_live_planning_task(**kwargs) -> None:
+    if recovery_mode():
+        return
     """Record broker receipt before a prefork pool slot starts the task.
 
     Celery's main consumer receives/reserves a message before the child process
@@ -259,6 +262,8 @@ def mark_received_auto_live_planning_task(**kwargs) -> None:
 
 @worker_ready.connect
 def reconcile_interrupted_auto_live_runs_after_worker_restart(**_kwargs) -> None:
+    if recovery_mode():
+        return
     """Schedule, rather than immediately perform, destructive restart recovery.
 
     Late-acknowledged tasks can be redelivered several seconds after systemd
@@ -292,3 +297,6 @@ def reconcile_interrupted_auto_live_runs_after_worker_restart(**_kwargs) -> None
             "Could not schedule delayed Auto-Live restart recovery; no automatic "
             "Stage 3 retry was requested."
         )
+
+# Apply last so no default route/scheduler overwrites recovery isolation.
+configure_recovery_queue(celery)

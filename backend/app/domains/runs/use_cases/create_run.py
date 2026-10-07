@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from app.core.recovery import recovery_mode, require_indmoney_analysis
+
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -57,6 +59,11 @@ class CreateRunUseCase:
         self._lock = lock
 
     async def execute(self, cmd: CreateRunCommand) -> Run:
+        require_indmoney_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
+        if recovery_mode():
+            # Existing six-stage UI requests sheet exports; contain that optional
+            # side effect while preserving queued analysis and database results.
+            cmd = replace(cmd, auto_export_enabled=False)
         if not cmd.targets:
             raise ValidationException("At least one (provider, model) target is required.")
         if cmd.output_source_jobs is not None and cmd.polymarket_event_context is not None:

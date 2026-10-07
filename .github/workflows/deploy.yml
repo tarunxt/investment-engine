@@ -474,10 +474,23 @@ jobs:
               chmod 0644 "$remote_artifact" "$remote_artifact.sha256"
             fi
 
+            RECOVERY_DEPLOY=false
             if [[ "$DEPLOY_SCOPE" != "frontend-only" ]]; then
+              recovery_mode=$(APP_ROOT="$APP_ROOT" bash "$APP_ROOT/deploy/no-docker/deploy-recovery.sh" --detect)
+              if [[ "$recovery_mode" == 1 ]]; then
+                APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                  bash "$APP_ROOT/deploy/no-docker/deploy-recovery.sh"
+                RECOVERY_DEPLOY=true
+                if [[ "$DEPLOY_SCOPE" == full-stack ]]; then DEPLOY_SCOPE=frontend-only; fi
+              elif [[ "$recovery_mode" != 0 ]]; then
+                echo 'Invalid recovery mode; refusing normal deployment.' >&2
+                exit 1
+              fi
+            fi
+            if [[ "$DEPLOY_SCOPE" != "frontend-only" && "$RECOVERY_DEPLOY" != true ]]; then
               bash "$APP_ROOT/deploy/no-docker/scripts/configure-postgres-recovery.sh" --restart-backend
             fi
-            if [[ "$DEPLOY_SCOPE" != "frontend-only" ]] && command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+            if [[ "$DEPLOY_SCOPE" != "frontend-only" && "$RECOVERY_DEPLOY" != true ]] && command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
               echo "==> PostgreSQL is not ready; restarting it after disk recovery"
               sudo systemctl restart postgresql
               for attempt in $(seq 1 30); do
@@ -487,12 +500,14 @@ jobs:
               pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1
             fi
 
+            if [[ "$RECOVERY_DEPLOY" != true || "$DEPLOY_SCOPE" == frontend-only ]]; then
             SKIP_GIT_SYNC=true \
             APP_ROOT="$APP_ROOT" \
             APP_USER="$APP_USER" \
             FRONTEND_ARTIFACT="$remote_artifact" \
             EXPECTED_FRONTEND_SHA="$DEPLOY_COMMIT_SHA" \
               bash "$APP_ROOT/deploy/no-docker/redeploy.sh" "$DEPLOY_SCOPE"
+            fi
 
             if [[ "$DEPLOY_SCOPE" == "full-stack" ]]; then
               echo "==> Install/update passive Bullpen runtime health timer"
