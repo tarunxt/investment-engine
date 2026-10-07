@@ -46,6 +46,7 @@ jobs:
           PYTHONPATH: backend
         run: >-
           pytest -q
+          backend/tests/test_recovery_containment.py
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_ranking_integrity.py
           backend/tests/test_bullpen_run_audit.py

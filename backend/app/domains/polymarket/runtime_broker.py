@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import require_bullpen_command_allowed
+
 import asyncio
 import json
 import os
@@ -1495,6 +1497,7 @@ class BullpenRuntimeBroker:
         extra_env: dict[str, str] | None = None,
         retry_auth_once: bool = True,
     ) -> BullpenRawCommandResult:
+        require_bullpen_command_allowed(args)
         category, is_write, requires_auth = _parse_command_category(args)
         sanitized_args = _sanitize_command_args(args, is_write=is_write)
         if not requires_auth:
@@ -2048,6 +2051,7 @@ class BullpenRuntimeBroker:
         lock_key: str | None = None,
         lock_wait_ms: float | None = None,
     ) -> BullpenRawCommandResult:
+        require_bullpen_command_allowed(args)
         config = _runtime_config()
         diagnostics = BullpenCommandDiagnostics(
             command_category=command_category,

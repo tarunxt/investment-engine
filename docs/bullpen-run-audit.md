@@ -2680,3 +2680,8 @@ Server terminal-run reconstruction remains the durable history path. This does
 not repair or rewrite historical records created before source validation.
 Closed Calculations dialogs no longer mount their expensive computation child.
 No action formulas, execution controls, or frozen audit evidence are changed.
+## Analysis-only recovery containment
+
+When CREDX_RECOVERY_MODE=1, no Bullpen bot initialization, runtime CLI command, direct live order, or background redeem/claim submission is admitted. All Bullpen commands, including reads and auth refresh, are refused before subprocess execution. Recovery exposes a narrow INDmoney/auth/results API surface; it does not mutate frozen historical audit evidence or classify refused work as executed. INDmoney jobs retain their portfolio/stage metadata; optional sheet exports and completion emails are suppressed, with run export_status disabled. Normal behavior remains available only outside explicit recovery mode.
+
+Celery analysis uses the dedicated credx_recovery_analysis queue and credx:recovery:analysis:v1: broker/result prefix, which isolates legacy unacked, unacked_index and queues. Only execute_ai_job and the read-only Zerodha portfolio snapshot task are published/executed, with an INDmoney equity-context check before registration or status mutation. Existing scheduler and financial consumers must remain stopped; recovery startup hooks do not enqueue old recovery/outbox/sports work. Changing the mode does not authorize restoring financial execution or acknowledge, purge, migrate or requeue reserved tasks.

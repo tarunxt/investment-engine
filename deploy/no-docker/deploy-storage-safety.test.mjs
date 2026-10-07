@@ -29,3 +29,34 @@ test('failed and scheduled deploys cannot launch destructive recovery', () => {
   assert.doesNotMatch(triggers, /workflow_run:|schedule:|cron:/);
   assert.match(recovery, /if: github\.event_name == 'workflow_dispatch'/);
 });
+
+
+test('recovery deployment never starts the normal financial service path', () => {
+  const start = deploy.indexOf('            RECOVERY_DEPLOY=false');
+  const end = deploy.indexOf('            echo "==> EC2 deployment total:', start);
+  assert.ok(start > 0 && end > start);
+  const selection = deploy.slice(start, end).split('\n').map(line => line.slice(12)).join('\n');
+  for (const [mode, scope, status, calls] of [
+    ['1', 'full-stack', 0, ['recovery', 'redeploy:frontend-only']],
+    ['1', 'backend-only', 0, ['recovery']],
+    ['0', 'backend-only', 0, ['postgres-policy', 'redeploy:backend-only']],
+    ['invalid', 'full-stack', 1, []],
+  ]) {
+    const script = `set -euo pipefail
+APP_ROOT=/unused APP_USER=test BACKEND_ENV_FILE=/unused.env
+DEPLOY_SCOPE=${scope} remote_artifact=/unused EXPECTED_FRONTEND_SHA=test DEPLOY_COMMIT_SHA=test
+bash() {
+  case "$1" in
+    */deploy-recovery.sh) if [[ "\${2:-}" == --detect ]]; then echo ${mode}; else echo recovery; fi ;;
+    */configure-postgres-recovery.sh) echo postgres-policy ;;
+    */redeploy.sh) echo "redeploy:$2" ;;
+    *) echo unexpected-script; return 1 ;;
+  esac
+}
+pg_isready() { return 0; }
+${selection}`;
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8' });
+    assert.equal(result.status, status, `${mode}/${scope}: ${result.stderr}`);
+    assert.deepEqual(result.stdout.trim().split('\n').filter(Boolean), calls);
+  }
+});
