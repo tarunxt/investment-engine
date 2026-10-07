@@ -1227,7 +1227,9 @@ class apiServiceClass implements IApiService {
   // ===== Zerodha Endpoints =====
 
   zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse> {
-    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl());
+    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse> {
@@ -1237,11 +1239,14 @@ class apiServiceClass implements IApiService {
   zerodhaStatus(): Promise<ZerodhaStatusResponse> {
     return this.get<ZerodhaStatusResponse>(URLs.zerodha.status(), {
       validate: isZerodhaStatusResponse,
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
     });
   }
 
   zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
-    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio());
+    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail> {

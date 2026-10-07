@@ -1,0 +1,270 @@
+name: Zerodha preflight recovery-safe frontend deploy
+on:
+  push:
+    branches: [fix/zerodha-sync-recovery-deploy-20261007]
+permissions:
+  contents: read
+  actions: read
+env:
+  FRONTEND_ARTIFACT_NAME: frontend-runtime-${{ github.sha }}
+  FRONTEND_ARTIFACT_FILE: frontend-runtime-${{ github.sha }}.tar.gz
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  build-frontend:
+    name: Build production frontend artifact
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    outputs:
+      checkout_seconds: ${{ steps.checkout-timing.outputs.seconds }}
+      dependency_seconds: ${{ steps.dependency-timing.outputs.seconds }}
+      build_seconds: ${{ steps.build.outputs.seconds }}
+      package_seconds: ${{ steps.package.outputs.seconds }}
+      upload_seconds: ${{ steps.upload-timing.outputs.seconds }}
+
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_STANDALONE_BUILD: "true"
+      NEXT_PUBLIC_API_URL: ${{ vars.PROD_NEXT_PUBLIC_API_URL || 'https://api.cred-x.in' }}
+      NEXT_PUBLIC_FRONTEND_URL: ${{ vars.PROD_NEXT_PUBLIC_FRONTEND_URL || 'https://cred-x.in' }}
+      NEXT_PUBLIC_BRAND_PREFIX: ${{ vars.PROD_NEXT_PUBLIC_BRAND_PREFIX || 'Cred-X' }}
+      NEXT_PUBLIC_BRAND_ACRONYM: ${{ vars.PROD_NEXT_PUBLIC_BRAND_ACRONYM || 'TIE' }}
+      NEXT_PUBLIC_BRAND_EXPANSION: ${{ vars.PROD_NEXT_PUBLIC_BRAND_EXPANSION || 'Tarun''s Investment Engine' }}
+      NEXT_PUBLIC_DISABLE_AUTH: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_AUTH || 'false' }}
+      NEXT_PUBLIC_DISABLE_API_PROXY: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_API_PROXY || 'false' }}
+      NEXT_PUBLIC_API_DEBUG: ${{ vars.PROD_NEXT_PUBLIC_API_DEBUG || 'false' }}
+      NEXTAUTH_URL: ${{ vars.PROD_NEXTAUTH_URL || 'https://cred-x.in' }}
+      NEXTAUTH_SECRET: build-only-runtime-secret-is-loaded-on-ec2
+      AUTH_TRUST_HOST: "true"
+      BACKEND_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - name: Start checkout timer
+        run: echo "CHECKOUT_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Record checkout duration
+        id: checkout-timing
+        run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start dependency restore timer
+        run: echo "DEPENDENCIES_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Restore reusable Next.js Webpack cache
+        uses: actions/cache@v6
+        with:
+          path: frontend/.next/cache
+          key: >-
+            ${{ runner.os }}-node22-next-webpack-${{
+              hashFiles('frontend/package-lock.json')
+            }}-${{
+              hashFiles('frontend/app/**', 'frontend/components/**', 'frontend/hooks/**',
+              'frontend/lib/**', 'frontend/providers/**', 'frontend/services/**',
+              'frontend/types/**', 'frontend/next.config.ts', 'frontend/tsconfig.json')
+            }}
+          restore-keys: |
+            ${{ runner.os }}-node22-next-webpack-${{ hashFiles('frontend/package-lock.json') }}-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Record dependency restore duration
+        id: dependency-timing
+        run: echo "seconds=$(( $(date +%s) - DEPENDENCIES_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Log build runner resources
+        run: |
+          echo "==> CPU"
+          nproc
+          echo "==> Memory"
+          free -h
+          echo "==> Swap"
+          swapon --show || true
+          echo "==> Disk"
+          df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}"
+
+      - name: Stamp production build fingerprint
+        run: |
+          build_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node scripts/stamp-frontend-build.mjs \
+            frontend/lib/generatedBuildInfo.ts \
+            "${GITHUB_SHA}" \
+            "${build_timestamp}"
+          echo "BUILD_TIMESTAMP=${build_timestamp}" >>"${GITHUB_ENV}"
+
+      - name: Build production frontend with Webpack
+        id: build
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          started_at="$(date +%s)"
+          set +e
+          /usr/bin/time -v -o "${RUNNER_TEMP}/frontend-webpack-resources.txt" \
+            npm run build 2>&1 | tee "${RUNNER_TEMP}/frontend-webpack-build.log"
+          build_status="${PIPESTATUS[0]}"
+          set -e
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+          echo "==> Frontend build resource usage"
+          cat "${RUNNER_TEMP}/frontend-webpack-resources.txt"
+          exit "$build_status"
+
+      - name: Package standalone frontend runtime
+        id: package
+        run: |
+          started_at="$(date +%s)"
+          deploy/no-docker/package-frontend-artifact.sh \
+            frontend/.next \
+            "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            "${GITHUB_SHA}" \
+            "${BUILD_TIMESTAMP}" \
+            webpack
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify packaged frontend runtime before upload
+        run: |
+          mkdir "${RUNNER_TEMP}/production-frontend-runtime"
+          tar -xzf "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            -C "${RUNNER_TEMP}/production-frontend-runtime"
+          node scripts/verify-frontend-artifact-runtime.mjs \
+            "${RUNNER_TEMP}/production-frontend-runtime" \
+            "${GITHUB_SHA}"
+
+      - name: Start artifact upload timer
+        if: success()
+        run: echo "UPLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Upload production frontend artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: |
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Record artifact upload duration
+        id: upload-timing
+        if: always() && env.UPLOAD_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - UPLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload raw frontend timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/frontend-webpack-build.log
+            ${{ runner.temp }}/frontend-webpack-resources.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Frontend build timing summary
+        if: always()
+        run: |
+          {
+            echo "### Production frontend build"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Checkout | ${{ steps.checkout-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Dependency/cache restore + npm ci | ${{ steps.dependency-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Webpack production build | ${{ steps.build.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact packaging | ${{ steps.package.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact upload | ${{ steps.upload-timing.outputs.seconds || 'n/a' }}s |"
+            echo
+            echo "Production remains on Webpack; Turbopack is benchmarked separately in PR checks."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+
+  deploy-frontend:
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: artifact
+      - name: Transfer verified frontend artifact
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          source: artifact/${{ env.FRONTEND_ARTIFACT_FILE }},artifact/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          target: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          strip_components: 1
+          timeout: 10m
+          command_timeout: 10m
+      - name: Deploy frontend without source reset or backend restart
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          REMOTE_ARTIFACT_DIR: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          REMOTE_ARTIFACT_FILE: ${{ env.FRONTEND_ARTIFACT_FILE }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          envs: DEPLOY_COMMIT_SHA,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE
+          timeout: 1200s
+          command_timeout: 1200s
+          script: |
+            set -euo pipefail
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if [[ ! -d "$APP_ROOT" && -d /srv/investor ]]; then APP_ROOT=/srv/investor; fi
+            if ! id "$APP_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then APP_USER=investor; fi
+            sudo test -d "$APP_ROOT/.git"
+            sudo test -f "$APP_ROOT/deploy/no-docker/redeploy.sh"
+            sudo touch /var/lock/investor-deploy.lock
+            sudo chown "$(id -u):$(id -g)" /var/lock/investor-deploy.lock
+            exec 9>/var/lock/investor-deploy.lock
+            flock -w 900 9
+            available_kb="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+            if (( available_kb < 1048576 )); then
+              echo "STORAGE_BLOCKED: frontend needs 1048576 KiB free; available=$available_kb. No files deleted."
+              exit 1
+            fi
+            capture_backend_state() {
+              sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD
+              sudo find "$APP_ROOT/backend/app" -type f -name '*.py' -exec sha256sum {} + | sort | sha256sum
+              for family in investor investment-engine; do
+                for role in backend celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
+                  sudo systemctl show "$family-$role.service" --property=Id,ActiveState,SubState,MainPID
+                done
+              done
+            }
+            state_before="$(capture_backend_state)"
+            # Only the frontend candidate is promoted. Preserve the recovery
+            # backend checkout, environment, database and financial services.
+            chmod 0755 "$REMOTE_ARTIFACT_DIR"
+            chmod 0644 "$REMOTE_ARTIFACT_DIR/$REMOTE_ARTIFACT_FILE" "$REMOTE_ARTIFACT_DIR/$REMOTE_ARTIFACT_FILE.sha256"
+            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" \
+              FRONTEND_ARTIFACT="$REMOTE_ARTIFACT_DIR/$REMOTE_ARTIFACT_FILE" \
+              EXPECTED_FRONTEND_SHA="$DEPLOY_COMMIT_SHA" \
+              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" frontend-only
+            state_after="$(capture_backend_state)"
+            if [[ "$state_before" != "$state_after" ]]; then
+              echo 'BACKEND_STATE_CHANGED: investigate source/service change; frontend deploy must not change it.'
+              exit 1
+            fi
+            echo 'Frontend rollout verified. Backend source, service states and PIDs unchanged.'
+            echo 'Recovery containment remains in effect; no financial services started.'

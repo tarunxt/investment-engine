@@ -28,6 +28,9 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
   "x-forwarded-proto",
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
+// Broker connection/snapshot reads may wait behind a database transaction.
+const ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS = 18_000;
 const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
 // Captured portfolio reports can wait for a DB connection and parse stored
@@ -325,7 +328,17 @@ function isSportsEventComparisonsRead(method: string, path: string) {
   return method === "POST" && path === "api/sports-rankings/event-comparisons";
 }
 
+function isZerodhaSyncRequest(method: string, path: string) {
+  return (
+    (SAFE_FALLBACK_METHODS.has(method) &&
+      ["zerodha/status", "zerodha/login-url", "zerodha/portfolio"].includes(path)) ||
+    (method === "POST" &&
+      ["zerodha/callback", "zerodha/portfolio/sync"].includes(path))
+  );
+}
+
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
   }
@@ -377,6 +390,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;
   }
@@ -484,6 +498,8 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     (path === "polymarket/auto-live/history" ||
       path === "polymarket/auto-live/history/event-trends")
       ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && isZerodhaSyncRequest(request.method, path)
+      ? "zerodha/sync"
       : getCapturedPortfolioAnalysisReadScope(request.method, path)
         ?? getResearchHistoryReadScope(request.method, path);
   const resolvedCandidates = resolveBackendApiCandidates(request).map(
