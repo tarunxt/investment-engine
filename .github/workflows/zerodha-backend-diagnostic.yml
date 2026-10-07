@@ -22,15 +22,39 @@ jobs:
             set -euo pipefail
             APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
             if [[ ! -d "$APP" && -d /srv/investor ]]; then APP=/srv/investor; fi
-            echo '== Runtime source locations =='
-            for service in investor-backend investor-celery-recovery-analysis investor-recovery-analysis credx-recovery-analysis; do
-              sudo systemctl show "$service" --property=Id,LoadState,ActiveState,MainPID,WorkingDirectory,DropInPaths
-              pid=$(sudo systemctl show "$service" --property=MainPID --value)
-              if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then sudo readlink "/proc/$pid/cwd"; fi
+            APP_USER=investor
+            echo '== Post-deploy services =='
+            for unit in investor-backend investor-frontend investor-recovery-analysis investor-celery-worker investor-celery-email-worker investor-celery-auto-live-worker investor-celery-beat investor-celery-beat-worker; do
+              sudo systemctl show "$unit" --property=Id,ActiveState,MainPID,NRestarts
             done
-            sudo systemctl list-units --all --no-pager '*recovery*' '*analysis*'
-            sudo systemctl list-unit-files --no-pager '*recovery*' '*analysis*'
-            echo '== Recovery middleware response =='
-            curl -sS --max-time 8 http://127.0.0.1:8000/zerodha/status | python3 -c 'import json,sys; d=json.load(sys.stdin); print({k:d.get(k) for k in ("code","detail")})'
-            echo '== Candidate directories =='
-            sudo find /srv /opt -maxdepth 4 -name recovery.py -o -name '*recovery*' -type d 2>/dev/null
+            echo '== Public endpoint timing =='
+            for url in https://api.cred-x.in/health/ready https://api.cred-x.in/zerodha/status https://api.cred-x.in/zerodha/login-url https://api.cred-x.in/zerodha/portfolio; do
+              echo "$url"
+              curl -sS --max-time 8 -o /dev/null -w 'http=%{http_code} total=%{time_total}\n' "$url"
+            done
+            echo '== Runtime fingerprint =='
+            curl -fsS --max-time 8 https://cred-x.in/api/runtime-fingerprint
+            echo
+            echo '== Read-only Zerodha database route checks =='
+            sudo -u "$APP_USER" env APP_ROOT="$APP" bash <<'SH'
+            set -euo pipefail
+            cd "$APP_ROOT/backend"
+            source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
+            load_env_file /etc/investor/backend.env
+            export CREDX_RECOVERY_MODE=1
+            .venv/bin/python - <<'PYCODE'
+            import asyncio,json
+            from types import SimpleNamespace
+            from sqlalchemy import select
+            from app.infrastructure.database.session import AsyncSessionLocal
+            from app.domains.zerodha.models import ZerodhaCredential
+            from app.domains.zerodha.router import get_status,get_portfolio_overview,_svc
+            async def verify():
+                async with AsyncSessionLocal() as db:
+                    user_id=(await db.execute(select(ZerodhaCredential.user_id).limit(1))).scalar_one_or_none()
+                    status=await get_status(db=db,current_user=SimpleNamespace(id=user_id or 0))
+                    portfolio=await get_portfolio_overview(limit=1,db=db,current_user=SimpleNamespace(id=user_id or 0))
+                    print(json.dumps({"zerodha_configured":_svc.is_configured,"status_db_read":"passed","portfolio_db_read":"passed","existing_session_connected":status.connected}))
+            asyncio.run(verify())
+            PYCODE
+            SH
