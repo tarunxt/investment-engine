@@ -102,10 +102,9 @@ jobs:
                 if sys.argv[1]=='observe': require(hashlib.sha256(raw.encode()).hexdigest()==fingerprint)
                 require(' ; start_time=' in raw)
                 stable=raw.split(' ; start_time=',1)[0]
-                allowed_env='/etc/investor/frontend.env' if unit=='investor-frontend' else '/etc/investor/backend.env'
+                allowed_env='/etc/investor/frontend.env' if unit=='investor-frontend' else '/etc/investor/analysis-recovery.env'
                 env_paths=re.findall(r'(/[^ ]+)',values.get('EnvironmentFiles',''))
-                require(set(env_paths)<= {allowed_env})
-                if unit=='investor-recovery-analysis': require(env_paths==[allowed_env])
+                require(env_paths==[allowed_env])
                 report[unit]={'command':hashlib.sha256(stable.encode()).hexdigest(),'environment':hashlib.sha256(values.get('Environment','').encode()).hexdigest(),'environment_files':hashlib.sha256(values.get('EnvironmentFiles','').encode()).hexdigest()}
                 path=pathlib.Path(launch)
                 if '/.venv/' not in launch:
@@ -115,7 +114,7 @@ jobs:
                 path=root/name
                 require(path.is_file())
                 report[name]={'resolved_path':str(path.resolve()),'sha256':checksum(path)}
-            for filename in ('/etc/investor/backend.env','/etc/investor/frontend.env'):
+            for filename in ('/etc/investor/backend.env','/etc/investor/frontend.env','/etc/investor/analysis-recovery.env'):
                 path=pathlib.Path(filename);require(path.is_file() and not path.is_symlink());report[filename]=checksum(path)
             record=stage/'runtime-wrapper-hashes.json'
             if sys.argv[1]=='observe':
@@ -219,6 +218,7 @@ jobs:
                     expected[name]=(mode,digest)
                     directories.update(parent.as_posix() for parent in path.parents if parent!=PurePosixPath('.'))
                 require(0<len(expected)<=20000)
+                retained={'previous-source/manifest.json','previous-source/backend-source.tar.gz'}
                 actual=set();actual_directories=set();total=0
                 for path in STAGE.rglob('*'):
                     name=path.relative_to(STAGE).as_posix();info=path.lstat()
@@ -228,7 +228,12 @@ jobs:
                         require(stat.S_ISREG(info.st_mode) and info.st_nlink==1)
                         actual.add(name);total+=info.st_size
                 # Reject unexpected runtime/private content before reading any file bytes.
-                require(actual==set(expected) and actual_directories==directories and total<=MAX_BYTES)
+                has_retained_artifact='previous-source' in actual_directories
+                require(actual==(set(expected)|retained if has_retained_artifact else set(expected)))
+                require(actual_directories==(directories|{'previous-source'} if has_retained_artifact else directories) and total<=2*MAX_BYTES)
+                if has_retained_artifact:
+                    require(stat.S_IMODE((STAGE/'previous-source').stat().st_mode)==0o700)
+                    for name in retained:require(stat.S_IMODE((STAGE/name).stat().st_mode)==0o600)
                 for name,(mode,digest) in expected.items():
                     path=STAGE/name;info=path.stat()
                     require(stat.S_IMODE(info.st_mode)==(0o755 if mode=='100755' else 0o644))
@@ -247,9 +252,78 @@ jobs:
             # The exact existing candidate artifact helper runs only as investor. It needs
             # no nested sudo, credential access, service operation or directory widening.
             export CREDX_RECOVERY_ROLLBACK_DIR="$MIGRATION_STAGE/previous-source"
-            sudo -n -u "$APP_USER" env PYTHONDONTWRITEBYTECODE=1 python3 -B \
-              "$MIGRATION_STAGE/deploy/no-docker/backend-recovery-artifact.py" snapshot \
-              "$APP_ROOT" "$CREDX_RECOVERY_ROLLBACK_DIR" --previous-sha "$BASE_SHA"
+            if ! sudo -n -u "$APP_USER" test -d "$CREDX_RECOVERY_ROLLBACK_DIR"; then
+              sudo -n -u "$APP_USER" env PYTHONDONTWRITEBYTECODE=1 python3 -B \
+                "$MIGRATION_STAGE/deploy/no-docker/backend-recovery-artifact.py" snapshot \
+                "$APP_ROOT" "$CREDX_RECOVERY_ROLLBACK_DIR" --previous-sha "$BASE_SHA"
+            fi
+            # Reuse only the still-exact private rollback artifact; never overwrite it.
+            sudo -n -u "$APP_USER" env PYTHONDONTWRITEBYTECODE=1 python3 -B - <<'SOURCE_ARTIFACT'
+            """Read-only validation of the retained authorized previous-source artifact."""
+            import hashlib
+            import importlib.util
+            import json
+            import os
+            from pathlib import Path
+            import stat
+            import tarfile
+            
+            ROOT=Path('/srv/investor')
+            STAGE=ROOT/'.audit-migration-2ae3e9466014'
+            BASE='0a12caddaf9bbd681487906774400a3ad4d0369b'
+            MAX_BYTES=512*1024*1024
+            
+            
+            def require(value):
+                if not value: raise RuntimeError('Retained previous-source artifact is not verified')
+            
+            
+            def checksum(path):
+                result=hashlib.sha256()
+                with path.open('rb') as source:
+                    for block in iter(lambda:source.read(1024*1024),b''):result.update(block)
+                return result.hexdigest()
+            
+            
+            def verify():
+                previous=STAGE/'previous-source'
+                require(previous.is_dir() and not previous.is_symlink())
+                require(previous.stat().st_uid==os.getuid() and stat.S_IMODE(previous.stat().st_mode)==0o700)
+                require({p.name for p in previous.iterdir()}=={'manifest.json','backend-source.tar.gz'})
+                for path in previous.iterdir():
+                    info=path.lstat()
+                    require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink==1)
+                manifest_path=previous/'manifest.json';archive=previous/'backend-source.tar.gz'
+                require(manifest_path.stat().st_size<=2*1024*1024 and archive.stat().st_size<=MAX_BYTES)
+                manifest=json.loads(manifest_path.read_text())
+                require(manifest['schema']==1 and manifest['app_root']==str(ROOT) and manifest['previous_sha']==BASE)
+                require(checksum(archive)==manifest['archive_sha256'])
+                # The preceding stage verifier has established this exact public module's
+                # candidate Git hash. It contains only the approved source-artifact logic.
+                spec=importlib.util.spec_from_file_location('verified_source_artifact',STAGE/'deploy/no-docker/backend-recovery-artifact.py')
+                helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+                sources=helper.checked_files(ROOT,helper.tracked_sources(ROOT))
+                expected={p.relative_to(ROOT).as_posix():checksum(p) for p in sources}
+                require(expected==manifest['files'] and 0<len(expected)<=20000)
+                seen=set();total=0
+                with tarfile.open(archive,'r|gz') as stream:
+                    for member in stream:
+                        require(member.isfile() and helper.safe_member(member.name) and member.name in expected and member.name not in seen and len(seen)<20000)
+                        total+=member.size;require(total<=MAX_BYTES)
+                        digest=hashlib.sha256()
+                        with stream.extractfile(member) as source:
+                            for block in iter(lambda:source.read(1024*1024),b''):digest.update(block)
+                        require(digest.hexdigest()==expected[member.name]);seen.add(member.name)
+                require(seen==set(expected))
+                print('retained_previous_source_artifact_verified=true')
+            
+            
+            if __name__=='__main__':
+                try:verify()
+                except Exception as error:
+                    print('source_artifact_verification=blocked; error_type='+type(error).__name__)
+                    raise SystemExit(1)
+            SOURCE_ARTIFACT
             sudo -n python3 -B - <<'FRONTEND'
             import json,urllib.request
             from pathlib import Path
@@ -264,13 +338,15 @@ jobs:
             FRONTEND
             run_database_phase() {
               local phase="$1"
-              sudo -n -u "$APP_USER" env AUDIT_MIGRATION_PHASE="$phase" PYTHONDONTWRITEBYTECODE=1 bash <<'DATABASE'
+              sudo -n -u "$APP_USER" env AUDIT_MIGRATION_PHASE="$phase" AUDIT_API_FENCED="$restore_api" PYTHONDONTWRITEBYTECODE=1 bash <<'DATABASE'
             set -euo pipefail
+            readonly credx_audit_requested_phase="$AUDIT_MIGRATION_PHASE"
+            readonly credx_audit_producer_fenced="$AUDIT_API_FENCED"
             cd /srv/investor/.audit-migration-2ae3e9466014/backend
             source /srv/investor/.audit-migration-2ae3e9466014/deploy/no-docker/load-env-file.sh
             load_env_file /etc/investor/backend.env
-            export CREDX_RECOVERY_MODE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/srv/investor/.audit-migration-2ae3e9466014/backend
-            /srv/investor/backend/.venv/bin/python -B - "$AUDIT_MIGRATION_PHASE" <<'DBPY'
+            export CREDX_RECOVERY_MODE=1 PYTHONDONTWRITEBYTECODE=1 AUDIT_API_FENCED="$credx_audit_producer_fenced" PYTHONPATH=/srv/investor/.audit-migration-2ae3e9466014/backend
+            /srv/investor/backend/.venv/bin/python -B - "$credx_audit_requested_phase" <<'DBPY'
             """Approved one-time additive migration driver, run as existing app user.
             
             Canonical credentials remain opaque; only sanitized operational metadata exits.
@@ -356,10 +432,18 @@ jobs:
             def queue_state(*, active_worker):
                 broker_url=settings.celery_broker_url or settings.redis_url
                 if active_worker:
-                    pid=int(private_command(["systemctl","show","investor-recovery-analysis","--property=MainPID","--value"],timeout=5).strip())
-                    require(pid>0,"Recovery worker is inactive before drain")
-                    env=dict(part.split(b"=",1) for part in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0") if b"=" in part)
-                    require((env.get(b"CELERY_BROKER_URL") or env.get(b"REDIS_URL") or b"").decode()==broker_url,"Worker broker differs from canonical settings")
+                    # Existing API and consumer may use the preserved analysis-recovery
+                    # overlay. It must resolve to the exact approved canonical DB/broker.
+                    for unit in ("investor-backend","investor-recovery-analysis"):
+                        state=private_command(["systemctl","show",unit,"--property=ActiveState,MainPID"],timeout=5).decode()
+                        values=dict(line.split("=",1) for line in state.splitlines() if "=" in line)
+                        if unit=="investor-backend" and os.getenv("AUDIT_API_FENCED")=="true":
+                            require(values.get("ActiveState")=="inactive" and values.get("MainPID")=="0","Fenced producer is not confirmed stopped")
+                            continue
+                        pid=int(values["MainPID"]);require(pid>0 and values.get("ActiveState")=="active","Recovery service is inactive before drain")
+                        env=dict(part.split(b"=",1) for part in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0") if b"=" in part)
+                        require((env.get(b"CELERY_BROKER_URL") or env.get(b"REDIS_URL") or b"").decode()==broker_url,"Runtime broker differs from canonical settings")
+                        require(env.get(b"DATABASE_URL",b"").decode()==settings.database_url,"Runtime database differs from approved canonical settings")
                     (STAGE/"broker.sha256").write_text(hashlib.sha256(broker_url.encode()).hexdigest())
                     os.chmod(STAGE/"broker.sha256",0o600)
                 else:
