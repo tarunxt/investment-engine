@@ -2,8 +2,10 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.jwt_configuration import validate_jwt_secret_key
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
 _FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}
@@ -12,7 +14,9 @@ _FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "pr
 class Settings(BaseSettings):
     """Application configuration from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=".env", case_sensitive=False, hide_input_in_errors=True
+    )
 
     # Database
     database_url: str
@@ -57,6 +61,9 @@ class Settings(BaseSettings):
     celery_broker_url: Optional[str] = None
     celery_result_backend: Optional[str] = None
     
+    # JWT signing: required in every environment, with no legacy alias or default.
+    jwt_secret_key: SecretStr = Field(repr=False)
+
     # Application
     debug: bool = False
     environment: str = "production"
@@ -86,6 +93,12 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def _validate_jwt_secret_key(cls, value: SecretStr) -> SecretStr:
+        validate_jwt_secret_key(value.get_secret_value())
+        return value
+
     @field_validator("debug", mode="before")
     @classmethod
     def _coerce_debug_flag(cls, value: object) -> object:
