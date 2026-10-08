@@ -74,6 +74,14 @@ jobs:
                 report['services'][unit]=item
             report['financial_consumers_confirmed_stopped']=all(report['services'].get(unit,{}).get('ActiveState') in ('inactive','failed') for unit in financial)
             report['active_recovery_confirmed']=all(report['services'].get(unit,{}).get('ActiveState')=='active' and report['services'][unit].get('recovery_mode')=='1' for unit in units[:2])
+            report['filesystem_free_bytes']=shutil.disk_usage('/srv/investor').free
+            if report['docker_binary_available']:
+                try:
+                    result=subprocess.run(['docker','ps','--format','{{.Names}}\t{{.Image}}\t{{.Status}}'],capture_output=True,text=True,timeout=8)
+                    report['docker_daemon_accessible']=result.returncode==0
+                    report['running_containers']=[{'name':row.split('\t')[0],'image':row.split('\t')[1],'status':row.split('\t')[2]} for row in result.stdout.splitlines() if len(row.split('\t'))==3] if result.returncode==0 else []
+                except Exception as error:
+                    report['docker_query_error']=type(error).__name__
             report['wrapper_and_hook_review']='required; command arguments and environment contents are not returned'
             print(json.dumps(report,sort_keys=True))
             RUNTIME
@@ -93,7 +101,7 @@ jobs:
             load_env_file /etc/investor/backend.env
             export PYTHONDONTWRITEBYTECODE=1 CREDX_RECOVERY_MODE=1
             .venv/bin/python -B - <<'DBPY'
-            import asyncio,json
+            import asyncio,json,pathlib,subprocess
             async def verify():
                 engine=None
                 outcome=1
@@ -101,7 +109,7 @@ jobs:
                     async with asyncio.timeout(25):
                         # Catch configuration/import errors and bound connection + all reads.
                         import hashlib
-                        from sqlalchemy import Column,MetaData,String,Table,inspect,select,text
+                        from sqlalchemy import Column,MetaData,String,Table,func,inspect,select,text
                         from app.infrastructure.database.session import AsyncSessionLocal,async_engine
                         engine=async_engine
                         engine.echo=False
@@ -121,7 +129,31 @@ jobs:
                             target_hash=hashlib.sha256(json.dumps(list(identity)).encode()).hexdigest()
                             query="""SELECT ns.nspname, rel.relname, tr.tgname, fn.proname, tr.tgenabled, tr.tgtype, md5(pg_get_functiondef(fn.oid)) FROM pg_catalog.pg_trigger tr JOIN pg_catalog.pg_class rel ON rel.oid=tr.tgrelid JOIN pg_catalog.pg_namespace ns ON ns.oid=rel.relnamespace JOIN pg_catalog.pg_proc fn ON fn.oid=tr.tgfoid WHERE NOT tr.tgisinternal AND ns.nspname=current_schema() AND rel.relname IN ('recommendation_evidence','recommendation_decisions') AND tr.tgname IN ('recommendation_evidence_immutable','recommendation_decisions_immutable') ORDER BY rel.relname, tr.tgname"""
                             triggers=[dict(zip(('schema','table','name','function','enabled','event_type_bits','function_definition_md5'),row)) for row in (await db.execute(text(query))).all()]
-                            print(json.dumps({'database_target_fingerprint':target_hash,'alembic_revisions':revision,'expected_parent_verified':revision==['api_attempt_events_001'],'audit_tables_present':{name:name in tables for name in audit_tables},'audit_immutable_trigger_metadata':triggers,'audit_trigger_enforcement':'not established by metadata alone','transaction_read_only':True,'backup_ready':'not established; approved verified backup required before migration'}))
+                            jobs=Table('jobs',MetaData(),Column('status',String),Column('auto_rebalance_portfolio',String))
+                            active_jobs=dict((await db.execute(select(jobs.c.status,func.count()).where(jobs.c.auto_rebalance_portfolio.in_(('india','indmoney_us')),jobs.c.status.in_(('pending','processing'))).group_by(jobs.c.status))).all())
+                            database_bytes=(await db.execute(select(func.pg_database_size(func.current_database())))).scalar_one()
+                            from app.core.config import settings
+                            from redis.asyncio import Redis
+                            worker_pid=int(subprocess.run(['systemctl','show','investor-recovery-analysis','--property=MainPID','--value'],capture_output=True,text=True,timeout=5,check=True).stdout.strip())
+                            if worker_pid<=0: raise ValueError('Inactive recovery worker')
+                            runtime_env=dict(part.split(b'=',1) for part in pathlib.Path(f'/proc/{worker_pid}/environ').read_bytes().split(b'\0') if b'=' in part)
+                            runtime_broker=(runtime_env.get(b'CELERY_BROKER_URL') or runtime_env.get(b'REDIS_URL') or b'').decode()
+                            canonical_broker=settings.celery_broker_url or settings.redis_url
+                            broker_matches_worker=runtime_broker==canonical_broker
+                            if not broker_matches_worker: raise ValueError('Canonical broker differs from running worker')
+                            broker=Redis.from_url(canonical_broker,socket_connect_timeout=3,socket_timeout=3)
+                            try:
+                                pipeline=broker.pipeline(transaction=False)
+                                queue='credx:recovery:analysis:v1:credx_recovery_analysis'
+                                for priority in range(10):
+                                    pipeline.llen(queue if priority==0 else queue+'\x06\x16'+str(priority))
+                                pipeline.hlen('credx:recovery:analysis:v1:unacked')
+                                pipeline.zcard('credx:recovery:analysis:v1:unacked_index')
+                                counts=await pipeline.execute()
+                                queue_state={'pending':sum(counts[:10]),'unacked':counts[10],'unacked_index':counts[11]}
+                            finally:
+                                await broker.aclose()
+                            print(json.dumps({'database_target_fingerprint':target_hash,'alembic_revisions':revision,'expected_parent_verified':revision==['api_attempt_events_001'],'audit_tables_present':{name:name in tables for name in audit_tables},'audit_immutable_trigger_metadata':triggers,'audit_trigger_enforcement':'not established by metadata alone','transaction_read_only':True,'active_equity_job_status_counts':active_jobs,'recovery_queue_counts':queue_state,'canonical_broker_matches_active_worker':broker_matches_worker,'database_bytes':database_bytes,'backup_ready':'not established; approved verified backup required before migration'}))
                             await db.rollback()
                             outcome=0
                 except Exception as error:
