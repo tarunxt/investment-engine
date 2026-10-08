@@ -85,6 +85,55 @@ jobs:
             report['wrapper_and_hook_review']='required; command arguments and environment contents are not returned'
             print(json.dumps(report,sort_keys=True))
             RUNTIME
+            # Diagnose only the known clean source and known private artifact.
+            if [[ "$source_sha" != 0a12caddaf9bbd681487906774400a3ad4d0369b || "$source_clean" != true ]]; then
+              echo 'wrapper_diagnostic=blocked: unknown live source'
+              exit 1
+            fi
+            sudo -n python3 -B - <<'WRAPPER_DIAGNOSTIC'
+            """Read-only predicate diagnosis; no command/environment values are disclosed."""
+            import hashlib,json,pathlib,re,subprocess
+            
+            root=pathlib.Path('/srv/investor');stage=root/'.audit-migration-2ae3e9466014'
+            expected={
+             'investor-backend':('7c43b70dc498240fe21bb667c8eff4240153dffa79d44b177c0f2038b164dc16','/srv/investor/deploy/no-docker/scripts/run-backend.sh','/srv/investor/backend'),
+             'investor-recovery-analysis':('e9e706a3dbbddc24d0dff19ccb3b16e48e5e5a97d3e4b65f0eaddc795827c520','/srv/investor/backend/.venv/bin/celery','/srv/investor/backend'),
+             'investor-frontend':('ec007da927932b6b77244b216de7393b5344694321fd51673dc72520d86b4e91','/srv/investor/deploy/no-docker/scripts/run-frontend.sh','/srv/investor/frontend'),
+            }
+            try:
+                previous=stage/'previous-source'
+                manifest_path=previous/'manifest.json'
+                if previous.is_symlink() or not previous.is_dir() or stage.is_symlink() or manifest_path.is_symlink() or not manifest_path.is_file() or manifest_path.stat().st_size>2*1024*1024: raise RuntimeError('Unknown source artifact')
+                manifest=json.loads(manifest_path.read_text())
+                report={}
+                for unit,(fingerprint,launch,directory) in expected.items():
+                    result=subprocess.run(['systemctl','show',unit,'--property=ExecStart,ExecStartPre,ExecStartPost,ExecStop,WorkingDirectory,KillMode,TimeoutStopUSec,KillSignal,Environment,EnvironmentFiles'],capture_output=True,text=True,timeout=5,check=True)
+                    values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                    raw=values['ExecStart'];allowed_env='/etc/investor/frontend.env' if unit=='investor-frontend' else '/etc/investor/backend.env'
+                    env_paths=re.findall(r'(/[^ ]+)',values.get('EnvironmentFiles',''))
+                    path=pathlib.Path(launch);relative=path.relative_to(root).as_posix()
+                    report[unit]={
+                      'exact_launch_path':re.findall(r'\bpath=([^ ;}]+)',raw)==[launch],
+                      'exact_working_directory':values['WorkingDirectory']==directory,
+                      'hooks_absent':all(not values.get(key) for key in ('ExecStartPre','ExecStartPost','ExecStop')),
+                      'kill_control_group':values['KillMode']=='control-group',
+                      'timeout_stop':values['TimeoutStopUSec'],'kill_signal':values['KillSignal'],
+                      'full_exec_fingerprint_matches_prior':hashlib.sha256(raw.encode()).hexdigest()==fingerprint,
+                      'current_full_exec_sha256':hashlib.sha256(raw.encode()).hexdigest(),
+                      'stable_start_time_separator_present':' ; start_time=' in raw,
+                      'environment_file_count':len(env_paths),
+                      'environment_paths_expected':set(env_paths)<= {allowed_env},
+                      'worker_canonical_env_expected':env_paths==[allowed_env],
+                      'environment_files_has_ignore_errors':'ignore_errors=' in values.get('EnvironmentFiles',''),
+                      'environment_files_has_space_before_annotation':' (ignore_errors=' in values.get('EnvironmentFiles',''),
+                      'launcher_manifest_covered':relative in manifest['files'],
+                      'launcher_bytes_match_manifest':hashlib.sha256(path.read_bytes()).hexdigest()==manifest['files'].get(relative) if '/.venv/' not in launch and relative in manifest['files'] and path.is_file() and not path.is_symlink() else None,
+                    }
+                print(json.dumps({'wrapper_predicates':report,'previous_source_sha_matches_base':manifest['previous_sha']=='0a12caddaf9bbd681487906774400a3ad4d0369b','source_file_count':len(manifest['files'])},sort_keys=True))
+            except Exception as error:
+                print(json.dumps({'wrapper_diagnostic':'blocked','error_type':type(error).__name__}))
+                raise SystemExit(1)
+            WRAPPER_DIAGNOSTIC
             # Public, unauthenticated GETs only; no financial/analysis route is called.
             curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --request GET --write-out '\nHTTP_STATUS=%{http_code}\n' https://api.cred-x.in/health/ready
             curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --request GET --write-out '\nHTTP_STATUS=%{http_code}\n' https://cred-x.in/api/runtime-fingerprint
