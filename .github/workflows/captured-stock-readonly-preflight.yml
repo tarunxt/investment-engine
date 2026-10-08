@@ -335,7 +335,9 @@ jobs:
                 require(manifest_path.stat().st_size<=2*1024*1024 and archive.stat().st_size<=MAX_BYTES, 'previous_size_bounds')
                 manifest=json.loads(manifest_path.read_text())
                 require(manifest['schema']==1, 'manifest_schema')
-                require(manifest['app_root']==str(ROOT), 'manifest_app_root')
+                # The reviewed snapshot writer canonicalizes app_root with Path.resolve().
+                # Compare to that same known-root contract, rather than its symlink alias.
+                require(manifest['app_root']==str(ROOT.resolve()), 'manifest_app_root')
                 require(manifest['previous_sha']==BASE, 'manifest_previous_sha')
                 require(checksum(archive)==manifest['archive_sha256'], 'archive_checksum')
                 # The preceding stage verifier has established this exact public module's
