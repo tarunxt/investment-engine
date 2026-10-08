@@ -122,6 +122,8 @@ jobs:
                       'current_full_exec_sha256':hashlib.sha256(raw.encode()).hexdigest(),
                       'stable_start_time_separator_present':' ; start_time=' in raw,
                       'environment_file_count':len(env_paths),
+                      'declared_environment_file_paths':[name for name in env_paths if re.fullmatch(r'/etc/investor/[A-Za-z0-9_.-]+\.env',name)],
+                      'all_declared_paths_are_investor_env_metadata':all(re.fullmatch(r'/etc/investor/[A-Za-z0-9_.-]+\.env',name) for name in env_paths),
                       'environment_paths_expected':set(env_paths)<= {allowed_env},
                       'worker_canonical_env_expected':env_paths==[allowed_env],
                       'environment_files_has_ignore_errors':'ignore_errors=' in values.get('EnvironmentFiles',''),
