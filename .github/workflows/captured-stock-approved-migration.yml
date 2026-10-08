@@ -1,0 +1,411 @@
+name: Captured Stock Details approved additive migration
+on:
+  push:
+    branches: [codex/captured-stock-approved-migration-20261008]
+    paths: [.github/workflows/captured-stock-approved-migration.yml]
+permissions:
+  contents: read
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Verify backup and drain, apply only the approved additive revision
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 18m
+          script: |
+            #!/usr/bin/env bash
+            # One-time approved additive migration; no financial/analysis route is invoked.
+            set -euo pipefail
+            export PYTHONDONTWRITEBYTECODE=1 GIT_OPTIONAL_LOCKS=0
+            APP_ROOT=/srv/investor
+            APP_USER=investor
+            MIGRATION_STAGE=/srv/investor/.audit-migration-2ae3e9466014
+            CANDIDATE_SHA=2ae3e9466014c5b68bab4b878389a26f0e26077b
+            BASE_SHA=0a12caddaf9bbd681487906774400a3ad4d0369b
+            restore_api=false
+            restore_worker=false
+            worker_gracefully_stopped=false
+            check_financial_stopped() {
+              for family in investor investment-engine; do
+                for role in celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
+                  state=$(sudo -n systemctl show "$family-$role" --property=ActiveState --value) || return 1
+                  [[ "$state" == inactive || "$state" == failed ]] || return 1
+                done
+              done
+            }
+            check_source() {
+              [[ "$(sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" rev-parse HEAD)" == "$BASE_SHA" ]] || return 1
+              sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --no-ext-diff --no-textconv --quiet || return 1
+              sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --cached --no-ext-diff --no-textconv --quiet
+            }
+            check_wrappers() {
+              sudo -n python3 -B - "$1" <<'WRAPPERS'
+            import hashlib,json,os,pathlib,re,subprocess,sys
+            root=pathlib.Path('/srv/investor');stage=root/'.audit-migration-2ae3e9466014'
+            expected={
+             'investor-backend':('7c43b70dc498240fe21bb667c8eff4240153dffa79d44b177c0f2038b164dc16','/srv/investor/deploy/no-docker/scripts/run-backend.sh','/srv/investor/backend'),
+             'investor-recovery-analysis':('e9e706a3dbbddc24d0dff19ccb3b16e48e5e5a97d3e4b65f0eaddc795827c520','/srv/investor/backend/.venv/bin/celery','/srv/investor/backend'),
+             'investor-frontend':('ec007da927932b6b77244b216de7393b5344694321fd51673dc72520d86b4e91','/srv/investor/deploy/no-docker/scripts/run-frontend.sh','/srv/investor/frontend'),
+            }
+            def require(value):
+                if not value: raise SystemExit('Unknown command, hook or wrapper coverage blocks service lifecycle')
+            def checksum(path):
+                digest=hashlib.sha256()
+                with path.open('rb') as stream:
+                    for block in iter(lambda:stream.read(1024*1024),b''): digest.update(block)
+                return digest.hexdigest()
+            manifest=json.loads((stage/'previous-source/manifest.json').read_text())
+            report={}
+            for unit,(fingerprint,launch,directory) in expected.items():
+                result=subprocess.run(['systemctl','show',unit,'--property=ExecStart,ExecStartPre,ExecStartPost,ExecStop,WorkingDirectory,KillMode,TimeoutStopUSec,KillSignal,Environment,EnvironmentFiles'],capture_output=True,text=True,timeout=5,check=True)
+                values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                raw=values['ExecStart']
+                require(re.findall(r'\bpath=([^ ;}]+)',raw)==[launch] and values['WorkingDirectory']==directory)
+                require(all(not values.get(key) for key in ('ExecStartPre','ExecStartPost','ExecStop')))
+                require(values['KillMode']=='control-group')
+                if unit=='investor-backend': require(values['TimeoutStopUSec']=='30s' and values['KillSignal']=='2')
+                if unit=='investor-recovery-analysis': require(values['TimeoutStopUSec']=='5min' and values['KillSignal']=='15')
+                if sys.argv[1]=='observe': require(hashlib.sha256(raw.encode()).hexdigest()==fingerprint)
+                require(' ; start_time=' in raw)
+                stable=raw.split(' ; start_time=',1)[0]
+                allowed_env='/etc/investor/frontend.env' if unit=='investor-frontend' else '/etc/investor/backend.env'
+                env_paths=re.findall(r'(/[^ ]+)',values.get('EnvironmentFiles',''))
+                require(set(env_paths)<= {allowed_env})
+                if unit=='investor-recovery-analysis': require(env_paths==[allowed_env])
+                report[unit]={'command':hashlib.sha256(stable.encode()).hexdigest(),'environment':hashlib.sha256(values.get('Environment','').encode()).hexdigest(),'environment_files':hashlib.sha256(values.get('EnvironmentFiles','').encode()).hexdigest()}
+                path=pathlib.Path(launch)
+                if '/.venv/' not in launch:
+                    relative=path.relative_to(root).as_posix()
+                    require(relative in manifest['files'] and checksum(path)==manifest['files'][relative])
+            for name in ('backend/.venv/bin/celery','backend/.venv/bin/python'):
+                path=root/name
+                require(path.is_file())
+                report[name]={'resolved_path':str(path.resolve()),'sha256':checksum(path)}
+            for filename in ('/etc/investor/backend.env','/etc/investor/frontend.env'):
+                path=pathlib.Path(filename);require(path.is_file() and not path.is_symlink());report[filename]=checksum(path)
+            record=stage/'runtime-wrapper-hashes.json'
+            if sys.argv[1]=='observe':
+                record.write_text(json.dumps(report,sort_keys=True)+'\n');os.chmod(record,0o600)
+            else: require(json.loads(record.read_text())==report)
+            print('canonical_wrapper_and_venv_preservation_verified=true')
+            WRAPPERS
+            }
+            finish() {
+              result=$?
+              trap - EXIT
+              if [[ "$restore_worker" == true || "$restore_api" == true ]]; then
+                if ! check_source || ! check_financial_stopped || ! check_wrappers restore; then
+                  echo 'ROLLBACK_BLOCKED: wrapper or preserved runtime changed; recovery service restart blocked; current state requires confirmation.' >&2
+                  echo 'migration_runner_exit=1'
+                  exit 1
+                fi
+              fi
+              if [[ "$restore_worker" == true ]]; then
+                if [[ "$worker_gracefully_stopped" != true ]] || ! run_database_phase resume; then
+                  echo 'RESUME_BLOCKED: recovery worker lacks a confirmed graceful empty state; restart blocked; current state requires confirmation.' >&2
+                  result=1
+                else
+                  sudo -n systemctl start investor-recovery-analysis || result=1
+                fi
+              fi
+              if [[ "$restore_api" == true ]]; then sudo -n systemctl start investor-backend || result=1; fi
+              if [[ "$restore_api" == true ]]; then
+                ready=false
+                for attempt in $(seq 1 40); do
+                  if curl -fsS --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then ready=true; break; fi
+                  sleep 1
+                done
+                [[ "$ready" == true ]] || result=1
+                if [[ "$restore_worker" != true || "$worker_gracefully_stopped" == true ]]; then
+                  APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$MIGRATION_STAGE/deploy/no-docker/deploy-recovery.sh" --preflight || result=1
+                fi
+              fi
+              echo "migration_runner_exit=$result"
+              exit "$result"
+            }
+            trap finish EXIT
+            sudo -n test -d "$APP_ROOT/.git"
+            sudo -n touch /run/investor-production-deploy.lock
+            sudo -n chown "$(id -u):$(id -g)" /run/investor-production-deploy.lock
+            exec 9>/run/investor-production-deploy.lock
+            flock -w 60 9
+            [[ "$(sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" rev-parse HEAD)" == "$BASE_SHA" ]]
+            sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --no-ext-diff --no-textconv --quiet
+            sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --cached --no-ext-diff --no-textconv --quiet
+            # The exception applies only when no existing backend container runner is active.
+            [[ "$(sudo -n docker ps -q | wc -l | tr -d ' ')" == 0 ]]
+            for unit in investor-backend investor-recovery-analysis investor-frontend; do
+              sudo -n systemctl is-active --quiet "$unit"
+              for property in ExecStartPre ExecStartPost ExecStop; do
+                [[ -z "$(sudo -n systemctl show "$unit" --property="$property" --value)" ]]
+              done
+            done
+            # No overwrite, install or source checkout; exact approved code is archived separately.
+            sudo -n test ! -e "$MIGRATION_STAGE"
+            sudo -n -u "$APP_USER" git -c core.hooksPath=/dev/null -C "$APP_ROOT" fetch origin codex/captured-stock-verification-20261007
+            sudo -n -u "$APP_USER" git -C "$APP_ROOT" cat-file -e "$CANDIDATE_SHA^{commit}"
+            sudo -n -u "$APP_USER" mkdir -m 0700 "$MIGRATION_STAGE"
+            sudo -n -u "$APP_USER" git -C "$APP_ROOT" archive "$CANDIDATE_SHA" backend deploy/no-docker | sudo -n -u "$APP_USER" tar -x -C "$MIGRATION_STAGE"
+            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$MIGRATION_STAGE/deploy/no-docker/deploy-recovery.sh" --preflight
+            # A complete prior source/wrapper snapshot precedes every service stop.
+            export CREDX_RECOVERY_ROLLBACK_DIR="$MIGRATION_STAGE/previous-source"
+            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$MIGRATION_STAGE/deploy/no-docker/deploy-recovery.sh" --prepare
+            sudo -n python3 -B - <<'FRONTEND'
+            import json,urllib.request
+            from pathlib import Path
+            response=json.load(urllib.request.urlopen('https://cred-x.in/api/runtime-fingerprint',timeout=5))
+            assert response['build_sha']=='0a12caddaf9bbd681487906774400a3ad4d0369b'
+            for line in Path('/etc/investor/frontend.env').read_text().splitlines():
+                if line.strip().startswith('NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED'):
+                    assert line.split('=',1)[1].strip().strip('"').strip("'")=='false'
+            print('previous_frontend_sha_verified=true')
+            FRONTEND
+            run_database_phase() {
+              local phase="$1"
+              sudo -n -u "$APP_USER" env AUDIT_MIGRATION_PHASE="$phase" PYTHONDONTWRITEBYTECODE=1 bash <<'DATABASE'
+            set -euo pipefail
+            cd /srv/investor/.audit-migration-2ae3e9466014/backend
+            source /srv/investor/.audit-migration-2ae3e9466014/deploy/no-docker/load-env-file.sh
+            load_env_file /etc/investor/backend.env
+            export CREDX_RECOVERY_MODE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/srv/investor/.audit-migration-2ae3e9466014/backend
+            /srv/investor/backend/.venv/bin/python -B - "$AUDIT_MIGRATION_PHASE" <<'DBPY'
+            """Approved one-time additive migration driver, run as existing app user.
+            
+            Canonical credentials remain opaque; only sanitized operational metadata exits.
+            The surrounding reviewed shell owns the production lock and service lifecycle.
+            """
+            import hashlib
+            import json
+            import os
+            from pathlib import Path
+            import shutil
+            import subprocess
+            import sys
+            import time
+            from uuid import uuid4
+            
+            
+            EXPECTED_TARGET="22a7ee52deda57df24809b18531a85437fc57b695b5662162d68f30c01c248d1"
+            PARENT="api_attempt_events_001"
+            REVISION="recommendation_audit_001"
+            TABLES=("recommendation_evidence","recommendation_decisions","recommendation_verifications","recommendation_spend_accounts","recommendation_spend_attempts")
+            STAGE=Path("/srv/investor/.audit-migration-2ae3e9466014")
+            PREFIX="credx:recovery:analysis:v1:"
+            RESERVE_BYTES=3*1024**3
+            PHASE=None
+            
+            
+            class OperationalBlocked(RuntimeError):
+                pass
+            
+            
+            def require(value, reason):
+                if not value: raise OperationalBlocked(reason)
+            
+            
+            def checksum(path):
+                digest=hashlib.sha256()
+                with path.open("rb") as stream:
+                    for block in iter(lambda:stream.read(1024*1024),b""): digest.update(block)
+                return digest.hexdigest()
+            
+            
+            def private_command(args, *, timeout, environment=None):
+                # Bounded tool detail stays private; command arguments contain no credential.
+                def retain(stdout,stderr):
+                    path=STAGE/"operations.private.log"
+                    descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_APPEND|os.O_NOFOLLOW,0o600)
+                    with os.fdopen(descriptor,"ab") as log:
+                        log.write(("command="+Path(args[0]).name+" phase="+str(PHASE)+"\n").encode())
+                        log.write((stdout or b"")[:1024*1024]);log.write((stderr or b"")[:1024*1024]);log.write(b"\n")
+                try: result=subprocess.run(args,env=environment,capture_output=True,timeout=timeout)
+                except subprocess.TimeoutExpired as error:
+                    retain(error.stdout,error.stderr)
+                    raise OperationalBlocked("Bounded operational command timed out") from None
+                retain(result.stdout,result.stderr)
+                require(result.returncode==0,"Bounded operational command failed; inspect private tool log")
+                return result.stdout
+            
+            
+            def metadata(engine, *, expected_revision=PARENT):
+                with engine.connect() as connection:
+                    transaction=connection.begin()
+                    try:
+                        connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+                        identity=connection.execute(sa.text("SELECT current_database(), inet_server_addr()::text, inet_server_port(), current_schema()" )).one()
+                        target=hashlib.sha256(json.dumps(list(identity)).encode()).hexdigest()
+                        require(target==EXPECTED_TARGET,"Database target changed")
+                        tables=set(sa.inspect(connection).get_table_names())
+                        version=sa.Table("alembic_version",sa.MetaData(),sa.Column("version_num",sa.String))
+                        revisions=list(connection.execute(sa.select(version.c.version_num)).scalars())
+                        if expected_revision is None:
+                            require(revisions in ([PARENT],[REVISION]),"Unknown database revision prevents recovery resume")
+                            expected_revision=revisions[0]
+                        require(revisions==[expected_revision],"Database revision changed")
+                        require(all((name in tables)==(expected_revision==REVISION) for name in TABLES),"Unexpected audit schema")
+                        jobs=sa.Table("jobs",sa.MetaData(),sa.Column("status",sa.String),sa.Column("auto_rebalance_portfolio",sa.String))
+                        jobs_count=connection.execute(sa.select(sa.func.count()).select_from(jobs).where(jobs.c.status.in_(("pending","processing")),jobs.c.auto_rebalance_portfolio.in_(("india","indmoney_us")))).scalar_one()
+                        require(jobs_count==0,"Existing analysis jobs prevent a verified drain")
+                        size=connection.execute(sa.select(sa.func.pg_database_size(sa.func.current_database()))).scalar_one()
+                        return {"database_target_fingerprint":target,"alembic_revisions":revisions,"active_equity_jobs":jobs_count,"database_bytes":size}
+                    finally: transaction.rollback()
+            
+            
+            def queue_state(*, active_worker):
+                broker_url=settings.celery_broker_url or settings.redis_url
+                if active_worker:
+                    pid=int(private_command(["systemctl","show","investor-recovery-analysis","--property=MainPID","--value"],timeout=5).strip())
+                    require(pid>0,"Recovery worker is inactive before drain")
+                    env=dict(part.split(b"=",1) for part in Path(f"/proc/{pid}/environ").read_bytes().split(b"\0") if b"=" in part)
+                    require((env.get(b"CELERY_BROKER_URL") or env.get(b"REDIS_URL") or b"").decode()==broker_url,"Worker broker differs from canonical settings")
+                    (STAGE/"broker.sha256").write_text(hashlib.sha256(broker_url.encode()).hexdigest())
+                    os.chmod(STAGE/"broker.sha256",0o600)
+                else:
+                    require((STAGE/"broker.sha256").read_text()==hashlib.sha256(broker_url.encode()).hexdigest(),"Broker changed while draining")
+                with Redis.from_url(broker_url,socket_connect_timeout=3,socket_timeout=3) as broker:
+                    pipeline=broker.pipeline(transaction=False)
+                    for priority in range(10): pipeline.llen(PREFIX+"credx_recovery_analysis"+("" if priority==0 else "\x06\x16"+str(priority)))
+                    pipeline.hlen(PREFIX+"unacked");pipeline.zcard(PREFIX+"unacked_index")
+                    counts=pipeline.execute()
+                require(all(value==0 for value in counts),"Recovery queue is not drained")
+                return {"pending":sum(counts[:10]),"unacked":counts[10],"unacked_index":counts[11]}
+            
+            
+            def backup(url):
+                pg_dump=shutil.which("pg_dump");pg_restore=shutil.which("pg_restore")
+                require(pg_dump is not None and pg_restore is not None,"Existing backup tools unavailable")
+                destination=STAGE/"database-backup";destination.mkdir(mode=0o700,exist_ok=False)
+                archive=destination/"before-recommendation-audit.dump"
+                params={"host":url.host,"port":url.port or 5432,"user":url.username,"dbname":url.database,"password":url.password,**url.query}
+                backup_engine=sa.create_engine("postgresql+psycopg2://",poolclass=NullPool,connect_args={**params,"connect_timeout":3,"options":"-c statement_timeout=5000 -c lock_timeout=1000"},echo=False)
+                try: metadata(backup_engine)  # Verify the exact effective libpq backup parameters.
+                finally: backup_engine.dispose()
+                env={**os.environ,"PGHOST":params["host"],"PGPORT":str(params["port"]),"PGUSER":params["user"],"PGDATABASE":params["dbname"],"PGPASSWORD":params["password"],"PGCONNECT_TIMEOUT":"3"}
+                # Preserve server TLS options supported by libpq; do not invent a weaker mode.
+                for key in ("sslmode","sslcert","sslkey","sslrootcert"):
+                    if key in url.query: env["PG"+key.upper()]=url.query[key]
+                started=time.monotonic();process=None
+                with (destination/"pg-dump.private.log").open("wb") as errors:
+                    os.chmod(destination/"pg-dump.private.log",0o600)
+                    try:
+                        process=subprocess.Popen([pg_dump,"--format=custom","--compress=6","--no-password","--file",str(archive)],env=env,stdout=subprocess.DEVNULL,stderr=errors)
+                        while process.poll() is None:
+                            require(time.monotonic()-started<360,"Backup exceeded its bound")
+                            require(shutil.disk_usage(STAGE).free>=RESERVE_BYTES,"Backup would consume the reserved deployment capacity")
+                            time.sleep(0.25)
+                        require(process.returncode==0,"Database backup failed")
+                    finally:
+                        if process is not None and process.poll() is None:
+                            process.terminate()
+                            try: process.wait(timeout=5)
+                            except subprocess.TimeoutExpired: process.kill();process.wait(timeout=5)
+                os.chmod(archive,0o600)
+                require(archive.stat().st_size>0,"Empty database backup")
+                private_command([pg_restore,"--list",str(archive)],timeout=20)
+                # Read and decompress the complete archive without connecting/restoring data.
+                private_command([pg_restore,"--file=/dev/null",str(archive)],timeout=180)
+                require(shutil.disk_usage(STAGE).free>=RESERVE_BYTES,"Reserved deployment capacity unavailable")
+                result={"archive_sha256":checksum(archive),"bytes":archive.stat().st_size,"archive_read_verified":True,"database_target_fingerprint":EXPECTED_TARGET}
+                (destination/"manifest.json").write_text(json.dumps(result,sort_keys=True)+"\n");os.chmod(destination/"manifest.json",0o600)
+                return result
+            
+            
+            def immutable_probe(engine):
+                with engine.connect() as connection:
+                    outer=connection.begin()
+                    try:
+                        require(connection.execute(sa.text("SELECT current_setting('session_replication_role')")).scalar_one()=="origin","Trigger role is not origin")
+                        for name in TABLES[:2]:
+                            table=sa.Table(name,sa.MetaData(),autoload_with=connection)
+                            row={"id":str(uuid4()),"user_id":-1,"content_hash":"0"*64,"payload":{},"captured_at":sa.func.now()}
+                            if name=="recommendation_evidence": row.update(kind="release_probe",source_key="transactional-release-probe")
+                            else: row.update(run_id=-1,market="india",symbol="FIXTUREEQ",exchange="NSE",decision_at=sa.func.now(),provenance="release_probe")
+                            connection.execute(table.insert().values(**row))
+                            for statement in (table.update().where(table.c.id==row["id"]).values(payload={"probe":True}),table.delete().where(table.c.id==row["id"])):
+                                savepoint=connection.begin_nested();blocked=False
+                                try: connection.execute(statement)
+                                except Exception as error:
+                                    blocked=getattr(getattr(error,"orig",None),"pgcode",None)=="P0001" and "Recommendation evidence is append-only" in str(getattr(error,"orig",""))
+                                finally: savepoint.rollback()
+                                require(blocked,"Immutable audit trigger did not reject mutation")
+                    finally: outer.rollback()  # No synthetic audit row persists.
+                return True
+            
+            
+            def main():
+                global sa, make_url, NullPool, Redis, settings
+                import sqlalchemy as sa
+                from sqlalchemy.engine import make_url
+                from sqlalchemy.pool import NullPool
+                from redis import Redis
+                from app.core.config import settings
+                require(PHASE in {"observe","upgrade","resume"},"Unknown operational phase")
+                require(os.getenv("CREDX_RECOVERY_MODE")=="1","Explicit recovery mode required")
+                require(not settings.recommendation_audit_enabled and not settings.recommendation_audit_external_enabled and not settings.recommendation_audit_fundamentals_enabled and settings.recommendation_audit_daily_cap_usd==0,"Audit must remain disabled")
+                url=make_url(settings.database_url.replace("postgresql+asyncpg://","postgresql://",1))
+                require(url.get_backend_name()=="postgresql","Existing PostgreSQL target required")
+                require(url.host and url.username and url.database and url.password is not None,"Incomplete database authority")
+                require(set(url.query)<= {"sslmode","sslcert","sslkey","sslrootcert"} and all(isinstance(v,str) for v in url.query.values()),"Unreviewed database query overrides")
+                require(not any(key.startswith("PG") for key in os.environ),"Inherited libpq configuration is outside the verified target")
+                engine=sa.create_engine(url,poolclass=NullPool,connect_args={"connect_timeout":3,"options":"-c statement_timeout=5000 -c lock_timeout=1000"},echo=False)
+                try:
+                    report=metadata(engine,expected_revision=None if PHASE=="resume" else PARENT);report["queue"]=queue_state(active_worker=PHASE=="observe")
+                    if PHASE=="resume": print(json.dumps({"phase":PHASE,**report}));return
+                    require(shutil.which("pg_dump") and shutil.which("pg_restore"),"Existing backup tools required")
+                    require(shutil.disk_usage(STAGE).free>=RESERVE_BYTES+1024**3,"Insufficient backup capacity")
+                    if PHASE=="observe": print(json.dumps({"phase":PHASE,**report}));return
+                    report["backup"]=backup(url)
+                    metadata(engine);queue_state(active_worker=False)
+                    environment={**os.environ,"DATABASE_URL":url.update_query_dict({"connect_timeout":"3","options":"-c statement_timeout=30000 -c lock_timeout=3000"}).render_as_string(hide_password=False),"PYTHONDONTWRITEBYTECODE":"1"}
+                    python="/srv/investor/backend/.venv/bin/python"
+                    private_command([python,"-B","-m","alembic","current"],timeout=20,environment=environment)
+                    private_command([python,"-B","-m","alembic","upgrade",REVISION],timeout=60,environment=environment)
+                    private_command([python,"-B","-m","alembic","current"],timeout=20,environment=environment)
+                    report.update(metadata(engine,expected_revision=REVISION))
+                    report["immutable_trigger_enforcement_verified"]=immutable_probe(engine)
+                    report["remaining_filesystem_free_bytes"]=shutil.disk_usage(STAGE).free
+                    report["phase"]=PHASE
+                    print(json.dumps(report,sort_keys=True))
+                finally: engine.dispose()
+            
+            
+            if __name__=="__main__":
+                try:
+                    require(len(sys.argv)==2,"One named operational phase required")
+                    PHASE=sys.argv[1]
+                    main()
+                except Exception as error:
+                    print(json.dumps({"phase":PHASE,"status":"blocked","error_type":type(error).__name__,"reason":str(error) if isinstance(error,OperationalBlocked) else "Operational check failed; tool details, where available, are retained privately"}))
+                    raise SystemExit(1)
+            DBPY
+            DATABASE
+            }
+            # Check before fencing, then again with the API producer stopped.
+            check_wrappers observe
+            run_database_phase observe
+            restore_api=true
+            sudo -n systemctl stop investor-backend
+            run_database_phase observe
+            restore_worker=true
+            sudo -n systemctl stop investor-recovery-analysis
+            [[ "$(sudo -n systemctl show investor-recovery-analysis --property=ActiveState --value)" == inactive ]]
+            [[ "$(sudo -n systemctl show investor-recovery-analysis --property=Result --value)" == success ]]
+            [[ "$(sudo -n systemctl show investor-recovery-analysis --property=ExecMainStatus --value)" == 0 ]]
+            [[ "$(sudo -n systemctl show investor-backend --property=ActiveState --value)" == inactive ]]
+            worker_gracefully_stopped=true
+            # Existing consumers are drained/stopped; backup is verified before the named upgrade.
+            check_source
+            check_financial_stopped
+            check_wrappers restore
+            run_database_phase upgrade
+            # No flags or live source were changed; the EXIT handler resumes only existing recovery services.
