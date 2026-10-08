@@ -203,7 +203,7 @@ jobs:
           AUDIT_PUBLIC_FLAG: ${{ steps.audit-public-flag.outputs.stdout }}
         run: |
           set -euo pipefail
-          flag=$(printf '%s\n' "$AUDIT_PUBLIC_FLAG" | sed -nE 's/^CREDX_PUBLIC_AUDIT_FLAG=(true|false)$/\1/p')
+          flag=$(printf '%s\n' "$AUDIT_PUBLIC_FLAG" | node scripts/read-audit-public-flag.mjs)
           case "$flag" in true|false) ;; *) echo 'Invalid public audit build flag' >&2; exit 1 ;; esac
           echo "NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=$flag" >>"${GITHUB_ENV}"
 
