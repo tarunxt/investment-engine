@@ -1,0 +1,1500 @@
+name: Captured Stock Details approved stored-only activation
+on:
+  push:
+    branches: [codex/captured-stock-approved-activation-20261008]
+    paths: [.github/workflows/captured-stock-approved-activation.yml]
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  RELEASE_SHA: abacd883a6cb17f257bbd869e1c530234fbefd48
+  FRONTEND_ARTIFACT_NAME: frontend-runtime-abacd883a6cb17f257bbd869e1c530234fbefd48
+  FRONTEND_ARTIFACT_FILE: frontend-runtime-abacd883a6cb17f257bbd869e1c530234fbefd48.tar.gz
+
+jobs:
+  activation-offline:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: abacd883a6cb17f257bbd869e1c530234fbefd48
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Execute private frontend adapter transaction and rollback fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir .audit-activation-offline
+          cat > .audit-activation-offline/adapter.py <<'ADAPTER_SOURCE'
+          """Private exact-source adapter: promote an artifact without installing host config."""
+          import hashlib
+          from pathlib import Path
+          import sys
+          
+          SOURCE_SHA256='474c37bb276855cce2c028fd75767b7095a274a3d189277782aa487fdf116e72'
+          OLD='''if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
+            install_systemd_unit "$FRONTEND_SERVICE_NAME"
+            echo "==> Install/update frontend nginx template when changed"
+            install_or_update_nginx_template
+          fi'''
+          NEW='''if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
+            echo "==> Private activation preserves existing systemd and Nginx configuration"
+            preserved_frontend_unit="$SYSTEMD_UNIT_ROOT/$(systemd_unit_file_name "$FRONTEND_SERVICE_NAME")"
+            sudo test -f "$preserved_frontend_unit" || { echo "Existing frontend unit required" >&2; exit 1; }
+            INSTALLED_SYSTEMD_UNITS+=("$preserved_frontend_unit")
+          fi'''
+          
+          def adapt(source):
+              if hashlib.sha256(source).hexdigest()!=SOURCE_SHA256:raise RuntimeError('Exact reviewed redeployer required')
+              text=source.decode()
+              if text.count(OLD)!=1:raise RuntimeError('Exact configuration block required')
+              return text.replace(OLD,NEW,1)
+          
+          if __name__=='__main__':
+              try:
+                  if len(sys.argv)!=2 or sys.argv[1]!='/srv/investor/deploy/no-docker/redeploy.sh':raise RuntimeError('Known source required')
+                  sys.stdout.write(adapt(Path(sys.argv[1]).read_bytes()))
+              except Exception as error:
+                  print('activation_frontend_adapter=blocked; error_type='+type(error).__name__,file=sys.stderr)
+                  raise SystemExit(1)
+          ADAPTER_SOURCE
+          python3 - <<'COMPILE_ADAPTER'
+          import importlib.util
+          from pathlib import Path
+          spec=importlib.util.spec_from_file_location('adapter',Path('.audit-activation-offline/adapter.py'))
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          Path('.audit-activation-offline/compiled-activation-frontend.sh').write_text(module.adapt(Path('deploy/no-docker/redeploy.sh').read_bytes()))
+          COMPILE_ADAPTER
+          cat > .audit-activation-offline/activation-frontend-transaction.test.mjs <<'FRONTEND_FIXTURE'
+          import assert from "node:assert/strict";
+          import { createHash, randomBytes } from "node:crypto";
+          import { execFile } from "node:child_process";
+          import {
+            chmod,
+            cp,
+            mkdir,
+            mkdtemp,
+            readFile,
+            symlink,
+            writeFile,
+          } from "node:fs/promises";
+          import path from "node:path";
+          import test from "node:test";
+          import { promisify } from "node:util";
+          import { fileURLToPath } from "node:url";
+          
+          const execFileAsync = promisify(execFile);
+          const repositoryRoot = process.cwd();
+          const realNode = process.execPath;
+          
+          async function executable(filePath, source) {
+            await writeFile(filePath, source, "utf8");
+            await chmod(filePath, 0o755);
+          }
+          
+          async function createHarness() {
+            const root = await mkdtemp("/tmp/investor-deploy-transaction-");
+            const releaseRoot = path.join(root, "release");
+            const srvRoot = path.join(root, "srv");
+            const appRoot = path.join(srvRoot, "investor");
+            const frontendRoot = path.join(releaseRoot, "frontend");
+            const fakeBin = path.join(root, "bin");
+            const logPath = path.join(root, "commands.log");
+            const systemdRoot = path.join(root, "systemd");
+            const nginxRoot = path.join(root, "nginx");
+            await mkdir(frontendRoot, { recursive: true });
+            await mkdir(srvRoot, { recursive: true });
+            await mkdir(fakeBin, { recursive: true });
+            await mkdir(systemdRoot, { recursive: true });
+            await writeFile(path.join(systemdRoot,"investor-frontend.service"),"existing-unit");
+            await mkdir(path.join(nginxRoot, "sites-available"), { recursive: true });
+            await mkdir(path.join(nginxRoot, "sites-enabled"), { recursive: true });
+            await symlink(releaseRoot, appRoot);
+            await cp(path.join(repositoryRoot, "deploy"), path.join(releaseRoot, "deploy"), {
+              recursive: true,
+            });
+            await writeFile(path.join(releaseRoot,"deploy/no-docker/redeploy.sh"),await readFile(".audit-activation-offline/compiled-activation-frontend.sh"));
+            await cp(path.join(repositoryRoot, "scripts"), path.join(releaseRoot, "scripts"), {
+              recursive: true,
+            });
+            await cp(
+              path.join(repositoryRoot, "frontend", "package-lock.json"),
+              path.join(frontendRoot, "package-lock.json"),
+            );
+          
+            const activeSlot = path.join(frontendRoot, ".next");
+            await mkdir(path.join(activeSlot, ".next", "static"), { recursive: true });
+            await writeFile(path.join(activeSlot, "server.js"), "previous-runtime\n");
+            await writeFile(path.join(activeSlot, ".next", "BUILD_ID"), "previous\n");
+            await writeFile(path.join(activeSlot, "active-marker"), "previous-untouched\n");
+            await writeFile(path.join(frontendRoot, ".next-active-dir"), ".next\n");
+          
+            const artifactRoot = path.join(root, "artifact-root");
+            await mkdir(path.join(artifactRoot, ".next", "static"), { recursive: true });
+            await writeFile(path.join(artifactRoot, "server.js"), "candidate-runtime\n");
+            await writeFile(path.join(artifactRoot, ".next", "BUILD_ID"), "candidate\n");
+            await writeFile(
+              path.join(artifactRoot, ".next", "static", "candidate.js"),
+              "candidate\n",
+            );
+            await writeFile(path.join(artifactRoot, "candidate-marker"), "candidate\n");
+            const artifact = path.join(root, "frontend.tar.gz");
+            await execFileAsync("tar", ["-czf", artifact, "-C", artifactRoot, "."]);
+            const artifactBytes = await readFile(artifact);
+            const checksum = createHash("sha256").update(artifactBytes).digest("hex");
+            await writeFile(`${artifact}.sha256`, `${checksum}  frontend.tar.gz\n`);
+          
+            const frontendEnv = path.join(root, "frontend.env");
+            await writeFile(
+              frontendEnv,
+              [
+                "NEXTAUTH_URL=http://127.0.0.1:3000",
+                "NEXTAUTH_SECRET="+randomBytes(24).toString("hex"),
+                "NEXT_PUBLIC_FRONTEND_URL=https://cred-x.test",
+                "NEXT_PUBLIC_API_URL=https://api.cred-x.test",
+              ].join("\n"),
+            );
+          
+            await executable(
+              path.join(fakeBin, "sudo"),
+              `#!/usr/bin/env bash
+          set -e
+          while [[ "\${1:-}" == "-u" || "\${1:-}" == "-H" || "\${1:-}" == "--" ]]; do
+            if [[ "$1" == "-u" ]]; then shift 2; else shift; fi
+          done
+          if [[ "\${1:-}" == "bash" && "\${2:-}" == "-lc" ]]; then
+            exec bash -c "export PATH='${fakeBin}':\\$PATH; \${3}"
+          fi
+          exec "$@"
+          `,
+            );
+            await executable(
+              path.join(fakeBin, "systemctl"),
+              `#!/usr/bin/env bash
+          echo "systemctl $*" >> "${logPath}"
+          case "\${1:-}" in
+            is-active|is-enabled)
+              unit="\${@: -1}"
+              if [[ "$unit" == *frontend* || "$unit" == nginx ]]; then
+                [[ "\${2:-}" == "--quiet" ]] || echo active
+                exit 0
+              fi
+              [[ "\${2:-}" == "--quiet" ]] || echo inactive
+              exit 1
+              ;;
+            cat)
+              [[ "\${2:-}" == *frontend* ]]
+              ;;
+            show)
+              echo 0
+              ;;
+            *)
+              exit 0
+              ;;
+          esac
+          `,
+            );
+            await executable(
+              path.join(fakeBin, "systemd-analyze"),
+              `#!/usr/bin/env bash
+          echo "systemd-analyze $*" >> "${logPath}"
+          exit 0
+          `,
+            );
+            await executable(
+              path.join(fakeBin, "nginx"),
+              `#!/usr/bin/env bash
+          echo "nginx $*" >> "${logPath}"
+          exit 0
+          `,
+            );
+            await executable(
+              path.join(fakeBin, "node"),
+              `#!/usr/bin/env bash
+          set -e
+          script="\${1:-}"
+          if [[ "$script" == *frontend-artifact.mjs ]]; then
+            command="\${2:-}"
+            frontend_root="\${3:-}"
+            case "$command" in
+              select)
+                active=".next"
+                [[ -f "$frontend_root/.next-active-dir" ]] && active="$(tr -d '\\r\\n' < "$frontend_root/.next-active-dir")"
+                [[ "$active" == ".next" ]] && printf '.next\\t.next-candidate\\n' || printf '.next-candidate\\t.next\\n'
+                ;;
+              resolve-launch)
+                active="$(tr -d '\\r\\n' < "$frontend_root/.next-active-dir")"
+                printf 'standalone-slot\\t%s/%s\\t%s\\n' "$frontend_root" "$active" "$active"
+                ;;
+              point)
+                printf '%s\\n' "\${4}" > "$frontend_root/.next-active-dir"
+                ;;
+              validate-host)
+                test -f "$frontend_root/server.js"
+                ;;
+              *)
+                exit 2
+                ;;
+            esac
+            exit 0
+          fi
+          if [[ "$script" == *verify-frontend-artifact-runtime.mjs ]]; then
+            exit 0
+          fi
+          exec "${realNode}" "$@"
+          `,
+            );
+            await executable(path.join(fakeBin,"install"),`#!/bin/bash
+          echo "FORBIDDEN_CONFIG_WRITE" >> "${logPath}"
+          exit 99
+          `);
+            await executable(
+              path.join(fakeBin, "curl"),
+              `#!/usr/bin/env bash
+          set -e
+          url=""
+          headers=""
+          output=""
+          write_out=""
+          while (( "$#" )); do
+            case "$1" in
+              --dump-header) headers="$2"; shift 2 ;;
+              --output|-o) output="$2"; shift 2 ;;
+              --write-out|-w) write_out="$2"; shift 2 ;;
+              --max-time) shift 2 ;;
+              --fail|--silent|--show-error|--location|-f|-s|-S|-L|-fsS) shift ;;
+              http*) url="$1"; shift ;;
+              *) shift ;;
+            esac
+          done
+          body="ok"
+          case "$url" in
+            */api/runtime-fingerprint)
+              body='{"build_sha":"candidate-sha"}'
+              ;;
+            */api/auth/csrf)
+              body='{"csrfToken":"test-csrf"}'
+              ;;
+            */api/auth/providers)
+              body='{"credentials":{"id":"credentials","signinUrl":"http://127.0.0.1:3000/api/auth/signin/credentials"}}'
+              ;;
+            */console/dashboard)
+              [[ -n "$headers" ]] && printf 'HTTP/1.1 307 Temporary Redirect\\r\\nlocation: /login?redirectTo=%%2Fconsole%%2Fdashboard\\r\\n\\r\\n' > "$headers"
+              write_out="307"
+              ;;
+            */console/bullpen-ai)
+              [[ -n "$headers" ]] && printf 'HTTP/1.1 307 Temporary Redirect\\r\\nlocation: /login?redirectTo=%%2Fconsole%%2Fbullpen-ai\\r\\n\\r\\n' > "$headers"
+              write_out="307"
+              ;;
+            */_next/static/*.css)
+              [[ -n "$headers" ]] && printf 'HTTP/1.1 200 OK\\r\\ncontent-type: text/css\\r\\n\\r\\n' > "$headers"
+              body='body{}'
+              ;;
+            */_next/static/*.js)
+              [[ -n "$headers" ]] && printf 'HTTP/1.1 200 OK\\r\\ncontent-type: application/javascript\\r\\n\\r\\n' > "$headers"
+              body='(()=>{})()'
+              ;;
+            */login)
+              body='<link href="/_next/static/app.css"><script src="/_next/static/app.js"></script>'
+              ;;
+          esac
+          if [[ -n "$output" && "$output" != "/dev/null" ]]; then
+            printf '%s' "$body" > "$output"
+          elif [[ -z "$output" ]]; then
+            printf '%s' "$body"
+          fi
+          [[ -n "$write_out" ]] && printf '%s' "$write_out"
+          exit 0
+          `,
+            );
+          
+            return {
+              root,
+              appRoot,
+              frontendRoot,
+              fakeBin,
+              logPath,
+              systemdRoot,
+              nginxRoot,
+              frontendEnv,
+              artifact,
+            };
+          }
+          
+          async function runFailure(phase) {
+            const harness = await createHarness();
+            let result;
+            try {
+              await execFileAsync(
+                "bash",
+                [path.join(harness.appRoot, "deploy/no-docker/redeploy.sh"), "frontend-only"],
+                {
+                  env: {
+                    ...process.env,
+                    PATH: `${harness.fakeBin}:${process.env.PATH}`,
+                    APP_ROOT: harness.appRoot,
+                    APP_USER: process.env.USER,
+                    FRONTEND_ENV_FILE: harness.frontendEnv,
+                    FRONTEND_ARTIFACT: harness.artifact,
+                    EXPECTED_FRONTEND_SHA: "candidate-sha",
+                    SKIP_GIT_SYNC: "true",
+                    SYSTEMD_UNIT_ROOT: harness.systemdRoot,
+                    NGINX_CONFIG_ROOT: harness.nginxRoot,
+                    SMOKE_RETRIES: "1",
+                    SMOKE_RETRY_SLEEP_SECONDS: "0",
+                    SERVICE_STARTUP_RETRIES: "1",
+                    SERVICE_STARTUP_RETRY_SLEEP_SECONDS: "0",
+                    SERVICE_STABLE_SECONDS: "0",
+                    INVESTOR_DEPLOY_TEST_MODE: "true",
+                    INVESTOR_DEPLOY_TEST_FAIL_PHASE: phase,
+                  },
+                },
+              );
+              assert.fail(`deployment unexpectedly succeeded for ${phase}`);
+            } catch (error) {
+              result = error;
+            }
+            const trace=await readFile(harness.logPath,"utf8").catch(()=>"");
+            assert.doesNotMatch(trace,/FORBIDDEN_CONFIG_WRITE|daemon-reload|reload nginx/);
+            assert.ok(`${result.stdout??""}\n${result.stderr??""}`.includes(`Injected deployment test failure: ${phase}`),`${phase} was not reached: ${result.stderr??""}`);
+            return { harness, result };
+          }
+          
+          for (const phase of ["extraction", "host-validation", "candidate-verification"]) {
+            test(`pre-promotion ${phase} failure leaves the active slot untouched`, async () => {
+              const { harness } = await runFailure(phase);
+              assert.equal(
+                (await readFile(path.join(harness.frontendRoot, ".next-active-dir"), "utf8")).trim(),
+                ".next",
+              );
+              assert.equal(
+                await readFile(path.join(harness.frontendRoot, ".next", "active-marker"), "utf8"),
+                "previous-untouched\n",
+              );
+            });
+          }
+          
+          for (const phase of [
+            "service-startup",
+            "fingerprint-verification",
+            "js-css-verification",
+            "authjs-verification",
+            "dashboard-smoke",
+            "bullpen-smoke",
+            "backend-proxy-verification",
+            "contained-release-guard",
+            "nginx-validation",
+          ]) {
+            test(`post-promotion ${phase} failure executes and verifies rollback`, async () => {
+              const { harness, result } = await runFailure(phase);
+              const combinedOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+              const commands = await readFile(harness.logPath, "utf8").catch(() => "");
+              assert.match(combinedOutput, /Restoring the previous frontend build/);
+              assert.match(combinedOutput, /Final verification of restored frontend/);
+              assert.equal(
+                (await readFile(path.join(harness.frontendRoot, ".next-active-dir"), "utf8")).trim(),
+                ".next",
+              );
+              assert.equal(
+                await readFile(path.join(harness.frontendRoot, ".next", "active-marker"), "utf8"),
+                "previous-untouched\n",
+              );
+              assert.equal(
+                await readFile(
+                  path.join(harness.frontendRoot, ".next-candidate", "candidate-marker"),
+                  "utf8",
+                ),
+                "candidate\n",
+              );
+              assert.ok(
+                commands.match(/systemctl restart investor-frontend/g)?.length >= 2,
+                commands,
+              );
+              assert.doesNotMatch(
+                commands,
+                /investor-(?:backend|celery-worker|celery-beat)/,
+              );
+            });
+          }
+          
+          test("private adapter succeeds while preserving host files and the previous slot",async()=>{
+           const h=await createHarness();
+           await writeFile(path.join(h.systemdRoot,"investor-frontend.service"),"existing-unit-canary");
+           await writeFile(path.join(h.nginxRoot,"sites-available","existing"),"existing-nginx-canary");
+           const result=await execFileAsync("bash",[path.join(h.appRoot,"deploy/no-docker/redeploy.sh"),"frontend-only"],{env:{...process.env,
+           PATH:`${h.fakeBin}:${process.env.PATH}`,APP_ROOT:h.appRoot,APP_USER:process.env.USER,FRONTEND_ENV_FILE:h.frontendEnv,
+           FRONTEND_ARTIFACT:h.artifact,EXPECTED_FRONTEND_SHA:"candidate-sha",SKIP_GIT_SYNC:"true",SYSTEMD_UNIT_ROOT:h.systemdRoot,NGINX_CONFIG_ROOT:h.nginxRoot,
+           SMOKE_RETRIES:"1",SMOKE_RETRY_SLEEP_SECONDS:"0",SERVICE_STARTUP_RETRIES:"1",SERVICE_STARTUP_RETRY_SLEEP_SECONDS:"0",SERVICE_STABLE_SECONDS:"0"}});
+           assert.match(result.stdout,/Deploy complete/);
+           assert.equal(await readFile(path.join(h.systemdRoot,"investor-frontend.service"),"utf8"),"existing-unit-canary");
+           assert.equal(await readFile(path.join(h.nginxRoot,"sites-available","existing"),"utf8"),"existing-nginx-canary");
+           assert.equal(await readFile(path.join(h.frontendRoot,".next","active-marker"),"utf8"),"previous-untouched\n");
+           assert.equal((await readFile(path.join(h.frontendRoot,".next-active-dir"),"utf8")).trim(),".next-candidate");
+           assert.doesNotMatch(await readFile(h.logPath,"utf8"),/FORBIDDEN_CONFIG_WRITE|daemon-reload|reload nginx|investor-(?:backend|celery-worker|celery-beat)/);
+          });
+          FRONTEND_FIXTURE
+          bash -n .audit-activation-offline/compiled-activation-frontend.sh
+          node --test .audit-activation-offline/activation-frontend-transaction.test.mjs
+  build-frontend:
+    name: Build production frontend artifact
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    outputs:
+      checkout_seconds: ${{ steps.checkout-timing.outputs.seconds }}
+      dependency_seconds: ${{ steps.dependency-timing.outputs.seconds }}
+      build_seconds: ${{ steps.build.outputs.seconds }}
+      package_seconds: ${{ steps.package.outputs.seconds }}
+      upload_seconds: ${{ steps.upload-timing.outputs.seconds }}
+
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_STANDALONE_BUILD: "true"
+      NEXT_PUBLIC_API_URL: ${{ vars.PROD_NEXT_PUBLIC_API_URL || 'https://api.cred-x.in' }}
+      NEXT_PUBLIC_FRONTEND_URL: ${{ vars.PROD_NEXT_PUBLIC_FRONTEND_URL || 'https://cred-x.in' }}
+      NEXT_PUBLIC_BRAND_PREFIX: ${{ vars.PROD_NEXT_PUBLIC_BRAND_PREFIX || 'Cred-X' }}
+      NEXT_PUBLIC_BRAND_ACRONYM: ${{ vars.PROD_NEXT_PUBLIC_BRAND_ACRONYM || 'TIE' }}
+      NEXT_PUBLIC_BRAND_EXPANSION: ${{ vars.PROD_NEXT_PUBLIC_BRAND_EXPANSION || 'Tarun''s Investment Engine' }}
+      NEXT_PUBLIC_DISABLE_AUTH: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_AUTH || 'false' }}
+      NEXT_PUBLIC_DISABLE_API_PROXY: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_API_PROXY || 'false' }}
+      NEXT_PUBLIC_API_DEBUG: ${{ vars.PROD_NEXT_PUBLIC_API_DEBUG || 'false' }}
+      NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED: "true"
+      NEXTAUTH_URL: ${{ vars.PROD_NEXTAUTH_URL || 'https://cred-x.in' }}
+      NEXTAUTH_SECRET: build-only-runtime-secret-is-loaded-on-ec2
+      AUTH_TRUST_HOST: "true"
+      BACKEND_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - name: Start checkout timer
+        run: echo "CHECKOUT_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: abacd883a6cb17f257bbd869e1c530234fbefd48
+
+      - name: Record checkout duration
+        id: checkout-timing
+        run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start dependency restore timer
+        run: echo "DEPENDENCIES_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Restore reusable Next.js Webpack cache
+        uses: actions/cache@v6
+        with:
+          path: frontend/.next/cache
+          key: >-
+            ${{ runner.os }}-node22-next-webpack-${{
+              hashFiles('frontend/package-lock.json')
+            }}-${{
+              hashFiles('frontend/app/**', 'frontend/components/**', 'frontend/hooks/**',
+              'frontend/lib/**', 'frontend/providers/**', 'frontend/services/**',
+              'frontend/types/**', 'frontend/next.config.ts', 'frontend/tsconfig.json')
+            }}
+          restore-keys: |
+            ${{ runner.os }}-node22-next-webpack-${{ hashFiles('frontend/package-lock.json') }}-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Record dependency restore duration
+        id: dependency-timing
+        run: echo "seconds=$(( $(date +%s) - DEPENDENCIES_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Log build runner resources
+        run: |
+          echo "==> CPU"
+          nproc
+          echo "==> Memory"
+          free -h
+          echo "==> Swap"
+          swapon --show || true
+          echo "==> Disk"
+          df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}"
+
+      - name: Stamp production build fingerprint
+        run: |
+          build_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node scripts/stamp-frontend-build.mjs \
+            frontend/lib/generatedBuildInfo.ts \
+            "${RELEASE_SHA}" \
+            "${build_timestamp}"
+          echo "BUILD_TIMESTAMP=${build_timestamp}" >>"${GITHUB_ENV}"
+
+      - name: Build production frontend with Webpack
+        id: build
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          started_at="$(date +%s)"
+          set +e
+          /usr/bin/time -v -o "${RUNNER_TEMP}/frontend-webpack-resources.txt" \
+            npm run build 2>&1 | tee "${RUNNER_TEMP}/frontend-webpack-build.log"
+          build_status="${PIPESTATUS[0]}"
+          set -e
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+          echo "==> Frontend build resource usage"
+          cat "${RUNNER_TEMP}/frontend-webpack-resources.txt"
+          exit "$build_status"
+
+      - name: Package standalone frontend runtime
+        id: package
+        run: |
+          started_at="$(date +%s)"
+          deploy/no-docker/package-frontend-artifact.sh \
+            frontend/.next \
+            "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            "${RELEASE_SHA}" \
+            "${BUILD_TIMESTAMP}" \
+            webpack
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify packaged frontend runtime before upload
+        run: |
+          mkdir "${RUNNER_TEMP}/production-frontend-runtime"
+          tar -xzf "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            -C "${RUNNER_TEMP}/production-frontend-runtime"
+          node scripts/verify-frontend-artifact-runtime.mjs \
+            "${RUNNER_TEMP}/production-frontend-runtime" \
+            "${RELEASE_SHA}"
+
+      - name: Start artifact upload timer
+        if: success()
+        run: echo "UPLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Upload production frontend artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: |
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Record artifact upload duration
+        id: upload-timing
+        if: always() && env.UPLOAD_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - UPLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload raw frontend timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/frontend-webpack-build.log
+            ${{ runner.temp }}/frontend-webpack-resources.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Frontend build timing summary
+        if: always()
+        run: |
+          {
+            echo "### Production frontend build"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Checkout | ${{ steps.checkout-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Dependency/cache restore + npm ci | ${{ steps.dependency-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Webpack production build | ${{ steps.build.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact packaging | ${{ steps.package.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact upload | ${{ steps.upload-timing.outputs.seconds || 'n/a' }}s |"
+            echo
+            echo "Production remains on Webpack; Turbopack is benchmarked separately in PR checks."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+  deploy-production:
+    name: Deploy frontend-only
+    needs: [build-frontend, activation-offline]
+    if: needs.build-frontend.result == 'success' && needs.activation-offline.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Start artifact download timer
+        if: true
+        run: echo "DOWNLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Download production frontend artifact
+        if: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: artifact
+
+      - name: Record artifact download duration
+        id: download-timing
+        if: always() && env.DOWNLOAD_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - DOWNLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start artifact transfer timer
+        if: true
+        run: echo "TRANSFER_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Transfer frontend artifact to EC2
+        if: true
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          source: artifact/${{ env.FRONTEND_ARTIFACT_FILE }},artifact/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          target: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          strip_components: 1
+          timeout: 10m
+          command_timeout: 10m
+
+      - name: Record artifact transfer duration
+        id: transfer-timing
+        if: always() && env.TRANSFER_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - TRANSFER_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start remote deployment timer
+        if: success()
+        run: echo "REMOTE_DEPLOY_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Deploy exact commit via SSH
+        id: deploy-ssh
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_COMMIT_SHA: abacd883a6cb17f257bbd869e1c530234fbefd48
+          DEPLOY_SCOPE: frontend-only
+          ACTIVATION_RUN_ID: ${{ github.run_id }}
+          ACTIVATION_ATTEMPT: ${{ github.run_attempt }}
+          REMOTE_ARTIFACT_DIR: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          REMOTE_ARTIFACT_FILE: ${{ env.FRONTEND_ARTIFACT_FILE }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE,ACTIVATION_RUN_ID,ACTIVATION_ATTEMPT
+          timeout: 3600s
+          command_timeout: 3600s
+          capture_stdout: true
+          script: |
+            #!/usr/bin/env bash
+            # Proposal: activate only stored-data advisory audits on an exact dormant release.
+            set -euo pipefail
+            export PYTHONDONTWRITEBYTECODE=1 GIT_OPTIONAL_LOCKS=0
+            APP_ROOT=/srv/investor
+            APP_USER=investor
+            BACKEND_ENV_FILE=/etc/investor/backend.env
+            FRONTEND_ENV_FILE=/etc/investor/frontend.env
+            RELEASE_SHA="${DEPLOY_COMMIT_SHA:?}"
+            [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "${ACTIVATION_RUN_ID:?}" =~ ^[0-9]+$ && "${ACTIVATION_ATTEMPT:?}" =~ ^[0-9]+$ ]]
+            [[ "${REMOTE_ARTIFACT_DIR:?}" == "/tmp/investor-deploy-$ACTIVATION_RUN_ID-$ACTIVATION_ATTEMPT" ]]
+            [[ "${REMOTE_ARTIFACT_FILE:?}" == "frontend-runtime-$RELEASE_SHA.tar.gz" ]]
+            STATE_DIR="$APP_ROOT/.audit-activation-$RELEASE_SHA-$ACTIVATION_RUN_ID-$ACTIVATION_ATTEMPT"
+            FLAG_STATE="$STATE_DIR/flag-state.json"
+            SOURCE_BACKUP="$APP_ROOT/.audit-activation-source-$RELEASE_SHA-$ACTIVATION_RUN_ID-$ACTIVATION_ATTEMPT"
+            remote_artifact="$REMOTE_ARTIFACT_DIR/$REMOTE_ARTIFACT_FILE"
+            restore_api=false
+            restore_worker=false
+            worker_gracefully_stopped=false
+            flags_may_have_changed=false
+            frontend_may_have_changed=false
+            previous_frontend_slot=''
+            contained_driver=''
+            
+            check_financial_stopped() {
+              for family in investor investment-engine; do
+                for role in celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
+                  state=$(sudo -n systemctl show "$family-$role" --property=ActiveState --value) || return 1
+                  [[ "$state" == inactive || "$state" == failed ]] || return 1
+                done
+              done
+            }
+            check_source() {
+              [[ "$(sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" rev-parse HEAD)" == "$RELEASE_SHA" ]] || return 1
+              sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --no-ext-diff --no-textconv --quiet || return 1
+              sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --cached --no-ext-diff --no-textconv --quiet
+            }
+            wait_ready() {
+              for attempt in $(seq 1 40); do
+                if curl -fsS --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then return 0; fi
+                sleep 1
+              done
+              return 1
+            }
+            
+            # Embedded reviewed helpers are added by the private workflow generator.
+            # BEGIN_HELPERS
+            flag_operation() {
+              sudo -n python3 -B - "$1" "$FLAG_STATE" <<'FLAGPY'
+            """Proposal: change only approved advisory flags, preserving unrelated bytes.
+            
+            Run as the existing operational identity under the existing deployment lock.
+            The retained state contains flag lines, offsets and hashes, never credentials.
+            No services, database, provider or queue operations are performed here.
+            """
+            import base64
+            import hashlib
+            import json
+            import os
+            from pathlib import Path
+            import re
+            import stat
+            import tempfile
+            
+            BACKEND_KEYS=(b'RECOMMENDATION_AUDIT_ENABLED',b'RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED')
+            TARGETS={
+                Path('/etc/investor/backend.env'):BACKEND_KEYS,
+                Path('/etc/investor/analysis-recovery.env'):BACKEND_KEYS,
+                Path('/etc/investor/frontend.env'):(b'NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED',),
+            }
+            MAX_BYTES=2*1024*1024
+            OFF={b'false',b'0',b'off',b'no'}
+            
+            
+            class FlagTransactionBlocked(RuntimeError):
+                pass
+            
+            
+            def require(value,reason):
+                if not value:raise FlagTransactionBlocked(reason)
+            
+            
+            def digest(data):return hashlib.sha256(data).hexdigest()
+            
+            
+            def read_target(path):
+                require(not path.is_symlink() and path.parent.is_dir() and not path.parent.is_symlink(),'target_shape')
+                descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+                with os.fdopen(descriptor,'rb') as source:
+                    info=os.fstat(source.fileno())
+                    require(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_size<=MAX_BYTES,'target_metadata')
+                    data=source.read(MAX_BYTES+1)
+                    require(len(data)<=MAX_BYTES,'target_size')
+                return data,info
+            
+            
+            def plan_bytes(data,keys):
+                # Systemd allows quoted multiline values and backslash continuations. This
+                # deliberately bounded editor refuses those constructs before retaining
+                # state, rather than confusing a line inside an unrelated value with a key.
+                validate_single_line_assignments(data)
+                parts=data.split(b'\n')
+                lines=[part+b'\n' for part in parts[:-1]]+([parts[-1]] if parts[-1] else [])
+                changes=[]
+                for key in keys:
+                    pattern=re.compile(rb'^[ \t]*'+re.escape(key)+rb'[ \t]*=[ \t]*(.*?)[ \t]*(?:\r?\n)?$')
+                    matches=[(index,pattern.fullmatch(line)) for index,line in enumerate(lines)]
+                    matches=[(index,match) for index,match in matches if match]
+                    require(len(matches)<=1,'duplicate_flag')
+                    if matches:
+                        index,match=matches[0];value=match.group(1).strip()
+                        if len(value)>=2 and value[:1]==value[-1:] and value[:1] in (b'"',b"'"):value=value[1:-1]
+                        require(value.lower() in OFF,'prior_flag_not_off')
+                        old=lines[index];ending=b'\r\n' if old.endswith(b'\r\n') else b'\n' if old.endswith(b'\n') else b''
+                        new=key+b'=true'+ending
+                        changes.append({'index':index,'old':base64.b64encode(old).decode(),'new':base64.b64encode(new).decode()})
+                        lines[index]=new
+                    else:
+                        # Append without treating a credential's final line as a flag.
+                        prefix=b'\n' if lines and not lines[-1].endswith(b'\n') else b''
+                        new=prefix+key+b'=true\n'
+                        changes.append({'append':True,'old':'','new':base64.b64encode(new).decode()})
+                        lines.append(new)
+                return b''.join(lines),changes
+            
+            
+            def validate_single_line_assignments(data):
+                for line in data.split(b'\n'):
+                    line=line.rstrip(b'\r').strip(b' \t')
+                    if not line or line.startswith((b'#',b';')):continue
+                    match=re.fullmatch(rb'[A-Za-z_][A-Za-z0-9_]*[ \t]*=[ \t]*(.*)',line)
+                    if not match:continue  # Systemd ignores physical lines without assignments.
+                    value=match.group(1).strip(b' \t\r')
+                    if value[:1] not in (b'"',b"'"):
+                        require(not value.endswith(b'\\'),'ambiguous_env_continuation')
+                        continue
+                    quote=value[:1];index=1;closed=False
+                    while index<len(value):
+                        token=value[index:index+1]
+                        if quote==b'"' and token==b'\\':index+=2;continue
+                        if token==quote:
+                            require(not value[index+1:].strip(b' \t\r'),'ambiguous_env_quoted_suffix')
+                            closed=True;break
+                        index+=1
+                    require(closed,'ambiguous_env_multiline_quote')
+            
+            
+            def restored_bytes(current,record):
+                require(digest(current)==record['after_sha256'],'rollback_target_drift')
+                result=current
+                # Applying offset replacements from the end avoids offset shifts. Restore
+                # the original bytes exactly, including a missing trailing newline.
+                for edit in reversed(record['edits']):
+                    offset=edit['offset'];new=base64.b64decode(edit['new'],validate=True);old=base64.b64decode(edit['old'],validate=True)
+                    require(result[offset:offset+len(new)]==new,'rollback_flag_drift')
+                    result=result[:offset]+old+result[offset+len(new):]
+                require(digest(result)==record['before_sha256'],'rollback_byte_parity')
+                return result
+            
+            
+            def record_for(data,planned,changes,info):
+                # Locate only each intended flag fragment in the planned document. Distinct
+                # flag keys make those fragments unique; no unrelated bytes enter state.
+                edits=[]
+                for change in changes:
+                    new=base64.b64decode(change['new']);require(planned.count(new)==1,'ambiguous_flag_fragment')
+                    edits.append({'offset':planned.index(new),'old':change['old'],'new':change['new']})
+                edits.sort(key=lambda edit:edit['offset'])
+                record={'before_sha256':digest(data),'after_sha256':digest(planned),'uid':info.st_uid,'gid':info.st_gid,'mode':stat.S_IMODE(info.st_mode),'edits':edits}
+                require(restored_bytes(planned,record)==data,'planned_roundtrip')
+                return record
+            
+            
+            def atomic_write(path,data,info):
+                descriptor,name=tempfile.mkstemp(prefix='.audit-flag-',dir=path.parent)
+                try:
+                    with os.fdopen(descriptor,'wb') as target:
+                        os.fchmod(target.fileno(),stat.S_IMODE(info.st_mode));os.fchown(target.fileno(),info.st_uid,info.st_gid)
+                        target.write(data);target.flush();os.fsync(target.fileno())
+                    os.replace(name,path)
+                    directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+                    try:os.fsync(directory)
+                    finally:os.close(directory)
+                finally:
+                    if os.path.exists(name):os.unlink(name)
+            
+            
+            def prepare(state_path):
+                require(not state_path.exists() and state_path.parent.is_dir() and not state_path.parent.is_symlink(),'state_path')
+                require(stat.S_IMODE(state_path.parent.stat().st_mode)==0o700 and state_path.parent.stat().st_uid==os.getuid(),'state_parent_owner_mode')
+                records={}
+                for path,keys in TARGETS.items():
+                    data,info=read_target(path);planned,changes=plan_bytes(data,keys)
+                    records[str(path)]=record_for(data,planned,changes,info)
+                state={'schema':1,'targets':records}
+                descriptor=os.open(state_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                with os.fdopen(descriptor,'w') as target:
+                    json.dump(state,target,sort_keys=True);target.write('\n');target.flush();os.fsync(target.fileno())
+                print('approved_flag_state_retained=true')
+            
+            
+            def change(state_path,*,restore):
+                require(not state_path.is_symlink() and state_path.is_file() and state_path.stat().st_size<=MAX_BYTES,'state_file')
+                require(state_path.stat().st_uid==os.getuid() and stat.S_IMODE(state_path.stat().st_mode)==0o600 and state_path.stat().st_nlink==1,'state_owner_mode')
+                state=json.loads(state_path.read_text())
+                require(state.get('schema')==1 and set(state['targets'])=={str(path) for path in TARGETS},'state_targets')
+                plans=[]
+                for path,keys in TARGETS.items():
+                    data,info=read_target(path);record=state['targets'][str(path)]
+                    require((info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(record['uid'],record['gid'],record['mode']),'target_owner_mode_drift')
+                    if restore:
+                        planned=data if digest(data)==record['before_sha256'] else restored_bytes(data,record)
+                    else:
+                        require(digest(data)==record['before_sha256'],'activation_target_drift')
+                        planned,changes=plan_bytes(data,keys)
+                        require(digest(planned)==record['after_sha256'],'activation_plan_drift')
+                    plans.append((path,data,planned,info))
+                # Validate every target before any mutation. Each write rechecks its bytes;
+                # retained state enables rollback after a partial process/file failure.
+                for path,before,planned,info in plans:
+                    current,current_info=read_target(path)
+                    require(current==before and (current_info.st_dev,current_info.st_ino)==(info.st_dev,info.st_ino),'pre_write_target_drift')
+                    require((current_info.st_uid,current_info.st_gid,stat.S_IMODE(current_info.st_mode))==(info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode)),'pre_write_owner_mode_drift')
+                    if planned!=before:atomic_write(path,planned,current_info)
+                print('approved_flags_restored=true' if restore else 'approved_stored_only_flags_enabled=true')
+            
+            
+            def verify_enabled(state_path):
+                require(not state_path.is_symlink() and state_path.is_file() and state_path.stat().st_size<=MAX_BYTES,'state_file')
+                require(state_path.stat().st_uid==os.getuid() and stat.S_IMODE(state_path.stat().st_mode)==0o600 and state_path.stat().st_nlink==1,'state_owner_mode')
+                state=json.loads(state_path.read_text())
+                require(state.get('schema')==1 and set(state['targets'])=={str(path) for path in TARGETS},'state_targets')
+                for path in TARGETS:
+                    data,info=read_target(path);record=state['targets'][str(path)]
+                    require((info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))==(record['uid'],record['gid'],record['mode']),'target_owner_mode_drift')
+                    require(digest(data)==record['after_sha256'],'enabled_flag_byte_parity')
+                print('enabled_flags_only_authorized_bytes_changed=true')
+            
+            
+            if __name__=='__main__':
+                import sys
+                try:
+                    require(os.geteuid()==0 and len(sys.argv)==3,'operational_identity_arguments')
+                    operation,state_name=sys.argv[1:];state_path=Path(state_name)
+                    require(re.fullmatch(r'/srv/investor/\.audit-activation-[0-9a-f]{40}-[0-9]+-[0-9]+/flag-state.json',state_name) is not None,'fixed_state_destination')
+                    require(operation in {'prepare','enable','verify','restore'},'named_flag_operation')
+                    if operation=='prepare':prepare(state_path)
+                    elif operation=='verify':verify_enabled(state_path)
+                    else:change(state_path,restore=operation=='restore')
+                except Exception as error:
+                    print('flag_transaction=blocked; error_type='+type(error).__name__+('; gate='+str(error) if isinstance(error,FlagTransactionBlocked) else ''))
+                    raise SystemExit(1)
+            FLAGPY
+            }
+            runtime_operation() {
+              sudo -n python3 -B - "$1" <<'RUNTIMEPY'
+            """Sanitized effective runtime and unchanged unit/venv checks; root read only."""
+            import hashlib
+            import json
+            from pathlib import Path
+            import re
+            import subprocess
+            import sys
+            from decimal import Decimal
+            
+            
+            def require(value):
+                if not value:raise RuntimeError('Known contained runtime required')
+            
+            
+            def check_wrappers():
+                root=Path('/srv/investor')
+                baseline=json.loads((root/'.audit-migration-2ae3e9466014/runtime-wrapper-hashes.json').read_text())
+                units={
+                    'investor-backend':('/srv/investor/deploy/no-docker/scripts/run-backend.sh','/srv/investor/backend','30s','2','/etc/investor/analysis-recovery.env'),
+                    'investor-recovery-analysis':('/srv/investor/backend/.venv/bin/celery','/srv/investor/backend','5min','15','/etc/investor/analysis-recovery.env'),
+                    'investor-frontend':('/srv/investor/deploy/no-docker/scripts/run-frontend.sh','/srv/investor/frontend','30s','15','/etc/investor/frontend.env'),
+                }
+                for unit,(launch,directory,timeout,signal,envfile) in units.items():
+                    result=subprocess.run(['systemctl','show',unit,'--property=ExecStart,ExecStartPre,ExecStartPost,ExecStop,WorkingDirectory,TimeoutStopUSec,KillMode,KillSignal,Environment,EnvironmentFiles'],capture_output=True,text=True,timeout=5,check=True)
+                    values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                    require(re.findall(r'\bpath=([^ ;}]+)',values['ExecStart'])==[launch] and values['WorkingDirectory']==directory)
+                    require(all(not values.get(key) for key in ('ExecStartPre','ExecStartPost','ExecStop')))
+                    require(values['KillMode']=='control-group' and values['TimeoutStopUSec']==timeout and values['KillSignal']==signal)
+                    require(re.findall(r'(/[^ ]+)',values.get('EnvironmentFiles',''))==[envfile])
+                    require(' ; start_time=' in values['ExecStart'])
+                    current={'command':hashlib.sha256(values['ExecStart'].split(' ; start_time=',1)[0].encode()).hexdigest(),'environment':hashlib.sha256(values.get('Environment','').encode()).hexdigest(),'environment_files':hashlib.sha256(values.get('EnvironmentFiles','').encode()).hexdigest()}
+                    require(current==baseline[unit])
+                for name in ('backend/.venv/bin/celery','backend/.venv/bin/python'):
+                    path=root/name
+                    require(path.is_file() and str(path.resolve())==baseline[name]['resolved_path'])
+                    require(hashlib.sha256(path.read_bytes()).hexdigest()==baseline[name]['sha256'])
+                print('unchanged_unit_wrapper_and_venv_verified=true')
+            
+            
+            def check_runtime(enabled):
+                for unit in ('investor-backend','investor-recovery-analysis'):
+                    result=subprocess.run(['systemctl','show',unit,'--property=ActiveState,MainPID'],capture_output=True,text=True,timeout=5,check=True)
+                    values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                    require(values['ActiveState']=='active' and int(values['MainPID'])>0)
+                    env=dict(part.split(b'=',1) for part in Path('/proc/'+values['MainPID']+'/environ').read_bytes().split(b'\0') if b'=' in part)
+                    require(env.get(b'CREDX_RECOVERY_MODE')==b'1')
+                    for key in (b'RECOMMENDATION_AUDIT_ENABLED',b'RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED'):
+                        raw=env.get(key,b'false').strip().lower()
+                        require(raw in ((b'1',b'true',b'on',b'yes') if enabled else (b'0',b'false',b'off',b'no')))
+                    for key in (b'RECOMMENDATION_AUDIT_EXTERNAL_ENABLED',b'RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED'):
+                        require(env.get(key,b'false').strip().lower() in (b'0',b'false',b'off',b'no'))
+                    require(Decimal(env.get(b'RECOMMENDATION_AUDIT_DAILY_CAP_USD',b'0').decode())==0)
+                print('effective_stored_only_flags='+str(enabled).lower()+'; external=false; fundamentals=false; cap_usd=0; recovery=1')
+            
+            
+            if __name__=='__main__':
+                try:
+                    require(len(sys.argv)==2 and sys.argv[1] in {'wrappers','true','false'})
+                    if sys.argv[1]=='wrappers':check_wrappers()
+                    else:check_runtime(sys.argv[1]=='true')
+                except Exception as error:
+                    print('activation_runtime=blocked; error_type='+type(error).__name__)
+                    raise SystemExit(1)
+            RUNTIMEPY
+            }
+            check_wrappers() { runtime_operation wrappers; }
+            check_runtime() { runtime_operation "$1"; }
+            host_config_operation() {
+              sudo -n python3 -B - "$1" "$STATE_DIR/host-config.json" <<'HOST_CONFIG'
+            """Read-only host-config fingerprint. Retain metadata/hashes, never file contents."""
+            import hashlib
+            import json
+            import os
+            from pathlib import Path
+            import re
+            import stat
+            import sys
+            
+            ROOTS=(Path('/etc/systemd/system'),Path('/etc/nginx'))
+            
+            def fingerprint(roots=ROOTS):
+                result={}; total=0
+                for root in roots:
+                    if not root.is_dir() or root.is_symlink():raise RuntimeError('Known configuration root required')
+                    pending=[root]
+                    while pending:
+                        path=pending.pop();info=path.lstat()
+                        entry={'uid':info.st_uid,'gid':info.st_gid,'mode':stat.S_IMODE(info.st_mode)}
+                        if stat.S_ISDIR(info.st_mode):
+                            entry['kind']='directory';pending.extend(sorted(path.iterdir()))
+                        elif stat.S_ISLNK(info.st_mode):entry.update(kind='symlink',target=os.readlink(path))
+                        elif stat.S_ISREG(info.st_mode):
+                            if info.st_size>16*1024*1024:raise RuntimeError('Bounded config file required')
+                            fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+                            with os.fdopen(fd,'rb') as stream:
+                                opened=os.fstat(stream.fileno())
+                                if (opened.st_dev,opened.st_ino,opened.st_size)!=(info.st_dev,info.st_ino,info.st_size):raise RuntimeError('Stable config file required')
+                                data=stream.read(16*1024*1024+1)
+                            total+=len(data)
+                            entry.update(kind='file',sha256=hashlib.sha256(data).hexdigest())
+                        else:raise RuntimeError('Known configuration entry required')
+                        result[str(path)]=entry
+                        if len(result)>10000 or total>64*1024*1024:raise RuntimeError('Bounded config tree required')
+                return result
+            
+            def operation(phase,path,roots=ROOTS,owner_uid=0):
+                parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+                try:
+                    info=os.fstat(parent)
+                    if info.st_uid!=owner_uid or stat.S_IMODE(info.st_mode)!=0o700:raise RuntimeError('Private state directory required')
+                    if phase=='prepare':
+                        payload=json.dumps(fingerprint(roots),sort_keys=True).encode()
+                        fd=os.open(path.name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=parent)
+                        with os.fdopen(fd,'wb') as target:target.write(payload);target.flush();os.fsync(target.fileno())
+                    elif phase=='verify':
+                        fd=os.open(path.name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=parent)
+                        with os.fdopen(fd,'rb') as source:
+                            state=os.fstat(source.fileno())
+                            if not stat.S_ISREG(state.st_mode) or state.st_uid!=owner_uid or stat.S_IMODE(state.st_mode)!=0o600 or state.st_nlink!=1 or state.st_size>4*1024*1024:raise RuntimeError('Private regular state required')
+                            payload=source.read(4*1024*1024+1)
+                        if json.loads(payload)!=fingerprint(roots):raise RuntimeError('Unchanged host configuration required')
+                    else:raise RuntimeError('Named operation required')
+                    current=path.parent.lstat()
+                    if stat.S_ISLNK(current.st_mode) or (current.st_dev,current.st_ino)!=(info.st_dev,info.st_ino):raise RuntimeError('Stable state directory required')
+                finally:os.close(parent)
+            
+            if __name__=='__main__':
+                try:
+                    if len(sys.argv)!=3 or not re.fullmatch(r'/srv/investor/\.audit-activation-[0-9a-f]{40}-[0-9]+-[0-9]+/host-config\.json',sys.argv[2]):raise RuntimeError('Known state target required')
+                    operation(sys.argv[1],Path(sys.argv[2]))
+                    print('host_configuration_'+sys.argv[1]+'=true; writes_to_host_configuration=false')
+                except Exception as error:
+                    print('activation_host_config=blocked; error_type='+type(error).__name__)
+                    raise SystemExit(1)
+            HOST_CONFIG
+            }
+            prepare_frontend_adapter() {
+              sudo -n python3 -B - "$APP_ROOT/deploy/no-docker/redeploy.sh" > "$contained_driver/redeploy-audit-activation.sh" <<'FRONTEND_ADAPTER'
+            """Private exact-source adapter: promote an artifact without installing host config."""
+            import hashlib
+            from pathlib import Path
+            import sys
+            
+            SOURCE_SHA256='474c37bb276855cce2c028fd75767b7095a274a3d189277782aa487fdf116e72'
+            OLD='''if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
+              install_systemd_unit "$FRONTEND_SERVICE_NAME"
+              echo "==> Install/update frontend nginx template when changed"
+              install_or_update_nginx_template
+            fi'''
+            NEW='''if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
+              echo "==> Private activation preserves existing systemd and Nginx configuration"
+              preserved_frontend_unit="$SYSTEMD_UNIT_ROOT/$(systemd_unit_file_name "$FRONTEND_SERVICE_NAME")"
+              sudo test -f "$preserved_frontend_unit" || { echo "Existing frontend unit required" >&2; exit 1; }
+              INSTALLED_SYSTEMD_UNITS+=("$preserved_frontend_unit")
+            fi'''
+            
+            def adapt(source):
+                if hashlib.sha256(source).hexdigest()!=SOURCE_SHA256:raise RuntimeError('Exact reviewed redeployer required')
+                text=source.decode()
+                if text.count(OLD)!=1:raise RuntimeError('Exact configuration block required')
+                return text.replace(OLD,NEW,1)
+            
+            if __name__=='__main__':
+                try:
+                    if len(sys.argv)!=2 or sys.argv[1]!='/srv/investor/deploy/no-docker/redeploy.sh':raise RuntimeError('Known source required')
+                    sys.stdout.write(adapt(Path(sys.argv[1]).read_bytes()))
+                except Exception as error:
+                    print('activation_frontend_adapter=blocked; error_type='+type(error).__name__,file=sys.stderr)
+                    raise SystemExit(1)
+            FRONTEND_ADAPTER
+              chmod 0644 "$contained_driver/redeploy-audit-activation.sh"
+              bash -n "$contained_driver/redeploy-audit-activation.sh"
+            }
+            run_database_check() {
+              sudo -n -u "$APP_USER" env APP_ROOT="$APP_ROOT" PYTHONDONTWRITEBYTECODE=1 bash -s -- "$1" <<'DATABASE'
+            set -euo pipefail
+            readonly credx_activation_phase="$1"
+            cd "$APP_ROOT/backend"
+            source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
+            load_env_file /etc/investor/backend.env
+            export CREDX_RECOVERY_MODE=1 PYTHONDONTWRITEBYTECODE=1
+            .venv/bin/python -B - "$credx_activation_phase" <<'ADMISSION'
+            """Read-only schema/runtime/drain admission for the proposed flag activation."""
+            import hashlib
+            import json
+            import os
+            from pathlib import Path
+            import subprocess
+            import sys
+            
+            TARGET='22a7ee52deda57df24809b18531a85437fc57b695b5662162d68f30c01c248d1'
+            REVISION='recommendation_audit_001'
+            TABLES=('recommendation_evidence','recommendation_decisions','recommendation_verifications','recommendation_spend_accounts','recommendation_spend_attempts')
+            PREFIX='credx:recovery:analysis:v1:'
+            
+            
+            class ActivationAdmissionBlocked(RuntimeError):pass
+            
+            
+            def require(value,gate):
+                if not value:raise ActivationAdmissionBlocked(gate)
+            
+            
+            def check_runtime_targets(settings,phase):
+                for unit in ('investor-backend','investor-recovery-analysis'):
+                    result=subprocess.run(['systemctl','show',unit,'--property=ActiveState,MainPID'],capture_output=True,text=True,timeout=5,check=True)
+                    values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                    must_stop=phase=='stopped' or (phase=='fenced' and unit=='investor-backend')
+                    if must_stop:
+                        require(values.get('ActiveState')=='inactive' and values.get('MainPID')=='0','producer_consumer_fence')
+                        continue
+                    require(values.get('ActiveState')=='active' and int(values.get('MainPID','0'))>0,'active_runtime')
+                    env=dict(part.split(b'=',1) for part in Path('/proc/'+values['MainPID']+'/environ').read_bytes().split(b'\0') if b'=' in part)
+                    require(env.get(b'DATABASE_URL',b'').decode()==settings.database_url,'runtime_database_target')
+                    require((env.get(b'CELERY_BROKER_URL') or env.get(b'REDIS_URL') or b'').decode()==(settings.celery_broker_url or settings.redis_url),'runtime_broker_target')
+            
+            
+            def check_queue(settings,Redis):
+                with Redis.from_url(settings.celery_broker_url or settings.redis_url,socket_connect_timeout=3,socket_timeout=3) as broker:
+                    pipeline=broker.pipeline(transaction=False)
+                    for priority in range(10):pipeline.llen(PREFIX+'credx_recovery_analysis'+('' if priority==0 else '\x06\x16'+str(priority)))
+                    pipeline.hlen(PREFIX+'unacked');pipeline.zcard(PREFIX+'unacked_index')
+                    counts=pipeline.execute()
+                require(len(counts)==12 and all(isinstance(count,int) and count==0 for count in counts),'empty_recovery_queue')
+                return {'pending':sum(counts[:10]),'unacked':counts[10],'unacked_index':counts[11]}
+            
+            
+            def main(phase):
+                from sqlalchemy import Column,MetaData,String,Table,create_engine,func,inspect,select,text
+                from sqlalchemy.engine import make_url
+                from sqlalchemy.pool import NullPool
+                from redis import Redis
+                from app.core.config import settings
+                require(not any(key.startswith('PG') for key in os.environ),'inherited_libpq_configuration')
+                url=make_url(settings.database_url)
+                require(url.get_backend_name()=='postgresql','postgresql_target')
+                url=url.set(drivername='postgresql+psycopg2')
+                require(url.host and url.username and url.database and url.password is not None,'database_authority')
+                require(set(url.query)<={'sslmode','sslcert','sslkey','sslrootcert'} and all(isinstance(value,str) for value in url.query.values()),'database_query_overrides')
+                check_runtime_targets(settings,phase)
+                engine=create_engine(url,poolclass=NullPool,connect_args={'connect_timeout':3,'options':'-c statement_timeout=5000 -c lock_timeout=1000'},echo=False)
+                try:
+                    with engine.connect() as connection:
+                        transaction=connection.begin()
+                        try:
+                            connection.execute(text('SET TRANSACTION READ ONLY'))
+                            identity=connection.execute(text('SELECT current_database(), inet_server_addr()::text, inet_server_port(), current_schema()')).one()
+                            require(hashlib.sha256(json.dumps(list(identity)).encode()).hexdigest()==TARGET,'exact_migrated_database_target')
+                            tables=set(inspect(connection).get_table_names())
+                            require(set(TABLES)<=tables,'complete_audit_schema')
+                            version=Table('alembic_version',MetaData(),Column('version_num',String))
+                            require(list(connection.execute(select(version.c.version_num)).scalars())==[REVISION],'exact_audit_revision')
+                            jobs=Table('jobs',MetaData(),Column('status',String),Column('auto_rebalance_portfolio',String))
+                            job_count=connection.execute(select(func.count()).select_from(jobs).where(jobs.c.status.in_(('pending','processing')),jobs.c.auto_rebalance_portfolio.in_(('india','indmoney_us')))).scalar_one()
+                            require(job_count==0,'no_existing_equity_jobs')
+                            audits=Table('recommendation_verifications',MetaData(),Column('status',String))
+                            audit_count=connection.execute(select(func.count()).select_from(audits).where(audits.c.status.in_(('queued','processing')))).scalar_one()
+                            require(audit_count==0,'no_inflight_audit_verifications')
+                            trigger_count=connection.execute(text("SELECT count(*) FROM pg_catalog.pg_trigger tr JOIN pg_catalog.pg_class rel ON rel.oid=tr.tgrelid JOIN pg_catalog.pg_namespace ns ON ns.oid=rel.relnamespace WHERE NOT tr.tgisinternal AND ns.nspname=current_schema() AND tr.tgenabled='O' AND ((rel.relname='recommendation_evidence' AND tr.tgname='recommendation_evidence_immutable') OR (rel.relname='recommendation_decisions' AND tr.tgname='recommendation_decisions_immutable'))")).scalar_one()
+                            require(trigger_count==2,'immutable_trigger_metadata')
+                            queue=check_queue(settings,Redis)
+                            print(json.dumps({'activation_admission':phase,'database_target_fingerprint':TARGET,'alembic_revision':REVISION,'active_equity_jobs':job_count,'active_audit_verifications':audit_count,'queue':queue,'transaction_read_only':True},sort_keys=True))
+                        finally:transaction.rollback()
+                finally:engine.dispose()
+            
+            
+            if __name__=='__main__':
+                try:
+                    require(len(sys.argv)==2 and sys.argv[1] in {'observe','fenced','stopped'},'named_admission_phase')
+                    main(sys.argv[1])
+                except Exception as error:
+                    print('activation_admission=blocked; error_type='+type(error).__name__+('; gate='+str(error) if isinstance(error,ActivationAdmissionBlocked) else ''))
+                    raise SystemExit(1)
+            ADMISSION
+            DATABASE
+            }
+            read_frontend_slot() {
+              sudo -n -u "$APP_USER" python3 -B - <<'FRONTEND_SLOT'
+            from pathlib import Path
+            path=Path('/srv/investor/frontend/.next-active-dir')
+            if path.is_symlink() or not path.is_file() or path.stat().st_size>64:raise SystemExit('Known previous frontend pointer required')
+            value=path.read_text().replace('\r','').strip()
+            if value not in {'.next','.next-candidate'}:raise SystemExit('Known previous frontend slot required')
+            print(value)
+            FRONTEND_SLOT
+            }
+            verify_frontend() {
+              local slot
+              slot=$(read_frontend_slot) || return 1
+              sudo -n -u "$APP_USER" env APP_ROOT="$APP_ROOT" PYTHONDONTWRITEBYTECODE=1 bash -s -- "$1" "$RELEASE_SHA" "$slot" <<'FRONTEND_VERIFY'
+            set -euo pipefail
+            readonly credx_public_expected="$1" credx_front_expected_sha="$2" credx_front_slot="$3"
+            source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
+            load_env_file /etc/investor/frontend.env
+            [[ "${NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED:-false}" == "$credx_public_expected" ]]
+            node "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" validate-host "$APP_ROOT/frontend/$credx_front_slot" "$credx_front_expected_sha" "$APP_ROOT/frontend/package-lock.json" webpack true true >/dev/null
+            export CREDX_EXPECTED_FRONTEND_SHA="$credx_front_expected_sha"
+            python3 -B - <<'FRONTEND_HTTP'
+            import json,os,urllib.request
+            with urllib.request.urlopen('http://127.0.0.1:3000/api/runtime-fingerprint',timeout=5) as response:
+                value=json.loads(response.read(8192))
+            if value.get('build_sha')!=os.environ['CREDX_EXPECTED_FRONTEND_SHA']:raise SystemExit('Served frontend SHA mismatch')
+            print('served_frontend_sha='+value['build_sha'])
+            FRONTEND_HTTP
+            FRONTEND_VERIFY
+            }
+            verify_task_registry() {
+              sudo -n -u "$APP_USER" env APP_ROOT="$APP_ROOT" PYTHONDONTWRITEBYTECODE=1 bash <<'REGISTRY'
+            set -euo pipefail
+            cd "$APP_ROOT/backend"
+            source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
+            load_env_file /etc/investor/backend.env
+            export CREDX_RECOVERY_MODE=1 PYTHONDONTWRITEBYTECODE=1
+            .venv/bin/python -B - <<'REGISTRY_PY'
+            try:
+                from app.core.config import settings
+                from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,AUDIT_TASK,stored_audit_recovery_enabled,recovery_http_allowed
+                from app.infrastructure.messaging.celery_app import celery
+                def require(value):
+                    if not value:raise RuntimeError('Stored-only isolation required')
+                require(stored_audit_recovery_enabled(settings))
+                require(not settings.recommendation_audit_external_enabled and not settings.recommendation_audit_fundamentals_enabled and settings.recommendation_audit_daily_cap_usd==0)
+                celery.loader.import_default_modules()
+                require(AUDIT_TASK in celery.tasks and celery.conf.task_default_queue==ANALYSIS_QUEUE)
+                require(celery.conf.broker_transport_options['global_keyprefix']==TRANSPORT_PREFIX)
+                require(celery.conf.result_backend_transport_options['global_keyprefix']==TRANSPORT_PREFIX)
+                require(not celery.conf.beat_schedule and not celery.conf.worker_enable_remote_control)
+                require(all(queue.name==ANALYSIS_QUEUE for queue in celery.conf.task_queues))
+                require(not recovery_http_allowed('POST','/zerodha/orders'))
+                print('audit_task_registration_verified=true; scheduler_entries=0; financial_order_post_allowed=false')
+            except Exception as error:
+                print('audit_task_registration=blocked; error_type='+type(error).__name__)
+                raise SystemExit(1)
+            REGISTRY_PY
+            REGISTRY
+              for route in '/runs/recommendation-audit/comparison?run_id=1&market=india&symbol=SYNTHETIC&exchange=NSE' '/runs/recommendation-audit/verifications/owned-authentication-check'; do
+                status=$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:8000$route") || return 1
+                [[ "$status" == 401 ]] || return 1
+              done
+              echo 'owned_audit_GET_routes_reach_authentication=true'
+            }
+            check_warm_stop() {
+              [[ "$(sudo -n systemctl show investor-recovery-analysis --property=ActiveState --value)" == inactive ]] || return 1
+              [[ "$(sudo -n systemctl show investor-recovery-analysis --property=Result --value)" == success ]] || return 1
+              [[ "$(sudo -n systemctl show investor-recovery-analysis --property=ExecMainStatus --value)" == 0 ]] || return 1
+              [[ "$(sudo -n systemctl show investor-backend --property=ActiveState --value)" == inactive ]]
+            }
+            # END_HELPERS
+            
+            finish() {
+              result=$?
+              trap - EXIT
+              if [[ "$restore_api" == true || "$restore_worker" == true ]]; then
+                if ! check_source || ! check_financial_stopped || ! check_wrappers || ! host_config_operation verify; then
+                  echo 'ROLLBACK_BLOCKED: source or preserved containment changed; no flags or processes restored.' >&2
+                  exit 1
+                fi
+                # Fence candidate producers before restoring flags or the prior frontend.
+                sudo -n systemctl stop investor-backend || { echo 'ROLLBACK_BLOCKED: producer stop failed.' >&2; exit 1; }
+                if sudo -n systemctl is-active --quiet investor-recovery-analysis; then
+                  run_database_check fenced || { echo 'ROLLBACK_BLOCKED: recovery work is not drained.' >&2; exit 1; }
+                  restore_worker=true
+                  worker_gracefully_stopped=false
+                  sudo -n systemctl stop investor-recovery-analysis || { echo 'ROLLBACK_BLOCKED: consumer stop failed.' >&2; exit 1; }
+                  check_warm_stop || { echo 'RESUME_BLOCKED: consumer was not gracefully stopped.' >&2; exit 1; }
+                  worker_gracefully_stopped=true
+                fi
+                [[ "$restore_worker" != true || "$worker_gracefully_stopped" == true ]] || { echo 'RESUME_BLOCKED: unknown consumer stop.' >&2; exit 1; }
+                run_database_check stopped || { echo 'RESUME_BLOCKED: schema or drain is unknown.' >&2; exit 1; }
+                if [[ "$flags_may_have_changed" == true ]]; then
+                  flag_operation restore || { echo 'ROLLBACK_BLOCKED: flag restoration failed; core processes remain stopped.' >&2; exit 1; }
+                fi
+                if [[ "$frontend_may_have_changed" == true ]]; then
+                  sudo -n -u "$APP_USER" node "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" point "$APP_ROOT/frontend" "$previous_frontend_slot" || { echo 'ROLLBACK_BLOCKED: previous frontend pointer unavailable.' >&2; exit 1; }
+                  sudo -n systemctl restart investor-frontend || { echo 'ROLLBACK_BLOCKED: previous frontend restart failed.' >&2; exit 1; }
+                  verify_frontend false || { echo 'ROLLBACK_BLOCKED: previous frontend flag/artifact parity failed.' >&2; exit 1; }
+                fi
+                sudo -n systemctl start investor-recovery-analysis investor-backend || { echo 'RESUME_BLOCKED: original recovery services failed.' >&2; exit 1; }
+                wait_ready && check_runtime false && check_financial_stopped || { echo 'ROLLBACK_BLOCKED: final original recovery check failed.' >&2; exit 1; }
+              fi
+              echo "activation_runner_exit=$result"
+              exit "$result"
+            }
+            trap finish EXIT
+            
+            sudo -n test -d "$APP_ROOT/.git"
+            sudo -n touch /run/investor-production-deploy.lock
+            sudo -n chown "$(id -u):$(id -g)" /run/investor-production-deploy.lock
+            exec 9>/run/investor-production-deploy.lock
+            flock -w 60 9
+            check_source
+            sudo -n -u "$APP_USER" git -c core.hooksPath=/dev/null -C "$APP_ROOT" fetch origin main
+            [[ "$(sudo -n -u "$APP_USER" git -C "$APP_ROOT" rev-parse FETCH_HEAD)" == "$RELEASE_SHA" ]]
+            check_financial_stopped
+            check_wrappers
+            check_runtime false
+            verify_frontend false
+            run_database_check observe
+            [[ "$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')" -ge 2097152 ]]
+            sudo -n -u "$APP_USER" test -r "$remote_artifact"
+            sudo -n -u "$APP_USER" test -r "$remote_artifact.sha256"
+            # Preserve exact current source separately; no source checkout/install occurs.
+            sudo -n -u "$APP_USER" env PYTHONDONTWRITEBYTECODE=1 python3 -B "$APP_ROOT/deploy/no-docker/backend-recovery-artifact.py" snapshot "$APP_ROOT" "$SOURCE_BACKUP" --previous-sha "$RELEASE_SHA"
+            previous_frontend_slot=$(read_frontend_slot)
+            sudo -n mkdir -m 0700 "$STATE_DIR"
+            flag_operation prepare
+            host_config_operation prepare
+            # Use the same stable public-code driver contract as the reviewed deployment.
+            # It survives frontend slot rollback, and is retained for operational review.
+            contained_driver=$(mktemp -d /tmp/investor-contained-driver.XXXXXX)
+            chmod 0755 "$contained_driver"
+            for driver_file in deploy-recovery.sh backend-recovery-artifact.py; do
+              sudo -n -u "$APP_USER" git -c core.hooksPath=/dev/null -C "$APP_ROOT" show "$RELEASE_SHA:deploy/no-docker/$driver_file" > "$contained_driver/$driver_file"
+              chmod 0644 "$contained_driver/$driver_file"
+            done
+            prepare_frontend_adapter
+            echo "retained_contained_driver=$contained_driver"
+            restore_api=true
+            sudo -n systemctl stop investor-backend
+            run_database_check fenced
+            restore_worker=true
+            sudo -n systemctl stop investor-recovery-analysis
+            check_warm_stop
+            worker_gracefully_stopped=true
+            run_database_check stopped
+            check_source
+            check_financial_stopped
+            check_wrappers
+            host_config_operation verify
+            flags_may_have_changed=true
+            flag_operation enable
+            # Only existing contained services are restarted; no worker/Beat installation.
+            sudo -n systemctl start investor-recovery-analysis investor-backend
+            wait_ready
+            check_runtime true
+            run_database_check observe
+            frontend_may_have_changed=true
+            SKIP_GIT_SYNC=true RECOVERY_DEPLOY=true CREDX_RECOVERY_ROLLBACK_OWNER=workflow \
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+              FRONTEND_ARTIFACT="$remote_artifact" EXPECTED_FRONTEND_SHA="$RELEASE_SHA" \
+              CREDX_CONTAINED_RELEASE_DRIVER="$contained_driver/deploy-recovery.sh" \
+              bash "$contained_driver/redeploy-audit-activation.sh" frontend-only
+            verify_frontend true
+            host_config_operation verify
+            check_source
+            check_wrappers
+            check_runtime true
+            check_financial_stopped
+            run_database_check observe
+            verify_task_registry
+            flag_operation verify
+            # All rollback gates remain armed until these combined final checks succeed.
+            restore_api=false
+            restore_worker=false
+            flags_may_have_changed=false
+            frontend_may_have_changed=false
+            echo 'stored_only_advisory_activation_verified=true'
+
+      - name: Record remote deployment duration
+        id: remote-timing
+        if: always() && env.REMOTE_DEPLOY_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - REMOTE_DEPLOY_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Write machine-readable deployment timings
+        if: always()
+        env:
+          DEPLOY_STDOUT: ${{ steps.deploy-ssh.outputs.stdout }}
+          CHECKOUT_SECONDS: ${{ needs.build-frontend.outputs.checkout_seconds }}
+          DEPENDENCY_SECONDS: ${{ needs.build-frontend.outputs.dependency_seconds }}
+          BUILD_SECONDS: ${{ needs.build-frontend.outputs.build_seconds }}
+          PACKAGE_SECONDS: ${{ needs.build-frontend.outputs.package_seconds }}
+          UPLOAD_SECONDS: ${{ needs.build-frontend.outputs.upload_seconds }}
+          DOWNLOAD_SECONDS: ${{ steps.download-timing.outputs.seconds }}
+          TRANSFER_SECONDS: ${{ steps.transfer-timing.outputs.seconds }}
+          REMOTE_SECONDS: ${{ steps.remote-timing.outputs.seconds }}
+          DEPLOY_SCOPE: frontend-only
+        run: |
+          printf '%s\n' "$DEPLOY_STDOUT" >"${RUNNER_TEMP}/remote-deploy.log"
+          remote_phases="$(
+            awk -F '\t' '$1 == "INVESTOR_DEPLOY_TIMING" {
+              print $2 "\t" $3
+            }' "${RUNNER_TEMP}/remote-deploy.log" |
+              jq -Rn '
+                [inputs | split("\t") | {(.[0]): (.[1] | tonumber)}]
+                | add // {}
+              '
+          )"
+          jq -n \
+            --arg commit "$GITHUB_SHA" \
+            --arg scope "$DEPLOY_SCOPE" \
+            --arg checkout "${CHECKOUT_SECONDS:-}" \
+            --arg dependency_restore "${DEPENDENCY_SECONDS:-}" \
+            --arg frontend_build "${BUILD_SECONDS:-}" \
+            --arg packaging "${PACKAGE_SECONDS:-}" \
+            --arg artifact_upload "${UPLOAD_SECONDS:-}" \
+            --arg artifact_download "${DOWNLOAD_SECONDS:-}" \
+            --arg artifact_transfer "${TRANSFER_SECONDS:-}" \
+            --arg remote_deploy "${REMOTE_SECONDS:-}" \
+            --argjson remote_phases "$remote_phases" \
+            '{
+              schemaVersion: 1,
+              commit: $commit,
+              scope: $scope,
+              durationsSeconds: {
+                checkout: ($checkout | tonumber?),
+                dependencyRestore: ($dependency_restore | tonumber?),
+                frontendBuild: ($frontend_build | tonumber?),
+                packaging: ($packaging | tonumber?),
+                artifactUpload: ($artifact_upload | tonumber?),
+                artifactDownload: ($artifact_download | tonumber?),
+                artifactTransfer: ($artifact_transfer | tonumber?),
+                remoteDeploy: ($remote_deploy | tonumber?)
+              },
+              remotePhasesSeconds: $remote_phases
+            }' >"${RUNNER_TEMP}/deployment-timings.json"
+
+      - name: Upload raw deployment timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deployment-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/deployment-timings.json
+            ${{ runner.temp }}/remote-deploy.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Deployment timing summary
+        if: always()
+        run: |
+          {
+            echo "### Production deployment"
+            echo
+            echo "**Scope:** \`frontend-only\`"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Checkout | ${{ needs.build-frontend.outputs.checkout_seconds || 'n/a' }}s |"
+            echo "| Dependency/cache restore + npm ci | ${{ needs.build-frontend.outputs.dependency_seconds || 'n/a' }}s |"
+            echo "| Frontend build | ${{ needs.build-frontend.outputs.build_seconds || 'n/a' }}s |"
+            echo "| Artifact packaging | ${{ needs.build-frontend.outputs.package_seconds || 'n/a' }}s |"
+            echo "| Artifact upload | ${{ needs.build-frontend.outputs.upload_seconds || 'n/a' }}s |"
+            echo "| Artifact download | ${{ steps.download-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact transfer | ${{ steps.transfer-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Remote source sync + deploy | ${{ steps.remote-timing.outputs.seconds || 'n/a' }}s |"
+            echo
+            echo "EC2 extraction, restart, fingerprint, and smoke-test durations are printed in the SSH step's final timing table."
+          } >>"${GITHUB_STEP_SUMMARY}"
