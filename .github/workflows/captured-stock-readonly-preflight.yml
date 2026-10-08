@@ -1,0 +1,143 @@
+name: Captured Stock Details read-only host preflight
+on:
+  push:
+    branches: [codex/captured-stock-readonly-preflight-20261007]
+    paths: [.github/workflows/captured-stock-readonly-preflight.yml]
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Read sanitized runtime and database metadata
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 240s
+          script: |
+            #!/usr/bin/env bash
+            # Proposed one-off read-only preflight. No host files, services or credentials change.
+            set -euo pipefail
+            export PYTHONDONTWRITEBYTECODE=1 GIT_OPTIONAL_LOCKS=0
+            APP_ROOT=/srv/investor
+            APP_USER=investor
+            sudo -n test -d "$APP_ROOT/.git"
+            source_sha=$(sudo -n -u "$APP_USER" env GIT_OPTIONAL_LOCKS=0 git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" rev-parse HEAD)
+            printf 'source_sha=%s\n' "$source_sha"
+            source_clean=false
+            if sudo -n -u "$APP_USER" env GIT_OPTIONAL_LOCKS=0 git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --no-ext-diff --no-textconv --quiet && sudo -n -u "$APP_USER" env GIT_OPTIONAL_LOCKS=0 git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --cached --no-ext-diff --no-textconv --quiet; then
+              source_clean=true
+              echo 'tracked_source_clean=true'
+            else
+              echo 'tracked_source_clean=false'
+            fi
+            sudo -n python3 -B - <<'RUNTIME'
+            import hashlib,json,pathlib,re,shutil,subprocess
+            from datetime import datetime,timezone
+            from decimal import Decimal,InvalidOperation
+            units=['investor-backend','investor-recovery-analysis','investor-frontend']
+            financial=[family+'-'+role for family in ('investor','investment-engine') for role in ('celery-worker','celery-email-worker','celery-auto-live-worker','celery-beat','celery-beat-worker')]
+            report={'checked_at':datetime.now(timezone.utc).isoformat(),'services':{},'docker_binary_available':shutil.which('docker') is not None,'pg_dump_available':shutil.which('pg_dump') is not None,'analysis_drain':'not established by service liveness'}
+            properties='Id,LoadState,ActiveState,MainPID,ExecStart,ExecStartPre,ExecStartPost,ExecStop,WorkingDirectory,TimeoutStopUSec,KillMode,KillSignal'
+            for unit in units+financial:
+                result=subprocess.run(['systemctl','show',unit,'--property='+properties],capture_output=True,text=True,timeout=8)
+                if result.returncode:
+                    report['services'][unit]={'query_ok':False}
+                    continue
+                values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                item={key:values.get(key) for key in ('Id','LoadState','ActiveState','MainPID','WorkingDirectory','TimeoutStopUSec','KillMode','KillSignal')}
+                item['query_ok']=True
+                for key in ('ExecStartPre','ExecStartPost','ExecStop'):
+                    raw=values.get(key,'')
+                    item[key+'_present']=bool(raw)
+                    item[key+'_sha256']=hashlib.sha256(raw.encode()).hexdigest() if raw else None
+                raw=values.get('ExecStart','')
+                item['ExecStart_sha256']=hashlib.sha256(raw.encode()).hexdigest()
+                item['launch_paths']=re.findall(r'\bpath=([^ ;}]+)',raw)
+                if unit in ('investor-backend','investor-recovery-analysis'):
+                    try:
+                        pid=int(values.get('MainPID','0'))
+                        if pid<=0: raise ValueError('No active PID')
+                        env=dict(part.split(b'=',1) for part in pathlib.Path(f'/proc/{pid}/environ').read_bytes().split(b'\0') if b'=' in part)
+                        item['recovery_mode']=env.get(b'CREDX_RECOVERY_MODE',b'absent').decode() if env.get(b'CREDX_RECOVERY_MODE') in (b'0',b'1') else 'unknown'
+                        for key in ('RECOMMENDATION_AUDIT_ENABLED','RECOMMENDATION_AUDIT_EXTERNAL_ENABLED','RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED'):
+                            raw=env.get(key.encode(),b'false').strip().lower()
+                            item[key]='off' if raw in (b'0',b'false',b'off',b'no') else 'on' if raw in (b'1',b'true',b'on',b'yes') else 'unknown'
+                        item['daily_cap_zero']=Decimal(env.get(b'RECOMMENDATION_AUDIT_DAILY_CAP_USD',b'0').decode())==0
+                    except Exception as error:
+                        item['runtime_query_error']=type(error).__name__
+                report['services'][unit]=item
+            report['financial_consumers_confirmed_stopped']=all(report['services'].get(unit,{}).get('ActiveState') in ('inactive','failed') for unit in financial)
+            report['active_recovery_confirmed']=all(report['services'].get(unit,{}).get('ActiveState')=='active' and report['services'][unit].get('recovery_mode')=='1' for unit in units[:2])
+            report['wrapper_and_hook_review']='required; command arguments and environment contents are not returned'
+            print(json.dumps(report,sort_keys=True))
+            RUNTIME
+            # Public, unauthenticated GETs only; no financial/analysis route is called.
+            curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --request GET --write-out '\nHTTP_STATUS=%{http_code}\n' https://api.cred-x.in/health/ready
+            curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --request GET --write-out '\nHTTP_STATUS=%{http_code}\n' https://cred-x.in/api/runtime-fingerprint
+            # Do not execute a dirty/unknown live loader or app module merely to inspect metadata.
+            if [[ "$source_sha" != 0a12caddaf9bbd681487906774400a3ad4d0369b || "$source_clean" != true ]]; then
+              echo 'database_preflight=skipped: live source is not the known reviewed clean base'
+              exit 1
+            fi
+            # Use the existing non-evaluating env loader and app user; never print its contents.
+            sudo -n -u "$APP_USER" env APP_ROOT="$APP_ROOT" PYTHONDONTWRITEBYTECODE=1 bash <<'DATABASE'
+            set -euo pipefail
+            cd "$APP_ROOT/backend"
+            source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
+            load_env_file /etc/investor/backend.env
+            export PYTHONDONTWRITEBYTECODE=1 CREDX_RECOVERY_MODE=1
+            .venv/bin/python -B - <<'DBPY'
+            import asyncio,json
+            async def verify():
+                engine=None
+                outcome=1
+                try:
+                    async with asyncio.timeout(25):
+                        # Catch configuration/import errors and bound connection + all reads.
+                        import hashlib
+                        from sqlalchemy import Column,MetaData,String,Table,inspect,select,text
+                        from app.infrastructure.database.session import AsyncSessionLocal,async_engine
+                        engine=async_engine
+                        engine.echo=False
+                        audit_tables=('recommendation_evidence','recommendation_decisions','recommendation_verifications','recommendation_spend_accounts','recommendation_spend_attempts')
+                        async with AsyncSessionLocal() as db:
+                            # Necessary transaction-local SQL enforces read-only PostgreSQL I/O.
+                            await db.execute(text('SET TRANSACTION READ ONLY'))
+                            await db.execute(text('SET LOCAL statement_timeout = 5000'))
+                            await db.execute(text('SET LOCAL lock_timeout = 1000'))
+                            connection=await db.connection()
+                            tables=set(await connection.run_sync(lambda sync:inspect(sync).get_table_names()))
+                            revision=[]
+                            if 'alembic_version' in tables:
+                                table=Table('alembic_version',MetaData(),Column('version_num',String))
+                                revision=list((await db.execute(select(table.c.version_num))).scalars())
+                            identity=(await db.execute(text('SELECT current_database(), inet_server_addr()::text, inet_server_port(), current_schema()'))).one()
+                            target_hash=hashlib.sha256(json.dumps(list(identity)).encode()).hexdigest()
+                            query="""SELECT ns.nspname, rel.relname, tr.tgname, fn.proname, tr.tgenabled, tr.tgtype, md5(pg_get_functiondef(fn.oid)) FROM pg_catalog.pg_trigger tr JOIN pg_catalog.pg_class rel ON rel.oid=tr.tgrelid JOIN pg_catalog.pg_namespace ns ON ns.oid=rel.relnamespace JOIN pg_catalog.pg_proc fn ON fn.oid=tr.tgfoid WHERE NOT tr.tgisinternal AND ns.nspname=current_schema() AND rel.relname IN ('recommendation_evidence','recommendation_decisions') AND tr.tgname IN ('recommendation_evidence_immutable','recommendation_decisions_immutable') ORDER BY rel.relname, tr.tgname"""
+                            triggers=[dict(zip(('schema','table','name','function','enabled','event_type_bits','function_definition_md5'),row)) for row in (await db.execute(text(query))).all()]
+                            print(json.dumps({'database_target_fingerprint':target_hash,'alembic_revisions':revision,'expected_parent_verified':revision==['api_attempt_events_001'],'audit_tables_present':{name:name in tables for name in audit_tables},'audit_immutable_trigger_metadata':triggers,'audit_trigger_enforcement':'not established by metadata alone','transaction_read_only':True,'backup_ready':'not established; approved verified backup required before migration'}))
+                            await db.rollback()
+                            outcome=0
+                except Exception as error:
+                    print(json.dumps({'database_preflight':'failed','error_type':type(error).__name__}))
+                finally:
+                    if engine is not None:
+                        try:
+                            await asyncio.wait_for(engine.dispose(),timeout=5)
+                        except Exception as error:
+                            print(json.dumps({'database_cleanup':'failed','error_type':type(error).__name__}))
+                            outcome=1
+                return outcome
+            try:
+                raise SystemExit(asyncio.run(verify()))
+            except Exception as error:
+                print(json.dumps({'database_driver':'failed','error_type':type(error).__name__}))
+                raise SystemExit(1)
+            DBPY
+            DATABASE
