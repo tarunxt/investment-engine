@@ -194,6 +194,7 @@ jobs:
           backend/tests/test_recommendation_audit_adapters.py
           backend/tests/test_recommendation_audit_queue.py
           backend/tests/test_recommendation_audit_outbox.py
+          backend/tests/test_recommendation_audit_recovery.py
           backend/tests/test_recommendation_audit_fundamentals.py
           backend/tests/test_recommendation_audit_postgres.py
           backend/tests/test_output_contracts.py
@@ -289,6 +290,7 @@ jobs:
           tests/dashboard-portfolio-totals.test.mjs
           tests/rebalance-workflow-resilience.test.mjs
           tests/auto-rebalance-audit-persistence.test.mjs
+          tests/recommendation-audit-recovery-policy.test.mjs
           tests/rebalance-stage-inputs.test.mjs
           tests/output-source-jobs.test.mjs
           tests/output-consistency-notice.test.mjs

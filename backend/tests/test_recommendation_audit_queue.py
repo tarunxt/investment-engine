@@ -33,8 +33,9 @@ from test_recommendation_audit import decision, request
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recovery",[False,True])
 @pytest.mark.parametrize("broker",["memory",pytest.param("redis",marks=pytest.mark.skipif(not os.getenv("CREDX_AUDIT_TEST_REDIS_URL") or os.getenv("CREDX_AUDIT_TEST_REDIS_ACK")!="disposable-local-only",reason="Disposable Redis fixture not provided"))])
-async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, monkeypatch, broker):
+async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, monkeypatch, broker, recovery):
     import app.models
     import app.core.security as security_module
     from app.domains.recommendation_audit.tasks import verify_reversal
@@ -42,11 +43,15 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     engine=create_engine(f"sqlite:///{database}",connect_args={"check_same_thread":False})
     Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
     monkeypatch.setattr(settings,"recommendation_audit_enabled",True)
+    monkeypatch.setattr(settings,"recommendation_audit_recovery_stored_only_enabled",recovery)
     monkeypatch.setattr(settings,"recommendation_audit_external_enabled",False)
+    monkeypatch.setattr(settings,"recommendation_audit_fundamentals_enabled",False)
+    monkeypatch.setattr(settings,"recommendation_audit_daily_cap_usd",0)
+    monkeypatch.setattr(settings,"database_url",f"sqlite:///{database}")
     monkeypatch.setattr(settings,"auth_disabled",False)
     monkeypatch.setattr(settings,"environment","test")
     monkeypatch.setattr(security_module,"SECRET_KEY","disposable-fixture-signing-key-only")
-    monkeypatch.setenv("CREDX_RECOVERY_MODE","0")
+    monkeypatch.setenv("CREDX_RECOVERY_MODE","1" if recovery else "0")
     with Session(engine) as session:
         session.add_all([User(id=i,email=f"fixture-{i}@invalid.test",username=f"fixture-{i}",password_hash="unused-fixture",role=UserRole.USER,is_active=True) for i in (1,2)])
         session.add(Run(id=10,user_id=1,prompt="fixture",prompt_preview="fixture"))
@@ -55,7 +60,8 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     sessions=async_sessionmaker(async_engine,expire_on_commit=False)
     async def fixture_db():
         async with sessions() as session: yield session
-    app=FastAPI();app.include_router(router);app.dependency_overrides[get_async_db]=fixture_db
+    from app.core.recovery import RecoveryMiddleware
+    app=FastAPI();app.add_middleware(RecoveryMiddleware);app.include_router(router);app.dependency_overrides[get_async_db]=fixture_db
     broker_url="memory://"
     if broker=="redis":
         from urllib.parse import urlsplit
@@ -71,7 +77,7 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     @celery.task(name="audit.fixture.verify."+fixture_id,shared=False,lazy=False)
     def queued_verification(record_id):
         with Session(engine,expire_on_commit=False) as session:
-            return run_verification(session,record_id,SimpleNamespace(recommendation_audit_external_enabled=False),external_collector=prohibited)
+            return run_verification(session,record_id,settings,external_collector=prohibited)
     def unavailable(*args,**kwargs): raise RuntimeError("fixture broker unavailable")
     monkeypatch.setattr(verify_reversal,"apply_async",unavailable)
     token=JWTUtils.create_access_token(1,"fixture-1@invalid.test","user")
@@ -87,6 +93,11 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
                 assert (await client.post("/runs/recommendation-audit/verifications",json=body)).status_code==401
                 assert (await client.post("/runs/recommendation-audit/verifications",json=body,headers={"Authorization":"Bearer invalid"})).status_code==401
                 headers={"Authorization":f"Bearer {token}"}
+                if recovery:
+                    capabilities=(await client.get("/runs/recommendation-audit/comparison?run_id=10&market=india&symbol=FIXTUREEQ&exchange=NSE",headers=headers)).json()["capabilities"]
+                    assert capabilities["recovery_stored_only"] is True and capabilities["recovery_read_only"] is False and capabilities["external_enabled"] is False
+                    for forbidden in [{**body,"mode":"external_data"},{**body,"budget_usd":"0.01"}]:
+                        assert (await client.post("/runs/recommendation-audit/verifications",json=forbidden,headers=headers)).status_code==403
                 response=await client.post("/runs/recommendation-audit/verifications",json=body,headers=headers)
                 assert response.status_code==200,response.text
                 record_id=response.json()["id"]
@@ -102,7 +113,7 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
                 delivered=[]
                 def publish_fixture(record_id):
                     delivered.append(queued_verification.apply_async(args=[record_id],retry=False))
-                relay=RelayService(lambda:Session(engine,expire_on_commit=False),publish_fixture,SimpleNamespace(recommendation_audit_enabled=True))
+                relay=RelayService(lambda:Session(engine,expire_on_commit=False),publish_fixture,settings)
                 relay.start()
                 try:
                     deadline=asyncio.get_running_loop().time()+10

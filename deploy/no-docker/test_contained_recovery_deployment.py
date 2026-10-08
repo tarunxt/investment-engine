@@ -189,5 +189,27 @@ else: print('401',end='')
             with self.subTest(values=values),patch.object(Path,'read_bytes',return_value=values),patch.object(sys,'argv',['probe','123']),patch('sys.stdout',new_callable=io.StringIO):
                 with self.assertRaises(SystemExit): exec(compile(probe,'runtime-probe','exec'),{})
 
+    def test_actual_runtime_probe_admits_only_complete_stored_pair(self):
+        probe=DRIVER.read_text().split("<<'PY'\n",1)[1].split('\nPY',1)[0]
+        base=b'CREDX_RECOVERY_MODE=1\0RECOMMENDATION_AUDIT_ENABLED=true'
+        for values,allowed in [(base,False),(base+b'\0RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED=true',True),(base+b'\0RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED=true\0RECOMMENDATION_AUDIT_EXTERNAL_ENABLED=true',False)]:
+            with self.subTest(allowed=allowed),patch.object(Path,'read_bytes',return_value=values),patch.object(sys,'argv',['probe','123']),patch('sys.stdout',new_callable=io.StringIO) as output:
+                if allowed:
+                    exec(compile(probe,'runtime-probe','exec'),{});self.assertEqual(output.getvalue(),'1\n')
+                else:
+                    with self.assertRaises(SystemExit): exec(compile(probe,'runtime-probe','exec'),{})
+
+    def test_public_build_probe_redacts_other_keys_and_refuses_invalid_flags(self):
+        workflow=yaml.load((REPO/'.github/workflows/deploy.yml').read_text(),Loader=yaml.BaseLoader)
+        step=next(s for s in workflow['jobs']['build-frontend']['steps'] if s.get('id')=='audit-public-flag')
+        probe=step['with']['script'].split("<<'PY'\n",1)[1].split('\nPY',1)[0]
+        for content,expected in [('NEXTAUTH_SECRET=fixture-never-output\n','false'),('NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED="true"\nNEXTAUTH_SECRET=fixture-never-output','true'),('NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=false','false'),('NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=$(invalid)',None),('NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=true\nNEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=false',None)]:
+            with self.subTest(expected=expected),patch.object(Path,'read_text',return_value=content),patch('sys.stdout',new_callable=io.StringIO) as output:
+                if expected is None:
+                    with self.assertRaises(SystemExit): exec(compile(probe,'public-probe','exec'),{})
+                else:
+                    exec(compile(probe,'public-probe','exec'),{});self.assertEqual(output.getvalue(),'CREDX_PUBLIC_AUDIT_FLAG='+expected+'\n')
+                self.assertNotIn('fixture-never-output',output.getvalue())
+
 
 if __name__=='__main__': unittest.main()

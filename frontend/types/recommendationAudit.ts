@@ -22,7 +22,7 @@ export type AuditDecision = {
   coverage: { successful: number; attempted: number; captured_terminal: number };
 };
 export type AuditComparison = {
-  capabilities?: { external_enabled: boolean; fundamentals_enabled?: boolean; automatic_delivery_recovery?: boolean; recovery_read_only: boolean; daily_cap_usd: number; kite_request_cost_usd: number | null; kite_max_requests: number; rbi_max_requests: number };
+  capabilities?: { external_enabled: boolean; fundamentals_enabled?: boolean; automatic_delivery_recovery?: boolean; recovery_read_only: boolean; recovery_stored_only?: boolean; daily_cap_usd: number; kite_request_cost_usd: number | null; kite_max_requests: number; rbi_max_requests: number };
   current: AuditDecision | null; present_calculation?: AuditDecision | null; previous: AuditDecision | null; bundle_hash?: string;
   comparison: { comparable: boolean; exposure_reversal: boolean; changes: { field: string; before: unknown; after: unknown }[]; score_component_changes?: Record<string,string>; findings: AuditFinding[] } | null;
   coverage: unknown;

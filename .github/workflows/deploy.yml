@@ -154,6 +154,7 @@ jobs:
       NEXT_PUBLIC_DISABLE_AUTH: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_AUTH || 'false' }}
       NEXT_PUBLIC_DISABLE_API_PROXY: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_API_PROXY || 'false' }}
       NEXT_PUBLIC_API_DEBUG: ${{ vars.PROD_NEXT_PUBLIC_API_DEBUG || 'false' }}
+      NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED: "false"
       NEXTAUTH_URL: ${{ vars.PROD_NEXTAUTH_URL || 'https://cred-x.in' }}
       NEXTAUTH_SECRET: build-only-runtime-secret-is-loaded-on-ec2
       AUTH_TRUST_HOST: "true"
@@ -169,6 +170,42 @@ jobs:
       - name: Record checkout duration
         id: checkout-timing
         run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Read canonical non-secret audit build flag
+        id: audit-public-flag
+        uses: appleboy/ssh-action@v1.2.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 30s
+          capture_stdout: true
+          script: |
+            sudo -n python3 -B - <<'PY'
+            import re
+            from pathlib import Path
+            matches=[]
+            for line in Path('/etc/investor/frontend.env').read_text().splitlines():
+                match=re.fullmatch(r'\s*NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED\s*=\s*(.*?)\s*',line)
+                if match:
+                    value=match.group(1)
+                    if len(value)>=2 and value[0]==value[-1] and value[0] in "\"'": value=value[1:-1]
+                    if value not in {'true','false'}: raise SystemExit('Invalid public audit flag')
+                    matches.append(value)
+            if len(matches)>1: raise SystemExit('Duplicate public audit flag')
+            print('CREDX_PUBLIC_AUDIT_FLAG='+ (matches[0] if matches else 'false'))
+            PY
+
+      - name: Set artifact public audit build variable
+        env:
+          AUDIT_PUBLIC_FLAG: ${{ steps.audit-public-flag.outputs.stdout }}
+        run: |
+          set -euo pipefail
+          flag=$(printf '%s\n' "$AUDIT_PUBLIC_FLAG" | sed -nE 's/^CREDX_PUBLIC_AUDIT_FLAG=(true|false)$/\1/p')
+          case "$flag" in true|false) ;; *) echo 'Invalid public audit build flag' >&2; exit 1 ;; esac
+          echo "NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=$flag" >>"${GITHUB_ENV}"
 
       - name: Start dependency restore timer
         run: echo "DEPENDENCIES_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"

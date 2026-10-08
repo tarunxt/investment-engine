@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
-from app.core.recovery import recovery_mode
+from app.core.recovery import recovery_mode, audit_recovery_blocked, require_audit_request_allowed, RecoveryBlocked
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.runs.models import Run
@@ -25,7 +25,12 @@ def enabled():
 
 def write_enabled():
     enabled()
-    if recovery_mode(): raise HTTPException(403, "Recovery mode permits audit reads only")
+    if audit_recovery_blocked(settings): raise HTTPException(403, "Recovery mode permits audit reads only")
+
+
+def request_allowed(request, *, record=None):
+    try: require_audit_request_allowed(request, settings, record=record)
+    except RecoveryBlocked as exc: raise HTTPException(403, str(exc)) from exc
 
 
 @router.get("/comparison")
@@ -35,7 +40,7 @@ async def get_comparison(run_id: int = Query(ge=1), market: str = Query(pattern=
     if not run: raise HTTPException(404, "Run not found")
     view = await db.run_sync(lambda session: comparison_view(session, user.id, run_id, market, symbol, exchange))
     tariff = settings.recommendation_audit_kite_incremental_cost_usd
-    view["capabilities"] = {"external_enabled": settings.recommendation_audit_external_enabled and not recovery_mode(), "fundamentals_enabled":settings.recommendation_audit_fundamentals_enabled,"automatic_delivery_recovery":True,"recovery_read_only": recovery_mode(), "daily_cap_usd": settings.recommendation_audit_daily_cap_usd, "kite_request_cost_usd": tariff, "kite_max_requests": 2, "rbi_max_requests": 1,"nse_filing_max_requests":1,"total_max_requests":3}
+    view["capabilities"] = {"external_enabled": settings.recommendation_audit_external_enabled and not recovery_mode(), "fundamentals_enabled":settings.recommendation_audit_fundamentals_enabled and not recovery_mode(),"automatic_delivery_recovery":True,"recovery_read_only": audit_recovery_blocked(settings), "recovery_stored_only": recovery_mode() and not audit_recovery_blocked(settings), "daily_cap_usd": settings.recommendation_audit_daily_cap_usd, "kite_request_cost_usd": tariff, "kite_max_requests": 2, "rbi_max_requests": 1,"nse_filing_max_requests":1,"total_max_requests":3}
     return view
 
 
@@ -66,9 +71,11 @@ async def materialize(body: MaterializeRequest, db: AsyncSession = Depends(get_a
 @router.post("/verifications")
 async def verify(body: VerificationCreate, db: AsyncSession = Depends(get_async_db), user: User = Depends(get_current_user)):
     write_enabled()
+    request_allowed(body.model_dump(mode="json"))
     if body.mode == "external_data" and not settings.recommendation_audit_external_enabled: raise HTTPException(403, "External verification disabled")
     try:
         record = await db.run_sync(lambda session: create_verification(session, user.id, body, daily_cap=settings.recommendation_audit_daily_cap_usd))
+        request_allowed(record.request, record=record)
         await db.commit()  # request/outbox committed before broker delivery
     except LookupError as exc: raise HTTPException(404, str(exc))
     except AuditConflict as exc: raise HTTPException(409, str(exc))
@@ -104,6 +111,7 @@ async def cancel(record_id: str, db: AsyncSession = Depends(get_async_db), user:
     write_enabled()
     record = await db.scalar(select(VerificationRecord).where(VerificationRecord.id == record_id, VerificationRecord.user_id == user.id).with_for_update())
     if not record: raise HTTPException(404, "Verification not found")
+    request_allowed(record.request, record=record)
     if record.status in {"queued", "processing"}:
         record.status = "cancelled"; record.fence += 1; record.dispatch_pending = False; record.completed_at = utcnow()
         # Started/uncertain spend is not released merely because UI cancels.

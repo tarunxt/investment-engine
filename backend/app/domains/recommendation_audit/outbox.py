@@ -14,7 +14,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-from app.core.recovery import recovery_mode
+from app.core.recovery import recovery_mode, audit_recovery_blocked, require_audit_request_allowed, RecoveryBlocked
 from .models import VerificationRecord, utcnow
 
 logger=logging.getLogger(__name__)
@@ -44,20 +44,29 @@ def due(now):
     return or_(unpublished,unclaimed,expired)
 
 
-def dispatch_due(session, publisher, *, limit=MAX_BATCH, now=None, should_stop=lambda:False):
+def recovery_eligibility():
+    return and_(VerificationRecord.request["mode"].as_string()=="stored_only", VerificationRecord.budget_usd==0, VerificationRecord.spent_usd==0, VerificationRecord.reserved_usd==0) if recovery_mode() else True
+
+
+def dispatch_due(session, publisher, *, limit=MAX_BATCH, now=None, should_stop=lambda:False, configuration=None):
     """Commit delivery claims before broker I/O; ambiguous publishes stay pending."""
-    if recovery_mode() or should_stop(): return {"claimed":0,"published":0,"failed":0,"blocked":True}
+    if audit_recovery_blocked(configuration) or should_stop(): return {"claimed":0,"published":0,"failed":0,"blocked":True}
     now=now or utcnow()
-    ids=list(session.scalars(select(VerificationRecord.id).where(due(now)).order_by(VerificationRecord.created_at,VerificationRecord.id).limit(max(1,min(limit,MAX_BATCH)))))
+    ids=list(session.scalars(select(VerificationRecord.id).where(due(now), recovery_eligibility()).order_by(VerificationRecord.created_at,VerificationRecord.id).limit(max(1,min(limit,MAX_BATCH)))))
     counts={"claimed":0,"published":0,"failed":0,"blocked":False}
     for record_id in ids:
-        if recovery_mode() or should_stop(): counts["blocked"]=True;break
-        changed=session.execute(update(VerificationRecord).where(VerificationRecord.id==record_id,due(now)).values(last_dispatch_at=now,dispatch_pending=True).execution_options(synchronize_session=False))
+        if audit_recovery_blocked(configuration) or should_stop(): counts["blocked"]=True;break
+        record=session.get(VerificationRecord,record_id,populate_existing=True)
+        try: require_audit_request_allowed(record.request,configuration,record=record)
+        except RecoveryBlocked: continue
+        changed=session.execute(update(VerificationRecord).where(VerificationRecord.id==record_id,due(now),recovery_eligibility()).values(last_dispatch_at=now,dispatch_pending=True).execution_options(synchronize_session=False))
         session.commit()
         if changed.rowcount!=1: continue
         counts["claimed"]+=1
         try:
-            if recovery_mode() or should_stop(): raise RuntimeError("Relay shutdown or containment blocks dispatch")
+            if audit_recovery_blocked(configuration) or should_stop(): raise RuntimeError("Relay shutdown or containment blocks dispatch")
+            record=session.get(VerificationRecord,record_id,populate_existing=True)
+            require_audit_request_allowed(record.request,configuration,record=record)
             publisher(record_id)
             # A late publisher cannot erase a later dispatch claim or cancellation.
             session.execute(update(VerificationRecord).where(VerificationRecord.id==record_id,VerificationRecord.last_dispatch_at==now,VerificationRecord.status.in_(["queued","processing"])).values(dispatch_pending=False).execution_options(synchronize_session=False))
@@ -69,6 +78,15 @@ def dispatch_due(session, publisher, *, limit=MAX_BATCH, now=None, should_stop=l
 
 
 def publish_verification(record_id):
+    if recovery_mode():
+        from app.core.config import settings
+        engine,factory=relay_database(settings.database_url)
+        try:
+            with factory() as session:
+                record=session.get(VerificationRecord,record_id)
+                if record is None: raise RecoveryBlocked("Missing audit request")
+                require_audit_request_allowed(record.request,settings,record=record)
+        finally: engine.dispose()
     from .tasks import verify_reversal
     app=verify_reversal.app
     # Bound only this publisher's connection, leaving other workflows untouched.
@@ -79,8 +97,8 @@ def publish_verification(record_id):
 
 def relay_pass(session_factory, publisher, settings, *, should_stop=lambda:False):
     blocked=lambda:should_stop() or not settings.recommendation_audit_enabled
-    if blocked() or recovery_mode(): return {"blocked":True}
-    with session_factory() as session: return dispatch_due(session,publisher,should_stop=blocked)
+    if blocked() or audit_recovery_blocked(settings): return {"blocked":True}
+    with session_factory() as session: return dispatch_due(session,publisher,should_stop=blocked,configuration=settings)
 
 
 class RelayService:
@@ -89,7 +107,7 @@ class RelayService:
         self.stopped=Event();self.thread=None
 
     def start(self):
-        if not self.settings.recommendation_audit_enabled or recovery_mode(): return
+        if not self.settings.recommendation_audit_enabled or audit_recovery_blocked(self.settings): return
         stopped=self.stopped
         def run():
             while not stopped.is_set():
@@ -110,7 +128,7 @@ class AuditOutboxRelay(bootsteps.StartStopStep):
 
     def start(self, consumer):
         from app.core.config import settings
-        if not settings.recommendation_audit_enabled or recovery_mode(): return
+        if not settings.recommendation_audit_enabled or audit_recovery_blocked(settings): return
         self.engine,factory=relay_database(settings.database_url)
         self.service=RelayService(factory,publish_verification,settings)
         self.service.start()

@@ -17,7 +17,13 @@ from decimal import Decimal
 values=dict(v.split(b'=',1) for v in pathlib.Path('/proc/'+sys.argv[1]+'/environ').read_bytes().split(b'\0') if b'=' in v)
 mode=values.get(b'CREDX_RECOVERY_MODE')
 if mode not in (b'0',b'1'): raise SystemExit('Explicit runtime recovery mode unavailable')
-for key in (b'RECOMMENDATION_AUDIT_ENABLED',b'RECOMMENDATION_AUDIT_EXTERNAL_ENABLED',b'RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED'):
+flags=[]
+for key in (b'RECOMMENDATION_AUDIT_ENABLED',b'RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED'):
+    value=values.get(key,b'false').strip().lower()
+    if value not in (b'0',b'false',b'off',b'no',b'1',b'true',b'on',b'yes'): raise SystemExit('Unknown audit activation flag')
+    flags.append(value in (b'1',b'true',b'on',b'yes'))
+if flags[0]!=flags[1]: raise SystemExit('Audit requires the complete stored-only recovery flag pair')
+for key in (b'RECOMMENDATION_AUDIT_EXTERNAL_ENABLED',b'RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED'):
     if values.get(key,b'false').strip().lower() not in (b'0',b'false',b'off',b'no'): raise SystemExit('Audit activation requires a separate verified gate')
 if Decimal(values.get(b'RECOMMENDATION_AUDIT_DAILY_CAP_USD',b'0').decode())!=0: raise SystemExit('Audit spend must stay disabled')
 print(mode.decode())
@@ -101,10 +107,10 @@ source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
 load_env_file "$BACKEND_ENV_FILE"
 export CREDX_RECOVERY_MODE=1
 .venv/bin/python - <<'PY'
-from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,ZERODHA_SYNC_TASK,require_equity_analysis
+from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,ZERODHA_SYNC_TASK,AUDIT_TASK,require_equity_analysis,stored_audit_recovery_enabled,recovery_http_allowed
 from app.infrastructure.messaging.celery_app import celery
 from app.core.config import settings
-assert not settings.recommendation_audit_enabled
+assert (not settings.recommendation_audit_enabled and not settings.recommendation_audit_recovery_stored_only_enabled) or stored_audit_recovery_enabled(settings)
 assert not settings.recommendation_audit_external_enabled
 assert not settings.recommendation_audit_fundamentals_enabled
 assert settings.recommendation_audit_daily_cap_usd == 0
@@ -116,6 +122,8 @@ assert celery.conf.result_backend_transport_options['global_keyprefix'] == TRANS
 assert not celery.conf.beat_schedule
 assert not celery.conf.worker_enable_remote_control
 assert ZERODHA_SYNC_TASK in celery.tasks
+if stored_audit_recovery_enabled(settings): assert AUDIT_TASK in celery.tasks
+assert not recovery_http_allowed('POST','/zerodha/orders')
 assert all(q.name == ANALYSIS_QUEUE for q in celery.conf.task_queues)
 print('Candidate recovery queue and portfolio sync registration verified.')
 PY
@@ -136,12 +144,5 @@ for path in /zerodha/status /zerodha/login-url /zerodha/portfolio /zerodha/threa
   [[ "$code" == 401 ]]
   echo "$path now reaches authentication (HTTP $code)."
 done
-for path in /zerodha/threats/run /zerodha/events/run; do
-  code=$(curl -sS --max-time 5 -X POST -H 'Content-Type: application/json' --data '{}' -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
-  [[ "$code" == 401 ]]
-  echo "$path now reaches authentication (HTTP $code)."
-done
-code=$(curl -sS --max-time 5 -X POST -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/zerodha/orders)
-[[ "$code" == 503 ]]
 assert_financial_stopped
 echo 'Recovery API and isolated worker promoted; financial services remain stopped.'

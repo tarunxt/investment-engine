@@ -132,6 +132,8 @@ const manifest = {
       process.env.NEXT_PUBLIC_DISABLE_API_PROXY?.trim() || "false",
     NEXT_PUBLIC_API_DEBUG:
       process.env.NEXT_PUBLIC_API_DEBUG?.trim() || "false",
+    NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED:
+      process.env.NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED?.trim() || "false",
   },
 };
 

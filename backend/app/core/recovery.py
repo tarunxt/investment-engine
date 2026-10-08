@@ -4,12 +4,15 @@ This is application policy, not a credential or operating-system permission chan
 Only CREDX_RECOVERY_MODE=1 enables it; malformed values refuse startup/execution.
 """
 import os
+import re
+from decimal import Decimal, InvalidOperation
 
 from app.shared.exceptions import AppException
 
 ANALYSIS_TASK = "app.domains.jobs.tasks.execute_ai_job"
 ZERODHA_SYNC_TASK = "app.domains.zerodha.tasks.sync_portfolio_snapshot_task"
 RECOVERY_TASKS = frozenset({ANALYSIS_TASK, ZERODHA_SYNC_TASK})
+AUDIT_TASK = "app.domains.recommendation_audit.tasks.verify_reversal"
 
 ANALYSIS_QUEUE = "credx_recovery_analysis"
 TRANSPORT_PREFIX = "credx:recovery:analysis:v1:"
@@ -60,8 +63,51 @@ def require_equity_analysis(portfolio, context=None, *, auto_export=False):
 require_indmoney_analysis = require_equity_analysis
 
 def require_task_allowed(name):
-    if recovery_mode() and name not in RECOVERY_TASKS:
+    if recovery_mode() and name not in recovery_tasks():
         raise RecoveryBlocked("Task outside the analysis allowlist")
+
+
+def stored_audit_recovery_enabled(configuration=None):
+    """A separate default-off exception; every cost-bearing capability stays off."""
+    if configuration is None:
+        from app.core.config import settings
+        configuration = settings
+    try:
+        return (
+            getattr(configuration, "recommendation_audit_enabled", False) is True
+            and getattr(configuration, "recommendation_audit_recovery_stored_only_enabled", False) is True
+            and getattr(configuration, "recommendation_audit_external_enabled", None) is False
+            and getattr(configuration, "recommendation_audit_fundamentals_enabled", None) is False
+            and Decimal(str(configuration.recommendation_audit_daily_cap_usd)) == 0
+        )
+    except (AttributeError, InvalidOperation, ValueError):
+        return False
+
+
+def audit_recovery_blocked(configuration=None):
+    return recovery_mode() and not stored_audit_recovery_enabled(configuration)
+
+
+def recovery_tasks():
+    return RECOVERY_TASKS | {AUDIT_TASK} if stored_audit_recovery_enabled() else RECOVERY_TASKS
+
+
+def require_audit_request_allowed(request, configuration=None, *, record=None):
+    """Validate persisted requests too, before dispatch, a lease, or external I/O."""
+    if not isinstance(request, dict) or not isinstance(request.get("mode"), str) or request["mode"] not in {"stored_only", "external_data"}:
+        raise RecoveryBlocked("Unknown audit verification mode")
+    if not recovery_mode():
+        return
+    if not stored_audit_recovery_enabled(configuration) or request["mode"] != "stored_only":
+        raise RecoveryBlocked("Audit verification outside stored-only recovery")
+    try:
+        values = [request["budget_usd"]]
+        if record is not None:
+            values.extend((record.budget_usd, record.spent_usd, record.reserved_usd))
+        if any(Decimal(str(value)) != 0 for value in values):
+            raise ValueError("Nonzero audit budget")
+    except (KeyError, AttributeError, InvalidOperation, ValueError):
+        raise RecoveryBlocked("Stored-only recovery requires zero audit budget")
 
 
 def recovery_http_allowed(method, path):
@@ -83,6 +129,11 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
+        if stored_audit_recovery_enabled() and (
+            path in {"/runs/recommendation-audit/materialize", "/runs/recommendation-audit/calculations", "/runs/recommendation-audit/verifications"}
+            or re.fullmatch(r"/runs/recommendation-audit/verifications/[0-9a-fA-F-]{36}/cancel", path)
+        ):
+            return True
         return path in {
             "/auth/login", "/auth/refresh", "/auth/logout", "/auth/websocket-ticket",
             "/indmoney-us/portfolio", "/indmoney-us/prices/current",

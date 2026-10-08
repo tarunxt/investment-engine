@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     
     # Disabled by default; local review must opt in after schema checks.
     recommendation_audit_enabled: bool = False
+    recommendation_audit_recovery_stored_only_enabled: bool = False
     recommendation_audit_external_enabled: bool = False
     recommendation_audit_fundamentals_enabled: bool = False
     recommendation_audit_daily_cap_usd: float = Field(default=0, ge=0, le=100)

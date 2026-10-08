@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 import logging
 from sqlalchemy import and_, or_, select, update
+from app.core.recovery import require_audit_request_allowed, RecoveryBlocked, recovery_mode
 from .capture import add_evidence
 from .deterministic import compare
 from .ledger import reserve, settle
@@ -34,6 +35,10 @@ def finish(session, record_id, fence, result=None, error=None):
 
 
 def run_verification(session, record_id, settings, *, external_collector=None):
+    candidate = session.get(VerificationRecord, record_id, populate_existing=True)
+    if not candidate: return False
+    try: require_audit_request_allowed(candidate.request, settings, record=candidate)
+    except RecoveryBlocked: return False
     record = claim_lease(session, record_id)
     if not record: return False
     fence = record.fence
@@ -61,6 +66,8 @@ def run_verification(session, record_id, settings, *, external_collector=None):
 
 
 def collect_external(session, record, fence, current, claims, settings):
+    # Defense in depth, including callers that bypass the queue task.
+    if recovery_mode(): raise RecoveryBlocked("External audit data during recovery")
     from .adapters import kite_read, rbi_read
     import requests
     observations, sources, limitations = [], [], []

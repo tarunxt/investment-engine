@@ -2,7 +2,7 @@ import logging
 import os
 
 from app.infrastructure.messaging.recovery_celery import RecoveryCelery, RecoveryTask, configure_recovery_queue
-from app.core.recovery import recovery_mode
+from app.core.recovery import recovery_mode, audit_recovery_blocked, stored_audit_recovery_enabled
 from celery.signals import task_received, worker_ready
 from kombu import Queue
 from celery.schedules import crontab, schedule
@@ -29,7 +29,7 @@ celery = RecoveryCelery("worker", broker=_broker, backend=_backend, task_cls=Rec
 
 # Recovery of advisory verification requests lives in the consumer service,
 # rather than adding a recurring Beat task or touching financial workflows.
-if not recovery_mode():
+if not audit_recovery_blocked():
     from app.domains.recommendation_audit.outbox import AuditOutboxRelay
     celery.steps["consumer"].add(AuditOutboxRelay)
 
@@ -188,7 +188,7 @@ except ValueError:
     _prefetch_multiplier = 1
 celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 
-celery.autodiscover_tasks(["app.domains.jobs", "app.domains.zerodha"] if recovery_mode() else [
+celery.autodiscover_tasks((["app.domains.jobs", "app.domains.zerodha"] + (["app.domains.recommendation_audit"] if stored_audit_recovery_enabled() else [])) if recovery_mode() else [
     "app.domains.sports_rankings",
     "app.domains.jobs",
     "app.domains.auth",
