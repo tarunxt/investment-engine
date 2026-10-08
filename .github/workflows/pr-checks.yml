@@ -241,6 +241,7 @@ jobs:
         run: |
           node --test \
             scripts/detect-deploy-scope.test.mjs \
+            scripts/read-audit-public-flag.test.mjs \
             scripts/check-javascript-budgets.test.mjs \
             scripts/high-traffic-response-inventory.test.mjs \
             deploy/no-docker/frontend-artifact.test.mjs \
