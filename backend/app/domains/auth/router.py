@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.logging import get_logger
+from app.core.recovery import recovery_mode
 from app.core.security import AuthUtils, JWTUtils, PasswordUtils
 from app.domains.auth.dependencies import get_current_user, require_admin
 from app.domains.auth.models import ActivityLog, User, UserProfile, UserRole
@@ -19,6 +20,7 @@ from app.domains.auth.schemas import (
     ResetPasswordRequest,
     UpdatePasswordRequest,
     UpdateProfileRequest,
+    ProfilePreferencesResponse,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
@@ -230,7 +232,7 @@ async def update_password(
     return {"message": "Password updated successfully"}
 
 
-@router.get("/profile", response_model=UpdateProfileRequest)
+@router.get("/profile", response_model=ProfilePreferencesResponse)
 async def get_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
@@ -241,7 +243,8 @@ async def get_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise NotFoundException("User profile not found")
-    return UpdateProfileRequest(
+    return ProfilePreferencesResponse(
+        preferences_writable=not recovery_mode(),
         full_name=current_user.full_name,
         avatar_url=profile.avatar_url,
         bio=profile.bio,

@@ -69,6 +69,11 @@ class UpdateProfileRequest(BaseModel):
     indmoney_buy_threshold: Optional[float] = Field(None, ge=-100, le=100)
 
 
+class ProfilePreferencesResponse(UpdateProfileRequest):
+    """Read-only capability metadata; never accepted as a profile update."""
+    preferences_writable: bool
+
+
 class ForgotPasswordRequest(BaseModel):
     """Forgot password request."""
     email: EmailStr

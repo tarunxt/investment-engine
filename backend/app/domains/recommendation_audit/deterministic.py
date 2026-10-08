@@ -133,6 +133,12 @@ def sizing_layer(calculation, market):
     action = calculation.get("formula_action")
     result = {"policy": "existing-basket-rounding-v1", "action": action, "units": str(units) if units is not None else None, "findings": []}
     if market == "india" and action in {"Trim", "Sell All"} and current is not None and current > 0 and units is not None:
+        if action == "Trim" and 0 < abs(units) < 1:
+            # New observations use the review policy. Existing append-only
+            # snapshots retain their recorded minimum-one-share sizing.
+            result.update(policy="whole-share-trim-review-v2", units=None, review_required=True)
+            result["findings"].append(finding("whole_share_choice_required", "A fractional trim is below one whole share. No order is selected; keeping the position or reviewing a full exit requires an explicit choice."))
+            return result
         sized = min(current.to_integral_value(rounding="ROUND_FLOOR"), Decimal(max(1, int(abs(units)))))
         result.update(units=str(-sized), action="Sell All" if sized >= current else "Trim")
         if sized != abs(units):

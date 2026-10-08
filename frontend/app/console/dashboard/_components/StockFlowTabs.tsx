@@ -16,6 +16,7 @@ import {
   extractRebalanceInputFingerprint,
   fetchDashboardRecentFullRuns,
   isCompletedRebalanceRun,
+  type DashboardRunCoverage,
   type ScoreMatrixFormulaConfig,
   type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
@@ -25,6 +26,8 @@ import {
   type StandardActionCategory,
 } from "@/lib/actionColorScheme";
 import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
+import { buildSwingFlow, inspectStockJob, sameFlowSequence, selectFlowStage, stockOutputMessage, type StockOutputState } from "@/lib/stockFlowEvidence";
+import { formatAuditTime } from "@/lib/recommendationAuditPresentation";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
 import { apiService } from "@/services/api";
 import type {
@@ -63,8 +66,11 @@ function latestMatchingRebalanceRuns(
   const latestRun = marketRuns[0];
   if (!latestRun) return [];
   const fingerprint = extractRebalanceInputFingerprint(latestRun.prompt);
+  if (!fingerprint) return [latestRun];
   return marketRuns.filter(
-    (run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint,
+    (run) => latestRun.auto_rebalance_portfolio && typeof latestRun.auto_rebalance_sequence === "number"
+      ? sameFlowSequence(run, latestRun) && extractRebalanceInputFingerprint(run.prompt) === fingerprint
+      : extractRebalanceInputFingerprint(run.prompt) === fingerprint && Math.abs(Date.parse(latestRun.created_at) - Date.parse(run.created_at)) <= 30 * 60 * 1000,
   );
 }
 
@@ -133,16 +139,13 @@ function compareFinalActionablesForThreshold(
 
 function stageRunMeta(run: RunResponse | undefined) {
   if (!run) return null;
-  const models = Array.from(new Set(run.run_jobs.map(({ job }) => job.model).filter(Boolean)));
-  const timestamp = new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(run.created_at));
+  const models = Array.from(new Set((run.run_jobs ?? []).map(({ job }) => job?.model).filter(Boolean)));
+  const timestamp = `#${run.id} · ${formatAuditTime(run.created_at)} · ${run.status || "unknown"}${typeof run.auto_rebalance_sequence === "number" ? ` · sequence ${run.auto_rebalance_sequence}` : ""}`;
   return { models: models.length ? models.join(", ") : "Model unavailable", timestamp };
 }
 
 function EmptyStage() {
-  return <p className="py-8 text-center text-sm text-slate-500">No stocks found in the latest completed scan.</p>;
+  return <p className="py-8 text-center text-sm text-slate-500">No stock rows available in this selection. Check job status and parsing coverage.</p>;
 }
 
 function actionBadgeClass(action: string) {
@@ -157,9 +160,11 @@ const REBALANCE_ACTION_HEADER = "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
 type StageJobOutput = {
   key: string;
   jobId: number;
+  runId: number;
   provider: string;
   model: string;
   status: string;
+  state: StockOutputState;
   symbols: string[];
   actions: Map<string, string>;
 };
@@ -174,22 +179,24 @@ function normalizeStageAction(value: string) {
   return value.trim() || "Not covered";
 }
 
-function buildStageJobOutputs(stocks: StockConsensus[], run: RunResponse | undefined) {
+function buildStageJobOutputs(stocks: StockConsensus[], runs: RunResponse[]) {
   const jobs = new Map<string, StageJobOutput>();
 
-  (run?.run_jobs ?? []).forEach((link) => {
+  runs.forEach(run => (run.run_jobs ?? []).forEach((link) => {
     if (!link.job) return;
     const key = `${run?.id ?? 0}:${link.job_id}`;
     jobs.set(key, {
       key,
       jobId: link.job_id,
+      runId: run.id,
       provider: link.job.provider || "Provider",
       model: link.job.model || "Model unavailable",
       status: link.job.status || "unknown",
+      state: inspectStockJob(run, link, true).state,
       symbols: [],
       actions: new Map(),
     });
-  });
+  }));
 
   stocks.forEach((stock) => {
     stock.rows.forEach((row) => {
@@ -197,9 +204,11 @@ function buildStageJobOutputs(stocks: StockConsensus[], run: RunResponse | undef
       const output = jobs.get(key) ?? {
         key,
         jobId: row.meta.jobId,
+        runId: row.meta.runId,
         provider: row.meta.provider || "Provider",
         model: row.meta.model || "Model unavailable",
         status: row.meta.status || "unknown",
+        state: "populated" as StockOutputState,
         symbols: [],
         actions: new Map<string, string>(),
       };
@@ -230,6 +239,7 @@ type RebalanceStockFlowWidgetProps = {
     value: string,
   ) => void;
   buyThresholdSaveError?: string | null;
+  buyThresholdPersistence?: string;
 };
 
 type RebalanceStockFlowSubwidgetProps = {
@@ -239,10 +249,14 @@ type RebalanceStockFlowSubwidgetProps = {
   buyThresholdDraft: string;
   onBuyThresholdDraftChange: (value: string) => void;
   buyThresholdSaveError?: string | null;
+  buyThresholdPersistence?: string;
 };
 
 type StockFlowSourceData = {
   runs: RunResponse[];
+  coverage?: DashboardRunCoverage;
+  cachedAt?: number;
+  warning?: string;
   portfolioSnapshot:
     | ZerodhaPortfolioSnapshotDetail
     | IndMoneyUsPortfolioSnapshotDetail
@@ -265,8 +279,9 @@ export function fetchRebalanceStockFlowSource(
   const cached = stockFlowSourcePromises.get(portfolio);
   if (cached) return cached;
 
+  let coverage: DashboardRunCoverage | undefined;
   const request = Promise.all([
-    fetchDashboardRecentFullRuns(),
+    fetchDashboardRecentFullRuns((result) => { coverage = result; }),
     portfolio === "zerodha"
       ? apiService.zerodhaPortfolioOverview()
       : apiService.indmoneyUsPortfolioOverview(),
@@ -275,6 +290,7 @@ export function fetchRebalanceStockFlowSource(
       stockFlowSourcePromises.delete(portfolio);
       const data = {
         runs,
+        coverage,
         portfolioSnapshot: overview.latest,
       };
       stockFlowLastSuccessfulSources.set(portfolio, {
@@ -290,7 +306,7 @@ export function fetchRebalanceStockFlowSource(
         fallback
         && Date.now() - fallback.cachedAt <= STOCK_FLOW_TRANSIENT_FALLBACK_MAX_AGE_MS
       ) {
-        return fallback.data;
+        return { ...fallback.data, cachedAt: fallback.cachedAt, warning: "Refresh failed; showing a previously loaded snapshot. " + (error instanceof Error ? error.message : "Source unavailable") };
       }
       throw error;
     },
@@ -308,6 +324,7 @@ export function RebalanceStockFlowWidget({
   buyThresholdDrafts,
   onBuyThresholdDraftChange,
   buyThresholdSaveError,
+  buyThresholdPersistence,
 }: RebalanceStockFlowWidgetProps) {
   const [active, setActive] = useState<RebalanceStockFlowPortfolio>(initialPortfolio);
 
@@ -361,6 +378,7 @@ export function RebalanceStockFlowWidget({
             buyThresholdDraft={buyThresholdDrafts.zerodha}
             onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("zerodha", value)}
             buyThresholdSaveError={buyThresholdSaveError}
+              buyThresholdPersistence={buyThresholdPersistence}
           />
         ) : (
           <IndMoneyRebalanceStockFlowWidget
@@ -369,6 +387,7 @@ export function RebalanceStockFlowWidget({
             buyThresholdDraft={buyThresholdDrafts.indmoneyUs}
             onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("indmoneyUs", value)}
             buyThresholdSaveError={buyThresholdSaveError}
+              buyThresholdPersistence={buyThresholdPersistence}
           />
         )}
       </div>
@@ -382,6 +401,7 @@ export function ZerodhaRebalanceStockFlowWidget({
   buyThresholdDraft,
   onBuyThresholdDraftChange,
   buyThresholdSaveError,
+  buyThresholdPersistence,
 }: Omit<RebalanceStockFlowSubwidgetProps, "portfolio">) {
   return (
     <RebalanceStockFlowSubwidget
@@ -391,6 +411,7 @@ export function ZerodhaRebalanceStockFlowWidget({
       buyThresholdDraft={buyThresholdDraft}
       onBuyThresholdDraftChange={onBuyThresholdDraftChange}
       buyThresholdSaveError={buyThresholdSaveError}
+              buyThresholdPersistence={buyThresholdPersistence}
     />
   );
 }
@@ -401,6 +422,7 @@ export function IndMoneyRebalanceStockFlowWidget({
   buyThresholdDraft,
   onBuyThresholdDraftChange,
   buyThresholdSaveError,
+  buyThresholdPersistence,
 }: Omit<RebalanceStockFlowSubwidgetProps, "portfolio">) {
   return (
     <RebalanceStockFlowSubwidget
@@ -410,6 +432,7 @@ export function IndMoneyRebalanceStockFlowWidget({
       buyThresholdDraft={buyThresholdDraft}
       onBuyThresholdDraftChange={onBuyThresholdDraftChange}
       buyThresholdSaveError={buyThresholdSaveError}
+              buyThresholdPersistence={buyThresholdPersistence}
     />
   );
 }
@@ -421,6 +444,7 @@ function RebalanceStockFlowSubwidget({
   buyThresholdDraft,
   onBuyThresholdDraftChange,
   buyThresholdSaveError,
+  buyThresholdPersistence,
 }: RebalanceStockFlowSubwidgetProps) {
   const [detailed, setDetailed] = useState(false);
   const [runs, setRuns] = useState<RunResponse[]>([]);
@@ -429,12 +453,15 @@ function RebalanceStockFlowSubwidget({
   >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sourceInfo, setSourceInfo] = useState<StockFlowSourceData | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void fetchRebalanceStockFlowSource(portfolioId)
-      .then(({ runs: result, portfolioSnapshot: snapshot }) => {
+      .then((source) => {
+        const { runs: result, portfolioSnapshot: snapshot } = source;
         if (!cancelled) {
+          setSourceInfo(source);
           setRuns(result);
           setPortfolioSnapshot(snapshot);
         }
@@ -448,17 +475,24 @@ function RebalanceStockFlowSubwidget({
 
   const flow = useMemo(() => {
     const portfolio = PORTFOLIOS.find((item) => item.id === portfolioId)!;
-    const swingRun = newest(runs.filter((run) => isAnalysisRunForStage(run, "swing", portfolio.market)));
+    const swingSelection = selectFlowStage(runs, "swing", portfolio.market);
+    const swingRun = swingSelection.selected;
+    const technicalSelection = selectFlowStage(runs, "technical", portfolio.market);
+    const technicalRun = technicalSelection.selected;
     const matchingRebalanceRuns = latestMatchingRebalanceRuns(runs, portfolio.market);
     const rebalanceRun = newest(matchingRebalanceRuns);
-    const swing = swingRun ? buildConsensusRows([swingRun], portfolio.market, portfolioSnapshot, runs) : [];
+    const swingRuns = swingRun?.auto_rebalance_portfolio && typeof swingRun.auto_rebalance_sequence === "number"
+      ? runs.filter(run => isAnalysisRunForStage(run, "swing", portfolio.market) && sameFlowSequence(run, swingRun))
+      : swingRun ? [swingRun] : [];
+    const swingEvidence = buildSwingFlow(swingRuns);
+    const swing = swingEvidence.stocks;
     const rebalance = matchingRebalanceRuns.length
       ? buildConsensusRows(matchingRebalanceRuns, portfolio.market, portfolioSnapshot, runs)
       : [];
     const actionables = buildDashboardActionRows(
       rebalance,
       portfolio.market,
-      buildTechnicalScanMap(runs),
+      buildTechnicalScanMap(technicalRun ? [technicalRun] : []),
       formulaConfig,
     )
       .filter((row) => {
@@ -483,8 +517,8 @@ function RebalanceStockFlowSubwidget({
         );
       })
       .sort(compareFinalActionablesForThreshold(buyThreshold));
-    const swingJobOutputs = buildStageJobOutputs(swing, swingRun);
-    const rebalanceJobOutputs = buildStageJobOutputs(rebalance, rebalanceRun);
+    const swingJobOutputs = swingEvidence.outputs;
+    const rebalanceJobOutputs = buildStageJobOutputs(rebalance, matchingRebalanceRuns);
     return {
       portfolio,
       swing,
@@ -493,6 +527,11 @@ function RebalanceStockFlowSubwidget({
       swingJobOutputs,
       rebalanceJobOutputs,
       rebalanceRun,
+      swingRun,
+      technicalRun,
+      swingSelection,
+      technicalSelection,
+      sequenceLinked: sameFlowSequence(swingRun, rebalanceRun) && sameFlowSequence(rebalanceRun, technicalRun),
       swingMeta: stageRunMeta(swingRun),
       rebalanceMeta: stageRunMeta(rebalanceRun),
     };
@@ -503,12 +542,12 @@ function RebalanceStockFlowSubwidget({
       id={`${portfolioId}-rebalance-stock-flow`}
       role="tabpanel"
       aria-label={flow.portfolio.title}
-      className="rounded-2xl border border-slate-200 bg-white p-5"
+      className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 [overflow-wrap:anywhere] sm:p-5"
     >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">{flow.portfolio.title}</h2>
-              <p className="mt-1 text-sm text-slate-500">Stocks identified across the latest Swing Scan, Rebalance Scan, and Final Actionables stages.</p>
+              <p className="mt-1 text-sm text-slate-500">Stored stage outputs and a calculation using the current formula. Source stages may come from different runs.</p>
             </div>
             <Button type="button" variant="outline" onClick={() => setDetailed((value) => !value)} aria-pressed={detailed} className="rounded-full">
               {detailed ? <ChevronUp className="mr-2 size-4" /> : <ChevronDown className="mr-2 size-4" />}
@@ -516,10 +555,20 @@ function RebalanceStockFlowSubwidget({
             </Button>
           </div>
 
+          {!loading && !error && <div className="mt-4 space-y-2 text-xs text-slate-700">
+            <p>Sources: Swing {flow.swingJobOutputs.length ? [...new Set(flow.swingJobOutputs.map(output => output.runId))].map(id => "#" + id).join(", ") : "unavailable"}; Rebalance {flow.rebalanceJobOutputs.length ? [...new Set(flow.rebalanceJobOutputs.map(output => output.runId))].map(id => "#" + id).join(", ") : "unavailable"}; Technical #{flow.technicalRun?.id ?? "unavailable"} ({formatAuditTime(flow.technicalRun?.created_at)}). Final Actionables is a current-formula calculation, not a separately saved scan.</p>
+            <p className={flow.sequenceLinked ? "text-blue-900" : "rounded border border-amber-300 bg-amber-50 p-2 text-amber-950"}>{flow.sequenceLinked ? "All selected stages share the recorded workflow sequence; this does not certify source quality." : "⚠ Stages selected independently. A shared workflow sequence is not established; do not read this as one verified run."}</p>
+            {flow.swingSelection.newerIncomplete && <p className="text-amber-950">⚠ Newer Swing run #{flow.swingSelection.newerIncomplete.id} is {flow.swingSelection.newerIncomplete.status}; showing explicitly labeled older completed output.</p>}
+            {flow.technicalSelection.newerIncomplete && <p className="text-amber-950">⚠ Newer technical run #{flow.technicalSelection.newerIncomplete.id} is {flow.technicalSelection.newerIncomplete.status}; selected older technical coverage may be stale.</p>}
+            {!flow.technicalRun && <p className="text-amber-950">⚠ Technical evidence is unavailable for this market. Scores use only the available inputs.</p>}
+            {sourceInfo?.warning && <p className="rounded border border-amber-300 bg-amber-50 p-2 text-amber-950">⚠ {sourceInfo.warning} Previously loaded {formatAuditTime(new Date(sourceInfo.cachedAt ?? 0).toISOString())}.</p>}
+            {Boolean(sourceInfo?.coverage?.failed_run_ids.length) && <p className="text-amber-950">⚠ Missing run details: {sourceInfo?.coverage?.failed_run_ids.map(id => "#" + id).join(", ")}. Stage coverage is partial.</p>}
+            <p>Bounded recent-run coverage{sourceInfo?.coverage?.history_has_more ? "; older runs may exist outside this view" : ""}. No live market refresh is performed by this popup.</p>
+          </div>}
           {loading ? <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500"><Loader2 className="size-4 animate-spin" /> Loading stock flow…</div>
           : error ? <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>
           : detailed ? (
-            <div className="mt-5 grid min-h-0 gap-4 xl:grid-cols-3">
+            <div className="mt-5 grid min-h-0 min-w-0 gap-4 xl:grid-cols-[repeat(3,minmax(0,1fr))]">
               <Stage title="Swing Scan" count={flow.swing.length} meta={flow.swingMeta}>
                 {flow.swing.length ? flow.swing.map((stock) => (
                   <StockRow key={stock.key} name={stock.symbol} detailed details={[`Exchange: ${stock.exchange || "—"}`, `Suggestions: ${stock.totalSuggestions}`]} />
@@ -541,6 +590,7 @@ function RebalanceStockFlowSubwidget({
                     threshold={buyThreshold}
                     onChange={onBuyThresholdDraftChange}
                     saveError={buyThresholdSaveError}
+                      persistence={buyThresholdPersistence}
                   />
                 )}
               >
@@ -552,7 +602,7 @@ function RebalanceStockFlowSubwidget({
           ) : (
             <div className="mt-5">
               <h3 className="mb-4 text-center text-xl font-bold uppercase tracking-[0.08em] text-slate-950">Summary View</h3>
-              <div className="grid min-h-0 gap-4 xl:grid-cols-[0.72fr_1.08fr_1.4fr]">
+              <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.08fr)_minmax(0,1.4fr)]">
                 <SwingJobOutputsStage
                   count={flow.swing.length}
                   meta={flow.swingMeta}
@@ -577,6 +627,7 @@ function RebalanceStockFlowSubwidget({
                       threshold={buyThreshold}
                       onChange={onBuyThresholdDraftChange}
                       saveError={buyThresholdSaveError}
+                      persistence={buyThresholdPersistence}
                     />
                   )}
                 >
@@ -646,6 +697,7 @@ export function RebalanceStockFlowDialog({
   buyThresholdDrafts,
   onBuyThresholdDraftChange,
   buyThresholdSaveError,
+  buyThresholdPersistence,
   onClose,
 }: {
   portfolio: RebalanceStockFlowPortfolio | null;
@@ -657,6 +709,7 @@ export function RebalanceStockFlowDialog({
     value: string,
   ) => void;
   buyThresholdSaveError?: string | null;
+  buyThresholdPersistence?: string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -683,7 +736,7 @@ export function RebalanceStockFlowDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="rebalance-stock-flow-dialog-title"
-        className="flex max-h-[92vh] w-full max-w-[96rem] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-slate-50 shadow-2xl"
+        className="flex max-h-[92vh] min-w-0 w-full max-w-[96rem] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-slate-50 shadow-2xl"
       >
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
           <div>
@@ -706,7 +759,7 @@ export function RebalanceStockFlowDialog({
             <X className="size-4" />
           </button>
         </header>
-        <div className="min-h-0 overflow-auto p-3 sm:p-5">
+        <div className="min-h-0 min-w-0 overflow-auto p-3 sm:p-5">
           {portfolio === "zerodha" ? (
             <ZerodhaRebalanceStockFlowWidget
               formulaConfig={formulaConfig}
@@ -714,6 +767,7 @@ export function RebalanceStockFlowDialog({
               buyThresholdDraft={buyThresholdDrafts.zerodha}
               onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("zerodha", value)}
               buyThresholdSaveError={buyThresholdSaveError}
+              buyThresholdPersistence={buyThresholdPersistence}
             />
           ) : (
             <IndMoneyRebalanceStockFlowWidget
@@ -722,6 +776,7 @@ export function RebalanceStockFlowDialog({
               buyThresholdDraft={buyThresholdDrafts.indmoneyUs}
               onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("indmoneyUs", value)}
               buyThresholdSaveError={buyThresholdSaveError}
+              buyThresholdPersistence={buyThresholdPersistence}
             />
           )}
         </div>
@@ -753,7 +808,7 @@ function JobOutputHeading({ output, index }: { output: StageJobOutput; index: nu
       <p className="text-sm font-bold text-slate-950">
         {output.provider} · {output.model} {index + 1}
       </p>
-      <p className="mt-0.5 text-xs font-semibold text-blue-700">Job #{output.jobId}</p>
+      <p className="mt-0.5 text-xs font-semibold text-blue-700">Run #{output.runId} · Job #{output.jobId} · {output.status}</p>
     </div>
   );
 }
@@ -762,7 +817,7 @@ function SwingJobOutputsStage({ count, meta, outputs }: { count: number; meta: {
   return (
     <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
       <StageHeader title="Swing Scan" count={count} meta={meta} />
-      <div className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain">
+      <div role="region" aria-label="Swing job outputs, scroll to inspect" tabIndex={0} className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain focus-visible:outline-2 focus-visible:outline-blue-700">
         {outputs.length ? outputs.map((output, index) => (
           <section key={output.key} aria-label={`${output.model} ${index + 1} Job #${output.jobId} output`} className="border-b border-slate-300 last:border-b-0">
             <JobOutputHeading output={output} index={index} />
@@ -774,7 +829,7 @@ function SwingJobOutputsStage({ count, meta, outputs }: { count: number; meta: {
                 {output.symbols.length ? output.symbols.map((symbol) => (
                   <tr key={`${output.key}:${symbol}`}><td className="px-4 py-3 text-sm font-semibold text-slate-950">{symbol}</td></tr>
                 )) : (
-                  <tr><td className="px-4 py-5 text-sm text-slate-500">No parsed stock output · {output.status}</td></tr>
+                  <tr><td className="px-4 py-5 text-sm text-slate-500">{stockOutputMessage(output.state)} · {output.status}</td></tr>
                 )}
               </tbody>
             </table>
@@ -789,15 +844,15 @@ function RebalanceJobOutputsStage({ count, meta, stocks, outputs }: { count: num
   return (
     <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
       <StageHeader title="Rebalance Scan" count={count} meta={meta} />
-      <div className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain">
+      <div role="region" aria-label="Rebalance job outputs, scroll to inspect" tabIndex={0} className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain focus-visible:outline-2 focus-visible:outline-blue-700">
         <table className="w-full min-w-max border-collapse">
           <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
             <tr>
               <th className="px-4 py-3 font-semibold">Stock Symbol</th>
               {outputs.map((output, index) => (
-                <th key={output.key} className="min-w-36 border-l border-slate-200 px-4 py-3 font-semibold normal-case tracking-normal">
+                <th key={output.key} className="w-48 min-w-36 max-w-48 whitespace-normal break-words border-l border-slate-200 px-4 py-3 font-semibold normal-case tracking-normal">
                   <span className="block text-xs font-bold text-slate-800">{output.provider} · {output.model} {index + 1}</span>
-                  <span className="mt-0.5 block text-[11px] font-semibold text-blue-700">Job #{output.jobId}</span>
+                  <span className="mt-0.5 block text-[11px] font-semibold text-blue-700">Run #{output.runId} · Job #{output.jobId}</span><span className="mt-1 block max-w-48 whitespace-normal text-[11px] font-normal text-slate-600">{stockOutputMessage(output.state)} · {output.status}</span>
                 </th>
               ))}
             </tr>
@@ -820,7 +875,7 @@ function RebalanceJobOutputsStage({ count, meta, stocks, outputs }: { count: num
 }
 
 function SummaryStage({ title, count, meta, toolbar, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; toolbar?: ReactNode; children: ReactNode }) {
-  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm"><StageHeader title={title} count={count} meta={meta} />{toolbar}<div className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain"><table className="w-full min-w-max border-collapse">{children}</table></div></article>;
+  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm"><StageHeader title={title} count={count} meta={meta} />{toolbar}<div role="region" aria-label={title + " table, scroll to inspect"} tabIndex={0} className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain focus-visible:outline-2 focus-visible:outline-blue-700"><table className="w-full min-w-max border-collapse">{children}</table></div></article>;
 }
 
 function BuyThresholdEditor({
@@ -829,12 +884,14 @@ function BuyThresholdEditor({
   threshold,
   onChange,
   saveError,
+  persistence,
 }: {
   portfolio: RebalanceStockFlowPortfolio;
   value: string;
   threshold: number;
   onChange: (value: string) => void;
   saveError?: string | null;
+  persistence?: string;
 }) {
   const id = `${portfolio}-stock-flow-buy-threshold`;
   return (
@@ -858,6 +915,7 @@ function BuyThresholdEditor({
           aria-label={`${portfolio === "zerodha" ? "Zerodha" : "IndMoney"} stock flow buy threshold`}
         />
       </div>
+      <p className="mt-2 text-xs text-blue-950">{persistence === "local_only" ? "Local preview only · saving is disabled during analysis-only recovery. Saved preferences are unchanged." : persistence === "saving" ? "Saving threshold preferences…" : persistence === "saved" ? "Saved threshold preferences loaded." : persistence === "error" ? "Local preview only · preferences were not saved." : "Preference persistence is unconfirmed; shown values are a local preview."}</p>
       {saveError ? <p className="mt-2 text-xs font-semibold text-red-700">{saveError}</p> : null}
     </div>
   );
@@ -868,5 +926,5 @@ function ActionBadge({ action }: { action: string }) {
 }
 
 function EmptyTableRow({ colSpan }: { colSpan: number }) {
-  return <tr><td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-slate-500">No stocks found in the latest completed scan.</td></tr>;
+  return <tr><td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-slate-500">No stock rows available in this selection. Check source coverage above.</td></tr>;
 }

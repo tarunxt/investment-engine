@@ -3244,7 +3244,9 @@ function selectLatestDashboardSummaryGroup(
  * A compact summary page now selects the latest stage groups, then bounded
  * detail reads preserve the existing rendering contract for those runs.
  */
-export async function fetchDashboardRecentFullRuns() {
+export type DashboardRunCoverage = { selected_run_ids: number[]; failed_run_ids: number[]; history_has_more: boolean };
+
+export async function fetchDashboardRecentFullRuns(onCoverage?: (coverage: DashboardRunCoverage) => void) {
   const summaryPage = await apiService.getRuns({
     page: 1,
     limit: DASHBOARD_RECENT_RUN_SUMMARY_LIMIT,
@@ -3278,6 +3280,7 @@ export async function fetchDashboardRecentFullRuns() {
 
   const detailedRuns: RunResponse[] = [];
   const errors: unknown[] = [];
+  const failedRunIds: number[] = [];
   for (
     let start = 0;
     start < selectedIds.length;
@@ -3290,9 +3293,9 @@ export async function fetchDashboardRecentFullRuns() {
     const results = await Promise.allSettled(
       batch.map((runId) => apiService.getRun(runId)),
     );
-    results.forEach((result) => {
+    results.forEach((result, index) => {
       if (result.status === "fulfilled") detailedRuns.push(result.value);
-      else errors.push(result.reason);
+      else { errors.push(result.reason); failedRunIds.push(batch[index]); }
     });
   }
 
@@ -3302,6 +3305,7 @@ export async function fetchDashboardRecentFullRuns() {
       ? firstError
       : new Error("Unable to load recent dashboard run details.");
   }
+  onCoverage?.({ selected_run_ids: selectedIds, failed_run_ids: failedRunIds, history_has_more: summaryPage.pages > 1 || groups.some(group => group.length >= DASHBOARD_RECENT_RUN_GROUP_LIMIT) });
   return detailedRuns.sort(
     (a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at),
   );
@@ -4179,7 +4183,7 @@ export function StockDetailsButton({
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+            className="min-w-0 w-full max-w-5xl rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
             style={draggableStyle}
             onClick={(event) => event.stopPropagation()}
           >
@@ -4226,7 +4230,7 @@ export function StockDetailsButton({
               </div>
             </div>
 
-            <div className="max-h-[75vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+            <div className="min-w-0 max-h-[75vh] space-y-5 overflow-y-auto px-3 py-5 text-sm sm:px-5">
               {effectiveDetailsData.error ? (
                 <OperationalErrorNotice
                   title="Some latest captured details could not be loaded:"
@@ -4236,7 +4240,23 @@ export function StockDetailsButton({
                 />
               ) : null}
 
-              <RecommendationAuditPanel key={`${market}:${stock.exchange}:${stock.symbol}:${auditDetail.rebalanceSourceRunId}`} runId={auditDetail.rebalanceSourceRunId} runIds={[...new Set(stock.rows.map(row => row.meta.runId))]} runCount={auditRunCount} formula={formulaConfig} technicalRunId={auditDetail.technicalScanSourceRunId} market={market} symbol={stock.symbol} exchange={stock.exchange} currentScore={auditDetail.detailedRationaleFinalScore} currentAction={auditDetail.calculatedAction} />
+              <RecommendationAuditPanel
+                key={`${market}:${stock.exchange}:${stock.symbol}:${auditDetail.rebalanceSourceRunId}`}
+                runId={auditDetail.rebalanceSourceRunId}
+                runIds={[...new Set(stock.rows.map(row => row.meta.runId))]}
+                runCount={auditRunCount}
+                formula={formulaConfig}
+                technicalRunId={auditDetail.technicalScanSourceRunId}
+                market={market} symbol={stock.symbol} exchange={stock.exchange}
+                currentScore={auditDetail.calculatedScore} currentAction={auditDetail.calculatedAction}
+                currentUnits={auditDetail.currentUnits} currentFormulaUnits={auditDetail.calculatedUnitsChange}
+                scoreInputs={auditDetail.detailedRationaleRows} scoreDenominator={auditDetail.detailedRationaleDenominator}
+                legacyHistory={[
+                  ...persistedHistory.map(item => ({ run_id: item.rebalance_run_id, timestamp: item.covered_at, action: item.action, score: item.score, coverage: item.coverage_status, origin: "saved_suggestion" as const })),
+                  ...matchingHistoricalRows.map(item => ({ run_id: item.runId, timestamp: item.coveredAt, action: item.formulaAction, score: item.formulaScore, coverage: "reconstructed", origin: "current_reconstruction" as const })),
+                ]}
+                legacyHistoryHasMore={historyHasMore} legacyHistoryError={historyError}
+              />
 
               <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
                 <h3 className="mb-3 font-semibold text-blue-950">Provider consensus & technical scan</h3>
@@ -4271,7 +4291,7 @@ export function StockDetailsButton({
 
               <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="font-semibold text-slate-950">Historical LLM suggestions</h3>
+                  <h3 className="font-semibold text-slate-950">Recommendation history · legacy context</h3>
                   <button
                     type="button"
                     aria-pressed={showUncoveredHistory}
@@ -4284,6 +4304,7 @@ export function StockDetailsButton({
                     Show Run Failed / Not Mentioned
                   </button>
                 </div>
+                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">Legacy history is separate from the preceding frozen snapshot used by verification. Saved suggestions preserve their recorded values; reconstructed rows use current settings. Neither certifies missing original policy, holdings or source availability.</p>
                 {historyError ? (
                   <div className="mb-3">
                     <OperationalErrorNotice
@@ -4296,7 +4317,7 @@ export function StockDetailsButton({
                 ) : null}
                 {historyLoading && persistedHistory.length === 0 ? (
                   <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3 text-slate-500">
-                    Loading complete historical suggestions…
+                    Loading available historical suggestions…
                   </div>
                 ) : null}
                 {displayedPersistedHistory.length ? (
@@ -4357,7 +4378,7 @@ export function StockDetailsButton({
                 ) : null}
                 {matchingHistoricalRows.length ? (
                   <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
-                    <p className="px-3 py-2 text-xs text-slate-500">Reconstructed using captured model holdings and current formula settings. Technical coverage is conservatively limited to before this rebalance started because its original completion time is unavailable. Saved server records above remain authoritative.</p>
+                    <p className="px-3 py-2 text-xs text-amber-900">Reconstructed using captured model holdings and current formula settings. Technical coverage is limited to before this rebalance started because its original completion time is unavailable. These rows are context, not the original frozen formula or proof of reversal; saved suggestion values above remain unchanged.</p>
                     <table className="min-w-[70rem] text-xs">
                       <thead>
                         <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
@@ -4558,6 +4579,7 @@ export function StockDetailsButton({
 function ActionSummarySections({
   consensus,
   market,
+  formulaConfig,
   technicalScans,
   setupGroups,
   detailsData,
@@ -4567,6 +4589,7 @@ function ActionSummarySections({
 }: {
   consensus: StockConsensus[];
   market: SwingTradeMarket;
+  formulaConfig: ScoreMatrixFormulaConfig;
   technicalScans: TechnicalScanMap;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
@@ -4604,6 +4627,7 @@ function ActionSummarySections({
                       action={action}
                       stock={stock}
                       market={market}
+                      formulaConfig={formulaConfig}
                       technicalScan={getTechnicalScanForStock(technicalScans, stock)}
                       setupGroups={setupGroups}
                       detailsData={detailsData}
@@ -4628,6 +4652,7 @@ function ActionSummaryStockTile({
   action,
   stock,
   market,
+  formulaConfig,
   technicalScan,
   setupGroups,
   detailsData,
@@ -4638,6 +4663,7 @@ function ActionSummaryStockTile({
   action: ActionCategory;
   stock: StockConsensus;
   market: SwingTradeMarket;
+  formulaConfig: ScoreMatrixFormulaConfig;
   technicalScan: TechnicalScanResult | null;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
@@ -4658,6 +4684,7 @@ function ActionSummaryStockTile({
             <StockDetailsButton
               stock={stock}
               market={market}
+              formulaConfig={formulaConfig}
               technicalScan={technicalScan}
               detailsData={detailsData}
               historicalRows={historicalRows}
@@ -6087,6 +6114,7 @@ function renderStockInfoBlock(
   technicalScan?: TechnicalScanResult | null,
   historicalRows?: HistoricalDashboardActionRow[],
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
+  formulaConfig?: ScoreMatrixFormulaConfig,
 ) {
   const stockName = stock.representative["Stock Name"] || stock.symbol;
   return (
@@ -6094,6 +6122,7 @@ function renderStockInfoBlock(
       {detailsData && market ? (
         <StockDetailsButton
           stock={stock}
+          formulaConfig={formulaConfig}
           market={market}
           technicalScan={technicalScan ?? null}
           detailsData={detailsData}
@@ -6323,6 +6352,7 @@ function buildActionablesCalculationRowGroups(
   detailsData?: StockDetailsData,
   historicalRows?: HistoricalDashboardActionRow[],
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
+  formulaConfig?: ScoreMatrixFormulaConfig,
 ): ActionablesCalculationRowGroup[] {
   const groupMap = new Map<string, ActionablesCalculationRowGroup>();
 
@@ -6343,6 +6373,7 @@ function buildActionablesCalculationRowGroups(
         getTechnicalScanForStock(technicalScans, row.stock),
         historicalRows,
         onFocusCalculation,
+        formulaConfig,
       ),
       sortValues: row.sortValues,
       rows: [row],
@@ -6851,8 +6882,8 @@ function OpenActionablesCalculationsModal({
     [displayedSetupGroups, displayedStocks, displayedTechnicalScans, formulaConfig, market, onSetupClick, setupGroups],
   );
   const rowGroups = useMemo(
-    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, historicalActionRows, setInternalFocusTarget),
-    [detailsData, displayedTechnicalScans, historicalActionRows, market, rows, sortState],
+    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, historicalActionRows, setInternalFocusTarget, formulaConfig),
+    [detailsData, displayedTechnicalScans, historicalActionRows, formulaConfig, market, rows, sortState],
   );
 
   useEffect(() => {
@@ -8534,6 +8565,7 @@ export function FinalActionablesConsole({
             </Card>
 
             <ActionSummarySections
+              formulaConfig={scoreMatrixFormulaConfig}
               consensus={consensus}
               market={market}
               technicalScans={technicalScans}
@@ -8812,6 +8844,7 @@ function FragmentRows({
           <div className="flex items-start gap-2">
             <StockDetailsButton
               stock={stock}
+              formulaConfig={formulaConfig}
               market={market}
               technicalScan={technicalScan}
               detailsData={detailsData}
@@ -8842,6 +8875,7 @@ function FragmentRows({
               <span className="inline-flex items-center whitespace-nowrap">
                 <StockDetailsButton
                   stock={stock}
+                  formulaConfig={formulaConfig}
                   market={market}
                   technicalScan={technicalScan}
                   detailsData={detailsData}

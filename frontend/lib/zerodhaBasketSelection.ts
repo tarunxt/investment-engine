@@ -4,6 +4,7 @@ export type ZerodhaBasketSelectableOrder = {
   id: string;
   side: "BUY" | "SELL";
   score: number | null;
+  explicitSelectionRequired?: boolean;
 };
 
 export function isEligibleZerodhaBuyOrder(
@@ -22,7 +23,7 @@ export function buildDefaultZerodhaBasketSelection(
 ) {
   return new Set(
     orders
-      .filter((order) => order.side !== "BUY" || isEligibleZerodhaBuyOrder(order, threshold))
+      .filter((order) => !order.explicitSelectionRequired && (order.side !== "BUY" || isEligibleZerodhaBuyOrder(order, threshold)))
       .map((order) => order.id),
   );
 }
