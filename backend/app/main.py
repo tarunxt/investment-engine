@@ -314,6 +314,8 @@ app.include_router(polymarket_direct_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
 app.include_router(api_usage_router)
+from app.domains.recommendation_audit.router import router as recommendation_audit_router
+app.include_router(recommendation_audit_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
 app.include_router(trading_bots_router)

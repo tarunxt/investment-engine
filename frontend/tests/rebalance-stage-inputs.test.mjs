@@ -25,6 +25,8 @@ modules['@/lib/rebalanceRunIdentity'] = load(read('../lib/rebalanceRunIdentity.t
 modules['@/lib/rebalanceStageInputs'] = load(read('../lib/rebalanceStageInputs.ts'));
 modules['@/lib/autoRebalanceAudit'] = load(read('../lib/autoRebalanceAudit.ts'));
 modules['@/lib/outputSourceJobs'] = load(read('../lib/outputSourceJobs.ts'), { crypto: webcrypto });
+const auditAst = ts.createSourceFile('audit.ts', read('../services/recommendationAudit.ts'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const auditHasher = load(auditAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'auditResponseHashes').getText(auditAst), { crypto: webcrypto }).auditResponseHashes;
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
 const portfolioSnapshot = { parse_status: 'parsed', reported_holdings_count: 1,
@@ -184,7 +186,7 @@ function visit(node) {
 }
 visit(ast);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
-const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`);
+const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`, { recommendationAuditEnabled: false });
 
 async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
   sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false } } = {}) {
@@ -222,6 +224,9 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
+    recommendationAuditEnabled: false,
+    scoreMatrixFormulaConfig: {},
+    auditResponseHashes: auditHasher,
     ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
     ...modules['@/lib/autoRebalanceAudit'], ...modules['@/lib/outputSourceJobs'], buildOutputSourceJobs: sourceHasher, apiService,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,

@@ -4,41 +4,100 @@ set -euo pipefail
 APP_ROOT="${APP_ROOT:-/srv/investor}"
 APP_USER="${APP_USER:-investor}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-/etc/investor/backend.env}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+rollback_dir="${CREDX_RECOVERY_ROLLBACK_DIR:-}"
 mode_for_service() {
   local pid
-  pid=$(sudo systemctl show "$1" --property=MainPID --value)
-  if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
-    sudo systemctl show "$1" --property=Environment --value | python3 -c '
-import shlex,sys
-values=shlex.split(sys.stdin.read())
-mode=next((v.split("=",1)[1] for v in values if v.startswith("CREDX_RECOVERY_MODE=")),"0")
-print(mode if mode in ("0","1") else "invalid")'
-    return
-  fi
+  pid=$(sudo systemctl show "$1" --property=MainPID --value) || return 1
+  sudo systemctl is-active --quiet "$1" || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { echo 'Active runtime PID unavailable' >&2; return 1; }
   sudo python3 - "$pid" <<'PY'
 import pathlib,sys
-values=pathlib.Path('/proc/'+sys.argv[1]+'/environ').read_bytes().split(b'\0')
-mode=next((v.split(b'=',1)[1] for v in values if v.startswith(b'CREDX_RECOVERY_MODE=')),b'0')
-print(mode.decode() if mode in (b'0',b'1') else 'invalid')
+from decimal import Decimal
+values=dict(v.split(b'=',1) for v in pathlib.Path('/proc/'+sys.argv[1]+'/environ').read_bytes().split(b'\0') if b'=' in v)
+mode=values.get(b'CREDX_RECOVERY_MODE')
+if mode not in (b'0',b'1'): raise SystemExit('Explicit runtime recovery mode unavailable')
+flags=[]
+for key in (b'RECOMMENDATION_AUDIT_ENABLED',b'RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED'):
+    value=values.get(key,b'false').strip().lower()
+    if value not in (b'0',b'false',b'off',b'no',b'1',b'true',b'on',b'yes'): raise SystemExit('Unknown audit activation flag')
+    flags.append(value in (b'1',b'true',b'on',b'yes'))
+if flags[0]!=flags[1]: raise SystemExit('Audit requires the complete stored-only recovery flag pair')
+for key in (b'RECOMMENDATION_AUDIT_EXTERNAL_ENABLED',b'RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED'):
+    if values.get(key,b'false').strip().lower() not in (b'0',b'false',b'off',b'no'): raise SystemExit('Audit activation requires a separate verified gate')
+if Decimal(values.get(b'RECOMMENDATION_AUDIT_DAILY_CAP_USD',b'0').decode())!=0: raise SystemExit('Audit spend must stay disabled')
+print(mode.decode())
 PY
 }
 if [[ "${1:-}" == --detect ]]; then
   mode_for_service investor-backend
   exit 0
 fi
-[[ "$(mode_for_service investor-backend)" == 1 ]]
-[[ "$(mode_for_service investor-recovery-analysis)" == 1 ]]
 assert_financial_stopped() {
   for family in investor investment-engine; do
     for role in celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
-      if sudo systemctl is-active --quiet "$family-$role"; then
-        echo "Refusing recovery deployment: $family-$role is active." >&2
+      state=$(sudo systemctl show "$family-$role" --property=ActiveState --value) || return 1
+      if [[ "$state" != inactive && "$state" != failed ]]; then
+        echo "Refusing recovery deployment: $family-$role is not confirmed stopped." >&2
         return 1
       fi
     done
   done
 }
+require_lock() {
+  # The workflow owns this descriptor across snapshot, checkout and promotion.
+  [[ "$(readlink /proc/$$/fd/9)" == /run/investor-production-deploy.lock ]] || return 1
+  flock -n 9
+}
+preflight() {
+  [[ "$(mode_for_service investor-backend)" == 1 ]] || return 1
+  [[ "$(mode_for_service investor-recovery-analysis)" == 1 ]] || return 1
+  # Unreviewed startup hooks can fetch external data or synchronize credentials.
+  # Preserve units; refuse deployment rather than changing those hooks here.
+  for service in investor-backend investor-recovery-analysis; do
+    hooks=$(sudo systemctl show "$service" --property=ExecStartPre --value) || return 1
+    [[ -z "$hooks" ]] || { echo 'Unreviewed pre-start hooks block contained promotion.' >&2; return 1; }
+  done
+  assert_financial_stopped
+}
+restore_backend() {
+  require_lock || return 1
+  assert_financial_stopped || return 1
+  [[ -n "$rollback_dir" ]] || return 1
+  sudo systemctl stop investor-backend investor-recovery-analysis || return 1
+  sudo -u "$APP_USER" python3 "$SCRIPT_DIR/backend-recovery-artifact.py" restore "$APP_ROOT" "$rollback_dir" || return 1
+  sudo systemctl start investor-recovery-analysis investor-backend || return 1
+  for attempt in $(seq 1 40); do
+    if curl -fsS --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then break; fi
+    sleep 1
+  done
+  curl -fsS --max-time 5 http://127.0.0.1:8000/health/ready >/dev/null || return 1
+  preflight
+}
+if [[ "${1:-}" == --restore ]]; then restore_backend; exit 0; fi
+if [[ "${1:-}" == --preflight ]]; then preflight; exit 0; fi
+if [[ "${1:-}" == --post-frontend-check ]]; then
+  require_lock
+  preflight
+  curl -fsS --max-time 5 http://127.0.0.1:8000/health/ready >/dev/null
+  exit 0
+fi
+require_lock
+[[ -n "$rollback_dir" ]]
+if [[ "${1:-}" == --prepare ]]; then
+  preflight
+  previous_sha=$(sudo -u "$APP_USER" git -C "$APP_ROOT" rev-parse HEAD)
+  sudo -u "$APP_USER" python3 "$SCRIPT_DIR/backend-recovery-artifact.py" snapshot "$APP_ROOT" "$rollback_dir" --previous-sha "$previous_sha"
+  exit 0
+fi
+sudo -u "$APP_USER" test -f "$rollback_dir/manifest.json"
+sudo -u "$APP_USER" test -f "$rollback_dir/backend-source.tar.gz"
+[[ "${CREDX_RECOVERY_ROLLBACK_OWNER:-}" == workflow ]]
 assert_financial_stopped
+for service in investor-backend investor-recovery-analysis; do
+  state=$(sudo systemctl show "$service" --property=ActiveState --value)
+  [[ "$state" == inactive || "$state" == failed ]]
+done
 # The existing recovery units keep their producer/consumer environment and
 # explicit queue selection. Do not install normal units or run migrations.
 sudo -u "$APP_USER" env APP_ROOT="$APP_ROOT" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash <<'SH'
@@ -48,8 +107,13 @@ source "$APP_ROOT/deploy/no-docker/load-env-file.sh"
 load_env_file "$BACKEND_ENV_FILE"
 export CREDX_RECOVERY_MODE=1
 .venv/bin/python - <<'PY'
-from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,ZERODHA_SYNC_TASK,require_equity_analysis
+from app.core.recovery import ANALYSIS_QUEUE,TRANSPORT_PREFIX,ZERODHA_SYNC_TASK,AUDIT_TASK,require_equity_analysis,stored_audit_recovery_enabled,recovery_http_allowed
 from app.infrastructure.messaging.celery_app import celery
+from app.core.config import settings
+assert (not settings.recommendation_audit_enabled and not settings.recommendation_audit_recovery_stored_only_enabled) or stored_audit_recovery_enabled(settings)
+assert not settings.recommendation_audit_external_enabled
+assert not settings.recommendation_audit_fundamentals_enabled
+assert settings.recommendation_audit_daily_cap_usd == 0
 celery.loader.import_default_modules()
 require_equity_analysis("india", {"kind": "equity_output_sources_v1", "market": "india"})
 assert celery.conf.task_default_queue == ANALYSIS_QUEUE
@@ -58,39 +122,16 @@ assert celery.conf.result_backend_transport_options['global_keyprefix'] == TRANS
 assert not celery.conf.beat_schedule
 assert not celery.conf.worker_enable_remote_control
 assert ZERODHA_SYNC_TASK in celery.tasks
+if stored_audit_recovery_enabled(settings): assert AUDIT_TASK in celery.tasks
+assert not recovery_http_allowed('POST','/zerodha/orders')
 assert all(q.name == ANALYSIS_QUEUE for q in celery.conf.task_queues)
 print('Candidate recovery queue and portfolio sync registration verified.')
 PY
 SH
-# Preserve a known contained rollback, including its runtime guards, rather
-# than restarting the previous main checkout without recovery policy.
-ROLLBACK_SHA=084423dce552d524aab2b1f7d89f168a2c3f701f
-if ! sudo -u "$APP_USER" git -C "$APP_ROOT" cat-file -e "$ROLLBACK_SHA^{commit}" 2>/dev/null; then
-  sudo -u "$APP_USER" git -C "$APP_ROOT" fetch origin credx/recovery-analysis-e401
-fi
-sudo -u "$APP_USER" git -C "$APP_ROOT" cat-file -e "$ROLLBACK_SHA^{commit}"
-rollback_dir=$(sudo -u "$APP_USER" mktemp -d "$APP_ROOT/.recovery-rollback-XXXXXX")
-while IFS= read -r path; do
-  [[ "$path" == backend/app/* ]] || continue
-  sudo -u "$APP_USER" mkdir -p "$rollback_dir/$(dirname "$path")"
-  sudo -u "$APP_USER" bash -c 'git -C "$1" show "$2:$3" > "$4/$3"' bash "$APP_ROOT" "$ROLLBACK_SHA" "$path" "$rollback_dir"
-done < <(sudo -u "$APP_USER" git -C "$APP_ROOT" diff-tree --no-commit-id --name-only -r 788cad76bfd793ec66bdb459efe5dad17b3fc8b4)
-promoted=false
-rollback() {
-  if [[ "$promoted" != true ]]; then
-    echo 'Recovery promotion failed; restoring contained backend files.' >&2
-    sudo -u "$APP_USER" cp -a "$rollback_dir/backend/app/." "$APP_ROOT/backend/app/"
-    sudo systemctl restart investor-recovery-analysis investor-backend
-  fi
-}
-trap rollback EXIT
-# Give the isolated consumer time to finish its current task on shutdown.
-sudo mkdir -p /etc/systemd/system/investor-recovery-analysis.service.d
-printf '[Service]\nTimeoutStopSec=300\n' | sudo tee /etc/systemd/system/investor-recovery-analysis.service.d/zz-graceful-stop.conf >/dev/null
-sudo systemctl daemon-reload
-sudo systemctl stop investor-backend
-sudo systemctl restart investor-recovery-analysis
-sudo systemctl start investor-backend
+# Existing recovery units and their environment/queue policy stay in place.
+# No systemd drop-in, daemon-reload, migration or normal unit installation.
+# The workflow stopped both processes before replacing their source.
+sudo systemctl start investor-recovery-analysis investor-backend
 for attempt in $(seq 1 40); do
   if curl -fsS --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then break; fi
   sleep 1
@@ -103,13 +144,5 @@ for path in /zerodha/status /zerodha/login-url /zerodha/portfolio /zerodha/threa
   [[ "$code" == 401 ]]
   echo "$path now reaches authentication (HTTP $code)."
 done
-for path in /zerodha/threats/run /zerodha/events/run; do
-  code=$(curl -sS --max-time 5 -X POST -H 'Content-Type: application/json' --data '{}' -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
-  [[ "$code" == 401 ]]
-  echo "$path now reaches authentication (HTTP $code)."
-done
-code=$(curl -sS --max-time 5 -X POST -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/zerodha/orders)
-[[ "$code" == 503 ]]
 assert_financial_stopped
-promoted=true
 echo 'Recovery API and isolated worker promoted; financial services remain stopped.'

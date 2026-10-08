@@ -118,11 +118,10 @@ test("Bullpen healthcheck systemd unit is a passive backend cache reader", () =>
   assert.match(service, /EnvironmentFile=__BACKEND_ENV_FILE__/);
   assert.doesNotMatch(service, /scripts\/bullpen-healthcheck|\/usr\/bin\/node/);
   assert.match(timer, /OnUnitActiveSec=5min/);
-  assert.match(workflow, /install-bullpen-healthcheck\.sh/);
-  assert.match(
-    workflow,
-    /BACKEND_ENV_FILE="\$BACKEND_ENV_FILE"[\s\S]+install-bullpen-healthcheck\.sh/,
-  );
+  // Contained recovery promotion must preserve existing units without installing
+  // or starting an unrelated timer. The installer/reader contract above remains.
+  assert.doesNotMatch(workflow, /install-bullpen-healthcheck\.sh/);
+  assert.match(workflow, /deploy-recovery\.sh/);
 });
 
 test("Bullpen Celery launchers bound retained memory and retire the legacy override", () => {

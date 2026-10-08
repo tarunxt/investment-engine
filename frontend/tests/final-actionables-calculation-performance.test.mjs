@@ -33,7 +33,7 @@ const imported = {
 const ui = Object.fromEntries([
   'Link', 'AlertTriangle', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'ChevronDown', 'ChevronRight', 'ChevronUp',
   'FileSpreadsheet', 'FunctionSquare', 'Info', 'RefreshCw', 'Triangle', 'X', 'TradingViewSymbolLink',
-  'TradingViewUrlListButton', 'OperationalErrorNotice', 'Button',
+  'TradingViewUrlListButton', 'OperationalErrorNotice', 'Button', 'RecommendationAuditPanel',
 ].map((name) => [name, ({ children }) => React.createElement('span', null, children)]));
 function helpers(overrides = {}, transform) {
   const calls = [];

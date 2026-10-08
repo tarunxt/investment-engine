@@ -36,6 +36,7 @@ class CreateRunCommand:
     prompt: str
     targets: list[RunModelTarget]
     user_id: UserId
+    recommendation_audit: Any | None = None
     polymarket_event_context: dict[str, Any] | None = None
     output_source_jobs: list[OutputSourceJobReference] | None = None
     prompt_id: int | None = None
@@ -169,6 +170,10 @@ class CreateRunUseCase:
                 for job in jobs:
                     self._session.add(RunJob(run_id=run.id, job_id=job.id, stage=1))
 
+                from app.core.config import settings
+                if settings.recommendation_audit_enabled:
+                    from app.domains.recommendation_audit.capture import freeze_input
+                    await self._session.run_sync(lambda session: freeze_input(session, run, jobs, cmd.recommendation_audit))
                 await self._session.commit()
 
         except LockAcquisitionError:

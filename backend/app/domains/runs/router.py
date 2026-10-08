@@ -934,6 +934,7 @@ async def create_run(
                     if body.polymarket_event_context is not None
                     else None
                 ),
+                recommendation_audit=body.recommendation_audit,
                 output_source_jobs=body.output_source_jobs,
                 prompt_id=body.prompt_id,
                 scheduled_at=body.scheduled_at,

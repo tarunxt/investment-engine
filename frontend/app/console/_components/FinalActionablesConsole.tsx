@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
+import { RecommendationAuditPanel } from "@/components/RecommendationAuditPanel";
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
 import {
@@ -4007,6 +4008,8 @@ export function StockDetailsButton({
     () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
     [stock, zerodhaHolding, zerodhaOrders],
   );
+  const auditDetail = useMemo(() => buildScoreMatrixDetail(stock, technicalScan, formulaConfig), [stock, technicalScan, formulaConfig]);
+  const auditRunCount = new Set(stock.rows.map(row => row.meta.runId)).size;
   const eventRows = open ? getAnalysisTableRowsForStock(
     effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
     stock,
@@ -4103,7 +4106,7 @@ export function StockDetailsButton({
         id: key,
         source: `${meta.runLabel} · ${meta.provider} ${meta.model}${sourceSuffix}`,
         action: row[ACTION_HEADER] || "—",
-        units: row["Units to Buy"] || row["Units Change"] || row["Units to Sell/Buy"] || "—",
+        units: getSignedUnitsChange(row)?.toString() ?? "—",
         amount: row["Total Buy Amount"] || row["Amount"] || "—",
         score: row["Score"] || row["Final Score"] || row["Confidence Score (0-100)"] || "—",
         rationale,
@@ -4233,8 +4236,10 @@ export function StockDetailsButton({
                 />
               ) : null}
 
+              <RecommendationAuditPanel key={`${market}:${stock.exchange}:${stock.symbol}:${auditDetail.rebalanceSourceRunId}`} runId={auditDetail.rebalanceSourceRunId} runIds={[...new Set(stock.rows.map(row => row.meta.runId))]} runCount={auditRunCount} formula={formulaConfig} technicalRunId={auditDetail.technicalScanSourceRunId} market={market} symbol={stock.symbol} exchange={stock.exchange} currentScore={auditDetail.detailedRationaleFinalScore} currentAction={auditDetail.calculatedAction} />
+
               <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
-                <h3 className="mb-3 font-semibold text-blue-950">Final action & technical scan</h3>
+                <h3 className="mb-3 font-semibold text-blue-950">Provider consensus & technical scan</h3>
                 <KeyValueGrid
                   itemClassName="border-blue-100 bg-white/75"
                   values={[
@@ -4491,7 +4496,7 @@ export function StockDetailsButton({
                           <td className="px-3 py-2 align-top">
                             <FinalActionValue value={row.cells[ACTION_HEADER]} />
                           </td>
-                          <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
+                          <td className="px-3 py-2 align-top">{getSignedUnitsChange(row.cells) ?? "—"}</td>
                           <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
                           <td className="whitespace-nowrap px-3 py-2 align-top"><CapturedRationaleScoreCell row={row.cells} /></td>
                           <td className="min-w-80 px-3 py-2 align-top"><CapturedRationalesCell row={row.cells} /></td>

@@ -666,6 +666,16 @@ test("packages only the standalone runtime and excludes the reusable build cache
   assert.equal(manifest.runtime_layout, "next-standalone");
   assert.equal(manifest.schema_version, 2);
   assert.equal(manifest.public_environment.NEXT_PUBLIC_DISABLE_AUTH, "false");
+  assert.equal(manifest.public_environment.NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED, "false");
+  const oldManifest = structuredClone(manifest);
+  delete oldManifest.public_environment.NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED;
+  await writeFile(path.join(extractedRoot, "deployment-manifest.json"), JSON.stringify(oldManifest));
+  await validateArtifactDirectory(extractedRoot, { expectedPublicEnvironment: manifest.public_environment });
+  await assert.rejects(validateArtifactDirectory(extractedRoot, { expectedPublicEnvironment: {
+    ...manifest.public_environment, NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED: "true",
+  } }), /public build environment does not match/);
+  await writeFile(path.join(extractedRoot, "deployment-manifest.json"), JSON.stringify(manifest));
+
   await validateArtifactDirectory(extractedRoot, {
     allowedBundler: "webpack",
     expectedBuildSha: buildSha,

@@ -174,6 +174,22 @@ class SyncJobRepository:
             job.web_sources = web_sources
         if runtime_metadata_json is not None:
             job.runtime_metadata_json = runtime_metadata_json
+        from app.core.config import settings
+        if settings.recommendation_audit_enabled:
+            from app.domains.recommendation_audit.capture import capture_terminal
+            try:
+                # Advisory capture must not turn a successful provider response into
+                # a failed/retried generation. Keep the existing job write outside
+                # the audit savepoint and expose the capture gap explicitly.
+                with self._session.begin_nested():
+                    capture_terminal(self._session, job)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception("Recommendation capture failed for job %s", job.id)
+                job.runtime_metadata_json = {
+                    **(job.runtime_metadata_json or {}),
+                    "recommendation_audit": {"status": "capture_failed", "error_type": type(exc).__name__},
+                }
         self._session.commit()
 
     def update_export_state(

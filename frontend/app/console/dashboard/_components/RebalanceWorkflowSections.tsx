@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { auditResponseHashes } from "@/services/recommendationAudit";
 import {
   Fragment,
   type ReactNode,
@@ -1723,18 +1724,22 @@ async function reserveAutoRebalanceRunMetadata(
   };
 }
 
+const recommendationAuditEnabled = process.env.NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED === "true";
+
 function buildRunPayload({
   prompt,
   targets,
   sheetName,
   runMetadata,
   scanLabel,
+  auditContext,
 }: {
   prompt: string;
   targets: ProviderModelTarget[];
   sheetName?: string;
   runMetadata?: AutoRebalanceRunMetadata | null;
   scanLabel?: "Swing Scan" | "Rebalance Scan" | "Technical Scan";
+  auditContext?: import("@/types/recommendationAudit").AuditRunContext;
 }): RunCreate {
   const uniqueTargets = targets;
 
@@ -1750,6 +1755,7 @@ function buildRunPayload({
   return {
     prompt,
     targets: uniqueTargets,
+    ...(recommendationAuditEnabled && auditContext ? { recommendation_audit: auditContext } : {}),
     allow_parallel: true,
     auto_export_enabled: Boolean(sheetName),
     export_sheet_name: sheetName,
@@ -8013,6 +8019,7 @@ ${zerodhaExecutionMode === "direct_market"
               sheetName: getRebalanceDefaultExportSheetName(market),
               runMetadata,
               scanLabel: "Rebalance Scan",
+              auditContext: { formula: scoreMatrixFormulaConfig },
             }), output_source_jobs: outputSourceJobs },
           );
           const completedRebalanceRun = await waitForRunWithStageHandling(
@@ -8084,6 +8091,7 @@ ${zerodhaExecutionMode === "direct_market"
               targets: [technicalTargets[0]],
               runMetadata,
               scanLabel: "Technical Scan",
+              auditContext: { formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id), expected_response_hashes: await auditResponseHashes(rebalanceInputs) },
             }),
           );
           const completedTechnicalRun = await waitForRunWithStageHandling(
