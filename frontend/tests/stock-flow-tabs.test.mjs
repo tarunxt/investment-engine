@@ -23,7 +23,7 @@ test("legacy stock-flow tabs are composed as one reusable rebalance widget", () 
 });
 
 test("stock flow and basket preview share score inputs and persisted thresholds", () => {
-  assert.match(stockFlowSource, /fetchAllFullRuns/);
+  assert.match(stockFlowSource, /fetchDashboardRecentFullRuns/);
   assert.match(stockFlowSource, /apiService\.zerodhaPortfolioOverview\(\)/);
   assert.match(stockFlowSource, /apiService\.indmoneyUsPortfolioOverview\(\)/);
   assert.match(stockFlowSource, /latestMatchingRebalanceRuns/);

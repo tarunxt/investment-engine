@@ -78,6 +78,10 @@ export interface UpdatePasswordRequest {
   confirm_password: string;
 }
 
+export interface ProfilePreferencesResponse extends UpdateProfileRequest {
+  preferences_writable?: boolean;
+}
+
 export interface UpdateProfileRequest {
   full_name?: string | null;
   avatar_url?: string | null;

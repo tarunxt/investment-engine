@@ -81,7 +81,7 @@ test("dashboard mount uses bounded summary-selected run details", () => {
 
   assert.match(
     actionablesSource,
-    /export async function fetchDashboardRecentFullRuns\(\)/,
+    /export async function fetchDashboardRecentFullRuns\(/,
   );
   assert.match(
     actionablesSource,

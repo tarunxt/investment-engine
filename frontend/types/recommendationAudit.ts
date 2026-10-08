@@ -14,11 +14,23 @@ export type AuditCalculation = {
   current_units: string | null; numerator: string | null; denominator: string | null;
   findings: AuditFinding[]; averages: Record<string, string | null>;
 };
+export type AuditLegacySuggestion = {
+  run_id: number; timestamp: string | null; action: string | null; score: number | null;
+  coverage: string; origin: "saved_suggestion" | "current_reconstruction";
+};
+export type AuditScoreInput = {
+  id: string; parameter: string; score: number | null; multiplier: number;
+  denominatorWeight?: number; outOfBoundsDenominatorWeight?: number;
+  validationRule?: { min?: number; max?: number; integerOnly?: boolean; actualValue?: number | null };
+};
 export type AuditDecision = {
   id: string; run_id: number; market: string; symbol: string; exchange: string;
   provenance: string; captured_at: string; decision_at: string; original_completion_at: string | null;
   formula_hash: string | null; calculation: AuditCalculation;
-  sizing: { action: string | null; units: string | null; findings: AuditFinding[] };
+  formula?: AuditFormula | null; objective?: string | null; horizon?: string | null;
+  provider_families?: string[][]; prompt_hash?: string | null; source_hashes?: string[];
+  technical?: { confidence?: string; bias?: string; premarket?: string; last5?: string; primary_setup?: string | null; trigger?: string; invalidation?: string; source_hashes?: string[] } | null;
+  sizing: { action: string | null; units: string | null; findings: AuditFinding[]; policy?: string; review_required?: boolean };
   coverage: { successful: number; attempted: number; captured_terminal: number };
 };
 export type AuditComparison = {

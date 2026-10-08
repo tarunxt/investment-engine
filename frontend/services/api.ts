@@ -868,8 +868,8 @@ class apiServiceClass implements IApiService {
   /**
    * Get user profile
    */
-  getProfile(): Promise<UpdateProfileRequest> {
-    return this.get<UpdateProfileRequest>(URLs.auth.getProfile());
+  getProfile(): Promise<import("@/types/api").ProfilePreferencesResponse> {
+    return this.get<import("@/types/api").ProfilePreferencesResponse>(URLs.auth.getProfile());
   }
 
   /**

@@ -63,8 +63,9 @@ def test_synthetic_arithmetic_and_rounding_are_distinct():
     assert result["rationale_mean"] == "0.0"
     assert result["formula_action"] == "Trim" and result["formula_units"] == "-0.5"
     sized = sizing_layer(result, "india")
-    assert sized["action"] == "Sell All" and sized["units"] == "-1"
-    assert sized["findings"][0]["code"] == "sizing_changes_exposure"
+    assert sized["action"] == "Trim" and sized["units"] is None
+    assert sized["review_required"] is True
+    assert sized["findings"][0]["code"] == "whole_share_choice_required"
     assert calculate(samples, formula())["formula_action"] == "Hold"
     assert any(f["code"] == "same_model_consensus" for f in result["findings"])
 
