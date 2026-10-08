@@ -274,8 +274,12 @@ jobs:
             MAX_BYTES=512*1024*1024
             
             
-            def require(value):
-                if not value: raise RuntimeError('Retained previous-source artifact is not verified')
+            class SourceVerificationBlocked(RuntimeError):
+                pass
+            
+            
+            def require(value, gate):
+                if not value: raise SourceVerificationBlocked(gate)
             
             
             def checksum(path):
@@ -287,41 +291,45 @@ jobs:
             
             def verify():
                 previous=STAGE/'previous-source'
-                require(previous.is_dir() and not previous.is_symlink())
-                require(previous.stat().st_uid==os.getuid() and stat.S_IMODE(previous.stat().st_mode)==0o700)
-                require({p.name for p in previous.iterdir()}=={'manifest.json','backend-source.tar.gz'})
+                require(previous.is_dir() and not previous.is_symlink(), 'previous_directory')
+                require(previous.stat().st_uid==os.getuid() and stat.S_IMODE(previous.stat().st_mode)==0o700, 'previous_private_owner_mode')
+                require({p.name for p in previous.iterdir()}=={'manifest.json','backend-source.tar.gz'}, 'previous_exact_members')
                 for path in previous.iterdir():
                     info=path.lstat()
-                    require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink==1)
+                    require(stat.S_ISREG(info.st_mode) and not path.is_symlink() and info.st_uid==os.getuid() and stat.S_IMODE(info.st_mode)==0o600 and info.st_nlink==1, 'previous_file_private_owner_mode')
                 manifest_path=previous/'manifest.json';archive=previous/'backend-source.tar.gz'
-                require(manifest_path.stat().st_size<=2*1024*1024 and archive.stat().st_size<=MAX_BYTES)
+                require(manifest_path.stat().st_size<=2*1024*1024 and archive.stat().st_size<=MAX_BYTES, 'previous_size_bounds')
                 manifest=json.loads(manifest_path.read_text())
-                require(manifest['schema']==1 and manifest['app_root']==str(ROOT) and manifest['previous_sha']==BASE)
-                require(checksum(archive)==manifest['archive_sha256'])
+                require(manifest['schema']==1, 'manifest_schema')
+                # The reviewed snapshot writer canonicalizes app_root with Path.resolve().
+                # Compare to that same known-root contract, rather than its symlink alias.
+                require(manifest['app_root']==str(ROOT.resolve()), 'manifest_app_root')
+                require(manifest['previous_sha']==BASE, 'manifest_previous_sha')
+                require(checksum(archive)==manifest['archive_sha256'], 'archive_checksum')
                 # The preceding stage verifier has established this exact public module's
                 # candidate Git hash. It contains only the approved source-artifact logic.
                 spec=importlib.util.spec_from_file_location('verified_source_artifact',STAGE/'deploy/no-docker/backend-recovery-artifact.py')
                 helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
                 sources=helper.checked_files(ROOT,helper.tracked_sources(ROOT))
                 expected={p.relative_to(ROOT).as_posix():checksum(p) for p in sources}
-                require(expected==manifest['files'] and 0<len(expected)<=20000)
+                require(expected==manifest['files'] and 0<len(expected)<=20000, 'live_source_matches_manifest')
                 seen=set();total=0
                 with tarfile.open(archive,'r|gz') as stream:
                     for member in stream:
-                        require(member.isfile() and helper.safe_member(member.name) and member.name in expected and member.name not in seen and len(seen)<20000)
-                        total+=member.size;require(total<=MAX_BYTES)
+                        require(member.isfile() and helper.safe_member(member.name) and member.name in expected and member.name not in seen and len(seen)<20000, 'archive_member_shape')
+                        total+=member.size;require(total<=MAX_BYTES, 'archive_uncompressed_size')
                         digest=hashlib.sha256()
                         with stream.extractfile(member) as source:
                             for block in iter(lambda:source.read(1024*1024),b''):digest.update(block)
-                        require(digest.hexdigest()==expected[member.name]);seen.add(member.name)
-                require(seen==set(expected))
+                        require(digest.hexdigest()==expected[member.name], 'archive_member_checksum');seen.add(member.name)
+                require(seen==set(expected), 'archive_member_set')
                 print('retained_previous_source_artifact_verified=true')
             
             
             if __name__=='__main__':
                 try:verify()
                 except Exception as error:
-                    print('source_artifact_verification=blocked; error_type='+type(error).__name__)
+                    print('source_artifact_verification=blocked; error_type='+type(error).__name__+('; gate='+str(error) if isinstance(error,SourceVerificationBlocked) else ''))
                     raise SystemExit(1)
             SOURCE_ARTIFACT
             sudo -n python3 -B - <<'FRONTEND'
