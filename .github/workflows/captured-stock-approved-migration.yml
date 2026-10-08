@@ -43,6 +43,30 @@ jobs:
                 done
               done
             }
+            check_runtime() {
+              check_financial_stopped || return 1
+              sudo -n python3 -B - <<'RUNTIME'
+            import json,pathlib,subprocess
+            from decimal import Decimal
+            def require(value):
+                if not value: raise RuntimeError('Runtime preservation check failed')
+            try:
+                for unit in ('investor-backend','investor-recovery-analysis'):
+                    result=subprocess.run(['systemctl','show',unit,'--property=ActiveState,MainPID,ExecStartPre,ExecStartPost,ExecStop'],capture_output=True,text=True,timeout=5,check=True)
+                    values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+                    require(values['ActiveState']=='active' and all(not values.get(key) for key in ('ExecStartPre','ExecStartPost','ExecStop')))
+                    pid=int(values['MainPID']);require(pid>0)
+                    env=dict(part.split(b'=',1) for part in pathlib.Path(f'/proc/{pid}/environ').read_bytes().split(b'\0') if b'=' in part)
+                    require(env.get(b'CREDX_RECOVERY_MODE')==b'1')
+                    for key in (b'RECOMMENDATION_AUDIT_ENABLED',b'RECOMMENDATION_AUDIT_RECOVERY_STORED_ONLY_ENABLED',b'RECOMMENDATION_AUDIT_EXTERNAL_ENABLED',b'RECOMMENDATION_AUDIT_FUNDAMENTALS_ENABLED'):
+                        require(env.get(key,b'false').strip().lower() in (b'0',b'false',b'off',b'no'))
+                    require(Decimal(env.get(b'RECOMMENDATION_AUDIT_DAILY_CAP_USD',b'0').decode())==0)
+                print('active_original_recovery_and_disabled_audit_verified=true')
+            except Exception as error:
+                print(json.dumps({'runtime_preservation':'blocked','error_type':type(error).__name__}))
+                raise SystemExit(1)
+            RUNTIME
+            }
             check_source() {
               [[ "$(sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" rev-parse HEAD)" == "$BASE_SHA" ]] || return 1
               sudo -n -u "$APP_USER" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -C "$APP_ROOT" diff --no-ext-diff --no-textconv --quiet || return 1
@@ -127,7 +151,7 @@ jobs:
                 done
                 [[ "$ready" == true ]] || result=1
                 if [[ "$restore_worker" != true || "$worker_gracefully_stopped" == true ]]; then
-                  APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$MIGRATION_STAGE/deploy/no-docker/deploy-recovery.sh" --preflight || result=1
+                  check_runtime || result=1
                 fi
               fi
               echo "migration_runner_exit=$result"
@@ -151,23 +175,91 @@ jobs:
               done
             done
             # No overwrite, install or source checkout; exact approved code is archived separately.
-            sudo -n test ! -e "$MIGRATION_STAGE"
             sudo -n -u "$APP_USER" git -c core.hooksPath=/dev/null -C "$APP_ROOT" fetch origin codex/captured-stock-verification-20261007
             sudo -n -u "$APP_USER" git -C "$APP_ROOT" cat-file -e "$CANDIDATE_SHA^{commit}"
-            sudo -n -u "$APP_USER" mkdir -m 0700 "$MIGRATION_STAGE"
-            sudo -n -u "$APP_USER" git -C "$APP_ROOT" archive "$CANDIDATE_SHA" backend deploy/no-docker | sudo -n -u "$APP_USER" tar -x -C "$MIGRATION_STAGE"
-            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$MIGRATION_STAGE/deploy/no-docker/deploy-recovery.sh" --preflight
-            # A complete prior source/wrapper snapshot precedes every service stop.
+            if ! sudo -n -u "$APP_USER" test -e "$MIGRATION_STAGE"; then
+              sudo -n -u "$APP_USER" mkdir -m 0700 "$MIGRATION_STAGE"
+              sudo -n -u "$APP_USER" git -C "$APP_ROOT" archive "$CANDIDATE_SHA" backend deploy/no-docker | sudo -n -u "$APP_USER" tar -x -C "$MIGRATION_STAGE"
+            fi
+            # The preserved directory is read only as its existing approved owner.
+            # Unknown content, permissions or bytes block before executing any staged code.
+            sudo -n -u "$APP_USER" env PYTHONDONTWRITEBYTECODE=1 python3 -B - <<'STAGE'
+            """Read-only exact-source validation under the already approved app identity."""
+            import hashlib
+            import os
+            from pathlib import Path, PurePosixPath
+            import stat
+            import subprocess
+            
+            ROOT=Path('/srv/investor')
+            STAGE=ROOT/'.audit-migration-2ae3e9466014'
+            CANDIDATE='2ae3e9466014c5b68bab4b878389a26f0e26077b'
+            MAX_BYTES=512*1024*1024
+            
+            
+            def require(value):
+                if not value: raise RuntimeError('Preserved stage is not the exact private approved candidate')
+            
+            
+            def verify():
+                require(not STAGE.is_symlink() and STAGE.is_dir())
+                state=STAGE.stat()
+                require(state.st_uid==os.getuid() and stat.S_IMODE(state.st_mode)==0o700)
+                result=subprocess.run(['git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','-C',str(ROOT),'ls-tree','-rz',CANDIDATE,'--','backend','deploy/no-docker'],capture_output=True,timeout=10,check=True)
+                expected={}
+                directories=set()
+                for raw in result.stdout.split(b'\0'):
+                    if not raw: continue
+                    header,name=raw.split(b'\t',1)
+                    mode,kind,digest=header.decode().split()
+                    name=name.decode();path=PurePosixPath(name)
+                    require(not path.is_absolute() and '..' not in path.parts and mode in {'100644','100755'} and kind=='blob')
+                    require(path.parts[0]=='backend' or path.is_relative_to(PurePosixPath('deploy/no-docker')))
+                    require(name not in expected)
+                    expected[name]=(mode,digest)
+                    directories.update(parent.as_posix() for parent in path.parents if parent!=PurePosixPath('.'))
+                require(0<len(expected)<=20000)
+                actual=set();actual_directories=set();total=0
+                for path in STAGE.rglob('*'):
+                    name=path.relative_to(STAGE).as_posix();info=path.lstat()
+                    require(not path.is_symlink() and info.st_uid==os.getuid())
+                    if stat.S_ISDIR(info.st_mode): actual_directories.add(name)
+                    else:
+                        require(stat.S_ISREG(info.st_mode) and info.st_nlink==1)
+                        actual.add(name);total+=info.st_size
+                # Reject unexpected runtime/private content before reading any file bytes.
+                require(actual==set(expected) and actual_directories==directories and total<=MAX_BYTES)
+                for name,(mode,digest) in expected.items():
+                    path=STAGE/name;info=path.stat()
+                    require(stat.S_IMODE(info.st_mode)==(0o755 if mode=='100755' else 0o644))
+                    data=path.read_bytes()
+                    require(hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==digest)
+                print('preserved_private_stage_exact_candidate_verified=true')
+            
+            
+            if __name__=='__main__':
+                try: verify()
+                except Exception as error:
+                    print('stage_verification=blocked; error_type='+type(error).__name__)
+                    raise SystemExit(1)
+            STAGE
+            check_runtime
+            # The exact existing candidate artifact helper runs only as investor. It needs
+            # no nested sudo, credential access, service operation or directory widening.
             export CREDX_RECOVERY_ROLLBACK_DIR="$MIGRATION_STAGE/previous-source"
-            APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$MIGRATION_STAGE/deploy/no-docker/deploy-recovery.sh" --prepare
+            sudo -n -u "$APP_USER" env PYTHONDONTWRITEBYTECODE=1 python3 -B \
+              "$MIGRATION_STAGE/deploy/no-docker/backend-recovery-artifact.py" snapshot \
+              "$APP_ROOT" "$CREDX_RECOVERY_ROLLBACK_DIR" --previous-sha "$BASE_SHA"
             sudo -n python3 -B - <<'FRONTEND'
             import json,urllib.request
             from pathlib import Path
+            def require(value):
+                if not value: raise RuntimeError('Previous frontend preservation check failed')
             response=json.load(urllib.request.urlopen('https://cred-x.in/api/runtime-fingerprint',timeout=5))
-            assert response['build_sha']=='0a12caddaf9bbd681487906774400a3ad4d0369b'
+            require(response['build_sha']=='0a12caddaf9bbd681487906774400a3ad4d0369b')
             for line in Path('/etc/investor/frontend.env').read_text().splitlines():
                 if line.strip().startswith('NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED'):
-                    assert line.split('=',1)[1].strip().strip('"').strip("'")=='false'
+                    require(line.split('=',1)[1].strip().strip('"').strip("'")=='false')
             print('previous_frontend_sha_verified=true')
             FRONTEND
             run_database_phase() {
