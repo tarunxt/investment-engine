@@ -9,6 +9,7 @@ class ZerodhaLoginUrlResponse(BaseModel):
     login_url: str
     configured: bool
     direct_market_orders_enabled: bool = False
+    order_submission_blocked_reason: str | None = None
 
 
 class ZerodhaCallbackRequest(BaseModel):
@@ -18,6 +19,7 @@ class ZerodhaCallbackRequest(BaseModel):
 class ZerodhaStatusResponse(BaseModel):
     connected: bool
     direct_market_orders_enabled: bool = False
+    order_submission_blocked_reason: str | None = None
     login_time: datetime | None = None
     expires_at: datetime | None = None
     last_portfolio_sync_at: datetime | None = None

@@ -1036,11 +1036,13 @@ export interface ZerodhaLoginUrlResponse {
   login_url: string;
   configured: boolean;
   direct_market_orders_enabled?: boolean;
+  order_submission_blocked_reason?: string | null;
 }
 
 export interface ZerodhaStatusResponse {
   connected: boolean;
   direct_market_orders_enabled?: boolean;
+  order_submission_blocked_reason?: string | null;
   login_time: string | null;
   expires_at: string | null;
   last_portfolio_sync_at?: string | null;

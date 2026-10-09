@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.recovery import require_financial_writes_allowed
+from app.core.recovery import recovery_mode, require_financial_writes_allowed
 
 import hashlib
 from datetime import datetime, timedelta, timezone
@@ -31,7 +31,21 @@ class ZerodhaService:
 
     @property
     def direct_market_orders_enabled(self) -> bool:
-        return bool(self.is_configured and settings.zerodha_enable_direct_market_orders)
+        return bool(
+            not recovery_mode()
+            and self.is_configured
+            and settings.zerodha_enable_direct_market_orders
+        )
+
+    @property
+    def order_submission_blocked_reason(self) -> str | None:
+        if recovery_mode():
+            return (
+                "Order submission is disabled during analysis-only recovery. "
+                "No orders will be sent to Kite. Trading must be explicitly restored "
+                "by the operator before placing orders from Cred-X."
+            )
+        return None
 
     def get_login_url(self) -> str:
         return f"{self.LOGIN_BASE}?v=3&api_key={settings.zerodha_api_key}"
