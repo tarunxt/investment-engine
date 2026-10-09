@@ -8,6 +8,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from app.core.recovery import RecoveryBlocked, recovery_http_allowed
+from app.core.config import settings
 from app.domains.zerodha import service
 from app.domains.zerodha.schemas import ZerodhaStatusResponse, ZerodhaLoginUrlResponse
 
@@ -21,6 +22,9 @@ class TradingAvailabilityTest(unittest.TestCase):
         self.settings.start()
         self.addCleanup(self.settings.stop)
         self.svc = service.ZerodhaService()
+        self.policy = patch.object(settings, "zerodha_recovery_manual_orders_enabled", False)
+        self.policy.start()
+        self.addCleanup(self.policy.stop)
 
     def test_recovery_blocks_advertised_capability_and_keeps_discovery_readable(self):
         with patch.dict(os.environ, {"CREDX_RECOVERY_MODE": "1"}):

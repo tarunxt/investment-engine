@@ -4,6 +4,8 @@ This is application policy, not a credential or operating-system permission chan
 Only CREDX_RECOVERY_MODE=1 enables it; malformed values refuse startup/execution.
 """
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -31,6 +33,51 @@ def recovery_mode():
     if value not in {"0", "1"}:
         raise RecoveryBlocked("Invalid CREDX_RECOVERY_MODE (expected 0 or 1)")
     return value == "1"
+
+
+# Only authenticated protected-market HTTP handlers enter this scope. It is not
+# propagated through the queue, and ordinary financial writes never consult it.
+_manual_zerodha_order = ContextVar("manual_zerodha_order", default=False)
+MANUAL_ZERODHA_ORDER_PATHS = frozenset({
+    "/zerodha/orders/place-protected-market",
+    "/zerodha/orders/place-protected-market-sequenced",
+})
+
+
+def manual_zerodha_orders_enabled():
+    from app.core.config import settings
+    return settings.zerodha_recovery_manual_orders_enabled is True
+
+
+@contextmanager
+def manual_zerodha_order_scope():
+    token = _manual_zerodha_order.set(True)
+    try:
+        yield
+    finally:
+        _manual_zerodha_order.reset(token)
+
+
+def require_zerodha_write_allowed(method, path, data=None):
+    if not recovery_mode():
+        return
+    # An explicit route scope is necessary but not sufficient: only protected
+    # regular cash-equity orders may cross this exception, never token changes,
+    # modifications/cancellations, derivatives, leverage or unprotected orders.
+    order = data or {}
+    try:
+        protection = Decimal(str(order.get("market_protection", "0")))
+        protected = protection.is_finite() and (protection == -1 or 0 < protection <= 100)
+    except InvalidOperation:
+        protected = False
+    if (manual_zerodha_orders_enabled() and _manual_zerodha_order.get()
+            and method == "POST" and path == "/orders/regular"
+            and order.get("order_type") == "MARKET" and protected
+            and order.get("product") == "CNC"
+            and order.get("exchange") in {"NSE", "BSE"}
+            and order.get("transaction_type") in {"BUY", "SELL"}):
+        return
+    require_financial_writes_allowed()
 
 
 def require_financial_writes_allowed():
@@ -114,6 +161,11 @@ def recovery_http_allowed(method, path):
     """Minimal API surface for login, existing data, and INDmoney fanout/results."""
     if method == "OPTIONS":
         return True
+    if manual_zerodha_orders_enabled():
+        if method == "POST" and path in MANUAL_ZERODHA_ORDER_PATHS:
+            return True
+        if method in {"GET", "HEAD"} and path == "/zerodha/orders":
+            return True
     if method in {"GET", "HEAD"} and (
         path in {"/zerodha/status", "/zerodha/login-url", "/zerodha/portfolio"}
         or any(path == prefix or path.startswith(prefix + "/") for prefix in (

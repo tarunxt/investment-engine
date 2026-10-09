@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from app.core.recovery import recovery_mode, require_financial_writes_allowed
+from app.core.recovery import (
+    recovery_mode, manual_zerodha_orders_enabled, require_zerodha_write_allowed,
+)
 
 import hashlib
 from datetime import datetime, timedelta, timezone
@@ -32,14 +34,14 @@ class ZerodhaService:
     @property
     def direct_market_orders_enabled(self) -> bool:
         return bool(
-            not recovery_mode()
+            (not recovery_mode() or manual_zerodha_orders_enabled())
             and self.is_configured
             and settings.zerodha_enable_direct_market_orders
         )
 
     @property
     def order_submission_blocked_reason(self) -> str | None:
-        if recovery_mode():
+        if recovery_mode() and not manual_zerodha_orders_enabled():
             return (
                 "Order submission is disabled during analysis-only recovery. "
                 "No orders will be sent to Kite. Trading must be explicitly restored "
@@ -87,7 +89,7 @@ class ZerodhaService:
         if method.upper() not in {"GET", "HEAD"} and not (
             method.upper() == "POST" and path == "/session/token"
         ):
-            require_financial_writes_allowed()
+            require_zerodha_write_allowed(method.upper(), path, data)
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
@@ -117,7 +119,7 @@ class ZerodhaService:
         if method.upper() not in {"GET", "HEAD"} and not (
             method.upper() == "POST" and path == "/session/token"
         ):
-            require_financial_writes_allowed()
+            require_zerodha_write_allowed(method.upper(), path, data)
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))

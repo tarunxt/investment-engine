@@ -324,3 +324,22 @@ From GitHub Actions, run **Deploy to Production** manually:
 ## Important rule
 
 Do not manually edit production files on EC2 as the normal path. Those edits can be overwritten by the next deploy. Make the change in GitHub, merge/push to `main`, and let the deploy workflow update EC2.
+
+## Manual Zerodha orders during recovery
+
+The operator-approved `ZERODHA_RECOVERY_MANUAL_ORDERS_ENABLED` setting defaults
+to true. Set it to false to restore the previous complete order block. Recovery
+mode itself stays enabled. Only the two authenticated protected-market order
+endpoints and the read-only Zerodha order book are added to its HTTP allowlist.
+The existing direct-market enable flag and Kite credentials are still required.
+
+Only those protected handlers enter the manual order scope, after authentication
+and token lookup. The transport exception permits regular MARKET orders with
+market protection, CNC product, and NSE/BSE exchange. Generic orders, mutations
+outside that scope, Polymarket, trading task publication, and all legacy trading
+workers/schedulers remain blocked. Deployment continues to verify those services
+are stopped and that the recovery queue is isolated. No pending order is replayed.
+
+Protected-order requests use a 180-second BFF deadline, 190-second browser
+deadline, and 200-second public proxy deadline; they are never retried on timeout.
+A missing response is not evidence of a missing order: inspect Kite before retrying.

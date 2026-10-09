@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
     zerodha_enable_direct_market_orders: bool = False  # Enable only when the server egress IP is Kite-whitelisted
 
+    # Operator-approved manual protected-order exception; automated writes stay blocked.
+    zerodha_recovery_manual_orders_enabled: bool = True
+
     # Google Sheets OAuth
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None

@@ -59,6 +59,7 @@ const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
 const SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000;
 const SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
 const SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const ZERODHA_PROTECTED_ORDER_TIMEOUT_MS = 180_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS = 20_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
@@ -338,6 +339,7 @@ function isZerodhaSyncRequest(method: string, path: string) {
 }
 
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
   if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
@@ -390,6 +392,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
   if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;

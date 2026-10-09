@@ -6147,7 +6147,7 @@ ${zerodhaExecutionMode === "direct_market"
           setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed; ${response.skipped_count} buy order${response.skipped_count === 1 ? "" : "s"} skipped/reduced: ${failedMessages.join("; ")}`);
         }
       } catch (error) {
-        setZerodhaBasketError(`Could not place protected MARKET orders: ${normalizeError(error)}. Use the Publisher-safe protected LIMIT fallback if direct order placement is unavailable.`);
+        setZerodhaBasketError(`Could not place protected MARKET orders: ${normalizeError(error)}. Check the Kite order book before retrying: a failed response does not prove that no orders were placed.`);
       } finally {
         setZerodhaBasketPlacing(false);
       }

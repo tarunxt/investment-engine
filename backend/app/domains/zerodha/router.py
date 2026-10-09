@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.recovery import manual_zerodha_order_scope
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.zerodha.audit import ZerodhaAuditRepository
@@ -668,7 +669,8 @@ async def place_protected_market_orders(
             "market_protection": order.market_protection,
         }
         try:
-            result = await _svc.place_order(token, order_data, variety="regular")
+            with manual_zerodha_order_scope():
+                result = await _svc.place_order(token, order_data, variety="regular")
             results.append(ZerodhaProtectedMarketOrderResult(
                 tradingsymbol=order_data["tradingsymbol"],
                 exchange=order_data["exchange"],
@@ -760,7 +762,8 @@ async def place_protected_market_orders_sequenced(
 
     for order in sell_orders:
         try:
-            result = await _svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
+            with manual_zerodha_order_scope():
+                result = await _svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
             order_id = result.get("order_id", "")
             if order_id:
                 sell_order_ids.add(str(order_id))
@@ -837,7 +840,8 @@ async def place_protected_market_orders_sequenced(
             buy_phase_attempted = True
             buy_order = order.model_copy(update={"quantity": affordable_qty})
             try:
-                result = await _svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
+                with manual_zerodha_order_scope():
+                    result = await _svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
                 buy_results.append(_order_result_from_request(buy_order, "placed", order_id=str(result.get("order_id", ""))))
                 remaining -= affordable_qty * unit_price
                 if affordable_qty < order.quantity:
