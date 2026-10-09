@@ -358,7 +358,7 @@ def test_worker_ready_hooks_do_not_dispatch_or_touch_legacy_state(recovery):
     ("POST", "/zerodha/threats/run", True), ("POST", "/zerodha/events/run", True),
     ("GET", "/zerodha/threats/latest", True), ("GET", "/zerodha/events/history", True),
     ("POST", "/zerodha/threats/unknown-write", False),
-    ("POST", "/zerodha/orders", False), ("GET", "/zerodha/orders", False),
+    ("POST", "/zerodha/orders", False), ("GET", "/zerodha/orders", True),
     ("POST", "/zerodha/portfolio/unknown-write", False),
     ("DELETE", "/zerodha/portfolio/2026-10-07", False), ("POST", "/runs/123/cancel", False),
     ("POST", "/runs/final-actionables/history/backfill", False),
@@ -438,6 +438,7 @@ def test_authenticated_zerodha_sync_http_flow_retains_containment(recovery, monk
         get_latest_by_user=AsyncMock(return_value=None), list_by_user=AsyncMock(return_value=[])))
     monkeypatch.setattr(routes, "ZerodhaAuditRepository", lambda _: SimpleNamespace(log=AsyncMock()))
     monkeypatch.setattr(routes, "_svc", SimpleNamespace(is_configured=True, direct_market_orders_enabled=False,
+                                                      order_submission_blocked_reason=None,
                                                       get_login_url=lambda: "https://kite.zerodha.com/connect/login"))
     celery_app = routes.sync_portfolio_snapshot_task.app
     for key in ("task_queues", "task_default_queue", "task_default_exchange", "task_default_routing_key",
