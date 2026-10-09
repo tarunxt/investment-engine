@@ -268,6 +268,7 @@ async def get_login_url(current_user: User = Depends(get_current_user)):
         login_url=_svc.get_login_url() if _svc.is_configured else "",
         configured=_svc.is_configured,
         direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
     )
 
 
@@ -331,6 +332,7 @@ async def callback(
         login_time=login_time,
         expires_at=expires_at,
         direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
     )
 
 
@@ -355,17 +357,20 @@ async def get_status(
         return ZerodhaStatusResponse(
             connected=False,
             direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+            order_submission_blocked_reason=_svc.order_submission_blocked_reason,
             **snapshot_meta,
         )
     if cred.expires_at <= datetime.now(tz=timezone.utc):
         return ZerodhaStatusResponse(
             connected=False,
             direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+            order_submission_blocked_reason=_svc.order_submission_blocked_reason,
             **snapshot_meta,
         )
     return ZerodhaStatusResponse(
         connected=True,
         direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
         login_time=cred.login_time,
         expires_at=cred.expires_at,
         **snapshot_meta,

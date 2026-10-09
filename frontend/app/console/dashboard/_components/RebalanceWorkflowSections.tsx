@@ -3587,6 +3587,7 @@ function ZerodhaBasketPreviewDialog({
   onPlaceOrder,
   placing,
   directMarketAvailable,
+  orderSubmissionBlockedReason,
   executionMode,
   onExecutionModeChange,
   onRefreshLtp,
@@ -3628,6 +3629,7 @@ function ZerodhaBasketPreviewDialog({
   onPlaceOrder: () => void;
   placing: boolean;
   directMarketAvailable: boolean;
+  orderSubmissionBlockedReason?: string | null;
   executionMode: ZerodhaExecutionMode;
   onExecutionModeChange: (mode: ZerodhaExecutionMode) => void;
   onRefreshLtp: () => void;
@@ -3701,13 +3703,13 @@ function ZerodhaBasketPreviewDialog({
     <Button
       type="button"
       onClick={onPlaceOrder}
-      disabled={!selectedOrders.length || placing || ltpRefreshing}
+      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason)}
       className={cn(
         "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
         className,
       )}
     >
-      {placing ? busyText : buttonText}
+      {orderSubmissionBlockedReason ? "Trading paused: recovery mode" : placing ? busyText : buttonText}
     </Button>
   );
 
@@ -3771,6 +3773,11 @@ function ZerodhaBasketPreviewDialog({
           </div>
         </div>
 
+        {orderSubmissionBlockedReason ? (
+          <div role="alert" className="mx-5 mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            {orderSubmissionBlockedReason}
+          </div>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-auto p-5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
@@ -5415,6 +5422,7 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketLoading, setZerodhaBasketLoading] = useState(false);
   const [zerodhaBasketPlacing, setZerodhaBasketPlacing] = useState(false);
   const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
+  const [zerodhaOrderSubmissionBlockedReason, setZerodhaOrderSubmissionBlockedReason] = useState<string | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
   const [zerodhaBasketHistoryRuns, setZerodhaBasketHistoryRuns] = useState<RunResponse[]>([]);
@@ -5711,6 +5719,7 @@ export function RebalanceWorkflowSections({
       setZerodhaBasketHistoryRuns(runs);
       const status = statusResult.status === "fulfilled" ? statusResult.value : null;
       const login = loginResult.status === "fulfilled" ? loginResult.value : null;
+      setZerodhaOrderSubmissionBlockedReason(status?.order_submission_blocked_reason ?? login?.order_submission_blocked_reason ?? null);
       const directMarketEnabled = Boolean(
         status?.connected
           && login?.configured
@@ -6032,6 +6041,10 @@ export function RebalanceWorkflowSections({
   }, []);
 
   const placeSelectedZerodhaBasketOrders = useCallback(async () => {
+    if (zerodhaOrderSubmissionBlockedReason) {
+      setZerodhaBasketError(zerodhaOrderSubmissionBlockedReason);
+      return;
+    }
     const selectedOrders = zerodhaBasketOrders
       .filter((order) => selectedZerodhaBasketIds.has(order.id))
       .sort(compareZerodhaBasketOrdersByScore);
@@ -6222,7 +6235,7 @@ ${zerodhaExecutionMode === "direct_market"
     } finally {
       setZerodhaBasketPlacing(false);
     }
-  }, [selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
+  }, [zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [
@@ -9012,6 +9025,7 @@ ${zerodhaExecutionMode === "direct_market"
         onWholeShareChoice={reviewZerodhaWholeShareChoice}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
+        orderSubmissionBlockedReason={zerodhaOrderSubmissionBlockedReason}
         directMarketAvailable={zerodhaDirectMarketAvailable}
         executionMode={zerodhaExecutionMode}
         onExecutionModeChange={changeZerodhaExecutionMode}
