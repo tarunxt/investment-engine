@@ -1,7 +1,7 @@
 import type { WholeShareChoice } from "@/lib/wholeShareReview";
 
 export function WholeShareTrimChoice({ symbol, choice, onChoose, locked = false }: { symbol: string; choice: WholeShareChoice; onChoose: (choice: "keep" | "exit") => void; locked?: boolean }) {
-  return <fieldset disabled={locked} className="min-w-0 max-w-sm space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 [overflow-wrap:anywhere] disabled:opacity-70">
+  return <fieldset disabled={locked} className="w-full min-w-0 max-w-2xl space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 whitespace-normal disabled:opacity-70">
     <legend className="px-1 font-semibold">⚠ Whole-share review for {symbol}</legend>
     <p>A 50% trim of one share cannot be sold as a whole share. Default: no order.</p>
     <div className="flex flex-wrap gap-2">

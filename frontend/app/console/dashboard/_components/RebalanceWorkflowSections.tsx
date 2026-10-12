@@ -3982,7 +3982,8 @@ function ZerodhaBasketPreviewDialog({
                               const isPlaced = placedOrderIds.has(order.id) || (submission?.executionMode === "publisher_limit" && isSubmitted);
                               const executionPrice = executionPricesByOrderId[order.id] ?? null;
                               return (
-                              <tr key={order.id} className={cn("transition", isSkipped ? "bg-orange-50/80 ring-1 ring-inset ring-orange-100" : isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
+                              <Fragment key={order.id}>
+                              <tr className={cn("transition", isSkipped ? "bg-orange-50/80 ring-1 ring-inset ring-orange-100" : isPlaced ? "bg-emerald-50/80 ring-1 ring-inset ring-emerald-100" : isSubmitted ? "bg-amber-50/70" : "bg-white")}>
                                 <td className="px-4 py-3">
                                   <input
                                     type="checkbox"
@@ -4020,7 +4021,7 @@ function ZerodhaBasketPreviewDialog({
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
                                 </td>
-                                <td className="px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}{order.wholeShareReview && <WholeShareTrimChoice symbol={order.symbol} choice={order.wholeShareReview} locked={placing || isSubmitted || isPlaced} onChoose={choice => onWholeShareChoice?.(order.id, choice)} />}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}</td>
                                 <td className="px-4 py-3">
                                   <span className={cn(
                                     "rounded-full px-3 py-1 text-xs font-bold",
@@ -4104,6 +4105,19 @@ function ZerodhaBasketPreviewDialog({
                                   )}
                                 </td>
                               </tr>
+                              {order.wholeShareReview && (
+                                <tr className="bg-amber-50/40">
+                                  <td colSpan={13} className="px-4 pb-4 pt-2">
+                                    <WholeShareTrimChoice
+                                      symbol={order.symbol}
+                                      choice={order.wholeShareReview}
+                                      locked={placing || isSubmitted || isPlaced}
+                                      onChoose={choice => onWholeShareChoice?.(order.id, choice)}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                               );
                             })}
                           </Fragment>
