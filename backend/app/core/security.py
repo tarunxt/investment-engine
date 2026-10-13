@@ -12,7 +12,6 @@ pwd_context = argon2.using(
 )
 
 # JWT settings
-SECRET_KEY = "your-secret-key-change-in-production"  # TODO: Will read from env 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
@@ -95,7 +94,9 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(
+            token_data, settings.jwt_secret_key.get_secret_value(), algorithm=ALGORITHM
+        )
         return encoded_jwt
     
     @staticmethod
@@ -120,7 +121,9 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(
+            token_data, settings.jwt_secret_key.get_secret_value(), algorithm=ALGORITHM
+        )
         return encoded_jwt
     
     @staticmethod
@@ -135,7 +138,9 @@ class JWTUtils:
             Token payload if valid, None otherwise
         """
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(
+                token, settings.jwt_secret_key.get_secret_value(), algorithms=[ALGORITHM]
+            )
             return payload
         except JWTError:
             return None
@@ -154,7 +159,7 @@ class JWTUtils:
         try:
             payload = jwt.decode(
                 token,
-                key=SECRET_KEY,
+                key=settings.jwt_secret_key.get_secret_value(),
                 options={"verify_signature": False}
             )
             return payload

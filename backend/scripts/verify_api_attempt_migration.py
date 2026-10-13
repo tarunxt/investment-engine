@@ -7,6 +7,7 @@ The database must be empty initially; this script never resets an existing DB.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -34,6 +35,9 @@ TEST_ENVIRONMENT = {
     "DATABASE_URL": TEST_DATABASE_URL,
     "REDIS_URL": "redis://127.0.0.1:6379/15",
 }
+# Public deterministic fixture for disposable migration imports only. Never use
+# this value as a runtime credential or inherit a real signing key from the host.
+TEST_JWT_SECRET_KEY = hashlib.sha256(b"credx-api-attempt-migration-tests-only").hexdigest()
 
 
 def guarded_environment(environment: Mapping[str, str]) -> dict[str, str]:
@@ -46,7 +50,12 @@ def guarded_environment(environment: Mapping[str, str]) -> dict[str, str]:
         raise RuntimeError("Refusing to load a backend .env during migration verification")
     # Do not pass inherited provider credentials, libpq overrides, or service URLs
     # into Alembic/model imports. The fixed URL can address only the CI service.
-    return {**TEST_ENVIRONMENT, "PATH": environment.get("PATH", ""), "PYTHONPATH": str(BACKEND)}
+    return {
+        **TEST_ENVIRONMENT,
+        "PATH": environment.get("PATH", ""),
+        "PYTHONPATH": str(BACKEND),
+        "JWT_SECRET_KEY": TEST_JWT_SECRET_KEY,
+    }
 
 
 def alembic(*arguments: str) -> None:

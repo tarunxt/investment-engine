@@ -87,6 +87,7 @@ jobs:
           backend/tests/test_final_actionable_history_completion_trigger.py
           backend/tests/test_final_actionable_history_task_contract.py
           backend/tests/test_urgent_actionables_history.py
+          backend/tests/test_jwt_signing.py
           backend/tests/test_universal_scan_auto_run.py
           backend/tests/test_universal_export_integrity.py
           backend/tests/test_universal_stage1_handoff_repair.py

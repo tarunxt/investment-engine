@@ -1,6 +1,9 @@
 """Offline tests: no Alembic commands or PostgreSQL connections are executed."""
 
 from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +25,36 @@ class MigrationSafetyTests(unittest.TestCase):
         self.assertEqual(clean["DATABASE_URL"], verifier.TEST_DATABASE_URL)
         for key in ("OPENAI_API_KEY", "PGHOST", "PGOPTIONS", "AWS_PROFILE"):
             self.assertNotIn(key, clean)
+
+    @patch.object(Path, "exists", return_value=False)
+    @patch.object(Path, "is_file", return_value=True)
+    def test_migration_imports_use_only_the_public_signing_fixture(self, *_):
+        environment = self.environment()
+        environment["JWT_SECRET_KEY"] = "synthetic-inherited-value-must-not-be-used"
+        clean = verifier.guarded_environment(environment)
+        self.assertEqual(clean["JWT_SECRET_KEY"], verifier.TEST_JWT_SECRET_KEY)
+        self.assertNotEqual(clean["JWT_SECRET_KEY"], environment["JWT_SECRET_KEY"])
+        # Mirror the Alembic model imports, without running Alembic or opening a
+        # database. A fresh process catches settings imports outside conftest.py.
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-c", (
+                    "from app.infrastructure.database.base import Base; "
+                    "import app.models; "
+                    "from app.core.config import settings; "
+                    "assert 'api_usage_attempt_events' in Base.metadata.tables; "
+                    "assert settings.jwt_secret_key.get_secret_value() == "
+                    "__import__('os').environ['JWT_SECRET_KEY']"
+                )],
+                cwd=directory,
+                env=clean,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(verifier.TEST_JWT_SECRET_KEY, result.stdout + result.stderr)
 
     def test_refuses_environment_or_url_changes_before_database_or_alembic(self):
         unsafe_values = {
