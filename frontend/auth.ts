@@ -4,6 +4,8 @@ import type { NextAuthConfig, Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 
 import { apiService } from "@/services/api";
+import { URLs } from "@/lib/urls";
+import type { LoginResponse } from "@/types/api";
 
 export function resolveNextAuthSecret(): string {
   const configuredSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
@@ -18,6 +20,42 @@ export const authConfig = {
   // Production runs behind nginx, so Auth.js must trust the forwarded host header.
   trustHost: true,
   providers: [
+    Credentials({
+      id: "google",
+      name: "Google",
+      credentials: { credential: { type: "text" } },
+      async authorize(credentials) {
+        if (typeof credentials?.credential !== "string" || credentials.credential.length > 8192) {
+          return null;
+        }
+        try {
+          const result = await fetch(URLs.auth.google(), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ credential: credentials.credential }),
+            cache: "no-store",
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!result.ok) return null;
+          const response = await result.json() as LoginResponse;
+          if (!response.user?.id || !response.access_token || !response.refresh_token) return null;
+          return {
+            id: response.user.id.toString(),
+            email: response.user.email,
+            name: response.user.full_name || response.user.username,
+            username: response.user.username,
+            role: response.user.role,
+            accessToken: response.access_token,
+            refreshToken: response.refresh_token,
+            expiresIn: response.expires_in,
+            userData: response.user,
+          };
+        } catch {
+          console.error("Google sign-in verification unavailable");
+          return null;
+        }
+      },
+    }),
     Credentials({
       name: "credentials",
       credentials: {

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormAlert } from "@/components/auth/FormAlert";
 import { Loader2 } from "lucide-react";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -58,6 +59,7 @@ export default function LoginPage() {
             <CardDescription>Sign in to your account to continue</CardDescription>
           </CardHeader>
           <CardContent>
+            <GoogleSignIn redirectTo={redirectTo} />
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
               {(error || validationError) && (

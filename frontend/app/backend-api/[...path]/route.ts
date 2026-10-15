@@ -64,6 +64,7 @@ const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS = 20_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 const PUBLIC_BACKEND_PATHS = new Set([
+  "auth/google/config",
   "auth/register",
   "auth/forgot-password",
   "auth/reset-password",

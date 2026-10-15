@@ -398,6 +398,7 @@ export const URLs = {
   auth: {
     register: () => `${resolveApiBaseUrl()}/auth/register`,
     login: () => `${resolveApiBaseUrl()}/auth/login`,
+    google: () => `${resolveApiBaseUrl()}/auth/google`,
     logout: () => `${resolveApiBaseUrl()}/auth/logout`,
     refresh: () => `${resolveApiBaseUrl()}/auth/refresh`,
     me: () => `${resolveApiBaseUrl()}/auth/me`,
