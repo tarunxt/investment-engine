@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Script from "next/script";
 import { signIn } from "next-auth/react";
 import { resolveAuthRedirectTarget } from "@/lib/authRedirect";
 
@@ -47,6 +46,30 @@ export function GoogleSignIn({ redirectTo }: { redirectTo: string }) {
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, []);
 
+  useEffect(() => {
+    if (!clientId) return;
+    const ready = () => setScriptReady(true);
+    const failed = () => setMessage("Google sign-in could not load. Use email and password below.");
+    if ((window as Window & { google?: unknown }).google) {
+      ready();
+      return;
+    }
+    const existing = document.getElementById("google-identity-script") as HTMLScriptElement | null;
+    const script = existing || document.createElement("script");
+    script.addEventListener("load", ready);
+    script.addEventListener("error", failed);
+    if (!existing) {
+      script.id = "google-identity-script";
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+    return () => {
+      script.removeEventListener("load", ready);
+      script.removeEventListener("error", failed);
+    };
+  }, [clientId]);
+
   const completeSignIn = useCallback(async ({ credential }: { credential: string }) => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -80,9 +103,6 @@ export function GoogleSignIn({ redirectTo }: { redirectTo: string }) {
 
   return (
     <div className="mb-5 space-y-3">
-      {clientId && <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive"
-        onReady={() => setScriptReady(true)}
-        onError={() => setMessage("Google sign-in could not load. Use email and password below.")} />}
       <div ref={button} className={busy ? "pointer-events-none opacity-50" : "w-full flex justify-center"} aria-busy={busy} />
       {(busy || message) && <p role="status" className="text-sm text-muted-foreground">{busy ? "Signing in…" : message}</p>}
       <div className="text-center text-xs uppercase text-muted-foreground">or sign in with email</div>
