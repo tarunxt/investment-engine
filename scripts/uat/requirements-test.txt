@@ -1,0 +1,4 @@
+# Isolated synthetic test environment only; not a production dependency change.
+fastapi==0.136.1
+httpx==0.28.1
+PyJWT==2.15.1
