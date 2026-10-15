@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,6 +14,7 @@ from app.core.security import AuthUtils, JWTUtils, PasswordUtils
 from app.domains.auth.dependencies import get_current_user, require_admin
 from app.domains.auth.models import ActivityLog, User, UserProfile, UserRole
 from app.domains.auth.schemas import (
+    GoogleSignInRequest,
     ForgotPasswordRequest,
     LoginResponse,
     RefreshTokenRequest,
@@ -36,6 +38,38 @@ from app.shared.exceptions import NotFoundException, ValidationException
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger(__name__)
+
+
+@router.get("/google/config")
+async def google_config(db: AsyncSession = Depends(get_async_db)):
+    from app.domains.auth.google_signin import google_signin_client_id
+
+    client_id = await google_signin_client_id(db)
+    return {"client_id": client_id, "enabled": bool(client_id)}
+
+
+@router.post("/google", response_model=LoginResponse)
+async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(get_async_db)):
+    from app.domains.auth.google_signin import (
+        google_signin_client_id, require_existing_google_user, verify_google_identity,
+    )
+
+    client_id = await google_signin_client_id(db)
+    email = await run_in_threadpool(verify_google_identity, request.credential, client_id)
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == email).options(selectinload(User.profile))
+    )
+    matches = result.scalars().all()
+    # Existing accounts only; fail closed on ambiguous case-insensitive matches.
+    user = require_existing_google_user(matches)
+    user.last_login = datetime.utcnow()
+    db.add(ActivityLog(user_id=user.id, action="login", details="User logged in with Google"))
+    await db.commit()
+    tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
+    return LoginResponse(
+        access_token=tokens["access_token"], refresh_token=tokens["refresh_token"],
+        token_type="bearer", user=UserResponse.model_validate(user), expires_in=900,
+    )
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)

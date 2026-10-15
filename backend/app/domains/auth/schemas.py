@@ -12,6 +12,10 @@ class UserRole(str, Enum):
 
 
 # Request schemas
+class GoogleSignInRequest(BaseModel):
+    credential: str = Field(..., min_length=1, max_length=8192)
+
+
 class UserRegisterRequest(BaseModel):
     """User registration request."""
     email: EmailStr
