@@ -1,0 +1,15 @@
+[Unit]
+Description=CredX UAT aggregate resource containment
+
+[Slice]
+CPUAccounting=yes
+CPUQuota=${cpu_quota_percent}%
+MemoryAccounting=yes
+MemoryHigh=${memory_high_bytes}
+MemoryMax=${memory_max_bytes}
+MemorySwapMax=0
+TasksAccounting=yes
+TasksMax=${tasks_max}
+IOAccounting=yes
+IOReadBandwidthMax=/dev/block/${io_device} ${io_read_bytes_sec}
+IOWriteBandwidthMax=/dev/block/${io_device} ${io_write_bytes_sec}

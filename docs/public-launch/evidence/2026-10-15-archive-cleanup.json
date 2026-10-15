@@ -1,0 +1,36 @@
+{
+  "source": "Chrome EC2 Instance Connect observed operation receipt; sanitized summary",
+  "server_receipt": "/tmp/archive-removal-29ca8c1a.jsonl",
+  "server_receipt_records": 30,
+  "manifest_sha256": "29ca8c1af91f6eb5c426be2cbd020c3abe4044e27d4921cd4cd97b2c3b240fe2",
+  "approval_time_utc": "2026-10-15T18:52:22Z",
+  "event": "complete",
+  "time_utc": "2026-10-15T19:14:08Z",
+  "removed_count": 14,
+  "allocated_bytes_recovered": 11077332992,
+  "available_delta": 11077332992,
+  "available_bytes_before": 5475717120,
+  "available_bytes_after": 16553050112,
+  "free_bytes_after": 16569827328,
+  "inodes_available_after": 12113489,
+  "primaries_preserved": 14,
+  "metadata_preserved": 28,
+  "production_sha": "0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
+  "backend_pid": 382132,
+  "frontend_pid": 382541,
+  "backend_http": 200,
+  "frontend_http": 307,
+  "checks": [
+    "Fresh full SHA256 of all 28 primary/archive files matched manifest",
+    "Fresh process fd/maps/locks census before each unlink",
+    "Exact canonical directory and regular-file inode/device/link-count/stat checks",
+    "Primary readability as investor",
+    "Metadata stat/hash checks before and after",
+    "Production PIDs, SHA and health unchanged"
+  ],
+  "limits": [
+    "Independent archive fallback lost as explicitly approved; no external backup verified",
+    "No broader deletion or retention schedule authorized",
+    "UAT remains off; Stage 01 blocked"
+  ]
+}

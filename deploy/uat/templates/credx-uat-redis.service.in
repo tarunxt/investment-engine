@@ -1,0 +1,28 @@
+[Unit]
+Description=CredX UAT separate Redis process
+ConditionPathExists=/etc/credx-uat/ISOLATION_VERIFIED
+
+[Service]
+Type=simple
+User=credx-uat-redis
+Group=credx-uat-redis
+Slice=credx-uat.slice
+ExecStart=/usr/bin/redis-server /etc/credx-uat/redis.conf
+Restart=no
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET
+ReadWritePaths=/var/lib/credx-uat-redis /var/log/credx-uat-redis
+InaccessiblePaths=-/etc/investor -/srv/investor -/srv/investment-engine -/run/postgresql -/run/redis
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+StandardOutput=append:/var/log/credx-uat-redis/redis.log
+StandardError=append:/var/log/credx-uat-redis/redis.log
