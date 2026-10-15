@@ -1,7 +1,8 @@
 """Restricted HTTP factory for private tests; intentionally no deployable app.
 
-Login, refresh, cookies, barrier and live verifiers are not supplied. A production
-router must never be mounted here to fill those gaps. Session authentication is
+Login routes mount only with an explicitly injected GoogleLogin. Refresh,
+barrier and live dependencies are not supplied. A production router must never
+be mounted here to fill those gaps. Session authentication is
 injected by the caller, with separate signing and verified owner policy required.
 """
 from dataclasses import asdict
@@ -20,9 +21,12 @@ class OrderInput(BaseModel):
     quantity: int = Field(ge=1, le=100)
 
 
-def create_private_app(sessions):
+def create_private_app(sessions, *, google_login=None):
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     broker = SyntheticBroker({'environment': 'uat', 'adapter': 'synthetic-v1'})
+    if google_login is not None:
+        from .auth_routes import mount_auth_routes
+        mount_auth_routes(app, google_login)
 
     async def owner(request: Request):
         values = request.headers.getlist('authorization')

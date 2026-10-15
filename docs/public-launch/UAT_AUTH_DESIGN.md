@@ -18,13 +18,15 @@ SameSite=Strict, Path=/, without Domain, with a five-minute lifetime. Both
 endpoints must reject missing or mismatched Origin, duplicate cookies/headers,
 non-JSON requests, oversized input and CORS requests from other origins. Return
 Cache-Control: no-store, and expire the challenge cookie after completion.
-Neither HTTP endpoint is mounted by the current private app.
+Both endpoints mount only when `create_private_app` receives an explicit
+`google_login` dependency. No live dependency or deployable entrypoint exists.
 
 The in-memory challenge component binds nonce to cookie, limits outstanding
 challenges to 256, expires after five minutes, and consumes atomically before
 profile resolution. A single process is mandatory; multiple workers require a
-separately reviewed isolated atomic store. Rate limiting and HTTP checks remain
-adapter work. Restart invalidates outstanding challenges.
+separately reviewed isolated atomic store. The HTTP adapter caps attempts at 30
+per minute per process, bounds bodies to 17 KB, and checks exact origin, host,
+JSON shape and duplicate cookies/headers. Restart invalidates challenges.
 
 ## Verification and subject binding
 
@@ -33,8 +35,12 @@ an unexpired bundle deadline, the configured UAT audience, Google's issuers,
 valid timestamps, the bound nonce, and the explicit verified owner email.
 Unknown keys fail closed. Token headers cannot select URLs or algorithms.
 The trusted key provider receives no credential or attacker-selected key ID.
-No network key provider is implemented: approved certificate-only transport,
-TLS validation, bounded responses, cache expiry and rotation remain gates.
+The explicit key-cache refresh component accepts an injected HTTP client and
+requests only Google's fixed public JWKS URL. It rejects redirects, bounds time
+and response size, checks key shape and cache lifetime, and clears the cache on
+failure. Tests inject a mocked transport; no live HTTP client is configured.
+Approved TLS-verifying client configuration, certificate-only network access
+and scheduled rotation remain deployment gates.
 
 After these checks, the resolver receives the verified Google subject and email.
 It must persist subject binding, reject conflicting/ambiguous subjects and
