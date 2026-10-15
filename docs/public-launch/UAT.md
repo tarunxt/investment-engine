@@ -239,3 +239,21 @@ coexistence with all current chains. Rule syntax reference:
 [Netfilter manual](https://netfilter.org/projects/nftables/manpage.html).
 This candidate has not undergone host syntax or live network enforcement tests.
 
+
+## Component implementation checkpoint
+
+`backend/app/uat/owner_policy.py` and `simulation.py` are independent components
+with synthetic tests. Owner admission runs before the injected profile resolver;
+its input must already be signature/expiry/nonce-verified Google claims. The
+synthetic adapters have no network/file transport and reject real configuration.
+Neither component is mounted in a live app or production factory. These do not
+replace the missing restricted entrypoint, token/session wiring, Google verifier,
+barrier or network isolation tests described above.
+
+The mandatory secret-safety tooling is now available as a pinned local review
+copy, from [AWS toolkit commit 9d76dd4](https://github.com/aws/agent-toolkit-for-aws/tree/9d76dd4494b7ff76105f52f5d59ae2180dc91289/plugins/aws-core/skills/aws-secrets-manager).
+The skill was loaded, both source Git blob hashes verified, and the wrapper passed
+compilation and a no-reference smoke execution with an empty environment. This
+does not install the plugin hook or provision runtime credentials. Before secret
+operations, verify the approved UAT target secret references, runtime installation
+and scoped resolver access. Follow [AWS secret-safety guidance](https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets-ai-agents.html).
