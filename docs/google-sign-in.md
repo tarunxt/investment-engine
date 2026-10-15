@@ -17,8 +17,10 @@ Google accounts must use their existing password. Password sign-in remains avail
 The public OAuth web client ID is resolved in this order:
 
 1. `GOOGLE_SIGNIN_CLIENT_ID` in `/etc/investor/backend.env`.
-2. The latest Google Sheets application configuration's public `client_id`.
-3. `GOOGLE_CLIENT_ID` in the backend environment.
+2. The owner-approved public client ID in `google_signin.py`:
+   `833980592098-0vt4iu94cqokkv1nmp6oqh6evdgmg5sj.apps.googleusercontent.com`.
+
+Sign-in does not inherit Google Sheets or generic Google integration credentials.
 
 No client secret is read, decrypted, copied, or sent to the browser for sign-in.
 The `/auth/google/config` endpoint exposes only the public ID and an enabled flag.
