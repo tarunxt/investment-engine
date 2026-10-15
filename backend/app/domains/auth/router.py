@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -51,17 +51,12 @@ async def google_config(db: AsyncSession = Depends(get_async_db)):
 @router.post("/google", response_model=LoginResponse)
 async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(get_async_db)):
     from app.domains.auth.google_signin import (
-        google_signin_client_id, require_existing_google_user, verify_google_identity,
+        google_signin_client_id, resolve_google_user, verify_google_identity,
     )
 
     client_id = await google_signin_client_id(db)
     email = await run_in_threadpool(verify_google_identity, request.credential, client_id)
-    result = await db.execute(
-        select(User).where(func.lower(User.email) == email).options(selectinload(User.profile))
-    )
-    matches = result.scalars().all()
-    # Existing accounts only; fail closed on ambiguous case-insensitive matches.
-    user = require_existing_google_user(matches)
+    user = await resolve_google_user(db, email)
     user.last_login = datetime.utcnow()
     db.add(ActivityLog(user_id=user.id, action="login", details="User logged in with Google"))
     await db.commit()

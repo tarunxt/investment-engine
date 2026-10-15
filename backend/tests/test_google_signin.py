@@ -94,3 +94,67 @@ def test_recovery_allows_only_required_google_routes():
     assert recovery_http_allowed('POST', '/auth/google')
     assert not recovery_http_allowed('POST', '/auth/google/config')
     assert not recovery_http_allowed('POST', '/auth/google/register')
+
+
+@pytest.mark.asyncio
+async def test_new_google_profiles_are_independent_and_reused():
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    # Register relationship targets without loading unrelated application services.
+    from app.domains.jobs.models import Job  # noqa: F401
+    from app.domains.prompts.models import Prompt  # noqa: F401
+    from app.domains.auth.models import User, UserProfile, ActivityLog, UserRole
+
+    engine = create_engine('sqlite://')
+    for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__):
+        table.create(engine)
+    with Session(engine, expire_on_commit=False) as session:
+        db = SimpleNamespace(execute=AsyncMock(side_effect=session.execute),
+                             flush=AsyncMock(side_effect=session.flush),
+                             rollback=AsyncMock(side_effect=session.rollback), add=session.add)
+        first = await service.resolve_google_user(db, 'first@gmail.com')
+        session.commit()
+        second = await service.resolve_google_user(db, 'second@gmail.com')
+        session.commit()
+        assert first.id != second.id
+        assert first.profile.user_id == first.id
+        assert second.profile.user_id == second.id
+        assert first.username != second.username
+        assert first.role == second.role == UserRole.USER
+        assert first.is_verified and second.is_verified
+        assert first.profile.google_sheets_master_url is None
+        assert second.profile.google_sheets_master_url is None
+        assert first.password_hash != second.password_hash
+        assert not service.PasswordUtils.verify_password('password', first.password_hash)
+        again = await service.resolve_google_user(db, 'first@gmail.com')
+        assert again.id == first.id
+        assert len(session.scalars(select(User)).all()) == 2
+        assert len(session.scalars(select(ActivityLog)).all()) == 2
+        first.role = UserRole.ADMIN
+        first.email = 'FIRST@gmail.com'
+        session.commit()
+        assert (await service.resolve_google_user(db, 'first@gmail.com')).role == UserRole.ADMIN
+        first.is_active = False
+        session.commit()
+        with pytest.raises(HTTPException):
+            await service.resolve_google_user(db, 'first@gmail.com')
+        assert not first.is_active
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_signup_reuses_winner():
+    from unittest.mock import Mock
+    from app.domains.jobs.models import Job  # noqa: F401
+    from app.domains.prompts.models import Prompt  # noqa: F401
+    from sqlalchemy.exc import IntegrityError
+    winner = SimpleNamespace(id=42, is_active=True, role='user')
+    empty = Mock()
+    empty.scalars.return_value.all.return_value = []
+    found = Mock()
+    found.scalars.return_value.all.return_value = [winner]
+    db = SimpleNamespace(execute=AsyncMock(side_effect=[empty, found]), add=Mock(),
+                         flush=AsyncMock(side_effect=IntegrityError('insert', {}, Exception())),
+                         rollback=AsyncMock())
+    assert await service.resolve_google_user(db, 'winner@gmail.com') is winner
+    db.rollback.assert_awaited_once()

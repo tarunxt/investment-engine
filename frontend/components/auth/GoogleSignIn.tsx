@@ -78,7 +78,7 @@ export function GoogleSignIn({ redirectTo }: { redirectTo: string }) {
     try {
       const result = await signIn("google", { credential, redirect: false });
       if (result?.error || !result?.ok) {
-        setMessage("Google sign-in failed. Use the Google account matching your existing Cred-X email, or sign in with your password.");
+        setMessage("Google sign-in failed. Please try again or contact support if your account is disabled.");
         return;
       }
       window.location.assign(resolveAuthRedirectTarget(redirectTo));
@@ -104,6 +104,7 @@ export function GoogleSignIn({ redirectTo }: { redirectTo: string }) {
   return (
     <div className="mb-5 space-y-3">
       <div ref={button} className={busy ? "pointer-events-none opacity-50" : "w-full flex justify-center"} aria-busy={busy} />
+      <p className="text-center text-xs text-muted-foreground">New here? Google sign-in creates your own Cred-X profile.</p>
       {(busy || message) && <p role="status" className="text-sm text-muted-foreground">{busy ? "Signing in…" : message}</p>}
       <div className="text-center text-xs uppercase text-muted-foreground">or sign in with email</div>
     </div>
