@@ -1,12 +1,20 @@
 """Google identity verification. No OAuth client secret or Google API scopes needed."""
 
 import os
+import secrets
 
 from fastapi import HTTPException
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
+
+from app.core.security import PasswordUtils
+from app.domains.auth.models import ActivityLog, User, UserProfile, UserRole
 
 
 
@@ -60,3 +68,39 @@ def require_existing_google_user(matches):
     if len(matches) != 1 or not matches[0].is_active:
         raise HTTPException(401, "Google sign-in is unavailable for this account")
     return matches[0]
+
+
+async def resolve_google_user(db: AsyncSession, email: str) -> User:
+    """Resolve a verified Google email, creating an independent standard profile."""
+    query = select(User).where(func.lower(User.email) == email).options(selectinload(User.profile))
+    matches = (await db.execute(query)).scalars().all()
+    if matches:
+        return require_existing_google_user(matches)
+
+    # No shared/default password: only Google or the normal password reset flow
+    # can give this new user access. Hash outside the event loop.
+    password_hash = await run_in_threadpool(PasswordUtils.hash_password, secrets.token_urlsafe(48))
+    user = User(
+        email=email,
+        username="google_" + secrets.token_hex(16),
+        password_hash=password_hash,
+        full_name=None,
+        role=UserRole.USER,
+        is_active=True,
+        is_verified=True,
+        profile=UserProfile(),
+    )
+    try:
+        db.add(user)
+        await db.flush()
+        db.add(ActivityLog(user_id=user.id, action="register", details="User registered with Google"))
+        await db.flush()
+    except IntegrityError:
+        # Concurrent first sign-ins race on the unique email constraint. Reuse
+        # the winning account, but never activate a disabled or ambiguous one.
+        await db.rollback()
+        matches = (await db.execute(query)).scalars().all()
+        if not matches:
+            raise HTTPException(409, "Could not create profile; please retry") from None
+        return require_existing_google_user(matches)
+    return user

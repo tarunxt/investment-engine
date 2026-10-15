@@ -6,8 +6,13 @@ backend, which verifies Google's signature, audience, issuer, expiry, subject,
 and verified email before issuing the existing application session tokens.
 Application access/refresh tokens remain in the server-side Auth.js session flow.
 
-Only existing, active Cred-X accounts can sign in. Roles and user IDs are preserved;
-Google sign-in never creates accounts or enables inactive accounts. Ambiguous
+First sign-in creates a separate standard-user account and empty user profile for
+a new verified Google email. Repeat sign-ins reuse that account. Existing roles,
+user IDs, profiles, and data are preserved; inactive accounts are never enabled.
+New users receive no administrator role or another user's portfolio/integrations.
+Concurrent first sign-ins reuse the account protected by the unique email constraint.
+The generated password is random and never disclosed; users can use Google or
+the normal password reset flow. Registration is recorded in the activity log. Ambiguous
 case-insensitive email matches fail closed. Automatic email matching is limited
 to Gmail and Google Workspace identities where Google is authoritative. Other
 Google accounts must use their existing password. Password sign-in remains available.
