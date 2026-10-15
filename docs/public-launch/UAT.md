@@ -194,3 +194,44 @@ cannot be demonstrated, leave UAT stopped and seek a separate host decision.
 Primary directive references (verify installed version, not just latest docs):
 [systemd resource controls](https://github.com/systemd/systemd/blob/main/man/systemd.resource-control.xml),
 [execution sandboxing](https://github.com/systemd/systemd/blob/main/man/systemd.exec.xml).
+
+## Implemented watchdog and network candidate
+
+`watchdog.py` runs one check then exits. On threshold breach or unavailable
+configuration/metrics, dry-run reports `would_stop`; explicit `--enforce` executes
+only the fixed UAT service stop list. A failed stop returns `stop_failed` and exit
+status 2, requiring operator intervention. It never starts or restarts services.
+
+```bash
+python3 scripts/uat/watchdog.py reviewed-capacity.json --filesystem /srv
+```
+
+After private validation, an operator may add `--enforce`. Do not schedule it until
+all actual UAT log/data filesystems are accounted for, the fixed unit list matches
+the deployment, and measured thresholds are approved. The manifest and scripts
+must be root-owned and non-writable by runtime UAT users. An absent optional unit
+may cause systemctl to return failure even if other units stopped; verify actual
+unit states instead of treating an error as success.
+
+The current watchdog covers host reserve/pressure, not production HTTP latency,
+error rates, health or a dead monitor. Add the separately reviewed production
+health observer and watchdog scheduling before the gate can pass. Resource
+starvation can prevent an on-host monitor from running; external production
+monitoring remains necessary. No timer is enabled by this branch.
+
+The renderer now requires distinct, verified `app_uid`, `redis_uid`, `db_uid` and
+three pressure thresholds (integer percentages). UIDs must not belong to existing
+production processes. It renders `egress.nft.candidate` alongside the five original
+candidates. This permits only UAT application loopback destinations 18000, 16379,
+15432 and a proposed fixed-origin cert relay at 18802, plus connection replies.
+It denies other IP traffic for those UIDs; it does not protect AF_UNIX sockets.
+The cert relay remains unimplemented. Do not enable arbitrary external egress
+to make Google login work. A shared-database fallback requires a new reviewed
+network policy and database denial tests; the dedicated-instance candidate must
+not be silently changed to allow production's DB port.
+
+Review and syntax-check with the installed host nftables version before applying
+anything; preserve existing tables and never flush the host ruleset. Confirm
+coexistence with all current chains. Rule syntax reference:
+[Netfilter manual](https://netfilter.org/projects/nftables/manpage.html).
+This candidate has not undergone host syntax or live network enforcement tests.

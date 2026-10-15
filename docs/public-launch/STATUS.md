@@ -20,10 +20,10 @@ Review date: 2026-10-15. Integration branch: `codex/credx-public-launch-uat`.
 
 - Original stage specification, access/isolation design, release evidence matrix.
 - Read-only Linux capacity sampler (no environment or process command dumps).
-- Capacity-gated renderer and five non-installed systemd/Redis candidates;
+- Capacity-gated renderer and six non-installed systemd/Redis/network candidates;
   budgets deliberately unset until representative host measurements exist.
 - Dark HTTP vhost example, log rotation candidate, shutdown and validation runbook.
-- Four local unit tests pass: missing evidence/budgets, invalid resource values,
+- Ten local unit tests pass (including watchdog checks): missing evidence/budgets, invalid resource values,
   template-injection input, memory bounds, candidate rendering, no overwrite.
 - Two-sample sampler smoke check passed on the local development environment.
   Those measurements are not production sizing evidence and were not committed.
@@ -49,7 +49,7 @@ Review date: 2026-10-15. Integration branch: `codex/credx-public-launch-uat`.
    tests are required. Do not rotate production keys or change live sessions as
    part of this stage without a separately reviewed production change.
 6. UAT runtime auth guards, fake adapters, network policy, actual database,
-   authenticated TLS vhost and disk watchdog are NOT implemented/deployed by this
+   authenticated TLS vhost are NOT implemented/deployed by this
    preparation. They require the gates in RELEASE_GATES.md. The backend candidate
    deliberately refers to an absent `app.uat_main` entrypoint and cannot serve the
    unrestricted production app. Do not replace it with `app.main` to get it running.
@@ -57,3 +57,22 @@ Review date: 2026-10-15. Integration branch: `codex/credx-public-launch-uat`.
 No production deployment, restart, migration, OAuth/Sheets edit, DNS change,
 financial operation or server provisioning was performed. Local checks do not
 establish production health or UAT isolation. No capacity numbers were invented.
+
+## Implementation continuation after approval
+
+- Implemented a one-shot resource watchdog for memory, disk, inode and CPU/memory/I/O
+  pressure reserves. Dry-run is the default; explicit enforcement can stop only
+  five fixed UAT service names. Invalid/missing configuration or metrics triggers
+  the stop decision. Failed stop commands are reported as failures.
+- Added a dedicated nftables output-policy candidate with distinct numeric UIDs,
+  a bounded UAT loopback port list and denial of other IPv4/IPv6 egress. It is not
+  installed; host nftables syntax/kernel validation and live denial tests remain
+  blocked. No nft executable is available in this development environment.
+- The watchdog is not installed/scheduled and does not replace production health
+  monitoring. It cannot establish the missing measured thresholds.
+- Rechecked both complete available skill catalogs and local skill paths; the
+  mandatory aws-secrets-manager skill remains unavailable. Secret/signing-key work
+  is still blocked by AGENTS.md. Approval did not supply missing infrastructure
+  access. No new authenticated server session is available.
+- Remote main remains 0c6e61e524c7a87c7b9ea79342f17b14a45e97a1. No production
+  runtime code, Google login code or production workflow was changed.

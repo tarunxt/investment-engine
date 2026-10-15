@@ -16,7 +16,7 @@ class CapacityGateTests(unittest.TestCase):
         data.update(representative_periods_reviewed=True,
                     evidence_reference='synthetic unit test', io_device='8:1',
                     memory_high_bytes=100, memory_max_bytes=200,
-                    redis_maxmemory_bytes=20)
+                    redis_maxmemory_bytes=20, app_uid=1101, redis_uid=1102, db_uid=1103)
         return data
 
     def test_missing_evidence_cannot_render(self):
@@ -32,6 +32,7 @@ class CapacityGateTests(unittest.TestCase):
 
     def test_unsafe_memory_and_device_rejected(self):
         for patch in ({'memory_max_bytes': 100}, {'redis_maxmemory_bytes': 100},
+                      {'app_uid': 1102}, {'stop_cpu_pressure_avg10': 101},
                       {'io_device': '8:1\nCPUQuota=1000%'}):
             with self.assertRaises(ValueError):
                 module.validate(self.fixture() | patch)
@@ -41,7 +42,7 @@ class CapacityGateTests(unittest.TestCase):
             destination = Path(tmp) / 'candidates'
             module.render(self.fixture(), destination)
             files = list(destination.iterdir())
-            self.assertEqual(len(files), 5)
+            self.assertEqual(len(files), 6)
             self.assertTrue(all(p.name.endswith('.candidate') for p in files))
             self.assertTrue(all('${' not in p.read_text() for p in files))
             with self.assertRaises(FileExistsError):

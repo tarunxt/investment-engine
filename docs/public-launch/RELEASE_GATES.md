@@ -10,7 +10,7 @@ reviewer per gate. Do not store tokens, cookies, keys or raw production data.
 | Capacity | Representative market/worker/backup peaks, reserve, chosen aggregate caps | BLOCKED: no host access |
 | Host safety | Services/proxy/ports/disk/inodes/DB/Redis/schedules inventory | BLOCKED |
 | UID isolation | Distinct users, no prod groups/sudo/Polkit restart rights; unreadable secrets without contents | BLOCKED |
-| Network isolation | UAT port allowlist; prod DB/Redis/Bullpen, public broker/AI/email and metadata denied; IPv6/UNIX reviewed | NOT IMPLEMENTED |
+| Network isolation | UAT port allowlist; prod DB/Redis/Bullpen, public broker/AI/email and metadata denied; IPv6/UNIX reviewed | EGRESS CANDIDATE; NOT INSTALLED/VERIFIED |
 | Database isolation | Fresh synthetic-only DB; non-superuser; prod CONNECT denied; connection/timeouts bounded | NOT PROVISIONED |
 | Redis isolation | Separate process, directory, ACL, maxmemory; prod Redis unreachable | CANDIDATE ONLY |
 | JWT separation | UAT-specific signing key actually used; prod/UAT cross-token rejection | BLOCKED: hard-coded key in current helper |
@@ -23,12 +23,12 @@ reviewer per gate. Do not store tokens, cookies, keys or raw production data.
 | Simulation | Deterministic fake adapter only; real adapter/config/task routes rejected and network denied | NOT IMPLEMENTED |
 | Costs/side effects | Fake AI, email sink, test exports, no live keys, schedulers off | NOT IMPLEMENTED |
 | Resource enforcement | Effective cgroup CPU/memory/swap/tasks/I/O, all processes accounted for | CANDIDATE ONLY |
-| Disk and stop thresholds | Measured production reserve, watchdog, log/artifact bounds; readable stop evidence | NOT IMPLEMENTED |
+| Disk and stop thresholds | Measured production reserve, watchdog, log/artifact bounds; readable stop evidence | WATCHDOG IMPLEMENTED/UNIT TESTED; NOT INSTALLED |
 | Safe exposure | DNS authority, dedicated TLS vhost, certificate, tested graceful reload and prod before/after checks | BLOCKED |
 | Lifecycle | Stop and redeploy UAT without interrupting production; independent rollback artifact | NOT TESTED |
 | Production stability | Before/after health/latency/errors, unchanged running service identities, no financial effects | NOT OBSERVED |
 | Branch safety | Trigger review before push, draft PR only, separate future UAT deployment credentials | SOURCE REVIEW COMPLETE |
-| Preparation checks | Local capacity-renderer test suite | PASS: 4 tests |
+| Preparation checks | Local capacity-renderer test suite | PASS: 10 tests |
 
 ## Next executable sequence
 

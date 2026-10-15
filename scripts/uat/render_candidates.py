@@ -13,6 +13,8 @@ NUMERIC_FIELDS = {
     'cpu_quota_percent', 'memory_high_bytes', 'memory_max_bytes', 'tasks_max',
     'io_read_bytes_sec', 'io_write_bytes_sec', 'redis_maxmemory_bytes',
     'stop_mem_available_bytes', 'stop_disk_free_bytes', 'stop_inodes_free',
+    'app_uid', 'redis_uid', 'db_uid',
+    'stop_cpu_pressure_avg10', 'stop_memory_pressure_avg10', 'stop_io_pressure_avg10',
 }
 
 
@@ -28,6 +30,10 @@ def validate(data):
         raise ValueError('MemoryHigh must be below MemoryMax')
     if data['redis_maxmemory_bytes'] >= data['memory_high_bytes']:
         raise ValueError('Redis budget leaves no room for other UAT processes')
+    if len({data['app_uid'], data['redis_uid'], data['db_uid']}) != 3:
+        raise ValueError('UAT identities must be distinct')
+    if any(data[f'stop_{r}_pressure_avg10'] > 100 for r in ('cpu', 'memory', 'io')):
+        raise ValueError('Pressure thresholds must not exceed 100 percent')
     device = data.get('io_device', '')
     # Major:minor avoids interpolating arbitrary paths or systemd directives.
     import re
