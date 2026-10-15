@@ -80,12 +80,13 @@ async def test_client_id_override_does_not_read_database(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_existing_config_selects_only_public_id(monkeypatch):
+async def test_default_client_is_independent_of_sheets(monkeypatch):
     monkeypatch.delenv('GOOGLE_SIGNIN_CLIENT_ID', raising=False)
-    db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: 'existing-client')))
-    assert await service.google_signin_client_id(db) == 'existing-client'
-    statement = db.execute.call_args.args[0]
-    assert [column.name for column in statement.selected_columns] == ['client_id']
+    db = SimpleNamespace(execute=AsyncMock())
+    assert await service.google_signin_client_id(db) == (
+        '833980592098-0vt4iu94cqokkv1nmp6oqh6evdgmg5sj.apps.googleusercontent.com'
+    )
+    db.execute.assert_not_awaited()
 
 
 def test_recovery_allows_only_required_google_routes():

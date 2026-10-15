@@ -6,25 +6,20 @@ from fastapi import HTTPException
 from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
-from app.domains.google_sheets.models import GoogleSheetsAppConfig
+
+
+# Public OAuth audience, explicitly supplied by the Cred-X project owner.
+# This is not a secret. Keep sign-in independent from Google Sheets credentials.
+DEFAULT_GOOGLE_SIGNIN_CLIENT_ID = (
+    "833980592098-0vt4iu94cqokkv1nmp6oqh6evdgmg5sj.apps.googleusercontent.com"
+)
 
 
 async def google_signin_client_id(db: AsyncSession) -> str | None:
-    # A dedicated public client ID can override the existing Google integration.
-    configured = os.getenv("GOOGLE_SIGNIN_CLIENT_ID", "").strip()
-    if configured:
-        return configured
-    # Select only the public ID; never read/decrypt the Sheets client secret.
-    result = await db.execute(
-        select(GoogleSheetsAppConfig.client_id)
-        .order_by(GoogleSheetsAppConfig.updated_at.desc(), GoogleSheetsAppConfig.id.desc())
-        .limit(1)
-    )
-    return result.scalar_one_or_none() or settings.google_client_id or None
+    # Retain the route-facing signature; identity configuration needs no DB read.
+    return os.getenv("GOOGLE_SIGNIN_CLIENT_ID", "").strip() or DEFAULT_GOOGLE_SIGNIN_CLIENT_ID
 
 
 class _BoundedGoogleRequest(Request):
