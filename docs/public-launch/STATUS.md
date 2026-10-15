@@ -2,6 +2,25 @@
 
 Stage 00: **BLOCKED — preparation only; isolation NOT verified.** Stage 01 must not start.
 
+## Retention preparation update
+
+- Added [RETENTION.md](RETENTION.md): Critical/High/Medium/Low classification,
+  protected unknowns, dependencies, recoverability, holds, proposed TTLs/quotas,
+  backpressure, bounded compaction and separate irreversible-action approval.
+- Added a synthetic in-memory registry/policy with no production writer hooks,
+  filesystem deletion, database, network or scheduling API. Physical purge is
+  never authorized by its output. Eleven new synthetic tests plus the existing
+  ten preparation tests pass locally (21 total).
+- Existing authenticated browser EC2 access now supports read-only host inspection;
+  earlier no-access notes below describe the initial preparation environment.
+  Deployed checkout and frontend manifest were observed at the preserved main SHA.
+  Representative active-worker/market/backup capacity remains unverified.
+- Existing immutable captures remain protected; reference census and specific
+  archive redundancy decisions are incomplete. No cleanup has occurred. The
+  100 GiB cap remains; no paid storage or snapshot change is part of this work.
+- UAT remains off. All auth, secret tooling, actual isolation, runtime and
+  deployment gates remain open; retention preparation does not satisfy them.
+
 Review date: 2026-10-15. Integration branch: `codex/credx-public-launch-uat`.
 
 ## Verified from repository
@@ -76,3 +95,4 @@ establish production health or UAT isolation. No capacity numbers were invented.
   access. No new authenticated server session is available.
 - Remote main remains 0c6e61e524c7a87c7b9ea79342f17b14a45e97a1. No production
   runtime code, Google login code or production workflow was changed.
+

@@ -29,6 +29,8 @@ reviewer per gate. Do not store tokens, cookies, keys or raw production data.
 | Production stability | Before/after health/latency/errors, unchanged running service identities, no financial effects | NOT OBSERVED |
 | Branch safety | Trigger review before push, draft PR only, separate future UAT deployment credentials | SOURCE REVIEW COMPLETE |
 | Preparation checks | Local capacity-renderer test suite | PASS: 10 tests |
+| Retention classification | Writer-time registry, dependency/queue census, holds, exact recovery evidence, reviewed TTLs and quotas | SYNTHETIC PROTOTYPE ONLY; NO LIVE INTEGRATION |
+| Physical reclamation | Exact verified manifest, fresh readers/leases/holds checks, user approval, loss-of-redundancy disclosure | NOT AUTHORIZED; NO EXECUTOR OR SCHEDULE |
 
 ## Next executable sequence
 
@@ -48,3 +50,4 @@ reviewer per gate. Do not store tokens, cookies, keys or raw production data.
    Configure the independent barrier/TLS/DNS only after private checks pass.
 6. Record actual URL/identity/ports/limits/commands/test results, update draft PR.
    Mark Stage 00 PASS only when every gate passes. No production merge or launch.
+

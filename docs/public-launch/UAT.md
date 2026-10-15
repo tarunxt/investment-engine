@@ -3,6 +3,9 @@
 Status: preparation only; see [STATUS.md](STATUS.md). Authority and scope:
 [stages/00.md](stages/00.md). Every release gate must have actual evidence.
 
+Storage policy and synthetic-only registry preparation: [RETENTION.md](RETENTION.md).
+This does not activate production retention, physical deletion or a schedule.
+
 ## Access and URL
 
 Proposed URL: `https://uat.cred-x.in`. It is not provisioned by this branch.
@@ -235,3 +238,4 @@ anything; preserve existing tables and never flush the host ruleset. Confirm
 coexistence with all current chains. Rule syntax reference:
 [Netfilter manual](https://netfilter.org/projects/nftables/manpage.html).
 This candidate has not undergone host syntax or live network enforcement tests.
+
