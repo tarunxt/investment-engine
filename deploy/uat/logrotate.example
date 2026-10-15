@@ -1,0 +1,13 @@
+/var/log/credx-uat/*.log /var/log/credx-uat-redis/*.log {
+    daily
+    maxsize 5M
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}
+# Candidate only: validate ownership and trigger frequency on the actual host.
+# Rotation is not a hard disk bound. A measured disk monitor must stop UAT
+# before the production reserve is crossed; artifacts need a separate quota.
