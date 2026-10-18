@@ -60,3 +60,6 @@ psql
 !docs/*.md
 graphify-out
 .claude
+
+# Required isolated UAT static assets only.
+!ci/uat-real-engines/candidate/frontend/out/_next/static/chunks/next/dist/

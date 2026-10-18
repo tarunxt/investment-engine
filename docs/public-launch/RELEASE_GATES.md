@@ -76,3 +76,10 @@ reviewer per gate. Do not store tokens, cookies, keys or raw production data.
 
 None of these component tests proves live isolation. Stage 00 remains blocked;
 Stage 01 must not start. No UAT service has been activated.
+
+
+## 18 October 2026 audit update
+
+Stage00 remains **BLOCKED**. The historical entries above are not a current deployment inventory. See [requirement-by-requirement audit](STAGE00_AUDIT_20261018.md) for later dedicated-host authorization, completed preparation, partial evidence and missing live gates. Existing-server co-location was not admitted; a dedicated test host does not satisfy that original requirement literally. Current59regression passes do not close private/fault/TLS/realGoogle acceptance. Stage01 remains unauthorized.
+
+Synthetic export follow-up: fixed memory-only destination now wired through the restricted owner HTTP runtime factory;98source tests pass. Disposable engine CI adds export assertions. Retained AWS candidate is unchanged; deployment/live acceptance remains unverified.

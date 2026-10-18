@@ -71,3 +71,10 @@ Production Google/Sheets configuration and workflows are unchanged. Branch
 trigger review confirms main-only deployment and separately named diagnostic
 branches; no production workflow was dispatched. No merge, migration, financial
 operation, paid storage change or UAT exposure occurred.
+
+
+## 18 October 2026 audit update
+
+Stage00 remains **BLOCKED**. The historical entries above are not a current deployment inventory. See [requirement-by-requirement audit](STAGE00_AUDIT_20261018.md) for later dedicated-host authorization, completed preparation, partial evidence and missing live gates. Existing-server co-location was not admitted; a dedicated test host does not satisfy that original requirement literally. Current59regression passes do not close private/fault/TLS/realGoogle acceptance. Stage01 remains unauthorized.
+
+Synthetic export follow-up: fixed memory-only destination now wired through the restricted owner HTTP runtime factory;98source tests pass. Disposable engine CI adds export assertions. Retained AWS candidate is unchanged; deployment/live acceptance remains unverified.

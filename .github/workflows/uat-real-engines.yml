@@ -1,0 +1,18 @@
+name: UAT isolated real engines
+on:
+  push:
+    branches: [codex/uat-real-engines-ci]
+    paths: ['ci/uat-real-engines/**', '.github/workflows/uat-real-engines.yml']
+permissions:
+  contents: read
+jobs:
+  integration:
+    if: github.repository == 'tarunxt/investment-engine' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Disposable engines and isolated acceptance
+        run: bash ci/uat-real-engines/run.sh
