@@ -58,6 +58,9 @@ class RealTests(unittest.IsolatedAsyncioTestCase):
     async def test_owner_flow_and_revocation(self):
         self.assertEqual((await self.login('other@example.test')).status_code,401)
         self.assertEqual(self.count(),0);self.assertEqual(self.redis.hlen(KEY),0)
+        export={'rows':[{'symbol':'SYNTHETIC-INDEX','quantity':1}]}
+        self.assertEqual((await self.client.post('/simulation/exports',headers={'origin':self.f.origin},json=export)).status_code,401)
+        self.assertEqual(self.count(),0);self.assertEqual(self.redis.hlen(KEY),0)
         login=await self.login();self.assertEqual(login.status_code,200)
         self.assertNotIn('access_token',login.text)
         self.assertEqual((await self.client.get('/')).status_code,200)
@@ -66,12 +69,19 @@ class RealTests(unittest.IsolatedAsyncioTestCase):
         b=await self.client.post('/simulation/orders',headers={'origin':self.f.origin},json=order)
         self.assertEqual(a.status_code,200);self.assertEqual(a.json(),b.json())
         self.assertTrue(a.json()['simulation']);self.assertEqual(self.count(),1)
+        exported=await self.client.post('/simulation/exports',headers={'origin':self.f.origin},json=export)
+        self.assertEqual(exported.status_code,200)
+        self.assertEqual(exported.json(),dict(simulation=True,delivered=False,destination='memory-sink-v1',row_count=1,sink_sequence=1))
+        self.assertEqual((await self.client.post('/simulation/exports',headers={'origin':'https://evil.invalid'},json=export)).status_code,401)
+        self.assertEqual((await self.client.post('/simulation/exports',headers={'origin':self.f.origin},json=dict(export,destination='https://example.invalid'))).status_code,422)
+        self.assertEqual(self.count(),1)
         self.assertEqual(self.redis.hlen(KEY),1)
         token=self.client.cookies.get(SESSION_COOKIE)
         self.assertEqual((await self.client.post('/auth/logout',headers={'origin':self.f.origin})).status_code,200)
         self.client.cookies.set(SESSION_COOKIE,token)
         self.assertEqual((await self.client.get('/')).status_code,401)
         self.assertEqual(self.redis.hlen(KEY),0)
+        self.assertEqual((await self.client.post('/simulation/exports',headers={'origin':self.f.origin},json=export)).status_code,401)
     async def test_assets_and_wrong_origin(self):
         assets=list((Path(__file__).parent/'candidate/frontend/out').rglob('*'))
         assets=[p for p in assets if p.is_file()]
@@ -120,3 +130,4 @@ if __name__=='__main__':
         'failures':len(result.failures),'errors':len(result.errors),'skipped':len(result.skipped),
         'production_activation':False}))
     raise SystemExit(0 if result.wasSuccessful() and result.testsRun==6 and not result.skipped else 1)
+
