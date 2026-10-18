@@ -59,3 +59,26 @@ class SimulationTests(unittest.TestCase):
             synthetic_ai('x' * 4097)
         with self.assertRaises(ValueError):
             SyntheticEmailSink().send('fixture@example.invalid', 'test', 'x' * 4097)
+
+
+class SyntheticExportTests(unittest.TestCase):
+    def sink(self):
+        from app.uat.simulation import SyntheticExportSink
+        return SyntheticExportSink({'environment':'uat','destination':'memory-sink-v1'})
+    def test_export_has_no_network_or_files_and_retains_no_rows(self):
+        rows=[{'symbol':'SYNTHETIC-INDEX','quantity':2}]
+        with patch('socket.socket',side_effect=AssertionError('network forbidden')), patch('builtins.open',side_effect=AssertionError('files forbidden')):
+            sink=self.sink();result=sink.export(rows)
+        self.assertFalse(result['delivered']);self.assertTrue(result['simulation'])
+        self.assertEqual(result['row_count'],1);self.assertEqual(vars(sink),{'count':1})
+    def test_real_destination_and_sensitive_or_real_rows_rejected(self):
+        from app.uat.simulation import SyntheticExportSink
+        for config in [{'environment':'production','destination':'memory-sink-v1'}, {'environment':'uat','destination':'https://example.invalid'}, {'environment':'uat','destination':'memory-sink-v1','path':'/tmp/out'}]:
+            with self.assertRaises(ValueError):SyntheticExportSink(config)
+        for rows in [[{'symbol':'REAL','quantity':1}], [{'symbol':'SYNTHETIC-INDEX','quantity':True}], [{'symbol':'SYNTHETIC-INDEX','quantity':1,'email':'fixture@example.invalid'}]]:
+            with self.assertRaises(ValueError):self.sink().export(rows)
+    def test_export_capacity_and_row_bounds(self):
+        sink=self.sink()
+        with self.assertRaises(ValueError):sink.export([{'symbol':'SYNTHETIC-INDEX','quantity':1}]*101)
+        for _ in range(1000):sink.export([])
+        with self.assertRaises(ValueError):sink.export([])

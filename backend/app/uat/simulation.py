@@ -67,3 +67,28 @@ class SyntheticEmailSink:
         self.count += 1
         # Do not retain or transmit message contents or recipient details.
         return {'simulation': True, 'delivered': False, 'sink_sequence': self.count}
+
+
+class SyntheticExportSink:
+    """Bounded test destination; never writes files, opens URLs or retains rows."""
+    def __init__(self, config):
+        if config != {'environment': 'uat', 'destination': 'memory-sink-v1'}:
+            raise ValueError('Only isolated test export destination is supported')
+        self.count = 0
+
+    def export(self, rows):
+        if not isinstance(rows, list) or len(rows) > 100:
+            raise ValueError('Synthetic export row bound')
+        # Exact fixture schema prevents accidental export of profiles or secrets.
+        for row in rows:
+            if (not isinstance(row, dict) or set(row) != {'symbol', 'quantity'}
+                    or row['symbol'] != 'SYNTHETIC-INDEX'
+                    or type(row['quantity']) is not int
+                    or not 0 <= row['quantity'] <= 100):
+                raise ValueError('Only synthetic portfolio rows are supported')
+        if self.count >= 1000:
+            raise ValueError('Synthetic export capacity reached')
+        self.count += 1
+        return {'simulation': True, 'delivered': False,
+                'destination': 'memory-sink-v1', 'row_count': len(rows),
+                'sink_sequence': self.count}

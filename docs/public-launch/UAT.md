@@ -257,3 +257,8 @@ compilation and a no-reference smoke execution with an empty environment. This
 does not install the plugin hook or provision runtime credentials. Before secret
 operations, verify the approved UAT target secret references, runtime installation
 and scoped resolver access. Follow [AWS secret-safety guidance](https://docs.aws.amazon.com/secretsmanager/latest/userguide/retrieving-secrets-ai-agents.html).
+
+
+## 18 October 2026 audit update
+
+Stage00 remains **BLOCKED**. The historical entries above are not a current deployment inventory. See [requirement-by-requirement audit](STAGE00_AUDIT_20261018.md) for later dedicated-host authorization, completed preparation, partial evidence and missing live gates. Existing-server co-location was not admitted; a dedicated test host does not satisfy that original requirement literally. Current59regression passes do not close private/fault/TLS/realGoogle acceptance. Stage01 remains unauthorized.
