@@ -8,6 +8,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+PRODUCTION_GOOGLE_CLIENT_ID = "833980592098-0vt4iu94cqokkv1nmp6oqh6evdgmg5sj.apps.googleusercontent.com"
+
 def read_env(path, private=True):
     if path.is_symlink():
         raise ValueError(f"Symlinked configuration rejected: {path.name}")
@@ -55,7 +57,7 @@ def validate(root):
     auth = frontend.get('NEXTAUTH_SECRET', '')
     if len(jwt) < 32 or len(auth) < 32 or jwt == auth:
         raise ValueError('Distinct independent signing configuration required')
-    if not backend.get('GOOGLE_SIGNIN_CLIENT_ID') or backend['GOOGLE_SIGNIN_CLIENT_ID'].startswith('833980592098-'):
+    if not backend.get('GOOGLE_SIGNIN_CLIENT_ID') or backend['GOOGLE_SIGNIN_CLIENT_ID'] == PRODUCTION_GOOGLE_CLIENT_ID:
         raise ValueError('Independent Google client required')
     if frontend.get('NEXTAUTH_URL') != 'https://uat2.cred-x.in' or frontend.get('BACKEND_API_URL') != 'http://backend:8000':
         raise ValueError('UAT2 frontend origins required')
