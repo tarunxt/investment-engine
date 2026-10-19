@@ -11,7 +11,7 @@ done
 python3 -c 'import sys; assert sys.version_info[:2] == (3,12)'
 /usr/bin/node -e 'if(process.versions.node.split(".")[0]!=="22")process.exit(1)'
 for account in credx-uat2-app credx-uat2-web credx-uat2-db credx-uat2-redis credx-uat2-certs credx-uat2-proxy; do
-  id "$account" >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$account"
+  id "$account" >/dev/null 2>&1 || useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$account"
 done
 install -d -m 0755 /opt/credx-uat2/releases /var/lib/credx-uat2 /etc/credx-uat2
 install -d -m 0700 -o credx-uat2-db -g credx-uat2-db /var/lib/credx-uat2/postgres
