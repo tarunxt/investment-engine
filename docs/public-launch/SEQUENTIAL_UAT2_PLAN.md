@@ -2,9 +2,9 @@
 
 ## Current authority and sequencing
 
-CURRENT_SPECIFICATION.md and synchronized complete stages/00–20 from Library libfile_8c0887a3e4f88191b24fba523ef6959e are controlling. The older pack and previous plan are preserved as history, not active prerequisites. Revised00 verifies existing UAT2 READY without restarting old UAT. Local/CI may proceed while readiness is pending; deployment requires READY and current valid authorization. UAT2 task owns live deployment; parent coordinates; owner reviews deployed01 before02. Preserve runtime/guards/code/migrations and all budget/shutdown limits. No production cutover, real integrations/orders or new security/resource work.
+CURRENT_SPECIFICATION.md and synchronized complete stages/00–20 from Library libfile_8c0887a3e4f88191b24fba523ef6959e are controlling. The older pack and previous plan are preserved as history, not active prerequisites. Revised 00 verifies existing UAT2 READY without restarting old UAT. Local/CI may proceed while readiness is pending; deployment requires READY and current valid authorization. UAT2 task owns live deployment; parent coordinates; owner reviews deployed Stage 01 before 02. Preserve runtime/guards/code/migrations and all budget/shutdown limits. No production cutover, real integrations/orders or new security/resource work.
 
-Only Stage01 reconciliation is active. Complete instruction files for02–20 are synchronized references, not started implementations. Inspect STAGE01_REQUIREMENT_MAP.md before inferring overlap; no duplicate ownership/module systems. Each later stage retains its original prerequisite. Stage20 prepares cutover only.
+Only Stage 01 reconciliation is active. Complete instruction files for02–20 are synchronized references, not started implementations. Inspect STAGE01_REQUIREMENT_MAP.md before inferring overlap; no duplicate ownership/module systems. Each later stage retains its original prerequisite. Stage20 prepares cutover only.
 
 ## Per-stage branch and acceptance plan
 
@@ -35,4 +35,4 @@ Only Stage01 reconciliation is active. Complete instruction files for02–20 are
 
 For each stage retain: source/spec reference and candidate/base SHAs; changed paths and migration order (or none); local test commands/results; exact-head CI links/conclusions; fake-vs-real integration boundary; localhost URL/PIDs and visible review steps; Linux artifact source/hash/audit/offline-install receipt; parent authorization and UAT2 deployment receipt; post-deploy owner/barrier/cookie/direct-API/stream/egress/empty-populated checks; rollback evidence; parent acceptance and pending external decisions. Source complete, locally verified, CI passed, artifact verified, UAT2 deployed, owner accepted and provider approved are separate fields. Never infer one from another.
 
-Current Stage01 ledger: source candidate prepared; local checks PASS; exact-head CI and Linux bundle pending; deployment NOT RUN; parent UAT2 acceptance PENDING; real providers NOT AUTHORIZED. Stage02–20 remain NOT STARTED. Parent advances the ledger only from evidence, without overlapping stages or changing approved access/budget limits.
+Current Stage 01 ledger: source candidate prepared; local checks PASS; exact-head CI and Linux bundle pending; deployment NOT RUN; parent UAT2 acceptance PENDING; real providers NOT AUTHORIZED. Stage 02–20 remain NOT STARTED. Parent advances the ledger only from evidence, without overlapping stages or changing approved access/budget limits.

@@ -7,12 +7,12 @@
   "rendered_lines_read": 888,
   "stage_count": 21,
   "html_modified": false,
-  "synchronization": "complete decoded stage pre blocks to active00–20; earlier01 exact copy and old00 reference preserved; ledgers archived",
+  "synchronization": "complete decoded stage pre blocks to active00\u201320; earlier01 exact copy and old00 reference preserved; ledgers archived",
   "scope": "complete instruction synchronization plus reviewed reset fix79acc235 and focused native regression; backend/frontend/migrations/preview/workflows and other guards unchanged",
   "pr1240_actual_head": "ddefd7306003dc8e4e662d3b88abe167da77f036",
   "pr1240_backend_frontend_changes": [],
-  "implementation_state": "baseline present;02/06–08 not implemented by1240; no inference from handoff caveat",
-  "local_environment": "Mac exec transport disconnected; no local new-candidate test or artifact transfer claimed",
+  "implementation_state": "baseline present;02/06\u201308 not implemented by1240; no inference from handoff caveat",
+  "local_environment": "Mac initially disconnected; resumed after explicit user confirmation. Clean worktree fast-forwarded to389a840a; native16 including mocked reset regression passed. No denied preview probes retried; no live reset/deployment.",
   "uat2_parent": "3497ff5cc6072ee3bb7ad3847d55d567f5702e58",
   "reset_fix": "79acc235da9f3ba7babb0b640c97442761b1da3f",
   "native_regression_state": "added; pending exact candidate CI; not locally run",
@@ -25,5 +25,6 @@
     "review": "reset uses serving model registry and release/backend cwd; same unprivileged identity; no broader guard/access change",
     "installed": false,
     "new_regression": "test_reset_uses_serving_model_registry_and_release_directory; pending new exact-candidate CI"
-  }
+  },
+  "controller_file_mode": "original100755 restored after GitHub content synchronization"
 }
