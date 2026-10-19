@@ -1,3 +1,4 @@
+import { uat2SessionCookieName } from "@/lib/authSessionCookie";
 import { createHash } from "node:crypto";
 
 import { getToken } from "@auth/core/jwt";
@@ -94,6 +95,7 @@ export async function createBackendSessionContext(
       req: request,
       secret: resolveNextAuthSecret(),
       secureCookie,
+      ...(uat2SessionCookieName() ? { cookieName: uat2SessionCookieName() } : {}),
     });
   } catch (error) {
     // Treat malformed, expired, or undecryptable Auth.js cookies as

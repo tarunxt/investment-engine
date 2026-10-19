@@ -1,4 +1,4 @@
-# Candidate topology. Application startup remains locked pending acceptance.
+# Dedicated UAT2 topology. Run only after approved resource/security gates.
 name: credx-uat2
 x-runtime: &runtime
   restart: unless-stopped
@@ -12,39 +12,57 @@ x-runtime: &runtime
 services:
   proxy:
     <<: *runtime
-    image: caddy:2.10.2-alpine
+    image: ${UAT2_PROXY_IMAGE:?supply immutable caddy image digest}
     ports: ['80:80', '443:443']
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - certificates:/data
       - proxy_config:/config
+    env_file: [{path: ./barrier.env, format: raw}]
     networks: [edge, private]
     mem_limit: 256m
   frontend:
     <<: *runtime
     image: ${UAT2_FRONTEND_IMAGE:?supply immutable frontend image digest}
-    env_file: [./frontend.env]
+    env_file: [{path: ./frontend.env, format: raw}]
     networks: [private]
     mem_limit: 1536m
   backend:
     <<: *runtime
     image: ${UAT2_BACKEND_IMAGE:?supply immutable backend image digest}
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
-    env_file: [./backend.env]
+    command: uvicorn app.uat2.main:app --host 0.0.0.0 --port 8000 --workers 1
+    env_file: [{path: ./backend.env, format: raw}]
     environment:
       CREDX_UAT2: '1'
       ENVIRONMENT: uat2
       AUTH_DISABLED: 'false'
+      UAT2_SOURCE_COMMIT: ${UAT2_SOURCE_COMMIT:?required source commit}
     networks: [private]
     volumes: [artifacts:/backend/data]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
     mem_limit: 1536m
+  google-certs:
+    <<: *runtime
+    image: ${UAT2_CERTS_IMAGE:?supply immutable nginx image digest}
+    volumes: [./google-certs.conf:/etc/nginx/conf.d/default.conf:ro]
+    tmpfs: [/tmp, /var/cache/nginx, /var/run]
+    networks: [edge, private]
+    mem_limit: 128m
+  simulation-worker:
+    <<: *runtime
+    image: ${UAT2_BACKEND_IMAGE:?supply immutable backend image digest}
+    command: celery -A app.uat2.worker worker -Q uat2_simulation --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=25 --loglevel=warning
+    env_file: [{path: ./backend.env, format: raw}]
+    environment: {CREDX_UAT2: '1', ENVIRONMENT: uat2, AUTH_DISABLED: 'false'}
+    networks: [private]
+    volumes: [artifacts:/backend/data]
+    mem_limit: 512m
   postgres:
     <<: *runtime
-    image: postgres:16.13-bookworm
-    env_file: [./database.env]
+    image: ${UAT2_POSTGRES_IMAGE:?supply immutable postgres16 image digest}
+    env_file: [{path: ./database.env, format: raw}]
     volumes: [postgres:/var/lib/postgresql/data]
     tmpfs: [/tmp, /var/run/postgresql]
     networks: [private]
@@ -56,7 +74,7 @@ services:
     mem_limit: 768m
   redis:
     <<: *runtime
-    image: redis:7.4.8-alpine
+    image: ${UAT2_REDIS_IMAGE:?supply immutable redis7 image digest}
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
     volumes: [redis:/data]
     networks: [private]

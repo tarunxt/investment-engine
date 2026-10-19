@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Operates only the local dedicated project. Does not provision or call AWS.
+set -euo pipefail
+umask 077
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+compose() { docker compose --project-name credx-uat2 --env-file .env -f compose.yaml "$@"; }
+validate() { python3 "$ROOT/validate.py" "$ROOT"; compose config --quiet; }
+wait_backend() {
+  for attempt in {1..30}; do
+    if compose exec -T backend python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2)' >/dev/null 2>&1; then return; fi
+    sleep 2
+  done
+  echo 'Backend readiness failed after bounded retries' >&2; return 1
+}
+backup() {
+  mkdir -p backups
+  local target="backups/uat2-$(date -u +%Y%m%dT%H%M%SZ).dump"
+  compose exec -T postgres pg_dump -U credx_uat2 -d credx_uat2 -Fc > "$target"
+  test -s "$target"
+  echo "$target"
+}
+case "${1:-help}" in
+  validate) validate ;;
+  deploy|start)
+    validate
+    compose pull
+    while IFS= read -r image; do
+      revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")"
+      source_commit="$(python3 -c 'from validate import validate; from pathlib import Path; print(validate(Path("."))["UAT2_SOURCE_COMMIT"])')"
+      test "$revision" = "$source_commit" || { echo 'Application image source revision mismatch' >&2; exit 1; }
+    done < <(python3 -c 'from validate import validate; from pathlib import Path; c=validate(Path(".")); print(c["UAT2_BACKEND_IMAGE"]); print(c["UAT2_FRONTEND_IMAGE"])')
+    compose up -d --wait --wait-timeout 90 postgres redis google-certs
+    backup
+    # This is the UAT2-only migration container, never host Alembic.
+    compose run --rm --no-deps backend alembic upgrade head
+    compose up -d backend simulation-worker frontend proxy
+    wait_backend
+    for attempt in {1..30}; do
+      if compose exec -T frontend node -e 'fetch("http://127.0.0.1:3000/login", {signal: AbortSignal.timeout(2000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))' >/dev/null 2>&1; then break; fi
+      if [[ "$attempt" == 30 ]]; then echo 'Frontend readiness failed after bounded retries' >&2; exit 1; fi
+      sleep 2
+    done
+    python3 -c 'from validate import validate; from pathlib import Path; print("UAT2 running source " + validate(Path("."))["UAT2_SOURCE_COMMIT"])'
+    ;;
+  status)
+    validate
+    compose ps
+    compose exec -T backend python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8000/health",timeout=3).read().decode())'
+    ;;
+  stop)
+    validate
+    compose stop --timeout 30
+    echo 'UAT2 application stopped; EC2/storage/IPv4 billing is NOT stopped by this command.'
+    ;;
+  backup) validate; backup ;;
+  restore)
+    validate
+    test "$#" -eq 2 && test -f "$2" && test ! -L "$2"
+    case "$2" in backups/uat2-*.dump) ;; *) echo 'Use a local UAT2 backup path' >&2; exit 1;; esac
+    compose stop backend simulation-worker frontend proxy
+    # Restore UAT2 schema and data together. Keep app stopped if restore fails.
+    compose exec -T postgres pg_restore -U credx_uat2 -d credx_uat2 --clean --if-exists --exit-on-error < "$2"
+    echo 'Database restored. Select the matching prior immutable .env images/commit, then run start.'
+    ;;
+  reset)
+    validate
+    case "${2:-}" in empty|populated) ;; *) echo 'reset requires empty or populated' >&2; exit 1;; esac
+    # This changes only synthetic fixture rows. Existing user/profile is retained.
+    compose exec -T backend python -m app.uat2.reset "$2"
+    echo 'US synthetic fixture reset. Set UAT2_FIXTURE_STATE consistently and restart backend for India fixture state.'
+    ;;
+  *) echo 'Usage: uat2ctl validate|deploy|start|status|stop|backup|restore backups/uat2-TIMESTAMP.dump|reset empty|populated' ;;
+esac

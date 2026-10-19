@@ -53,3 +53,15 @@ export function resolveSessionCookieSecurity(input: {
 
   return input.requestProtocol === "https:";
 }
+
+// A distinct host-only family must also be selected by every BFF decoder.
+export function uat2SessionCookieName() {
+  return process.env.CREDX_UAT2 === "1" ? "__Host-credx-uat2.session-token" : undefined;
+}
+
+export function requireUat2AuthSecret(configuredSecret: string | undefined) {
+  if (process.env.CREDX_UAT2 === "1" && (!configuredSecret || configuredSecret.length < 32)) {
+    throw new Error("Independent UAT2 Auth.js signing key is required");
+  }
+  return configuredSecret;
+}

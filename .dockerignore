@@ -48,3 +48,11 @@ docker-compose*.yml
 *.log
 .env.prod
 .env.prod.example
+
+# UAT2 local tooling and resolved deployment material must never enter build context.
+.venv
+**/backend.env
+**/frontend.env
+**/database.env
+**/barrier.env
+**/backups

@@ -58,6 +58,10 @@ async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(
     client_id = await google_signin_client_id(db)
     email = await run_in_threadpool(verify_google_identity, request.credential, client_id)
     user = await resolve_google_user(db, email)
+    from app.core.uat2 import uat2_mode
+    if uat2_mode():
+        from app.uat2.fixtures import seed_portfolio
+        await seed_portfolio(db, user.id)
     user.last_login = datetime.utcnow()
     db.add(ActivityLog(user_id=user.id, action="login", details="User logged in with Google"))
     await db.commit()

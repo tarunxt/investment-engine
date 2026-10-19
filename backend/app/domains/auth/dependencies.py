@@ -72,6 +72,8 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        if uat2_mode() and payload.get("type") == "refresh":
+            raise HTTPException(401, "Access token required")
         sub = payload.get("sub")
         if not sub:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")

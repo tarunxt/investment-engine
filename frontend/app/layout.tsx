@@ -32,6 +32,12 @@ export default function RootLayout({
             __html: `(function(){try{var theme=window.localStorage.getItem("investment-engine:theme-preference")||window.localStorage.getItem("investor:theme-preference")||"light";var isDark=theme==="dark"||(theme==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",isDark);document.documentElement.style.colorScheme=isDark?"dark":"light";}catch(e){}})();`,
           }}
         />
+        {process.env.NEXT_PUBLIC_UAT2 === "true" && (
+          <aside className="border-b border-amber-400 bg-amber-50 px-4 py-1 text-xs text-amber-950">
+            <a href="/console/uat2" className="underline">UAT2 / SIMULATION</a>
+            {" · Synthetic data · Build "}{process.env.NEXT_PUBLIC_UAT2_COMMIT?.slice(0, 12) || "unbuilt"}
+          </aside>
+        )}
         {children}
       </body>
     </html>

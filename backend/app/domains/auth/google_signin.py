@@ -27,11 +27,24 @@ DEFAULT_GOOGLE_SIGNIN_CLIENT_ID = (
 
 async def google_signin_client_id(db: AsyncSession) -> str | None:
     # Retain the route-facing signature; identity configuration needs no DB read.
-    return os.getenv("GOOGLE_SIGNIN_CLIENT_ID", "").strip() or DEFAULT_GOOGLE_SIGNIN_CLIENT_ID
+    from app.core.uat2 import uat2_mode
+    configured = os.getenv("GOOGLE_SIGNIN_CLIENT_ID", "").strip()
+    if uat2_mode():
+        return configured if configured and configured != DEFAULT_GOOGLE_SIGNIN_CLIENT_ID else None
+    return configured or DEFAULT_GOOGLE_SIGNIN_CLIENT_ID
 
 
 class _BoundedGoogleRequest(Request):
     def __call__(self, *args, **kwargs):
+        from app.core.uat2 import uat2_mode
+        if uat2_mode():
+            url = kwargs.get("url", args[0] if args else "")
+            if url != "https://www.googleapis.com/oauth2/v1/certs":
+                raise ValueError("UAT2 only permits Google identity certificate retrieval")
+            if args:
+                args = ("http://google-certs:8080/certs", *args[1:])
+            else:
+                kwargs["url"] = "http://google-certs:8080/certs"
         kwargs["timeout"] = 5
         return super().__call__(*args, **kwargs)
 
