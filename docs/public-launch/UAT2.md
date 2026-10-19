@@ -1,25 +1,15 @@
 # CredX UAT2
 
-**UAT2 PREVIEW ONLY — genuine owner login verified; remaining checks pending.**
-URL: https://uat2.cred-x.in. Native systemd on one fresh dedicated server.
-This is not production deployment or an old Stage00 pass.
-
-Owner dashboard, preferences, populated synthetic US portfolio and actual secure
-host-only cookie metadata were verified. The reset-controller fix79acc235da9f3ba7babb0b640c97442761b1da3f
-is prepared but not installed: Mac execution/browser transport disconnected before
-its transfer process started. See UAT2_ACCEPTANCE.md for exact preserved evidence.
-Application/controller below remain the actually deployed revisions.
-
-## Source and provenance
+**UAT2 READY — 19 October 2026.** URL: https://uat2.cred-x.in.
+One dedicated native systemd server; owner-only, synthetic operations. Production unchanged.
 
 Branch `codex/uat2-owner-only-20261019`; draft PR #1239.
-Application/frontend bundle: `4a8e81ab16c0c141d1f84656afdf548b659de496`.
-Deployment controller: `c72d41ad2bce465e5f3f5cdbae43693935c38eb3`.
-The controller fixes Chrony detection, nginx runtime paths and sanitized-PATH
-administration. Its tree matches local `f3ac5c94d8158be356560763e4571abbcaada98f`.
-Application code remains the earlier fully CI-verified bundle. New controller CI
-passed for c72d41a; refreshed combined bundle acceptance remains pending. Do not present
-an older green CI run as verification of a newer head.
+Application and controller: `8f2d24e5aa348a86aa694bed592b5b6dc951427b`.
+Exact artifact and acceptance evidence are in UAT2_ACCEPTANCE.md.
+
+Sign in through the approved outer access barrier, then the independent UAT2 Google login as tarun.singh6893@gmail.com. The owner has completed genuine login. Review Dashboard, Profile/Preferences, India and US Portfolio, and UAT2 diagnostics. Only synthetic holdings/orders, deterministic AI, email sink and local exports are available. Real broker credentials must remain absent. Stage01 module controls are pending integration.
+
+## Source and provenance
 
 Preserved baseline main `0c6e61e524c7a87c7b9ea79342f17b14a45e97a1` (#1236)
 and ancestor `385f618` (#1235). Stage01 is not integrated. Coordinate its exact
