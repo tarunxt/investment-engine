@@ -7,7 +7,7 @@ import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -28,6 +28,10 @@ socket.create_connection = denied
 from app.domains.auth.models import User, UserProfile, UserRole, ActivityLog, UserSession, APIKey
 from app.domains.jobs.models import Job  # register ORM relationships
 from app.domains.prompts.models import Prompt
+from app.domains.runs.models import Run, RunJob
+from app.domains.jobs.router import router as jobs_router
+from app.domains.runs.router import router as runs_router
+from app.shared.types import JobStatus
 from app.domains.auth.router import router
 from app.core.security import PasswordUtils
 from app.infrastructure.database.session import async_engine, AsyncSessionLocal
@@ -37,7 +41,8 @@ from app.infrastructure.database.session import async_engine, AsyncSessionLocal
 async def lifespan(app):
     async with async_engine.begin() as connection:
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
-                      UserSession.__table__, APIKey.__table__):
+                      UserSession.__table__, APIKey.__table__, Prompt.__table__,
+                      Job.__table__, Run.__table__, RunJob.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -50,6 +55,19 @@ async def lifespan(app):
                             is_verified=True, password_hash=PasswordUtils.hash_password("SyntheticPreview123!"))
                 user.profile = UserProfile(bio=f"Synthetic preview: {name}", timezone="UTC")
                 db.add(user)
+        await db.flush()
+        users = (await db.execute(select(User).where(User.username.in_(['usera', 'userb', 'admin'])))).scalars().all()
+        for user in users:
+            existing_job = await db.scalar(select(Job.id).where(Job.user_id == user.id).limit(1))
+            if existing_job is None:
+                job = Job(user_id=user.id, prompt=f'Stage02 private synthetic job: {user.username}',
+                          provider='synthetic', model='offline', status=JobStatus.COMPLETED,
+                          response=f'Private synthetic response for {user.username}', tokens_in=0, tokens_out=0)
+                run = Run(user_id=user.id, prompt=job.prompt, prompt_preview=job.prompt,
+                          status=JobStatus.COMPLETED, auto_export_enabled=False, export_status='disabled')
+                db.add_all([job, run])
+                await db.flush()
+                db.add(RunJob(run_id=run.id, job_id=job.id))
         await db.commit()
     yield
     await async_engine.dispose()
@@ -69,7 +87,10 @@ async def synthetic_boundary(request: Request, call_next):
         return JSONResponse({"enabled": False, "client_id": None, "synthetic_preview": True})
     if request.url.path == "/preview-health":
         return JSONResponse({"synthetic": True, "database": "isolated SQLite", "outbound_network": "denied"})
-    if request.method != "OPTIONS" and (request.method, request.url.path) not in ALLOWED:
+    private_read = request.method == "GET" and (request.url.path in {"/jobs", "/runs"} or
+                   any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
+                       for prefix in ("/jobs/", "/runs/")))
+    if request.method != "OPTIONS" and not private_read and (request.method, request.url.path) not in ALLOWED:
         return JSONResponse({"detail": "Unavailable in synthetic Stage01 preview; no external actions are permitted"}, status_code=503)
     response = await call_next(request)
     response.headers["X-Stage01-Synthetic-Preview"] = "true"
@@ -77,3 +98,8 @@ async def synthetic_boundary(request: Request, call_next):
 
 
 app.include_router(router)
+
+for private_router in (jobs_router, runs_router):
+    for route in private_router.routes:
+        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
+            app.include_router(APIRouter(routes=[route]))

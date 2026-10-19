@@ -5,6 +5,8 @@ import logging
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.shared.types import JobId
+from app.domains.runs.repository import PostgresRunRepository
+from app.infrastructure.database.session import AsyncSessionLocal
 from app.shared.ws_relay import relay_channel, user_id_from_ws_token
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,11 @@ async def ws_run_detail(websocket: WebSocket, run_id: JobId, token: str | None =
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
+    async with AsyncSessionLocal() as db:
+        run = await PostgresRunRepository(db).get(run_id, user_id=user_id)
+        if run is None:
+            await websocket.close(code=4004, reason="Run not found")
+            return
     await websocket.accept()
     logger.info("WS /ws/runs/%d connected user_id=%s", run_id, user_id)
     try:

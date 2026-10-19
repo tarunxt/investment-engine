@@ -1126,7 +1126,7 @@ def _mark_failed(
 ) -> None:
     try:
         db.rollback()
-        job = repo.get(job_id)
+        job = repo.get_for_worker(job_id)
         if job:
             if job.status == JobStatus.FAILED and "cancelled" in (job.error_message or "").lower():
                 logger.info("Preserving cancellation for job %s", job_id)
@@ -1168,8 +1168,8 @@ def _update_job_status(repo, job, status, **kwargs) -> None:
 
 
 def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
-    get_fresh = getattr(repo, "get_fresh", None)
-    latest = get_fresh(job_id) if callable(get_fresh) else repo.get(job_id)
+    get_fresh = getattr(repo, "get_fresh_for_worker", None)
+    latest = get_fresh(job_id) if callable(get_fresh) else repo.get_for_worker(job_id)
     return bool(
         latest
         and latest.status == JobStatus.FAILED
@@ -1190,7 +1190,7 @@ def execute_ai_job(self, job_id: int) -> None:
     if recovery_mode():
         # Validate before task registration, status writes, or provider work.
         with SyncSessionLocal() as recovery_db:
-            recovery_job = SyncJobRepository(recovery_db).get(job_id)
+            recovery_job = SyncJobRepository(recovery_db).get_for_worker(job_id)
             require_equity_analysis(
                 getattr(recovery_job, "auto_rebalance_portfolio", None),
                 getattr(recovery_job, "request_context_json", None),
@@ -1234,7 +1234,7 @@ def execute_ai_job(self, job_id: int) -> None:
     try:
         if self.request.id:
             register_job_task_sync(job_id, self.request.id)
-        job = repo.get(job_id)
+        job = repo.get_for_worker(job_id)
         if not job:
             logger.warning("Job %s not found", job_id)
             return

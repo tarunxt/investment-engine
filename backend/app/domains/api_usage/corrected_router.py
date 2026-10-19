@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.api_usage.router import (
@@ -228,8 +228,9 @@ async def _load_usage_rows(
                     RunJob.stage,
                 )
                 .select_from(Job)
-                .outerjoin(RunJob, RunJob.job_id == Job.id)
-                .outerjoin(Run, Run.id == RunJob.run_id)
+                .outerjoin(RunJob, and_(RunJob.job_id == Job.id,
+                RunJob.run_id.in_(select(Run.id).where(Run.user_id == user_id).correlate(None))))
+                .outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == user_id))
                 .where(
                     Job.user_id == user_id,
                     Job.created_at >= start_utc,
@@ -396,9 +397,10 @@ async def _load_provider_call_rows(
                 RunJob.stage,
             )
             .select_from(LlmProviderUsageCallRecord)
-            .outerjoin(Job, Job.id == LlmProviderUsageCallRecord.job_id)
-            .outerjoin(RunJob, RunJob.job_id == Job.id)
-            .outerjoin(Run, Run.id == RunJob.run_id)
+            .outerjoin(Job, and_(Job.id == LlmProviderUsageCallRecord.job_id, Job.user_id == user_id))
+            .outerjoin(RunJob, and_(RunJob.job_id == Job.id,
+                RunJob.run_id.in_(select(Run.id).where(Run.user_id == user_id).correlate(None))))
+            .outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == user_id))
             .where(
                 LlmProviderUsageCallRecord.user_id == user_id,
                 LlmProviderUsageCallRecord.occurred_at >= start_aware,

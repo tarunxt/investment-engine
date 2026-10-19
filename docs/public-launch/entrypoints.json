@@ -99,7 +99,7 @@
       "registration": "unmounted",
       "route": "/api-usage/summary",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/corrected_router.py:1039"
+      "source": "backend/app/domains/api_usage/corrected_router.py:1041"
     },
     {
       "calls": [
@@ -140,7 +140,7 @@
       "registration": "unmounted",
       "route": "/api-usage/llms/breakdown",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/corrected_router.py:1079"
+      "source": "backend/app/domains/api_usage/corrected_router.py:1081"
     },
     {
       "calls": [
@@ -185,7 +185,7 @@
       "registration": "unmounted",
       "route": "/api-usage/llms/cost-history",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/corrected_router.py:1134"
+      "source": "backend/app/domains/api_usage/corrected_router.py:1136"
     },
     {
       "calls": [
@@ -311,18 +311,20 @@
     },
     {
       "calls": [
-        "(await db.execute(select(Job, RunJob, Run).outerjoin(RunJob, RunJob.job_id == Job.id).outerjoin(Run, Run.id == RunJob.run_id).where(Job.user_id == current_user.id).order_by(Job.created_at.desc(), Job.id.desc()).limit(limit))).all",
+        "(await db.execute(select(Job, RunJob, Run).select_from(Job).outerjoin(RunJob, and_(RunJob.job_id == Job.id, RunJob.run_id.in_(select(Run.id).where(Run.user_id == current_user.id).correlate(None)))).outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == current_user.id)).where(Job.user_id == current_user.id).order_by(Job.created_at.desc(), Job.id.desc()).limit(limit))).all",
         "Depends",
         "Job.created_at.desc",
         "Job.id.desc",
         "LlmPerformanceResponse",
         "LlmScanPerformanceItem",
         "Query",
+        "RunJob.run_id.in_",
         "ZoneInfo",
         "_build_llm_group",
         "_duration_ms",
         "_scan_type_for_job",
         "_sheet_export_passed",
+        "and_",
         "datetime.now",
         "db.execute",
         "hasattr",
@@ -332,11 +334,14 @@
         "scans_by_llm.setdefault",
         "scans_by_llm.setdefault((job.provider, job.model), []).append",
         "select",
-        "select(Job, RunJob, Run).outerjoin",
-        "select(Job, RunJob, Run).outerjoin(RunJob, RunJob.job_id == Job.id).outerjoin",
-        "select(Job, RunJob, Run).outerjoin(RunJob, RunJob.job_id == Job.id).outerjoin(Run, Run.id == RunJob.run_id).where",
-        "select(Job, RunJob, Run).outerjoin(RunJob, RunJob.job_id == Job.id).outerjoin(Run, Run.id == RunJob.run_id).where(Job.user_id == current_user.id).order_by",
-        "select(Job, RunJob, Run).outerjoin(RunJob, RunJob.job_id == Job.id).outerjoin(Run, Run.id == RunJob.run_id).where(Job.user_id == current_user.id).order_by(Job.created_at.desc(), Job.id.desc()).limit",
+        "select(Job, RunJob, Run).select_from",
+        "select(Job, RunJob, Run).select_from(Job).outerjoin",
+        "select(Job, RunJob, Run).select_from(Job).outerjoin(RunJob, and_(RunJob.job_id == Job.id, RunJob.run_id.in_(select(Run.id).where(Run.user_id == current_user.id).correlate(None)))).outerjoin",
+        "select(Job, RunJob, Run).select_from(Job).outerjoin(RunJob, and_(RunJob.job_id == Job.id, RunJob.run_id.in_(select(Run.id).where(Run.user_id == current_user.id).correlate(None)))).outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == current_user.id)).where",
+        "select(Job, RunJob, Run).select_from(Job).outerjoin(RunJob, and_(RunJob.job_id == Job.id, RunJob.run_id.in_(select(Run.id).where(Run.user_id == current_user.id).correlate(None)))).outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == current_user.id)).where(Job.user_id == current_user.id).order_by",
+        "select(Job, RunJob, Run).select_from(Job).outerjoin(RunJob, and_(RunJob.job_id == Job.id, RunJob.run_id.in_(select(Run.id).where(Run.user_id == current_user.id).correlate(None)))).outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == current_user.id)).where(Job.user_id == current_user.id).order_by(Job.created_at.desc(), Job.id.desc()).limit",
+        "select(Run.id).where",
+        "select(Run.id).where(Run.user_id == current_user.id).correlate",
         "sorted",
         "status.lower",
         "str",
@@ -2610,7 +2615,7 @@
       "registration": "mounted",
       "route": "/google-sheets/auth-url",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:112"
+      "source": "backend/app/domains/google_sheets/router.py:113"
     },
     {
       "calls": [
@@ -2642,7 +2647,7 @@
       "registration": "mounted",
       "route": "/google-sheets/exchange-code",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:127"
+      "source": "backend/app/domains/google_sheets/router.py:128"
     },
     {
       "calls": [
@@ -2670,7 +2675,7 @@
       "registration": "mounted",
       "route": "/google-sheets/admin-config",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:189"
+      "source": "backend/app/domains/google_sheets/router.py:190"
     },
     {
       "calls": [
@@ -2708,7 +2713,7 @@
       "registration": "mounted",
       "route": "/google-sheets/admin-config",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:208"
+      "source": "backend/app/domains/google_sheets/router.py:209"
     },
     {
       "calls": [
@@ -2744,7 +2749,7 @@
       "registration": "mounted",
       "route": "/google-sheets/status",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:261"
+      "source": "backend/app/domains/google_sheets/router.py:262"
     },
     {
       "calls": [
@@ -2771,7 +2776,7 @@
       "registration": "mounted",
       "route": "/google-sheets/disconnect",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:334"
+      "source": "backend/app/domains/google_sheets/router.py:335"
     },
     {
       "calls": [
@@ -2803,7 +2808,7 @@
       "registration": "mounted",
       "route": "/google-sheets/default-sheet",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:347"
+      "source": "backend/app/domains/google_sheets/router.py:348"
     },
     {
       "calls": [
@@ -2811,10 +2816,13 @@
         "GoogleSheetsCredentialRepository",
         "GoogleSheetsExportResponse",
         "HTTPException",
+        "db.scalar",
         "export_job_to_sheets_task.delay",
         "logger.info",
         "repo.get_by_user",
-        "router.post"
+        "router.post",
+        "select",
+        "select(Job.id).where"
       ],
       "capability": "export_job",
       "classification": "owner-private",
@@ -2831,7 +2839,7 @@
       "registration": "",
       "route": "",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:389"
+      "source": "backend/app/domains/google_sheets/router.py:390"
     },
     {
       "calls": [
@@ -2839,10 +2847,13 @@
         "GoogleSheetsCredentialRepository",
         "GoogleSheetsExportResponse",
         "HTTPException",
+        "db.scalar",
         "export_job_to_sheets_task.delay",
         "logger.info",
         "repo.get_by_user",
-        "router.post"
+        "router.post",
+        "select",
+        "select(Job.id).where"
       ],
       "capability": "export_job",
       "classification": "owner-private",
@@ -2860,7 +2871,7 @@
       "registration": "mounted",
       "route": "/google-sheets/export/job",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:389"
+      "source": "backend/app/domains/google_sheets/router.py:390"
     },
     {
       "calls": [
@@ -2868,10 +2879,13 @@
         "GoogleSheetsCredentialRepository",
         "GoogleSheetsExportResponse",
         "HTTPException",
+        "db.scalar",
         "export_run_to_sheets_task.delay",
         "logger.info",
         "repo.get_by_user",
-        "router.post"
+        "router.post",
+        "select",
+        "select(Run.id).where"
       ],
       "capability": "export_run",
       "classification": "owner-private",
@@ -2888,7 +2902,7 @@
       "registration": "",
       "route": "",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:433"
+      "source": "backend/app/domains/google_sheets/router.py:440"
     },
     {
       "calls": [
@@ -2896,10 +2910,13 @@
         "GoogleSheetsCredentialRepository",
         "GoogleSheetsExportResponse",
         "HTTPException",
+        "db.scalar",
         "export_run_to_sheets_task.delay",
         "logger.info",
         "repo.get_by_user",
-        "router.post"
+        "router.post",
+        "select",
+        "select(Run.id).where"
       ],
       "capability": "export_run",
       "classification": "owner-private",
@@ -2917,7 +2934,7 @@
       "registration": "mounted",
       "route": "/google-sheets/export/run",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:433"
+      "source": "backend/app/domains/google_sheets/router.py:440"
     },
     {
       "calls": [
@@ -2946,7 +2963,7 @@
       "registration": "mounted",
       "route": "/google-sheets/import",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/router.py:477"
+      "source": "backend/app/domains/google_sheets/router.py:490"
     },
     {
       "calls": [
@@ -3158,8 +3175,8 @@
         "datetime.now",
         "db.execute",
         "db.execute(select(GoogleSheetsCredential).where(GoogleSheetsCredential.user_id == user_id)).scalar_one_or_none",
-        "db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none",
         "db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id)).scalar_one_or_none",
+        "db.execute(select(Run).where(Run.id == run_id, Run.user_id == user_id)).scalar_one_or_none",
         "decrypt_token",
         "format_sheet_title",
         "format_stocks_for_sheet",
@@ -3169,11 +3186,11 @@
         "len",
         "logger.exception",
         "logger.info",
-        "run_repo.get",
         "run_repo.update_export_state",
         "select",
         "select(GoogleSheetsCredential).where",
         "select(Job).where",
+        "select(Run).where",
         "self.retry"
       ],
       "capability": "export_job_to_sheets_task",
@@ -3218,8 +3235,8 @@
         "datetime.now",
         "db.execute",
         "db.execute(select(GoogleSheetsCredential).where(GoogleSheetsCredential.user_id == user_id)).scalar_one_or_none",
-        "db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none",
         "db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id)).scalar_one_or_none",
+        "db.execute(select(Run).where(Run.id == run_id, Run.user_id == user_id)).scalar_one_or_none",
         "decrypt_token",
         "format_sheet_title",
         "format_stocks_for_sheet",
@@ -3229,11 +3246,11 @@
         "len",
         "logger.exception",
         "logger.info",
-        "run_repo.get",
         "run_repo.update_export_state",
         "select",
         "select(GoogleSheetsCredential).where",
         "select(Job).where",
+        "select(Run).where",
         "self.retry"
       ],
       "capability": "export_job_to_sheets_task",
@@ -3290,7 +3307,6 @@
         "output_sections.append",
         "rows.extend",
         "run.created_at.astimezone",
-        "run_repo.get",
         "run_repo.update_export_state",
         "select",
         "select(GoogleSheetsCredential).where",
@@ -3354,7 +3370,6 @@
         "output_sections.append",
         "rows.extend",
         "run.created_at.astimezone",
-        "run_repo.get",
         "run_repo.update_export_state",
         "select",
         "select(GoogleSheetsCredential).where",
@@ -3430,7 +3445,7 @@
       "registration": "",
       "route": "",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/tasks.py:605"
+      "source": "backend/app/domains/google_sheets/tasks.py:607"
     },
     {
       "calls": [
@@ -3462,7 +3477,7 @@
       "registration": "celery.task(bind=True, max_retries=3, soft_time_limit=120, time_limit=180)",
       "route": "",
       "side_effects": "Google OAuth and external spreadsheet writes",
-      "source": "backend/app/domains/google_sheets/tasks.py:605"
+      "source": "backend/app/domains/google_sheets/tasks.py:607"
     },
     {
       "calls": [
@@ -3979,7 +3994,7 @@
       "registration": "",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/repository.py:195"
+      "source": "backend/app/domains/jobs/repository.py:201"
     },
     {
       "calls": [
@@ -4003,6 +4018,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(get_current_user)]",
         "router.post('/{job_id}/cancel', response_model=JobResponse)"
       ],
       "owner_source": [
@@ -4011,7 +4027,7 @@
       "registration": "mounted",
       "route": "/jobs/{job_id}/cancel",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/router.py:108"
+      "source": "backend/app/domains/jobs/router.py:111"
     },
     {
       "calls": [
@@ -4039,6 +4055,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(get_current_user)]",
         "router.post('', response_model=JobResponse)"
       ],
       "owner_source": [
@@ -4068,10 +4085,12 @@
       "module": "jobs",
       "observed_guards": [
         "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "[Depends(get_current_user)]",
         "router.get('')"
       ],
       "owner_source": [
-        "not established in local function; inspect callers/repository"
+        "current_user.id"
       ],
       "registration": "mounted",
       "route": "/jobs",
@@ -4094,15 +4113,17 @@
       "module": "jobs",
       "observed_guards": [
         "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "[Depends(get_current_user)]",
         "router.get('/{job_id}', response_model=JobResponse)"
       ],
       "owner_source": [
-        "not established in local function; inspect callers/repository"
+        "current_user.id"
       ],
       "registration": "mounted",
       "route": "/jobs/{job_id}",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/router.py:96"
+      "source": "backend/app/domains/jobs/router.py:98"
     },
     {
       "calls": [
@@ -4113,7 +4134,7 @@
         "ProviderFactory.create",
         "RuntimeError",
         "SyncJobRepository",
-        "SyncJobRepository(recovery_db).get",
+        "SyncJobRepository(recovery_db).get_for_worker",
         "SyncSessionLocal",
         "WorkerLogHelper.log_task_complete",
         "WorkerLogHelper.log_task_error",
@@ -4180,7 +4201,7 @@
         "rebalance_table_issue.startswith",
         "recovery_mode",
         "register_job_task_sync",
-        "repo.get",
+        "repo.get_for_worker",
         "repo.update_status",
         "request_context_json.get",
         "require_equity_analysis",
@@ -4206,7 +4227,7 @@
       "method": "",
       "module": "jobs",
       "observed_guards": [
-        "SyncJobRepository(recovery_db).get",
+        "SyncJobRepository(recovery_db).get_for_worker",
         "_requires_generic_table_output",
         "_requires_stock_recommendation_output",
         "recovery_mode",
@@ -8512,7 +8533,7 @@
       "registration": "",
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/repository.py:167"
+      "source": "backend/app/domains/runs/repository.py:170"
     },
     {
       "calls": [
@@ -9064,10 +9085,13 @@
       "registration": "mounted",
       "route": "/ws/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/ws_router.py:16"
+      "source": "backend/app/domains/runs/ws_router.py:18"
     },
     {
       "calls": [
+        "AsyncSessionLocal",
+        "PostgresRunRepository",
+        "PostgresRunRepository(db).get",
         "Query",
         "logger.error",
         "logger.info",
@@ -9092,7 +9116,7 @@
       "registration": "mounted",
       "route": "/ws/runs/{run_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/ws_router.py:36"
+      "source": "backend/app/domains/runs/ws_router.py:38"
     },
     {
       "calls": [
@@ -11493,7 +11517,7 @@
       "registration": "asynccontextmanager",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:14"
+      "source": "backend/app/uat2/main.py:17"
     },
     {
       "calls": [
@@ -11513,7 +11537,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:31"
+      "source": "backend/app/uat2/main.py:46"
     },
     {
       "calls": [
@@ -11534,7 +11558,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:36"
+      "source": "backend/app/uat2/main.py:51"
     },
     {
       "calls": [
@@ -11555,7 +11579,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:36"
+      "source": "backend/app/uat2/main.py:51"
     },
     {
       "calls": [
@@ -11576,7 +11600,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:36"
+      "source": "backend/app/uat2/main.py:51"
     },
     {
       "calls": [
@@ -11597,7 +11621,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:36"
+      "source": "backend/app/uat2/main.py:51"
     },
     {
       "calls": [
@@ -11618,7 +11642,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:36"
+      "source": "backend/app/uat2/main.py:51"
     },
     {
       "calls": [
@@ -11639,7 +11663,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:36"
+      "source": "backend/app/uat2/main.py:51"
     },
     {
       "calls": [
@@ -11660,7 +11684,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:42"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -13626,12 +13650,12 @@
     "backend/app/domains/ai_providers/tools/web_search.py": "52484bfe88c6629cb3463a978d11d9159f5ef1d385f55dbcd437f35a0a3448c7",
     "backend/app/domains/ai_providers/web_metadata.py": "9f7b547d471c0df964ada372dec4da6e6c01c34d152f4bffc58f0d9f5fd36ba0",
     "backend/app/domains/api_usage/__init__.py": "b15a9801c8a2f57f82dc9c76f4ef51e1119e9d97a2166647eb0e0efe1f95b13b",
-    "backend/app/domains/api_usage/corrected_router.py": "b4b68fb81ae5347e163ed0ad315bbec879abdc3de7db68168ec3b7f07537869b",
+    "backend/app/domains/api_usage/corrected_router.py": "4912e89bdbe147acbbe45f62e958d5ad6d430b56c9d3e1b1c9067e913bcc2c1f",
     "backend/app/domains/api_usage/coverage.py": "621d7951a17f509388ee5915500ec30b5fbed9ef47329b5281c305bfd3a5e3e4",
     "backend/app/domains/api_usage/metering.py": "d0760d95128f3a2975d7192b629205b77a5c6174218270893f6eb0ca7b20cd1e",
     "backend/app/domains/api_usage/models.py": "818231dead71786aec84a7b3c4784a502af39f53b81e80de96e359b0f4019084",
     "backend/app/domains/api_usage/recorder.py": "1a52e110931d6380569e27445d20ac2e97e43a80071dcdbad95446d4201846f0",
-    "backend/app/domains/api_usage/router.py": "15a6d282dc3b018bcd1f5edf8e05c6e94c5f5a883664e95b18497fc568e69a22",
+    "backend/app/domains/api_usage/router.py": "d443d8f92f609d0965f6f6cd602b7226a1d3ee379f2473ca9852aa473a92a912",
     "backend/app/domains/api_usage/schemas.py": "e1ba61871de81c3b3fab7220aec86fa8190a85369d1e3494031ba381a3bed148",
     "backend/app/domains/api_usage/usage_metadata.py": "ea4f6912cc8d28c75fd1245f8be6a505179382f9bcad284907d1a33f6a58cd91",
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -13697,17 +13721,17 @@
     "backend/app/domains/google_sheets/crypto.py": "a307e084443ea00e60c4cbee185f69d30fa169554c5437a38b5e83ec3bd14e9a",
     "backend/app/domains/google_sheets/models.py": "036888cc5ec8b11fadd10fc00799d6d8225f445dd2a78e4a114cc3c626b2b040",
     "backend/app/domains/google_sheets/repository.py": "26b16020068a4619c8f56752fa65d525dec663ef35894b5a0d6b56db85525eb1",
-    "backend/app/domains/google_sheets/router.py": "f133e4be8acab3d587f558391e2159a107ad2ad1afadc6bcef281d9a5493a77e",
+    "backend/app/domains/google_sheets/router.py": "62fa5fa6eb356a0e71abd422f8ab69ee38b6045ff78301d01175ad8b2c32820a",
     "backend/app/domains/google_sheets/schemas.py": "a4f435658ca15626f31b9571f70430edec69f740a778d3c118ab2fc2368b405c",
     "backend/app/domains/google_sheets/service.py": "d51384c30a535b992fc1d4f23a745775c5fd0d5a6dc6c757ab8521e479a43710",
     "backend/app/domains/google_sheets/stock_models.py": "616eea94bdcc4bfebe1c00a765d6cc6e9e344eddc2391a7f53c578917fa5beb4",
     "backend/app/domains/google_sheets/stock_service.py": "a5b0faaf41cb04fa4f4352e5549682b1e83ade523af15091183b3ebaccd610ac",
-    "backend/app/domains/google_sheets/tasks.py": "25ede42d543a113be4429cf9dd5ae231c356044ec4fabf1c38aac0949a711e8c",
+    "backend/app/domains/google_sheets/tasks.py": "76f67c8beb5597f96181ded554930476a8143e49647ffbf984d2475c182c4e4d",
     "backend/app/domains/health/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/health/router.py": "a53888b3d29c4c678c55118336631fc3e5cb598a350d8e335d5884015b831543",
     "backend/app/domains/indmoney_us/__init__.py": "bf70baf7f2a22b8703238187201179d0f1b275798fb2ae7532c1b88a894da292",
     "backend/app/domains/indmoney_us/events.py": "7d5f2285d6d6530841a726d2a14dbab0eee3a241dc45135f6be22da6cbe4d513",
-    "backend/app/domains/indmoney_us/events_router.py": "b78899613d4dc298dcd837865dd9c5114c7fe6a0b61178714261b3193a2a0fbc",
+    "backend/app/domains/indmoney_us/events_router.py": "372eb56d1290c17defb8bee2ff6da4d60e7e03b111b68e1ba5a4a186bdb78774",
     "backend/app/domains/indmoney_us/events_schemas.py": "5501e8a96ad76142101b920091d64a259db162dc36fab06d7b4c665502f53a55",
     "backend/app/domains/indmoney_us/models.py": "cc750803095ed9d323c0ee45e6e6396053c259e20fd59711a83c5f0b5a6f3009",
     "backend/app/domains/indmoney_us/price_service.py": "bbf5cfe65525efb7b71e4ebe6e88e2507bcfbfd025eecf69709456d4e6e6e647",
@@ -13717,7 +13741,7 @@
     "backend/app/domains/indmoney_us/service.py": "3e3c74319633be198675e547d09c7872a8641b06828d8553c916bee38af71b15",
     "backend/app/domains/indmoney_us/snapshot_validation.py": "77cf6200281e1633324d5f687ab2f518ffa325b5abedd2c14acf3d7593348d1d",
     "backend/app/domains/indmoney_us/threats.py": "f8d4982f17bce42821eb025b0d20d6c7bf3721fbd6187d71e6cedb806da34c71",
-    "backend/app/domains/indmoney_us/threats_router.py": "4735871adc24c65b4091ff418253b9bdeca79aa7643f740aca99b5ba294f179f",
+    "backend/app/domains/indmoney_us/threats_router.py": "cd25aaa0baa3c6f16a58cb8d469eede5aae950d9e7d769d697dbdada7f132c17",
     "backend/app/domains/indmoney_us/threats_schemas.py": "a2ef4417e7a59a5aec671a0b2913be2d3ad8994bd0304eca1c18c771f86da51d",
     "backend/app/domains/jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/jobs/events.py": "efbdca60f1b437064acac1722a9a4b19a11b489ba74b581503d7eec9f46a50ff",
@@ -13731,14 +13755,14 @@
     "backend/app/domains/jobs/output_contracts/validation.py": "e26e01f2e1e3cc693805db5eeea49dbc344dc3cecc03590286ffabc3e68decf5",
     "backend/app/domains/jobs/output_runtime.py": "95773ac85373141a83886d0e6641d14124621b2cf856b831d3ad544033a9ebd3",
     "backend/app/domains/jobs/output_sources.py": "c8f788994e78be1bdba2c56450660581a7e4c7992a2bf8cc3635d6eb130a26fb",
-    "backend/app/domains/jobs/repository.py": "13527aca4493692294001599f4b9b1fb7d181c3f114f0b89576edf66b19ae09b",
-    "backend/app/domains/jobs/router.py": "b806911a4e3759aaa16dd4587d66a297965e67ce557972196437f17621f47853",
+    "backend/app/domains/jobs/repository.py": "0860a240f6efe062c21f78e28a26df5218d781a36b194779a2ccbaad268edc76",
+    "backend/app/domains/jobs/router.py": "01213de54a214e29c6caea02a99a4caf28ab7b727a6503206b67d3d62f02fb7f",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
-    "backend/app/domains/jobs/tasks.py": "b7e78129099ecd5c0e036cf85b76df1d11bdbfbf5ae9e4cc4eac0cc4cf62c121",
+    "backend/app/domains/jobs/tasks.py": "a016cc31dd1ddc9825a8292f74bd29845d8658ab6d60f5d043e8c5a8a0585183",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
     "backend/app/domains/jobs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/jobs/use_cases/create_job.py": "7bf05cc9f4a6ae535c4462ab3d618de6cffd283751a74a0cde822e443b09e85b",
-    "backend/app/domains/jobs/ws_router.py": "8134998e76d3aabb4252aaaafafac853e79e64f5434d178775193ca1a3969635",
+    "backend/app/domains/jobs/use_cases/create_job.py": "d85170896cf823dc130fd5860927a708887a7471556c93c33d6d1028f1681531",
+    "backend/app/domains/jobs/ws_router.py": "9fec16b815d9aad86bc184048f9d4e1c74b5750e321c6630c4527e27fd20b936",
     "backend/app/domains/mails/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/mails/completion_events.py": "9b59846d2bce41790fb39a6952c397fbfbbf84337028043a18a42857b1f5879a",
     "backend/app/domains/mails/completion_preferences.py": "fffc8d76b73b5f48f364206bb4f377b0e5e98b89be61a65514a9a7f3c8c08931",
@@ -13852,14 +13876,14 @@
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "3296ad11b77f50ca9c8b43924758f53ad422dbb12092f9315b951700d3db9d3d",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
-    "backend/app/domains/runs/repository.py": "2ca22d4147fd22ccde5fd741e5189a71f55d86369870cd54ce1d9e36ff5710ba",
-    "backend/app/domains/runs/router.py": "4aaebf6f663473f229a5a7d40091383434fe8e66b9c857e744128ecafa042fa3",
+    "backend/app/domains/runs/repository.py": "65227f558355f1863e440fd9903a81a17445dae051584edd9ae7c16105a66260",
+    "backend/app/domains/runs/router.py": "5ba7839d089501c57dcabcea5b67fd5cbb21fc637e8a3213ca490965acbb6a5e",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "e05a046b5af24fffe96610116cbc647799b42eb112c6f39f27ddc7950a1fb8f0",
     "backend/app/domains/runs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/use_cases/create_run.py": "462afeb350f5de4a9c265ab2337e685725921980b26d7b50f2cb840db8953bbf",
-    "backend/app/domains/runs/ws_router.py": "6dc6151808ed9bbb4540dbc5ec65e71efb9c8afb2fc421ead2c413e74dd71914",
+    "backend/app/domains/runs/use_cases/create_run.py": "6ceee7f87e879c7f7b516cd063713dda1b8bb8706996d18df8cc9154c6df83f8",
+    "backend/app/domains/runs/ws_router.py": "407a53eed784365e61ec1c8dfccf8475efc652aa1aab1275fa732acbd94923c0",
     "backend/app/domains/sports_rankings/__init__.py": "a42cf39ed63a3cf2677034f74a4ef88a788a621375b5955acf3db39b45143759",
     "backend/app/domains/sports_rankings/capture.py": "c39ce090b0e21cbf1345741f9bac2cc182460d1416e422bc8efcab17839674d4",
     "backend/app/domains/sports_rankings/catalogue.py": "3b780e0b9213cb9e4341f64e4b9aaa715083056452a6e3f2ac1dd22d4ff33137",
@@ -13891,7 +13915,7 @@
     "backend/app/domains/zerodha/basket.py": "2c453eb7df28c7924538b1960d25dbdeed7c615c53fc046f1c528204f18b2361",
     "backend/app/domains/zerodha/crypto.py": "5b3efb6fb65aa33dbb7cf3d63dc53367cc64815887cd3d8887fb57a75a985a5f",
     "backend/app/domains/zerodha/events.py": "aa3ddc3c9050de72713c0b8d1376a406484e282175fa5aaf9db6002d7545dee5",
-    "backend/app/domains/zerodha/events_router.py": "b038950849116c69ac6e81f123e809f56a069ce9e816e5ff087f486a96c44170",
+    "backend/app/domains/zerodha/events_router.py": "1a81f430cc88c5e90d79f484f6a6df9b0a631fe97436b83df246f679c87d115b",
     "backend/app/domains/zerodha/events_schemas.py": "6626acae75529fa26e989947b552e86eb9d48bda044db90f082381ca95778870",
     "backend/app/domains/zerodha/models.py": "4dd730f5322c0fa05d4c7818eda0c827598b9d5b7b7dc6436508d29223b3cba4",
     "backend/app/domains/zerodha/order_validation.py": "979bfb228e9f6b7a431f269dcf92ffdb8d7d65cd25032978c1dc27cd063ae284",
@@ -13902,7 +13926,7 @@
     "backend/app/domains/zerodha/service.py": "29ae95966805ee763e41558a991cc49152267d44af16524523705276f0945046",
     "backend/app/domains/zerodha/tasks.py": "20f507d262892031fce4e3e6a3eb463c6d9e7fa6458828d20527597a1fd11c29",
     "backend/app/domains/zerodha/threats.py": "56d5bb802a3423b6b4ae2cd620f088d790e9d99c2e4167e1cbdc103fa323d4af",
-    "backend/app/domains/zerodha/threats_router.py": "e4d6b183bfd944596006e744d6d0b026f1cc856e62bd2b718d5dc577b201d042",
+    "backend/app/domains/zerodha/threats_router.py": "8b203cd468d6a0df2f41a901664ab3e82cf59641d90248c7e823f264881b3a4a",
     "backend/app/domains/zerodha/threats_schemas.py": "e56577a914fe5bea3f3f558fceb71c03f0f1767ffda3612da77445dc1f7dc75a",
     "backend/app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -13932,7 +13956,7 @@
     "backend/app/shared/ws_relay.py": "67309dd4713fda2d6eec9600f33aa4d3bc7f182c57bdc1ebd9f9f5eb4607b54e",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/main.py": "f64831c519224b7b56cbe86f116d2e5bbe5f18dea1c5ee5ca1ee91b2ae62886d",
+    "backend/app/uat2/main.py": "b88f5331b75e183d1f4ddcdc62aed66f40c08e344d9709f86c558613493b9ee0",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/worker.py": "4e43a596627005530dcbf10a68e55b57de68ae8d963d1196020e6a2c7b220241",

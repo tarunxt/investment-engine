@@ -120,7 +120,7 @@ def test_ineligible_worker_job_never_registers_updates_or_calls_provider(recover
         def __exit__(self, *args): pass
     monkeypatch.setattr(tasks, "SyncSessionLocal", Session)
     monkeypatch.setattr(tasks, "SyncJobRepository", lambda db: SimpleNamespace(
-        get=lambda job_id: SimpleNamespace(auto_rebalance_portfolio="indmoney_us",
+        get_for_worker=lambda job_id: SimpleNamespace(auto_rebalance_portfolio="indmoney_us",
                                           request_context_json={"kind": "polymarket_bullpen_event"}),
     ))
     monkeypatch.setattr(tasks, "register_job_task_sync", lambda *a: pytest.fail("registered rejected job"))
@@ -172,7 +172,7 @@ def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery,
         async def create(self, run):
             self.run = run
             run.id = 123
-        async def get(self, run_id): return self.run
+        async def get(self, run_id, *, user_id): return self.run
     class Lock:
         @asynccontextmanager
         async def acquire(self, *args, **kwargs): yield None
@@ -498,7 +498,7 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
         async def create(self, job):
             job.id, job.created_at = 123, now
             jobs.append(job)
-        async def get(self, job_id): return jobs[0]
+        async def get(self, job_id, *, user_id): return jobs[0]
     class Lock:
         def __init__(self, *args): pass
         @asynccontextmanager

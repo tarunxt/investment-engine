@@ -30,7 +30,11 @@ The complete auth router is included, with existing UAT2 exact-owner checks befo
 | GET | /uat2/ai/{task_id} | backend/app/uat2/router.py:85 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | POST | /uat2/email | backend/app/uat2/router.py:100 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | GET | /uat2/export | backend/app/uat2/router.py:107 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| GET | /indmoney-us/portfolio and /indmoney-us/portfolio/{snapshot_id} | backend/app/uat2/main.py filtered route append | Only these existing GET routes are appended; ingestion/price-fetch routes excluded; real owner dependency retained |
+| GET | /indmoney-us/portfolio and /indmoney-us/portfolio/{snapshot_id} | backend/app/uat2/main.py filtered route append | Only these existing GET routes are included; ingestion/price-fetch routes excluded; real owner dependency retained |
+| GET | /jobs | backend/app/domains/jobs/router.py:72 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
+| GET | /jobs/{job_id} | backend/app/domains/jobs/router.py:98 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
+| GET | /runs | backend/app/domains/runs/router.py:959 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
+| GET | /runs/{run_id} | backend/app/domains/runs/router.py:992 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
 | GET | /health | backend/app/uat2/main.py | Simulation health; external barrier still required |
 | GET/POST/PUT/DELETE/PATCH/OPTIONS | /{path:path} fallback | backend/app/uat2/main.py | Explicit UAT2_UNAVAILABLE / 503; no production router fallthrough |
 | WebSocket | /{path:path} fallback | backend/app/uat2/main.py | Close 1008 before subscription; live WS functionality unavailable |
@@ -42,3 +46,5 @@ The complete auth router is included, with existing UAT2 exact-owner checks befo
 The dedicated host barrier must cover all pages/assets/API/WS, independent host-only cookies/signing keys and no-egress sandbox must still be verified live by the parent/UAT2 task. Baseline's 4 default FastAPI documentation routes refer to app.main; UAT2's docs/redoc/openapi are explicitly disabled. Localhost auth/profile preview uses its own opt-in script and synthetic accounts, never the public UAT2 identity allowlist. No later-stage modules or tenant repairs are implied.
 
 Historical pre-sync guard hashes and the then-current c40f112d tree comparison are preserved in evidence/stage01-uat2-source-review-20261019.json. Current source incorporates reviewed reset fix79acc235 and synthetic India fixes503f86ee and8f2d24e5; use current entrypoints.json hashes and Git identities. Runtime backend/frontend/controller content matches the published UAT2 source8f2d24e5; the additional deployment-tree change is the mocked reset regression, not a guard/access change. The regenerated source inventory includes 262 HTTP, 5 WebSocket, 43 worker, 16 scheduler, 42 export, 32 background, 7 lifecycle, 66 page and 25 frontend entries. These counts cover source alternatives, not enabled public UAT2 surfaces.
+
+Stage02 adds actual read-only jobs/runs handlers by filtered router inclusion. Their POST/cancel/export routes remain unavailable503 and WebSockets1008 in UAT2. No provider dispatch or extra test identity is enabled. Route identity comes from get_current_user; public multi-user remains closed. The prior source503/8f comparison paragraph above is Stage01 historical provenance; current ownership changes are mapped in STAGE02_REQUIREMENT_MAP.md.

@@ -42,6 +42,11 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
+    async with AsyncSessionLocal() as db:
+        job = await PostgresJobRepository(db).get(job_id, user_id=user_id)
+        if job is None:
+            await websocket.close(code=4004, reason="Job not found")
+            return
     await websocket.accept()
     logger.info("WS /ws/jobs/%d connected user_id=%s", job_id, user_id)
 
@@ -49,7 +54,7 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
     # job still receive the final status (Redis pub/sub drops events with no subscriber).
     try:
         async with AsyncSessionLocal() as db:
-            job = await PostgresJobRepository(db).get(job_id)
+            job = await PostgresJobRepository(db).get(job_id, user_id=user_id)
             if job and job.user_id == user_id:
                 status_val = (
                     job.status.value if hasattr(job.status, "value") else str(job.status)

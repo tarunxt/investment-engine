@@ -68,7 +68,8 @@ async def test_cancel_job_marks_failed_and_revokes_worker(monkeypatch):
         def __init__(self, session) -> None:
             assert session is fake_db
 
-        async def get(self, job_id):
+        async def get(self, job_id, *, user_id):
+            assert user_id == 7
             assert int(job_id) == 17
             return fake_job
 

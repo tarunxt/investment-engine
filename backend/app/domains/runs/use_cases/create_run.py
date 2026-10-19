@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.ai_providers.availability import filter_recently_available_targets
@@ -65,6 +66,15 @@ class CreateRunUseCase:
             # Existing six-stage UI requests sheet exports; contain that optional
             # side effect while preserving queued analysis and database results.
             cmd = replace(cmd, auto_export_enabled=False)
+        if cmd.prompt_id is not None:
+            from app.domains.prompts.models import Prompt
+            prompt_id = await self._session.scalar(select(Prompt.id).where(
+                Prompt.id == cmd.prompt_id,
+                or_(Prompt.user_id == cmd.user_id, Prompt.is_system.is_(True)),
+            ))
+            if prompt_id is None:
+                from app.shared.exceptions import NotFoundException
+                raise NotFoundException("Prompt not found")
         if not cmd.targets:
             raise ValidationException("At least one (provider, model) target is required.")
         if cmd.output_source_jobs is not None and cmd.polymarket_event_context is not None:
@@ -108,7 +118,6 @@ class CreateRunUseCase:
 
         if cmd.auto_export_enabled and not export_url:
             # Try to get user's master sheet, if available
-            from sqlalchemy import select
             from app.domains.auth.models import UserProfile
 
             user_profile_result = await self._session.execute(
@@ -199,6 +208,6 @@ class CreateRunUseCase:
             await register_job_task(job.id, task.id)
 
         # Re-fetch with all relationships loaded for the response
-        result = await self._run_repo.get(run.id)
+        result = await self._run_repo.get(run.id, user_id=int(cmd.user_id))
         assert result is not None, f"Run {run.id} not found after creation"
         return result

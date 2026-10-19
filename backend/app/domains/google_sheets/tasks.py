@@ -208,7 +208,7 @@ def export_job_to_sheets_task(
             ).scalar_one_or_none()
 
             if not cred:
-                job = db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+                job = db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id)).scalar_one_or_none()
                 if job:
                     job_repo.update_export_state(
                         job,
@@ -358,7 +358,7 @@ def export_job_to_sheets_task(
             _refresh_run_status(db, job.id)
 
             if run_id:
-                run = run_repo.get(run_id)
+                run = db.execute(select(Run).where(Run.id == run_id, Run.user_id == user_id)).scalar_one_or_none()
                 if run:
                     run_repo.update_export_state(
                         run,
@@ -383,7 +383,7 @@ def export_job_to_sheets_task(
 
         except Exception as exc:
             job_repo = SyncJobRepository(db)
-            job = db.execute(select(Job).where(Job.id == job_id)).scalar_one_or_none()
+            job = db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id)).scalar_one_or_none()
             is_last_attempt = self.request.retries >= self.max_retries
             if job:
                 job_repo.update_export_state(
@@ -421,7 +421,7 @@ def export_run_to_sheets_task(
             ).scalar_one_or_none()
 
             if not cred:
-                run = run_repo.get(run_id)
+                run = db.execute(select(Run).where(Run.id == run_id, Run.user_id == user_id)).scalar_one_or_none()
                 if run:
                     run_repo.update_export_state(
                         run,
@@ -456,6 +456,8 @@ def export_run_to_sheets_task(
 
             for run_job in run_jobs:
                 job = run_job.job
+                if job is None or job.user_id != user_id:
+                    return {"status": "failed", "error": "Run not found"}
                 if not job.response:
                     continue
                 if _job_export_block_reason(job):
@@ -585,7 +587,7 @@ def export_run_to_sheets_task(
 
         except Exception as exc:
             run_repo = SyncRunRepository(db)
-            run = run_repo.get(run_id)
+            run = db.execute(select(Run).where(Run.id == run_id, Run.user_id == user_id)).scalar_one_or_none()
             is_last_attempt = self.request.retries >= self.max_retries
             if run:
                 run_repo.update_export_state(
