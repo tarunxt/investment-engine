@@ -34,6 +34,12 @@ def test_actual_schemas_and_disabled_modules(owner_client):
     # The real frontend requires these nullable fields even for simulated login.
     assert isinstance(status['login_time'], str)
     assert status['expires_at'] is None
+    login = owner_client.get('/zerodha/login-url')
+    assert login.status_code == 200
+    assert login.json()['login_url'] == ''  # never expose a real broker login
+    assert login.json()['configured'] is False
+    orders = owner_client.get('/zerodha/orders')
+    assert orders.status_code == 200 and orders.json()['data'] == []
     latest = portfolio.json()['latest']
     assert sum(h['market_value'] for h in latest['holdings']) == latest['holdings_market_value']
     assert sum(h['invested_value'] for h in latest['holdings']) == latest['holdings_invested_value']
