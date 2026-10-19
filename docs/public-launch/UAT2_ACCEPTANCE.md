@@ -1,5 +1,32 @@
 # UAT2 acceptance
 
+**UAT2 READY — 19 October 2026.** Staging only; no public launch or production deployment.
+
+Actual URL: https://uat2.cred-x.in. Application and controller source:
+`8f2d24e5aa348a86aa694bed592b5b6dc951427b` on `codex/uat2-owner-only-20261019`.
+The historical checkpoint below is superseded by this completed acceptance.
+
+- Genuine owner Google login and existing owner profile/session preserved through final redeployment.
+- Final actual India browser page shows build8f2d24e5aa34, synthetic UATTECH1100/UATBANK960, total2060/P&L60; no status schema error. Real broker configuration warning is expected; do not add real credentials.
+- Dashboard, profile/preferences, populated US portfolio and loading state inspected; reset empty state observed and populated restored with controller79acc235 before final deployment.
+- Exact-source CI39292110970: all ten jobs passed; migration CI39292111065 passed. Local focused policy/runtime/Google suite44 passed.
+- Artifact12206670608 ZIP SHA256c53d33ae7830f44ccb3c431bf8539e2ccdd0b339474ad422727b3aa89749f381; manifesteee643faa66864fbf26ca4e45714968c9c99ba55310a46568211b6d666848890. All127files/125wheels and archives verified locally and after native SCP before deploy.
+- Public TLS-validated WebSocket upgrades /ws,/jobs/ws,/runs/ws each401 before upgrade, recorded17:06:17Z. Pages/assets/APIs barrier checks retained.
+- Direct synthetic nonowner/alternate-auth denial, expiry, foreign-key/production-cookie rejection, independent CSRF logout jar, simulated API orders/exports/WebSocket closure passed. Owner browser was never signed out by these tests. No fabricated genuine nonowner Google evidence.
+- Actual PostgreSQL counts: one owner, zero other users. Separate Redis, fake worker, local email/export and scheduler-off evidence retained. App/worker network denial and loopback binding checks passed.
+- Actual UAT2 backup/schema+data+application rollback and EC2 stop/restart passed; same IP and disk. Production public health stayed200 before/during/after; final postdeploy check200, UAT2 anonymous401, all eight dedicated services active, disk13%.
+- Stateless backend token expiry is15minutes; browser logout clears that browser session. Global immediate token revocation is a later scope, not claimed here.
+
+Live server evidence: /var/lib/credx-uat2/{session-acceptance,adapter-acceptance,identity-count-acceptance,live-check,rollback-check}.json. Local public WebSocket receipt: task-3/uat2-public-websocket-check.json.
+
+Budget/stop/retention unchanged: US$10 allowance, manual stop21Oct2026 15:34:13UTC (21:04:13IST), retention26Oct15:34:13UTC. No exact automatic cutoff or guaranteed billing cap. Old Stage00 remains separate and unchanged.
+
+Stage01 candidate8d8bc552 includes503f86ee but lacks final8f2d24e5 safe login-url/orders response contract. Do not deploy that older contract over READY; integrate the final fix, then verify the exact new candidate artifact first.
+
+## Historical checkpoint (superseded)
+
+# UAT2 acceptance — final checkpoint
+
 **UAT2 PREVIEW ONLY — owner login verified; remaining acceptance blocked by execution transport.**
 Actual URL https://uat2.cred-x.in. No UAT2 READY claim yet.
 
