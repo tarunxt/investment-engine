@@ -126,12 +126,23 @@ def install_release(bundle):
 
 
 def time_check():
-    run(['systemctl','is-active','systemd-timesyncd.service'],capture=True)
     deadline = time.monotonic()+60
     while time.monotonic()<deadline:
-        if run(['timedatectl','show','--property=NTPSynchronized','--value'],capture=True)=='yes':
-            run(['timedatectl','timesync-status','--no-pager'],capture=True)
-            return
+        active = lambda unit: subprocess.run(
+            ['systemctl','is-active','--quiet',unit], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+        if active('chrony.service'):
+            tracking = run(['chronyc','tracking'],capture=True)
+            sources = run(['chronyc','sources','-n'],capture=True)
+            normal = re.search(r'^Leap status\s*:\s*Normal\s*$',tracking,re.M)
+            stratum = re.search(r'^Stratum\s*:\s*([1-9][0-9]*)\s*$',tracking,re.M)
+            selected = re.search(r'^\^\*\s+\S+',sources,re.M)
+            if normal and stratum and selected:
+                return
+        elif active('systemd-timesyncd.service'):
+            if run(['timedatectl','show','--property=NTPSynchronized','--value'],capture=True)=='yes':
+                run(['timedatectl','timesync-status','--no-pager'],capture=True)
+                return
         time.sleep(2)
     raise RuntimeError('Time synchronization not established in bounded initialization interval')
 
