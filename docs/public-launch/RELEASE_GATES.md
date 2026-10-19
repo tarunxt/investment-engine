@@ -8,7 +8,7 @@ Stage 00 live acceptance: **BLOCKED**. Stage 01 source baseline may proceed unde
 | Persistent baseline and inventory | Source implemented | Reproducible source scanner, hash manifest, route/task/schedule/export matrix and synthetic fixtures |
 | Local baseline checks | 5 baseline + 19 Google + 42 API/BFF checks PASS; production frontend build/type PASS | Exact commands and actual results; no count borrowed from Stage 00 |
 | CI checks | Draft PR #1240 published; fresh exact-head CI pending | Check actual head SHA and isolated test results; never infer from local or historical CI |
-| Local UI preview | Running on localhost; interactive browser completion pending coordination | Real Next.js/Auth.js/FastAPI auth-profile harness, synthetic SQLite, no external actions; LOCAL_PREVIEW.md |
+| Local UI preview | Running on localhost; scoped interactive browser walkthrough PASS with recorded baseline display limitation | Real Next.js/Auth.js/FastAPI auth-profile harness, synthetic SQLite, no external actions; LOCAL_PREVIEW.md |
 | Existing-source failures | Open | Source-verified ownership/stream/auth-bypass findings in DECISIONS.md; later-stage negative tests and fixes required |
 | Stage 00 isolation/lifecycle/private/TLS/Google | BLOCKED | Actual admitted live evidence; retained artifacts and stopped infrastructure unchanged |
 | Actual deployed ingress and population | Unknown this task | Read-only deployed SHA, ingress paths, active user/role counts, owner IDs and ownership mapping via admitted route; config examples insufficient |
