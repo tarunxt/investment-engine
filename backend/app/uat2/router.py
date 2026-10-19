@@ -33,6 +33,19 @@ async def broker_status():
             'last_portfolio_sync_at': STAMP, 'last_portfolio_snapshot_date': STAMP[:10]}
 
 
+@router.get('/zerodha/login-url')
+async def broker_login_metadata():
+    # The real portfolio screen loads this alongside status. No live login URL.
+    return {'login_url': '', 'configured': False, 'simulation': True,
+            'direct_market_orders_enabled': False,
+            'order_submission_blocked_reason': 'Live broker connection unavailable in UAT2 simulation'}
+
+
+@router.get('/zerodha/orders')
+async def fake_order_history():
+    return {'status': 'success', 'data': [], 'simulation': True}
+
+
 @router.post('/zerodha/orders', response_model=ZerodhaPlaceOrderResponse)
 async def fake_order(order: ZerodhaPlaceOrderRequest):
     return broker.place(order.model_dump())
