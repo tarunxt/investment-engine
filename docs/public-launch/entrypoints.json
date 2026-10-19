@@ -3,14 +3,14 @@
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
     "background": 32,
-    "export": 41,
+    "export": 42,
     "frontend": 25,
-    "http": 244,
-    "lifecycle": 6,
-    "page": 65,
+    "http": 260,
+    "lifecycle": 7,
+    "page": 66,
     "scheduler": 16,
-    "websocket": 4,
-    "worker": 42
+    "websocket": 5,
+    "worker": 43
   },
   "entries": [
     {
@@ -394,6 +394,8 @@
         "db.add",
         "db.commit",
         "db.execute",
+        "require_password_auth_allowed",
+        "require_uat2_owner",
         "result.scalar_one_or_none",
         "router.post",
         "select",
@@ -409,6 +411,8 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_async_db)",
+        "require_password_auth_allowed",
+        "require_uat2_owner",
         "router.post('/login', response_model=LoginResponse)"
       ],
       "owner_source": [
@@ -417,7 +421,7 @@
       "registration": "mounted",
       "route": "/auth/login",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:116"
+      "source": "backend/app/domains/auth/router.py:123"
     },
     {
       "calls": [
@@ -430,6 +434,7 @@
         "db.execute",
         "int",
         "payload.get",
+        "require_uat2_owner",
         "result.scalar_one_or_none",
         "router.post",
         "select",
@@ -444,6 +449,7 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_async_db)",
+        "require_uat2_owner",
         "router.post('/refresh', response_model=LoginResponse)"
       ],
       "owner_source": [
@@ -452,7 +458,7 @@
       "registration": "mounted",
       "route": "/auth/refresh",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:149"
+      "source": "backend/app/domains/auth/router.py:158"
     },
     {
       "calls": [
@@ -478,7 +484,7 @@
       "registration": "mounted",
       "route": "/auth/logout",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:176"
+      "source": "backend/app/domains/auth/router.py:186"
     },
     {
       "calls": [
@@ -502,7 +508,7 @@
       "registration": "mounted",
       "route": "/auth/websocket-ticket",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:186"
+      "source": "backend/app/domains/auth/router.py:196"
     },
     {
       "calls": [
@@ -525,7 +531,7 @@
       "registration": "mounted",
       "route": "/auth/me",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:196"
+      "source": "backend/app/domains/auth/router.py:206"
     },
     {
       "calls": [
@@ -533,6 +539,7 @@
         "datetime.utcnow",
         "db.commit",
         "db.execute",
+        "require_password_auth_allowed",
         "result.scalar_one_or_none",
         "router.post",
         "secrets.token_urlsafe",
@@ -548,6 +555,7 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_async_db)",
+        "require_password_auth_allowed",
         "router.post('/forgot-password')"
       ],
       "owner_source": [
@@ -556,7 +564,7 @@
       "registration": "mounted",
       "route": "/auth/forgot-password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:203"
+      "source": "backend/app/domains/auth/router.py:213"
     },
     {
       "calls": [
@@ -568,6 +576,7 @@
         "db.add",
         "db.commit",
         "db.execute",
+        "require_password_auth_allowed",
         "result.scalar_one_or_none",
         "router.post",
         "select",
@@ -580,6 +589,7 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_async_db)",
+        "require_password_auth_allowed",
         "router.post('/reset-password')"
       ],
       "owner_source": [
@@ -588,7 +598,7 @@
       "registration": "mounted",
       "route": "/auth/reset-password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:219"
+      "source": "backend/app/domains/auth/router.py:230"
     },
     {
       "calls": [
@@ -599,6 +609,7 @@
         "ValidationException",
         "db.add",
         "db.commit",
+        "require_password_auth_allowed",
         "router.put"
       ],
       "capability": "update_password",
@@ -609,6 +620,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "require_password_auth_allowed",
         "router.put('/password')"
       ],
       "owner_source": [
@@ -617,7 +629,7 @@
       "registration": "mounted",
       "route": "/auth/password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:245"
+      "source": "backend/app/domains/auth/router.py:257"
     },
     {
       "calls": [
@@ -648,7 +660,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:265"
+      "source": "backend/app/domains/auth/router.py:278"
     },
     {
       "calls": [
@@ -681,7 +693,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:289"
+      "source": "backend/app/domains/auth/router.py:302"
     },
     {
       "calls": [
@@ -705,7 +717,7 @@
       "registration": "mounted",
       "route": "/auth/google/config",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:44"
+      "source": "backend/app/domains/auth/router.py:45"
     },
     {
       "calls": [
@@ -718,9 +730,12 @@
         "db.add",
         "db.commit",
         "google_signin_client_id",
+        "require_uat2_owner",
         "resolve_google_user",
         "router.post",
-        "run_in_threadpool"
+        "run_in_threadpool",
+        "seed_portfolio",
+        "uat2_mode"
       ],
       "capability": "google_login",
       "classification": "public",
@@ -729,6 +744,7 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_async_db)",
+        "require_uat2_owner",
         "router.post('/google', response_model=LoginResponse)"
       ],
       "owner_source": [
@@ -737,7 +753,7 @@
       "registration": "mounted",
       "route": "/auth/google",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:52"
+      "source": "backend/app/domains/auth/router.py:53"
     },
     {
       "calls": [
@@ -759,6 +775,7 @@
         "db.flush",
         "len",
         "logger.info",
+        "require_password_auth_allowed",
         "result.scalar_one_or_none",
         "router.post",
         "select",
@@ -772,6 +789,7 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_async_db)",
+        "require_password_auth_allowed",
         "router.post('/register', response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)"
       ],
       "owner_source": [
@@ -780,7 +798,7 @@
       "registration": "mounted",
       "route": "/auth/register",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:71"
+      "source": "backend/app/domains/auth/router.py:77"
     },
     {
       "calls": [
@@ -11270,6 +11288,7 @@
     {
       "calls": [
         "AsyncSessionLocal",
+        "RuntimeError",
         "async_engine.dispose",
         "close_bullpen_runtime_broker",
         "get_bullpen_runtime_broker",
@@ -11280,7 +11299,8 @@
         "polymarket_direct_bot_manager.shutdown",
         "recovery_mode",
         "seed_system_prompts",
-        "settings.database_url.split"
+        "settings.database_url.split",
+        "uat2_mode"
       ],
       "capability": "lifespan",
       "classification": "administrator-only",
@@ -11314,7 +11334,7 @@
       "registration": "framework default",
       "route": "/docs",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:155"
+      "source": "backend/app/main.py:162"
     },
     {
       "calls": [],
@@ -11332,7 +11352,7 @@
       "registration": "framework default",
       "route": "/docs/oauth2-redirect",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:155"
+      "source": "backend/app/main.py:162"
     },
     {
       "calls": [],
@@ -11350,7 +11370,7 @@
       "registration": "framework default",
       "route": "/openapi.json",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:155"
+      "source": "backend/app/main.py:162"
     },
     {
       "calls": [],
@@ -11368,7 +11388,7 @@
       "registration": "framework default",
       "route": "/redoc",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:155"
+      "source": "backend/app/main.py:162"
     },
     {
       "calls": [
@@ -11388,7 +11408,7 @@
       "registration": "mounted",
       "route": "/",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/main.py:328"
+      "source": "backend/app/main.py:331"
     },
     {
       "calls": [
@@ -11452,6 +11472,445 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/shared/ws_relay.py:108"
+    },
+    {
+      "calls": [
+        "RuntimeError",
+        "uat2_mode",
+        "validate_uat2_startup"
+      ],
+      "capability": "lifespan",
+      "classification": "administrator-only",
+      "kind": "lifecycle",
+      "method": "",
+      "module": "platform",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "asynccontextmanager",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:14"
+    },
+    {
+      "calls": [
+        "app.get"
+      ],
+      "capability": "health",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "app.get('/health')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/health",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:31"
+    },
+    {
+      "calls": [
+        "JSONResponse",
+        "app.api_route"
+      ],
+      "capability": "unavailable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "DELETE",
+      "module": "platform",
+      "observed_guards": [
+        "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:36"
+    },
+    {
+      "calls": [
+        "JSONResponse",
+        "app.api_route"
+      ],
+      "capability": "unavailable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:36"
+    },
+    {
+      "calls": [
+        "JSONResponse",
+        "app.api_route"
+      ],
+      "capability": "unavailable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "OPTIONS",
+      "module": "platform",
+      "observed_guards": [
+        "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:36"
+    },
+    {
+      "calls": [
+        "JSONResponse",
+        "app.api_route"
+      ],
+      "capability": "unavailable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "PATCH",
+      "module": "platform",
+      "observed_guards": [
+        "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:36"
+    },
+    {
+      "calls": [
+        "JSONResponse",
+        "app.api_route"
+      ],
+      "capability": "unavailable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "observed_guards": [
+        "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:36"
+    },
+    {
+      "calls": [
+        "JSONResponse",
+        "app.api_route"
+      ],
+      "capability": "unavailable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "PUT",
+      "module": "platform",
+      "observed_guards": [
+        "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:36"
+    },
+    {
+      "calls": [
+        "app.websocket",
+        "websocket.close"
+      ],
+      "capability": "unavailable_socket",
+      "classification": "owner-private",
+      "kind": "websocket",
+      "method": "WEBSOCKET",
+      "module": "platform",
+      "observed_guards": [
+        "app.websocket('/{path:path}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/{path:path}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/main.py:42"
+    },
+    {
+      "calls": [
+        "os.getenv",
+        "router.get"
+      ],
+      "capability": "status",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/uat2/status')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/status",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:15"
+    },
+    {
+      "calls": [
+        "broker.portfolio",
+        "os.getenv",
+        "router.get"
+      ],
+      "capability": "portfolio",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/zerodha/portfolio', response_model=ZerodhaPortfolioOverviewResponse)"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/zerodha/portfolio",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:24"
+    },
+    {
+      "calls": [
+        "router.get"
+      ],
+      "capability": "broker_status",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/zerodha/status')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/zerodha/status",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:29"
+    },
+    {
+      "calls": [
+        "broker.place",
+        "order.model_dump",
+        "router.post"
+      ],
+      "capability": "fake_order",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.post('/zerodha/orders', response_model=ZerodhaPlaceOrderResponse)"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/zerodha/orders",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:36"
+    },
+    {
+      "calls": [
+        "broker.portfolio",
+        "dict",
+        "os.getenv",
+        "portfolio.items",
+        "router.get"
+      ],
+      "capability": "dashboard",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/dashboard/summary', response_model=DashboardSummaryResponse)"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/dashboard/summary",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:41"
+    },
+    {
+      "calls": [
+        "fake_ai.delay",
+        "router.post"
+      ],
+      "capability": "queue_fake_ai",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.post('/uat2/ai')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/ai",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:64"
+    },
+    {
+      "calls": [
+        "HTTPException",
+        "celery.AsyncResult",
+        "len",
+        "result.successful",
+        "router.get"
+      ],
+      "capability": "read_fake_ai",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/uat2/ai/{task_id}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/ai/{task_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:71"
+    },
+    {
+      "calls": [
+        "EmailSink",
+        "EmailSink(artifact_directory() + '/email-sink').send",
+        "artifact_directory",
+        "router.post"
+      ],
+      "capability": "capture_email",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.post('/uat2/email')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/email",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:86"
+    },
+    {
+      "calls": [
+        "Response",
+        "router.get"
+      ],
+      "capability": "local_export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "platform",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:93"
+    },
+    {
+      "calls": [
+        "Response",
+        "router.get"
+      ],
+      "capability": "local_export",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/uat2/export')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/export",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:93"
+    },
+    {
+      "calls": [
+        "FakeAI",
+        "FakeAI().generate",
+        "celery.task"
+      ],
+      "capability": "fake_ai",
+      "classification": "administrator-only",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "celery.task(name='uat2.fake_ai', autoretry_for=(OSError,), retry_backoff=True, max_retries=1, acks_late=True)",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/worker.py:15"
     },
     {
       "calls": [],
@@ -12847,6 +13306,24 @@
     },
     {
       "calls": [],
+      "capability": "/console/uat2",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/uat2",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/uat2/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/zerodha-swing-run/[id]",
       "classification": "owner-private",
       "kind": "page",
@@ -13069,7 +13546,8 @@
       "method": "DISPATCH",
       "module": "frontend",
       "observed_guards": [
-        "getToken("
+        "getToken(",
+        "requireUat2AuthSecret("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -13080,6 +13558,7 @@
       "source": "frontend/proxy.ts:1"
     }
   ],
+  "mount_scope": "app.main; restricted app.uat2.main composition reviewed separately in UAT2_ENTRYPOINT_MATRIX.md",
   "schema_version": 1,
   "source_sha256": {
     "backend/app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -13088,8 +13567,9 @@
     "backend/app/core/logging.py": "34ec5aec553941e669ca8c256b7e43bdedb37d7784da70e52d198d30e048799e",
     "backend/app/core/recovery.py": "7e1c77bbd8a82a65b3f42cc647f7c9b28bc266f8e37f701ab2871247a64f7e19",
     "backend/app/core/request_timing.py": "ac30e9e77498d78c16e72cb72cf1821bf808b680c22b3c36c62e1a612fbe4ec4",
-    "backend/app/core/security.py": "d3a4a5d794df1fd27ca2c1ae58a5916093d6cb3b33ae854e4de38c4b7decb903",
+    "backend/app/core/security.py": "638f8d50878292a3d5dffea7de88a078bec497e8216acf57dc0308626a2bf2d7",
     "backend/app/core/seed.py": "f00e773efffc3ca505c20048fb592868dce6fd241ee8b1479ab51441d611d7a1",
+    "backend/app/core/uat2.py": "bab4c74498a7db818c695bec717a31d4f2bafa55711b620bbbc28f7ede5a0894",
     "backend/app/domains/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/ai_providers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/ai_providers/anthropic.py": "eeffe90ad29cd1e1b2704cda99faa5a4c57c621729e31f2a2aef2a8d3b50aa96",
@@ -13113,10 +13593,10 @@
     "backend/app/domains/api_usage/schemas.py": "e1ba61871de81c3b3fab7220aec86fa8190a85369d1e3494031ba381a3bed148",
     "backend/app/domains/api_usage/usage_metadata.py": "ea4f6912cc8d28c75fd1245f8be6a505179382f9bcad284907d1a33f6a58cd91",
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/auth/dependencies.py": "ffa79fa853d076012d64d6fef75578f3531143f43b1fd069a2ecb17d02954613",
-    "backend/app/domains/auth/google_signin.py": "ff1348d75f58274d65963f5b5a496958ead72a60ad25aa1378721831da911baf",
+    "backend/app/domains/auth/dependencies.py": "4e36c15b99ecaadfdb205c192f5b1291b3add41ab234bc85d1e45540665bab76",
+    "backend/app/domains/auth/google_signin.py": "aef4c0e28d498070f14f85ab6611ae45f7374aa3a96dfc4e060b8beaffb60d84",
     "backend/app/domains/auth/models.py": "279ca51fd8a2c750051407bd1721c3bf2a0e83ccb1e9b33671b5bb8551e87a26",
-    "backend/app/domains/auth/router.py": "72e18aa254078454c983e096d4d9c7959988010b95e16e70770f13738cbe4c48",
+    "backend/app/domains/auth/router.py": "9fb69fc28f9080d8a534a7b168ec448fdbc00a2f00747ce7a97ea3946393c29e",
     "backend/app/domains/auth/schemas.py": "b9ed808ca03f82e2a2ec47c655a4241cfa91532714827c28d37c740b9aaddbf3",
     "backend/app/domains/auth/tasks.py": "491bcc47f793f324dabe8dd8a79c5560cdae422e688dd89981fd1b9aa7b4a7b8",
     "backend/app/domains/auth/websocket_tickets.py": "0187fb0e6237a04793b365a8c6a29691f2757646a8c24dd07dfec884af20d254",
@@ -13399,7 +13879,7 @@
     "backend/app/infrastructure/messaging/idempotency.py": "eccfb53841be4346e620c7a4527960bd155b16562cfbdfef38d5de5137fac968",
     "backend/app/infrastructure/messaging/recovery_celery.py": "e26d7687987a37581414f55bfea0d0414898d24557c7b7b746d0e292d505d0e9",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "d9c9ec533b09a8dec7bc8aa92894afddb3a44547f530882e73444f8384f82ea6",
+    "backend/app/main.py": "2c4f14d6736112e705c5c10a4d3694373e9450d99fc1bf91e515f82299f94bf5",
     "backend/app/models/__init__.py": "b37a9cff3296493058dfbf5703d89e2f793c66d507c57dd1516a19f04ea20b99",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -13408,6 +13888,12 @@
     "backend/app/shared/portfolio_summary.py": "20bccb9fafbeb7d8ebca0b1da793bc935d873103c581b530da801559ba1c851e",
     "backend/app/shared/types.py": "d2ecdcbf27e937c869e1bfd0b508681eb2a3b40b0ca8070dec39561bb8ca900b",
     "backend/app/shared/ws_relay.py": "67309dd4713fda2d6eec9600f33aa4d3bc7f182c57bdc1ebd9f9f5eb4607b54e",
+    "backend/app/uat2/adapters.py": "812edaf525a86803e0c3cd49966313ef429d6b9a24f4155f56ab840f2c6880a5",
+    "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
+    "backend/app/uat2/main.py": "f64831c519224b7b56cbe86f116d2e5bbe5f18dea1c5ee5ca1ee91b2ae62886d",
+    "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
+    "backend/app/uat2/router.py": "1376ef7f429c00fbf3b0388465248c1b7695cbd73518dd82964604751478dfa1",
+    "backend/app/uat2/worker.py": "4e43a596627005530dcbf10a68e55b57de68ae8d963d1196020e6a2c7b220241",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
     "frontend/app/(auth)/register/page.tsx": "025d5a3992465a4c2fc39f9066d3a25b619214af0a0c96a302efbfc0074ace97",
@@ -13477,6 +13963,7 @@
     "frontend/app/console/technical-setups/page.tsx": "8b4dd8e5b9d693eadcea9178199fd0d5af2a2c4f267a4598972d35c709fd9bcc",
     "frontend/app/console/trading-bots/bullpen-ai-auto-live/page.tsx": "9defcad1af48185e15277051e253f6694a5006b3112b5fe1b48d93e77c59d6fe",
     "frontend/app/console/trading-bots/page.tsx": "dabeb1735a79f799cdab8ad8d17cd4fa4d5eabe514b69d7b560997672123410b",
+    "frontend/app/console/uat2/page.tsx": "1f13ea0b1fc396a5f140b8fb1b5bdaf07e2c6ab76432d4ce9d010e75e923d8cb",
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
     "frontend/app/console/zerodha/final-actionables/page.tsx": "054a42b3efcfd5b740e28fab42407c8c2ffb7f5c3dff18867acd0f7adc206e01",
@@ -13489,7 +13976,7 @@
     "frontend/app/page.tsx": "2b17b3f517fb3bb5e85cb3ac52d75aef5ebd8111e04544110b531201517557bf",
     "frontend/app/zerodha/callback/page.tsx": "ed762a6e9d76483ac37d9835ee1ef74111cc24a88fe4c2b139719aa2a8419ebd",
     "frontend/next.config.ts": "cbcb5b2aab2df208fc53ce3677d2e5541a07cd827e67b8de0179f63ca1b87879",
-    "frontend/proxy.ts": "ddd6c32208409706a87d69cb86a541f67bfe3df35fefae1236500b9aa4645a08"
+    "frontend/proxy.ts": "a914550fae7f556dbff456e4841bcbdbfacf0b3d87b143ff533f5e47b18f75d1"
   },
   "unresolved": []
 }

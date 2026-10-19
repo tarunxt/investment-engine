@@ -4,7 +4,7 @@ Read this ledger, STATUS.md, ROUTE_MATRIX.md and RELEASE_GATES.md before subsequ
 
 | Decision | State and evidence | Owner / gate |
 | --- | --- | --- |
-| Stage 01 execution boundary | Confirmed: isolated development and local/CI tests only. Draft PR allowed. No deployment or merge. Stage 00 live acceptance remains BLOCKED. | User; Stage 00 PASS before any Stage 01 UAT deployment |
+| Stage01 execution boundary | Latest amendment: sequential stages01–20 into separately approved UAT2. This task prepares Stage01 source/draft only; no deployment. Preserve all UAT2 guards/limits and old Stage00 BLOCKED history. | Parent verifies UAT2 owner acceptance and coordinates deployment; Stage02 waits for Stage01 acceptance; no production merge/cutover |
 | India residents | Confirmed product scope; eligibility enforcement belongs to later stages. No legal/provider compliance claim from this baseline. | Product/legal release review |
 | Kite application modes | Confirmed BOTH user-owned apps and approved platform-managed app, with separate user/account authorizations. No automatic fallback between modes. | Broker/commercial approval and implementation gates |
 | User-owned Kite dependency | Obtain current provider confirmation for multi-user/commercial use, callbacks and data usage. Accepting a user's API key alone does not resolve those dependencies. | Integration/product owner; evidence pending |

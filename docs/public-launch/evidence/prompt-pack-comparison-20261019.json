@@ -1,0 +1,102 @@
+{
+  "library_file_id": "libfile_3d327c4f41f08191bdb9321b87a8639a",
+  "filename": "CredX-GPT-Work-execution-prompts(1).html",
+  "reported_size_bytes": 145437,
+  "version_id": null,
+  "rendered_lines_read": [
+    1,
+    610
+  ],
+  "binary_materialization": "not performed; no byte/hash equivalence claimed",
+  "comparison": "complete Stage01 decoded prompt equals recovered code-block text after trimming outer whitespace",
+  "stage01_decoded_chars": 6852,
+  "stage01_equal": true,
+  "stages": [
+    {
+      "stage": "00",
+      "title": "00 · Create isolated UAT on the existing server"
+    },
+    {
+      "stage": "01",
+      "title": "01 · Establish the implementation baseline"
+    },
+    {
+      "stage": "02",
+      "title": "02 · Fix private API ownership"
+    },
+    {
+      "stage": "03",
+      "title": "03 · Secure live updates and browser account boundaries"
+    },
+    {
+      "stage": "04",
+      "title": "04 · Make idempotency durable and tenant-scoped"
+    },
+    {
+      "stage": "05",
+      "title": "05 · Close shared-runtime and administrator boundaries"
+    },
+    {
+      "stage": "06",
+      "title": "06 · Build the module registry and backend policy"
+    },
+    {
+      "stage": "07",
+      "title": "07 · Enforce module lifecycle across backend work"
+    },
+    {
+      "stage": "08",
+      "title": "08 · Build module Preferences and filtered navigation"
+    },
+    {
+      "stage": "09",
+      "title": "09 · Implement dual-mode connection storage and adapters"
+    },
+    {
+      "stage": "10",
+      "title": "10 · Complete connection authorization, renewal and disconnect"
+    },
+    {
+      "stage": "11",
+      "title": "11 · Repair INDmoney imports and financial data integrity"
+    },
+    {
+      "stage": "12",
+      "title": "12 · Move rebalance orchestration to durable server workflows"
+    },
+    {
+      "stage": "13",
+      "title": "13 · Add AI limits, data boundaries and private exports"
+    },
+    {
+      "stage": "14",
+      "title": "14 · Implement durable order intents and explicit approvals"
+    },
+    {
+      "stage": "15",
+      "title": "15 · Implement guarded execution and order reconciliation"
+    },
+    {
+      "stage": "16",
+      "title": "16 · Build order review, safety activity and account support UX"
+    },
+    {
+      "stage": "17",
+      "title": "17 · Prepare public-service security, privacy and operations"
+    },
+    {
+      "stage": "18",
+      "title": "18 · Rehearse migration and verify the complete release"
+    },
+    {
+      "stage": "19",
+      "title": "19 · Perform a release review and prepare the rollout"
+    },
+    {
+      "stage": "20",
+      "title": "20 · Prepare cutover for acceptance—do not deploy"
+    }
+  ],
+  "sequencing": "one stage at a time; 02 ownership; 06-08 modules; 20 cutover preparation only",
+  "overrides": "current user-approved UAT2 destination; parent acceptance before deployment; old Stage00 stays BLOCKED"
+}

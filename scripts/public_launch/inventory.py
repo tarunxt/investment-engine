@@ -200,14 +200,18 @@ def scan(root=ROOT):
                              side_effects="backend proxy or server rendering; see corresponding backend entry; exports may return files",
                              calls=[], registration="App Router convention" if file.name not in {"proxy.ts", "next.config.ts"} else "framework ingress"))
     # Framework-created FastAPI documentation routes.
+    main_tree = trees[Path("backend/app/main.py")][0]
+    framework_line = next(n.lineno for n in ast.walk(main_tree)
+                          if isinstance(n, ast.Call) and expr(n.func) == "FastAPI")
     for route in ("/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"):
-        rows.append(dict(kind="http", source="backend/app/main.py:155", module="platform", capability="FastAPI built-in docs",
+        rows.append(dict(kind="http", source=f"backend/app/main.py:{framework_line}", module="platform", capability="FastAPI built-in docs",
                          method="GET", route=route, classification="public", owner_source=["none"],
                          observed_guards=["FastAPI defaults; global recovery middleware may deny"], side_effects="schema/documentation only",
                          calls=[], registration="framework default"))
     # Avoid duplicate unresolved messages from fixed-point traversal.
     rows.sort(key=lambda r: (r["source"], r["kind"], r["method"], r["route"], r["capability"]))
     return dict(schema_version=1, baseline_sha="0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
+                mount_scope="app.main; restricted app.uat2.main composition reviewed separately in UAT2_ENTRYPOINT_MATRIX.md",
                 classification_semantics="intended launch access; observed guards do not prove enforcement",
                 counts=dict(sorted(Counter(r["kind"] for r in rows).items())),
                 unresolved=sorted(set(unresolved)), source_sha256=files, entries=rows)
@@ -219,6 +223,7 @@ def render(data):
             "Classification is the intended launch access class, not a claim that it is enforced.",
             "Owner sources/guards are local static evidence; transitive calls require review. All export helpers are included conservatively.",
             "Backend source hashes and full call lists are in entrypoints.json. Unmounted routers remain visible.",
+            "Mount labels describe app.main; see UAT2_ENTRYPOINT_MATRIX.md for the restricted app.uat2.main composition and route filters.",
             "Workers with owner inputs require owner-private authorization at enqueue/execution; administrator-only background entries describe internal dispatch authority, not permission to read every tenant.",
             "Shared-read entries never authorize unscoped private holdings, prompts, costs or exports. Module-level possible effects are conservative and need transitive review.",
             "Framework handlers/pages, background dispatch sites and Beat entries are included; dynamic external registrations cannot be certified from source.",

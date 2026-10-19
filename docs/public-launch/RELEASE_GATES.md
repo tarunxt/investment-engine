@@ -1,6 +1,6 @@
 # Public-launch release gates
 
-Stage 00 live acceptance: **BLOCKED**. Stage 01 source baseline may proceed under the 19 October amendment; no UAT/production deployment or merge is authorized. Read stages/01.md, STATUS.md, DECISIONS.md and ROUTE_MATRIX.md before dependent stages.
+Stage 00 live acceptance: **BLOCKED**. Latest UAT2 amendment: Stage01 candidate preparation only; parent-confirmed dedicated UAT2 acceptance and exact-candidate CI/artifact checks precede any deployment coordinated by the UAT2 task. Old Stage00 history is preserved; no production action is authorized. This task prepares source only; it does not deploy UAT2 or authorize production merge/deployment. Read stages/01.md, STATUS.md, DECISIONS.md and ROUTE_MATRIX.md before dependent stages.
 
 | Gate | State | Required evidence |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ Stage 00 live acceptance: **BLOCKED**. Stage 01 source baseline may proceed unde
 | Capacity, budgets, products, retention | Pending decisions | Assigned owners, explicit values and evidence from DECISIONS.md; proposals are not approvals |
 | India eligibility / Bullpen availability / disclosures | Pending review | Feature-specific legal/provider release decisions; no baseline certification |
 | Orders | Not implemented in Stage 01 | Explicit payload-bound approval, durable intent, deterministic risk limits, reconciliation and separately authorized live validation |
-| Stage 01 UAT | BLOCKED / not attempted | Stage 00 PASS plus later explicit deployment authorization |
+| Stage01 UAT2 candidate | Prepared; deployment held | Parent-confirmed dedicated UAT2 owner acceptance plus exact-head CI/native artifact review; deployment coordinated by UAT2 task; old Stage00 remains separately BLOCKED |
 | Production release | Not authorized | Separate user instruction after complete release review; no merge in this task |
 
 ## Push and PR safety at the recorded base
@@ -26,3 +26,7 @@ All 14 GitHub workflows were inspected before pushing. deploy.yml is push-to-mai
 The added Stage 01 workflow is PR-only/path-filtered, read-only contents, hosted runner, synthetic SQLite/no-network fixtures and source checks. It has no deployment credentials, broker keys, environment binding, AWS commands, application startup or schedulers. No production pipeline is changed. Recheck triggers and current main before future pushes.
 
 GitHub workflow inspection does not certify outside hosting integrations. vercel.json is source configuration only, not proof of a connected deployment or its permissions. No external deployment is requested or invoked.
+
+## Current separate UAT2 candidate gate
+
+Read UAT2_INTEGRATION.md and SEQUENTIAL_UAT2_PLAN.md. Stage01 source integrates baseline documentation/inventory/fixtures/localhost tools into guarded UAT2 source. Parent acceptance and candidate CI/native artifact/deployment evidence remain pending; no deployment here. Stage02 starts only after Stage01 is accepted. Sequential authorization does not enable real providers/orders, expand owner access, change spending/retention limits or authorize Stage20 production cutover.

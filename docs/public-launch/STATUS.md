@@ -2,7 +2,13 @@
 
 19 October 2026. Read stages/01.md, DECISIONS.md, ROUTE_MATRIX.md and RELEASE_GATES.md before subsequent work.
 
-Stage 00 live acceptance remains **BLOCKED**. Both stopped hosts and every preserved artifact are unchanged. Stage 01 development/testing is authorized under the explicit amendment; **no UAT/production deployment or merge** is authorized.
+Old Stage00 live acceptance remains **BLOCKED**; its artifacts/evidence are preserved and no old-resource action is authorized. Current work is Stage01 candidate preparation for the separately approved UAT2. Deployment is held for parent-confirmed UAT2 acceptance; no production merge/deployment is authorized.
+
+## Current UAT2 candidate preparation
+
+Sequential Stage01–20 implementation is now authorized, one stage at a time. Stage01 alone is active; Stage02–20 are not started. Current candidate branch: codex/stage01-uat2-integration-20261019. It preserves both published UAT2 c40f112d and local equivalent-tree 74c2187c histories plus tested Stage01 ddefd730. Backend/frontend/deploy/guards/existing PR workflow are byte-identical to UAT2. No candidate deployment is performed: parent must first verify UAT2 owner acceptance, then coordinate the UAT2 task. Old Stage00 stays BLOCKED; this is a separate UAT2 readiness gate. No production action, access/limit change or real integration is authorized. See UAT2_INTEGRATION.md for exact checks and SEQUENTIAL_UAT2_PLAN.md for stage order.
+
+Historical recovery checkpoints below describe their then-current boundary and are superseded only by the current UAT2 amendment above.
 
 ## Stage 01 — implementation baseline
 
