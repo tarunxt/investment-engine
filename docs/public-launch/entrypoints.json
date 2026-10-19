@@ -5,7 +5,7 @@
     "background": 32,
     "export": 42,
     "frontend": 25,
-    "http": 260,
+    "http": 262,
     "lifecycle": 7,
     "page": 66,
     "scheduler": 16,
@@ -11664,6 +11664,73 @@
     },
     {
       "calls": [
+        "EmailSink",
+        "EmailSink(artifact_directory() + '/email-sink').send",
+        "artifact_directory",
+        "router.post"
+      ],
+      "capability": "capture_email",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.post('/uat2/email')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/email",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:100"
+    },
+    {
+      "calls": [
+        "Response",
+        "router.get"
+      ],
+      "capability": "local_export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "platform",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:107"
+    },
+    {
+      "calls": [
+        "Response",
+        "router.get"
+      ],
+      "capability": "local_export",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/uat2/export')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/export",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:107"
+    },
+    {
+      "calls": [
         "os.getenv",
         "router.get"
       ],
@@ -11730,6 +11797,48 @@
     },
     {
       "calls": [
+        "router.get"
+      ],
+      "capability": "broker_login_metadata",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/zerodha/login-url')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/zerodha/login-url",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:37"
+    },
+    {
+      "calls": [
+        "router.get"
+      ],
+      "capability": "fake_order_history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/zerodha/orders')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/zerodha/orders",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:45"
+    },
+    {
+      "calls": [
         "broker.place",
         "order.model_dump",
         "router.post"
@@ -11749,7 +11858,7 @@
       "registration": "unmounted",
       "route": "/zerodha/orders",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:37"
+      "source": "backend/app/uat2/router.py:50"
     },
     {
       "calls": [
@@ -11774,7 +11883,7 @@
       "registration": "unmounted",
       "route": "/dashboard/summary",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:42"
+      "source": "backend/app/uat2/router.py:55"
     },
     {
       "calls": [
@@ -11796,7 +11905,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:65"
+      "source": "backend/app/uat2/router.py:78"
     },
     {
       "calls": [
@@ -11821,74 +11930,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai/{task_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:72"
-    },
-    {
-      "calls": [
-        "EmailSink",
-        "EmailSink(artifact_directory() + '/email-sink').send",
-        "artifact_directory",
-        "router.post"
-      ],
-      "capability": "capture_email",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "platform",
-      "observed_guards": [
-        "[Depends(get_current_user)]",
-        "router.post('/uat2/email')"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "unmounted",
-      "route": "/uat2/email",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:87"
-    },
-    {
-      "calls": [
-        "Response",
-        "router.get"
-      ],
-      "capability": "local_export",
-      "classification": "owner-private",
-      "kind": "export",
-      "method": "",
-      "module": "platform",
-      "observed_guards": [
-        "none found locally; not proof of public access"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "",
-      "route": "",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:94"
-    },
-    {
-      "calls": [
-        "Response",
-        "router.get"
-      ],
-      "capability": "local_export",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "GET",
-      "module": "platform",
-      "observed_guards": [
-        "[Depends(get_current_user)]",
-        "router.get('/uat2/export')"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "unmounted",
-      "route": "/uat2/export",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:94"
+      "source": "backend/app/uat2/router.py:85"
     },
     {
       "calls": [
@@ -13892,7 +13934,7 @@
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/main.py": "f64831c519224b7b56cbe86f116d2e5bbe5f18dea1c5ee5ca1ee91b2ae62886d",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
-    "backend/app/uat2/router.py": "3f80bb4a46a71e0d04bc6a031aca0107564662d8631846a9ad19b963e12e86b9",
+    "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/worker.py": "4e43a596627005530dcbf10a68e55b57de68ae8d963d1196020e6a2c7b220241",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
