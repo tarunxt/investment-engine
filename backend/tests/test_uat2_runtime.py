@@ -30,6 +30,16 @@ def test_actual_schemas_and_disabled_modules(owner_client):
     portfolio = owner_client.get('/zerodha/portfolio')
     assert portfolio.status_code == 200
     assert portfolio.json()['latest']['holdings_count'] == 2
+    status = owner_client.get('/zerodha/status').json()
+    # The real frontend requires these nullable fields even for simulated login.
+    assert isinstance(status['login_time'], str)
+    assert status['expires_at'] is None
+    latest = portfolio.json()['latest']
+    assert sum(h['market_value'] for h in latest['holdings']) == latest['holdings_market_value']
+    assert sum(h['invested_value'] for h in latest['holdings']) == latest['holdings_invested_value']
+    for holding in latest['holdings']:
+        assert holding['market_value'] == holding['quantity'] * holding['last_price']
+        assert holding['day_change_value'] == holding['quantity'] * holding['day_change']
     assert owner_client.post('/zerodha/callback', json={'request_token': 'synthetic'}).status_code == 503
     assert owner_client.post('/zerodha/orders/place-protected-market', json={}).status_code == 503
     assert owner_client.post('/google-sheets/export', json={}).status_code == 503
