@@ -1,5 +1,13 @@
 # Stage 01 UAT2 integration candidate
 
+## Deployment audit and repeatable certificate proxy correction
+
+Parent/live executor reports Stage01 deployed successfully at exact67cb8e6d499126f5dfcbf28d813d6cab4fe042bb; owner review is pending and Stage02 remains unstarted. Preserve that deployed SHA and its verified artifact as the deployment audit. This source follow-up does not change that deployed app identity or request redeployment.
+
+Integrated exact reviewed correction709bbac38557e4390afb7c527a58ffc1412cd6b7, including its acceptance-history ancestry. The only configuration change is deploy/uat2/native/nginx.conf: resolver169.254.169.253 with ipv6=off and3s timeout, variable-based fixed Google certificate host/path. Loopback listener, GET-only exact /certs location, TLS SNI/verification/trust and catchall403 remain unchanged. File SHA256 e5cd9da8b9a2e2380f7250eedb7bc46778d060beeb8f2ab712c7bd8ebf76f826 matches the approved live correction reported by the parent. Native16 and shared configuration7 tests pass locally; targeted exact-source checksum/restriction assertions pass. No nginx executable is installed locally, so no local nginx -t is claimed. Live acceptance belongs to the existing executor.
+
+No redeploy, new key, live setting/access/resource/budget/shutdown/retention change or Stage02 action occurred. The source follow-up prevents future deployment reverting the already approved correction; its exact-head PR checks remain required.
+
 Current authority is CURRENT_SPECIFICATION.md and the new complete UAT2 stages 00–20. Prior version is preserved under history/UAT2_INTEGRATION-pre-uat2-pack-137fce50.md. Revised 00 verifies existing UAT2 READY; older UAT is deferred and not a prerequisite. UAT2 task deploys after parent verifies READY under current valid authorization; owner reviews deployed Stage 01 before 02. This task synchronizes instructions and incorporates only the separately reviewed reset fix/regression. Mac access resumed; no live/deployment action is performed. Stage 01 overlap is mapped in STAGE01_REQUIREMENT_MAP.md, not inferred from handoff text.
 
 ## Source and review boundary
