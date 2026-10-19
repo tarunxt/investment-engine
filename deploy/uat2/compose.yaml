@@ -1,0 +1,77 @@
+# Candidate topology. Application startup remains locked pending acceptance.
+name: credx-uat2
+x-runtime: &runtime
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+services:
+  proxy:
+    <<: *runtime
+    image: caddy:2.10.2-alpine
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - proxy_config:/config
+    networks: [edge, private]
+    mem_limit: 256m
+  frontend:
+    <<: *runtime
+    image: ${UAT2_FRONTEND_IMAGE:?supply immutable frontend image digest}
+    env_file: [./frontend.env]
+    networks: [private]
+    mem_limit: 1536m
+  backend:
+    <<: *runtime
+    image: ${UAT2_BACKEND_IMAGE:?supply immutable backend image digest}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    env_file: [./backend.env]
+    environment:
+      CREDX_UAT2: '1'
+      ENVIRONMENT: uat2
+      AUTH_DISABLED: 'false'
+    networks: [private]
+    volumes: [artifacts:/backend/data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    mem_limit: 1536m
+  postgres:
+    <<: *runtime
+    image: postgres:16.13-bookworm
+    env_file: [./database.env]
+    volumes: [postgres:/var/lib/postgresql/data]
+    tmpfs: [/tmp, /var/run/postgresql]
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U credx_uat2 -d credx_uat2']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 768m
+  redis:
+    <<: *runtime
+    image: redis:7.4.8-alpine
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
+    volumes: [redis:/data]
+    networks: [private]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    mem_limit: 192m
+networks:
+  edge: {}
+  private: {internal: true}
+volumes:
+  postgres: {}
+  redis: {}
+  artifacts: {}
+  certificates: {}
+  proxy_config: {}

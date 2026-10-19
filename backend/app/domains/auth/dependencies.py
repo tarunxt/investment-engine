@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.uat2 import uat2_mode, require_uat2_owner
 from app.core.config import settings
 from app.core.security import JWTUtils, PasswordUtils
 from app.core.logging import get_logger
@@ -18,7 +19,7 @@ security = HTTPBearer(auto_error=False)
 
 
 def is_auth_disabled() -> bool:
-    return settings.auth_disabled or settings.environment.lower() == "development"
+    return not uat2_mode() and (settings.auth_disabled or settings.environment.lower() == "development")
 
 
 async def get_or_create_dev_user(db: AsyncSession) -> User:
@@ -83,6 +84,7 @@ async def get_current_user(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         if not user.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive")
+        require_uat2_owner(user.email)
         return user
     finally:
         add_auth_duration((monotonic() - started_at) * 1000)
