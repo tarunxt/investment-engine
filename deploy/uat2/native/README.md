@@ -79,8 +79,9 @@ a separate PostgreSQL cluster, without installing packages or starting the app.
 User/role creation and loading the UID-scoped firewall policy are exact action-time
 security gates, not commands to run now.
 Resolve independent backend/frontend/barrier config using the mandated
-aws-secrets-manager skill and asm-exec; both are still unavailable. References are
-templates, not fabricated values. Do not retrieve/copy production secrets or
+aws-secrets-manager skill and asm-exec. The reviewed wrapper is now registered
+locally and its runtime AWS MCP resolution has passed on the dedicated host.
+References in this directory remain secret-free templates. Do not retrieve/copy production secrets or
 substitute an invented secret command. DATABASE_URL must select the dedicated
 app role, localhost5542 and credx_uat2 database, with URI-encoded password.
 
