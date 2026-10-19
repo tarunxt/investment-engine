@@ -1028,7 +1028,7 @@ async def cancel_run(
     jobs: list[Job] = []
     if run_jobs:
         job_ids = [rj.job_id for rj in run_jobs]
-        jobs_rows = await db.execute(select(Job).where(Job.id.in_(job_ids)))
+        jobs_rows = await db.execute(select(Job).where(Job.id.in_(job_ids), Job.user_id == current_user.id))
         jobs = jobs_rows.scalars().all()
         for job in jobs:
             if job.status in {JobStatus.SCHEDULED, JobStatus.PENDING, JobStatus.PROCESSING}:

@@ -169,6 +169,7 @@ class GoogleSheetsTaskTests(unittest.TestCase):
         cred = SimpleNamespace(access_token_enc="enc", refresh_token_enc=None)
         partial_job = SimpleNamespace(
             id=88,
+            user_id=5,
             status=JobStatus.FAILED,
             response=PARTIAL_COMPLETE_RESPONSE,
             error_message="gemini/gemini-2.5-flash returned insufficient recommendations (expected 5, got 4)",
@@ -177,6 +178,7 @@ class GoogleSheetsTaskTests(unittest.TestCase):
         )
         malformed_job = SimpleNamespace(
             id=89,
+            user_id=5,
             status=JobStatus.FAILED,
             response="| header | only |",
             error_message="gemini/gemini-2.5-flash returned malformed table output (no data rows)",

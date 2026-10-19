@@ -14,10 +14,12 @@ from datetime import datetime
 
 class JobRepository(Protocol):
     async def create(self, job: Job) -> Job: ...
-    async def get(self, job_id: JobId) -> Job | None: ...
+    async def get(self, job_id: JobId, *, user_id: int) -> Job | None: ...
     async def list(
         self,
         query: PagedQuery,
+        *,
+        user_id: int,
         status: JobStatus | None = None,
         search: str | None = None,
     ) -> PagedResult[Job]: ...
@@ -26,6 +28,7 @@ class JobRepository(Protocol):
         job_id: JobId,
         status: JobStatus,
         *,
+        user_id: int,
         response: str | None = None,
         error_message: str | None = None,
         tokens_in: int | None = None,
@@ -48,19 +51,21 @@ class PostgresJobRepository:
         await self._session.refresh(job)
         return job
 
-    async def get(self, job_id: JobId) -> Job | None:
+    async def get(self, job_id: JobId, *, user_id: int) -> Job | None:
         result = await self._session.execute(
-            select(Job).where(Job.id == job_id)
+            select(Job).where(Job.id == job_id, Job.user_id == user_id)
         )
         return result.scalar_one_or_none()
 
     async def list(
         self,
         query: PagedQuery,
+        *,
+        user_id: int,
         status: JobStatus | None = None,
         search: str | None = None,
     ) -> PagedResult[Job]:
-        stmt = select(Job)
+        stmt = select(Job).where(Job.user_id == user_id)
         if status:
             stmt = stmt.where(Job.status == status)
         if search:
@@ -90,6 +95,7 @@ class PostgresJobRepository:
         job_id: JobId,
         status: JobStatus,
         *,
+        user_id: int,
         response: str | None = None,
         error_message: str | None = None,
         tokens_in: int | None = None,
@@ -100,7 +106,7 @@ class PostgresJobRepository:
         web_sources: list[str] | None = None,
         runtime_metadata_json: dict | None = None,
     ) -> None:
-        job = await self.get(job_id)
+        job = await self.get(job_id, user_id=user_id)
         if not job:
             return
         job.status = status
@@ -133,10 +139,10 @@ class SyncJobRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get(self, job_id: int) -> Job | None:
+    def get_for_worker(self, job_id: int) -> Job | None:
         return self._session.get(Job, job_id)
 
-    def get_fresh(self, job_id: int) -> Job | None:
+    def get_fresh_for_worker(self, job_id: int) -> Job | None:
         """Re-read cancellation state changed by an API session during generation."""
         return self._session.get(Job, job_id, populate_existing=True)
 

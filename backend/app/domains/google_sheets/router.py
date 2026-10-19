@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -391,6 +392,12 @@ async def export_job(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.jobs.models import Job
+    resource = await db.scalar(select(Job.id).where(
+        Job.id == data.job_id, Job.user_id == current_user.id,
+    ))
+    if resource is None:
+        raise HTTPException(404, detail="Job not found")
     repo = GoogleSheetsCredentialRepository(db)
     cred = await repo.get_by_user(current_user.id)
 
@@ -435,6 +442,12 @@ async def export_run(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.runs.models import Run
+    resource = await db.scalar(select(Run.id).where(
+        Run.id == data.run_id, Run.user_id == current_user.id,
+    ))
+    if resource is None:
+        raise HTTPException(404, detail="Run not found")
     repo = GoogleSheetsCredentialRepository(db)
     cred = await repo.get_by_user(current_user.id)
 

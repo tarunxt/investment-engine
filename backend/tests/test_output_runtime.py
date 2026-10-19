@@ -244,12 +244,12 @@ def test_failed_cancellation_read_preserves_original_failure(monkeypatch):
     def get_fresh(repo,job_id):
         if generation_failed:
             raise RuntimeError('Secondary state read failure')
-        return repo.get(job_id)
+        return repo.get_for_worker(job_id)
     def generate(**kwargs):
         nonlocal generation_failed
         generation_failed=True
         raise RuntimeError('p/m returned invalid output contract (synthetic)')
-    monkeypatch.setattr(FakeRepo,'get_fresh',get_fresh,raising=False)
+    monkeypatch.setattr(FakeRepo,'get_fresh_for_worker',get_fresh,raising=False)
     _,_,_,failed=execute_mocked(job,generate)
     failed.assert_called_once()
     assert failed.call_args.args[3]=='p/m returned invalid output contract (synthetic)'

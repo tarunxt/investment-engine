@@ -55,9 +55,11 @@ class CreateJobUseCase:
 
     async def execute(self, cmd: CreateJobCommand) -> CreateJobResult:
         require_equity_analysis(cmd.auto_rebalance_portfolio)
+        # Cache/lock identities are server-derived; equal client keys never share owners.
+        owner_key = f"job:{int(cmd.user_id)}:{cmd.idempotency_key}" if cmd.idempotency_key else None
         # ── 1. Idempotency fast-path ─────────────────────────────────────────
         if cmd.idempotency_key:
-            if cached := await self._idempotency.get(cmd.idempotency_key):
+            if cached := await self._idempotency.get(owner_key):
                 return CreateJobResult(**cached)
 
         # ── 2. Normalise scheduled_at to UTC-aware ───────────────────────────
@@ -69,7 +71,7 @@ class CreateJobUseCase:
         initial_status = JobStatus.SCHEDULED if is_future else JobStatus.PENDING
 
         # ── 3. Atomic write: job + outbox in one transaction ─────────────────
-        lock_key = f"job:create:{cmd.idempotency_key or cmd.prompt[:40]}"
+        lock_key = f"job:create:{cmd.user_id}:{cmd.idempotency_key or cmd.prompt[:40]}"
         try:
             async with self._lock.acquire(lock_key, ttl=15, timeout=5):
                 job = Job(
@@ -126,7 +128,7 @@ class CreateJobUseCase:
         # ── 6. Cache result for idempotency ──────────────────────────────────
         if cmd.idempotency_key:
             await self._idempotency.set(
-                cmd.idempotency_key,
+                owner_key,
                 {
                     "job_id": result.job_id,
                     "status": result.status.value,

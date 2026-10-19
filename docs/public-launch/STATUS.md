@@ -1,5 +1,19 @@
 # Public-launch implementation status
 
+## Stage02 implementation checkpoint (supersedes prior active-stage status)
+
+Stage01 is owner-accepted on deployed67cb8e6d plus separately approved proxy709bbac; clean repeatable-source base4b69c472 is preserved. Stage02 is authorized on separate codex/stage02-private-ownership-20261019 in task-5/stage02-private-ownership; no Stage01 branch edits. Full stages/02.md was verified exact against authoritative HTML p02; instruction history is unchanged.
+
+Code:IMPLEMENTED pending CI and deployed acceptance. CI:PENDING exact source. UAT2 deployment:NOT_RUN here; parent/existing executor only after READY/current limits check and exact artifact verification. UAT2 verification:NOT_RUN. Owner acceptance:PENDING Stage02 review. External approval:UNCHANGED; no provider approval inferred. Stage03:MUST_WAIT for deployed Stage02 owner review.
+
+Jobs list/detail/cancel now require current active identity and owner SQL predicates including counts/search/pagination; async job/run repository owner is mandatory. Foreign and missing resources return indistinguishable404. Create identity is server-derived and replay/cache locks are per user. Internal job worker lookups are explicitly named get_for_worker/get_fresh_for_worker; all affected router/worker/test callsites updated. Job/run WebSockets reject foreign IDs before accept or relay. Run queries exclude corrupt cross-owner Job links; prompt references require owned/system visibility. Sheets export HTTP ownership checks precede credentials/dispatch; worker success/failure paths and linked records are owner checked. Usage joins cannot disclose foreign Job/Run metadata. Existing snapshot, recommendation and frozen-output source checks are reused.
+
+Local verification:367 tests PASS across ownership, usage, provider/worker/export, run output-source, UAT2 policy/runtime and Google-login suites. Original4b69c472 disposable-source negative run reproduced the original count leak6vs3 and known foreign job200vs404; repaired regressions pass. Actual localhost Next/FastAPI/BFF checks and Chrome A/B walkthrough pass; see STAGE02_PREVIEW.md and evidence/stage02-local-preview.json. A dedicated PostgreSQL test step uses random isolated schemas on the existing disposable CI service, explicitly acknowledged and never a live DB; its result is pending. No schema/model/Alembic migration or Google identity change.
+
+UAT2 read-only actual /jobs, /jobs/{id}, /runs, /runs/{id} are included for review with existing exact-owner authentication. Mutations/AI dispatch/export/cancel and WebSockets stay unavailable in this restricted UAT2 composition; private create/cancel/replay tests use isolated fake adapters. No public test identity or registration opened. Public Bullpen live/copy/direct and broader operator subsystems remain closed under RELEASE_GATES; this is release-scope private API evidence, not whole-platform security certification or authorization to open multi-user production. All production, AWS, keys/access and resource/budget/shutdown/retention settings remain unchanged.
+
+Next:publish separate draft Stage02 PR after CI-trigger audit, verify exact candidate/native artifact, coordinate approved UAT2 deployment through parent, record deployed SHA/pages/negative-case walkthrough and obtain owner review before03.
+
 ## Deployment audit and repeatable certificate proxy correction
 
 Parent/live executor reports Stage01 deployed successfully at exact67cb8e6d499126f5dfcbf28d813d6cab4fe042bb; owner review is pending and Stage02 remains unstarted. Preserve that deployed SHA and its verified artifact as the deployment audit. This source follow-up does not change that deployed app identity or request redeployment.

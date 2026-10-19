@@ -1,0 +1,26 @@
+{
+  "frontend_url": "http://localhost:56322",
+  "backend_url": "http://127.0.0.1:56323",
+  "checks": [
+    "anonymous direct/BFF401",
+    "two synthetic credential sessions",
+    "per-owner list/search/count/pagination",
+    "owned run summaries",
+    "foreign/guessed IDs identical404 direct/BFF",
+    "spoofed Authorization/owner headers cannot override BFF session"
+  ],
+  "result": "passed",
+  "integrations": "unavailable; no external actions",
+  "tokens_or_cookies_retained": false,
+  "browser_checks": [
+    "Chrome actual jobs screen: A sees own synthetic#2 only; B sees own synthetic#3 only",
+    "B opens own#3: private B response visible",
+    "B opens known A#2: Job not found; no A content",
+    "Logout/login B successful; actual run category view remains generic/empty for unclassified fixture"
+  ],
+  "frontend_port": 56322,
+  "backend_port": 56323,
+  "backend_pid": 71004,
+  "frontend_pid": 71005,
+  "local_only": true
+}

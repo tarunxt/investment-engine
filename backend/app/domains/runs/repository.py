@@ -41,16 +41,20 @@ class PostgresRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    def _owned_query(self, user_id: int):
+        # A corrupted historical link must not expose or cancel another owner's job.
+        foreign_links = (select(RunJob.run_id).join(Job, RunJob.job_id == Job.id)
+                         .where(Job.user_id.is_distinct_from(user_id)))
+        return select(Run).where(Run.user_id == user_id, Run.id.not_in(foreign_links))
+
     async def create(self, run: Run) -> Run:
         self._session.add(run)
         await self._session.flush()
         await self._session.refresh(run)
         return run
 
-    async def get(self, run_id: int, *, user_id: int | None = None) -> Run | None:
-        stmt = select(Run).where(Run.id == run_id)
-        if user_id is not None:
-            stmt = stmt.where(Run.user_id == user_id)
+    async def get(self, run_id: int, *, user_id: int) -> Run | None:
+        stmt = self._owned_query(user_id).where(Run.id == run_id)
         result = await self._session.execute(
             stmt
             .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
@@ -61,7 +65,7 @@ class PostgresRunRepository:
         self,
         query: PagedQuery,
         *,
-        user_id: int | None = None,
+        user_id: int,
         summary: bool = False,
     ) -> PagedResult[Run]:
         # Full run payloads include every linked LLM response and can grow to
@@ -74,9 +78,7 @@ class PostgresRunRepository:
                 limit=MAX_FULL_RUN_LIST_LIMIT,
             )
 
-        stmt = select(Run)
-        if user_id is not None:
-            stmt = stmt.where(Run.user_id == user_id)
+        stmt = self._owned_query(user_id)
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total: int = (await self._session.execute(count_stmt)).scalar_one()
         if summary:

@@ -40,7 +40,7 @@ class FakeRepo:
     def __init__(self, job):
         self.job = job
 
-    def get(self, _job_id: int):
+    def get_for_worker(self, _job_id: int):
         return self.job
 
     def update_status(

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -561,8 +561,10 @@ async def llm_performance(
     rows = (
         await db.execute(
             select(Job, RunJob, Run)
-            .outerjoin(RunJob, RunJob.job_id == Job.id)
-            .outerjoin(Run, Run.id == RunJob.run_id)
+            .select_from(Job)
+            .outerjoin(RunJob, and_(RunJob.job_id == Job.id,
+                RunJob.run_id.in_(select(Run.id).where(Run.user_id == current_user.id).correlate(None))))
+            .outerjoin(Run, and_(Run.id == RunJob.run_id, Run.user_id == current_user.id))
             .where(Job.user_id == current_user.id)
             .order_by(Job.created_at.desc(), Job.id.desc())
             .limit(limit)

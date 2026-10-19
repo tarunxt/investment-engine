@@ -105,7 +105,7 @@ async def get_threat_analysis(
     current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get(JobId(job_id))
+    job = await repo.get(JobId(job_id), user_id=current_user.id)
     if not job or job.user_id != current_user.id or not is_indmoney_us_threat_job(job):
         raise HTTPException(404, detail="Threat analysis job not found")
     return await _serialize_threat_job(db, job)
@@ -155,7 +155,7 @@ async def run_threat_analysis(
     finally:
         await redis.aclose()
 
-    job = await PostgresJobRepository(db).get(result.job_id)
+    job = await PostgresJobRepository(db).get(result.job_id, user_id=current_user.id)
     if not job:
         raise HTTPException(500, detail="Threat analysis job could not be loaded after creation")
 

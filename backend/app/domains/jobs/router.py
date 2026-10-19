@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 
-router = APIRouter(prefix="/jobs", tags=["jobs"])
+router = APIRouter(prefix="/jobs", tags=["jobs"], dependencies=[Depends(get_current_user)])
 
 
 def _get_redis() -> aioredis.Redis:
@@ -64,7 +64,7 @@ async def create_job(
 
     # Re-fetch to return full JobResponse (use case only returns minimal result)
     repo = PostgresJobRepository(db)
-    job = await repo.get(result.job_id)
+    job = await repo.get(result.job_id, user_id=current_user.id)
     return job
 
 
@@ -75,6 +75,7 @@ async def list_jobs(
     status: str | None = Query(None),
     q: str | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
     status_filter: JobStatus | None = None
@@ -86,6 +87,7 @@ async def list_jobs(
 
     result = await repo.list(
         PagedQuery(page=page, limit=limit),
+        user_id=current_user.id,
         status=status_filter,
         search=q or None,
     )
@@ -96,9 +98,10 @@ async def list_jobs(
 async def get_job(
     job_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get(JobId(job_id))
+    job = await repo.get(JobId(job_id), user_id=current_user.id)
     if not job:
         raise HTTPException(404, detail="Job not found")
     return job
@@ -111,11 +114,9 @@ async def cancel_job(
     current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get(JobId(job_id))
+    job = await repo.get(JobId(job_id), user_id=current_user.id)
     if not job:
         raise HTTPException(404, detail="Job not found")
-    if job.user_id != current_user.id:
-        raise HTTPException(403, detail="Not allowed")
 
     if job.status not in JobStatus.active():
         return job
@@ -128,7 +129,7 @@ async def cancel_job(
 
     await db.commit()
 
-    job = await repo.get(JobId(job_id))
+    job = await repo.get(JobId(job_id), user_id=current_user.id)
     if not job:
         raise HTTPException(404, detail="Job not found")
 
