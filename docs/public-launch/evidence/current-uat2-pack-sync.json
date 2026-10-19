@@ -1,0 +1,48 @@
+{
+  "source_library_id": "libfile_8c0887a3e4f88191b24fba523ef6959e",
+  "filename": "CredX-UAT2-execution-prompts(1).html",
+  "reported_size_bytes": 221733,
+  "reported_sha256": "c25d5b69b160b0a9228667d6374b17f5e6b135ac8e941f2eee7404a81e8f1449",
+  "original_bytes_hash_verified": false,
+  "rendered_lines_read": 888,
+  "stage_count": 21,
+  "html_modified": false,
+  "synchronization": "complete decoded stage pre blocks to active00\u201320; earlier01 exact copy and old00 reference preserved; ledgers archived",
+  "scope": "complete instruction synchronization plus reviewed reset fix79acc235 and focused native regression; backend/frontend/migrations/preview/workflows and other guards unchanged",
+  "pr1240_actual_head": "ddefd7306003dc8e4e662d3b88abe167da77f036",
+  "pr1240_backend_frontend_changes": [],
+  "implementation_state": "baseline present;02/06\u201308 not implemented by1240; no inference from handoff caveat",
+  "local_environment": "Mac initially disconnected; resumed after explicit user confirmation. Clean worktree fast-forwarded to389a840a; native16 including mocked reset regression passed. No denied preview probes retried; no live reset/deployment.",
+  "uat2_parent": "3497ff5cc6072ee3bb7ad3847d55d567f5702e58",
+  "reset_fix": "79acc235da9f3ba7babb0b640c97442761b1da3f",
+  "native_regression_state": "16 native unit tests passed locally on the prior verified candidate; controller/regression code unchanged by India fix503f86ee. Successor exact-head CI still required.",
+  "required_runtime_fix": {
+    "commit": "79acc235da9f3ba7babb0b640c97442761b1da3f",
+    "uat2_evidence_head": "3497ff5cc6072ee3bb7ad3847d55d567f5702e58",
+    "files": [
+      "deploy/uat2/native/ctl.py"
+    ],
+    "review": "reset uses serving model registry and release/backend cwd; same unprivileged identity; no broader guard/access change",
+    "new_regression": "test_reset_uses_serving_model_registry_and_release_directory; pending new exact-candidate CI",
+    "installed_reported_by_parent": true,
+    "live_verification_by_this_task": "not performed",
+    "installed_status": "Parent reports installed with15 host tests passed; this task performed no live installation or verification"
+  },
+  "controller_file_mode": "original100755 restored after GitHub content synchronization",
+  "india_contract_fix": {
+    "commit": "503f86ee8623d1dbeb25ce7adaa9b5a1364b7b96",
+    "files": [
+      "backend/app/uat2/adapters.py",
+      "backend/app/uat2/router.py",
+      "backend/tests/test_uat2_runtime.py"
+    ],
+    "local_results": {
+      "google_uat2": 44,
+      "baseline": 5
+    },
+    "scope": "derived synthetic holding values and simulated login/expiry response fields only",
+    "live_installation_by_this_task": false,
+    "successor_ci_artifact": "pending exact-source verification"
+  },
+  "provenance_note": "This is a source-time checkpoint; exact post-build successor CI/artifact results are pinned in PR1241 without relabeling historical bundles."
+}

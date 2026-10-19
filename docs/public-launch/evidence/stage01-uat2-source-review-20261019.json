@@ -1,0 +1,65 @@
+{
+  "local_uat2_base": "74c2187cc324a4d4c16ecc3f264bb5e294f6b953",
+  "published_uat2_base": "c40f112d9259592256df4e5db5646f5d8915f0a6",
+  "uat2_tree_both": "ce2571f49747158cee276c79b3b40c0ea10793e9",
+  "stage01_source": "ddefd7306003dc8e4e662d3b88abe167da77f036",
+  "preserved_runtime_paths": [
+    "backend",
+    "frontend",
+    "deploy",
+    ".dockerignore",
+    ".github/workflows/pr-checks.yml"
+  ],
+  "runtime_diff": "empty against both UAT2 bases",
+  "google_history": [
+    "0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
+    "385f61888dfab13ceac1a960f9e508626f407a35"
+  ],
+  "guard_source_sha256": {
+    "backend/app/core/uat2.py": "bab4c74498a7db818c695bec717a31d4f2bafa55711b620bbbc28f7ede5a0894",
+    "backend/app/core/security.py": "638f8d50878292a3d5dffea7de88a078bec497e8216acf57dc0308626a2bf2d7",
+    "backend/app/domains/auth/dependencies.py": "4e36c15b99ecaadfdb205c192f5b1291b3add41ab234bc85d1e45540665bab76",
+    "backend/app/domains/auth/google_signin.py": "aef4c0e28d498070f14f85ab6611ae45f7374aa3a96dfc4e060b8beaffb60d84",
+    "backend/app/domains/auth/router.py": "9fb69fc28f9080d8a534a7b168ec448fdbc00a2f00747ce7a97ea3946393c29e",
+    "backend/app/uat2/main.py": "f64831c519224b7b56cbe86f116d2e5bbe5f18dea1c5ee5ca1ee91b2ae62886d",
+    "backend/app/uat2/router.py": "1376ef7f429c00fbf3b0388465248c1b7695cbd73518dd82964604751478dfa1",
+    "backend/app/uat2/worker.py": "4e43a596627005530dcbf10a68e55b57de68ae8d963d1196020e6a2c7b220241",
+    "frontend/auth.ts": "47cc73218e7f7779d69208819ab25fdd8dc9518e57446a42aedf81325a031cb6",
+    "frontend/proxy.ts": "a914550fae7f556dbff456e4841bcbdbfacf0b3d87b143ff533f5e47b18f75d1",
+    "frontend/lib/authSessionCookie.ts": "5f915fd4cb6e4ecfd93cd7e9604fc72da6a1d6f1575076db8c8723b825c860a6",
+    "frontend/app/api/bullpen-ai/_lib/serverBackendSession.ts": "53913ebd07c8debf697ed059014ebcb9eaf8cab0136eb47935066e6b11736f64",
+    "deploy/uat2/native/network.nft": "a9887610c47e57c96b7fd1bb514095d33a63f7c8b33124454894c8d7197de4b9",
+    "deploy/uat2/native/ctl.py": "d6054c1d00455853ab4a2a3a09e331f7da8cb7a1be68c0b95588290d5159d2c7",
+    ".github/workflows/pr-checks.yml": "2fd11f96f71ed57904d1e63ff6532acbf0eecfe59cba6c1991b46e369b470ed6"
+  },
+  "local_results": {
+    "baseline_pytest": {
+      "passed": 5
+    },
+    "google_and_uat2_policy_runtime": {
+      "passed": 44,
+      "environment": "test; unused PostgreSQL URL port1, no connection required"
+    },
+    "native_controller_unittest": {
+      "passed": 15
+    },
+    "configuration_unittest": {
+      "passed": 6,
+      "skipped": 1,
+      "skip": "Docker CLI hidden from PATH; Compose syntax check not run"
+    },
+    "auth_session_cookie_node": {
+      "passed": 6
+    }
+  },
+  "scope": "candidate source review only; no UAT2 deployment/owner acceptance/provider approval claimed",
+  "test_setup_failure": "combined UAT2 test collection initially used in-memory SQLite, whose StaticPool rejects app pool options; rerun with documented unused PostgreSQL test URL passed without source change",
+  "draft_pr": "https://github.com/tarunxt/investment-engine/pull/1241",
+  "original_stage01_ci": {
+    "head": "ddefd7306003dc8e4e662d3b88abe167da77f036",
+    "baseline": "https://github.com/tarunxt/investment-engine/actions/runs/39284309932",
+    "pr_checks": "https://github.com/tarunxt/investment-engine/actions/runs/39284309986",
+    "both_conclusions": "success"
+  },
+  "candidate_ci": "separate exact-head check required; first candidate runs queued; no result borrowed from original Stage01"
+}

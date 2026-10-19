@@ -1,0 +1,38 @@
+# Sequential UAT2 stages 01–20
+
+## Current authority and sequencing
+
+CURRENT_SPECIFICATION.md and synchronized complete stages/00–20 from Library libfile_8c0887a3e4f88191b24fba523ef6959e are controlling. The older pack and previous plan are preserved as history, not active prerequisites. Revised 00 verifies existing UAT2 READY without restarting old UAT. Local/CI may proceed while readiness is pending; deployment requires READY and current valid authorization. UAT2 task owns live deployment; parent coordinates; owner reviews deployed Stage 01 before 02. Preserve runtime/guards/code/migrations and all budget/shutdown limits. No production cutover, real integrations/orders or new security/resource work.
+
+Only Stage 01 reconciliation is active. Complete instruction files for02–20 are synchronized references, not started implementations. Inspect STAGE01_REQUIREMENT_MAP.md before inferring overlap; no duplicate ownership/module systems. Each later stage retains its original prerequisite. Stage20 prepares cutover only.
+
+## Per-stage branch and acceptance plan
+
+| Stage | Scope | Branch | Prerequisite | Current state | Required completion evidence |
+| --- | --- | --- | --- | --- | --- |
+| 01 | Establish the implementation baseline | codex/stage01-uat2-integration-20261019 | Parent-confirmed UAT2 acceptance | Candidate; deployment held | persistent implementation ledger, complete entry-point inventory and reproducible baseline checks. Report existing failures separately. No claim of exhaustive security certification. |
+| 02 | Fix private API ownership | codex/uat2-stage02 (reserved) | Stage 01 accepted | Not started | release-scope private reads/writes cannot cross owners. If a broad subsystem needs follow-up, explicitly list it as a release blocker rather than declaring all isolation complete. |
+| 03 | Secure live updates and browser account boundaries | codex/uat2-stage03 (reserved) | Stage 02 accepted | Not started | cross-user streaming and stale-account UI regression tests pass. Document revocation latency and mechanism rather than promising instantaneous distributed revocation without evidence. |
+| 04 | Make idempotency durable and tenant-scoped | codex/uat2-stage04 (reserved) | Stage 03 accepted | Not started | one durable logical operation per scoped key, recoverable dispatch and no cross-user result references. Keep financial order deduplication separate until stage 14. |
+| 05 | Close shared-runtime and administrator boundaries | codex/uat2-stage05 (reserved) | Stage 04 accepted | Not started | no release-scope path grants a public user access to the singleton financial runtime; operator privileges are explicit and audited. |
+| 06 | Build the module registry and backend policy | codex/uat2-stage06 (reserved) | Stage 05 accepted | Not started | authoritative policy contract and registry documented, migration tested; all remaining integration points explicitly tracked for stages 07–08. |
+| 07 | Enforce module lifecycle across backend work | codex/uat2-stage07 (reserved) | Stage 06 accepted | Not started | server-side enable/disable semantics hold even when the UI is bypassed. Record what later execution stages must reuse. |
+| 08 | Build module Preferences and filtered navigation | codex/uat2-stage08 (reserved) | Stage 07 accepted | Not started | visually verified UI and browser tests demonstrate module isolation without broken internal dependencies. |
+| 09 | Implement dual-mode connection storage and adapters | codex/uat2-stage09 (reserved) | Stage 08 accepted | Not started | isolation and contract tests under both modes; no mixing of keys/tokens; no connection fallback; additive migration and rotation recovery demonstrated in test. |
+| 10 | Complete connection authorization, renewal and disconnect | codex/uat2-stage10 (reserved) | Stage 09 accepted | Not started | browser flow and backend tests pass for both modes; real integration/approval status is separately recorded, never inferred from mocks. |
+| 11 | Repair INDmoney imports and financial data integrity | codex/uat2-stage11 (reserved) | Stage 10 accepted | Not started | accepted data passes documented validation and uncertainty is visible before it feeds recommendations. |
+| 12 | Move rebalance orchestration to durable server workflows | codex/uat2-stage12 (reserved) | Stage 11 accepted | Not started | workflows survive browser loss and restart safely; every side effect is policy checked; completion/failure/partial state remains inspectable and owned. |
+| 13 | Add AI limits, data boundaries and private exports | codex/uat2-stage13 (reserved) | Stage 12 accepted | Not started | bounded attributable spending and private data flow; users can understand quota/partial-analysis failures. |
+| 14 | Implement durable order intents and explicit approvals | codex/uat2-stage14 (reserved) | Stage 13 accepted | Not started | no broker-submit path in release scope can execute without current payload-bound approval; use fake adapters only. |
+| 15 | Implement guarded execution and order reconciliation | codex/uat2-stage15 (reserved) | Stage 14 accepted | Not started | restart/reconciliation evidence and no blind duplicate submission; real orders remain out of testing scope. |
+| 16 | Build order review, safety activity and account support UX | codex/uat2-stage16 (reserved) | Stage 15 accepted | Not started | a user can see exactly what was approved, submitted and remains unresolved without opening a disabled product page. |
+| 17 | Prepare public-service security, privacy and operations | codex/uat2-stage17 (reserved) | Stage 16 accepted | Not started | tested operational controls and explicit owner/evidence/status for every external release gate. |
+| 18 | Rehearse migration and verify the complete release | codex/uat2-stage18 (reserved) | Stage 17 accepted | Not started | migration counts/invariants, restore drill, rollback simulation and release matrix results recorded; no claim that mock tests equal real broker certification. No production deployment. |
+| 19 | Perform a release review and prepare the rollout | codex/uat2-stage19 (reserved) | Stage 18 accepted | Not started | either a fully evidenced release candidate ready for prompt 20, or a precise blocked checklist. Continue useful remediation without fabricating approvals or weakening controls. Do not merge/deploy yet. |
+| 20 | Prepare cutover for acceptance—do not deploy | codex/uat2-stage20 (reserved) | Stage 19 accepted | Not started | a tested UAT result and concrete cutover plan. Do not merge main, deploy production, activate public registration, change production flags or place orders. This prompt does not authorize cutover. |
+
+## Stage completion record template
+
+For each stage retain: source/spec reference and candidate/base SHAs; changed paths and migration order (or none); local test commands/results; exact-head CI links/conclusions; fake-vs-real integration boundary; localhost URL/PIDs and visible review steps; Linux artifact source/hash/audit/offline-install receipt; parent authorization and UAT2 deployment receipt; post-deploy owner/barrier/cookie/direct-API/stream/egress/empty-populated checks; rollback evidence; parent acceptance and pending external decisions. Source complete, locally verified, CI passed, artifact verified, UAT2 deployed, owner accepted and provider approved are separate fields. Never infer one from another.
+
+Current Stage 01 ledger: source candidate prepared; local checks PASS; exact-head CI and Linux bundle pending; deployment NOT RUN; parent UAT2 acceptance PENDING; real providers NOT AUTHORIZED. Stage 02–20 remain NOT STARTED. Parent advances the ledger only from evidence, without overlapping stages or changing approved access/budget limits.

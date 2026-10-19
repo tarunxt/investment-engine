@@ -1,0 +1,30 @@
+{
+  "source_commit": "137fce503eea7d22fecd4c935931cf0e72e81282",
+  "run_id": 39287460516,
+  "run_conclusion": "success",
+  "job_id": 118178543057,
+  "native_steps": "all build, audit, retention roundtrip and Linux offline-install steps success",
+  "bundle": {
+    "id": 12204206468,
+    "name": "uat2-native-bundle-137fce503eea7d22fecd4c935931cf0e72e81282",
+    "url": "https://github.com/tarunxt/investment-engine/actions/runs/39287460516/artifacts/12204206468",
+    "zip_digest": "sha256:c9b7b23a0e169bd24780fef9fb0f6057a403bf31241323d0e23631b5edf4aa35",
+    "size_bytes": 110888054,
+    "expires_at": "2026-10-20T16:43:35Z"
+  },
+  "verification": {
+    "id": 12204116769,
+    "url": "https://github.com/tarunxt/investment-engine/actions/runs/39287460516/artifacts/12204116769",
+    "zip_digest": "sha256:a38a8a1a51a3d5ee46c517d7b794b9b247a46556fcfcc8269376258bbcf2e28e"
+  },
+  "manifest_sha256": "f1b7e388a996316482300484104bfc73ec91c9335beb15ea61a28c829f37768a",
+  "files_verified": 127,
+  "wheel_count": 125,
+  "archive_members": {
+    "application.tar.gz": 677,
+    "frontend.tar.gz": 3116
+  },
+  "runtime_configuration_included": false,
+  "verification_scope": "GitHub immutable metadata plus native CI audit/download-roundtrip/Linux offline install logs; local byte transfer failed before process creation due disconnected Mac exec server; no independent local ZIP hash claim",
+  "new_candidate_rule": "Historical artifact only; never relabel for a new candidate. Exact new SHA must pass CI/native build and manifest verification."
+}
