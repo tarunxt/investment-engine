@@ -1,0 +1,29 @@
+{
+  "source_library_id": "libfile_8c0887a3e4f88191b24fba523ef6959e",
+  "filename": "CredX-UAT2-execution-prompts(1).html",
+  "reported_size_bytes": 221733,
+  "reported_sha256": "c25d5b69b160b0a9228667d6374b17f5e6b135ac8e941f2eee7404a81e8f1449",
+  "original_bytes_hash_verified": false,
+  "rendered_lines_read": 888,
+  "stage_count": 21,
+  "html_modified": false,
+  "synchronization": "complete decoded stage pre blocks to active00–20; earlier01 exact copy and old00 reference preserved; ledgers archived",
+  "scope": "complete instruction synchronization plus reviewed reset fix79acc235 and focused native regression; backend/frontend/migrations/preview/workflows and other guards unchanged",
+  "pr1240_actual_head": "ddefd7306003dc8e4e662d3b88abe167da77f036",
+  "pr1240_backend_frontend_changes": [],
+  "implementation_state": "baseline present;02/06–08 not implemented by1240; no inference from handoff caveat",
+  "local_environment": "Mac exec transport disconnected; no local new-candidate test or artifact transfer claimed",
+  "uat2_parent": "3497ff5cc6072ee3bb7ad3847d55d567f5702e58",
+  "reset_fix": "79acc235da9f3ba7babb0b640c97442761b1da3f",
+  "native_regression_state": "added; pending exact candidate CI; not locally run",
+  "required_runtime_fix": {
+    "commit": "79acc235da9f3ba7babb0b640c97442761b1da3f",
+    "uat2_evidence_head": "3497ff5cc6072ee3bb7ad3847d55d567f5702e58",
+    "files": [
+      "deploy/uat2/native/ctl.py"
+    ],
+    "review": "reset uses serving model registry and release/backend cwd; same unprivileged identity; no broader guard/access change",
+    "installed": false,
+    "new_regression": "test_reset_uses_serving_model_registry_and_release_directory; pending new exact-candidate CI"
+  }
+}

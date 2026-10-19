@@ -187,5 +187,20 @@ class NativeTests(unittest.TestCase):
         self.assertIn(('stop',ctl.APPS),events)
         self.assertFalse(any(action=='restart' for action,names in events))
 
+    def test_reset_uses_serving_model_registry_and_release_directory(self):
+        release=self.root/'releases'/('a'*40)
+        for state in ('empty','populated'):
+            with self.subTest(state=state), patch.object(ctl,'host_guard'), patch.object(ctl,'acquire_lock'), patch.object(ctl,'validate'), patch.object(ctl,'current',return_value=release), patch.object(ctl,'env_for',return_value={}), patch.object(ctl,'run') as run, patch.object(sys,'argv',['ctl.py','reset',state]):
+                ctl.main()
+            run.assert_called_once()
+            command=run.call_args.args[0]
+            self.assertEqual(command[:4],['/usr/sbin/runuser','-u','credx-uat2-app','--'])
+            self.assertEqual(command[-1],state)
+            self.assertEqual(command[-3],'-c')
+            self.assertIn('import app.uat2.main',command[-2])
+            self.assertIn("runpy.run_module('app.uat2.reset', run_name='__main__')",command[-2])
+            self.assertEqual(run.call_args.kwargs['cwd'],release/'backend')
+            self.assertEqual(run.call_args.kwargs['env']['PYTHONPATH'],str(release/'backend'))
+
 
 if __name__=='__main__':unittest.main()
