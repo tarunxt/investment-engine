@@ -608,10 +608,30 @@ jobs:
         run: |
           deploy/uat2/native/build.sh "$RUNNER_TEMP/uat2-native-package"
           python deploy/uat2/native/ctl.py inspect-bundle "$RUNNER_TEMP/uat2-native-package"
-      - name: Retain small package evidence only
+      - name: Audit complete native bundle before retention
+        run: python deploy/uat2/native/package.py audit "$RUNNER_TEMP/uat2-native-package"
+      - name: Retain complete deployable native bundle
+        id: native-bundle
         uses: actions/upload-artifact@v7
         with:
-          name: uat2-native-manifest-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ runner.temp }}/uat2-native-package/manifest.json
+          name: uat2-native-bundle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/uat2-native-package
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Download retained bundle for integrity round trip
+        uses: actions/download-artifact@v8
+        with:
+          name: uat2-native-bundle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/uat2-native-roundtrip
+      - name: Verify retained content and offline dependency installation
+        run: |
+          python deploy/uat2/native/package.py offline-check "$RUNNER_TEMP/uat2-native-roundtrip" | tee "$RUNNER_TEMP/uat2-native-retention-verification.json"
+      - name: Retain verification receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: uat2-native-verification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/uat2-native-retention-verification.json
           retention-days: 1
           if-no-files-found: error
