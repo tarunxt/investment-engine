@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 
 
 def read_env(path, private=True):
+    if path.is_symlink():
+        raise ValueError(f"Symlinked configuration rejected: {path.name}")
     if private and stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError(f'{path.name} must be owner-readable only (0600)')
     result = {}

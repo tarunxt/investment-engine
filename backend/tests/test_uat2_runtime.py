@@ -163,3 +163,25 @@ async def test_nonowner_existing_user_cannot_authorize_direct_api(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await get_current_user(HTTPAuthorizationCredentials(scheme='Bearer', credentials='synthetic'), db)
     assert exc.value.status_code == 403
+
+
+def test_native_runtime_uses_only_dedicated_loopback_endpoints(monkeypatch):
+    from app.core.uat2 import validate_uat2_startup, certificate_proxy_url, artifact_directory
+    from app.core.config import settings
+    monkeypatch.setenv('CREDX_UAT2','1')
+    for key in ('OPENAI_API_KEY','ANTHROPIC_API_KEY','GEMINI_API_KEY','DEEPSEEK_API_KEY','ZERODHA_API_KEY','ZERODHA_API_SECRET','GOOGLE_CLIENT_SECRET','SMTP_PASSWORD','SMTP_HOST','TAVILY_API_KEY','BULLPEN_API_KEY'):
+        monkeypatch.delenv(key,raising=False)
+    monkeypatch.setenv('UAT2_RUNTIME','native')
+    monkeypatch.setenv('UAT2_ADAPTERS','simulation')
+    monkeypatch.setenv('UAT2_SOURCE_COMMIT','a'*40)
+    monkeypatch.setenv('GOOGLE_SIGNIN_CLIENT_ID','independent-test-client')
+    monkeypatch.setenv('UAT2_JWT_SIGNING_KEY','unit-test-only-jwt-material-never-deployed')
+    monkeypatch.setattr(settings,'environment','uat2')
+    monkeypatch.setattr(settings,'auth_disabled',False)
+    monkeypatch.setattr(settings,'database_url','postgresql://credx_uat2:synthetic-test-only@127.0.0.1:5542/credx_uat2')
+    monkeypatch.setattr(settings,'redis_url','redis://127.0.0.1:6479/0')
+    validate_uat2_startup()
+    assert certificate_proxy_url()=='http://127.0.0.1:18082/certs'
+    assert artifact_directory()=='/var/lib/credx-uat2/artifacts'
+    monkeypatch.setattr(settings,'redis_url','redis://127.0.0.1:6379/0')
+    with pytest.raises(RuntimeError):validate_uat2_startup()

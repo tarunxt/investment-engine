@@ -36,15 +36,15 @@ async def google_signin_client_id(db: AsyncSession) -> str | None:
 
 class _BoundedGoogleRequest(Request):
     def __call__(self, *args, **kwargs):
-        from app.core.uat2 import uat2_mode
+        from app.core.uat2 import uat2_mode, certificate_proxy_url
         if uat2_mode():
             url = kwargs.get("url", args[0] if args else "")
             if url != "https://www.googleapis.com/oauth2/v1/certs":
                 raise ValueError("UAT2 only permits Google identity certificate retrieval")
             if args:
-                args = ("http://google-certs:8080/certs", *args[1:])
+                args = (certificate_proxy_url(), *args[1:])
             else:
-                kwargs["url"] = "http://google-certs:8080/certs"
+                kwargs["url"] = certificate_proxy_url()
         kwargs["timeout"] = 5
         return super().__call__(*args, **kwargs)
 

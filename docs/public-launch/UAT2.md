@@ -1,7 +1,8 @@
 # CredX UAT2
 
 **UAT2 BLOCKED.** No deployed URL or paid resources. Intended URL:
-https://uat2.cred-x.in. A runnable command package is prepared; live deployment acceptance remains pending.
+https://uat2.cred-x.in. The owner selected native systemd preparation; live deployment acceptance remains pending.
+See deploy/uat2/native/README.md for the selected package. Compose remains preserved history.
 
 ## Source
 
@@ -38,6 +39,9 @@ Parent coordination message to `01a14a6b-8cc5-75a6-ba97-9acc2cb8f019` failed:
 
 ## Implemented preparation
 
+Selected runtime: native systemd. Compose descriptions below record the preserved
+alternative; they are not the current deployment instruction.
+
 Default-off CREDX_UAT2=1 enforces exact owner before Google provisioning and token
 issuance, rejects alternate password paths and refresh-token-as-access requests.
 UAT2 JWT uses an independent required key plus UAT2 issuer/audience. Auth.js uses
@@ -54,9 +58,8 @@ Fake AI runs in a dedicated bounded Celery queue; email sink and synthetic CSV a
 local only. Actual frontend has UAT2/build banner and /console/uat2 walkthrough.
 Stage01 controls remain pending, not imitated.
 
-Lifecycle commands, image build definitions, private config templates and rollback
-instructions are in deploy/uat2/README.md. Application images carry exact source
-labels. Startup rejects missing/real adapters, production DB/Redis, missing keys,
+Selected native lifecycle/offline package/configuration/rollback instructions are in
+deploy/uat2/native/README.md. Preserved Compose instructions remain in deploy/uat2/README.md. Native bundles carry exact source/platform/checksum manifests; preserved images carry source labels. Startup rejects missing/real adapters, production DB/Redis, missing keys,
 production Google client, missing source SHA or auth bypass. Original app.main
 cannot be used in UAT2. The restricted entrypoint cannot start outside UAT2 mode.
 
@@ -109,7 +112,15 @@ transfer route and exact resources/current rates; finish code and local containe
 checks. IAM/access/firewall/secret/Google changes require applicable exact action-time
 security confirmation. This draft is not approval and no new charges were incurred.
 
-## Deployment/recovery contract
+## Native deployment/recovery contract
+
+The owner explicitly selected native systemd preparation on a separate server.
+The restricted application code is reused. New code is packaged offline in Linux CI.
+Native UAT2 units/users/paths/PG16/Redis and scoped process firewall templates are
+prepared without executing host setup. Runtime migrations use the dedicated native
+venv in a confined oneshot UAT2 unit; the owner-selected native path supersedes
+Docker-only migration tooling for this new UAT2 path, without changing other workflows.
+
 
 Require immutable images and recorded source commit; validate config without secret
 output; start UAT2 DB/Redis; UAT2-only backup; Alembic only inside backend Docker

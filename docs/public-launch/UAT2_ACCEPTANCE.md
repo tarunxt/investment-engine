@@ -1,44 +1,73 @@
 # UAT2 acceptance
 
-**UAT2 BLOCKED — no deployment or browser acceptance.**
+**UAT2 BLOCKED — no cloud deployment, usable preview URL or browser acceptance.**
+The owner selected native systemd preparation on a fresh separate server. This
+selection is not a resource/budget, security-change or production-deployment approval.
 
-Verified: isolated current-main baseline, prerequisite ancestry; Python syntax;
-whitespace check; focused synthetic policy and existing Google verification/profile
-tests (final count in handoff). Exact nonowner denied before Google DB access;
-alternate login/registration/reset denied before lookup; development bypass off.
+## Verified preparation
 
-Pending: container builds/migrations/redeploy/reset/rollback; independent keys/cookies;
-financial/AI/email/Sheets fake adapters and direct API containment; complete barrier
-and Google egress; DNS/certificate; host time synchronization/disk monitoring;
-live owner login and authorized nonowner test; synthetic portfolio UI/screens;
-actual Stage01 controls; stop/start isolation; production before/after health.
+- Preserved main0c6e61e/#1236 and prerequisite385f618/#1235. Stage01 untouched/not
+  integrated. Branch codex/uat2-owner-only-20261019; exact final source in PR history.
+- 44 focused backend identity/runtime/Google tests PASS, including native loopback
+  configuration, production-token rejection, nonowner provisioning/session denial,
+  alternate-auth denial, fake order schemas and disabled unsupported modules.
+- 8 native package/config/host-identity/unit/network-gate/failed-migration tests PASS.
+  They use synthetic fixtures and mocked host operations, not a live native server.
+- Earlier unchanged frontend:16 auth/BFF checks PASS, TypeScript noEmit PASS,
+  local actual frontend production build PASS. Seven shared config/Compose checks
+  previously passed. Python compilation, shell syntax and whitespace checks pass.
+- Published earlier aa8e516483ed1f1fa5ae5eceb3ace97ccd0da974 had both PR workflows
+  SUCCESS. New native CI job builds Linuxx86_64/Python3.12/Node22 bundle at exact
+  head SHA, without credentials, deployment, role changes or firewall installation.
+  New-commit CI results must be checked separately; do not reuse earlier green CI.
 
-No result inferred from unit tests or candidate YAML. No AWS restriction bypassed.
-AWS auth expired; required secret skill/runtime and Docker daemon unavailable.
-No paid launch approved. The implementation remains incomplete as itemized in UAT2.md.
+## Native preparation implemented
 
-## Continuation checkpoint
+Dedicated users, ports, PG16/Redis configuration, reverse proxy and fixed Google
+certificate proxy; scoped nftables and systemd confinement templates; independent
+session/cookie config; actual-app badge/walkthrough; offline application/frontend/
+wheelhouse bundle with source/platform/hash checks. Native deploy/status/start/stop,
+initialization, synthetic reset and schema+data-aware rollback commands prepared.
+Failed migrations leave app stopped and prevent ambiguous start/promotion.
 
-- Local source 3246e140ed9f103e714f8efcfb51ca74578bead3 implemented restricted
-  runtime, deterministic adapters, dedicated fake-AI queue, distinct issuer/audience
-  and __Host Auth.js cookie family, synthetic fixtures, actual-app badge/walkthrough,
-  lifecycle/build/reset/backup/restore command package. a87d86a fixes image inputs.
-- 43 focused backend policy/runtime/Google tests PASS; 16 frontend auth/BFF tests
-  PASS; TypeScript noEmit PASS; local frontend production build PASS; 7 configuration/
-  Compose parse tests PASS; Python syntax/shell syntax/whitespace PASS.
-- CI for exact published aa8e516483ed1f1fa5ae5eceb3ace97ccd0da974: API Attempt
-  Migration and Pull Request Checks both SUCCESS. Newer continuation is local;
-  not yet published or covered by that CI evidence.
-- Docker available after opening existing Desktop: Engine29.8.2/Compose5.6.0.
-  Backend image for source3246e14 built successfully. Initial frontend container
-  build failed on missing sibling polymarket_codes.json; a87d86a adds that input
-  and the package postbuild script, and excludes nested host Node/build directories.
-  Corrected image build is in progress, log /tmp/uat2-container-build-v2.log.
-- First disposable smoke attempt timed out starting nginx with a host bind mount;
-  test containers were cleaned up. No permission prompt or denial was observed.
-  Retry uses Docker copy for the public test config, log /tmp/uat2-smoke-v2.log.
-  Neither smoke nor corrected container build has a PASS claim at this checkpoint.
-- Existing authenticated Chrome console confirmed AWS account457945009677;
-  Route53 zero hosted zones; Mumbai SSM zero managed nodes. Public NS lookup:
-  ns63.domaincontrol.com/ns64.domaincontrol.com. CLI session separately remains
-  expired. No new login, grants, DNS/certificate changes or paid resources.
+No host users, roles, firewall policy, services or secrets were created by preparation.
+Native Linux service/confinement, actual artifact runtime, migrations, restart,
+rollback, disk/time and browser acceptance remain live prerequisites. Mac unit
+checks do not prove native Linux runtime behavior. No production health change
+is claimed from absence of production actions.
+
+## Preserved Compose evidence — optional, not the selected server architecture
+
+Existing Docker Desktop became available (Engine29.8.2, Compose5.6.0), without a
+software installation or unexpected permission grant. Backend image source3246e14
+built. Disposable backend smoke retry passed container-only migrations, backend
+readiness, anonymous API denial, blocked direct egress, fixed certificate proxy,
+dedicated fake-AI Redis/Celery queue, real-schema synthetic fixture reset and UAT2-only
+backup/schema-data restore. No host ports or live identities were used.
+Logs preserved: /tmp/uat2-smoke-v2.log.
+
+Initial frontend container build failed on missing sibling JSON; packaging inputs
+were corrected. Subsequent image build ended with Docker daemon EOF during backend
+image export. It is NOT a passing frontend/container packaging result. Initial nginx
+host-bind startup timed out and cleaned up; retry copied only public test config.
+Logs: /tmp/uat2-container-build.log, /tmp/uat2-container-build-v2.log,
+/tmp/uat2-smoke.log. Compose work was preserved, not used to claim native acceptance.
+
+## Exact outstanding prerequisites
+
+- Concrete fresh AWS resource/subnet/admin and approved package-transfer route,
+  verified current costs, testing window, allowance and retention approval.
+- Mandated aws-secrets-manager skill and asm-exec available, then separately
+  approved independent UAT2 secret provisioning/access. No production secret reuse.
+- External DNS control: Route53 showed zero zones; public NS are
+  ns63.domaincontrol.com/ns64.domaincontrol.com. No records changed.
+- Independent Google GIS client/origin and exact independent barrier access arrangement.
+- Native host dependencies and OS enforcement, active time service, valid HTTPS,
+  owner Google login and authorized nonowner test, protected pages/assets/API/sockets,
+  actual synthetic UI screens, deployment/restart/rollback and production before/after
+  health checks. No live Google-login result fabricated.
+
+AWS CLI STS session is expired; no aws login attempted. Existing authenticated
+Chrome console separately verified account457945009677 and Mumbai; SSM showed zero
+managed nodes. Browser console access is not proof of an approved admin/transfer route.
+Stage00 retention and stopped resources remain separate and unchanged.

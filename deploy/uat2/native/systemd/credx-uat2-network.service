@@ -1,0 +1,19 @@
+[Unit]
+Description=CredX UAT2 scoped process network policy
+Before=credx-uat2-postgres.service credx-uat2-redis.service credx-uat2-backend.service credx-uat2-worker.service credx-uat2-frontend.service credx-uat2-migrate.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/credx-uat2/current/deploy/uat2/native/network-apply.sh
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_NETLINK AF_UNIX
+TimeoutStartSec=20
+StandardOutput=journal
+StandardError=journal
+LogNamespace=credx-uat2
+[Install]
+WantedBy=multi-user.target

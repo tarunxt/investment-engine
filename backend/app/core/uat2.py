@@ -42,9 +42,15 @@ def validate_uat2_startup():
         raise RuntimeError('UAT2 source commit must be a full SHA')
     db = urlsplit(settings.database_url)
     cache = urlsplit(settings.redis_url)
-    if db.hostname != 'postgres' or db.path != '/credx_uat2' or db.username != 'credx_uat2':
+    runtime = os.getenv('UAT2_RUNTIME', 'compose')
+    if runtime not in {'compose', 'native'}:
+        raise RuntimeError('Unknown UAT2 runtime')
+    db_host, redis_host = ('127.0.0.1', '127.0.0.1') if runtime == 'native' else ('postgres', 'redis')
+    if runtime == 'native' and (db.port != 5542 or cache.port != 6479):
+        raise RuntimeError('Native UAT2 requires its dedicated database/Redis ports')
+    if db.hostname != db_host or db.path != '/credx_uat2' or db.username != 'credx_uat2':
         raise RuntimeError('UAT2 requires its dedicated database')
-    if cache.hostname != 'redis' or cache.path != '/0':
+    if cache.hostname != redis_host or cache.path != '/0':
         raise RuntimeError('UAT2 requires its dedicated Redis')
     # A no-egress network remains mandatory independently of this denylist.
     forbidden = ('OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY',
@@ -55,3 +61,12 @@ def validate_uat2_startup():
         raise RuntimeError('UAT2 rejects external integration credentials/configuration')
     if os.getenv('UAT2_FIXTURE_STATE', 'populated') not in {'empty', 'populated'}:
         raise RuntimeError('Invalid UAT2 fixture state')
+
+
+def certificate_proxy_url():
+    return ('http://127.0.0.1:18082/certs' if os.getenv('UAT2_RUNTIME') == 'native'
+            else 'http://google-certs:8080/certs')
+
+
+def artifact_directory():
+    return '/var/lib/credx-uat2/artifacts' if os.getenv('UAT2_RUNTIME') == 'native' else '/backend/data'

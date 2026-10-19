@@ -85,7 +85,8 @@ class SinkRequest(BaseModel):
 @router.post('/uat2/email')
 async def capture_email(request: SinkRequest):
     from app.uat2.adapters import EmailSink
-    return EmailSink('/backend/data/email-sink').send(request.subject, request.body)
+    from app.core.uat2 import artifact_directory
+    return EmailSink(artifact_directory() + '/email-sink').send(request.subject, request.body)
 
 
 @router.get('/uat2/export')

@@ -1,0 +1,40 @@
+[Unit]
+Description=CredX UAT2 postgres
+After=network-online.target
+Requires=credx-uat2-network.service
+After=credx-uat2-network.service
+[Service]
+Type=simple
+User=credx-uat2-db
+Group=credx-uat2-db
+ExecStart=/usr/lib/postgresql/16/bin/postgres -D /var/lib/credx-uat2/postgres -c config_file=/etc/credx-uat2/postgresql.conf -c hba_file=/etc/credx-uat2/pg_hba.conf
+MemoryMax=768M
+TasksMax=128
+RuntimeDirectory=credx-uat2-postgres
+ReadWritePaths=/var/lib/credx-uat2/postgres
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitNOFILE=4096
+LogNamespace=credx-uat2
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+IPAddressDeny=any
+IPAddressAllow=localhost
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,7 @@
-# UAT2 deployment package
+# Preserved Compose UAT2 package
+
+The owner now selected native systemd preparation. Use native/README.md for the
+selected server path. This Compose implementation and its evidence are preserved.
 
 Do not launch until the owner approves the concrete resources/budget and the exact
 applicable access/security changes. This package changes no AWS resources itself.
