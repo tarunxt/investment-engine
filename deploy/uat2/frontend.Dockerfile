@@ -3,6 +3,8 @@ WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN npm ci --include=dev --no-audit --fund=false
 COPY frontend/ .
+COPY backend/app/domains/sports_rankings/polymarket_codes.json /backend/app/domains/sports_rankings/polymarket_codes.json
+COPY deploy/no-docker/repair-next-runtime-artifacts.mjs /deploy/no-docker/repair-next-runtime-artifacts.mjs
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 NEXT_STANDALONE_BUILD=true
 ENV NEXT_PUBLIC_API_URL=https://uat2.cred-x.in/backend-api NEXT_PUBLIC_FRONTEND_URL=https://uat2.cred-x.in
 ENV NEXT_PUBLIC_DISABLE_AUTH=false NEXT_PUBLIC_DISABLE_API_PROXY=false

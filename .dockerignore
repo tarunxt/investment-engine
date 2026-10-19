@@ -56,3 +56,10 @@ docker-compose*.yml
 **/database.env
 **/barrier.env
 **/backups
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.env
+**/.env.*
+**/*.tsbuildinfo
