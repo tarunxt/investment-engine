@@ -53,5 +53,13 @@
     }
   },
   "scope": "candidate source review only; no UAT2 deployment/owner acceptance/provider approval claimed",
-  "test_setup_failure": "combined UAT2 test collection initially used in-memory SQLite, whose StaticPool rejects app pool options; rerun with documented unused PostgreSQL test URL passed without source change"
+  "test_setup_failure": "combined UAT2 test collection initially used in-memory SQLite, whose StaticPool rejects app pool options; rerun with documented unused PostgreSQL test URL passed without source change",
+  "draft_pr": "https://github.com/tarunxt/investment-engine/pull/1241",
+  "original_stage01_ci": {
+    "head": "ddefd7306003dc8e4e662d3b88abe167da77f036",
+    "baseline": "https://github.com/tarunxt/investment-engine/actions/runs/39284309932",
+    "pr_checks": "https://github.com/tarunxt/investment-engine/actions/runs/39284309986",
+    "both_conclusions": "success"
+  },
+  "candidate_ci": "separate exact-head check required; first candidate runs queued; no result borrowed from original Stage01"
 }
