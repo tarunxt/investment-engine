@@ -247,7 +247,11 @@ def main():
     if args.action=='reset':
         if args.argument not in {'empty','populated'}: raise RuntimeError('reset requires empty or populated')
         release=current()
-        run(['/usr/sbin/runuser','-u','credx-uat2-app','--',release/'.venv/bin/python','-m','app.uat2.reset',args.argument],env={**env_for(release),'PYTHONPATH':str(release/'backend')})
+        # Load the same model registry as the serving app, and leave the SSH
+        # operator's private home before the unprivileged process checks .env.
+        bootstrap = "import runpy; import app.uat2.main; runpy.run_module('app.uat2.reset', run_name='__main__')"
+        run(['/usr/sbin/runuser','-u','credx-uat2-app','--',release/'.venv/bin/python','-c',bootstrap,args.argument],
+            env={**env_for(release),'PYTHONPATH':str(release/'backend')},cwd=release/'backend')
         print('US synthetic fixture reset. Match UAT2_FIXTURE_STATE and restart backend for India/dashboard.'); return
     if args.action=='rollback':
         path=Path(args.argument).resolve()
