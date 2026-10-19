@@ -80,3 +80,13 @@ a small manifest artifact retained. API migration workflow PASSED. The audit CI 
 failed because its async tests lacked pytest-asyncio; a follow-up restores that test
 dependency and adds lifecycle serialization/config-independent stop. Fresh follow-up
 CI must be checked separately. No production workflow or runtime was changed.
+
+## Complete artifact retention correction
+
+The PR-only native package job now retains the entire deployable bundle for one day,
+not just its manifest. It audits content before upload, downloads the retained copy,
+rechecks checksums/content and performs an isolated no-index dependency installation.
+A small verification receipt is also retained. This corrects availability of the
+release payload; it does not authorize an AWS transfer, launch or credential change.
+The earlier successful manifest-only builds remain historical evidence. Fresh
+artifact ID, source, expiry and round-trip results are reported in the draft PR.

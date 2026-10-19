@@ -69,6 +69,38 @@ class NativeTests(unittest.TestCase):
         (self.root/'wheels').mkdir();(self.root/'wheels/test_only-1-py3-none-any.whl').write_bytes(b'synthetic wheel placeholder')
         return package.create(self.root,'a'*40)
 
+    def complete_audit_bundle(self, runtime_env=False):
+        def write_archive(name, contents):
+            with tarfile.open(self.root/name,'w:gz') as output:
+                for path,content in contents.items():
+                    payload=content.encode();entry=tarfile.TarInfo(path);entry.size=len(payload);output.addfile(entry,io.BytesIO(payload))
+        source={name:'synthetic test source' for name in ['backend/requirements.txt','backend/app/uat2/main.py','deploy/uat2/native/ctl.py','deploy/uat2/native/package.py']}
+        if runtime_env:source['backend/.env']='synthetic-test-only-not-a-runtime-secret'
+        write_archive('application.tar.gz',source)
+        manifest={'build_sha':'a'*40,'platform':'linux','arch':'x64','node_major':22,
+                  'public_environment':{'NEXT_PUBLIC_FRONTEND_URL':'https://uat2.cred-x.in','NEXT_PUBLIC_DISABLE_AUTH':'false'}}
+        write_archive('frontend.tar.gz',{'server.js':'synthetic test entrypoint','deployment-manifest.json':json.dumps(manifest),
+                      '.next/BUILD_ID':'test','.next/server/app-paths-manifest.json':json.dumps({'/console/uat2/page':'test.js'})})
+        (self.root/'wheels').mkdir();(self.root/'wheels/test_only-1-py3-none-any.whl').write_bytes(b'synthetic wheel placeholder')
+        package.create(self.root,'a'*40)
+
+    def test_complete_bundle_content_audit(self):
+        self.complete_audit_bundle()
+        receipt=package.audit(self.root)
+        self.assertEqual(receipt['wheel_count'],1)
+        self.assertEqual(receipt['files_verified'],3)
+        self.assertFalse(receipt['runtime_configuration_included'])
+
+    def test_retained_bundle_rejects_runtime_env_files(self):
+        self.complete_audit_bundle(runtime_env=True)
+        with self.assertRaisesRegex(ValueError,'Runtime environment'):
+            package.audit(self.root)
+
+    def test_retained_bundle_rejects_unlisted_files(self):
+        self.complete_audit_bundle();(self.root/'unexpected.txt').write_text('synthetic unexpected file')
+        with self.assertRaisesRegex(ValueError,'Unexpected retained'):
+            package.audit(self.root)
+
     def test_manifest_integrity_and_fixed_filenames(self):
         self.bundle();self.assertEqual(package.verify(self.root)['source_commit'],'a'*40)
         (self.root/'application.tar.gz').write_bytes(b'tampered')

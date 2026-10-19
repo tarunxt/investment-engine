@@ -47,11 +47,24 @@ Linux x86_64, Python3.12 and Node22. It creates an offline wheelhouse, actual Ne
 standalone artifact using the existing frontend packager, application source archive
 and SHA256 manifest. Public UAT2 origins/badge/build stamp are set; no runtime secrets
 are supplied. Native artifact output is not built from Mac binaries. CI verifies the
-build; only tiny evidence manifests are retained by default, not large dependency
-archives. A later approved transfer must use a verified administrative/package route.
+build and retains the complete `uat2-native-bundle-<full-source-SHA>` Actions artifact
+for one day: application.tar.gz, frontend.tar.gz, manifest.json, frontend checksum
+sidecar and the entire wheels directory. The workflow downloads that retained artifact,
+checks every manifest checksum, inspects archive scope/runtime-config exclusions and
+validates a clean dependency install with --no-index. A separate small verification
+receipt records source, manifest hash, member counts and offline-install result.
+Download before the displayed artifact expiry; regenerate through this workflow if
+expired. This retention concerns GitHub artifacts only, not old AWS volumes.
+A later AWS transfer remains blocked until a genuinely permitted route is resolved.
 
 `python3 deploy/uat2/native/ctl.py inspect-bundle /bundle` validates fixed filenames,
-platform, source and hashes without starting anything. Transfers require an approved
+platform, source and hashes without starting anything. After downloading/unzipping
+the complete Actions artifact into an empty directory, run
+`python3 deploy/uat2/native/package.py audit /downloaded/bundle` to recheck hashes,
+required source/frontend files and absence of runtime env/credential/database files.
+`offline-check` additionally requires target Linuxx86_64/Python3.12 and installs only
+from the retained wheels in an isolated temporary venv. No app/server starts.
+Transfers require an approved
 route and exact source review; checksums alone are not proof of trusted provenance.
 
 ## Future approved setup and deployment
