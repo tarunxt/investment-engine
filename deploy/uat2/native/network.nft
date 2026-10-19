@@ -1,0 +1,8 @@
+# Scoped only to dedicated native UAT2 application/data users.
+table inet credx_uat2 {
+  chain output {
+    type filter hook output priority -5; policy accept;
+    meta skuid { "credx-uat2-app", "credx-uat2-web", "credx-uat2-db", "credx-uat2-redis" } ip daddr 127.0.0.0/8 accept
+    meta skuid { "credx-uat2-app", "credx-uat2-web", "credx-uat2-db", "credx-uat2-redis" } reject with icmpx type admin-prohibited
+  }
+}

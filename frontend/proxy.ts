@@ -1,3 +1,4 @@
+import { uat2SessionCookieName, requireUat2AuthSecret } from "@/lib/authSessionCookie";
 import { getToken } from "next-auth/jwt";
 import {
   buildLoginRedirectHref,
@@ -18,7 +19,7 @@ const authRoutePrefixes = [
 ] as const;
 
 function resolveNextAuthSecret(): string {
-  const configuredSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+  const configuredSecret = requireUat2AuthSecret(process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET);
   if (configuredSecret) {
     return configuredSecret;
   }
@@ -39,7 +40,7 @@ function isAuthPath(path: string) {
 }
 
 function isAuthBypassed() {
-  return (
+  return process.env.CREDX_UAT2 !== "1" && (
     process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
     process.env.NODE_ENV === "development"
   );
@@ -60,6 +61,7 @@ async function readSessionToken(req: NextRequest): Promise<JWT | null> {
     req,
     secret: resolveNextAuthSecret(),
     secureCookie,
+    ...(uat2SessionCookieName() ? { cookieName: uat2SessionCookieName() } : {}),
   });
 }
 
@@ -119,6 +121,13 @@ export async function proxy(req: NextRequest) {
       req.nextUrl.searchParams.toString(),
     );
     const response = NextResponse.redirect(new URL(loginHref, req.url));
+    if (uat2SessionCookieName()) {
+      for (const cookie of req.cookies.getAll()) {
+        if (cookie.name === uat2SessionCookieName() || cookie.name.startsWith(`${uat2SessionCookieName()}.`)) {
+          response.cookies.delete(cookie.name);
+        }
+      }
+    }
     response.cookies.delete("authjs.session-token");
     response.cookies.delete("__Secure-authjs.session-token");
     return attachAuthTiming(response, authDurationMs);

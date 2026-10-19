@@ -1,0 +1,35 @@
+[Unit]
+Description=CredX UAT2 certs
+After=network-online.target
+[Service]
+Type=simple
+User=credx-uat2-certs
+Group=credx-uat2-certs
+ExecStart=/usr/sbin/nginx -c /etc/credx-uat2/nginx.conf -g "daemon off;"
+MemoryMax=128M
+TasksMax=128
+RuntimeDirectory=credx-uat2-certs
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitNOFILE=4096
+LogNamespace=credx-uat2
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+[Install]
+WantedBy=multi-user.target

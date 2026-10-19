@@ -1,7 +1,8 @@
 # CredX UAT2
 
 **UAT2 BLOCKED.** No deployed URL or paid resources. Intended URL:
-https://uat2.cred-x.in. This is preparatory work, not a runnable deployment.
+https://uat2.cred-x.in. The owner selected native systemd preparation; live deployment acceptance remains pending.
+See deploy/uat2/native/README.md for the selected package. Compose remains preserved history.
 
 ## Source
 
@@ -36,22 +37,54 @@ Parent coordination message to `01a14a6b-8cc5-75a6-ba97-9acc2cb8f019` failed:
 - Baseline `core/security.py` hardcodes JWT signing key. UAT2 key isolation must
   be fixed before launch. Secret-tool requirement remains in force.
 
-## Prepared policy and remaining implementation
+## Implemented preparation
 
-Default-off `CREDX_UAT2=1` checks exact owner before Google profile lookup/creation,
-all token issuance and authenticated-user return. Password registration/login/reset
-are blocked; development bypass cannot activate. Dots/plus aliases do not match.
-UAT2 startup deliberately refuses until simulation/network integration passes.
-Production default behavior remains unchanged. Do not remove lock for a preview.
+Selected runtime: native systemd. Compose descriptions below record the preserved
+alternative; they are not the current deployment instruction.
 
-Still required: independent JWT/Auth.js keys and consistent distinct host-only
-secure cookies including BFF decoder; Google certificate-only verification egress;
-fake adapters or disabled unsupported modules; email sink/local exports; fixtures;
-UI badge/commit; complete deploy/bootstrap/start/stop/status/rollback/reset tooling.
-Candidate private network deliberately prevents internet access, so Google verification
-cannot currently work. Do not attach application containers to public network to fix it.
-Pin reviewed image digests and verify supported tags before any launch. Existing
-backend image installs unnecessary broker CLI and reload; frontend uses Node 20.
+Default-off CREDX_UAT2=1 enforces exact owner before Google provisioning and token
+issuance, rejects alternate password paths and refresh-token-as-access requests.
+UAT2 JWT uses an independent required key plus UAT2 issuer/audience. Auth.js uses
+required independent signing configuration and distinct __Host-credx-uat2 cookies;
+proxy and BFF decoders select that same family. Production defaults are preserved.
+No deployed keys were generated, read or copied. Runtime configuration remains
+blocked by missing mandated secret tooling.
+
+Restricted app.uat2.main reuses actual CredX auth and US portfolio routes, with
+synthetic fixtures created only after verified owner login. Existing India/dashboard
+schema contracts use deterministic test adapters. Unsupported modules return
+UAT2_UNAVAILABLE, WebSockets close with 1008, live broker callbacks are unavailable.
+Fake AI runs in a dedicated bounded Celery queue; email sink and synthetic CSV are
+local only. Actual frontend has UAT2/build banner and /console/uat2 walkthrough.
+Stage01 controls remain pending, not imitated.
+
+Selected native lifecycle/offline package/configuration/rollback instructions are in
+deploy/uat2/native/README.md. Preserved Compose instructions remain in deploy/uat2/README.md. Native bundles carry exact source/platform/checksum manifests; preserved images carry source labels. Startup rejects missing/real adapters, production DB/Redis, missing keys,
+production Google client, missing source SHA or auth bypass. Original app.main
+cannot be used in UAT2. The restricted entrypoint cannot start outside UAT2 mode.
+
+Network design places app/data/worker on internal network only. A fixed-purpose
+nginx proxy fetches only Google's signing certificates and verifies upstream TLS.
+Caddy barrier covers every app route/asset/API/WebSocket; only ACME validation is
+public. Container/runtime and live acceptance results are recorded separately.
+
+## CLI versus browser account inspection
+
+AWS CLI authentication remains expired; no aws login attempted. Existing authenticated
+Chrome console independently verified account 457945009677 and Mumbai selection.
+Route53 showed zero hosted zones. Public NS lookup returned ns63.domaincontrol.com
+and ns64.domaincontrol.com, so exact external DNS account access is still unverified.
+Systems Manager Mumbai showed zero managed nodes; no setup/grants enabled. SSM and
+transfer route are not established merely by the console being accessible.
+
+Docker Desktop was present. Initial user socket was absent; opening its existing
+app timed out, then the daemon socket appeared. Sandboxed CLI access was denied by
+filesystem permissions; authorized read-only check outside sandbox succeeded:
+Engine 29.8.2, Compose v5.6.0. No software installed or unexpected permissions granted.
+Docker is an optional design choice, not an application prerequisite; native assets
+exist under deploy/no-docker. Their production backend unit includes credential-sync
+and must not be reused unchanged. Artifact packager/runtime logic could be adapted,
+but separate UAT2 units/users/paths/network rules would still be needed.
 
 ## Resource and cost proposal draft — no launch approval requested yet
 
@@ -79,14 +112,22 @@ transfer route and exact resources/current rates; finish code and local containe
 checks. IAM/access/firewall/secret/Google changes require applicable exact action-time
 security confirmation. This draft is not approval and no new charges were incurred.
 
-## Deployment/recovery contract to implement
+## Native deployment/recovery contract
+
+The owner explicitly selected native systemd preparation on a separate server.
+The restricted application code is reused. New code is packaged offline in Linux CI.
+Native UAT2 units/users/paths/PG16/Redis and scoped process firewall templates are
+prepared without executing host setup. Runtime migrations use the dedicated native
+venv in a confined oneshot UAT2 unit; the owner-selected native path supersedes
+Docker-only migration tooling for this new UAT2 path, without changing other workflows.
+
 
 Require immutable images and recorded source commit; validate config without secret
 output; start UAT2 DB/Redis; UAT2-only backup; Alembic only inside backend Docker
 against verified UAT2 DB; bounded readiness; report commit/result. Start/stop/status
 must target dedicated UAT2 only. Application rollback and schema rollback are separate:
 restore UAT2 backup or reset approved synthetic fixtures, not merely old image.
-No working reset/rollback commands exist yet. Never routine `compose down -v`.
+Commands are prepared; runtime backup/restore acceptance remains pending. Never routine `compose down -v`.
 
 ## CI safety
 

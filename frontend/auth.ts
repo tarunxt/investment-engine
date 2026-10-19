@@ -1,3 +1,4 @@
+import { uat2SessionCookieName, requireUat2AuthSecret } from "@/lib/authSessionCookie";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import type { NextAuthConfig, Session } from "next-auth";
@@ -8,7 +9,7 @@ import { URLs } from "@/lib/urls";
 import type { LoginResponse } from "@/types/api";
 
 export function resolveNextAuthSecret(): string {
-  const configuredSecret = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
+  const configuredSecret = requireUat2AuthSecret(process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET);
   if (configuredSecret) {
     return configuredSecret;
   }
@@ -19,6 +20,14 @@ export function resolveNextAuthSecret(): string {
 export const authConfig = {
   // Production runs behind nginx, so Auth.js must trust the forwarded host header.
   trustHost: true,
+  ...(process.env.CREDX_UAT2 === "1" ? {
+    useSecureCookies: true,
+    cookies: {
+      sessionToken: { name: uat2SessionCookieName()!, options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: true } },
+      csrfToken: { name: "__Host-credx-uat2.csrf-token", options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: true } },
+      callbackUrl: { name: "__Host-credx-uat2.callback-url", options: { httpOnly: true, sameSite: "lax" as const, path: "/", secure: true } },
+    },
+  } : {}),
   providers: [
     Credentials({
       id: "google",

@@ -1,0 +1,39 @@
+[Unit]
+Description=CredX UAT2 redis
+After=network-online.target
+Requires=credx-uat2-network.service
+After=credx-uat2-network.service
+[Service]
+Type=simple
+User=credx-uat2-redis
+Group=credx-uat2-redis
+ExecStart=/usr/bin/redis-server /etc/credx-uat2/redis.conf
+MemoryMax=192M
+TasksMax=128
+ReadWritePaths=/var/lib/credx-uat2/redis
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitNOFILE=4096
+LogNamespace=credx-uat2
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+IPAddressDeny=any
+IPAddressAllow=localhost
+[Install]
+WantedBy=multi-user.target
