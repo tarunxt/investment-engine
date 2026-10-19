@@ -24,7 +24,10 @@ class FakeBroker:
                        holdings_market_value=2060, holdings_invested_value=2000,
                        holdings_pnl=60, holdings_day_change_value=0, available_margin=500,
                        positions_pnl=0, positions_m2m=0)
-        return {'latest': dict(summary, holdings=HOLDINGS, positions={'net': [], 'day': []}),
+        holdings = [dict(h, market_value=h['quantity']*h['last_price'],
+                         invested_value=h['quantity']*h['average_price'],
+                         day_change_value=h['quantity']*h['day_change']) for h in HOLDINGS]
+        return {'latest': dict(summary, holdings=holdings, positions={'net': [], 'day': []}),
                 'history': [summary]}
 
     def place(self, order):

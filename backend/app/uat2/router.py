@@ -27,7 +27,8 @@ async def portfolio():
 
 @router.get('/zerodha/status')
 async def broker_status():
-    return {'connected': True, 'direct_market_orders_enabled': False,
+    return {'connected': True, 'login_time': STAMP, 'expires_at': None,
+            'direct_market_orders_enabled': False,
             'order_submission_blocked_reason': 'UAT2 simulated broker; no live account connected',
             'last_portfolio_sync_at': STAMP, 'last_portfolio_snapshot_date': STAMP[:10]}
 
