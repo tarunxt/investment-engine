@@ -53,6 +53,17 @@ class NativeTests(unittest.TestCase):
         self.config();path.write_text(path.read_text().replace('unit-test-only-jwt-material-never-deployed','unit-test-only-authjs-material-never-deployed'))
         with self.assertRaises(ValueError):validate.validate(self.root)
 
+    def test_independent_client_in_same_google_project_allowed(self):
+        self.config();path=self.root/'backend.env'
+        path.write_text(path.read_text().replace('independent-test-client','833980592098-independent-uat2-test-client.apps.googleusercontent.com'))
+        validate.validate(self.root)
+        path.write_text(path.read_text().replace('833980592098-independent-uat2-test-client.apps.googleusercontent.com',validate.shared.PRODUCTION_GOOGLE_CLIENT_ID))
+        with self.assertRaises(ValueError):validate.validate(self.root)
+
+    def test_unexpected_frontend_integration_config_rejected(self):
+        self.config();path=self.root/'frontend.env';path.write_text(path.read_text()+'GOOGLE_CLIENT_SECRET=synthetic-test-only\n')
+        with self.assertRaises(ValueError):validate.validate(self.root)
+
     def bundle(self):
         for name in ['application.tar.gz','frontend.tar.gz']:(self.root/name).write_bytes(b'synthetic archive placeholder')
         (self.root/'wheels').mkdir();(self.root/'wheels/test_only-1-py3-none-any.whl').write_bytes(b'synthetic wheel placeholder')

@@ -11,7 +11,7 @@ selection is not a resource/budget, security-change or production-deployment app
 - 44 focused backend identity/runtime/Google tests PASS, including native loopback
   configuration, production-token rejection, nonowner provisioning/session denial,
   alternate-auth denial, fake order schemas and disabled unsupported modules.
-- 8 native package/config/host-identity/unit/network-gate/failed-migration tests PASS.
+- 10 native package/config/host-identity/unit/network-gate/failed-migration tests PASS.
   They use synthetic fixtures and mocked host operations, not a live native server.
 - Earlier unchanged frontend:16 auth/BFF checks PASS, TypeScript noEmit PASS,
   local actual frontend production build PASS. Seven shared config/Compose checks
