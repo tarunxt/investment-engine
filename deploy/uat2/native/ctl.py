@@ -238,7 +238,7 @@ def main():
         release=install_release(Path(args.argument).resolve())
         configure_units(release)
         systemctl('start',['network','postgres','redis','certs'])
-        run(['runuser','-u','credx-uat2-db','--',release/'.venv/bin/python',release/'deploy/uat2/native/initialize_database.py'],env=env_for(release))
+        run(['/usr/sbin/runuser','-u','credx-uat2-db','--',release/'.venv/bin/python',release/'deploy/uat2/native/initialize_database.py'],env=env_for(release))
         print('UAT2 database initialized; run deploy after reviewing config'); return
     if args.action=='start':
         current()
@@ -247,7 +247,7 @@ def main():
     if args.action=='reset':
         if args.argument not in {'empty','populated'}: raise RuntimeError('reset requires empty or populated')
         release=current()
-        run(['runuser','-u','credx-uat2-app','--',release/'.venv/bin/python','-m','app.uat2.reset',args.argument],env={**env_for(release),'PYTHONPATH':str(release/'backend')})
+        run(['/usr/sbin/runuser','-u','credx-uat2-app','--',release/'.venv/bin/python','-m','app.uat2.reset',args.argument],env={**env_for(release),'PYTHONPATH':str(release/'backend')})
         print('US synthetic fixture reset. Match UAT2_FIXTURE_STATE and restart backend for India/dashboard.'); return
     if args.action=='rollback':
         path=Path(args.argument).resolve()
