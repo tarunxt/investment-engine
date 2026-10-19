@@ -72,6 +72,8 @@ def require_existing_google_user(matches):
 
 async def resolve_google_user(db: AsyncSession, email: str) -> User:
     """Resolve a verified Google email, creating an independent standard profile."""
+    from app.core.uat2 import require_uat2_owner
+    require_uat2_owner(email)
     query = select(User).where(func.lower(User.email) == email).options(selectinload(User.profile))
     matches = (await db.execute(query)).scalars().all()
     if matches:
