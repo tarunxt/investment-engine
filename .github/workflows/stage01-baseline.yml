@@ -1,0 +1,43 @@
+name: Stage 01 implementation baseline
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/public_launch/**'
+      - 'docs/public-launch/**'
+      - 'backend/app/**'
+      - 'frontend/app/**'
+      - 'frontend/proxy.ts'
+      - 'frontend/next.config.ts'
+      - '.github/workflows/stage01-baseline.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: 'sqlite+aiosqlite:///:memory:'
+      REDIS_URL: 'redis://127.0.0.1:1/15'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install repository-constrained test dependencies
+        run: python -m pip install -r scripts/public_launch/requirements-test.txt -c backend/requirements.txt
+      - name: Verify complete source inventory and syntax
+        run: |
+          python scripts/public_launch/inventory.py --check
+          python -m compileall -q scripts/public_launch backend/app
+      - name: Run isolated synthetic and existing Google-login regressions
+        run: |
+          python -m pytest -q scripts/public_launch
+          python -m pytest --noconftest -q backend/tests/test_google_signin.py

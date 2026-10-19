@@ -1,5 +1,7 @@
 # Stage 01 scope recovery — blocked on source
 
+**Superseded later on 19 October:** the parent supplied the recovered Library prompt and current local-only amendment. Library text subsequently confirmed Stage 01. See `stages/01.md` and `STATUS.md` for the implemented baseline; the initial recovery record below is historical evidence, not the current blocker.
+
 19 October 2026. This is a recovery report, not a Stage 01 specification or completion claim.
 
 ## Authorization and current state

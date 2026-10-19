@@ -1,0 +1,146 @@
+[
+  {
+    "number": 1238,
+    "title": "Gate Stage00 on isolation evidence and wire owner-only synthetic exports",
+    "head": "263a1946f1032bb2aa3250e5cf868b8d70884cb1",
+    "branch": "codex/uat-real-engines-ci",
+    "base": "codex/credx-public-launch-uat",
+    "draft": true
+  },
+  {
+    "number": 1237,
+    "title": "Prepare owner-only simulation UAT with capacity and isolation gates",
+    "head": "76beca83662eaadc4cecfa6b3f7df09af03e12a5",
+    "branch": "codex/credx-public-launch-uat",
+    "base": "main",
+    "draft": true
+  },
+  {
+    "number": 1211,
+    "title": "Require private JWT signing configuration before backend startup",
+    "head": "49a2874d706bc12ab8fd8fc3cf0186876dce09ee",
+    "branch": "codex/require-private-jwt-signing-20261002",
+    "base": "main",
+    "draft": true
+  },
+  {
+    "number": 954,
+    "title": "Clarify Bullpen 008 Stage 1 universe accounting",
+    "head": "20ae350d1f7be3c4e4411fcf17cd00adae553546",
+    "branch": "fix/bullpen008-universe-accounting",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 820,
+    "title": "Add IndMoney, Zerodha, and Bullpen run tabs",
+    "head": "fff532a5d0204cb5deeb5f115f50fa691bf7b8e2",
+    "branch": "codex/runs-three-portfolios",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 793,
+    "title": "Make Bullpen run-audit failures actionable",
+    "head": "4df4e554bb8c38f13172b957cc70a7b203ff24f3",
+    "branch": "fix/bullpen-run-audit-actionable-errors",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 792,
+    "title": "Fix Bullpen run-audit 500 diagnostics",
+    "head": "ab3148e8a4f0851761e5441dab1c1ba1ff32697f",
+    "branch": "fix/bullpen-run-audit-error-diagnostics",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 737,
+    "title": "Fix Bullpen scan Filters popup and add “Exclude release-by events” filter",
+    "head": "648aaea5d67184e3c9aaa3735c6c0fdc191ba6d6",
+    "branch": "codex/fix-filters-popup-not-opening",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 712,
+    "title": "Retain opened Bullpen and dashboard workspaces",
+    "head": "ed1956626a64be06f4231aad793306b23e4da340",
+    "branch": "fix/retain-interactive-workspaces",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 623,
+    "title": "Compute returns/day from strongest current odds and record active positions separately in audit",
+    "head": "6047117fbc184028a1303a323e380660ac88899a",
+    "branch": "codex/update-returns/day-formula-in-widget-lphgzz",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 541,
+    "title": "Fix deployment cleanup permission failure",
+    "head": "ce60759e4f9352130523ce02f13b6bf2254b762b",
+    "branch": "codex/fix-deploy-backup-cleanup-permissions",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 515,
+    "title": "Improve Bullpen auto-run portfolio snapshot and exit metrics",
+    "head": "78fe603362498e4057013930186a1358dfd91325",
+    "branch": "codex/fix-zero-event-display-and-update-ui",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 485,
+    "title": "Fix stalled console auth loading",
+    "head": "b4da44c832b80106d816b41b281dcbc4a71b1a05",
+    "branch": "codex/fix-dashboard-loading-issue",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 270,
+    "title": "Fix actionables input dialog footer layout",
+    "head": "6617ce894a61d50868fbafb6fe670d59be47f986",
+    "branch": "codex/fix-stuck-dine-button-in-popup",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 116,
+    "title": "Use All Runs labels in actionables input picker",
+    "head": "8b4b062195993ecaa8a9a2b932af593454ca48cb",
+    "branch": "codex/update-run-names-in-select-actionables-popup-xbnpv8",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 91,
+    "title": "Go live-only for Polymarket Bullpen bot",
+    "head": "4c947a5522479e484aa4a522ec72c5a587f6838e",
+    "branch": "codex/implement-polymarket-copy-trading-bot-yofb23",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 51,
+    "title": "Allow partial rebalance outputs and compact input error display",
+    "head": "e6976301dbb8ab5985d630ea3e837551aae55871",
+    "branch": "codex/fix-error-generation-and-table-height",
+    "base": "main",
+    "draft": false
+  },
+  {
+    "number": 42,
+    "title": "Add Score badges column and matrix popup in Final Actionables console",
+    "head": "d87b38b2b50a1890bfeb5683f9c607506a5906fe",
+    "branch": "codex/add-score-column-to-rationale-table",
+    "base": "main",
+    "draft": false
+  }
+]
