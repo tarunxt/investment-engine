@@ -1,0 +1,23 @@
+{
+  "source_commit": "2728100d9fbdf5f3915109d14a7ba64dab174e0b",
+  "manifest_sha256": "f87866e3c9581b2a51b1b62e83050114b61911c0517243ccdbcd6dc23927c561",
+  "files_verified": 127,
+  "wheel_count": 125,
+  "archives": {
+    "application.tar.gz": 677,
+    "frontend.tar.gz": 3116
+  },
+  "runtime_configuration_included": false,
+  "bundle_zip_sha256": "efd5f25921532a4723f87f3f54ff466adc3129d7220d927f41ff980e979322f7",
+  "verification_zip_sha256": "460887a7875aac94ca85a6e53818065ec90550dcc00529b530c9996d368c4618",
+  "offline_dependency_install": "passed in exact-source Linux CI; receipt matched locally",
+  "local_scope": "ZIP digests, safe extraction, manifest/all127 file hashes, archive scope, source/code/executable-bit match; no app execution or deployment",
+  "bundle_directory": "/Users/tarunsingh/Documents/Codex/2026-10-19/task-5/stage01-uat2-integration/.runtime/ci-artifacts/2728100d9fbdf5f3915109d14a7ba64dab174e0b/bundle",
+  "artifact_ids": [
+    12205521198,
+    12205432256
+  ],
+  "historical_only": "Superseded for deployment by required India contract fix503f86ee; preserve as verified checkpoint, do not relabel for successor",
+  "immutable_artifact_url": "https://github.com/tarunxt/investment-engine/actions/runs/39290257886/artifacts/12205521198",
+  "expires_at": "2026-10-20T17:01:27Z"
+}

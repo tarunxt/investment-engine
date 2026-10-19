@@ -24,7 +24,24 @@
     ],
     "review": "reset uses serving model registry and release/backend cwd; same unprivileged identity; no broader guard/access change",
     "installed": false,
-    "new_regression": "test_reset_uses_serving_model_registry_and_release_directory; pending new exact-candidate CI"
+    "new_regression": "test_reset_uses_serving_model_registry_and_release_directory; pending new exact-candidate CI",
+    "installed_reported_by_parent": true,
+    "live_verification_by_this_task": "not performed"
   },
-  "controller_file_mode": "original100755 restored after GitHub content synchronization"
+  "controller_file_mode": "original100755 restored after GitHub content synchronization",
+  "india_contract_fix": {
+    "commit": "503f86ee8623d1dbeb25ce7adaa9b5a1364b7b96",
+    "files": [
+      "backend/app/uat2/adapters.py",
+      "backend/app/uat2/router.py",
+      "backend/tests/test_uat2_runtime.py"
+    ],
+    "local_results": {
+      "google_uat2": 44,
+      "baseline": 5
+    },
+    "scope": "derived synthetic holding values and simulated login/expiry response fields only",
+    "live_installation_by_this_task": false,
+    "successor_ci_artifact": "pending exact-source verification"
+  }
 }

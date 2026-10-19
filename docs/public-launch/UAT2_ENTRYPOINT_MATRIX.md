@@ -22,12 +22,12 @@ The complete auth router is included, with existing UAT2 exact-owner checks befo
 | GET | /uat2/status | backend/app/uat2/router.py:15 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | GET | /zerodha/portfolio | backend/app/uat2/router.py:24 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | GET | /zerodha/status | backend/app/uat2/router.py:29 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| POST | /zerodha/orders | backend/app/uat2/router.py:36 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| GET | /dashboard/summary | backend/app/uat2/router.py:41 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| POST | /uat2/ai | backend/app/uat2/router.py:64 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| GET | /uat2/ai/{task_id} | backend/app/uat2/router.py:71 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| POST | /uat2/email | backend/app/uat2/router.py:86 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
-| GET | /uat2/export | backend/app/uat2/router.py:93 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
+| POST | /zerodha/orders | backend/app/uat2/router.py:37 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
+| GET | /dashboard/summary | backend/app/uat2/router.py:42 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
+| POST | /uat2/ai | backend/app/uat2/router.py:65 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
+| GET | /uat2/ai/{task_id} | backend/app/uat2/router.py:72 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
+| POST | /uat2/email | backend/app/uat2/router.py:87 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
+| GET | /uat2/export | backend/app/uat2/router.py:94 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | GET | /indmoney-us/portfolio and /indmoney-us/portfolio/{snapshot_id} | backend/app/uat2/main.py filtered route append | Only these existing GET routes are appended; ingestion/price-fetch routes excluded; real owner dependency retained |
 | GET | /health | backend/app/uat2/main.py | Simulation health; external barrier still required |
 | GET/POST/PUT/DELETE/PATCH/OPTIONS | /{path:path} fallback | backend/app/uat2/main.py | Explicit UAT2_UNAVAILABLE / 503; no production router fallthrough |

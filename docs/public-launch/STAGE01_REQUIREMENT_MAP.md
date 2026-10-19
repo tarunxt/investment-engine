@@ -27,3 +27,10 @@ The revised pack's handoff statement about overlap is a requirement to inspect, 
 ## Required UAT2 reset correction incorporated
 
 Exact reviewed fix:79acc235da9f3ba7babb0b640c97442761b1da3f; UAT2 evidence head 3497ff5cc6072ee3bb7ad3847d55d567f5702e58. The change is limited to the existing controller reset action: use the application backend working directory and import the serving model registry before running the fixture-reset module under the same unprivileged service identity. Existing owner/barrier/resource controls are unchanged. A focused native unit regression now checks both empty and populated reset command construction, cwd, model bootstrap and PYTHONPATH without executing a reset. Its result is PENDING exact-candidate CI; no local pass is claimed while Mac exec is unavailable. UAT2 task reports the fix is not installed; serving app4a8e81ab and controllerc72d41ad remain live. Do not deploy or run reset here. No Stage 02 implementation.
+
+
+## India simulation contract successor
+
+Reviewed and integrated UAT2 commit 503f86ee8623d1dbeb25ce7adaa9b5a1364b7b96. Its only code changes enrich synthetic holding market/invested/day-change values and provide the simulated status login_time/expires_at contract expected by the existing UI; regression assertions are in test_uat2_runtime.py. No real adapter, production domain, owner guard, credential, trading permission, migration or frontend behavior is enabled. Relevant Google/UAT2 policy/runtime 44 tests and baseline 5 tests pass locally after this merge; source inventory and affected manual route-line references are refreshed. The existing reset regression/controller source is preserved. Exact successor CI/native artifact remain required.
+
+The fully verified 2728100d artifact is preserved as historical evidence only and must not be deployed as this successor. Parent reports reset79acc235 installed and 15 host tests plus owner/private-state checks passed; this task performed no live actions and does not claim UAT2 READY. UAT2 task owns installation/acceptance of this India fix and any Stage 01 deployment after parent handoff. Stage 02 remains unstarted.
