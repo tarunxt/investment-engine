@@ -1,92 +1,73 @@
 # UAT2 acceptance
 
-**UAT2 BLOCKED — no cloud deployment, usable preview URL or browser acceptance.**
-The owner selected native systemd preparation on a fresh separate server. This
-selection is not a resource/budget, security-change or production-deployment approval.
+**Live restricted deployment; owner browser acceptance pending.**
+Actual URL https://uat2.cred-x.in. No UAT2 READY claim yet.
 
-## Verified preparation
+## Verified live
 
-- Preserved main0c6e61e/#1236 and prerequisite385f618/#1235. Stage01 untouched/not
-  integrated. Branch codex/uat2-owner-only-20261019; exact final source in PR history.
-- 44 focused backend identity/runtime/Google tests PASS, including native loopback
-  configuration, production-token rejection, nonowner provisioning/session denial,
-  alternate-auth denial, fake order schemas and disabled unsupported modules.
-- 10 native package/config/host-identity/unit/network-gate/failed-migration tests PASS.
-  They use synthetic fixtures and mocked host operations, not a live native server.
-- Earlier unchanged frontend:16 auth/BFF checks PASS, TypeScript noEmit PASS,
-  local actual frontend production build PASS. Seven shared config/Compose checks
-  previously passed. Python compilation, shell syntax and whitespace checks pass.
-- Published earlier aa8e516483ed1f1fa5ae5eceb3ace97ccd0da974 had both PR workflows
-  SUCCESS. New native CI job builds Linuxx86_64/Python3.12/Node22 bundle at exact
-  head SHA, without credentials, deployment, role changes or firewall installation.
-  New-commit CI results must be checked separately; do not reuse earlier green CI.
+- Fresh approved account 457945009677/Mumbai host i-0d1d4a0b841c98691;
+  encrypted separate storage, dedicated users, DB, Redis, artifacts and logs.
+- Console-matched SSH fingerprint and native SCP; complete source ZIP/manifest
+  checks passed: 127 files, 125 wheels, 677 source and 3116 frontend archive members.
+- Offline dependency installation passed on actual Ubuntu 24.04/Python 3.12 host.
+- Application4a8e81ab16c0c141d1f84656afdf548b659de496; deployment controller
+  c72d41ad2bce465e5f3f5cdbae43693935c38eb3; 15 native tests passed locally and on host.
+- Independent secret generated; exact-ARN IAM policy read back. Runtime resolution
+  through reviewed asm-exec/AWS MCP and temporary role succeeded. Root mode 0600 config.
+- Separate Google client saved; exact UAT2 origin. Production/old clients unchanged.
+- GoDaddy uat2 A 16.4.84.155 TTL 600 saved, both authoritative nameservers verified.
+- Valid Let's Encrypt certificate, hostname/chain verified; TLS1.3 observed.
+- Anonymous /, /login, /console/uat2, /api/auth/session, /backend-api/health and
+  /_next/static/missing.js each401 at the barrier.
+- Actual frontend /login and backend /health each200 locally; health reports
+  environmentuat2 and simulationtrue. Internal ports bind loopback only.
+- Synthetic nonowner signed tokens/direct /auth/me, /auth/profile, /uat2/status,
+  /zerodha/orders and /auth/refresh requests 403. Registration/password login,
+  forgot/reset paths 403. Users after checks: 0. No synthetic test minted an owner
+  session or provisioned an owner/profile.
+- Fake broker returns SIM IDs; actual dedicated Celery worker completed fake AI
+  with cost 0; email sink captured locally; beat schedule empty. Startup confinement
+  checked explicit external-socket denial and restricted IPv6 in service cgroups.
+- Repeat application deployment passed without rebuilding host. Verified UAT2-only
+  backup/schema+data/application rollback passed before owner login. An earlier
+  repeat-deploy service-control failure was followed by controlled app closure,
+  internal-service verification and successful traced retry; no failure hidden.
+- Active Chrony selects Amazon 169.254.169.123, normal leap status and microsecond
+  offset. No old helper clock issue inherited. Controller now checks active service.
+- Production public HTTP 200 before/after setup and while fresh UAT2 was stopped.
+  This is a bounded public-health check, not a production stress test.
 
-## Native preparation implemented
+## Still pending
 
-Dedicated users, ports, PG16/Redis configuration, reverse proxy and fixed Google
-certificate proxy; scoped nftables and systemd confinement templates; independent
-session/cookie config; actual-app badge/walkthrough; offline application/frontend/
-wheelhouse bundle with source/platform/hash checks. Native deploy/status/start/stop,
-initialization, synthetic reset and schema+data-aware rollback commands prepared.
-Failed migrations leave app stopped and prevent ambiguous start/promotion.
+- Owner must enter barrier credentials through the protected local handoff and
+  perform genuine Google login in the browser; owner session/profile acceptance
+  and actual dashboard/profile/portfolio UI walkthrough remain incomplete.
+- Genuine nonowner Google testing requires a consenting account; no result fabricated.
+  Synthetic backend owner-restriction checks have passed.
+- Authenticated browser cookie separation, populated/empty UI states and direct
+  owner API simulation checks follow genuine login. WebSocket public barrier and
+  disabled backend socket behavior require final live check.
+- EC2 stop/start passed: same Elastic IP, persistent UAT2 data/evidence and all
+  eight services active after manual controller start; production stayed HTTP 200
+  while UAT2 was stopped. Post-restart production HTTP 200 and UAT2 anonymous 401
+  were verified with TLS validation at 2026-10-19T16:13:52Z.
+- New deployment-controller CI jobs are queued; no runner assigned at inspection.
+  Baseline application 4a8e81a had PR checks 39273576447 and migration 39273575901
+  SUCCESS. New-head CI is not implied by that earlier result.
+- Stage01 remains separate, not integrated. Require parent-confirmed tested source.
 
-No host users, roles, firewall policy, services or secrets were created by preparation.
-Native Linux service/confinement, actual artifact runtime, migrations, restart,
-rollback, disk/time and browser acceptance remain live prerequisites. Mac unit
-checks do not prove native Linux runtime behavior. No production health change
-is claimed from absence of production actions.
+## Evidence and limits
 
-## Preserved Compose evidence — optional, not the selected server architecture
+Operational readbacks are in task-3 uat2-launch-receipt.json and
+uat2-security-receipt.json; no secret values. Original complete bundle remains
+retained locally. New controller fixes address real-host Chrony, nginx sandbox
+paths and runuser lookup; no production pipeline or service was rewritten.
 
-Existing Docker Desktop became available (Engine29.8.2, Compose5.6.0), without a
-software installation or unexpected permission grant. Backend image source3246e14
-built. Disposable backend smoke retry passed container-only migrations, backend
-readiness, anonymous API denial, blocked direct egress, fixed certificate proxy,
-dedicated fake-AI Redis/Celery queue, real-schema synthetic fixture reset and UAT2-only
-backup/schema-data restore. No host ports or live identities were used.
-Logs preserved: /tmp/uat2-smoke-v2.log.
+The initial CLI secret/IAM provisioning review was rejected before execution.
+One retry passed after checking AGENTS lines 540–542 explicitly permits CLI fallback
+when AWS MCP tooling is unavailable. Secret reads remained exclusively through
+unchanged asm-exec/AWS MCP. No denied action was rerouted or hidden.
 
-Initial frontend container build failed on missing sibling JSON; packaging inputs
-were corrected. Subsequent image build ended with Docker daemon EOF during backend
-image export. It is NOT a passing frontend/container packaging result. Initial nginx
-host-bind startup timed out and cleaned up; retry copied only public test config.
-Logs: /tmp/uat2-container-build.log, /tmp/uat2-container-build-v2.log,
-/tmp/uat2-smoke.log. Compose work was preserved, not used to claim native acceptance.
-
-## Exact outstanding prerequisites
-
-- Concrete fresh AWS resource/subnet/admin and approved package-transfer route,
-  verified current costs, testing window, allowance and retention approval.
-- Mandated aws-secrets-manager skill and asm-exec available, then separately
-  approved independent UAT2 secret provisioning/access. No production secret reuse.
-- External DNS control: Route53 showed zero zones; public NS are
-  ns63.domaincontrol.com/ns64.domaincontrol.com. No records changed.
-- Independent Google GIS client/origin and exact independent barrier access arrangement.
-- Native host dependencies and OS enforcement, active time service, valid HTTPS,
-  owner Google login and authorized nonowner test, protected pages/assets/API/sockets,
-  actual synthetic UI screens, deployment/restart/rollback and production before/after
-  health checks. No live Google-login result fabricated.
-
-AWS CLI STS session is expired; no aws login attempted. Existing authenticated
-Chrome console separately verified account457945009677 and Mumbai; SSM showed zero
-managed nodes. Browser console access is not proof of an approved admin/transfer route.
-Stage00 retention and stopped resources remain separate and unchanged.
-
-## Native CI evidence update
-
-On exact commit8c6cc634437ad8a5f02346fc009a89cfa4f4eed5, native isolated contracts
-and full Linuxx86_64/Python3.12/Node22 offline package build/validation PASSED, with
-a small manifest artifact retained. API migration workflow PASSED. The audit CI job
-failed because its async tests lacked pytest-asyncio; a follow-up restores that test
-dependency and adds lifecycle serialization/config-independent stop. Fresh follow-up
-CI must be checked separately. No production workflow or runtime was changed.
-
-## Complete artifact retention correction
-
-The PR-only native package job now retains the entire deployable bundle for one day,
-not just its manifest. It audits content before upload, downloads the retained copy,
-rechecks checksums/content and performs an isolated no-index dependency installation.
-A small verification receipt is also retained. This corrects availability of the
-release payload; it does not authorize an AWS transfer, launch or credential change.
-The earlier successful manifest-only builds remain historical evidence. Fresh
-artifact ID, source, expiry and round-trip results are reported in the draft PR.
+No production/old-UAT infrastructure changes, old-disk deletion or retention
+extension. Stop target 21 Oct 2026 21:04IST; retention target 26 Oct 2026 21:04IST.
+US$10 allowance is not a guaranteed cap. See UAT2.md for costs and operations.

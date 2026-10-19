@@ -1,146 +1,139 @@
 # CredX UAT2
 
-**UAT2 BLOCKED.** No deployed URL or paid resources. Intended URL:
-https://uat2.cred-x.in. The owner selected native systemd preparation; live deployment acceptance remains pending.
-See deploy/uat2/native/README.md for the selected package. Compose remains preserved history.
+**Live restricted deployment; owner browser acceptance pending.**
+URL: https://uat2.cred-x.in. Native systemd on one fresh dedicated server.
+This is not production deployment or an old Stage00 pass.
 
-## Source
+## Source and provenance
 
-Branch `codex/uat2-owner-only-20261019`, isolated checkout at
-`/Users/tarunsingh/Documents/Codex/2026-10-19/task-3/investment-engine`.
-Fetched current main `0c6e61e524c7a87c7b9ea79342f17b14a45e97a1` (#1236);
-`385f618` is an ancestor. Newer Google-login behavior preserved.
-Stage01 task `01a15432-5d0b-7574-a54f-fc7fae65a01a` owns
-`codex/stage01-scope-recovery-20261019`, observed at `f25811dd` after `940994b2`.
-Its checkout was read only, no commits integrated or module controls claimed.
-Parent coordination message to `01a14a6b-8cc5-75a6-ba97-9acc2cb8f019` failed:
-`thread not found`. Coordinate source commits through parent before integration.
+Branch `codex/uat2-owner-only-20261019`; draft PR #1239.
+Application/frontend bundle: `4a8e81ab16c0c141d1f84656afdf548b659de496`.
+Deployment controller: `c72d41ad2bce465e5f3f5cdbae43693935c38eb3`.
+The controller fixes Chrony detection, nginx runtime paths and sanitized-PATH
+administration. Its tree matches local `f3ac5c94d8158be356560763e4571abbcaada98f`.
+Application code remains the earlier fully CI-verified bundle. New controller CI
+is queued; refreshed combined bundle acceptance remains pending. Do not present
+an older green CI run as verification of a newer head.
 
-## Short preflight
+Preserved baseline main `0c6e61e524c7a87c7b9ea79342f17b14a45e97a1` (#1236)
+and ancestor `385f618` (#1235). Stage01 is not integrated. Coordinate its exact
+tested source through the parent; no decorative module controls were substituted.
 
-- Actual stack: Next.js/Auth.js, FastAPI, PostgreSQL, Redis, Celery. Initial preview
-  needs no scheduler/live-trading workers. Existing Compose publishes database,
-  Redis and adminer; unsuitable as-is. Candidate `deploy/uat2/compose.yaml` uses
-  one Caddy/frontend/backend/Postgres/Redis host, internal network, separate
-  volumes, memory bounds and log rotation, no schedulers. It is incomplete.
-- Docker CLI available; daemon `/var/run/docker.sock` absent. Container tests blocked.
-- AWS CLI read-only STS returned `Your session has expired. Please reauthenticate
-  using 'aws login'.` Account 457945009677/Mumbai is owner-supplied, not independently
-  verified. DNS control, subnet, SSM/admin and package-transfer routes unverified.
-- AGENTS mandates `aws-secrets-manager` skill plus `asm-exec`. Neither found in
-  available catalogs/PATH. No secret access attempted. AWS compute skill read at
-  `~/.agents/skills/aws-compute/SKILL.md` for planning.
-- GIS flow sends ID token through Auth.js credentials provider to backend signature,
-  issuer, audience, expiry, verified-email checks. Independent UAT2 public client
-  and exact JS origin `https://uat2.cred-x.in` required; no redirect callback for
-  this flow. Production Google client and Sheets configuration untouched.
-- Baseline `core/security.py` hardcodes JWT signing key. UAT2 key isolation must
-  be fixed before launch. Secret-tool requirement remains in force.
+Application ZIP SHA256:
+`4e7d3b73b80897006a0a5bc6c1ff3cb7b71adf07c7745b4593fba71fc124363e`.
+Manifest SHA256:
+`239be802082246ec6603ee45b06b528891e6fbab1025bef4f859a918ca51cde7`.
+Deployment-tool archive SHA256:
+`1b60bcb63ad4c450f8b06b219a2dc6cdadfc708fabfae00b979cecc500901beb`.
 
-## Implemented preparation
+## Approved resources and access
 
-Selected runtime: native systemd. Compose descriptions below record the preserved
-alternative; they are not the current deployment instruction.
+AWS account `457945009677`, Mumbai `ap-south-1`:
 
-Default-off CREDX_UAT2=1 enforces exact owner before Google provisioning and token
-issuance, rejects alternate password paths and refresh-token-as-access requests.
-UAT2 JWT uses an independent required key plus UAT2 issuer/audience. Auth.js uses
-required independent signing configuration and distinct __Host-credx-uat2 cookies;
-proxy and BFF decoders select that same family. Production defaults are preserved.
-No deployed keys were generated, read or copied. Runtime configuration remains
-blocked by missing mandated secret tooling.
+| Resource | Identifier |
+| --- | --- |
+| EC2 credx-uat2 | i-0d1d4a0b841c98691, t3a.large, standard CPU credits |
+| Canonical Ubuntu 24.04 AMD64 | ami-065d2b03fb493085a, owner 099720109477 |
+| Encrypted 40 GiB gp3 | vol-049d81922bc8fc3a5 |
+| Elastic IPv4 | 16.4.84.155, eipalloc-05f573b2b2e0e8e52 |
+| Security group | sg-0e64d54bd06fde3eb |
+| SSH public key | key-0349669b7441f0b72, credx-uat2-admin-20261019 |
+| VPC/subnet | vpc-0204982d4e14723a9 / subnet-0bc9e22176cee7140 |
+| Deployment role/profile | credx-uat2-deploy |
+| New secret | arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx-uat2-wsTPWG |
 
-Restricted app.uat2.main reuses actual CredX auth and US portfolio routes, with
-synthetic fixtures created only after verified owner login. Existing India/dashboard
-schema contracts use deterministic test adapters. Unsupported modules return
-UAT2_UNAVAILABLE, WebSockets close with 1008, live broker callbacks are unavailable.
-Fake AI runs in a dedicated bounded Celery queue; email sink and synthetic CSV are
-local only. Actual frontend has UAT2/build banner and /console/uat2 walkthrough.
-Stage01 controls remain pending, not imitated.
+SSH 22 is restricted to verified operator 49.43.25.205/32; recheck before changing it.
+Only 80/443 are additionally allowed. Database 5542, Redis 6479, backend 8002,
+frontend 3002 and certificate proxy 18082 bind 127.0.0.1 only. No production role,
+secret, database, token or environment was copied. The fresh role permits only
+GetSecretValue on that exact ARN, conditioned on AWS MCP service use.
 
-Selected native lifecycle/offline package/configuration/rollback instructions are in
-deploy/uat2/native/README.md. Preserved Compose instructions remain in deploy/uat2/README.md. Native bundles carry exact source/platform/checksum manifests; preserved images carry source labels. Startup rejects missing/real adapters, production DB/Redis, missing keys,
-production Google client, missing source SHA or auth bypass. Original app.main
-cannot be used in UAT2. The restricted entrypoint cannot start outside UAT2 mode.
+The registered reviewed AWS skill/wrapper is pinned to official AWS commit
+9d76dd4494b7ff76105f52f5d59ae2180dc91289; wrapper SHA256
+05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f.
+Runtime resolution succeeded through unchanged asm-exec and AWS MCP using the
+instance's temporary role. Configurations are root-owned mode 0600; values are withheld.
+AGENTS permits CLI provisioning when MCP tools are unavailable. No direct secret
+read CLI/SDK call or direct SMA access was used.
 
-Network design places app/data/worker on internal network only. A fixed-purpose
-nginx proxy fetches only Google's signing certificates and verifies upstream TLS.
-Caddy barrier covers every app route/asset/API/WebSocket; only ACME validation is
-public. Container/runtime and live acceptance results are recorded separately.
+Six dedicated credx-uat2-{app,web,db,redis,certs,proxy} identities own isolated data.
+UID-scoped nftables blocks app/data/worker external traffic; systemd also restricts
+addresses and IPv6 socket creation. Only the fixed TLS-verified Google certificate
+proxy supplies signing certificates. Runtime confinement checks passed.
 
-## CLI versus browser account inspection
+Caddy Basic authentication protects all application pages/assets/APIs/WebSockets.
+HTTP ACME validation is the minimal public certificate endpoint;80 otherwise
+redirects to HTTPS. Google GIS uses separate client
+833980592098-3ag94voqctj8p60ikkpg34065khbdpu3.apps.googleusercontent.com,
+name CredX UAT2, origin https://uat2.cred-x.in, no redirect URIs needed.
+Production/old UAT Google clients are unchanged. Backend permits only exact
+verified email tarun.singh6893@gmail.com before provisioning/session/token issuance.
+Host-only secure __Host-credx-uat2 cookies and signing keys are independent.
 
-AWS CLI authentication remains expired; no aws login attempted. Existing authenticated
-Chrome console independently verified account 457945009677 and Mumbai selection.
-Route53 showed zero hosted zones. Public NS lookup returned ns63.domaincontrol.com
-and ns64.domaincontrol.com, so exact external DNS account access is still unverified.
-Systems Manager Mumbai showed zero managed nodes; no setup/grants enabled. SSM and
-transfer route are not established merely by the console being accessible.
+GoDaddy uat2 A points to16.4.84.155, TTL 600, verified against both authoritative
+nameservers. Production apex/API/www records are unchanged. Let's Encrypt YE2
+certificate verifies for uat2.cred-x.in, expires 2027-01-17T15:01:29Z.
 
-Docker Desktop was present. Initial user socket was absent; opening its existing
-app timed out, then the daemon socket appeared. Sandboxed CLI access was denied by
-filesystem permissions; authorized read-only check outside sandbox succeeded:
-Engine 29.8.2, Compose v5.6.0. No software installed or unexpected permissions granted.
-Docker is an optional design choice, not an application prerequisite; native assets
-exist under deploy/no-docker. Their production backend unit includes credential-sync
-and must not be reused unchanged. Artifact packager/runtime logic could be adapted,
-but separate UAT2 units/users/paths/network rules would still be needed.
+## Start, stop, deploy, rollback
 
-## Resource and cost proposal draft — no launch approval requested yet
+On this dedicated host, controller alias is `/opt/credx-uat2/control/ctl.py`.
 
-Intended account/region 457945009677/ap-south-1; names `credx-uat2`, `credx-uat2-sg`,
-`credx-uat2-admin`, `credx-uat2-root`. Candidate one x86 Linux t3a.large (2 CPU/8 GiB),
-standard credits, 40 GiB encrypted gp3, one public IPv4; external image build.
-No ALB/NAT/helper. SSM preferred if available; otherwise exact admin /32 and separate
-key need approval. No production role. Inbound 443; 80 only for ACME/redirect.
-No DB/Redis/API public ports. Proposed Caddy independent basic-auth barrier covers
-pages/assets/API/WebSockets including login. Only certificate validation is public.
-Access arrangement itself still requires approval, and Google acceptance stays pending.
+```sh
+sudo python3 /opt/credx-uat2/control/ctl.py status
+sudo python3 /opt/credx-uat2/control/ctl.py start
+sudo python3 /opt/credx-uat2/control/ctl.py stop
+sudo python3 /opt/credx-uat2/control/ctl.py deploy /home/ubuntu/uat2-staged/bundle
+sudo python3 /opt/credx-uat2/control/ctl.py backup
+sudo python3 /opt/credx-uat2/control/ctl.py rollback /var/lib/credx-uat2/backups/VERIFIED_BACKUP.dump
+```
 
-Unverified planning assumptions: compute $0.10/hour, gp3 $0.10/GiB-month, IPv4
-$0.005/hour, 730 hours/month. Running ~$0.1105/hour or $80.65/month; stopped retaining
-disk+IPv4 ~$7.65/month. Compute/storage need current regional quote. Public IPv4
-reference: https://aws.amazon.com/vpc/pricing/. Transfers, secrets, snapshots,
-DNS queries and applicable tax extra. Illustrative 18% tax is not a verified account
-rate. Proposed 48-hour test plus 7-day stopped retention approximately $7.1 pre-tax,
-plus variable services; tentative $15 allowance is monitoring, not a guaranteed cap.
-No automatic-stop mechanism proposed until verified. Manual/API stop has latency
-and failure limits; retained disk/IPv4 continue charging while stopped.
+Deploy validates identity/config/source/platform/hashes, installs offline, backs up
+only UAT2, migrates only its DB, starts bounded services and checks readiness.
+Rollback restores both schema/data and the recorded application revision. A
+source reversal alone does not undo migration. A first-deployment backup has no
+prior release and cannot be used as an application rollback. Repeat-deploy backup
+and schema/data restore were exercised before owner login.
 
-Before a concrete paid approval request: restore account access, verify DNS/admin/
-transfer route and exact resources/current rates; finish code and local container
-checks. IAM/access/firewall/secret/Google changes require applicable exact action-time
-security confirmation. This draft is not approval and no new charges were incurred.
+Stopping services does not stop EC2 billing. Use AWS console Stop/Start instance
+on only i-0d1d4a0b841c98691. After EC2 start, run controller start; units are not
+assumed to autostart. Keep original lifecycle deadlines after restarts.
 
-## Native deployment/recovery contract
+## Owner walkthrough and synthetic reset
 
-The owner explicitly selected native systemd preparation on a separate server.
-The restricted application code is reused. New code is packaged offline in Linux CI.
-Native UAT2 units/users/paths/PG16/Redis and scoped process firewall templates are
-prepared without executing host setup. Runtime migrations use the dedicated native
-venv in a confined oneshot UAT2 unit; the owner-selected native path supersedes
-Docker-only migration tooling for this new UAT2 path, without changing other workflows.
+Open the URL. Enter independent barrier credentials from the protected local
+owner-access.txt handed to the owner, then use Google as tarun.singh6893@gmail.com.
+Never paste passwords, tokens or cookies into chat. Owner must perform interactive
+credential entry and genuine Google sign-in. No live nonowner account was used.
 
+Review /console/uat2 for available/unavailable workflows and source stamp, dashboard,
+profile/preferences, India synthetic holdings and US portfolio. Actual US fixtures
+are provisioned only after verified owner sign-in. Fake broker IDs begin SIM-;
+AI is deterministic and free, email goes to a local sink, exports stay local.
+Live brokers, Sheets, paid AI, scheduled jobs and Stage01 controls are unavailable.
 
-Require immutable images and recorded source commit; validate config without secret
-output; start UAT2 DB/Redis; UAT2-only backup; Alembic only inside backend Docker
-against verified UAT2 DB; bounded readiness; report commit/result. Start/stop/status
-must target dedicated UAT2 only. Application rollback and schema rollback are separate:
-restore UAT2 backup or reset approved synthetic fixtures, not merely old image.
-Commands are prepared; runtime backup/restore acceptance remains pending. Never routine `compose down -v`.
+After owner login, reset only synthetic US rows with:
 
-## CI safety
+```sh
+sudo python3 /opt/credx-uat2/control/ctl.py reset empty
+sudo python3 /opt/credx-uat2/control/ctl.py reset populated
+```
 
-All workflow triggers inspected. deploy.yml pushes only main; manual rejects non-main.
-Other push inspection branches `codex/fix-ranking-errors` and
-`fix/sports-ranking-live-validation` do not match UAT2. Production disk recovery is
-manual-only/guarded. PR jobs are checks/disposable DB tests. No workflow modified.
-Dedicated push/draft PR do not trigger production deployment. No merge/dispatch.
+For India/dashboard states set UAT2_FIXTURE_STATE=empty|populated in protected
+backend.env and restart backend. Do not provision an owner/profile with fixtures.
 
-## Existing Stage00 attention
+## Cost and retention
 
-Original root `vol-0820f7e4073a37848` retention only until 20 October 2026 15:00 IST
-(09:30 UTC), owner-supplied. No extension. Helper root `vol-07d700a05ead8ed67` must
-not be deleted; may contain unique logs. Instances `i-0dea5617814f8b351` and
-`i-0cb5d69e6b140b2da` remain untouched. Production `i-0b8ad0aebce8510cb` excluded.
-Old policies/transfer permission not reused; Stage00 remains separately BLOCKED.
+Initial launch 2026-10-19T15:34:13Z /21:04:13IST. Approved 48-hour stop target:
+2026-10-21T15:34:13Z /21:04:13IST. New-resource retention ends
+2026-10-26T15:34:13Z /21:04:13IST. US$10 total allowance, not a technical cap.
+48 hours compute plus seven days disk/IP/secret estimates US$4.15 before tax,
+US$4.90 with assumed 18% tax. Rates: t3a.large $0.0493/hour, gp3 $0.0912/GiB-month,
+IPv4 $0.005/hour, one secret $0.40/month. Transfer/API/tax/FX may differ. Stopped
+retention with EIP is about7.70/month pretax or9.08 with that tax assumption.
+No free-tier credit assumed. Actual billing is not yet available. Manual stop
+can take minutes; verify stopped state. No automatic or exact-time guarantee.
+Deletion/release at retention end requires its exact destructive-action gate.
+
+Old Stage00 remains separate: original root vol-0820f7e4073a37848 retention only
+until 20 Oct 15:00 IST; helper root vol-07d700a05ead8ed67 deletion forbidden. Neither
+old server/disk nor production i-0b8ad0aebce8510cb was modified.
