@@ -19,6 +19,28 @@ import ctl
 
 
 class NativeTests(unittest.TestCase):
+    def test_chrony_requires_normal_tracking_and_selected_source(self):
+        for tracking,sources,accepted in [
+            ('Stratum : 4\nLeap status : Normal\n','^* 169.254.169.123 3 4 377 8 -3us',True),
+            ('Stratum : 0\nLeap status : Not synchronised\n','^? 169.254.169.123',False),
+            ('Stratum : 4\nLeap status : Normal\n','^- 169.254.169.123',False),
+        ]:
+            with self.subTest(accepted=accepted, sources=sources), \
+                 patch.object(ctl.subprocess,'run',return_value=Mock(returncode=0)), \
+                 patch.object(ctl,'run',side_effect=[tracking,sources]), \
+                 patch.object(ctl.time,'monotonic',side_effect=[0,0,61]), \
+                 patch.object(ctl.time,'sleep'):
+                if accepted:ctl.time_check()
+                else:
+                    with self.assertRaisesRegex(RuntimeError,'Time synchronization'):ctl.time_check()
+
+    def test_timesyncd_checks_its_own_diagnostics(self):
+        with patch.object(ctl.subprocess,'run',side_effect=[Mock(returncode=3),Mock(returncode=0)]), \
+             patch.object(ctl,'run',side_effect=['yes','synchronized diagnostic']) as run, \
+             patch.object(ctl.time,'monotonic',side_effect=[0,0]):
+            ctl.time_check()
+            self.assertEqual(run.call_args_list[-1].args[0],['timedatectl','timesync-status','--no-pager'])
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.root=Path(self.temp.name)
