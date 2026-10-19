@@ -8533,7 +8533,7 @@
       "registration": "",
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/repository.py:169"
+      "source": "backend/app/domains/runs/repository.py:170"
     },
     {
       "calls": [
@@ -13876,7 +13876,7 @@
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "3296ad11b77f50ca9c8b43924758f53ad422dbb12092f9315b951700d3db9d3d",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
-    "backend/app/domains/runs/repository.py": "fa2199562b5ce4cdb02dc616dceb661cb065bbfbde66aa55fad6014f94dcac58",
+    "backend/app/domains/runs/repository.py": "65227f558355f1863e440fd9903a81a17445dae051584edd9ae7c16105a66260",
     "backend/app/domains/runs/router.py": "5ba7839d089501c57dcabcea5b67fd5cbb21fc637e8a3213ca490965acbb6a5e",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",

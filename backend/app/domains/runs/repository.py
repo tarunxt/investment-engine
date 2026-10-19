@@ -43,9 +43,10 @@ class PostgresRunRepository:
 
     def _owned_query(self, user_id: int):
         # A corrupted historical link must not expose or cancel another owner's job.
-        foreign_links = (select(RunJob.run_id).join(Job, RunJob.job_id == Job.id)
-                         .where(Job.user_id.is_distinct_from(user_id)))
-        return select(Run).where(Run.user_id == user_id, Run.id.not_in(foreign_links))
+        foreign_links = (select(RunJob.id).join(Job, RunJob.job_id == Job.id)
+                         .where(RunJob.run_id == Run.id,
+                                Job.user_id.is_distinct_from(user_id)).exists())
+        return select(Run).where(Run.user_id == user_id, ~foreign_links)
 
     async def create(self, run: Run) -> Run:
         self._session.add(run)

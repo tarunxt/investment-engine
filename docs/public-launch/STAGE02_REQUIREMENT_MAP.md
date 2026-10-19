@@ -21,4 +21,4 @@ Full stages/02.md matches the decoded p02 prompt in current Library HTML libfile
 
 Code:IMPLEMENTED pending exact CI/deployed acceptance. CI:PENDING. UAT2 deployment:NOT_RUN. UAT2 verification:NOT_RUN. Owner acceptance:NOT_RUN. External approvals:unchanged/not granted by this stage. No live operations performed.
 
-Implemented/test evidence:22 isolated ownership regressions plus affected suites total367 PASS locally; real localhost A/B FastAPI+BFF and Chrome negative cases PASS. PostgreSQL schema parity is CI-pending. No migration. Detailed current states and release boundaries are in STATUS.md; preview steps in STAGE02_PREVIEW.md.
+Implemented/test evidence:28 isolated ownership regressions plus affected suites total373 PASS locally; real localhost A/B FastAPI+BFF and Chrome negative cases PASS. PostgreSQL schema parity is CI-pending. No migration. Detailed current states and release boundaries are in STATUS.md; preview steps in STAGE02_PREVIEW.md.

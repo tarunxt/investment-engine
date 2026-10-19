@@ -127,6 +127,21 @@ def test_private_reads_require_active_identity(private_api, path):
     assert a.client.get(path, headers=a.headers[2]).status_code == 403
 
 
+@pytest.mark.parametrize('path,body', [('/jobs', {}), ('/jobs/1/cancel', {}),
+    ('/runs', {}), ('/runs/1/cancel', {}), ('/google-sheets/export/job', {'job_id': 1})])
+def test_private_writes_reject_anonymous_identity(private_api, path, body):
+    assert private_api.client.post(path, json=body).status_code == 401
+
+
+def test_admin_private_list_does_not_gain_implicit_cross_owner_access(private_api):
+    from app.domains.auth.models import UserRole
+    a = private_api
+    a.users[0].role = UserRole.ADMIN
+    a.session.commit()
+    response = a.client.get('/jobs', headers=a.headers[0])
+    assert response.status_code == 200 and response.json()['total'] == 3
+
+
 def test_job_list_count_search_pagination_ignore_client_owner(private_api):
     a = private_api
     for headers, expected in zip(a.headers[:2], (a.jobs[:3], a.jobs[3:])):
