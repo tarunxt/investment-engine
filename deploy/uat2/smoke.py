@@ -59,8 +59,12 @@ try:
           '-e', 'POSTGRES_USER=credx_uat2', '-e', 'POSTGRES_DB=credx_uat2', '-e', 'POSTGRES_PASSWORD=synthetic-test-only')
     start(prefix+'-redis', 'redis:7-alpine', '--network', private, '--network-alias', 'redis')
     cert_config = str(Path(__file__).with_name('google-certs.conf').resolve())
-    start(prefix+'-certs', 'nginx:stable-alpine', '--network', private, '--network-alias', 'google-certs',
-          '-v', cert_config+':/etc/nginx/conf.d/default.conf:ro')
+    # Copy only this public test configuration; avoid slow Desktop host-directory sharing.
+    containers.append(prefix+'-certs')
+    docker('create', '--name', prefix+'-certs', '--network', private,
+           '--network-alias', 'google-certs', 'nginx:stable-alpine')
+    docker('cp', cert_config, prefix+'-certs:/etc/nginx/conf.d/default.conf')
+    docker('start', prefix+'-certs')
     docker('network', 'connect', edge, prefix+'-certs')
     wait_db()
     docker('run', '--rm', '--network', private, *env_args, backend, 'alembic', 'upgrade', 'head', timeout=180)
