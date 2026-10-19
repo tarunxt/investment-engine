@@ -71,3 +71,12 @@ AWS CLI STS session is expired; no aws login attempted. Existing authenticated
 Chrome console separately verified account457945009677 and Mumbai; SSM showed zero
 managed nodes. Browser console access is not proof of an approved admin/transfer route.
 Stage00 retention and stopped resources remain separate and unchanged.
+
+## Native CI evidence update
+
+On exact commit8c6cc634437ad8a5f02346fc009a89cfa4f4eed5, native isolated contracts
+and full Linuxx86_64/Python3.12/Node22 offline package build/validation PASSED, with
+a small manifest artifact retained. API migration workflow PASSED. The audit CI job
+failed because its async tests lacked pytest-asyncio; a follow-up restores that test
+dependency and adds lifecycle serialization/config-independent stop. Fresh follow-up
+CI must be checked separately. No production workflow or runtime was changed.

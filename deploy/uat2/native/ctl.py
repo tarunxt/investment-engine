@@ -5,6 +5,7 @@ Mutating commands require root on the separately approved EC2 host, a matching
 IMDSv2 identity and a root-owned UAT2 marker. Validation/package tests run locally.
 """
 import argparse
+import fcntl
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -29,6 +30,16 @@ DATA = Path('/var/lib/credx-uat2')
 SERVICES = ['network','postgres','redis','certs','backend','worker','frontend','proxy']
 APPS = ['proxy','frontend','worker','backend']
 EXCLUDED = {'i-0b8ad0aebce8510cb','i-0dea5617814f8b351','i-0cb5d69e6b140b2da'}
+
+
+def acquire_lock():
+    lock = open('/run/credx-uat2-control.lock','a')
+    try:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        raise RuntimeError('Another native UAT2 lifecycle operation is in progress') from None
+    return lock
 
 
 def run(args, *, env=None, capture=False, timeout=120, cwd=None):
@@ -184,6 +195,7 @@ def main():
     if args.action=='validate':
         validate(Path(args.argument or CONFIG)); print('Native UAT2 config valid; values withheld'); return
     host_guard()
+    operation_lock = acquire_lock()  # held until this command returns/exits
     if args.action=='status':
         for name in SERVICES:
             result=subprocess.run(['systemctl','is-active',f'credx-uat2-{name}.service'],capture_output=True,text=True)
@@ -191,10 +203,10 @@ def main():
         usage=shutil.disk_usage(DATA); print(f'Disk used {100*(usage.total-usage.free)/usage.total:.0f}%')
         if (ROOT/'pending-deployment.json').exists(): print('Pending deployment: app must remain stopped until deploy/rollback completes')
         print('Source '+current().name); return
-    validate(CONFIG)
     if args.action=='stop':
         systemctl('stop',list(reversed(SERVICES)))
         print('UAT2 services stopped; EC2/storage/IPv4 billing continues'); return
+    validate(CONFIG)
     if args.action=='backup': print(backup()); return
     if args.action=='deploy':
         time_check()

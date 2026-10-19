@@ -115,7 +115,7 @@ class NativeTests(unittest.TestCase):
         def systemctl(action,names):
             events.append((action,names))
             if names==['migrate']:raise RuntimeError('synthetic migration failure')
-        with patch.object(ctl,'ROOT',self.root),patch.object(ctl,'CONFIG',self.root),patch.object(ctl,'host_guard'),patch.object(ctl,'validate'),patch.object(ctl,'time_check'),patch.object(ctl,'install_release',return_value=release),patch.object(ctl,'configure_units'),patch.object(ctl,'systemctl',side_effect=systemctl),patch.object(ctl,'backup',return_value=self.root/'backup.dump'),patch.object(ctl,'write_release_environment'),patch.object(ctl,'promote') as promote,patch.object(ctl.shutil,'disk_usage',return_value=Mock(free=4*1024**3)),patch.object(sys,'argv',['ctl.py','deploy',str(self.root)]):
+        with patch.object(ctl,'ROOT',self.root),patch.object(ctl,'CONFIG',self.root),patch.object(ctl,'host_guard'),patch.object(ctl,'acquire_lock'),patch.object(ctl,'validate'),patch.object(ctl,'time_check'),patch.object(ctl,'install_release',return_value=release),patch.object(ctl,'configure_units'),patch.object(ctl,'systemctl',side_effect=systemctl),patch.object(ctl,'backup',return_value=self.root/'backup.dump'),patch.object(ctl,'write_release_environment'),patch.object(ctl,'promote') as promote,patch.object(ctl.shutil,'disk_usage',return_value=Mock(free=4*1024**3)),patch.object(sys,'argv',['ctl.py','deploy',str(self.root)]):
             with self.assertRaises(RuntimeError):ctl.main()
         promote.assert_not_called()
         self.assertTrue((self.root/'pending-deployment.json').exists())
