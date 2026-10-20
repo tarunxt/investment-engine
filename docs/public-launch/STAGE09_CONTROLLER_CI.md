@@ -47,3 +47,11 @@ Any runtime repair is prepared/reviewed separately before publication.
 
 Each case and final receipt are retained even on test failure. Red cases are
 reported as failed, never counted as skips, expected passes or live acceptance.
+
+The first completed integration at37c29ef1 executed all19 cases:17 passed,
+zero skipped. It confirmed the promotion retry runtime defect. Schema interruption
+also exposed a test waiter error: is-active returns nonzero for activating oneshot
+services, so it must wait for ActiveState inactive/failed instead. That test-only
+waiter is corrected without changing runtime. The same19 cases are split into four
+independent disposable VM groups with fail-fast disabled; each run step has20min
+and the job25min, reserving time to retain failure diagnostics. No case is waived.
