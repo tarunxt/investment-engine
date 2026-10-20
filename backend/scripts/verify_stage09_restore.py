@@ -29,6 +29,13 @@ ALLOWED_CHANGES = frozenset({
     '.github/workflows/pr-checks.yml',
     'docs/public-launch/STAGE09_ROLLBACK_REHEARSAL.md',
     'docs/public-launch/STATUS.md',
+    'docs/public-launch/STAGE09_CONTROLLER_REPAIR.md',
+    'deploy/uat2/native/ctl.py',
+    'deploy/uat2/native/schema_service.py',
+    'deploy/uat2/native/systemd/credx-uat2-migrate.service',
+    'deploy/uat2/native/test_native.py',
+    'deploy/uat2/native/test_recovery.py',
+    'deploy/uat2/native/README.md',
 })
 
 

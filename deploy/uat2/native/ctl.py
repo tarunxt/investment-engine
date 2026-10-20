@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from uuid import uuid4
 
 from package import verify, extract, digest
 from validate import validate
@@ -147,20 +148,206 @@ def time_check():
     raise RuntimeError('Time synchronization not established in bounded initialization interval')
 
 
-def backup():
-    directory = DATA/'backups'; directory.mkdir(mode=0o700,parents=True,exist_ok=True)
-    path = directory/('uat2-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.dump')
-    with path.open('wb') as output:
-        result = subprocess.run(['runuser','-u','credx-uat2-db','--','/usr/lib/postgresql/16/bin/pg_dump',
-                                 '-h','/run/credx-uat2-postgres','-p','5542','-d','credx_uat2','-Fc'],
-                                stdout=output,stderr=subprocess.PIPE,timeout=60)
-    if result.returncode or path.stat().st_size<5:
-        raise RuntimeError('UAT2 backup failed; application state not promoted')
-    path.chmod(0o600)
-    old = current().name if (ROOT/'current').exists() else None
-    path.with_suffix('.json').write_text(json.dumps({'source_commit':old,'sha256':digest(path)})+'\n')
-    path.with_suffix('.json').chmod(0o600)
+BASE_REVISION = 'module_lifecycle_001'
+STAGE09_REVISION = 'integration_connections_001'
+SCHEMA_ARTIFACTS = DATA/'artifacts/native-schema'
+
+
+def durable_write(path, payload):
+    temporary=path.with_name(path.name+'.'+uuid4().hex+'.tmp')
+    descriptor=os.open(temporary,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    with os.fdopen(descriptor,'wb') as output:
+        output.write(payload);output.flush();os.fsync(output.fileno())
+    os.replace(temporary,path)
+    sync_directory(path.parent)
+
+
+def sync_directory(path):
+    descriptor=os.open(path,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(descriptor)
+    finally:os.close(descriptor)
+
+
+def durable_json(path, value):
+    durable_write(path,(json.dumps(value,sort_keys=True)+'\n').encode())
+
+
+def private_file(path, owner=None):
+    info=path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid!=(os.geteuid() if owner is None else owner) or stat.S_IMODE(info.st_mode)&0o077:
+        raise RuntimeError('Private regular UAT2 recovery file required')
     return path
+
+
+def private_json(path):return json.loads(private_file(path).read_text())
+
+
+def release_manifest(release):
+    path=release/'native-manifest.json';info=path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)&0o022:
+        raise RuntimeError('Trusted installed release manifest required')
+    value=json.loads(path.read_text())
+    if value.get('source_commit')!=release.name:raise RuntimeError('Release manifest source mismatch')
+    return digest(path)
+
+
+def require_apps_stopped():
+    for name in APPS:
+        result=subprocess.run(['systemctl','is-active','--quiet',f'credx-uat2-{name}.service'],
+                              stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
+        if result.returncode!=3:raise RuntimeError('All UAT2 applications must be verifiably stopped')
+
+
+def schema_operation(release, action, *, expected=None, fingerprint=None, material=None):
+    # Reuse exactly the existing migration identity/cgroup/network sandbox.
+    require_apps_stopped()
+    active=subprocess.run(['systemctl','is-active','--quiet','credx-uat2-migrate.service'],
+                          stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=10)
+    if active.returncode not in {3,4}:raise RuntimeError('Schema operation already active or uncertain')
+    release_manifest(release)
+    if not (release/'deploy/uat2/native/schema_service.py').is_file():raise RuntimeError('Installed schema recovery helper required')
+    request=uuid4().hex
+    values={'ACTION':action,'REQUEST':request,'SOURCE':release.name}
+    if expected:values['EXPECTED']=expected
+    if fingerprint:values['FINGERPRINT']=fingerprint
+    if material:values.update(MATERIAL_REQUEST=material['request'],MATERIAL_SHA=material['sha256'])
+    if action not in {'inspect','preserve','downgrade','verify'}:raise RuntimeError('Unknown schema operation')
+    for value in values.values():
+        if not re.fullmatch(r'[A-Za-z0-9_]+',value):raise RuntimeError('Invalid schema operation value')
+    unit=release/'deploy/uat2/native/systemd/credx-uat2-migrate.service'
+    content=unit.read_text()
+    if 'native/schema_service.py' not in content:raise RuntimeError('Confined schema unit required')
+    destination=Path('/etc/systemd/system/credx-uat2-migrate.service')
+    destination.write_text(content.replace('/opt/credx-uat2/current',str(release)))
+    run(['systemd-analyze','verify',destination]);run(['systemctl','daemon-reload'])
+    operation=CONFIG/'schema-operation.env'
+    durable_write(operation,''.join('CREDX_UAT2_SCHEMA_'+k+'='+v+'\n' for k,v in values.items()).encode())
+    try:
+        systemctl('start',['migrate'])
+        path=DATA/'artifacts/native-schema'/(request+'-result.json')
+        owner=pwd.getpwnam('credx-uat2-app').pw_uid
+        value=json.loads(private_file(path,owner).read_text())
+        if (value.get('request'),value.get('source'),value.get('action'))!=(request,release.name,action):raise RuntimeError('Schema response mismatch')
+        if material_result:=value.get('material'):
+            saved=DATA/'artifacts/native-schema'/(material_result['request']+'-material.json')
+            if not re.fullmatch(r'[0-9a-f]{32}',material_result['request']) or digest(private_file(saved,owner))!=material_result['sha256']:
+                raise RuntimeError('Material preservation verification failed')
+        return value
+    finally:
+        operation.unlink(missing_ok=True);sync_directory(CONFIG)
+
+
+def backup(release=None):
+    require_apps_stopped();release=release or current()
+    before=schema_operation(release,'inspect')['state']
+    source=current();manifest_sha=release_manifest(source)
+    directory=DATA/'backups';directory.mkdir(mode=0o700,parents=True,exist_ok=True)
+    path=directory/('uat2-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.dump')
+    descriptor=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    with os.fdopen(descriptor,'wb') as output:
+        result=subprocess.run(['runuser','-u','credx-uat2-db','--','/usr/lib/postgresql/16/bin/pg_dump',
+                               '-h','/run/credx-uat2-postgres','-p','5542','-d','credx_uat2','-Fc'],
+                              stdout=output,stderr=subprocess.PIPE,timeout=60)
+        output.flush();os.fsync(output.fileno())
+    if result.returncode or path.stat().st_size<5:raise RuntimeError('UAT2 backup failed; application state not promoted')
+    after=schema_operation(release,'inspect')['state']
+    if before!=after:raise RuntimeError('Database changed during backup; recovery point not verified')
+    durable_json(path.with_suffix('.json'),{'schema_version':2,'source_commit':source.name,'manifest_sha256':manifest_sha,
+                 'sha256':digest(path),'schema_revision':before['revision'],'fingerprint':before['fingerprint'],
+                 'created_at':datetime.now(timezone.utc).isoformat()})
+    return path
+
+
+def backup_reference(path, receipt):
+    return {key:receipt[key] for key in ('sha256','source_commit','schema_revision','fingerprint')}|{'name':path.name}
+
+
+def checked_backup(argument):
+    raw=Path(argument)
+    if raw.is_symlink():raise RuntimeError('Symlinked backup refused')
+    path=raw.resolve()
+    if path.parent!=(DATA/'backups').resolve() or not re.fullmatch(r'uat2-[0-9TZ]+\.dump',path.name):raise RuntimeError('Use UAT2 backup only')
+    private_file(path);receipt=private_json(path.with_suffix('.json'))
+    if receipt.get('schema_version')!=2 or receipt.get('schema_revision')!=BASE_REVISION:
+        raise RuntimeError('Fresh Stage08 backup with schema provenance required')
+    if not re.fullmatch(r'[0-9a-f]{40}',receipt.get('source_commit','')) or not re.fullmatch(r'[0-9a-f]{64}',receipt.get('fingerprint','')):
+        raise RuntimeError('Invalid backup provenance')
+    timestamp=datetime.fromisoformat(receipt['created_at'])
+    if timestamp.tzinfo is None or timestamp.timestamp()>time.time()+60:raise RuntimeError('Invalid backup timestamp')
+    if digest(path)!=receipt.get('sha256'):raise RuntimeError('Backup checksum mismatch')
+    release=ROOT/'releases'/receipt['source_commit']
+    if release_manifest(release)!=receipt.get('manifest_sha256'):raise RuntimeError('Rollback release provenance mismatch')
+    return path,receipt,release
+
+
+def pending():return ROOT/'pending-deployment.json'
+
+
+def clear_pending():
+    pending().unlink();sync_directory(ROOT)
+
+
+def mark(record, phase, **extra):
+    record.update(phase=phase,**extra);durable_json(pending(),record)
+
+
+def rollback(argument, *, recover_only=False):
+    path,receipt,target=checked_backup(argument)
+    reference=backup_reference(path,receipt)
+    old=private_json(pending()) if pending().exists() else None
+    if recover_only:
+        if not old or old.get('operation')!='rollback' or old.get('backup')!=reference:
+            raise RuntimeError('Matching interrupted rollback required')
+        record=old
+    else:
+        if old and old.get('operation')=='rollback':raise RuntimeError('Interrupted rollback: use verify-only recover-rollback; no blind retry')
+        context=old or private_json(ROOT/'deployment-receipt.json')
+        if context.get('schema_version')!=2 or context.get('operation')!='deploy' or not re.fullmatch(r'[0-9a-f]{40}',context.get('candidate','')):
+            raise RuntimeError('Verified deployment provenance required')
+        if context.get('backup')!=reference or context.get('previous_source')!=target.name:
+            raise RuntimeError('Backup is not the recorded pre-deployment recovery point')
+        if not old and current().name!=context.get('candidate'):raise RuntimeError('Current source changed')
+        record={'schema_version':2,'operation':'rollback','id':uuid4().hex,'candidate':context['candidate'],
+                'previous_source':target.name,'backup':reference}
+        mark(record,'validated')  # durable BEFORE stop, downgrade, restore or promotion
+    if record.get('schema_version')!=2 or not re.fullmatch(r'[0-9a-f]{40}',record.get('candidate','')):
+        raise RuntimeError('Invalid recovery marker; review required')
+    operator=ROOT/'releases'/record['candidate']
+    try:
+        systemctl('stop',APPS);require_apps_stopped()
+        if recover_only:
+            # Never repeat a possibly completed restore after interruption.
+            schema_operation(operator,'verify',expected=BASE_REVISION,fingerprint=receipt['fingerprint'])
+        else:
+            state=schema_operation(operator,'inspect')['state']
+            if state['revision']==STAGE09_REVISION:
+                saved=schema_operation(operator,'preserve',expected=STAGE09_REVISION)
+                mark(record,'material_preserved',material=saved['material'])
+                mark(record,'downgrade_started')
+                schema_operation(operator,'downgrade',expected=STAGE09_REVISION,
+                                 fingerprint=saved['state']['fingerprint'],material=saved['material'])
+            elif state['revision']!=BASE_REVISION or state.get('stage09_tables'):
+                raise RuntimeError('Unexpected revision or partial schema; rollback stopped')
+            mark(record,'restore_started')
+            with path.open('rb') as stream:
+                result=subprocess.run(['runuser','-u','credx-uat2-db','--','/usr/lib/postgresql/16/bin/pg_restore',
+                                       '-h','/run/credx-uat2-postgres','-p','5542','-d','credx_uat2',
+                                       '--clean','--if-exists','--exit-on-error','--single-transaction'],
+                                      stdin=stream,stderr=subprocess.PIPE,timeout=120)
+            if result.returncode:raise RuntimeError('Restore failed; apps remain stopped and recovery marker retained')
+            schema_operation(operator,'verify',expected=BASE_REVISION,fingerprint=receipt['fingerprint'])
+        mark(record,'database_verified')
+        configure_units(target);promote(target)
+        mark(record,'finalizing')
+        systemctl('start',['backend','worker','frontend','proxy']);readiness()
+        clear_pending()
+        print('Verified schema/data and application restored to '+target.name)
+    except BaseException:
+        # A killed controller cannot clean up, but its fsynced marker still blocks
+        # every later start. Normal failures also stop any partially started apps.
+        try:systemctl('stop',APPS)
+        except Exception:pass
+        raise
 
 
 def configure_units(release):
@@ -198,7 +385,7 @@ def readiness():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action',choices=['validate','inspect-bundle','deploy','start','stop','status','backup','rollback','reset','initialize'])
+    parser.add_argument('action',choices=['validate','inspect-bundle','deploy','start','stop','status','backup','rollback','recover-rollback','reset','initialize'])
     parser.add_argument('argument',nargs='?')
     args = parser.parse_args()
     if args.action=='inspect-bundle':
@@ -218,22 +405,30 @@ def main():
         systemctl('stop',list(reversed(SERVICES)))
         print('UAT2 services stopped; EC2/storage/IPv4 billing continues'); return
     validate(CONFIG)
+    if pending().exists() and args.action in {'deploy','backup','reset','initialize'}:
+        raise RuntimeError('Pending operation must be verified/recovered first')
     if args.action=='backup': print(backup()); return
     if args.action=='deploy':
         time_check()
         if shutil.disk_usage(ROOT).free<2*1024**3: raise RuntimeError('At least2GiB free required')
         release=install_release(Path(args.argument).resolve())
-        (ROOT/'pending-deployment.json').write_text(json.dumps({'candidate':release.name})+'\n')
+        previous=current().name
+        record={'schema_version':2,'operation':'deploy','id':uuid4().hex,'candidate':release.name,'previous_source':previous}
+        mark(record,'prepared')
         configure_units(release)
         systemctl('start',['network','postgres','redis','certs'])
         systemctl('stop',APPS)
-        saved=backup()
+        saved=backup(release)
+        saved_receipt=private_json(saved.with_suffix('.json'))
+        mark(record,'backup_verified',backup=backup_reference(saved,saved_receipt))
         # Native migration uses the same network confinement and private runtime env as the app.
         write_release_environment(release)
+        mark(record,'migration_started')
         systemctl('start',['migrate'])
         promote(release)
         systemctl('restart',['backend','worker','frontend','proxy'])
-        readiness(); (ROOT/'pending-deployment.json').unlink(missing_ok=True); print(f'UAT2 source {release.name} ready; pre-migration backup {saved.name}'); return
+        readiness();durable_json(ROOT/'deployment-receipt.json',record);clear_pending()
+        print(f'UAT2 source {release.name} ready; pre-migration backup {saved.name}');return
     if args.action=='initialize':
         release=install_release(Path(args.argument).resolve())
         configure_units(release)
@@ -253,21 +448,8 @@ def main():
         run(['/usr/sbin/runuser','-u','credx-uat2-app','--',release/'.venv/bin/python','-c',bootstrap,args.argument],
             env={**env_for(release),'PYTHONPATH':str(release/'backend')},cwd=release/'backend')
         print('US synthetic fixture reset. Match UAT2_FIXTURE_STATE and restart backend for India/dashboard.'); return
-    if args.action=='rollback':
-        path=Path(args.argument).resolve()
-        if path.parent != DATA/'backups' or path.is_symlink() or not re.fullmatch(r'uat2-[0-9TZ]+\.dump',path.name): raise RuntimeError('Use UAT2 backup only')
-        receipt=json.loads(path.with_suffix('.json').read_text())
-        if digest(path)!=receipt['sha256'] or not re.fullmatch(r'[0-9a-f]{40}',receipt.get('source_commit') or ''): raise RuntimeError('Verified prior-source backup required')
-        release=ROOT/'releases'/receipt['source_commit']
-        if not (release/'native-manifest.json').is_file(): raise RuntimeError('Prior release missing')
-        systemctl('stop',APPS)
-        with path.open('rb') as stream:
-            result=subprocess.run(['runuser','-u','credx-uat2-db','--','/usr/lib/postgresql/16/bin/pg_restore','-h','/run/credx-uat2-postgres','-p','5542','-d','credx_uat2','--clean','--if-exists','--exit-on-error'],stdin=stream,stderr=subprocess.PIPE,timeout=120)
-        if result.returncode: raise RuntimeError('Restore failed; app remains stopped')
-        configure_units(release); promote(release)
-        systemctl('start',['backend','worker','frontend','proxy']); readiness()
-        (ROOT/'pending-deployment.json').unlink(missing_ok=True)
-        print('Schema/data and application restored to '+release.name)
+    if args.action in {'rollback','recover-rollback'}:
+        rollback(args.argument,recover_only=args.action=='recover-rollback');return
 
 
 if __name__=='__main__':

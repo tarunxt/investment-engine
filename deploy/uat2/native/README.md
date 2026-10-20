@@ -107,11 +107,29 @@ data and does not stop EC2/storage/IPv4 billing; stop the approved dedicated EC2
 instance separately through the verified account/instance route. No exact shutdown
 latency/billing guarantee is made and no cloud timer infrastructure is added.
 
-`ctl.py backup` creates private dump+checksum+prior-source metadata.
-`ctl.py rollback /var/lib/credx-uat2/backups/uat2-TIMESTAMP.dump` stops app services,
-restores both schema/data and the recorded prior release, then checks readiness.
-Failed restores leave the app stopped. Image/source reversal alone is not schema
-rollback. Test this on native host before acceptance. No automatic data deletion.
+`ctl.py backup` requires all four application services stopped and creates a
+private v2 receipt binding the dump to the current release manifest, exact schema
+revision and database fingerprint. A deployment takes this backup automatically
+before migration. Legacy receipts are refused; the old `26508e84` recovery point
+is not a substitute for a fresh accepted Stage08 source backup.
+
+`ctl.py rollback /var/lib/credx-uat2/backups/uat2-TIMESTAMP.dump` requires the
+matching recorded pre-deployment backup. It durably records a pending rollback
+before stopping services. Exact Stage09 revision cleanup first preserves private
+encrypted binding material, verifies its hash, and downgrades only to
+`module_lifecycle_001` through the existing confined migration service. Restore
+uses `--single-transaction`; full fingerprint verification precedes promotion and
+application start. Unknown revisions, mismatched provenance and failures retain
+the marker and stop applications. A retained marker blocks `start`, deploy, reset,
+backup and initialize. Stop/status remain available.
+
+After interruption, `ctl.py recover-rollback <same-dump>` performs verification
+only before finalization; it never repeats a possibly completed downgrade/restore.
+If the database does not exactly match the recovery point, it remains blocked for
+review. Do not delete the marker or manually start services. This repair does not
+provide an automatic destructive retry. The verified prior release must remain
+installed. Source reversal alone is not schema rollback. Native-host acceptance
+and real PostgreSQL checks are required before live use. No automatic data deletion.
 
 `ctl.py reset empty|populated` resets only synthetic US snapshot rows after owner
 Google login. Match UAT2_FIXTURE_STATE in backend.env and restart backend for India/

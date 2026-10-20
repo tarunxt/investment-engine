@@ -37,7 +37,7 @@ class RestoreSafety(unittest.TestCase):
 
     def test_runtime_paths_and_client_major_cannot_drift(self):
         v.validate_changed_paths(v.ALLOWED_CHANGES)
-        for path in ['backend/app/core/uat2.py','deploy/uat2/native/ctl.py','frontend/auth.ts']:
+        for path in ['backend/app/core/uat2.py','deploy/uat2/native/network.nft','frontend/auth.ts']:
             with self.subTest(path=path),self.assertRaises(RuntimeError):v.validate_changed_paths([path])
         v.postgres16('pg_restore (PostgreSQL) 16.11')
         with self.assertRaises(RuntimeError):v.postgres16('pg_restore (PostgreSQL) 17.0')
@@ -70,7 +70,7 @@ class RestoreSafety(unittest.TestCase):
 
 
 class NativeControllerKnownGap(unittest.TestCase):
-    """Expected-current-behavior repros: green means the P1 was reproduced, NOT fixed."""
+    """Pinned historical repros; current controller is tested in native/test_recovery.py."""
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name).resolve()/'root';self.data=Path(self.tmp.name).resolve()/'data'
@@ -82,7 +82,9 @@ class NativeControllerKnownGap(unittest.TestCase):
         (release/'native-manifest.json').write_text('{}')
         self.marker=self.root/'pending-deployment.json'
         native=v.ROOT/'deploy/uat2/native';sys.path.insert(0,str(native));self.addCleanup(lambda:sys.path.remove(str(native)))
-        spec=importlib.util.spec_from_file_location('stage09_unchanged_native_ctl',native/'ctl.py')
+        historical=Path(self.tmp.name)/'historical_ctl.py'
+        historical.write_bytes(v.subprocess.check_output(['git','-c','safe.directory='+str(v.ROOT),'show',v.APP_SOURCE+':deploy/uat2/native/ctl.py'],cwd=v.ROOT))
+        spec=importlib.util.spec_from_file_location('stage09_unchanged_native_ctl',historical)
         self.ctl=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.ctl)
         for name,value in [('ROOT',self.root),('DATA',self.data)]:
             p=patch.object(self.ctl,name,value);p.start();self.addCleanup(p.stop)
