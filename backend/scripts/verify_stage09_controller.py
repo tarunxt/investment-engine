@@ -26,7 +26,7 @@ import threading
 import time
 from unittest.mock import patch
 
-FROZEN='1f33c88dac8060abf1487607397def21ee5fe4b9'
+FROZEN='1162e81165112a5fccc2bf8d2860b9e8082c2c22'
 BASE='61ce447ba35f4db7cd06fd550c62557450247af3'
 REPO=Path(__file__).resolve().parents[2]
 ROOT=Path('/opt/credx-uat2');CONFIG=Path('/etc/credx-uat2');DATA=Path('/var/lib/credx-uat2')

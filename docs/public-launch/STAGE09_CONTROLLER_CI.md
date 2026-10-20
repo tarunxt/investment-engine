@@ -1,7 +1,7 @@
 # Frozen Stage09 controller integration CI
 
 Runtime/controller/helper/application remain byte-identical to
-`1f33c88dac8060abf1487607397def21ee5fe4b9`. Only test harness/fixture, CI and this
+`1162e81165112a5fccc2bf8d2860b9e8082c2c22` for this local repair candidate. Only test harness/fixture, CI and this
 record change. Prior receipts remain intact. Exact runtime SHA and verification
 SHA are separately recorded; the harness refuses any unlisted changed path.
 
@@ -55,3 +55,11 @@ services, so it must wait for ActiveState inactive/failed instead. That test-onl
 waiter is corrected without changing runtime. The same19 cases are split into four
 independent disposable VM groups with fail-fast disabled; each run step has20min
 and the job25min, reserving time to retain failure diagnostics. No case is waived.
+
+The candidate additionally carries the narrowly scoped promotion-pointer repair
+from1162e811 and two direct controller regressions. Publication of this runtime
+change is pending separate approval. The published e6bef0e8 evidence remains
+pinned to original runtime1f33c88d and is not acceptance evidence for this repair.
+After approval, the unchanged19-case grouped harness is pinned to1162e811 for
+new exact-source CI. Existing local33 native tests pass; real repaired-runtime
+PostgreSQL/systemd acceptance is still pending publication and execution.
