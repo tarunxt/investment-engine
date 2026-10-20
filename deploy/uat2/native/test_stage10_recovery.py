@@ -83,3 +83,24 @@ class SameRevisionRecoveryTests(unittest.TestCase):
             ctl.rollback(str(self.dump))
             self.assertEqual([call.args[1] for call in operations.call_args_list],['inspect','preserve','verify'])
         self.assertFalse(ctl.pending().exists())
+
+class ConstraintFingerprintTests(unittest.TestCase):
+    def test_only_two_exact_connection_mode_decompilations_share_fingerprint(self):
+        import schema_service as helper
+        original={'name':'ck_connection_mode','sqltext':helper.MODE_CHECK_FORMS[0],'comment':None}
+        restored={**original,'sqltext':helper.MODE_CHECK_FORMS[1]}
+        self.assertEqual(helper.canonical_checks('integration_connections',[original]),helper.canonical_checks('integration_connections',[restored]))
+        self.assertEqual(restored['sqltext'],helper.MODE_CHECK_FORMS[1],'input metadata is never mutated')
+        for value in [helper.MODE_CHECK_FORMS[1]+' OR true',helper.MODE_CHECK_FORMS[0].replace('platform_managed','other'), 'version > 0', 'unknown expression']:
+            altered={**original,'sqltext':value}
+            self.assertEqual(helper.canonical_checks('integration_connections',[altered]),[altered])
+            self.assertNotEqual(helper.canonical_checks('integration_connections',[altered]),[original])
+
+    def test_other_tables_constraint_names_and_comments_remain_exact(self):
+        import schema_service as helper
+        check={'name':'ck_connection_mode','sqltext':helper.MODE_CHECK_FORMS[1],'comment':None}
+        self.assertEqual(helper.canonical_checks('other_table',[check]),[check])
+        renamed={**check,'name':'different_constraint'}
+        self.assertEqual(helper.canonical_checks('integration_connections',[renamed]),[renamed])
+        commented={**check,'comment':'changed'}
+        self.assertEqual(helper.canonical_checks('integration_connections',[commented])[0]['comment'],'changed')

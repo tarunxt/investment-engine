@@ -1,3 +1,9 @@
+# Stage10 CI blocked on local-only fingerprint correction
+
+Draft PR1252 is published at diagnostic3dfa94826684176e679f37577de0d67918184860; runtime remains identical to reviewed4668e2a9. Both CI runs39460845285 and39462281660 are terminal23/26 success, three Linux groups failed. Current matrix executed20 cases:13 pass/7 fail/zero skips;29 PostgreSQL and all19 historical Stage09 cases passed. Native4668 source/offline/artifact audit passed separately. No CI/deployment acceptance claimed.
+
+Exact snapshots isolate one deparsed PostgreSQL check-expression spelling change. A narrow runtime correction is LOCAL ONLY pending separate publication approval, with58 native tests and retained-snapshot replay passing; new real PostgreSQL contract is prepared/not run. See STAGE10_CONSTRAINT_FINGERPRINT.md. Existing source/evidence below remains preserved history. No merge, deploy, live DB/AWS/credentials/provider or Stage11 action occurred.
+
 # Stage10 local successor — independent review findings addressed locally
 
 The immutable reviewed0f026ee candidate/evidence is preserved. Local successor adds Stage10→Stage09 and same-schema recovery support; privately preserves both new tables plus current connection material; retains binding history for same-ID account changes; and completes validated login navigation/returned-query handling through a gated fake broker page. See STAGE10_RECOVERY_CI.md. Historical Stage09 jobs are pinned explicitly to acceptedccb; their runtime guards/test sources are unchanged. Separate current-head Stage10 Docker29-case and Linux20-case matrices are prepared, NOT run.

@@ -73,3 +73,29 @@ def test_actual_stage10_migration_preserves_all_stage09_tables(database):
         migrate('downgrade','integration_connections_001')
         assert 'connection_attempts' not in inspect(engine).get_table_names()
         assert baseline_snapshot(engine,exclude_tables=frozenset())==before
+
+
+def test_postgres_mode_constraint_decompilations_have_identical_domain(database):
+    """Exact two-form canonicalization must retain actual PostgreSQL rejection."""
+    import importlib.util
+    import sqlalchemy as sa
+    from sqlalchemy.exc import IntegrityError,DataError
+    engine,_,_,_,_=database
+    path=Path(__file__).resolve().parents[2]/'deploy/uat2/native/schema_service.py'
+    spec=importlib.util.spec_from_file_location('stage10_constraint_helper',path)
+    helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+    catalogs=[]
+    for index,expression in enumerate(helper.MODE_CHECK_FORMS):
+        table=sa.Table('mode_contract_'+str(index),sa.MetaData(),
+            sa.Column('app_ownership_mode',sa.String(24),nullable=False),
+            sa.CheckConstraint(expression,name='ck_connection_mode'))
+        table.create(engine)
+        checks=sa.inspect(engine).get_check_constraints(table.name)
+        assert checks[0]['sqltext'] in helper.MODE_CHECK_FORMS
+        catalogs.append(helper.canonical_checks('integration_connections',checks))
+        for value in ['user_owned','platform_managed']:
+            with engine.begin() as db:db.execute(table.insert().values(app_ownership_mode=value))
+        for value in ['other','USER_OWNED','',None,'real-money','x'*25]:
+            with pytest.raises((IntegrityError,DataError)):
+                with engine.begin() as db:db.execute(table.insert().values(app_ownership_mode=value))
+    assert catalogs[0]==catalogs[1]

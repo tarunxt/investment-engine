@@ -24,6 +24,22 @@ PREFIX = 'CREDX_UAT2_SCHEMA_'
 def sha(data):return hashlib.sha256(data).hexdigest()
 
 
+# PostgreSQL16 dump/restore can move this implicit varchar[] -> text[] cast
+# onto each literal. These two exact catalog decompilations express the same
+# fixed two-value text domain; do not strip casts or normalize arbitrary SQL.
+MODE_CHECK_FORMS = (
+    "app_ownership_mode::text = ANY (ARRAY['user_owned'::character varying, 'platform_managed'::character varying]::text[])",
+    "app_ownership_mode::text = ANY (ARRAY['user_owned'::character varying::text, 'platform_managed'::character varying::text])",
+)
+
+
+def canonical_checks(table, checks):
+    return [dict(check,sqltext=MODE_CHECK_FORMS[0])
+            if table=='integration_connections' and check.get('name')=='ck_connection_mode'
+            and check.get('sqltext') in MODE_CHECK_FORMS else dict(check)
+            for check in checks]
+
+
 def capture(engine):
     import sqlalchemy as sa
     inspector=sa.inspect(engine);names=sorted(inspector.get_table_names(schema='public'))
@@ -39,7 +55,7 @@ def capture(engine):
             data[name]={'columns':[(c['name'],str(c['type']),c['nullable'],c['default']) for c in inspector.get_columns(name,schema='public')],
                         'indexes':inspector.get_indexes(name,schema='public'),'fk':inspector.get_foreign_keys(name,schema='public'),
                         'pk':inspector.get_pk_constraint(name,schema='public'),'unique':inspector.get_unique_constraints(name,schema='public'),
-                        'checks':inspector.get_check_constraints(name,schema='public'),
+                        'checks':canonical_checks(name,inspector.get_check_constraints(name,schema='public')),
                         'rows':sorted(json.dumps(dict(r),sort_keys=True,default=str) for r in db.execute(sa.select(table)).mappings())}
         sequences={}
         for name in sorted(inspector.get_sequence_names(schema='public')):
