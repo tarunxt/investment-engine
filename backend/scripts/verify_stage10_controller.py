@@ -166,6 +166,18 @@ def run_suite(python,group):
     def sequences():
         with engine.connect() as conn:
             return {n:list(conn.execute(sa.text('SELECT last_value,is_called FROM public.'+conn.dialect.identifier_preparer.quote_identifier(n))).one()) for n in sorted(sa.inspect(conn).get_sequence_names(schema='public'))}
+    def detailed_capture(label):
+        # Diagnostics only on the guarded synthetic runner. Capture the exact
+        # fingerprint input without changing hash bytes or the confined helper.
+        payloads=[];original_sha=helper.sha
+        def observe(payload):
+            value=json.loads(payload)
+            if isinstance(value,dict) and {'tables','sequences','catalog'}<=value.keys():payloads.append(value)
+            return original_sha(payload)
+        with patch.object(helper,'sha',side_effect=observe):state=helper.capture(engine)
+        assert len(payloads)==1
+        state_json(OUT/(label+'-snapshot.json'),payloads[0])
+        return state
     def prepare(name):
         ctl.systemctl('stop',ctl.APPS);wait_inactive('credx-uat2-migrate.service')
         engine.dispose()
@@ -190,7 +202,7 @@ def run_suite(python,group):
             owner=conn.scalar(sa.text("SELECT id FROM users WHERE username='controller_fixture'"))
             conn.execute(sa.text("INSERT INTO integration_connections (id,owner_id,provider,app_ownership_mode,provider_account_id,credential_ref,status,version,is_current) VALUES ('ci-binding',:owner,'zerodha','user_owned','FAKEBASE','ci-private','configured',1,true)"),{'owner':owner})
             conn.execute(sa.text("INSERT INTO connection_credentials (id,connection_id,owner_id,ciphertext,key_version) VALUES ('ci-private','ci-binding',:owner,'opaque-synthetic-only',1)"),{'owner':owner})
-        before=helper.capture(engine);before_sequences=sequences()
+        before=detailed_capture(name+'-baseline');before_sequences=sequences()
         assert before['revision']=='integration_connections_001' and not before['stage10_tables']
         saved=ctl.backup(candidate);receipt=ctl.private_json(saved.with_suffix('.json'))
         assert receipt['source_commit']==BASE and receipt['fingerprint']==before['fingerprint']
@@ -209,7 +221,7 @@ def run_suite(python,group):
         if name=='same_revision':
             # A repeat deploy at Stage10 must recover its own complete Stage10
             # snapshot without crossing a schema boundary.
-            before=helper.capture(engine);before_sequences=sequences()
+            before=detailed_capture(name+'-baseline');before_sequences=sequences()
             saved=ctl.backup(candidate);receipt=ctl.private_json(saved.with_suffix('.json'))
             assert receipt['source_commit']==CANDIDATE and receipt['schema_revision']=='connection_attempts_001'
             recovery_source=CANDIDATE
@@ -217,6 +229,7 @@ def run_suite(python,group):
         ctl.durable_json(ROOT/'deployment-receipt.json',{'schema_version':2,'operation':'deploy','candidate':CANDIDATE,'previous_source':recovery_source,'backup':ctl.backup_reference(saved,receipt)})
         return saved,before,before_sequences
     def capture_results(case):
+        case['final_database_state']=detailed_capture(case['name']+'-final')
         case['pending']=ctl.pending().exists();case['source']=ctl.current().name
         case['operation_environment_cleaned']=not (CONFIG/'schema-operation.env').exists()
         if ctl.pending().exists():case['marker']=ctl.private_json(ctl.pending())
