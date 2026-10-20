@@ -1,6 +1,6 @@
 "use client";
 
-import {useModules} from "@/providers/ModuleProvider";
+import {useModules} from "@/providers/ModuleContext";
 import {surfaceAllowed} from "@/lib/modulePolicy";
 import {ModuleSurface} from "@/components/modules/ModuleSurface";
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
@@ -56,10 +56,8 @@ import {
   DashboardMarketCardSkeleton,
   DashboardThreatCardSkeleton,
 } from "./_components/DashboardSkeletons";
-import {
-  MarketPortfolioCard,
-  type PortfolioCardTopHolding,
-} from "./_components/MarketPortfolioCard";
+import type {PortfolioCardTopHolding} from "./_components/MarketPortfolioCard";
+const MarketPortfolioCard = dynamic(() => import("./_components/MarketPortfolioCard").then(m=>m.MarketPortfolioCard), {ssr:false,loading:()=> <DashboardMarketCardSkeleton />});
 import {
   INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
   ZERODHA_DASHBOARD_SYNC_NOW_EVENT,

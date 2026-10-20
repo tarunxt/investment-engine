@@ -1,6 +1,6 @@
 'use client';
 
-import {useModules} from '@/providers/ModuleProvider';
+import {useModules} from '@/providers/ModuleContext';
 import {allowedModule} from '@/lib/modulePolicy';
 import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Loader2 } from 'lucide-react';

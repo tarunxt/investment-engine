@@ -1,5 +1,6 @@
 'use client';
-import {createContext,useCallback,useContext,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useRef,useState} from 'react';
+import {ModulesContext} from './ModuleContext';
 import {usePathname} from 'next/navigation';
 import {useAuth} from '@/hooks/useAuth';
 import {apiService} from '@/services/api';
@@ -8,9 +9,6 @@ import {installModulePolicy,clearModulePolicy} from '@/lib/moduleRequests';
 import {closePrivateWebSockets} from '@/services/privateSocketRegistry';
 import {purgeBrowserPrivateDashboardCaches} from '@/lib/privateDashboardCache';
 
-type Context={manifest:ModuleCollection|null;loading:boolean;error:string|null;refresh:()=>Promise<void>;save:(id:string,enabled:boolean)=>Promise<void>};
-const ModulesContext=createContext<Context>({manifest:null,loading:true,error:null,refresh:async()=>{},save:async()=>{}});
-export const useModules=()=>useContext(ModulesContext);
 export function ModuleProvider({children}:{children:React.ReactNode}){
  const {user}=useAuth();const path=usePathname();const owner=user?.id??null;
  const [state,setState]=useState<{owner:number|null;manifest:ModuleCollection|null;loading:boolean;error:string|null}>({owner:null,manifest:null,loading:true,error:null});

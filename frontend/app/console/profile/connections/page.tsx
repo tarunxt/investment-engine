@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import {useModules} from '@/providers/ModuleProvider';
+import {useModules} from '@/providers/ModuleContext';
 export default function ConnectionsPage(){
  const {manifest,loading,error,refresh}=useModules();
  return <section className="space-y-5"><h1 className="text-xl font-semibold">Connection setup</h1><p>Connections belong to your account. Module selection does not connect an account or authorize an operation.</p>{loading&&<p role="status">Loading connection readiness…</p>}{error&&<p role="alert">{error} <button onClick={()=>void refresh()}>Retry</button></p>}

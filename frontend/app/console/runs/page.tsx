@@ -22,7 +22,7 @@ import {
 import { cn } from '@/lib/utils';
 import { apiService, APIError } from '@/services/api';
 import type { BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
-import {useModules} from '@/providers/ModuleProvider';
+import {useModules} from '@/providers/ModuleContext';
 import {surfaceVisible,surfaceAllowed} from '@/lib/modulePolicy';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 

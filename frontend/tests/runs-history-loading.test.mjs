@@ -198,7 +198,7 @@ test("a superseded Runs refresh cannot publish its older result", async () => {
       useSearchParams: () => new URLSearchParams(),
     },
     "@/lib/utils": { cn: () => "" },
-    "@/providers/ModuleProvider": {useModules:()=>({manifest:{}})},
+    "@/providers/ModuleContext": {useModules:()=>({manifest:{}})},
     "@/lib/modulePolicy": {surfaceVisible:()=>true,surfaceAllowed:()=>true},
     "@/services/api": {
       apiService: {

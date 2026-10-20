@@ -1,9 +1,9 @@
 {
   "stage": "08",
-  "checked_at_utc": "2026-10-20T09:00:27.167266+00:00",
+  "checked_at_utc": "2026-10-20T09:17:02.055541+00:00",
   "base": "dc3063d06605c5c93494a2861bfa840f61c8d94a",
-  "code": "implemented; final visual theme correction under verification",
-  "ci": "not yet run08",
+  "code": "implemented; optimized production build and final theme/browser checks passed",
+  "ci": "final deferred candidate pending exact-head CI",
   "deployment": "not performed",
   "owner_acceptance": "pending08",
   "checks": {
@@ -16,20 +16,20 @@
       "sha256": "9b589b7d9c22d223c557f8acc1e340752e4248584bb1dd32faca5a2763508db6"
     },
     "required_frontend": {
-      "log": ".runtime/stage08-ci-frontend-first.txt",
-      "sha256": "c886d75619136cb557eb43f678722646e632a26ee540906e4a3cbe497f8be409"
+      "log": ".runtime/stage08-deferred-required-frontend.txt",
+      "sha256": "89a7c7101fb632027adced93d88cbc6ef96d03ac61fc1484961fa3cdc76fdbad"
     },
     "policy_and_requests": {
       "log": ".runtime/stage08-final-unit-policies.txt",
       "sha256": "f3744a136f88f11b6a6b15ee63d191f6368f4c94e8eb78fe5ab6b470a81c415c"
     },
     "auth_browser": {
-      "log": ".runtime/stage08-auth-render-complete.txt",
-      "sha256": "ed32a6714dffb9d340b0d239bef4d7f77b644da9b455d682e26f53d86988db7d"
+      "log": ".runtime/stage08-auth-render-navigation-final.txt",
+      "sha256": "17a5d1f2af5db59253f5ce735d891724d52f0f85123ceb88fb67d55b01a5ef40"
     },
     "functional": {
-      "log": ".runtime/stage08-functional-final.txt",
-      "sha256": "c6dcb137c4ae00c8783f5a815d70f3c97f05d14410b6f7f1528fc292d81e17af"
+      "log": ".runtime/stage08-functional-published.txt",
+      "sha256": "812e2d1d804b4661b143d5419ed75066e28432f5c92a6d7ab09039e206e771a1"
     }
   },
   "backend_release_passed": 1251,
@@ -45,5 +45,13 @@
   },
   "synthetic_only": true,
   "no_real_provider_or_order_or_email_or_paid_ai": true,
-  "external_approval": "unchanged"
+  "external_approval": "unchanged",
+  "startup_budget": {
+    "files": 15,
+    "gzip_level6_bytes": 211198,
+    "decoded_bytes": 682286,
+    "compressed_limit": 235942,
+    "decoded_limit": 760197,
+    "passed": true
+  }
 }

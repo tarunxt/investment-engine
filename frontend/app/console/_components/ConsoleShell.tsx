@@ -11,8 +11,9 @@ import {
 import { URLs } from '@/lib/urls';
 import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
-import { ModuleRouteGate } from '@/components/modules/ModuleRouteGate';
-import { SidebarNavigation } from './SidebarNavigation';
+import dynamic from 'next/dynamic';
+const ModuleRouteGate = dynamic(() => import('@/components/modules/ModuleRouteGate').then(m=>m.ModuleRouteGate), {ssr:false,loading:()=> <p role="status">Loading workspace access…</p>});
+const SidebarNavigation = dynamic(() => import('./SidebarNavigation').then(m=>m.SidebarNavigation), {ssr:false,loading:()=> <p role="status">Loading navigation…</p>});
 
 export function ConsoleShell({
     children,

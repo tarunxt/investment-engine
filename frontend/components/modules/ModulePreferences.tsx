@@ -1,7 +1,7 @@
 'use client';
 import {useState} from 'react';
 import Link from 'next/link';
-import {useModules} from '@/providers/ModuleProvider';
+import {useModules} from '@/providers/ModuleContext';
 import {apiService,APIError} from '@/services/api';
 import type {ModuleState} from '@/lib/modulePolicy';
 type Impact={version:number;active_work:{queued_analysis:number;running_analysis:number;reason:string};dependent_modules:string[]};

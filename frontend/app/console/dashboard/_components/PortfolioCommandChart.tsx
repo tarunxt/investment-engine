@@ -1,6 +1,6 @@
 "use client";
 
-import {useModules} from "@/providers/ModuleProvider";
+import {useModules} from "@/providers/ModuleContext";
 import {surfaceAllowed} from "@/lib/modulePolicy";
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 

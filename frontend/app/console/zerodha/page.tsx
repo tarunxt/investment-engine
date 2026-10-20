@@ -18,7 +18,7 @@ import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
 import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
-import {useModules} from '@/providers/ModuleProvider';
+import {useModules} from '@/providers/ModuleContext';
 import {allowedModule} from '@/lib/modulePolicy';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';

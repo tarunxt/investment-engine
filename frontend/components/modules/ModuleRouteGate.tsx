@@ -3,7 +3,7 @@ import Link from 'next/link';
 import {useEffect,useState} from 'react';
 import {apiService} from '@/services/api';
 import {usePathname} from 'next/navigation';
-import {useModules} from '@/providers/ModuleProvider';
+import {useModules} from '@/providers/ModuleContext';
 import {surfaceAllowed,surfaceVisible} from '@/lib/modulePolicy';
 export function ModuleRouteGate({children}:{children:React.ReactNode}){
  const path=usePathname();const {manifest,loading,error,refresh}=useModules();

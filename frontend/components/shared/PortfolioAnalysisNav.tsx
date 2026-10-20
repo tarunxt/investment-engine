@@ -1,5 +1,5 @@
 "use client";
-import {useModules} from "@/providers/ModuleProvider";
+import {useModules} from "@/providers/ModuleContext";
 import {surfaceVisible} from "@/lib/modulePolicy";
 import Link from 'next/link';
 
