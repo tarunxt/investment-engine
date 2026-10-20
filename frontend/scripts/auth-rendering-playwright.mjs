@@ -236,6 +236,35 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
   await context.close();
 }
 
+async function assertProfileNavigationWidths(page,baseUrl){
+ const expected=['Profile','Preferences','Platform Cost Drivers','Security','Activity'];
+ for(const width of [320,360,390,430]){
+  await page.setViewportSize({width,height:844});
+  await page.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
+  const nav=page.locator('main aside nav');await nav.waitFor({state:'visible'});
+  const links=nav.getByRole('link');
+  if(JSON.stringify(await links.allTextContents())!==JSON.stringify(expected))throw new Error('Profile navigation labels/order changed');
+  const geometry=await page.evaluate(()=>({width:innerWidth,documentWidth:document.documentElement.scrollWidth}));
+  if(geometry.documentWidth>geometry.width)throw new Error(`Profile navigation overflows at ${width}px: document ${geometry.documentWidth}px`);
+  if(await nav.getAttribute('aria-label')!=='Profile settings'||await nav.getByRole('link',{name:'Preferences',exact:true}).getAttribute('aria-current')!=='page')throw new Error('Profile navigation accessibility labels/current page missing');
+  await links.nth(0).focus();
+  for(let i=0;i<expected.length;i++){
+   const link=links.nth(i);
+   if(!await link.evaluate(node=>document.activeElement===node))throw new Error(`Profile Tab order lost ${expected[i]} at ${width}px`);
+   const bounds=await link.boundingBox();
+   if(!bounds||bounds.x<0||bounds.x+bounds.width>width+1||bounds.y<0||bounds.y+bounds.height>844)throw new Error(`Profile tab unreachable in viewport: ${expected[i]} at ${width}px`);
+   if(i<expected.length-1)await page.keyboard.press('Tab');
+  }
+  await page.keyboard.press('Enter');await page.waitForURL(`${baseUrl}/console/profile/activity`);
+  await page.getByRole('heading',{name:'Activity',exact:true}).waitFor();
+  await page.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
+  await page.locator('main aside nav').getByRole('link',{name:'Security',exact:true}).press('Enter');
+  await page.waitForURL(`${baseUrl}/console/profile/security`);
+  console.log(`Stage08 profile tabs fit ${width}x844; all five Tab-reachable; Activity/Security Enter navigation passed`);
+ }
+ await page.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
+}
+
 async function assertStage08PreferenceFlows(browser,baseUrl){
  const context=await authenticatedContext(browser,baseUrl);
  let manifest=JSON.parse(readFileSync(path.join(frontendRoot,'tests/fixtures/stage08-ready-manifest.json'),'utf8'));
@@ -285,6 +314,7 @@ async function assertStage08PreferenceFlows(browser,baseUrl){
  await first.getByText('Preferences changed in another tab or session.',{exact:false}).waitFor();
  await first.waitForFunction(()=>document.querySelector('[aria-label="Select INDmoney US"]')?.checked===false);
  console.log('Stage08 delayed PATCH versus real cross-tab disable invalidation passed');
+ await assertProfileNavigationWidths(first,baseUrl);
  await first.setViewportSize({width:390,height:844});
  await first.getByRole('button',{name:'Open navigation',exact:true}).click();
  if(await first.getByRole('button',{name:'Open navigation',exact:true}).getAttribute('aria-expanded')!=='true')throw new Error('Mobile navigation did not expand');

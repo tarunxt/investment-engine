@@ -47,8 +47,9 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
       <div className="flex flex-col space-y-8 lg:flex-row lg:space-x-12 lg:space-y-0">
         <aside className="-mx-4 lg:w-1/5">
           <nav
+            aria-label="Profile settings"
             className={cn(
-              "flex space-x-2 lg:flex-col lg:space-x-0 lg:space-y-1",
+              "flex flex-wrap gap-2 lg:flex-col lg:flex-nowrap lg:gap-1",
               "px-4"
             )}
           >
@@ -56,6 +57,7 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={pathname === item.href ? "page" : undefined}
                 className={cn(
                   "inline-flex items-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
                   "hover:bg-muted hover:text-muted-foreground",
