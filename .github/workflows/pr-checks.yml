@@ -471,6 +471,7 @@ jobs:
         run: >-
           node --test
           tests/stage08-module-policy.test.mjs
+          tests/stage08-module-provider-races.test.mjs
           tests/api-read-fallbacks.test.mjs
           tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs

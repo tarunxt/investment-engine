@@ -1,3 +1,7 @@
+# Stage08 independent-review repair checkpoint
+
+The independent review of6fd9618e reproduced a delayed PATCH overwriting a newer cross-tab disable. This successor rejects stale mutation/read callbacks using owner/session lifetimes, invalidation epochs and a persistent version floor, and refreshes authoritative policy before reopening. Nine deterministic provider regressions and the real two-tab delayed-response browser regression pass; required frontend340/340 pass; broad784/798 retains the exact14 Stage07 failures. Production build, TypeScript, source inventory and unchanged local startup budgets pass. Successor exact-head CI/native artifact verification and independent re-review remain required; final runtime handoff/PR identify the tested successor. No deployment, live UAT writes, production changes, access expansion or09. Prior ledgers below are historical.
+
 # Stage08 active — accepted deployed Stage07
 
 Owner explicitly accepted07 and requested08 at20Oct2026 08:06:07UTC. Accepted base dc3063d06605c5c93494a2861bfa840f61c8d94a; all exact CI/native artifact, independent/server and fresh owner browser checks passed; no owner acceptance inferred beyond that explicit message. See STAGE08_REQUIREMENT_MAP.md. Code:IN_PROGRESS / CI:NOT_RUN08 / deployment:NOT_RUN08 / UAT2 verification:NOT_RUN08 / owner acceptance:PENDING08 / external approval:UNCHANGED. No deployment this implementation turn or09 progression. Prior ledgers are preserved historical checkpoints.

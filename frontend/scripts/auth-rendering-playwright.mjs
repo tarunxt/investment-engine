@@ -239,6 +239,7 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
 async function assertStage08PreferenceFlows(browser,baseUrl){
  const context=await authenticatedContext(browser,baseUrl);
  let manifest=JSON.parse(readFileSync(path.join(frontendRoot,'tests/fixtures/stage08-ready-manifest.json'),'utf8'));
+ let holdNextPatch=false,releaseHeld,markHeld;let heldStarted;
  for(const module of manifest.modules){module.selection.enabled=false;for(const d of Object.values(module.capabilities))d.allowed=false;}
  const bind=async(page)=>{
   await page.route('**/backend-api/me/modules',async route=>{
@@ -247,6 +248,7 @@ async function assertStage08PreferenceFlows(browser,baseUrl){
     if(body.expected_version!==manifest.version)return route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({detail:{code:'MODULE_VERSION_CONFLICT'}})});
     for(const update of body.updates){const module=manifest.modules.find(m=>m.module_id===update.module_id);module.selection.enabled=update.enabled;for(const [cap,d] of Object.entries(module.capabilities))d.allowed=update.enabled&&module.availability.available&&['view','analyze'].includes(cap);}
     manifest.version++;
+    if(holdNextPatch){holdNextPatch=false;const committed=JSON.stringify(manifest);markHeld();await new Promise(resolve=>{releaseHeld=resolve;});return route.fulfill({status:200,contentType:'application/json',body:committed});}
    }
    return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(manifest)});
   });
@@ -270,6 +272,19 @@ async function assertStage08PreferenceFlows(browser,baseUrl){
  await first.getByRole('checkbox',{name:'Select INDmoney US',exact:true}).click();
  await first.getByText('Preferences changed or this module is unavailable.',{exact:false}).waitFor();
  if(await first.getByRole('checkbox',{name:'Select INDmoney US',exact:true}).isChecked())throw new Error('Conflicted save granted a selection');
+ // Commit an enable but delay its response; the other actual tab disables it
+ // and broadcasts the newer version before the first response is released.
+ heldStarted=new Promise(resolve=>{markHeld=resolve;});holdNextPatch=true;
+ await first.getByRole('checkbox',{name:'Select INDmoney US',exact:true}).click();await heldStarted;
+ await second.reload({waitUntil:'domcontentloaded'});
+ await second.waitForFunction(()=>document.querySelector('[aria-label="Select INDmoney US"]')?.checked===true);
+ await second.getByRole('checkbox',{name:'Select INDmoney US',exact:true}).click();
+ await second.getByRole('button',{name:'Confirm disable',exact:true}).click();
+ await second.getByText('INDmoney US disabled.',{exact:false}).waitFor();
+ releaseHeld();
+ await first.getByText('Preferences changed in another tab or session.',{exact:false}).waitFor();
+ await first.waitForFunction(()=>document.querySelector('[aria-label="Select INDmoney US"]')?.checked===false);
+ console.log('Stage08 delayed PATCH versus real cross-tab disable invalidation passed');
  await first.setViewportSize({width:390,height:844});
  await first.getByRole('button',{name:'Open navigation',exact:true}).click();
  if(await first.getByRole('button',{name:'Open navigation',exact:true}).getAttribute('aria-expanded')!=='true')throw new Error('Mobile navigation did not expand');
