@@ -1,10 +1,18 @@
-from app.domains.connections.material import AppMaterial
-from pydantic import SecretStr
-"""Manual protected orders work while background financial writes stay denied."""
+"""Recovery route scope never replaces module or connection authorization.
+
+Stage07 closed unbound public adapter calls. Stage09 additionally requires an
+explicit app/session binding instead of environment credential fallback. These
+contracts exercise both denials without weakening either guard for a legacy test.
+"""
 import asyncio
 import os
 import unittest
 from unittest.mock import patch, AsyncMock
+from datetime import datetime, timedelta, timezone
+from pydantic import SecretStr
+from app.domains.connections.material import AppMaterial, BoundToken
+from app.domains.connections.crypto import ConnectionFault
+from app.domains.modules.lifecycle import ModuleLifecycleDenied
 from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost/testdb")
@@ -17,7 +25,7 @@ from app.core.config import settings
 from app.core.recovery import (
     RecoveryBlocked, RecoveryMiddleware, manual_zerodha_order_scope,
     recovery_http_allowed, require_bullpen_command_allowed,
-    require_financial_writes_allowed, require_task_allowed,
+    require_financial_writes_allowed, require_task_allowed, require_zerodha_write_allowed,
 )
 from app.domains.zerodha.service import ZerodhaService
 
@@ -37,7 +45,12 @@ class ManualRecoveryTest(unittest.TestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.svc = ZerodhaService(AppMaterial(SecretStr("fixture"),SecretStr("fixture"),"fake",1))
+        # Explicit fake material is necessary for configuration discovery; it is
+        # not module authorization and never consults a live credential service.
+        app = AppMaterial(SecretStr("fixture-key"), SecretStr("fixture-secret"), "fake", 1)
+        self.svc = ZerodhaService(app)
+        self.token = BoundToken(123, "fake-connection", 1, app, SecretStr("fixture-token"),
+                                datetime.now(timezone.utc) + timedelta(hours=1))
         self.requests = []
         def respond(request):
             self.requests.append(request)
@@ -48,17 +61,32 @@ class ManualRecoveryTest(unittest.TestCase):
         self.transport.start()
         self.addCleanup(self.transport.stop)
 
-    def test_scoped_manual_order_reaches_mock_broker_and_scope_is_reset(self):
+    def test_scoped_manual_order_requires_execution_authority_and_scope_is_reset(self):
         self.assertTrue(self.svc.direct_market_orders_enabled)
         self.assertIsNone(self.svc.order_submission_blocked_reason)
-        async def run():
-            with manual_zerodha_order_scope():
-                self.assertEqual(await self.svc.place_order("fake", ORDER), {"order_id": "fake-1"})
-            with self.assertRaises(RecoveryBlocked):
-                await self.svc.place_order("fake", ORDER)
-        asyncio.run(run())
-        self.assertEqual(len(self.requests), 1)
-        self.assertIn(b"market_protection=-1", self.requests[0].content)
+        with manual_zerodha_order_scope():
+            # The narrow recovery validator accepts only this order shape. It
+            # cannot confer authority on the public guarded adapter.
+            require_zerodha_write_allowed("POST", "/orders/regular", ORDER)
+            with self.assertRaisesRegex(ModuleLifecycleDenied, "Trusted module execution context required"):
+                asyncio.run(self.svc.place_order(self.token, ORDER))
+        with self.assertRaises(RecoveryBlocked):
+            require_zerodha_write_allowed("POST", "/orders/regular", ORDER)
+        with self.assertRaises(ModuleLifecycleDenied):
+            asyncio.run(self.svc.place_order(self.token, ORDER))
+        self.assertEqual(self.requests, [])
+
+    def test_explicit_app_binding_is_required_despite_global_settings(self):
+        unbound = ZerodhaService()
+        # setUp deliberately supplies fake global settings too. They must not
+        # silently become an application's or user's credential binding.
+        self.assertFalse(unbound.is_configured)
+        self.assertFalse(unbound.direct_market_orders_enabled)
+        with self.assertRaisesRegex(ConnectionFault, "CONNECTION_APP_BINDING_REQUIRED"):
+            unbound.get_login_url()
+        with self.assertRaisesRegex(ConnectionFault, "CONNECTION_BOUND_TOKEN_REQUIRED"):
+            self.svc._auth_headers("fixture-token")
+        self.assertEqual(self.requests, [])
 
     def test_exception_does_not_enable_background_trading_or_other_mutations(self):
         with manual_zerodha_order_scope():
@@ -70,7 +98,9 @@ class ManualRecoveryTest(unittest.TestCase):
             for overrides in ({"market_protection": "0"}, {"market_protection": "NaN"},
                               {"product": "MIS"}, {"exchange": "NFO"}, {"order_type": "LIMIT"}):
                 with self.assertRaises(RecoveryBlocked):
-                    asyncio.run(self.svc.place_order("fake", {**ORDER, **overrides}))
+                    require_zerodha_write_allowed("POST", "/orders/regular", {**ORDER, **overrides})
+                with self.assertRaises(ModuleLifecycleDenied):
+                    asyncio.run(self.svc.place_order(self.token, {**ORDER, **overrides}))
             with self.assertRaises(RecoveryBlocked):
                 asyncio.run(self.svc._request_async("DELETE", "/orders/regular/1"))
         self.assertEqual(self.requests, [])
@@ -80,8 +110,11 @@ class ManualRecoveryTest(unittest.TestCase):
             self.assertFalse(self.svc.direct_market_orders_enabled)
             self.assertIn("recovery", self.svc.order_submission_blocked_reason)
             self.assertFalse(recovery_http_allowed("POST", "/zerodha/orders/place-protected-market-sequenced"))
-            with manual_zerodha_order_scope(), self.assertRaises(RecoveryBlocked):
-                asyncio.run(self.svc.place_order("fake", ORDER))
+            with manual_zerodha_order_scope():
+                with self.assertRaises(RecoveryBlocked):
+                    require_zerodha_write_allowed("POST", "/orders/regular", ORDER)
+                with self.assertRaises(ModuleLifecycleDenied):
+                    asyncio.run(self.svc.place_order(self.token, ORDER))
         self.assertFalse(self.requests)
 
     def test_only_exact_manual_endpoints_and_order_book_are_allowed(self):
@@ -93,7 +126,7 @@ class ManualRecoveryTest(unittest.TestCase):
         for path in ("/zerodha/orders", "/polymarket/auto-live/run-once", "/polymarket-direct/orders"):
             self.assertFalse(recovery_http_allowed("POST", path))
 
-    def test_real_sequenced_route_submits_only_the_explicit_manual_sell(self):
+    def test_real_sequenced_route_cannot_submit_without_execution_authority(self):
         from app.domains.zerodha import router as routes
         app = FastAPI()
         app.add_middleware(RecoveryMiddleware)
@@ -105,18 +138,27 @@ class ManualRecoveryTest(unittest.TestCase):
         app.dependency_overrides[routes.get_current_user] = lambda: SimpleNamespace(id=123)
         with patch.object(routes, "_svc", self.svc), patch.object(
             routes, "ZerodhaCredentialRepository",
-            return_value=SimpleNamespace(get_plaintext_token=AsyncMock(return_value="fake")),
+            return_value=SimpleNamespace(get_plaintext_token=AsyncMock(return_value=self.token)),
         ), patch.object(routes, "ZerodhaAuditRepository", return_value=SimpleNamespace(log=AsyncMock())):
             with TestClient(app) as client:
-                response = client.post("/zerodha/orders/place-protected-market-sequenced", json={"orders": [ORDER]})
+                # Unbound discovery fails before session lookup, even though
+                # global fake app settings and the recovery flag are present.
+                with patch.object(routes, "_svc", ZerodhaService()):
+                    self.assertEqual(client.post("/zerodha/orders/place-protected-market-sequenced",
+                                                 json={"orders": [ORDER]}).status_code, 503)
+                with self.assertLogs("app.domains.zerodha.router", level="ERROR") as captured:
+                    response = client.post("/zerodha/orders/place-protected-market-sequenced", json={"orders": [ORDER]})
+                self.assertIn("Trusted module execution context required", "\n".join(captured.output))
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["placed_count"], 1)
-                self.assertEqual(response.json()["sell_results"][0]["order_id"], "fake-1")
+                self.assertEqual(response.json()["placed_count"], 0)
+                self.assertEqual(response.json()["failed_count"], 1)
+                self.assertEqual(response.json()["sell_results"][0]["status"], "failed")
+                self.assertFalse(response.json()["sell_results"][0].get("order_id"))
                 self.assertFalse(response.json()["buy_phase_attempted"])
                 self.assertEqual(client.post("/zerodha/orders", json=ORDER).status_code, 503)
-        self.assertEqual(len(self.requests), 1)
-        with self.assertRaises(RecoveryBlocked):
-            asyncio.run(self.svc.place_order("fake", ORDER))
+        self.assertEqual(self.requests, [])
+        with self.assertRaises(ModuleLifecycleDenied):
+            asyncio.run(self.svc.place_order(self.token, ORDER))
 
     def test_middleware_preserves_authentication_boundary(self):
         app = FastAPI()

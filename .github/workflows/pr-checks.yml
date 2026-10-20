@@ -196,20 +196,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Install constrained backend dependencies
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify both modes, rotation races and actual Alembic roundtrip
-        run: python -m pytest -q --junitxml=/tmp/stage09.xml backend/tests/test_stage09_connections.py backend/tests/test_stage09_connections_postgres.py
+        run: python -m pytest -q --junitxml=/tmp/stage09.xml backend/tests/test_stage09_connections.py backend/tests/test_zerodha_manual_recovery.py backend/tests/test_stage09_connections_postgres.py
       - name: Require all Stage09 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage09.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage09 cannot skip checks'
-          assert len(root.findall('.//testcase')) >= 27
+          assert len(root.findall('.//testcase')) >= 34
           PY_CHECK
 
   stage07-module-policy:

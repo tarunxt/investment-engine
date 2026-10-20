@@ -16,3 +16,7 @@
 | Reviewable delivery | Separate branch from accepted08; draft PR and exact-head CI | Pending; no merge/deploy authorized |
 
 Code / CI / UAT2 deployment / UAT2 verification / Owner acceptance / External approval are separate gates. Stage09 currently DRAFT, all other gates pending. Stage10 authorization attempts/OAuth/onboarding and renewal/revocation UX are excluded. Existing Stage08 capability/recovery gates remain authoritative. No production/AWS/oldUAT/credential changes.
+
+## Isolated successor checkpoint
+
+The current parent-authorized continuation is task-3/stage09-recovery-successor on unique branch codex/stage09-recovery-successor-20261020-task3, based on fc4d513. It does not edit or publish the original branch/PR. Local 171 contracts pass; see STAGE09_SUCCESSOR_REVIEW.md for the exact recovery-test reconciliation, preserved pre-fix identities/signatures and publication/mandatory PostgreSQL plan. Code, exact CI, PostgreSQL, native artifact, UAT2 and owner/provider gates remain separate. No Stage10, application-policy relaxation or runtime change is included.

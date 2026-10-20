@@ -1,3 +1,15 @@
+# Stage09 isolated recovery successor — local only
+
+Current worktree: task-3/stage09-recovery-successor. Unique branch: `codex/stage09-recovery-successor-20261020-task3`, based on `fc4d51313e2d86e5bc807ad91db877a26aa0bb89`; accepted/live Stage08 remains `61ce447ba35f4db7cd06fd550c62557450247af3`. Owner accepted Stage08 and authorized Stage09; no Stage10. Original task-5 checkout/branch/processes are preserved. The current parent phase explicitly forbids publication, PR creation, deployment, AWS, live credentials and shared-service starts.
+
+Code: LOCAL RECOVERY CONTRACT REPAIR COMPLETE. Local checks: 171 PASS including 23 Stage09 connection and 7 manual-recovery contracts. CI: NOT RUN for this successor. PostgreSQL migration/concurrency: PENDING container execution, mandatory 34 checks/zero skips. Native artifact: PENDING exact successor. UAT2 deployment / verification / owner acceptance: PENDING Stage09. External platform-provider approval: PENDING. No runtime authorization code was relaxed; only obsolete recovery-test assumptions and the Stage09 CI gate changed. See STAGE09_SUCCESSOR_REVIEW.md and evidence/stage09-successor-local.json.
+
+The 14 frontend failures were independently compared on exact Stage08/Stage09 archives: identities, test bytes and normalized error signatures match. They remain unresolved, not waived. The four recovery failures were reproduced on both archives, but the Stage09 fixture was changed; unchanged Stage08 test source against Stage09 produces two earlier configuration denials. This is documented in retained pre-fix evidence. Corrected tests now assert explicit binding and independent module/recovery denials rather than asking to bypass them.
+
+Read-only GitHub recheck during this successor found original draft PR #1250 published at fc4d513 (base Stage08 branch), after the earlier remote check found no branch/commit/PR. That original PR is untouched; its now-successful15-job CI and27-check PostgreSQL merge-ref run are recorded separately in evidence/stage09-original-remote-ci.json, not relabelled as exact successor evidence. Publication plan is prepared but NOT executed. No local Docker daemon operation, PostgreSQL start, UI build, live/provider call or credential operation occurred.
+
+The following is preserved historical checkpoint evidence. Its prior active-branch and test-comparison claims are superseded by this successor record.
+
 # Active Stage09 implementation checkpoint
 
 09 · Implement dual-mode connection storage and adapters. Worktree task-5/stage09-connection-bindings; branch codex/stage09-connection-bindings-20261020; accepted Stage08 base61ce447ba35f4db7cd06fd550c62557450247af3. Owner explicitly accepted08 and authorized09 at2026-10-20 10:49:05UTC. No deployment authorized in this implementation turn. Stage10 remains excluded.

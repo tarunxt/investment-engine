@@ -1,0 +1,25 @@
+{
+  "base": "fc4d51313e2d86e5bc807ad91db877a26aa0bb89",
+  "accepted_stage08": "61ce447ba35f4db7cd06fd550c62557450247af3",
+  "branch": "codex/stage09-recovery-successor-20261020-task3",
+  "local_only": true,
+  "runtime_application_changes": false,
+  "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=backend ENVIRONMENT=test AUTH_DISABLED=false DATABASE_URL=postgresql+psycopg2://unused:unused@127.0.0.1:1/unused_test REDIS_URL=redis://127.0.0.1:1/15 python -m pytest -q -p no:cacheprovider --disable-warnings --tb=short backend/tests/test_zerodha_manual_recovery.py backend/tests/test_stage09_connections.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage06_modules.py backend/tests/test_recovery_containment.py",
+  "result": "171 passed, 3100 warnings in 11.29s",
+  "log_sha256": "b9e7bec23b0552172f220a9c58f2adecce6105a075c98b7c3edf1b9fd555bb78",
+  "log_location": "task-3/stage09-successor-focused.log",
+  "pre_fix_evidence": "stage09-independent-pre-fix.json",
+  "postgres": "not executed; mandatory exact-head 34 tests and zero skips required",
+  "ci": "not executed for successor",
+  "publication": "not performed",
+  "native_artifact": "not built; exact successor artifact required",
+  "uat2": "accepted Stage08 unchanged",
+  "stage10": "not authorized",
+  "source_sha256": {
+    "backend/tests/test_zerodha_manual_recovery.py": "515632f54e3cbb63c26ce019c0cdb418a54e4f9f11b4c6e93fd9d5956fb5a24f",
+    ".github/workflows/pr-checks.yml": "b42ab5c60d4182033b62f35dbed029a2c249fb36caf43fd71b0fe2aeddf41ac1"
+  },
+  "source_inventory": "PASS: unresolved=[]; no application source change",
+  "syntax_configuration": "Python AST and all workflow YAML parse PASS; git diff --check PASS",
+  "independent_successor_review": "PENDING; this task is now implementer"
+}
