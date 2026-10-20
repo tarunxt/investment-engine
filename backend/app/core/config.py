@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import SecretStr, AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     zerodha_api_key: Optional[str] = None
     zerodha_api_secret: Optional[str] = None
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
+    integration_encryption_keys: Optional[SecretStr] = None
+    integration_encryption_key_version: int = 1
+    kite_managed_credential_ref: str = "kite-managed-default"
+    kite_managed_credential_version: int = 1
+    kite_managed_provider_approved: bool = False
+    kite_managed_approval_reference: Optional[str] = None
     zerodha_enable_direct_market_orders: bool = False  # Enable only when the server egress IP is Kite-whitelisted
 
     # Operator-approved manual protected-order exception; automated writes stay blocked.

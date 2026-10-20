@@ -17,19 +17,21 @@ class ZerodhaCredentialRepository:
         self._db = db
 
     async def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
-        result = await self._db.execute(
-            select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
-        )
-        return result.scalar_one_or_none()
+        from app.domains.connections.service import ConnectionStore
+        from app.domains.connections.crypto import ConnectionFault
+        store=ConnectionStore(self._db)
+        try:
+            token=await store.resolve_token(user_id)
+            return await store.current(user_id) if token else None
+        except ConnectionFault:return None
 
-    async def get_plaintext_token(self, user_id: int) -> str | None:
-        """Return the decrypted access token and stamp last_used_at."""
-        cred = await self.get_by_user(user_id)
-        if not cred:
-            return None
-        cred.last_used_at = datetime.now(tz=timezone.utc)
-        await self._db.flush()
-        return decrypt_token(cred.access_token)
+    async def get_plaintext_token(self, user_id: int):
+        # Compatibility name, now returns one authenticated key/secret/token
+        # bundle rather than a string that could be mixed with global app keys.
+        from app.domains.connections.service import ConnectionStore
+        from app.domains.connections.crypto import ConnectionFault
+        try:return await ConnectionStore(self._db).resolve_token(user_id)
+        except ConnectionFault:return None
 
     async def upsert(
         self,
@@ -38,51 +40,38 @@ class ZerodhaCredentialRepository:
         login_time: datetime,
         expires_at: datetime,
     ) -> ZerodhaCredential:
-        encrypted = encrypt_token(access_token)
-        cred = await self.get_by_user(user_id)
-        if cred:
-            cred.access_token = encrypted
-            cred.login_time = login_time
-            cred.expires_at = expires_at
-        else:
-            cred = ZerodhaCredential(
-                user_id=user_id,
-                access_token=encrypted,
-                login_time=login_time,
-                expires_at=expires_at,
-            )
-            self._db.add(cred)
-        await self._db.flush()
-        return cred
+        # Unbound legacy writes cannot establish an authenticated app/account
+        # binding. Stage10 authorization must call install_session explicitly.
+        from app.domains.connections.crypto import ConnectionFault
+        raise ConnectionFault('CONNECTION_BOUND_SESSION_REQUIRED')
 
     async def delete_by_user(self, user_id: int) -> None:
-        await self._db.execute(
-            delete(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
-        )
+        from app.domains.connections.service import ConnectionStore
+        await ConnectionStore(self._db).disable(user_id)
 
 
 class SyncZerodhaCredentialRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
-        return self._db.execute(
-            select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
-        ).scalar_one_or_none()
+    def get_by_user(self, user_id: int):
+        from app.domains.connections.service import SyncConnectionStore
+        from app.domains.connections.crypto import ConnectionFault
+        from app.domains.connections.models import IntegrationConnection
+        try:
+            token=SyncConnectionStore(self._db).resolve_token(user_id)
+            return self._db.execute(select(IntegrationConnection).where(IntegrationConnection.owner_id==user_id,IntegrationConnection.id==token.connection_id)).scalar_one_or_none() if token else None
+        except ConnectionFault:return None
 
-    def get_plaintext_token(self, user_id: int) -> str | None:
-        cred = self.get_by_user(user_id)
-        if not cred:
-            return None
-        cred.last_used_at = datetime.now(tz=timezone.utc)
-        self._db.flush()
-        return decrypt_token(cred.access_token)
+    def get_plaintext_token(self, user_id: int):
+        from app.domains.connections.service import SyncConnectionStore
+        from app.domains.connections.crypto import ConnectionFault
+        try:return SyncConnectionStore(self._db).resolve_token(user_id)
+        except ConnectionFault:return None
 
     def list_active_user_ids(self, now: datetime) -> list[int]:
-        rows = self._db.execute(
-            select(ZerodhaCredential.user_id).where(ZerodhaCredential.expires_at > now)
-        )
-        return list(rows.scalars().all())
+        from app.domains.connections.models import IntegrationConnection
+        return list(self._db.execute(select(IntegrationConnection.owner_id).where(IntegrationConnection.is_current.is_(True),IntegrationConnection.status=='active',IntegrationConnection.token_expires_at>now)).scalars().all())
 
 
 class ZerodhaPortfolioSnapshotRepository:

@@ -1,3 +1,5 @@
+from app.domains.connections.material import AppMaterial
+from pydantic import SecretStr
 import asyncio
 from types import SimpleNamespace
 
@@ -385,7 +387,7 @@ def test_zerodha_login_token_exchange_allowed_but_orders_stay_blocked(recovery, 
     client_class = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client_class(
         **kwargs, transport=httpx.MockTransport(respond)))
-    service = ZerodhaService()
+    service = ZerodhaService(AppMaterial(SecretStr("fixture"),SecretStr("fixture"),"fake",1))
     monkeypatch.setattr(service, "_checksum", lambda _: "fixture-checksum")
     result = asyncio.run(service.exchange_token("fixture-request-token"))
     assert result["access_token"] == "fixture"
