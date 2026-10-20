@@ -556,12 +556,15 @@ async def reserve_auto_rebalance_label(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.modules.lifecycle import admit_enqueue,analysis_module
+    identity=await admit_enqueue(db,current_user.id,analysis_module(body.portfolio))
     redis = _get_redis()
     try:
         sequence = await _reserve_auto_rebalance_sequence(db, redis, body.portfolio)
     finally:
         await redis.aclose()
     workflow = AutoRebalanceWorkflow(
+        module_id=identity.module_id,module_version=identity.version,
         user_id=current_user.id,
         portfolio=body.portfolio,
         sequence=sequence,
@@ -674,6 +677,10 @@ async def update_auto_rebalance_stage(
 ):
     if portfolio not in AUTO_REBALANCE_LABEL_PREFIXES:
         raise HTTPException(404, detail="Auto-rebalance portfolio not found")
+    from app.domains.modules.lifecycle import admit_enqueue,analysis_module
+    # Preserve one global lock order for direct/internal callers too: selection
+    # header before workflow, the same order used by disable cancellation.
+    await admit_enqueue(db,current_user.id,analysis_module(portfolio))
     # Lock the parent row. The dashboard may send a "started" audit update and
     # an ID-linking update almost at the same time; serializing them prevents a
     # duplicate stage row and makes updates idempotent across browser retries.
@@ -690,6 +697,8 @@ async def update_auto_rebalance_stage(
     )).scalar_one_or_none()
     if not workflow:
         raise HTTPException(404, detail="Auto-rebalance run not found")
+    from app.domains.modules.lifecycle import admit_workflow_transition
+    await admit_workflow_transition(db,current_user.id,workflow)
     stage_record = next((item for item in workflow.stages if item.stage == stage), None)
     existing_status = stage_record.status.lower() if stage_record else "queued"
     was_terminal = existing_status in AUTO_REBALANCE_TERMINAL_STATUSES

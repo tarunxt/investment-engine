@@ -59,3 +59,6 @@ async def unavailable(path: str):
 @app.websocket('/{path:path}')
 async def unavailable_socket(websocket: WebSocket, path: str):
     await websocket.close(code=1008, reason='WebSockets unavailable in UAT2; use polling')
+
+from app.domains.modules.transports import install_route_policy
+install_route_policy(app)

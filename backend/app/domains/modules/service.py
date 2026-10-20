@@ -19,7 +19,7 @@ async def describe(db, owner_id: int, *, snapshot=None) -> dict:
         facts = await resolver.resolve(owner_id, id)
         available, reason = platform_available(spec, uat2=uat2_mode())
         modules.append({'module_id': id.value, 'label': spec.label, 'category': spec.category,
-            'selection': {'enabled': snapshot.selected(id), 'version': row.version if row else 0,
+            'selection': {'schedules_paused': row.schedules_paused if row else True, 'enabled': snapshot.selected(id), 'version': row.version if row else 0,
                 'config': ModuleConfigV1.model_validate(row.config if row else {}).model_dump()},
             'availability': {'available': available, 'reason': reason},
             'entitlement': {'jurisdiction': facts.jurisdiction, 'plan': facts.plan},
@@ -54,6 +54,8 @@ async def patch_modules(db, owner_id: int, patch) -> dict:
         raise conflict()
     validate_selection(snapshot, patch)
     try:
+        from .lifecycle import lock_owner
+        await lock_owner(db,owner_id)
         version = await claim_version(db, snapshot, patch.expected_version)
         for change in patch.updates:
             row = snapshot.rows.get(change.module_id)
@@ -67,13 +69,19 @@ async def patch_modules(db, owner_id: int, patch) -> dict:
             resource_type='user_modules', details=json.dumps({'version': version,
                 'changes': [{'module_id': change.module_id.value, 'enabled': change.enabled} for change in patch.updates]}, sort_keys=True)))
         await db.flush()
+        from .lifecycle import selection_changed
+        await selection_changed(db, owner_id, version, patch.updates)
+        await db.flush()
         # Form the response in the same transaction/version, not after a
         # concurrent next patch has committed. Commit only a valid response.
         result = ModuleCollection.model_validate(await describe(db, owner_id)).model_dump(mode="json")
         await db.commit()
         return result
-    except Exception:
+    except Exception as exc:
         await db.rollback()
+        from sqlalchemy.exc import DBAPIError
+        if isinstance(exc,DBAPIError) and getattr(exc.orig,'sqlstate',getattr(exc.orig,'pgcode',None)) in {'55P03','57014'}:
+            raise HTTPException(409,{'code':'MODULE_STATE_BUSY','message':'An already-started operation is finishing; reload and retry'}) from None
         raise
 
 
@@ -90,10 +98,15 @@ async def disable_impact(db, owner_id: int, request) -> dict:
             break
         affected.update(found)
     dependents = [id.value for id in REGISTRY if id in affected and id not in requested]
+    from sqlalchemy import select,func
+    from app.domains.jobs.models import Job
+    from app.shared.types import JobStatus
+    queued=await db.scalar(select(func.count()).select_from(Job).where(Job.user_id==owner_id,Job.module_id.in_([id.value for id in affected]),Job.status.in_([JobStatus.PENDING,JobStatus.SCHEDULED])))
+    running=await db.scalar(select(func.count()).select_from(Job).where(Job.user_id==owner_id,Job.module_id.in_([id.value for id in affected]),Job.status==JobStatus.PROCESSING))
     return {'schema_version': 1, 'owner_id': owner_id, 'version': snapshot.version,
         'modules': [{'module_id': id.value, 'currently_enabled': snapshot.selected(id),
             'capabilities_disabled_by_policy': sorted(REGISTRY[id].capabilities)} for id in request.module_ids],
         'dependent_modules': dependents,
         'data_and_connections_retained': True, 'changes_applied': False,
-        'active_work': {'status': 'not_inspected', 'reason': 'This API stores a selection only; active work is not inspected, cancelled or dispatched'},
+        'active_work': {'status': 'not_inspected', 'analysis_inspected': True, 'reason': 'Owned version-bound analysis counts are inspected; this is not a complete accepted-order or legacy-runtime audit. Disable cancels queued analysis, requests running stop and pauses schedules; already-started effects may finish before disable commits', 'queued_analysis': queued, 'running_analysis': running, 'schedules_will_pause': True},
         'core_account_features_retained': True}

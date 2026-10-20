@@ -9,13 +9,20 @@ from app.core.security import JWTUtils
 from app.domains.auth.dependencies import get_current_user
 from app.uat2.adapters import FakeAI, FakeBroker, EmailSink
 from app.uat2.main import app
+from test_private_api_ownership import private_api
 
 
 @pytest.fixture
-def owner_client(monkeypatch):
+def owner_client(private_api,monkeypatch):
     monkeypatch.setenv('CREDX_UAT2', '1')
     monkeypatch.setenv('UAT2_JWT_SIGNING_KEY', 'unit-test-only-signing-material-not-a-deployed-secret')
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, email=OWNER_EMAIL)
+    from app.infrastructure.database.session import get_async_db
+    from app.domains.modules.models import UserModule,UserModulePreferences
+    UserModulePreferences.__table__.create(private_api.session.get_bind(),checkfirst=True)
+    UserModule.__table__.create(private_api.session.get_bind(),checkfirst=True)
+    async def database():yield private_api.db
+    app.dependency_overrides[get_async_db]=database
     # Route tests deliberately exclude lifespan; separate startup tests below.
     client = TestClient(app)
     try:
@@ -58,15 +65,15 @@ def test_actual_schemas_and_disabled_modules(owner_client):
     assert exc.value.code == 1008
 
 
-def test_broker_order_is_deterministic_simulation(owner_client):
+def test_broker_adapter_deterministic_but_disabled_module_route_denies(owner_client):
     order = dict(tradingsymbol='UATTECH', exchange='NSE', transaction_type='BUY',
                  order_type='MARKET', quantity=1, product='CNC')
     first = owner_client.post('/zerodha/orders', json=order)
     second = owner_client.post('/zerodha/orders', json=order)
-    assert first.status_code == 200
-    assert first.json() == second.json()
-    assert first.json()['order_id'].startswith('SIM-')
-    assert owner_client.post('/zerodha/orders', json={**order, 'quantity': -1}).status_code == 422
+    assert first.status_code == second.status_code == 403
+    assert first.json()['detail']['code']=='MODULE_POLICY_DENIED'
+    # Adapter contract remains deterministic; it does not grant route permission.
+    assert FakeBroker().place(order)==FakeBroker().place(order)
 
 
 def test_empty_portfolio_state(owner_client, monkeypatch):

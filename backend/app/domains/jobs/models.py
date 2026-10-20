@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
@@ -40,6 +41,11 @@ class Job(Base, TimestampMixin):
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
+
+    # Server-derived module attribution; legacy unbound work is never assumed eligible.
+    module_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    module_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    module_cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
 
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     provider: Mapped[str] = mapped_column(String(100), nullable=False)

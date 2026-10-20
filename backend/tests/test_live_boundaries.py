@@ -15,7 +15,7 @@ from app.domains.auth import websocket_tickets as tickets
 from app.domains.auth.models import ActivityLog
 from app.shared import ws_relay as relay
 from app.shared.ws_channels import job_channel, run_channel
-from test_private_api_ownership import private_api  # reuse isolated SQL/identity fixture
+from test_private_api_ownership import private_api, admitted_private_analysis  # reuse isolated SQL/identity fixture
 
 
 class Store:
@@ -58,7 +58,11 @@ class Redis:
 
 
 @pytest.fixture
-def live(private_api, monkeypatch):
+def live(admitted_private_analysis, monkeypatch):
+    private_api=admitted_private_analysis
+    for row in [*private_api.jobs,*private_api.runs]:
+        row.module_id="ai_studio";row.module_version=1
+    private_api.session.commit()
     from app.domains.jobs.ws_router import router as jobs
     from app.domains.runs.ws_router import router as runs
     from app.domains.auth.router import router as auth
@@ -276,3 +280,39 @@ async def test_access_check_failure_fails_closed_without_logging_exception_secre
     socket.close.assert_awaited_once()
     socket.send_json.assert_not_awaited()
     assert 'must-not-appear' not in caplog.text
+
+
+@pytest.mark.parametrize('path',['/ws/jobs','/ws/runs'])
+def test_module_disable_closes_stream_without_any_outbox_or_pubsub_delivery(live,monkeypatch,path):
+    from app.domains.modules.models import UserModule,UserModulePreferences
+    from sqlalchemy import select
+    monkeypatch.setattr(relay,'REVOCATION_POLL_SECONDS',.02)
+    with live.client.websocket_connect(path+'?token='+live.ticket(),headers=live.origin) as ws:
+        ws.send_json({'type':'client-ready'})
+        deadline=time.monotonic()+2
+        while not live.store.subscribers:
+            assert time.monotonic()<deadline;time.sleep(.005)
+        row=live.session.scalar(select(UserModule).where(UserModule.user_id==live.users[0].id,UserModule.module_id=='ai_studio'))
+        row.enabled=False;row.version=2
+        live.session.get(UserModulePreferences,live.users[0].id).version=2
+        live.session.commit()
+        with pytest.raises(WebSocketDisconnect) as error:ws.receive_json()
+        assert error.value.code==4001
+    assert all(s.closed and not s.channels for s in live.store.subscribers)
+
+
+def test_fast_disable_reenable_cannot_revalidate_an_old_stream_epoch(live,monkeypatch):
+    from app.domains.modules.models import UserModule,UserModulePreferences
+    from sqlalchemy import select
+    monkeypatch.setattr(relay,'REVOCATION_POLL_SECONDS',.05)
+    with live.client.websocket_connect('/ws/jobs?token='+live.ticket(),headers=live.origin) as ws:
+        ws.send_json({'type':'client-ready'})
+        deadline=time.monotonic()+2
+        while not live.store.subscribers:
+            assert time.monotonic()<deadline;time.sleep(.005)
+        row=live.session.scalar(select(UserModule).where(UserModule.user_id==live.users[0].id,UserModule.module_id=='ai_studio'))
+        # Both committed toggles can occur before the next authorization poll.
+        row.enabled=False;row.version=2;live.session.get(UserModulePreferences,live.users[0].id).version=2;live.session.commit()
+        row.enabled=True;row.version=3;live.session.get(UserModulePreferences,live.users[0].id).version=3;live.session.commit()
+        with pytest.raises(WebSocketDisconnect) as error:ws.receive_json()
+        assert error.value.code==4001

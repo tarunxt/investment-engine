@@ -350,3 +350,8 @@ class GoogleSheetsService:
             .execute()
         )
         return spreadsheet["spreadsheetId"]
+
+# Effect enforcement also covers direct synchronous service callers, not only HTTP.
+from app.domains.modules.execution import guarded_effect as _module_effect
+for _name in ('write_sheet', 'append_sheet', 'create_spreadsheet'):
+    setattr(GoogleSheetsService, _name, _module_effect(getattr(GoogleSheetsService, _name), capability='export', module='sheets_export'))

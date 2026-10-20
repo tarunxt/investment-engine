@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "stage": "07",
+  "base": "f985ea727eb04d140f5794d95880be50418ff1fb",
+  "checked_at_utc": "2026-10-20T07:08:59.435169+00:00",
+  "checks": {
+    "release_selection": {
+      "passed": 1230,
+      "log": ".runtime/stage07-release-final.txt",
+      "sha256": "cf5f617151017e728eb6525d9829b87ef59b93ab5d83821657e038d578743e84"
+    },
+    "combined_sql": {
+      "passed": 110,
+      "log": ".runtime/stage07-prepublish-combined.txt",
+      "sha256": "4a7d000b3538487e30e6db70db45d67c1b6edb1da64b9539f88b9f8902003244"
+    },
+    "layering_recovery_audit": {
+      "passed": 195,
+      "log": ".runtime/stage07-final-layering-tests.txt",
+      "sha256": "3eeeeee4abeb94d1232ea5c92d52298791c5c61a9f3be204b277bb5488df8ab6"
+    },
+    "private_file_smoke": {
+      "passed": 7,
+      "network": "all socket connections forbidden",
+      "live_owner_or_database_changed": false,
+      "log": ".runtime/stage07-native-smoke-local.txt"
+    },
+    "postgres": {
+      "initial": "3 passed / 1 fixture seed failure",
+      "correction": "seed current_stage fixed; extended six-check suite",
+      "latest_read_only_daemon_check": "socket absent; no Docker processes; no new foreground launch",
+      "corrected_suite": "not_run_locally",
+      "mandatory_ci": "six Docker PostgreSQL checks with no skips plus private-file smoke"
+    },
+    "baseline_google_uat2": {
+      "passed": 49,
+      "log": ".runtime/stage07-baseline-google-uat2-final.txt"
+    },
+    "final_capability_guards": {
+      "passed": 57,
+      "log": ".runtime/stage07-final-capability-checks.txt"
+    }
+  },
+  "ci": "pending_exact_head",
+  "independent_review": "pending",
+  "uat2_deployment": "not_run_here",
+  "owner_acceptance": "pending",
+  "production_or_aws_actions": false,
+  "new_access_grants": false,
+  "preview": {
+    "result": "passed",
+    "count": 43,
+    "checks": [
+      {
+        "check": "usera identity",
+        "status": 200
+      },
+      {
+        "check": "userb identity",
+        "status": 200
+      },
+      {
+        "check": "B initial state",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "Disabled UI-bypass creation denied",
+        "status": 403
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "A select True",
+        "status": 200
+      },
+      {
+        "check": "Stale tab cannot disable",
+        "status": 409
+      },
+      {
+        "check": "Explicit analysis schedule resume",
+        "status": 200
+      },
+      {
+        "check": "Create future synthetic analysis",
+        "status": 200
+      },
+      {
+        "check": "Real disable-impact counts",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "A select False",
+        "status": 200
+      },
+      {
+        "check": "Queued analysis cancelled",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "A select True",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "Re-enable does not resume schedules",
+        "status": 409
+      },
+      {
+        "check": "Create immediate fake analysis",
+        "status": 200
+      },
+      {
+        "check": "Poll fake running phase",
+        "status": 200
+      },
+      {
+        "check": "Poll fake running phase",
+        "status": 200
+      },
+      {
+        "check": "Poll fake running phase",
+        "status": 200
+      },
+      {
+        "check": "Poll fake running phase",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "A select False",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "Observe cooperative stop",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "A select True",
+        "status": 200
+      },
+      {
+        "check": "Old running work stays stopped",
+        "status": 200
+      },
+      {
+        "check": "Foreign synthetic work hidden",
+        "status": 404
+      },
+      {
+        "check": "B policy unchanged",
+        "status": 200
+      },
+      {
+        "check": "Existing Preferences retained",
+        "status": 200
+      },
+      {
+        "check": "A current catalogue",
+        "status": 200
+      },
+      {
+        "check": "A select False",
+        "status": 200
+      }
+    ],
+    "frontend_url": "http://localhost:61386",
+    "backend_url": "http://127.0.0.1:61387",
+    "synthetic_job_ids": [
+      8,
+      9
+    ],
+    "tokens_cookies_retained": false,
+    "limitations": "Real Next/Auth.js/BFF/FastAPI/SQL with explicit synthetic AI facts, offline fake consumer and SQLite. No real provider/order/email/paidAI. PostgreSQL concurrency and live UAT acceptance are separate."
+  },
+  "browser": {
+    "result": "passed",
+    "checked_at_utc": "2026-10-20T07:12:26.017Z",
+    "environment": "LOCAL http://localhost:61386, not live UAT2",
+    "tab_id": "2040527992",
+    "checks": [
+      "Existing synthetic admin Preferences Light/UTC/All notifications preserved after reload",
+      "Owned completed Job history loads while modules off and read-only refresh completes",
+      "Module catalogue10, selected0, schedules paused10, allowed capabilities0",
+      "Runs loads and Bullpen remains unavailable"
+    ],
+    "contract": {
+      "allowed": 0,
+      "count": 10,
+      "operational_enforcement_complete": false,
+      "owner_id": 3,
+      "paused": 10,
+      "selected": 0,
+      "version": 0
+    },
+    "limitations": [
+      "Synthetic ADMIN browser session; ordinary A/B users exercised through separate real Auth.js/BFF lifecycle protocol checks",
+      "Local fake AI eligibility only, all backend outbound socket connections denied",
+      "No Stage08 module-selection UI or live UAT2 acceptance"
+    ],
+    "screenshots": [
+      "preferences.png",
+      "jobs.png",
+      "runs.png"
+    ]
+  }
+}

@@ -45,6 +45,7 @@ class ModuleDecision(BaseModel):
 
 
 class ModuleSelection(BaseModel):
+    schedules_paused: bool = True
     enabled: bool
     version: int = Field(ge=0)
     config: ModuleConfigV1
@@ -105,7 +106,11 @@ class DisabledModuleImpact(BaseModel):
 
 class ActiveWorkImpact(BaseModel):
     status: Literal['not_inspected']
+    analysis_inspected: bool = False
     reason: str
+    queued_analysis: int = 0
+    running_analysis: int = 0
+    schedules_will_pause: bool = True
 
 
 class DisableImpact(BaseModel):
@@ -118,3 +123,8 @@ class DisableImpact(BaseModel):
     changes_applied: Literal[False]
     active_work: ActiveWorkImpact
     core_account_features_retained: Literal[True]
+
+
+class ResumeSchedulesRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    expected_version:int=Field(ge=0,strict=True)

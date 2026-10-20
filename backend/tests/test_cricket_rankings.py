@@ -96,3 +96,8 @@ def test_reconciliation_has_daily_schedule_and_existing_refresh_remains():
     entry = celery.conf.beat_schedule['cricket-rankings-daily-reconciliation']
     assert entry['schedule'].hour == {3} and entry['schedule'].minute == {10}
     assert 'sports-rankings-refresh' in celery.conf.beat_schedule
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

@@ -1,5 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.infrastructure.database.base import Base
 from app.domains.auth.models import User
@@ -25,4 +26,5 @@ class UserModule(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    schedules_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=sa_true())
     preferences: Mapped[UserModulePreferences] = relationship()

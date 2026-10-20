@@ -99,7 +99,7 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
 
 
 def require_forward_baseline_preserved(before: dict, after: dict) -> None:
-    """Permit only Stage04's explicit additive outbox fields, not arbitrary drift.
+    """Permit only named Stage04/07 additive fields, never arbitrary drift.
 
     Existing columns, constraints, indexes and values retain the strict check.
     The separate Stage04 Docker gate proves its full up/down/up migration.
@@ -121,6 +121,23 @@ def require_forward_baseline_preserved(before: dict, after: dict) -> None:
                         "Legacy outbox delivery state changed")
                 rows.append(json.dumps(values, sort_keys=True))
             checked["outbox"]["rows"] = sorted(rows)
+    for table in ('jobs','runs','auto_rebalance_workflows'):
+        if table not in before or table not in checked:continue
+        old_names={column[0] for column in before[table]['columns']}
+        added={column[0]:column for column in checked[table]['columns'] if column[0] not in old_names}
+        if not added:continue
+        require(set(added)=={'module_id','module_version','module_cancel_requested'},'Unexpected forward module lifecycle column addition')
+        require(tuple(added['module_id'][1:])==('VARCHAR(40)',True,None),'Unexpected module_id definition')
+        require(tuple(added['module_version'][1:])==('INTEGER',True,None),'Unexpected module_version definition')
+        cancellation=added['module_cancel_requested']
+        require(cancellation[1]=='BOOLEAN' and cancellation[2] is False and cancellation[3] in ('false',"'false'::boolean"),'Unexpected cancellation definition')
+        checked[table]['columns']=[column for column in checked[table]['columns'] if column[0] in old_names]
+        rows=[]
+        for row in checked[table]['rows']:
+            values=json.loads(row)
+            require(values.pop('module_id','missing') is None and values.pop('module_version','missing') is None and values.pop('module_cancel_requested',None) is False,'Legacy module work was attributed or changed')
+            rows.append(json.dumps(values,sort_keys=True))
+        checked[table]['rows']=sorted(rows)
     require(checked == before, "Forward head upgrade changed existing schema/data")
 
 

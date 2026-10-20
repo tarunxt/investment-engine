@@ -2079,18 +2079,20 @@ class BullpenRuntimeBroker:
 
         started_at = monotonic()
         try:
-            process = await asyncio.create_subprocess_exec(
-                config.bullpen_bin,
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                limit=_MAX_BUFFER_BYTES,
-                # Bullpen may spawn a helper process.  Put the command in its
-                # own process group so a timeout cannot leave a descendant
-                # holding the stdout/stderr pipes open forever.
-                start_new_session=os.name == "posix",
-            )
+            from app.domains.modules.execution import bullpen_process_fence
+            async with bullpen_process_fence(args):
+                process = await asyncio.create_subprocess_exec(
+                    config.bullpen_bin,
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                    limit=_MAX_BUFFER_BYTES,
+                    # Bullpen may spawn a helper process.  Put the command in its
+                    # own process group so a timeout cannot leave a descendant
+                    # holding the stdout/stderr pipes open forever.
+                    start_new_session=os.name == "posix",
+                )
         except FileNotFoundError as exc:
             diagnostics.error_classification = "missing_runtime"
             self._record_failure(

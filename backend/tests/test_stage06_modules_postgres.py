@@ -35,7 +35,11 @@ def database(monkeypatch):
     schema='stage06_'+uuid4().hex
     with root.begin() as c:c.execute(CreateSchema(schema))
     engine=create_engine(URL,connect_args={'options':f'-csearch_path={schema}'})
-    for model in (User,UserProfile,ActivityLog,UserModulePreferences,UserModule):
+    from app.domains.jobs.models import Job
+    from app.domains.runs.models import Run,RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage
+    from app.domains.prompts.models import Prompt
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    for model in (User,UserProfile,ActivityLog,UserModulePreferences,UserModule,Prompt,Job,Run,RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage,OutboxMessage):
         model.__table__.create(engine)
     with Session(engine) as s:
         users=[User(email=f'{name}@stage06.example.com',username=f'synthetic_{name}',
@@ -146,7 +150,11 @@ def test_named_migration_full_baseline_preservation_and_roundtrip(database):
     from app.domains.auth.models import User,UserProfile,ActivityLog,UserRole
     from app.domains.modules.models import UserModule,UserModulePreferences
     # Only this generated fixture schema is cleared to test the actual chain.
-    for model in (UserModule,UserModulePreferences,ActivityLog,UserProfile,User):model.__table__.drop(engine)
+    from app.domains.jobs.models import Job
+    from app.domains.runs.models import Run,RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage
+    from app.domains.prompts.models import Prompt
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    for model in (AutoRebalanceWorkflowStage,AutoRebalanceWorkflow,RunJob,Run,Job,Prompt,OutboxMessage,UserModule,UserModulePreferences,ActivityLog,UserProfile,User):model.__table__.drop(engine)
     env={**os.environ,'PGOPTIONS':f'-csearch_path={schema}'}
     backend=Path(__file__).resolve().parents[1]
     def migrate(direction,target):
@@ -177,7 +185,7 @@ def test_named_migration_full_baseline_preservation_and_roundtrip(database):
     assert not inspect(engine).has_table('user_modules')
     assert not inspect(engine).has_table('user_module_preferences')
     assert baseline_snapshot(engine,exclude_tables=frozenset())==before
-    migrate('upgrade','head')
+    migrate('upgrade','user_modules_001')
     assert baseline_snapshot(engine,exclude_tables=frozenset({'user_modules','user_module_preferences'}))==before
 
 

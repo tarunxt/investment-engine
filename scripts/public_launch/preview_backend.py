@@ -34,7 +34,7 @@ socket.create_connection = denied
 from app.domains.auth.models import User, UserProfile, UserRole, ActivityLog, UserSession, APIKey
 from app.domains.jobs.models import Job  # register ORM relationships
 from app.domains.prompts.models import Prompt
-from app.domains.runs.models import Run, RunJob
+from app.domains.runs.models import Run, RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage
 from app.domains.jobs.router import router as jobs_router
 from app.domains.runs.router import router as runs_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
@@ -58,7 +58,7 @@ async def lifespan(app):
     async with async_engine.begin() as connection:
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
-                      Job.__table__, Run.__table__, RunJob.__table__,
+                      Job.__table__, Run.__table__, RunJob.__table__,AutoRebalanceWorkflow.__table__,AutoRebalanceWorkflowStage.__table__,
                       OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES, UserModulePreferences.__table__, UserModule.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
@@ -107,7 +107,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[os.environ["FRONTEND_URL"]],
 ALLOWED = {("POST", "/auth/login"), ("POST", "/auth/refresh"), ("POST", "/auth/logout"),
            ("GET", "/auth/me"), ("GET", "/auth/profile"), ("PUT", "/auth/profile"),
            ("POST", "/auth/websocket-ticket"), ("POST", "/jobs"), ("GET", "/me/modules"), ("PATCH", "/me/modules"),
-           ("POST", "/me/modules/disable-impact")}
+           ("POST", "/me/modules/disable-impact"), ("POST", "/me/modules/ai_studio/resume-schedules")}
 
 
 @app.middleware("http")
@@ -142,3 +142,6 @@ app.include_router(jobs_ws_router)
 app.include_router(runs_ws_router)
 
 preview_stage05.install(app)
+
+from app.domains.modules.transports import install_route_policy
+install_route_policy(app)

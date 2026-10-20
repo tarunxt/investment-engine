@@ -25,11 +25,11 @@ def migrate(direction,target):
 subprocess.run([sys.executable,'-m','alembic','upgrade','recommendation_audit_001'],cwd=backend,check=True,timeout=180)
 import app.models
 from app.domains.auth.models import User
-from app.domains.jobs.models import Job
-from app.shared.types import JobStatus
 with Session(engine) as s:
     s.add(User(id=900001,email='migration-fixture@invalid.test',username='stage04-migration',password_hash='unusable',is_active=True));s.flush()
-    s.add(Job(id=900001,user_id=900001,prompt='pre04 synthetic record preserved',provider='fake',model='offline',status=JobStatus.COMPLETED));s.commit()
+    # Reflect the named pre04 schema; current ORM columns belong to later stages.
+    jobs=sa.Table('jobs',sa.MetaData(),autoload_with=engine)
+    s.execute(jobs.insert().values(id=900001,user_id=900001,prompt='pre04 synthetic record preserved',provider='fake',model='offline',status='completed',created_at=datetime.utcnow(),updated_at=datetime.utcnow()));s.commit()
 with engine.begin() as connection:
     legacy=sa.Table('outbox',sa.MetaData(),autoload_with=connection)
     connection.execute(legacy.insert().values(id=uuid4(),topic='job.created',payload={'job_id':900001},created_at=datetime.utcnow(),attempts=0))

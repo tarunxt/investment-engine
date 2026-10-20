@@ -109,6 +109,9 @@ class PostgresJobRepository:
         job = await self.get(job_id, user_id=user_id)
         if not job:
             return
+        if status != JobStatus.FAILED and job.module_id:
+            from app.domains.modules.execution import checkpoint
+            checkpoint()
         job.status = status
         if response is not None:
             job.response = response
@@ -161,6 +164,9 @@ class SyncJobRepository:
         web_sources: list[str] | None = None,
         runtime_metadata_json: dict | None = None,
     ) -> None:
+        if status != JobStatus.FAILED and job.module_id:
+            from app.domains.modules.lifecycle import guard_job_transition
+            guard_job_transition(self._session, job)
         job.status = status
         if response is not None:
             job.response = response

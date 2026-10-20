@@ -25,6 +25,7 @@ class StreamAccess:
     user_id: int
     auth_time: float
     expires_at: float
+    module_epoch: int | None = None
 
 
 def _ticket_key(ticket: str) -> str:

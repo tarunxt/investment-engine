@@ -5,8 +5,8 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 265,
-    "lifecycle": 7,
+    "http": 266,
+    "lifecycle": 9,
     "page": 66,
     "scheduler": 16,
     "websocket": 5,
@@ -58,6 +58,7 @@
       "kind": "http",
       "method": "GET",
       "module": "ai_providers",
+      "module_lifecycle_gate": "ai_studio / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -88,6 +89,7 @@
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -129,6 +131,7 @@
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -174,6 +177,7 @@
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -232,6 +236,7 @@
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -296,6 +301,7 @@
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -352,6 +358,7 @@
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -374,6 +381,7 @@
       "kind": "export",
       "method": "",
       "module": "api_usage",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -414,6 +422,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "require_password_auth_allowed",
@@ -454,6 +463,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "require_uat2_owner",
@@ -480,6 +490,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -508,6 +519,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "Depends(security)",
@@ -532,6 +544,7 @@
       "kind": "http",
       "method": "GET",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/me', response_model=UserResponse)"
@@ -564,6 +577,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "require_password_auth_allowed",
@@ -598,6 +612,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "require_password_auth_allowed",
@@ -628,6 +643,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -659,6 +675,7 @@
       "kind": "http",
       "method": "GET",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -693,6 +710,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -718,6 +736,7 @@
       "kind": "http",
       "method": "GET",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "router.get('/google/config')"
@@ -753,6 +772,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "require_uat2_owner",
@@ -798,6 +818,7 @@
       "kind": "http",
       "method": "POST",
       "module": "auth",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "require_password_auth_allowed",
@@ -835,6 +856,7 @@
       "kind": "worker",
       "method": "",
       "module": "auth",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -858,6 +880,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -885,6 +908,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -910,6 +934,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -935,6 +960,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "__safety__ / stop_bullpen008_scheduler via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -960,6 +986,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "__safety__ / pause_bullpen008_scheduler via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -985,6 +1012,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1010,6 +1038,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "__safety__ / activate_bullpen008_emergency_stop via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1035,6 +1064,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1070,6 +1100,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1099,6 +1130,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1142,6 +1174,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1166,6 +1199,7 @@
       "kind": "background",
       "method": "",
       "module": "bullpen008",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -1189,6 +1223,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1215,6 +1250,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1242,6 +1278,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1287,6 +1324,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1311,6 +1349,7 @@
       "kind": "background",
       "method": "",
       "module": "bullpen008",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -1334,6 +1373,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1359,6 +1399,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1384,6 +1425,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -1505,6 +1547,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_bullpen008_run_sync",
         "require_operator_user_id_sync"
@@ -1543,6 +1586,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -1631,6 +1675,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync",
         "select(Bullpen008AlertRecord).where(Bullpen008AlertRecord.user_id == user_id, Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE, Bullpen008AlertRecord.market_id == recovery['market_id'], Bullpen008AlertRecord.side == recovery['side'], Bullpen008AlertRecord.recovered_at.is_(None)).order_by",
@@ -1679,6 +1724,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_bullpen008_run_sync"
       ],
@@ -1706,6 +1752,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1738,6 +1785,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1768,6 +1816,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1797,6 +1846,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1822,6 +1872,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1850,6 +1901,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1877,6 +1929,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1907,6 +1960,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1934,6 +1988,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1963,6 +2018,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -1992,6 +2048,7 @@
       "kind": "export",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_current_user)"
       ],
@@ -2019,6 +2076,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "sheets_export / export via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -2043,6 +2101,7 @@
       "kind": "export",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2063,6 +2122,7 @@
       "kind": "export",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2084,6 +2144,7 @@
       "kind": "background",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2116,6 +2177,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2167,6 +2229,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2229,6 +2292,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen_run_audit",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2255,6 +2319,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_trade_analysis",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2278,6 +2343,7 @@
       "kind": "background",
       "method": "",
       "module": "bullpen_trade_analysis",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2302,6 +2368,7 @@
       "kind": "http",
       "method": "GET",
       "module": "bullpen_trade_analysis",
+      "module_lifecycle_gate": "bullpen_research / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2329,6 +2396,7 @@
       "kind": "http",
       "method": "POST",
       "module": "bullpen_trade_analysis",
+      "module_lifecycle_gate": "bullpen_research / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2353,6 +2421,7 @@
       "kind": "background",
       "method": "",
       "module": "bullpen_trade_analysis",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2391,6 +2460,7 @@
       "kind": "worker",
       "method": "",
       "module": "bullpen_trade_analysis",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -2415,6 +2485,7 @@
       "kind": "http",
       "method": "GET",
       "module": "cost_drivers",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(_allowed_admin)",
         "router.get('/summary', response_model=CostDriversDashboard)"
@@ -2438,6 +2509,7 @@
       "kind": "http",
       "method": "GET",
       "module": "cost_drivers",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(_allowed_admin)",
         "router.get('/aws')"
@@ -2461,6 +2533,7 @@
       "kind": "http",
       "method": "GET",
       "module": "cost_drivers",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(_allowed_admin)",
         "router.get('/traffic')"
@@ -2484,6 +2557,7 @@
       "kind": "http",
       "method": "GET",
       "module": "cost_drivers",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(_allowed_admin)",
         "router.get('/recommendations')"
@@ -2511,6 +2585,7 @@
       "kind": "http",
       "method": "POST",
       "module": "cost_drivers",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(_allowed_admin)",
         "router.post('/refresh', response_model=CostDriversDashboard)"
@@ -2547,6 +2622,7 @@
       "kind": "http",
       "method": "GET",
       "module": "dashboard",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/summary', response_model=DashboardSummaryResponse)"
@@ -2587,6 +2663,7 @@
       "kind": "worker",
       "method": "",
       "module": "dashboard",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2625,6 +2702,7 @@
       "kind": "worker",
       "method": "",
       "module": "fx_rates",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -2651,6 +2729,7 @@
       "kind": "http",
       "method": "GET",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/auth-url', response_model=GoogleSheetsAuthUrlResponse)"
@@ -2682,6 +2761,7 @@
       "kind": "http",
       "method": "POST",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2710,6 +2790,7 @@
       "kind": "http",
       "method": "GET",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(require_admin)",
@@ -2748,6 +2829,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(require_admin)",
@@ -2784,6 +2866,7 @@
       "kind": "http",
       "method": "GET",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2811,6 +2894,7 @@
       "kind": "http",
       "method": "DELETE",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2843,6 +2927,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "google_sheets",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2875,6 +2960,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)"
@@ -2906,6 +2992,7 @@
       "kind": "http",
       "method": "POST",
       "module": "google_sheets",
+      "module_lifecycle_gate": "sheets_export / export via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2938,6 +3025,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)"
@@ -2969,6 +3057,7 @@
       "kind": "http",
       "method": "POST",
       "module": "google_sheets",
+      "module_lifecycle_gate": "sheets_export / export via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2998,6 +3087,7 @@
       "kind": "http",
       "method": "POST",
       "module": "google_sheets",
+      "module_lifecycle_gate": "sheets_export / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3022,6 +3112,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3040,6 +3131,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3067,6 +3159,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3093,6 +3186,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3135,6 +3229,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3158,6 +3253,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3184,6 +3280,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3244,6 +3341,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3304,6 +3402,7 @@
       "kind": "worker",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3367,6 +3466,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3430,6 +3530,7 @@
       "kind": "worker",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3450,6 +3551,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3482,6 +3584,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3514,6 +3617,7 @@
       "kind": "worker",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3538,6 +3642,7 @@
       "kind": "export",
       "method": "",
       "module": "google_sheets",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -3558,6 +3663,7 @@
       "kind": "http",
       "method": "GET",
       "module": "health",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "router.get('')"
       ],
@@ -3578,6 +3684,7 @@
       "kind": "http",
       "method": "GET",
       "module": "health",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "router.get('/live')"
       ],
@@ -3620,6 +3727,7 @@
       "kind": "http",
       "method": "GET",
       "module": "health",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "router.get('/ready')"
       ],
@@ -3644,6 +3752,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3671,6 +3780,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3700,6 +3810,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3738,6 +3849,7 @@
       "kind": "http",
       "method": "POST",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3769,6 +3881,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3800,6 +3913,7 @@
       "kind": "http",
       "method": "POST",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3828,6 +3942,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3856,6 +3971,7 @@
       "kind": "http",
       "method": "POST",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.post('/prices/current', response_model=IndMoneyUsCurrentPricesResponse)"
@@ -3884,6 +4000,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3923,6 +4040,7 @@
       "kind": "http",
       "method": "POST",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3950,6 +4068,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -3977,6 +4096,7 @@
       "kind": "http",
       "method": "GET",
       "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4007,6 +4127,7 @@
       "kind": "export",
       "method": "",
       "module": "jobs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4027,6 +4148,7 @@
       "kind": "export",
       "method": "",
       "module": "jobs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4036,7 +4158,7 @@
       "registration": "",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/repository.py:201"
+      "source": "backend/app/domains/jobs/repository.py:207"
     },
     {
       "calls": [
@@ -4057,6 +4179,7 @@
       "kind": "http",
       "method": "POST",
       "module": "jobs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4092,6 +4215,7 @@
       "kind": "http",
       "method": "POST",
       "module": "jobs",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4123,6 +4247,7 @@
       "kind": "http",
       "method": "GET",
       "module": "jobs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4151,6 +4276,7 @@
       "kind": "http",
       "method": "GET",
       "module": "jobs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4267,6 +4393,7 @@
       "kind": "worker",
       "method": "",
       "module": "jobs",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "SyncJobRepository(recovery_db).get_for_worker",
         "_requires_generic_table_output",
@@ -4298,6 +4425,7 @@
       "kind": "websocket",
       "method": "WEBSOCKET",
       "module": "jobs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "router.websocket('/ws/jobs')"
       ],
@@ -4335,6 +4463,7 @@
       "kind": "websocket",
       "method": "WEBSOCKET",
       "module": "jobs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "router.websocket('/ws/jobs/{job_id}')"
       ],
@@ -4360,6 +4489,7 @@
       "kind": "http",
       "method": "GET",
       "module": "mails",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/preferences', response_model=MailPreferencesResponse)"
@@ -4386,6 +4516,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "mails",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.put('/preferences', response_model=MailPreferencesResponse)"
@@ -4413,6 +4544,7 @@
       "kind": "http",
       "method": "GET",
       "module": "mails",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/history', response_model=MailHistoryResponse)"
@@ -4440,6 +4572,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "mails",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.patch('/history/{history_id}/sell-action', response_model=MailSellActionResponse)"
@@ -4468,6 +4601,7 @@
       "kind": "http",
       "method": "POST",
       "module": "mails",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.post('/send-test', response_model=SendTestMailResponse)"
@@ -4497,6 +4631,7 @@
       "kind": "worker",
       "method": "",
       "module": "mails",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4536,6 +4671,7 @@
       "kind": "worker",
       "method": "",
       "module": "mails",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4549,6 +4685,78 @@
     },
     {
       "calls": [
+        "(await db.execute(select(User.role, User.is_active).where(User.id == owner).with_for_update())).first",
+        "AsyncSessionLocal",
+        "ModuleLifecycleDenied",
+        "_current.get",
+        "_parse_command_category",
+        "_reconciliation_read.get",
+        "_safety_owner.get",
+        "async_effect_guard",
+        "db.begin",
+        "db.execute",
+        "db.get_bind",
+        "func.set_config",
+        "require_bullpen_context",
+        "select",
+        "select(User.role, User.is_active).where",
+        "select(User.role, User.is_active).where(User.id == owner).with_for_update",
+        "type"
+      ],
+      "capability": "bullpen_process_fence",
+      "classification": "administrator-only",
+      "kind": "lifecycle",
+      "method": "",
+      "module": "modules",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "require_bullpen_context"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "asynccontextmanager",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/execution.py:86"
+    },
+    {
+      "calls": [
+        "ModuleLifecycleDenied",
+        "ModulePolicy",
+        "ModulePolicy(db).authorize",
+        "db.begin",
+        "db.execute",
+        "db.get_bind",
+        "db.scalar",
+        "factory",
+        "fence_error",
+        "func.set_config",
+        "lock_owner",
+        "select",
+        "select(User.id).where",
+        "select(User.id).where(User.id == identity.owner_id).with_for_update",
+        "select(UserModule.version).where"
+      ],
+      "capability": "async_effect_guard",
+      "classification": "administrator-only",
+      "kind": "lifecycle",
+      "method": "",
+      "module": "modules",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "ModulePolicy(db).authorize"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "asynccontextmanager",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/lifecycle.py:170"
+    },
+    {
+      "calls": [
         "Depends",
         "describe",
         "router.get"
@@ -4558,6 +4766,7 @@
       "kind": "http",
       "method": "GET",
       "module": "modules",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4582,6 +4791,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "modules",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4606,6 +4816,7 @@
       "kind": "http",
       "method": "POST",
       "module": "modules",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -4621,6 +4832,31 @@
     },
     {
       "calls": [
+        "Depends",
+        "resume_schedules",
+        "router.post"
+      ],
+      "capability": "resume_module_schedules",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "modules",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/{module_id}/resume-schedules')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/modules/{module_id}/resume-schedules",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/router.py:32"
+    },
+    {
+      "calls": [
         "asyncio.create_task",
         "self._run_daily_net_worth_refresh_loop"
       ],
@@ -4629,6 +4865,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4650,6 +4887,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4671,6 +4909,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4692,6 +4931,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4713,6 +4953,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4734,6 +4975,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -4758,6 +5000,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4785,6 +5028,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4819,6 +5063,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4864,6 +5109,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4891,6 +5137,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4924,6 +5171,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4949,6 +5197,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -4974,6 +5223,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5002,6 +5252,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5028,6 +5279,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "__safety__ / stop_polymarket_bot via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5054,6 +5306,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5080,6 +5333,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5108,6 +5362,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5134,6 +5389,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5160,6 +5416,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5186,6 +5443,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5214,6 +5472,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5240,6 +5499,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "__safety__ / emergency_stop_polymarket_live via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5266,6 +5526,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5294,6 +5555,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5322,6 +5584,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5350,6 +5613,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5376,6 +5640,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5405,6 +5670,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5433,6 +5699,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5461,6 +5728,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5489,6 +5757,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5517,6 +5786,7 @@
       "kind": "http",
       "method": "DELETE",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5544,6 +5814,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket",
+      "module_lifecycle_gate": "copy_trader / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5567,6 +5838,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5576,7 +5848,7 @@
       "registration": "",
       "route": "",
       "side_effects": "singleton wallet/runtime; broker/process/network/financial I/O possible",
-      "source": "backend/app/domains/polymarket/service.py:233"
+      "source": "backend/app/domains/polymarket/service.py:236"
     },
     {
       "calls": [
@@ -5607,6 +5879,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/clustering/{run_id}/progress')"
@@ -5648,6 +5921,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.post('/clustering/{run_id}/progress')"
@@ -5670,6 +5944,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5691,6 +5966,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5712,6 +5988,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5733,6 +6010,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "_read_stage1_wallet_positions_recovery_snapshot"
       ],
@@ -5758,6 +6036,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5785,6 +6064,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5835,6 +6115,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -5885,6 +6166,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -5905,6 +6187,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -5929,6 +6212,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5956,6 +6240,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -5986,6 +6271,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_current_user)"
       ],
@@ -6014,6 +6300,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6040,6 +6327,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_current_user)"
       ],
@@ -6064,6 +6352,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6096,6 +6385,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_current_user)"
       ],
@@ -6126,6 +6416,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6155,6 +6446,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6184,6 +6476,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6211,6 +6504,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6238,6 +6532,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6265,6 +6560,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "__safety__ / reconcile_auto_live_run_order_states via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6292,6 +6588,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6317,6 +6614,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6344,6 +6642,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6371,6 +6670,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "__safety__ / cancel_auto_live_order via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6398,6 +6698,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6433,6 +6734,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6458,6 +6760,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6483,6 +6786,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "__safety__ / stop_auto_live via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6508,6 +6812,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "__safety__ / pause_auto_live via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6533,6 +6838,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6558,6 +6864,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "__safety__ / emergency_stop_auto_live via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6583,6 +6890,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6612,6 +6920,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6639,6 +6948,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6680,6 +6990,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6705,6 +7016,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6732,6 +7044,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(security)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6758,6 +7071,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6789,6 +7103,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(security)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6816,6 +7131,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6860,6 +7176,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(security)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6889,6 +7206,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(security)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6924,6 +7242,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(security)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6953,6 +7272,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "bullpen_live / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(security)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -6975,6 +7295,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -6995,6 +7316,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7020,6 +7342,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7066,6 +7389,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7086,6 +7410,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7114,6 +7439,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7140,6 +7466,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7166,6 +7493,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7217,6 +7545,7 @@
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7263,6 +7592,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -7288,6 +7618,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7323,6 +7654,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7364,6 +7696,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "heartbeat.ensure_ownership"
       ],
@@ -7411,6 +7744,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "heartbeat.ensure_ownership"
       ],
@@ -7432,6 +7766,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7473,6 +7808,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "heartbeat.ensure_ownership"
       ],
@@ -7497,6 +7833,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7545,6 +7882,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -7566,6 +7904,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7613,6 +7952,7 @@
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -7634,6 +7974,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7655,6 +7996,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7676,6 +8018,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7697,6 +8040,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7718,6 +8062,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7739,6 +8084,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -7765,6 +8111,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7791,6 +8138,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "__safety__ / emergency_stop_polymarket_live via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7817,6 +8165,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7845,6 +8194,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7873,6 +8223,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7901,6 +8252,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7927,6 +8279,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7955,6 +8308,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -7983,6 +8337,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8011,6 +8366,7 @@
       "kind": "http",
       "method": "DELETE",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8038,6 +8394,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8063,6 +8420,7 @@
       "kind": "http",
       "method": "GET",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8091,6 +8449,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8117,6 +8476,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "__safety__ / stop_polymarket_bot via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8143,6 +8503,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8169,6 +8530,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8197,6 +8559,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8223,6 +8586,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8249,6 +8613,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8275,6 +8640,7 @@
       "kind": "http",
       "method": "POST",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "prediction_direct / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -8298,6 +8664,7 @@
       "kind": "background",
       "method": "",
       "module": "polymarket_direct",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -8307,7 +8674,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/service.py:85"
+      "source": "backend/app/domains/polymarket_direct/service.py:89"
     },
     {
       "calls": [
@@ -8331,6 +8698,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "prompts",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8362,6 +8730,7 @@
       "kind": "http",
       "method": "DELETE",
       "module": "prompts",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8396,6 +8765,7 @@
       "kind": "http",
       "method": "GET",
       "module": "prompts",
+      "module_lifecycle_gate": "ai_studio / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8425,6 +8795,7 @@
       "kind": "http",
       "method": "POST",
       "module": "prompts",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8450,6 +8821,7 @@
       "kind": "http",
       "method": "GET",
       "module": "prompts",
+      "module_lifecycle_gate": "ai_studio / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8472,6 +8844,7 @@
       "kind": "background",
       "method": "",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -8499,6 +8872,7 @@
       "kind": "http",
       "method": "GET",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "ai_studio / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8532,6 +8906,7 @@
       "kind": "http",
       "method": "POST",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8565,6 +8940,7 @@
       "kind": "http",
       "method": "GET",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "ai_studio / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8596,6 +8972,7 @@
       "kind": "http",
       "method": "POST",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8630,6 +9007,7 @@
       "kind": "http",
       "method": "POST",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8680,6 +9058,7 @@
       "kind": "http",
       "method": "POST",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "ai_studio / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8705,6 +9084,7 @@
       "kind": "worker",
       "method": "",
       "module": "recommendation_audit",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "audit_recovery_blocked"
       ],
@@ -8725,6 +9105,7 @@
       "kind": "export",
       "method": "",
       "module": "runs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -8735,6 +9116,33 @@
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
       "source": "backend/app/domains/runs/repository.py:176"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "PostgresRunRepository",
+        "repo.get",
+        "router.get"
+      ],
+      "capability": "get_run",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{run_id}', response_model=RunResponse)"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/{run_id}",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/router.py:1001"
     },
     {
       "calls": [
@@ -8765,6 +9173,7 @@
       "kind": "http",
       "method": "POST",
       "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8776,7 +9185,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}/cancel",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1005"
+      "source": "backend/app/domains/runs/router.py:1014"
     },
     {
       "calls": [
@@ -8793,6 +9202,7 @@
       "kind": "http",
       "method": "GET",
       "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8821,6 +9231,7 @@
       "kind": "http",
       "method": "POST",
       "module": "runs",
+      "module_lifecycle_gate": "__analysis_consumer__ / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8850,6 +9261,7 @@
       "kind": "http",
       "method": "POST",
       "module": "runs",
+      "module_lifecycle_gate": "__analysis_consumer__ / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.post('/final-actionables/history/backfill', response_model=FinalActionableHistoryBackfillResponse)"
@@ -8870,6 +9282,8 @@
         "_format_auto_rebalance_label",
         "_get_redis",
         "_reserve_auto_rebalance_sequence",
+        "admit_enqueue",
+        "analysis_module",
         "db.add",
         "db.commit",
         "redis.aclose",
@@ -8880,6 +9294,7 @@
       "kind": "http",
       "method": "POST",
       "module": "runs",
+      "module_lifecycle_gate": "__analysis_consumer__ / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8917,6 +9332,7 @@
       "kind": "http",
       "method": "GET",
       "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8928,7 +9344,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:582"
+      "source": "backend/app/domains/runs/router.py:585"
     },
     {
       "calls": [
@@ -8949,6 +9365,7 @@
       "kind": "http",
       "method": "GET",
       "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -8960,7 +9377,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history/{portfolio}/{sequence}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:620"
+      "source": "backend/app/domains/runs/router.py:623"
     },
     {
       "calls": [
@@ -8972,7 +9389,10 @@
         "_build_auto_rebalance_history",
         "_latest_timestamp",
         "add_completion_event",
+        "admit_enqueue",
+        "admit_workflow_transition",
         "all",
+        "analysis_module",
         "any",
         "datetime.now",
         "db.add",
@@ -8998,6 +9418,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "runs",
+      "module_lifecycle_gate": "__analysis_consumer__ / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9009,7 +9430,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history/{portfolio}/{sequence}/stages/{stage}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:667"
+      "source": "backend/app/domains/runs/router.py:670"
     },
     {
       "calls": [
@@ -9042,6 +9463,7 @@
       "kind": "http",
       "method": "POST",
       "module": "runs",
+      "module_lifecycle_gate": "__analysis_consumer__ / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9053,7 +9475,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-completion-email",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:793"
+      "source": "backend/app/domains/runs/router.py:802"
     },
     {
       "calls": [
@@ -9079,6 +9501,7 @@
       "kind": "http",
       "method": "POST",
       "module": "runs",
+      "module_lifecycle_gate": "__analysis_consumer__ / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9090,7 +9513,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:888"
+      "source": "backend/app/domains/runs/router.py:897"
     },
     {
       "calls": [
@@ -9111,6 +9534,7 @@
       "kind": "http",
       "method": "GET",
       "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9122,33 +9546,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:959"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
-        "PostgresRunRepository",
-        "repo.get",
-        "router.get"
-      ],
-      "capability": "get_run",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "GET",
-      "module": "runs",
-      "observed_guards": [
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "router.get('/{run_id}', response_model=RunResponse)"
-      ],
-      "owner_source": [
-        "current_user.id"
-      ],
-      "registration": "mounted",
-      "route": "/runs/{run_id}",
-      "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:992"
+      "source": "backend/app/domains/runs/router.py:968"
     },
     {
       "calls": [
@@ -9175,6 +9573,7 @@
       "kind": "worker",
       "method": "",
       "module": "runs",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9221,6 +9620,7 @@
       "kind": "worker",
       "method": "",
       "module": "runs",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9249,6 +9649,7 @@
       "kind": "worker",
       "method": "",
       "module": "runs",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9276,6 +9677,7 @@
       "kind": "websocket",
       "method": "WEBSOCKET",
       "module": "runs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "router.websocket('/ws/runs')"
       ],
@@ -9308,6 +9710,7 @@
       "kind": "websocket",
       "method": "WEBSOCKET",
       "module": "runs",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "router.websocket('/ws/runs/{run_id}')"
       ],
@@ -9339,6 +9742,7 @@
       "kind": "export",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9366,6 +9770,7 @@
       "kind": "export",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9392,6 +9797,7 @@
       "kind": "http",
       "method": "POST",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9424,6 +9830,7 @@
       "kind": "http",
       "method": "POST",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9454,6 +9861,7 @@
       "kind": "http",
       "method": "POST",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_admin)",
         "[Depends(get_current_user)]",
@@ -9484,6 +9892,7 @@
       "kind": "http",
       "method": "POST",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_admin)",
         "[Depends(get_current_user)]",
@@ -9516,6 +9925,7 @@
       "kind": "http",
       "method": "GET",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9541,6 +9951,7 @@
       "kind": "http",
       "method": "POST",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(require_admin)",
         "[Depends(get_current_user)]",
@@ -9570,6 +9981,7 @@
       "kind": "http",
       "method": "GET",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "sports_rankings / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -9627,6 +10039,7 @@
       "kind": "worker",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9651,6 +10064,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "recovery_mode"
       ],
@@ -9683,6 +10097,7 @@
       "kind": "worker",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9708,6 +10123,7 @@
       "kind": "worker",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9744,6 +10160,7 @@
       "kind": "worker",
       "method": "",
       "module": "sports_rankings",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9766,6 +10183,7 @@
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9790,6 +10208,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9814,6 +10233,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9838,6 +10258,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9864,6 +10285,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9887,6 +10309,7 @@
       "kind": "background",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -9909,6 +10332,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9933,6 +10357,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9957,6 +10382,7 @@
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -9981,6 +10407,7 @@
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -10005,6 +10432,7 @@
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
+      "module_lifecycle_gate": "market_scanner / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -10032,6 +10460,7 @@
       "kind": "export",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10057,6 +10486,7 @@
       "kind": "export",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "Depends(get_current_user)"
       ],
@@ -10082,6 +10512,7 @@
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
+      "module_lifecycle_gate": "sheets_export / export via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_current_user)",
         "[Depends(require_singleton_bullpen_runtime_access)]",
@@ -10128,6 +10559,7 @@
       "kind": "worker",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "require_operator_user_id_sync"
       ],
@@ -10157,6 +10589,7 @@
       "kind": "worker",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10186,6 +10619,7 @@
       "kind": "worker",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10209,6 +10643,7 @@
       "kind": "export",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10236,6 +10671,7 @@
       "kind": "export",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10258,6 +10694,7 @@
       "kind": "export",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10295,6 +10732,7 @@
       "kind": "export",
       "method": "",
       "module": "trading_bots",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10319,6 +10757,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10346,6 +10785,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10375,6 +10815,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10413,6 +10854,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10438,6 +10880,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_current_user)",
         "router.get('/login-url', response_model=ZerodhaLoginUrlResponse)"
@@ -10476,6 +10919,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10505,6 +10949,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10534,6 +10979,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10570,6 +11016,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10597,6 +11044,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10630,6 +11078,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10674,6 +11123,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10721,6 +11171,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10786,6 +11237,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10826,6 +11278,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / execute via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10858,6 +11311,7 @@
       "kind": "http",
       "method": "DELETE",
       "module": "zerodha",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10885,6 +11339,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -10901,11 +11356,9 @@
     {
       "calls": [
         "SyncSessionLocal",
-        "SyncZerodhaCredentialRepository",
         "celery.task",
-        "cred_repo.list_active_user_ids",
         "current_snapshot_date",
-        "datetime.now",
+        "eligible_scheduled_user_ids",
         "is_weekend_snapshot_date",
         "len",
         "logger.info",
@@ -10917,6 +11370,7 @@
       "kind": "worker",
       "method": "",
       "module": "zerodha",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10960,6 +11414,7 @@
       "kind": "worker",
       "method": "",
       "module": "zerodha",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -10987,6 +11442,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -11025,6 +11481,7 @@
       "kind": "http",
       "method": "POST",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -11052,6 +11509,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -11079,6 +11537,7 @@
       "kind": "http",
       "method": "GET",
       "module": "zerodha",
+      "module_lifecycle_gate": "zerodha_rebalance / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -11101,6 +11560,7 @@
       "kind": "background",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11110,7 +11570,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:88"
+      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:104"
     },
     {
       "calls": [
@@ -11135,6 +11595,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11156,6 +11617,7 @@
       "kind": "background",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11176,6 +11638,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11196,6 +11659,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11216,6 +11680,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11236,6 +11701,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11256,6 +11722,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11276,6 +11743,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11296,6 +11764,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11316,6 +11785,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11336,6 +11806,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11356,6 +11827,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11376,6 +11848,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11396,6 +11869,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11416,6 +11890,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11436,6 +11911,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11456,6 +11932,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11476,6 +11953,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11507,6 +11985,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "recovery_mode"
       ],
@@ -11533,6 +12012,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "recovery_mode"
       ],
@@ -11566,6 +12046,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "recovery_mode"
       ],
@@ -11584,6 +12065,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "FastAPI defaults; global recovery middleware may deny"
       ],
@@ -11602,6 +12084,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "FastAPI defaults; global recovery middleware may deny"
       ],
@@ -11620,6 +12103,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "FastAPI defaults; global recovery middleware may deny"
       ],
@@ -11638,6 +12122,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "FastAPI defaults; global recovery middleware may deny"
       ],
@@ -11658,6 +12143,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.get('/')"
       ],
@@ -11679,6 +12165,7 @@
       "kind": "background",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11688,7 +12175,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/shared/ws_relay.py:158"
+      "source": "backend/app/shared/ws_relay.py:187"
     },
     {
       "calls": [
@@ -11701,6 +12188,7 @@
       "kind": "lifecycle",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11721,6 +12209,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.get('/health')"
       ],
@@ -11742,6 +12231,7 @@
       "kind": "http",
       "method": "DELETE",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
       ],
@@ -11763,6 +12253,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
       ],
@@ -11784,6 +12275,7 @@
       "kind": "http",
       "method": "OPTIONS",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
       ],
@@ -11805,6 +12297,7 @@
       "kind": "http",
       "method": "PATCH",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
       ],
@@ -11826,6 +12319,7 @@
       "kind": "http",
       "method": "POST",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
       ],
@@ -11847,6 +12341,7 @@
       "kind": "http",
       "method": "PUT",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])"
       ],
@@ -11868,6 +12363,7 @@
       "kind": "websocket",
       "method": "WEBSOCKET",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "app.websocket('/{path:path}')"
       ],
@@ -11891,6 +12387,7 @@
       "kind": "http",
       "method": "POST",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.post('/uat2/email')"
@@ -11913,6 +12410,7 @@
       "kind": "export",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -11934,6 +12432,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/uat2/export')"
@@ -11956,6 +12455,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/uat2/status')"
@@ -11979,6 +12479,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/zerodha/portfolio', response_model=ZerodhaPortfolioOverviewResponse)"
@@ -12000,6 +12501,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/zerodha/status')"
@@ -12021,6 +12523,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/zerodha/login-url')"
@@ -12042,6 +12545,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/zerodha/orders')"
@@ -12065,6 +12569,7 @@
       "kind": "http",
       "method": "POST",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.post('/zerodha/orders', response_model=ZerodhaPlaceOrderResponse)"
@@ -12090,6 +12595,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/dashboard/summary', response_model=DashboardSummaryResponse)"
@@ -12112,6 +12618,7 @@
       "kind": "http",
       "method": "POST",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.post('/uat2/ai')"
@@ -12137,6 +12644,7 @@
       "kind": "http",
       "method": "GET",
       "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "[Depends(get_current_user)]",
         "router.get('/uat2/ai/{task_id}')"
@@ -12153,13 +12661,17 @@
       "calls": [
         "FakeAI",
         "FakeAI().generate",
-        "celery.task"
+        "ModuleLifecycleDenied",
+        "celery.task",
+        "task_scope",
+        "type"
       ],
       "capability": "fake_ai",
       "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
       "observed_guards": [
         "none found locally; not proof of public access"
       ],
@@ -12178,6 +12690,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12196,6 +12709,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12214,6 +12728,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12232,6 +12747,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12250,6 +12766,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12268,6 +12785,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12286,6 +12804,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12304,6 +12823,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12322,6 +12842,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12340,6 +12861,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12358,6 +12880,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12376,6 +12899,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12394,6 +12918,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12412,6 +12937,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12430,6 +12956,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12448,6 +12975,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12466,6 +12994,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12484,6 +13013,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12502,6 +13032,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12520,6 +13051,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12538,6 +13070,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "requireBullpenOperator("
       ],
@@ -12556,6 +13089,7 @@
       "kind": "frontend",
       "method": "DELETE",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext(",
         "rotateBackendTokens("
@@ -12575,6 +13109,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext(",
         "rotateBackendTokens("
@@ -12594,6 +13129,7 @@
       "kind": "frontend",
       "method": "HEAD",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext(",
         "rotateBackendTokens("
@@ -12613,6 +13149,7 @@
       "kind": "frontend",
       "method": "PATCH",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext(",
         "rotateBackendTokens("
@@ -12632,6 +13169,7 @@
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext(",
         "rotateBackendTokens("
@@ -12651,6 +13189,7 @@
       "kind": "frontend",
       "method": "PUT",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext(",
         "rotateBackendTokens("
@@ -12670,6 +13209,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12688,6 +13228,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12706,6 +13247,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12724,6 +13266,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12742,6 +13285,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12760,6 +13304,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12778,6 +13323,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12796,6 +13342,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12814,6 +13361,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12832,6 +13380,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12850,6 +13399,7 @@
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12868,6 +13418,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12886,6 +13437,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12904,6 +13456,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12922,6 +13475,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12940,6 +13494,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12958,6 +13513,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12976,6 +13532,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -12994,6 +13551,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13012,6 +13570,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13030,6 +13589,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13048,6 +13608,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13066,6 +13627,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "createBackendSessionContext("
       ],
@@ -13084,6 +13646,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13102,6 +13665,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13120,6 +13684,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13138,6 +13703,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13156,6 +13722,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13174,6 +13741,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13192,6 +13760,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13210,6 +13779,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13228,6 +13798,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13246,6 +13817,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13264,6 +13836,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13282,6 +13855,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13300,6 +13874,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13318,6 +13893,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13336,6 +13912,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13354,6 +13931,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13372,6 +13950,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13390,6 +13969,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13408,6 +13988,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13426,6 +14007,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13444,6 +14026,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13462,6 +14045,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13480,6 +14064,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13498,6 +14083,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13516,6 +14102,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13534,6 +14121,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13552,6 +14140,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13570,6 +14159,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13588,6 +14178,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13606,6 +14197,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13624,6 +14216,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13642,6 +14235,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13660,6 +14254,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13678,6 +14273,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13696,6 +14292,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13714,6 +14311,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13732,6 +14330,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13750,6 +14349,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13768,6 +14368,7 @@
       "kind": "page",
       "method": "GET",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13786,6 +14387,7 @@
       "kind": "frontend",
       "method": "DISPATCH",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "none found locally; inspect frontend/proxy.ts and layouts"
       ],
@@ -13804,6 +14406,7 @@
       "kind": "frontend",
       "method": "DISPATCH",
       "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
         "getToken(",
         "requireUat2AuthSecret("
@@ -13824,7 +14427,7 @@
     "backend/app/core/__init__.py": "691e5ed6014a69a3200d83084b8cdaa37cf9430b57d33b0584ca6a7b707f3b06",
     "backend/app/core/config.py": "d75516ce06ddca3c5754ca206cf545d4328e2a9adcd755ca61ec0756d4ba5541",
     "backend/app/core/logging.py": "34ec5aec553941e669ca8c256b7e43bdedb37d7784da70e52d198d30e048799e",
-    "backend/app/core/recovery.py": "7e1c77bbd8a82a65b3f42cc647f7c9b28bc266f8e37f701ab2871247a64f7e19",
+    "backend/app/core/recovery.py": "af003514eb40361bb832e42397bd309cdaa7a28ebd38762df0c1a1c1369cb29c",
     "backend/app/core/request_timing.py": "ac30e9e77498d78c16e72cb72cf1821bf808b680c22b3c36c62e1a612fbe4ec4",
     "backend/app/core/security.py": "ef02ce03628c92e029bb66bb0c61ca65f175858ddfac9ac98e34baa99ef97c66",
     "backend/app/core/seed.py": "f00e773efffc3ca505c20048fb592868dce6fd241ee8b1479ab51441d611d7a1",
@@ -13833,7 +14436,7 @@
     "backend/app/domains/ai_providers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/ai_providers/anthropic.py": "eeffe90ad29cd1e1b2704cda99faa5a4c57c621729e31f2a2aef2a8d3b50aa96",
     "backend/app/domains/ai_providers/availability.py": "8696786f8406338b9d3419e9a8df77712bae8496df8d7aa1d3ecb8230e4c6a8d",
-    "backend/app/domains/ai_providers/base.py": "c6570d18f249e61fb5044eff19defb93de29efaea8a4431b97adef55b8d331c0",
+    "backend/app/domains/ai_providers/base.py": "76ff774f94b3187da22157f10abcd235ff83b0e230dd87e2071cd11dee7b559c",
     "backend/app/domains/ai_providers/deepseek.py": "82545355e45896f53c5560f8ed0e59982c1a70c0d3b4210f6ee99197f9884896",
     "backend/app/domains/ai_providers/factory.py": "aeec686a88c1cbb88af7e51e81f36d554dd8ffb2f7d6444ee08a8fa55902299b",
     "backend/app/domains/ai_providers/gemini.py": "05aa097dadfb8dcdfcfe38a727b2ca5867cd12a34bc28a912274e327ff45ad19",
@@ -13860,7 +14463,7 @@
     "backend/app/domains/auth/schemas.py": "b9ed808ca03f82e2a2ec47c655a4241cfa91532714827c28d37c740b9aaddbf3",
     "backend/app/domains/auth/session_revocation.py": "15f90b7efa30edcfc0b1a8e82ea603e3f7a03d273956642d68f97a93962a00b3",
     "backend/app/domains/auth/tasks.py": "491bcc47f793f324dabe8dd8a79c5560cdae422e688dd89981fd1b9aa7b4a7b8",
-    "backend/app/domains/auth/websocket_tickets.py": "9d73f9d5d434245108a5009b5b8fbf8dfdf8fa7af75b8c4fd6e1ded06aaeb64f",
+    "backend/app/domains/auth/websocket_tickets.py": "d52c78b54fb15678b9575415cea4dae365b3995f246fa3bfc7550e161b57e98f",
     "backend/app/domains/bullpen008/__init__.py": "c034bbfe18342ffcdcbf7bd42e1621d13b3dd4c880bb9d82607edc28ff1cd39d",
     "backend/app/domains/bullpen008/alerts.py": "d70d54ec486a2b464af6c30f50f42b05215e35946c1689ee160d705e956e7c8e",
     "backend/app/domains/bullpen008/constants.py": "9c1a75e0d9ff7738a31fb4958e2dcbe3774d85882ac854ccbff97f4db4d018f3",
@@ -13918,7 +14521,7 @@
     "backend/app/domains/google_sheets/repository.py": "26b16020068a4619c8f56752fa65d525dec663ef35894b5a0d6b56db85525eb1",
     "backend/app/domains/google_sheets/router.py": "62fa5fa6eb356a0e71abd422f8ab69ee38b6045ff78301d01175ad8b2c32820a",
     "backend/app/domains/google_sheets/schemas.py": "a4f435658ca15626f31b9571f70430edec69f740a778d3c118ab2fc2368b405c",
-    "backend/app/domains/google_sheets/service.py": "d51384c30a535b992fc1d4f23a745775c5fd0d5a6dc6c757ab8521e479a43710",
+    "backend/app/domains/google_sheets/service.py": "165aa4fe5975d5089020bb442cfc0c8d02a38641b9989a4b2775b97fd883b2a2",
     "backend/app/domains/google_sheets/stock_models.py": "616eea94bdcc4bfebe1c00a765d6cc6e9e344eddc2391a7f53c578917fa5beb4",
     "backend/app/domains/google_sheets/stock_service.py": "a5b0faaf41cb04fa4f4352e5549682b1e83ade523af15091183b3ebaccd610ac",
     "backend/app/domains/google_sheets/tasks.py": "76f67c8beb5597f96181ded554930476a8143e49647ffbf984d2475c182c4e4d",
@@ -13941,7 +14544,7 @@
     "backend/app/domains/jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/jobs/events.py": "efbdca60f1b437064acac1722a9a4b19a11b489ba74b581503d7eec9f46a50ff",
     "backend/app/domains/jobs/failure_diagnostics.py": "dd8ef01cc742bd33524c362d0eec98421e160c552b8e1d9cda7f430c71e0a724",
-    "backend/app/domains/jobs/models.py": "3181dc4430847017df277fa83deb2fb5a4e2d03bbc7a3a6eb12dec70c70bbd47",
+    "backend/app/domains/jobs/models.py": "a0ca50689ba788d6bbb94b2272e0cb8187a432e674a4c5cc7e1b096ce8f577f9",
     "backend/app/domains/jobs/output_contracts/__init__.py": "1b2d0deb7180ee90b0de0240e17b0815350bf7bf6611e83ee987ed33037923a8",
     "backend/app/domains/jobs/output_contracts/consistency.py": "0609dd3af0d44acd3d1d2a531556d64cb4a2df6ac419d5c4e8dce28387f75b55",
     "backend/app/domains/jobs/output_contracts/document.py": "b5892cc7240d01d569f64c830f673581c19f1486e07292efd7ed9ef11d693526",
@@ -13950,31 +14553,37 @@
     "backend/app/domains/jobs/output_contracts/validation.py": "e26e01f2e1e3cc693805db5eeea49dbc344dc3cecc03590286ffabc3e68decf5",
     "backend/app/domains/jobs/output_runtime.py": "95773ac85373141a83886d0e6641d14124621b2cf856b831d3ad544033a9ebd3",
     "backend/app/domains/jobs/output_sources.py": "c8f788994e78be1bdba2c56450660581a7e4c7992a2bf8cc3635d6eb130a26fb",
-    "backend/app/domains/jobs/repository.py": "0860a240f6efe062c21f78e28a26df5218d781a36b194779a2ccbaad268edc76",
+    "backend/app/domains/jobs/repository.py": "33d9ba34aec2b005ae619d03a1e1e9bcda9b254899ca0ad635792f7746ba279e",
     "backend/app/domains/jobs/router.py": "080841568f18218d1d5e02592a06e8ef299970a3a830442abe7a3f7eaba9cf37",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
     "backend/app/domains/jobs/tasks.py": "30d3ce7d3b5bcceaf3ffe51a6039a20e0182069b180db32260fc0b2c3f853cb3",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
     "backend/app/domains/jobs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/jobs/use_cases/create_job.py": "a38638a48c7ed4e430c25ae51425d72e6fe428dc6fda2b7daa6950d4ce084241",
+    "backend/app/domains/jobs/use_cases/create_job.py": "adb8ba753cec97c4d399e007c5c8caa279b4b0cec92839312752a15991ee4535",
     "backend/app/domains/jobs/ws_router.py": "44421350ee99857304f94ec92ea7757b12c786d86b1a749cf3058157a4dd8885",
     "backend/app/domains/mails/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/mails/completion_events.py": "9b59846d2bce41790fb39a6952c397fbfbbf84337028043a18a42857b1f5879a",
     "backend/app/domains/mails/completion_preferences.py": "fffc8d76b73b5f48f364206bb4f377b0e5e98b89be61a65514a9a7f3c8c08931",
     "backend/app/domains/mails/router.py": "8e55d321482dbead46fbef071032265a9241ee81c5fbdaa382d275c64f19bd20",
-    "backend/app/domains/mails/service.py": "3c89dc58be89f1d305ccffc64786d9da0ae917b10706ac57d7c1b62b75507202",
+    "backend/app/domains/mails/service.py": "dd151c2365d8fc7cfa224c070844387dfe266d083ba48fa462c078056c5e53d1",
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/models.py": "0917e467a167811e5728c798c25b5c12ea77f934cac8ace29ccfb440ec175e68",
-    "backend/app/domains/modules/policy.py": "b691fd1159271477b71571dbd851a14289b0f4da976391b23e02bbf3de625716",
+    "backend/app/domains/modules/coverage.py": "37a223e39cb41be4709d2da42817cda1a8b4de9aa68635ddac7e75562030560a",
+    "backend/app/domains/modules/dispatch.py": "bb9e8faf27a33a947af05d569763eb91c8ba3ff6d7a90989a8288c798201fa18",
+    "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
+    "backend/app/domains/modules/lifecycle.py": "e05bf9a7baccc9c42bdb728bf569e4f28458099ff616eb980384b6b9eb727f2d",
+    "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
+    "backend/app/domains/modules/policy.py": "5a9340b3abb61d28fc7f5c34e0e88fc059027ac84745e5fa32f151e98799d626",
     "backend/app/domains/modules/registry.py": "d053888dc602a6330e5cdd6447895aedc40bc62abbe9fb347a9b36fdf58b049f",
-    "backend/app/domains/modules/router.py": "1a04b6b6b8e075d83552fc7619677fbaeb3331c9d6bfc8b08bff69029fe88a38",
-    "backend/app/domains/modules/schemas.py": "ae3f2c8f64f39c12d81a9638f88b91449f8cfc60f95b529b320c2a6fafbc64d7",
-    "backend/app/domains/modules/service.py": "f69c1792c583d5aff807a40d26fb8004b8cef677c82ea8b5b1b8cb7639bde525",
+    "backend/app/domains/modules/router.py": "65563a31a7418c66677aa8bbb9ad4019322f02b11a3b3965b6d18065eb437a46",
+    "backend/app/domains/modules/schemas.py": "b0ab41cf1f297aa29695a21469e35983bfea485b8d4cb966226dbab3fc8f2f52",
+    "backend/app/domains/modules/service.py": "0e2b042014a394a266dca54e36c43ca587d944cafc1df118e4a4c073cef0e13b",
     "backend/app/domains/modules/store.py": "1c99c65203a74e0d7566575947e7e0c6a08c130a8a7a6bc6263e157e508672fd",
+    "backend/app/domains/modules/tasks.py": "23b12fd7a80dec5ad1105de27b53d94eeab9ba1a0cf50adf8afb4ddd4eed691d",
+    "backend/app/domains/modules/transports.py": "54d47d0fa4582de1a32da870bff39416d2a7988bce8c8d3427f3902eb5427a5c",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
-    "backend/app/domains/polymarket/access.py": "c803e5445fbde37d1c499fc6c8b52ee45214a51df5978fcf5f2502b1d8e87ae6",
+    "backend/app/domains/polymarket/access.py": "8bf2536f1c66e78707f4f010798d3325ed298fdcc2cbc8f0a373d3701cc01413",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
     "backend/app/domains/polymarket/bullpen.py": "ca03ec6964cad79d2f098b0adac2b173f6f28e03620cc873245888ddaf382052",
     "backend/app/domains/polymarket/bullpen_llm_execution.py": "ef2d47412176ea329318d6802c87d3b62938d22785ffeaebc54ad6ad55a48aa7",
@@ -13989,10 +14598,10 @@
     "backend/app/domains/polymarket/providers.py": "260adb4f7c338e603c293837ec0127e7ec5d6f9f1843b4da790c8eb654f4f57e",
     "backend/app/domains/polymarket/redeem_coordinator.py": "3845c6755a1aa7114522fde60e9b05b35a031207db0430821fd1168c6a5c03d7",
     "backend/app/domains/polymarket/router.py": "737e7f0bc90f446fca7dd573c0ee79169810b9922cdb2b453a9a1d53f900d888",
-    "backend/app/domains/polymarket/runtime_broker.py": "2403286238b3fa6818787dc4bff629607a1fb2b9bd3912d1b152d3cd0262d92e",
+    "backend/app/domains/polymarket/runtime_broker.py": "183e4b9b5bcb51e5e7f827a7d9ec0293c505deaa01df8d7777082dc1b59e0a35",
     "backend/app/domains/polymarket/runtime_positions_refresh.py": "d761c920d1a1f3bfeee7ce4e48bcb5d81fd6df92dd8f56123d3e895006d1d1d5",
     "backend/app/domains/polymarket/schemas.py": "2ea73231511170c7dc51dd1cbca23b37d0885cf6f20ac99c628c743ced0dc4c1",
-    "backend/app/domains/polymarket/service.py": "7dd2cfdf6dd8c16cb7febf2de79ddd3abbacb66e61751575cf34b5f7e9f42e78",
+    "backend/app/domains/polymarket/service.py": "822fe177161b36e7e7f0111e37151e241cfeed39acd9ff8adb46bcbb47b399d7",
     "backend/app/domains/polymarket/stage2_models.py": "aee499a5d4afc0dec7b56186b6cf2767626f2470f420f8ea8565a38b9118e9f1",
     "backend/app/domains/polymarket/storage.py": "66a3ca17174ce261c63929217f4c9badc7b3149249306698635da459f469719b",
     "backend/app/domains/polymarket_auto_live/__init__.py": "385b9eeb39f4fa0069c280845cef612cc632b7caf9c555ce4e2ea7220a10e64f",
@@ -14046,7 +14655,7 @@
     "backend/app/domains/polymarket_direct/providers.py": "a38d077a1825b6ed431a6fec95bb4f3e7cb5eacab59a2f5e9de7a9a1f0657136",
     "backend/app/domains/polymarket_direct/router.py": "d6f595920048b81013e8c13c0bd230db373b580dcb65c1ed36714a4915d98f8b",
     "backend/app/domains/polymarket_direct/schemas.py": "7101a5c4e18c413c5f6b8e80a976a40d2fe6e746b1b4b375c7a3d250aa015922",
-    "backend/app/domains/polymarket_direct/service.py": "2b190540b32882ec034dcfc19fe5f214272e19397c16d13b917d1ecaba8c693a",
+    "backend/app/domains/polymarket_direct/service.py": "9297f938b986820a5a9ae9fde9d78b180fc1df2025df2740a969833feb915679",
     "backend/app/domains/polymarket_direct/storage.py": "66a3ca17174ce261c63929217f4c9badc7b3149249306698635da459f469719b",
     "backend/app/domains/portfolio_events/__init__.py": "08caf39f558886e8a21d6cfff08aa6f22b39b98e5d6e26cfd577f8c40e6af63e",
     "backend/app/domains/portfolio_events/common.py": "18ab19faac8d6ed5c768562135431b277cc48e1286e6e7ebddd4e68ad7b88e82",
@@ -14078,15 +14687,15 @@
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/runs/auto_rebalance_audit.py": "32e04c7bf212bcf7e989252f6877bf205ecfef13942babec807441efac0dbcab",
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
-    "backend/app/domains/runs/models.py": "3296ad11b77f50ca9c8b43924758f53ad422dbb12092f9315b951700d3db9d3d",
+    "backend/app/domains/runs/models.py": "f37d8b723d70a5e512612ef62cb2e00f6fbbf6a0f285acfe6903ba2f24281487",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
     "backend/app/domains/runs/repository.py": "65d60c48f3688f752c470c8f17bf26ba2c8673fdb34371593e3a35d5c3d5d5c6",
-    "backend/app/domains/runs/router.py": "5ba7839d089501c57dcabcea5b67fd5cbb21fc637e8a3213ca490965acbb6a5e",
+    "backend/app/domains/runs/router.py": "0e5cb9df35dcf40aed4d1915358227f2665f48fa60d980088719eb6d81ddb62b",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "e05a046b5af24fffe96610116cbc647799b42eb112c6f39f27ddc7950a1fb8f0",
     "backend/app/domains/runs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/use_cases/create_run.py": "6ceee7f87e879c7f7b516cd063713dda1b8bb8706996d18df8cc9154c6df83f8",
+    "backend/app/domains/runs/use_cases/create_run.py": "6ebc9862f3964c8343322d977ead5462910c6630ee4e8f2ff16702f86d24b2d5",
     "backend/app/domains/runs/ws_router.py": "feabc8791610cad44485bae5060f8205415a876de51f5932e2e36c2898890326",
     "backend/app/domains/sports_rankings/__init__.py": "a42cf39ed63a3cf2677034f74a4ef88a788a621375b5955acf3db39b45143759",
     "backend/app/domains/sports_rankings/capture.py": "c39ce090b0e21cbf1345741f9bac2cc182460d1416e422bc8efcab17839674d4",
@@ -14127,8 +14736,8 @@
     "backend/app/domains/zerodha/repository.py": "f985fb3eb11d0a96fea0bf5c5513c1cbf9b03602b19c461a05e46de6bd389af2",
     "backend/app/domains/zerodha/router.py": "e5d4e1e29a2d8e712ad4b3fa25debe93e7268570b68347a008229a37b6af8628",
     "backend/app/domains/zerodha/schemas.py": "d4a93c5f2bba2e12dbc4112286125bc030c957e9ab3d0139cf5e4768adf3667e",
-    "backend/app/domains/zerodha/service.py": "29ae95966805ee763e41558a991cc49152267d44af16524523705276f0945046",
-    "backend/app/domains/zerodha/tasks.py": "20f507d262892031fce4e3e6a3eb463c6d9e7fa6458828d20527597a1fd11c29",
+    "backend/app/domains/zerodha/service.py": "c3cb5a6d9b2f5be8bff92439854762e90c72f193bbfd85685ec81dfa0fd49d84",
+    "backend/app/domains/zerodha/tasks.py": "7dbd93a59aebbcb0182a4ab53a41b6aad1f01e051faca9f1bccf1d210c9cf1fd",
     "backend/app/domains/zerodha/threats.py": "56d5bb802a3423b6b4ae2cd620f088d790e9d99c2e4167e1cbdc103fa323d4af",
     "backend/app/domains/zerodha/threats_router.py": "80368e13fba08e91c3a27e0128592bc96b98f41b29c9e77df69d9f7aacce041d",
     "backend/app/domains/zerodha/threats_schemas.py": "e56577a914fe5bea3f3f558fceb71c03f0f1767ffda3612da77445dc1f7dc75a",
@@ -14138,7 +14747,7 @@
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/outbox/job_dispatch.py": "490f18332325f50d8b8d76db92a79904729bcb842472c930750d7d76f0cf952b",
+    "backend/app/infrastructure/database/outbox/job_dispatch.py": "a51df2517b52900cf4ab9b1ab6943efd67b8acb87b1276ba90b71bb82da55f6e",
     "backend/app/infrastructure/database/outbox/models.py": "a331a3011182c6a6f7d959db71615c6622419d51f2d6d52a83750f5a5b0c703d",
     "backend/app/infrastructure/database/session.py": "a9677b6bab386476db0493aa2f849a66c5f63312810aafa99a5e0be54947c2e9",
     "backend/app/infrastructure/database/sync_session.py": "f974fe13644cf266ef6b1eba8e4280b5412475ce6a47b5f62be90dfd857cd29e",
@@ -14150,9 +14759,9 @@
     "backend/app/infrastructure/messaging/idempotency.py": "73b3756d0e42518d7392ab116f70c123a3b2f86d6dfaf1c2c5a3e8dec20a1022",
     "backend/app/infrastructure/messaging/job_delivery.py": "5ed60b6b8bb9da32c96e37418cc0349f62256f59c8651b86b90bd3964fb1f463",
     "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
-    "backend/app/infrastructure/messaging/recovery_celery.py": "e26d7687987a37581414f55bfea0d0414898d24557c7b7b746d0e292d505d0e9",
+    "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "a2fde3916245ea368978273f425824a744436660bd188662535d92e1a937eee3",
+    "backend/app/main.py": "076631185dd3acb188de4612c628721d09033c04ca094d8c94f29e9aac2a235d",
     "backend/app/models/__init__.py": "6216721873771a689d511e4f841eccca718d1d9be5ba9e773322b1d9a7289e63",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -14161,14 +14770,15 @@
     "backend/app/shared/portfolio_summary.py": "20bccb9fafbeb7d8ebca0b1da793bc935d873103c581b530da801559ba1c851e",
     "backend/app/shared/types.py": "d2ecdcbf27e937c869e1bfd0b508681eb2a3b40b0ca8070dec39561bb8ca900b",
     "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
-    "backend/app/shared/ws_relay.py": "109dec6742fe9b2787efd793d07526a3ffbaf7262b9d6477de854fdc2936799a",
+    "backend/app/shared/ws_relay.py": "249b615b0ad457839d530eb25f0f504bead19a5a63874adec607c4622504296b",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/main.py": "9d1970a69018668f145227e4ba0fa3fd84b7900ce9207b22b8495786167e0295",
+    "backend/app/uat2/main.py": "a01db4d928abec3cdc4e5af787963ca37fc094bf430c2784ff025904bb9d645d",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
-    "backend/app/uat2/worker.py": "4e43a596627005530dcbf10a68e55b57de68ae8d963d1196020e6a2c7b220241",
+    "backend/app/uat2/stage07_lifecycle_smoke.py": "31f8d111818f63437b7a3fe893cce9052719d61f9d85004ce9e715688f001b40",
+    "backend/app/uat2/worker.py": "64ece6aa3a3cf5b165d1d7ab3be46f39188fac9718b57a2124ae208df746f2df",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
     "frontend/app/(auth)/register/page.tsx": "025d5a3992465a4c2fc39f9066d3a25b619214af0a0c96a302efbfc0074ace97",

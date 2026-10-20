@@ -332,3 +332,7 @@ app.include_router(zerodha_threats_router)
 @app.get("/")
 async def root():
     return {"status": "ok", "app": settings.app_name, "version": settings.version}
+
+# Applied after the complete mount graph; no ADMIN/job bypass for new work.
+from app.domains.modules.transports import install_route_policy
+install_route_policy(app)

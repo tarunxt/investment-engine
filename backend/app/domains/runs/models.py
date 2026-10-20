@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import false as sa_false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -27,6 +28,11 @@ class Run(Base, TimestampMixin):
     prompt_id: Mapped[int | None] = mapped_column(
         ForeignKey("prompts.id", ondelete="SET NULL"), nullable=True
     )
+    # Server-derived module attribution; legacy unbound work is never assumed eligible.
+    module_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    module_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    module_cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sa_false())
+
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     prompt_preview: Mapped[str] = mapped_column(String(284), nullable=False)
     status: Mapped[JobStatus] = mapped_column(
@@ -166,6 +172,9 @@ class AutoRebalanceWorkflow(Base, TimestampMixin):
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    module_id: Mapped[str | None] = mapped_column(String(40),nullable=True)
+    module_version: Mapped[int | None] = mapped_column(Integer,nullable=True)
+    module_cancel_requested: Mapped[bool] = mapped_column(Boolean,nullable=False,default=False,server_default=sa_false())
     portfolio: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(128), nullable=False)

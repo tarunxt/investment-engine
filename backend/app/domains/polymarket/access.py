@@ -37,6 +37,21 @@ async def require_operator_user_id(user_id:int) -> None:
     logger.info('operator_object_access actor=%s decision=%s',user_id,'allow' if allowed else 'deny')
     if not allowed:raise HTTPException(403,'Singleton financial runtime requires an active administrator role')
 
+    from app.domains.modules.tasks import _reconciliation_read
+    if _reconciliation_read.get():
+        from app.domains.modules.execution import _safety_owner
+        _safety_owner.set(user_id)
+    else:
+        from app.domains.modules.registry import REGISTRY,ModuleId,platform_available
+        from app.core.uat2 import uat2_mode
+        if not platform_available(REGISTRY[ModuleId.BULLPEN_RESEARCH],uat2=uat2_mode())[0]:
+            raise HTTPException(403,{'code':'MODULE_POLICY_DENIED','reasons':['MODULE_UNAVAILABLE']})
+        from app.domains.modules.policy import ModulePolicy
+        async with AsyncSessionLocal() as session:
+            decision=await ModulePolicy(session).authorize(owner_id=user_id,resource_owner_id=user_id,
+                module_id='bullpen_research',capability='view',boundary='worker')
+        if not decision.allowed:raise HTTPException(403,{'code':'MODULE_POLICY_DENIED','reasons':decision.reasons})
+
 
 def require_operator_user_id_sync(user_id:int) -> None:
     from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -45,6 +60,19 @@ def require_operator_user_id_sync(user_id:int) -> None:
     allowed=row is not None and row.role==UserRole.ADMIN and row.is_active
     logger.info('operator_worker_access actor=%s decision=%s',user_id,'allow' if allowed else 'deny')
     if not allowed:raise PermissionError('Singleton financial runtime requires an active administrator role')
+
+    from app.domains.modules.tasks import _reconciliation_read
+    if _reconciliation_read.get():
+        from app.domains.modules.execution import _safety_owner
+        _safety_owner.set(user_id)
+    else:
+        from app.domains.modules.lifecycle import ModuleLifecycleDenied
+        # All singleton/public research/runtime modules remain unavailable in
+        # the canonical registry. An ADMIN role does not override that gate.
+        from app.domains.modules.registry import REGISTRY,ModuleId,platform_available
+        from app.core.uat2 import uat2_mode
+        if not platform_available(REGISTRY[ModuleId.BULLPEN_RESEARCH],uat2=uat2_mode())[0]:
+            raise ModuleLifecycleDenied('Singleton module unavailable')
 
 
 def require_operator_intent_sync(intent_id: str) -> None:
