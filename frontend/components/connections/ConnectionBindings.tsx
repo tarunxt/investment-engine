@@ -8,19 +8,19 @@ type Binding={id:string;provider:string;app_ownership_mode:'user_owned'|'platfor
 type Metadata={schema_version:1;owner_id:number;connections:Binding[]};
 export function ConnectionBindings(){
  const {user}=useAuth();const {data:session,status}=useSession();const owner=status==='authenticated'?user?.id:undefined;const sessionGeneration=session?.generation;const generation=useRef(0);
- const [retry,setRetry]=useState(0);const [state,setState]=useState<{owner:number;data?:Metadata;error?:string}>();
+ const [retry,setRetry]=useState(0);const [state,setState]=useState<{owner:number;generation?:string;data?:Metadata;error?:string}>();
  useEffect(()=>{
   const ticket=++generation.current;const controller=new AbortController();
   if(owner!==undefined){
-   setState({owner});
+   setState({owner,generation:sessionGeneration});
    void apiService.fetch<Metadata>('/backend-api/me/connections',{signal:controller.signal,cache:'no-store',timeoutMs:8000}).then(data=>{
     if(data.schema_version!==1||data.owner_id!==owner||!Array.isArray(data.connections)||data.connections.length>50||data.connections.some(row=>!row||typeof row.id!=='string'||!['user_owned','platform_managed'].includes(row.app_ownership_mode)||typeof row.status!=='string'||typeof row.version!=='number'||!row.readiness||typeof row.readiness.ready_for_adapter!=='boolean'||row.readiness.module_access_granted!==false||row.readiness.financial_execution_granted!==false))throw new Error('Invalid private metadata');
-    if(!controller.signal.aborted&&generation.current===ticket)setState({owner,data});
-   }).catch(()=>{if(!controller.signal.aborted&&generation.current===ticket)setState({owner,error:'Connection metadata is unavailable. No provider action was performed.'});});
+    if(!controller.signal.aborted&&generation.current===ticket)setState({owner,generation:sessionGeneration,data});
+   }).catch(()=>{if(!controller.signal.aborted&&generation.current===ticket)setState({owner,generation:sessionGeneration,error:'Connection metadata is unavailable. No provider action was performed.'});});
   }
   return()=>{controller.abort();generation.current++;};
  },[owner,sessionGeneration,retry]);
- const visible=state?.owner===owner?state:undefined;
+ const visible=state?.owner===owner&&state?.generation===sessionGeneration?state:undefined;
  return <section aria-labelledby="binding-heading" className="space-y-3 rounded-xl border p-5 min-w-0">
   <h2 id="binding-heading" className="font-semibold">Private connection bindings</h2>
   <p className="text-sm text-muted-foreground">Use your own Kite app or an approved CredX-managed app. Each account retains its own authorization. App secrets and tokens are never displayed here.</p>

@@ -1,0 +1,146 @@
+{
+  "base": "6e56dc99b355f3a1c1ce76ea0433f6865e3750be",
+  "scope": "local-only same-owner session display repair; no publication/deployment",
+  "copied_original_files": {
+    "frontend/components/connections/ConnectionBindings.tsx": {
+      "sha256": "9ceadc36ee25f2e4a3806977158d97a560fde8139986d71e8d9d14f1d399d7c8",
+      "byte_identical_to_original_uncommitted_copy": true
+    },
+    "frontend/tests/stage09-connection-bindings.test.mjs": {
+      "sha256": "3c63e37d0eb6a166704c6c69d934276d2d6e0e8278ad8452d11e521cbee01745",
+      "byte_identical_to_original_uncommitted_copy": true
+    }
+  },
+  "before": {
+    "result": "7 passed,1 failed,0 skipped",
+    "failure": "same-owner replacement hides prior binding during the first render before effects",
+    "signature": "AssertionError: input expected not to match /PRIOR/; old same-owner metadata still present before effects"
+  },
+  "after": {
+    "frontend": "33 passed,0 failed,0 skipped",
+    "backend": "89 passed,3090 warnings in13.82s",
+    "production_build_typescript": "PASS; Webpack compiled25.3s, TypeScript14.3s",
+    "inventory": "PASS; unresolved=[]",
+    "diff_check": "PASS"
+  },
+  "frontend_files_executed": [
+    "tests/stage09-connection-bindings.test.mjs",
+    "tests/stage08-module-policy.test.mjs",
+    "tests/stage08-module-provider-races.test.mjs",
+    "tests/private-account-boundary.test.mjs"
+  ],
+  "backend_files_executed": [
+    "backend/tests/test_stage09_connections.py",
+    "backend/tests/test_zerodha_manual_recovery.py",
+    "backend/tests/test_stage07_lifecycle.py",
+    "backend/tests/test_stage06_modules.py"
+  ],
+  "browser": {
+    "synthetic": true,
+    "frontend_port": 51593,
+    "backend_port": 51594,
+    "browser": "development Playwright Chromium",
+    "process_ownership": "Only direct Popen child handles; no shared process inspection or control",
+    "browser_result": {
+      "stage": "09",
+      "checked_at": "2026-10-20T12:54:00.939Z",
+      "url": "http://localhost:51593/console/profile/connections",
+      "browser": "isolated development Playwright Chromium, not user Chrome",
+      "checks": [
+        "usera real form login, own mode/account, secret-free metadata and no authority grant",
+        "usera actual metadata refresh",
+        "usera reload retains own binding",
+        "usera logout and direct protected-route denial",
+        "same-owner reauthentication obtains a distinct real Auth.js session generation and owned metadata",
+        "same-owner replacement logout denies protected reload",
+        "same-browser different-owner replacement displays only B binding after A logout",
+        "userb real form login, own mode/account, secret-free metadata and no authority grant",
+        "userb actual metadata refresh",
+        "userb reload retains own binding",
+        "userb logout and direct protected-route denial",
+        "admin real form login, own mode/account, secret-free metadata and no authority grant",
+        "admin actual metadata refresh",
+        "admin reload retains own binding",
+        "admin logout and direct protected-route denial"
+      ],
+      "sizes": [
+        {
+          "name": "usera",
+          "width": 320,
+          "documentWidth": 320
+        },
+        {
+          "name": "usera",
+          "width": 360,
+          "documentWidth": 360
+        },
+        {
+          "name": "usera",
+          "width": 390,
+          "documentWidth": 390
+        },
+        {
+          "name": "usera",
+          "width": 430,
+          "documentWidth": 430
+        },
+        {
+          "name": "userb",
+          "width": 320,
+          "documentWidth": 320
+        },
+        {
+          "name": "userb",
+          "width": 360,
+          "documentWidth": 360
+        },
+        {
+          "name": "userb",
+          "width": 390,
+          "documentWidth": 390
+        },
+        {
+          "name": "userb",
+          "width": 430,
+          "documentWidth": 430
+        },
+        {
+          "name": "admin",
+          "width": 320,
+          "documentWidth": 320
+        },
+        {
+          "name": "admin",
+          "width": 360,
+          "documentWidth": 360
+        },
+        {
+          "name": "admin",
+          "width": 390,
+          "documentWidth": 390
+        },
+        {
+          "name": "admin",
+          "width": 430,
+          "documentWidth": 430
+        }
+      ],
+      "passed": 27,
+      "synthetic": true
+    },
+    "result": "passed",
+    "owned_children_stopped": true
+  },
+  "logs": {
+    "stage09-display-repair-before.log": "4e8b9123369e9a2c041f27ae681b030d44dfeae05d36fa44a58beb1597f3a3d2",
+    "stage09-display-repair-frontend.log": "f9f8728d754c581c2e77961337f01d6784c68a6c2aa71fe649fa01bd2b106fa6",
+    "stage09-display-repair-backend.log": "83b062cfef4b20366e2a0ef0565718f19dad894af8d8ffc3b87adafe4764ad50",
+    "stage09-display-repair-build.log": "b6d56e77ad1284d0193ade22e82261e6c4ef5c363790198bdd6ac6d5a4e077ae",
+    "stage09-display-repair-browser.log": "0a867890cf5d641d48cae58f2d87b94c894a5dc872ae69d998fa6355669d3cdf"
+  },
+  "build_sha_note": "Local build verifies tested source bytes above, not remote CI/artifact acceptance for the containing new commit.",
+  "unchanged_published_source": "6e56dc99b355f3a1c1ce76ea0433f6865e3750be; PR1251/verified artifacts retained",
+  "baseline_failures": "14 independently identified frontend failures remain unresolved and unwaived; affected files unchanged; broad suite not rerun for this narrow fix.",
+  "new_ci_artifacts_independent_review_uat_owner": "PENDING",
+  "stage10": "not authorized"
+}

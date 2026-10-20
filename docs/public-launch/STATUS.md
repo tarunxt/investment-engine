@@ -1,3 +1,13 @@
+# Stage09 same-owner display repair — local successor only
+
+Current branch remains `codex/stage09-recovery-successor-20261020-task3`, worktree task-3/stage09-recovery-successor. Parent authorized local repair only, based on exact published `6e56dc99b355f3a1c1ce76ea0433f6865e3750be`. The new candidate is this checkpoint's containing commit, recorded fully in parent handoff. Original task-5 checkout/branch/processes are preserved. Published draft PR1251 and its passing CI/artifact receipts stay at6e56dc99; no changed SHA is pushed, no remote metadata is edited, and no deployment occurs in this phase.
+
+Code: NARROW DISPLAY REPAIR COMPLETE. Only ConnectionBindings.tsx and its existing regression test file are changed in executable/test source, byte-identical to the verified original uncommitted safeguard. A pre-effect first render now requires matching owner AND session generation before displaying prior metadata/error. The added regression first failed on6e56dc99 (7pass/1fail), then passed with the repair. Local verification:33 frontend tests,89 backend connection/recovery/module guards, Webpack/TypeScript build and inventory PASS;27 temporary synthetic browser checks PASS, including actual logout/reload, distinct same-owner session generation and same-browser A-to-B isolation. Both directly owned loopback child processes were stopped; original preview untouched. See STAGE09_DISPLAY_REPAIR.md and evidence/stage09-display-repair-local.json.
+
+Exact new-head CI / native artifact / independent successor review / Stage09 UAT2 deployment / live verification / owner acceptance remain PENDING. Provider approval remains PENDING. Parent coordinates any new publication approval; do not relabel6e56dc99 artifacts. Existing14 baseline frontend failures remain unresolved/not waived; no broad rerun claimed. Stage10 is excluded. Live owner-only simulation remains accepted Stage08 `61ce447ba35f4db7cd06fd550c62557450247af3`. No AWS, credential, backend policy, migration, provider or shared-service changes.
+
+The records below are preserved earlier checkpoints; the current local-only scope and source/gate record above supersede their active-phase statements.
+
 # Stage09 isolated recovery successor — local only
 
 Current worktree: task-3/stage09-recovery-successor. Unique branch: `codex/stage09-recovery-successor-20261020-task3`, based on `fc4d51313e2d86e5bc807ad91db877a26aa0bb89`; accepted/live Stage08 remains `61ce447ba35f4db7cd06fd550c62557450247af3`. Owner accepted Stage08 and authorized Stage09; no Stage10. Original task-5 checkout/branch/processes are preserved. The current parent phase explicitly forbids publication, PR creation, deployment, AWS, live credentials and shared-service starts.
