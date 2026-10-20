@@ -7,6 +7,7 @@ The database must be empty initially; this script never resets an existing DB.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -95,6 +96,32 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
                 ),
             }
     return snapshot
+
+
+def require_forward_baseline_preserved(before: dict, after: dict) -> None:
+    """Permit only Stage04's explicit additive outbox fields, not arbitrary drift.
+
+    Existing columns, constraints, indexes and values retain the strict check.
+    The separate Stage04 Docker gate proves its full up/down/up migration.
+    """
+    checked = deepcopy(after)
+    if "outbox" in before and "outbox" in checked:
+        old_names = {column[0] for column in before["outbox"]["columns"]}
+        added = {column[0]:column for column in checked["outbox"]["columns"] if column[0] not in old_names}
+        if added:
+            require(set(added) == {"available_at", "execution_attempts"}, "Unexpected forward outbox column addition")
+            require(tuple(added["available_at"][1:]) == ("TIMESTAMP", True, None), "Unexpected available_at definition")
+            attempt = added["execution_attempts"]
+            require(attempt[1] == "INTEGER" and attempt[2] is False and attempt[3] in ("0", "'0'", "'0'::integer"), "Unexpected execution_attempts definition")
+            checked["outbox"]["columns"] = [column for column in checked["outbox"]["columns"] if column[0] in old_names]
+            rows = []
+            for row in checked["outbox"]["rows"]:
+                values = json.loads(row)
+                require(values.pop("available_at", "missing") is None and values.pop("execution_attempts", None) == 0,
+                        "Legacy outbox delivery state changed")
+                rows.append(json.dumps(values, sort_keys=True))
+            checked["outbox"]["rows"] = sorted(rows)
+    require(checked == before, "Forward head upgrade changed existing schema/data")
 
 
 def seed_baseline(engine: sa.Engine) -> None:
@@ -242,7 +269,7 @@ def main() -> None:
         require(revision(engine)==head, "Full-chain upgrade did not stamp its exact head")
         alembic("current", "--check-heads")
         verify_schema(engine)
-        require(baseline_snapshot(engine,exclude_tables=frozenset(),include_tables=before)==before, "Forward head upgrade changed existing schema/data")
+        require_forward_baseline_preserved(before, baseline_snapshot(engine,exclude_tables=frozenset(),include_tables=before))
         after=baseline_snapshot(engine,exclude_tables=frozenset())
         alembic("upgrade", "head")
         require(revision(engine)==head, "Idempotent upgrade changed head stamp")

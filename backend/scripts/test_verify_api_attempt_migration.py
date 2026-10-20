@@ -1,5 +1,7 @@
 """Offline tests: no Alembic commands or PostgreSQL connections are executed."""
 
+import json
+from copy import deepcopy
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -65,6 +67,39 @@ class MigrationSafetyTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 verifier.alembic("downgrade", verifier.BASELINE)
             run.assert_not_called()
+
+    def forward_snapshots(self):
+        before = {"outbox": {"columns": [("id", "UUID", False, None)], "rows": [json.dumps({"id":"synthetic"},sort_keys=True)], "indexes":[]}}
+        after = deepcopy(before)
+        after["outbox"]["columns"] += [("available_at", "TIMESTAMP", True, None), ("execution_attempts", "INTEGER", False, "0")]
+        after["outbox"]["rows"] = [json.dumps({"id":"synthetic","available_at":None,"execution_attempts":0},sort_keys=True)]
+        return before,after
+
+    def test_only_exact_stage04_additions_preserve_forward_baseline(self):
+        before,after=self.forward_snapshots()
+        verifier.require_forward_baseline_preserved(before,after)
+        self.assertEqual(len(after["outbox"]["columns"]),3, "Verifier must not mutate evidence")
+        verifier.require_forward_baseline_preserved(before,before)
+
+    def test_forward_head_still_rejects_old_data_schema_and_constraint_changes(self):
+        before,after=self.forward_snapshots()
+        for kind in ("old-value","old-column","index","legacy-attempt"):
+            changed=deepcopy(after)
+            if kind=="old-value": changed["outbox"]["rows"]=[json.dumps({"id":"changed","available_at":None,"execution_attempts":0},sort_keys=True)]
+            elif kind=="old-column": changed["outbox"]["columns"][0]=("id","TEXT",False,None)
+            elif kind=="index": changed["outbox"]["indexes"]=["unexpected"]
+            else: changed["outbox"]["rows"]=[json.dumps({"id":"synthetic","available_at":None,"execution_attempts":1},sort_keys=True)]
+            with self.subTest(kind=kind),self.assertRaises(AssertionError): verifier.require_forward_baseline_preserved(before,changed)
+
+    def test_forward_head_rejects_any_unapproved_addition_or_default(self):
+        before,after=self.forward_snapshots()
+        for kind in ("extra","partial","type","default"):
+            changed=deepcopy(after)
+            if kind=="extra": changed["outbox"]["columns"].append(("unapproved","TEXT",True,None))
+            elif kind=="partial": changed["outbox"]["columns"].pop()
+            elif kind=="type": changed["outbox"]["columns"][1]=("available_at","TEXT",True,None)
+            else: changed["outbox"]["columns"][2]=("execution_attempts","INTEGER",False,"1")
+            with self.subTest(kind=kind),self.assertRaises(AssertionError): verifier.require_forward_baseline_preserved(before,changed)
 
     def test_workflow_uses_ephemeral_containers_without_production_access(self):
         workflow_path = verifier.BACKEND.parent / ".github/workflows/api-attempt-migration.yml"

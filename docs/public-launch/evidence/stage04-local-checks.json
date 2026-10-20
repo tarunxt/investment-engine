@@ -25,7 +25,11 @@
       "passed": 7
     },
     "actual_local_API_BFF_idempotency": "passed",
-    "actual_local_Chrome_B_own_job5_foreign_A_job4_denied": "passed"
+    "actual_local_Chrome_B_own_job5_foreign_A_job4_denied": "passed",
+    "API_attempt_guard_unit_tests": {
+      "passed": 9
+    },
+    "API_attempt_full_guarded_Docker_roundtrip": "passed_through_tenant_idempotency_001_with_repeated_head_unchanged"
   },
   "local_replay": {
     "result": "passed",
@@ -58,6 +62,7 @@
     "Controlled crash-window fault injection; no real paid-provider crash",
     "SQLite preview uses fake execution; distributed guard proven separately in real PostgreSQL/Redis",
     "Historical unversioned outbox/cache state is not automatically recovered",
-    "Financial order deduplication remains Stage14"
+    "Financial order deduplication remains Stage14",
+    "Broader Stage03 frontend suite retains12 known inherited failures; frontend source unchanged"
   ]
 }
