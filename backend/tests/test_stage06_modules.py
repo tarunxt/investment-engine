@@ -75,7 +75,7 @@ def test_new_and_existing_accounts_default_to_no_modules_without_get_writes(modu
         assert response.json()['version']==0
         assert len(response.json()['modules'])==10
         for module in response.json()['modules']:
-            assert module['selection']=={'enabled':False,'version':0,'config':{'schema_version':1}}
+            assert module['selection']=={'enabled':False,'version':0,'config':{'schema_version':1},'schedules_paused':True}
             assert module['execution']['capable'] is False
             assert module['entitlement']=={'jurisdiction':'unknown','plan':'unknown'}
             assert all(not cap['allowed'] for cap in module['capabilities'].values())

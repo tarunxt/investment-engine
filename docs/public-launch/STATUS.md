@@ -1,5 +1,13 @@
 # Public-launch implementation status
 
+## Stage07 active — owner-accepted deployed06
+
+Owner accepted06 and authorized07 by live voice20October2026. Exact deployed base f985ea727eb04d140f5794d95880be50418ff1fb; PR1247/exact CI/artifact PASS. Parent reports independent93 policy/isolation+8 PostgreSQL and live migration/services checks11:31:22IST; this task fresh signed-in live browser Preferences/build, ten-module/default-off contract, Jobs/refresh and Runs/Bullpen unavailable PASS. Owner acceptance is separate and now explicit.
+
+Started isolated codex/stage07-module-lifecycle-20261020 in task-5/stage07-module-lifecycle from that exact base. Complete stages/07.md recovered: backend lifecycle enforcement/outbox/cancellation/schedules/streams/effect race checks. UI belongs to08; prior06 UI-stage references are superseded. See STAGE07_REQUIREMENT_MAP.md. Code:IMPLEMENTED_LOCAL_VERIFICATION_IN_PROGRESS / CI:NOT_RUN07 / UAT2 deployment:NOT_RUN07 / independent review:PENDING07 / owner acceptance:PENDING07 / external approval:UNCHANGED. No08 until new owner acceptance. Production/allowlist/simulation/disabled routes/limited role unchanged; existing sole executor handles UAT2 READY/US$10/21Oct2026 21:04:13IST check and deployment.
+
+Stage07 local checkpoint: full release selection1230 passed after final refinements;110 combined SQL/ownership/stream checks and195 layering/recovery/audit checks passed; real Next build and refreshed localhost lifecycle checks passed; fresh Chrome Preferences/Job history/default-off/paused module/Run checks passed; private no-network native-compatible smoke7 checks passed. Initial Docker PostgreSQL3passed/1fixture failure; corrected6-check rerun remains unverified because daemon stopped. Mandatory Docker CI gate retained. Candidate/CI/artifact/independent/UAT2/owner gates remain pending. See STAGE07_REVIEW.md and STAGE07_COVERAGE.md; no provider approval or complete operational rollout inferred.
+
 ## Stage06 active — owner-accepted/deployed05
 
 Prerequisite05 is accepted at deployed10c5a2c1561e8d1cf0e5b54c5b53e89e0c564c95. Exact CI39371432073/39371432077/39371432106 and native bundle12241567561 verified; sole executor deployed20Oct10:38:51IST with the specifically approved narrow cost-only membership, User.role remains user and no routes enabled. Independent checks53 runtime/ownership/financial +10 migrations passed; two optimizer failures match unchanged Stage04. Fresh signed-in Mac browser Jobs/refresh, Runs/Bullpen unavailable, Preferences/reload passed. User explicitly accepted05 and authorized06 at05:17:35UTC. These results supersede historical05 pending entries below.

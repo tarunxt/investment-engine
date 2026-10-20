@@ -136,7 +136,8 @@ async def test_managers_and_cache_recheck_current_owner_before_objects(boundary,
         with pytest.raises(HTTPException) as exc: await call()
         assert exc.value.status_code == 403
     a.users[0].role = UserRole.ADMIN; a.session.commit()
-    await access.require_operator_user_id(a.users[0].id)
+    with pytest.raises(HTTPException) as disabled:await access.require_operator_user_id(a.users[0].id)
+    assert disabled.value.detail['code']=='MODULE_POLICY_DENIED'
     a.users[0].is_active = False; a.session.commit()
     with pytest.raises(HTTPException) as exc: await access.require_operator_user_id(a.users[0].id)
     assert exc.value.status_code == 403
@@ -232,8 +233,10 @@ async def test_real_operator_warm_objects_preserved_then_revoked(boundary, monke
     copy=PolymarketBotManager();direct=PolymarketDirectBotManager()
     copy._bots[a.users[0].id]=_LoopBoundBot(cached,asyncio.get_running_loop())
     direct._bots[a.users[0].id]=cached
-    assert await copy.get_bot(a.users[0].id) is cached
-    assert await direct.get_bot(a.users[0].id) is cached
+    # Stage07 adds the independent module gate: ADMIN cannot revive an unavailable runtime.
+    for manager in (copy,direct):
+        with pytest.raises(HTTPException) as disabled:await manager.get_bot(a.users[0].id)
+        assert disabled.value.detail['code']=='MODULE_POLICY_DENIED'
     a.users[0].role=UserRole.USER;a.session.commit()
     for manager in (copy,direct):
         with pytest.raises(HTTPException) as exc:await manager.get_bot(a.users[0].id)
@@ -297,7 +300,7 @@ def test_persisted_intent_owner_blocks_legacy_execution_and_keeps_history(bounda
         intent_id=intent.id,operation='execute',lease_token=None,source='synthetic')
     assert intent.status=='READY' and run.summary=='Frozen synthetic audit'
     a.users[0].role=UserRole.ADMIN;a.session.commit()
-    access.require_operator_intent_sync(intent.id)
+    with pytest.raises(PermissionError):access.require_operator_intent_sync(intent.id)
     a.users[0].is_active=False;a.session.commit()
     with pytest.raises(PermissionError):access.require_operator_intent_sync(intent.id)
 

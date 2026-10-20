@@ -67,8 +67,10 @@ class CreateJobUseCase:
     async def _create(self, cmd, scheduled_at):
         if self._before_create is not None:
             self._before_create()
+        from app.domains.modules.lifecycle import admit_enqueue, analysis_module
+        identity = await admit_enqueue(self._session, int(cmd.user_id), analysis_module(cmd.auto_rebalance_portfolio), scheduled=cmd.scheduled_at is not None)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        job = Job(prompt=cmd.prompt, provider=cmd.provider, model=cmd.model,
+        job = Job(module_id=identity.module_id, module_version=identity.version, prompt=cmd.prompt, provider=cmd.provider, model=cmd.model,
             user_id=cmd.user_id, status=JobStatus.SCHEDULED if scheduled_at and scheduled_at > now else JobStatus.PENDING,
             scheduled_at=scheduled_at, auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
             auto_rebalance_sequence=cmd.auto_rebalance_sequence, auto_rebalance_label=cmd.auto_rebalance_label)

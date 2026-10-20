@@ -254,3 +254,8 @@ def test_failed_cancellation_read_preserves_original_failure(monkeypatch):
     failed.assert_called_once()
     assert failed.call_args.args[3]=='p/m returned invalid output contract (synthetic)'
     assert current_output_context() is None
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

@@ -253,3 +253,8 @@ class DeepSeekProviderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

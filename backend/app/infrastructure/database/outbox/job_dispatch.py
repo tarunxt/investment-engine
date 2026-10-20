@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 def dispatch_due(session, publisher, *, now=None, limit=MAX_BATCH, should_stop=lambda: False):
+    from app.domains.modules.lifecycle import relay_selection_events
+    relay_selection_events(session)
     now = now or datetime.utcnow()
     due = or_(OutboxMessage.published_at.is_(None), OutboxMessage.published_at <= now - timedelta(seconds=RETRY_SECONDS))
     joined = (OutboxMessage.payload['job_id'].as_integer() == Job.id) & (OutboxMessage.payload['user_id'].as_integer() == Job.user_id)
@@ -39,10 +41,22 @@ def dispatch_due(session, publisher, *, now=None, limit=MAX_BATCH, should_stop=l
         if recovery_mode():
             try: require_equity_analysis(job.auto_rebalance_portfolio, job.request_context_json)
             except RecoveryBlocked: continue
+        from app.domains.modules.lifecycle import current_sync, WorkIdentity, ModuleLifecycleDenied
+        try:
+            if not job.module_id or job.module_version is None or job.module_cancel_requested:
+                raise ModuleLifecycleDenied('No current work binding')
+            # Fence the final dispatch point with selection writes; hold through
+            # broker publication below, then release promptly.
+            from app.domains.modules.models import UserModulePreferences
+            session.execute(select(UserModulePreferences.user_id).where(UserModulePreferences.user_id==job.user_id).with_for_update())
+            current_sync(session,WorkIdentity(job.user_id,job.module_id,job.module_version),scheduled=job.scheduled_at is not None)
+        except ModuleLifecycleDenied:
+            job.status=JobStatus.FAILED;job.error_message='Cancelled: module policy denied';job.module_cancel_requested=True
+            session.commit();continue
         changed = session.execute(update(OutboxMessage).where(
             OutboxMessage.id == message.id, OutboxMessage.topic == TOPIC, due,
         ).values(published_at=now, attempts=OutboxMessage.attempts + 1).execution_options(synchronize_session=False))
-        session.commit()  # Durable claim before ambiguous network I/O.
+        session.flush()  # Retain selection fence through bounded broker publication.
         if changed.rowcount != 1: continue
         counts['claimed'] += 1
         try:
@@ -53,6 +67,8 @@ def dispatch_due(session, publisher, *, now=None, limit=MAX_BATCH, should_stop=l
             # No prompt, key, broker URL or exception text is needed here.
             logger.warning('Durable job %s dispatch deferred', job.id)
             counts['failed'] += 1
+        finally:
+            session.commit()  # Dispatch began before a waiting disable commit.
     return counts
 
 

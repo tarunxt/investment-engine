@@ -259,3 +259,8 @@ def test_run_keeps_independent_samples_and_blocks_invalid_current_outputs(invali
     assert {row["Rationale Cruxx"] for row in exported} == {"Sample 77 rationale", "Sample 78 rationale"}
     assert all(row["Run #"] == 0 and row["LLM"] == "Original source model" for row in exported)
     assert current_output_context() is None
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

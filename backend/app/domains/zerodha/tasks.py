@@ -189,8 +189,8 @@ def enqueue_daily_portfolio_sync(self):
         }
 
     with SyncSessionLocal() as db:
-        cred_repo = SyncZerodhaCredentialRepository(db)
-        active_user_ids = cred_repo.list_active_user_ids(datetime.now(tz=timezone.utc))
+        from app.domains.modules.lifecycle import eligible_scheduled_user_ids
+        active_user_ids = eligible_scheduled_user_ids(db, "zerodha_rebalance")
 
     for user_id in active_user_ids:
         sync_portfolio_snapshot_task.delay(user_id, "scheduled")  # type: ignore[attr-defined]

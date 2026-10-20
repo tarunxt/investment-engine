@@ -547,3 +547,8 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
     assert publications[0][0] == ANALYSIS_TASK
     assert publications[0][1]["queue"] == ANALYSIS_QUEUE
     db.commit.assert_awaited_once()
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

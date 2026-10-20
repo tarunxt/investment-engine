@@ -25,12 +25,13 @@ def isolate_api_usage_telemetry(monkeypatch):
 
 
 @pytest.fixture
-def synthetic_operator_unit_context(monkeypatch):
+def synthetic_operator_unit_context(monkeypatch, request):
     """Unit-test admitted operator logic; real admission is tested in Stage05.
 
     Existing detached bot/projection/worker fixtures have no users database.
     They opt in explicitly, while HTTP/SQL negative tests never use this.
     """
+    request.getfixturevalue("synthetic_module_unit_context")
     import importlib
     from unittest.mock import AsyncMock, Mock
     for domain, file in (
@@ -45,3 +46,33 @@ def synthetic_operator_unit_context(monkeypatch):
         for name in ('require_operator_user_id','require_operator_user_id_sync','require_operator_intent_sync','require_operator_bullpen008_run_sync'):
             if hasattr(module,name):
                 monkeypatch.setattr(module,name,AsyncMock() if name=='require_operator_user_id' else Mock())
+
+
+@pytest.fixture
+def synthetic_module_unit_context(monkeypatch):
+    """Admitted context ONLY for explicit detached algorithm/adapter unit tests.
+
+    Those tests use fake sessions/HTTP/providers and test their original domain
+    contract. Real SQL/HTTP/lifecycle/worker negative tests never request this;
+    Stage07 suites independently exercise admission and cancellation without it.
+    """
+    from contextlib import contextmanager,nullcontext
+    from types import SimpleNamespace
+    from app.domains.modules import execution,lifecycle,tasks,dispatch
+    identity=lifecycle.WorkIdentity(1,'zerodha_rebalance',1)
+    context=SimpleNamespace(identity=identity,factory=lambda:nullcontext(SimpleNamespace()))
+    monkeypatch.setattr(execution,'checkpoint',lambda:context)
+    monkeypatch.setattr(execution,'require_bullpen_context',lambda *_:None)
+    monkeypatch.setattr(execution,'resolve_effect_identity',lambda *_:identity)
+    monkeypatch.setattr(execution,'effect_guard',lambda *a,**kw:nullcontext())
+    monkeypatch.setattr(lifecycle,'current_sync',lambda *a,**kw:None)
+    monkeypatch.setattr(lifecycle,'guard_job_transition',lambda *a,**kw:None)
+    @contextmanager
+    def admitted(*a,**kw):yield
+    monkeypatch.setattr(tasks,'task_scope',admitted)
+    monkeypatch.setattr(dispatch,'prepare_dispatch',lambda name,args,kwargs,options,**kw:options)
+    monkeypatch.setattr(tasks,'closed_scheduler',lambda _:False)
+    async def enqueue(db,owner,module,**kwargs):return lifecycle.WorkIdentity(owner,module,1)
+    monkeypatch.setattr(lifecycle,'admit_enqueue',enqueue)
+    async def transition(db,owner,workflow):return lifecycle.WorkIdentity(owner,'zerodha_rebalance',1)
+    monkeypatch.setattr(lifecycle,'admit_workflow_transition',transition)

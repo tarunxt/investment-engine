@@ -83,6 +83,12 @@ def require_zerodha_write_allowed(method, path, data=None):
 def require_financial_writes_allowed():
     if recovery_mode():
         raise RecoveryBlocked("Financial submission")
+    # Recovery overrides are not per-user module or explicit-order authority.
+    from app.domains.modules.execution import checkpoint
+    from app.domains.modules.lifecycle import current_sync
+    context=checkpoint()
+    with context.factory() as session:
+        current_sync(session,context.identity,capability='execute',boundary='side_effect')
 
 
 def require_bullpen_command_allowed(args):
@@ -90,6 +96,8 @@ def require_bullpen_command_allowed(args):
     # including unknown verbs and implicit auth refresh, before any subprocess.
     if recovery_mode():
         raise RecoveryBlocked("Bullpen runtime command")
+    from app.domains.modules.execution import require_bullpen_context
+    require_bullpen_context(args)
 
 
 def require_equity_analysis(portfolio, context=None, *, auto_export=False):

@@ -45,7 +45,7 @@ def _origin(value: str | None):
 
 
 async def stream_is_current(access: StreamAccess, *, job_id=None, run_id=None, message=None) -> bool:
-    """Current-access hook; Stage07 may add module checks here, not claimed now."""
+    """Current account/owner/module access, polled even without pub/sub events."""
     if access.expires_at <= time.time():
         return False
     async with AsyncSessionLocal() as db:
@@ -72,6 +72,25 @@ async def stream_is_current(access: StreamAccess, *, job_id=None, run_id=None, m
             if run_id is not None and event_run != run_id:
                 return False
             job_id, run_id = event_job, event_run
+        from app.domains.modules.models import UserModulePreferences
+        if access.module_epoch is not None:
+            version=await db.scalar(select(UserModulePreferences.version).where(UserModulePreferences.user_id==access.user_id))
+            if version!=access.module_epoch:return False
+        from app.domains.modules.policy import ModulePolicy
+        from app.domains.modules.lifecycle import analysis_module
+        from app.domains.runs.models import Run
+        binding_module='ai_studio'
+        if job_id is not None:
+            item=await db.get(Job,job_id,populate_existing=True)
+            if item is None or item.module_cancel_requested or not item.module_id:return False
+            binding_module=item.module_id
+        elif run_id is not None:
+            item=await db.get(Run,run_id,populate_existing=True)
+            if item is None or item.module_cancel_requested or not item.module_id:return False
+            binding_module=item.module_id
+        result=await ModulePolicy(db).authorize(owner_id=access.user_id,resource_owner_id=access.user_id,
+            module_id=binding_module,capability='view',boundary='stream')
+        if not result.allowed:return False
         if job_id is not None:
             if type(job_id) is not int or (await db.execute(select(Job.id).where(
                     Job.id == job_id, Job.user_id == access.user_id))).scalar_one_or_none() is None:
@@ -106,6 +125,16 @@ async def authenticate_websocket(websocket: WebSocket, token: str | None) -> Str
             access = await consume_stream_ticket(token)
         except Exception:
             logger.warning('Private stream ticket unavailable')
+    if access is not None:
+        try:
+            from dataclasses import replace
+            from app.domains.modules.models import UserModulePreferences
+            async with AsyncSessionLocal() as db:
+                version=await db.scalar(select(UserModulePreferences.version).where(UserModulePreferences.user_id==access.user_id))
+            access=replace(access,module_epoch=version if version is not None else 0)
+        except Exception:
+            logger.warning('Private stream module epoch unavailable')
+            access=None
     if access is None or not await _checked(lambda message: stream_is_current(access)):
         await websocket.close(code=4001, reason='Unauthorized')
         return None

@@ -182,9 +182,12 @@ class PolymarketBotManager:
             existing = self._bots.get(user_id)
             if existing and existing.loop is loop:
                 return existing.bot
+            from app.domains.modules.tasks import _reconciliation_read
+            if _reconciliation_read.get():
+                from fastapi import HTTPException
+                raise HTTPException(409,'No existing runtime to stop; safety operations cannot create one')
             if existing and existing.loop is not loop:
                 self._bots.pop(user_id, None)
-
             base_config = load_polymarket_config()
             user_data_dir = Path(base_config.data_dir) / f"user-{user_id}"
             config_store = JsonObjectStore(

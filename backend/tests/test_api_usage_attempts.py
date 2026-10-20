@@ -846,3 +846,8 @@ def test_request_response_identity_bridge_quarantines_both_prior_estimates(ledge
     coverage = summarize_attempt_coverage(ledger(None))
     assert coverage["summary"]["ambiguous_attempts"] == 3
     assert coverage["summary"]["known_token_estimate_subtotal_usd"] is None
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

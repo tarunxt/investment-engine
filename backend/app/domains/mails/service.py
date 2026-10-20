@@ -1009,3 +1009,14 @@ def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, 
                 }
             )
         return items
+
+# Completion/manual notifications cannot bypass the fresh originating module fence.
+from app.domains.modules.execution import guarded_effect as _module_effect
+_send_logged_email_core = send_logged_email_sync
+_send_logged_email_module = _module_effect(send_logged_email_sync)
+def send_logged_email_sync(session, **kwargs):
+    # Account recovery remains available without optional modules. Exact fixed
+    # account action only; notification categories cannot select this exemption.
+    if kwargs.get('action') == 'mail.password_reset' and kwargs.get('category') == MAIL_CATEGORY_ACCOUNT:
+        return _send_logged_email_core(session, **kwargs)
+    return _send_logged_email_module(session, **kwargs)

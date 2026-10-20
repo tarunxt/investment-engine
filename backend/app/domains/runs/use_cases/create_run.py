@@ -62,6 +62,8 @@ class CreateRunUseCase:
 
     async def execute(self, cmd: CreateRunCommand) -> Run:
         require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
+        from app.domains.modules.lifecycle import admit_enqueue, analysis_module
+        identity = await admit_enqueue(self._session, int(cmd.user_id), analysis_module(cmd.auto_rebalance_portfolio), scheduled=cmd.scheduled_at is not None)
         if recovery_mode():
             # Existing six-stage UI requests sheet exports; contain that optional
             # side effect while preserving queued analysis and database results.
@@ -137,7 +139,7 @@ class CreateRunUseCase:
                         raise ConflictException(
                             f"Run #{active_run.id} is already in progress. Confirm to run multiple jobs."
                         )
-                run = Run(
+                run = Run(module_id=identity.module_id, module_version=identity.version,
                     user_id=cmd.user_id,
                     prompt=cmd.prompt,
                     prompt_preview=build_run_prompt_preview(cmd.prompt),
@@ -158,7 +160,7 @@ class CreateRunUseCase:
 
                 jobs: list[Job] = []
                 for target in targets:
-                    job = Job(
+                    job = Job(module_id=identity.module_id, module_version=identity.version,
                         prompt=cmd.prompt,
                         provider=target.provider,
                         model=target.model,

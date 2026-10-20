@@ -32,6 +32,8 @@ class RecoveryTask(Task):
             require_isolated_transport(self.app, options)
             options.update(queue=ANALYSIS_QUEUE, routing_key=ANALYSIS_QUEUE,
                            exchange=ANALYSIS_QUEUE)
+        from app.domains.modules.dispatch import prepare_dispatch
+        options=prepare_dispatch(self.name,args,kwargs,options)
         return super().apply_async(args=args, kwargs=kwargs, **options)
 
     def before_start(self, task_id, args, kwargs):
@@ -44,12 +46,19 @@ class RecoveryTask(Task):
 
 
 class RecoveryCelery(Celery):
+    def _task_from_fun(self, fun, **options):
+        task = super()._task_from_fun(fun, **options)
+        from app.domains.modules.tasks import wrap_task
+        return wrap_task(task)
+
     def send_task(self, name, args=None, kwargs=None, **options):
         require_task_allowed(name)
         if recovery_mode():
             require_isolated_transport(self, options)
             options.update(queue=ANALYSIS_QUEUE, routing_key=ANALYSIS_QUEUE,
                            exchange=ANALYSIS_QUEUE)
+        from app.domains.modules.dispatch import prepare_dispatch
+        options=prepare_dispatch(name,args,kwargs,options)
         return super().send_task(name, args=args, kwargs=kwargs, **options)
 
 

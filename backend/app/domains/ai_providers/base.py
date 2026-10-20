@@ -134,6 +134,12 @@ def build_provider_call_error(
 
 
 class BaseAIProvider(ABC):
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if 'generate' in cls.__dict__:
+            from app.domains.modules.execution import guarded_effect
+            cls.generate = guarded_effect(cls.generate)
+
     provider_name: str
     supported_models: list[str] = []
 

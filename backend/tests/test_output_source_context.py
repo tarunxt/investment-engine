@@ -240,3 +240,8 @@ def test_advisory_conflicts_never_regenerate_or_change_completed_rows():
     assert job.status == JobStatus.COMPLETED
     assert "Current price is below 120." in job.response and "124.2" in job.response
     assert job.runtime_metadata_json["deterministic_output"]["consistency"]["check_counts"]["inconsistent"] == 2
+
+
+# Detached domain unit tests use fake sessions/providers; actual module admission
+# is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
+pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")

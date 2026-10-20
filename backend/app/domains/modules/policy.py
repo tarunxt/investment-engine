@@ -35,6 +35,9 @@ class FactsResolver(Protocol):
 
 class DefaultFactsResolver:
     async def resolve(self, owner_id: int, module_id: ModuleId) -> ModuleFacts:
+        return self.resolve_sync(owner_id, module_id)
+
+    def resolve_sync(self, owner_id: int, module_id: ModuleId) -> ModuleFacts:
         # No verified residence/plan source exists yet. Do not infer it from
         # email/timezone, inspect credentials or call providers to discover it.
         spec = REGISTRY[module_id]

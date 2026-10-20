@@ -51,3 +51,9 @@ Stage02 adds actual read-only jobs/runs handlers by filtered router inclusion. T
 
 
 Stage05 preserves this restricted composition. Its runtime/sports/cost routers remain unmounted and unavailable503 in UAT2; the full-application126 runtime routes and13 Next BFF handlers are verified separately with private synthetic HTTP/SQL tests. The additive admin-role table does not grant access by itself. Before any live migration, run the packaged read-only Stage05 role-equivalence preflight under the existing UAT2 runtime; stop on any proposed cost membership or ambiguous/invalid mapping until specific approval. No new owner identity, role, cookie, runtime, route or financial flag is enabled by generic Stage05 authority.
+
+## Stage07 lifecycle composition supplement
+
+The restricted mount set/owner allowlist remains intact. GET/PATCH `/me/modules`, POST `/me/modules/disable-impact`, and POST `/me/modules/{module_id}/resume-schedules` are real authenticated management routes. The resume endpoint permits only eligible analysis modules, starts no work, and cannot resume trading. All optional modules remain unavailable under restricted UAT2; no new domain router or public account is added.
+
+Existing synthetic read-only portfolio/status/dashboard/order-history fixtures and real owned Job/Run history remain reviewable. Synthetic POST order/AI/email and export operations now pass canonical optional-module policy, closing when default-off; missing fake support never falls back to a real provider. The fake worker requires a persisted owned Job binding. The explicit standalone private-file smoke is not an HTTP exception or live policy override; see STAGE07_COVERAGE.md. Source-only composition is separate from deployed/browser acceptance.

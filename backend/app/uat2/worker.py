@@ -12,5 +12,11 @@ celery.conf.update(task_default_queue='uat2_simulation', task_serializer='json',
 
 @celery.task(name='uat2.fake_ai', autoretry_for=(OSError,), retry_backoff=True,
              max_retries=1, acks_late=True)
-def fake_ai(prompt):
-    return FakeAI().generate(prompt)
+def fake_ai(prompt, *, job_id=None):
+    from app.domains.modules.tasks import task_scope
+    from app.domains.modules.lifecycle import ModuleLifecycleDenied
+    if type(job_id) is not int:raise ModuleLifecycleDenied('Persisted module work required')
+    # Resolve current owner/module/version from stored Job; payload permissions
+    # never authorize work. Restricted UAT2 currently keeps optional work closed.
+    with task_scope('app.domains.jobs.tasks.execute_ai_job',[job_id]):
+        return FakeAI().generate(prompt)

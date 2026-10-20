@@ -208,6 +208,19 @@ def scan(root=ROOT):
                          method="GET", route=route, classification="public", owner_source=["none"],
                          observed_guards=["FastAPI defaults; global recovery middleware may deny"], side_effects="schema/documentation only",
                          calls=[], registration="framework default"))
+    # Execute only the deliberately source-only canonical classifier. It has no
+    # application imports, environment reads, database or network side effects.
+    import runpy
+    coverage=runpy.run_path(str(root/'backend/app/domains/modules/coverage.py'))
+    for row in rows:
+        if row['kind']=='http' and row['source'].startswith('backend/app/domains/'):
+            binding=coverage['classify_route'](row['module'],row['capability'],row['route'],{row['method']})
+            row['module_lifecycle_gate']='core/safety; existing auth/owner/role checks' if binding is None else ' / '.join(binding)+' via modules.transports.install_route_policy'
+        elif row['kind'] in {'worker','scheduler'}:
+            row['module_lifecycle_gate']='RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard'
+        elif row['kind'] in {'background','export','websocket','lifecycle'}:
+            row['module_lifecycle_gate']='originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths'
+        else:row['module_lifecycle_gate']='framework/core or frontend proxy; backend remains authoritative'
     # Avoid duplicate unresolved messages from fixed-point traversal.
     rows.sort(key=lambda r: (r["source"], r["kind"], r["method"], r["route"], r["capability"]))
     return dict(schema_version=1, baseline_sha="0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
@@ -229,14 +242,14 @@ def render(data):
             "Framework handlers/pages, background dispatch sites and Beat entries are included; dynamic external registrations cannot be certified from source.",
             "", "Counts: " + json.dumps(data["counts"], sort_keys=True), "",
             "Unresolved registrations: " + (", ".join(data["unresolved"]) or "none found by scanner"), "",
-            "| Kind / module | Method / path or capability | Launch class | Owner source | Observed guards | Possible external effects | Source / registration |",
-            "| --- | --- | --- | --- | --- | --- | --- |"]
+            "| Kind / module | Method / path or capability | Launch class | Owner source | Observed guards | Possible external effects | Module lifecycle gate | Source / registration |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     def clean(value):
         return str(value).replace("|", "\\|").replace("\n", " ").replace("<", "&lt;").replace(">", "&gt;")
     for row in data["entries"]:
         values = [row["kind"] + " / " + row["module"], row["method"] + " " + (row["route"] or row["capability"]),
                   row["classification"], "; ".join(row["owner_source"]), "; ".join(row["observed_guards"]),
-                  row["side_effects"], row["source"] + " / " + row["registration"]]
+                  row["side_effects"], row["module_lifecycle_gate"], row["source"] + " / " + row["registration"]]
         text.append("| " + " | ".join(clean(v) for v in values) + " |")
     return "\n".join(text) + "\n"
 

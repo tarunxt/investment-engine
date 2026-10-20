@@ -21,7 +21,7 @@ from app.core.security import JWTUtils
 from app.domains.auth.models import User, UserProfile, ActivityLog
 from app.domains.prompts.models import Prompt
 from app.domains.jobs.models import Job
-from app.domains.runs.models import Run, RunJob
+from app.domains.runs.models import Run, RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.google_sheets.models import GoogleSheetsCredential
 from app.infrastructure.database.outbox.models import OutboxMessage
@@ -58,7 +58,7 @@ def private_api(monkeypatch):
     else:
         engine = create_engine('sqlite://', poolclass=StaticPool,
                                connect_args={'check_same_thread': False})
-    for model in (User, UserProfile, ActivityLog, Prompt, Job, Run, RunJob,
+    for model in (User, UserProfile, ActivityLog, Prompt, Job, Run, RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage,
                   OutboxMessage, IdempotencyOperation, GoogleSheetsCredential, IndMoneyUsPortfolioSnapshot):
         model.__table__.create(engine)
     session = Session(engine, expire_on_commit=False)
@@ -92,7 +92,7 @@ def private_api(monkeypatch):
     @asynccontextmanager
     async def nested():
         with session.begin_nested(): yield
-    db = SimpleNamespace(get_bind=session.get_bind, begin_nested=nested, add=session.add, execute=AsyncMock(side_effect=session.execute),
+    db = SimpleNamespace(get=AsyncMock(side_effect=session.get), get_bind=session.get_bind, begin_nested=nested, add=session.add, execute=AsyncMock(side_effect=session.execute),
         scalar=AsyncMock(side_effect=session.scalar), flush=AsyncMock(side_effect=session.flush),
         refresh=AsyncMock(side_effect=session.refresh), commit=AsyncMock(side_effect=session.commit),
         rollback=AsyncMock(side_effect=session.rollback))
@@ -207,8 +207,8 @@ def test_snapshot_foreign_id_is_indistinguishable(private_api):
     assert [x.status_code for x in r] == [404, 404] and r[0].json() == r[1].json()
 
 
-def test_create_replay_uses_server_owner_and_per_owner_cache(private_api, monkeypatch):
-    a = private_api
+def test_create_replay_uses_server_owner_and_per_owner_cache(admitted_private_analysis, monkeypatch):
+    a = admitted_private_analysis
     from app.domains.jobs import router, tasks
     from app.domains.jobs.use_cases import create_job
     monkeypatch.setattr(router.event_bus, 'publish', AsyncMock())
@@ -266,10 +266,10 @@ def test_foreign_websocket_never_subscribes(private_api, monkeypatch, kind):
 
 
 @pytest.mark.asyncio
-async def test_foreign_prompt_reference_rejected_before_dispatch(private_api):
+async def test_foreign_prompt_reference_rejected_before_dispatch(admitted_private_analysis):
     from app.domains.runs.use_cases.create_run import CreateRunUseCase, CreateRunCommand, RunModelTarget
     from app.shared.exceptions import NotFoundException
-    a = private_api
+    a = admitted_private_analysis
     prompt = Prompt(user_id=a.users[1].id, name='Private B', body='private', is_system=False)
     a.session.add(prompt)
     a.session.commit()
@@ -289,8 +289,10 @@ def test_export_worker_failure_does_not_mutate_foreign_resource(private_api, mon
     row = a.jobs[3] if kind == 'job' else a.runs[1]
     before = row.export_status
     task = tasks.export_job_to_sheets_task if kind == 'job' else tasks.export_run_to_sheets_task
-    result = task.run(a.users[0].id, row.id, None)
-    assert result['status'] == 'failed'
+    from app.domains.modules.lifecycle import ModuleLifecycleDenied
+    from app.infrastructure.database import sync_session
+    monkeypatch.setattr(sync_session,'SyncSessionLocal',lambda:a.session)
+    with pytest.raises(ModuleLifecycleDenied):task.run(a.users[0].id, row.id, None)
     assert a.session.get(type(row), row.id).export_status == before
 
 
@@ -335,9 +337,9 @@ def test_uat2_mounts_only_read_handlers_and_retains_fail_closed_mutations(privat
         app.dependency_overrides.clear()
 
 
-def test_owned_durable_replay_survives_provider_unavailability(private_api, monkeypatch):
+def test_owned_durable_replay_survives_provider_unavailability(admitted_private_analysis, monkeypatch):
     from app.domains.jobs import router
-    a=private_api
+    a=admitted_private_analysis
     body=dict(prompt='synthetic durable provider replay',provider='fake',model='offline')
     h={**a.headers[0],'Idempotency-Key':'provider-offline-replay'}
     first=a.client.post('/jobs',json=body,headers=h)
@@ -347,3 +349,21 @@ def test_owned_durable_replay_survives_provider_unavailability(private_api, monk
     assert again.status_code==200 and again.json()['id']==first.json()['id']
     fresh=a.client.post('/jobs',json=body,headers={**h,'Idempotency-Key':'a-new-key'})
     assert fresh.status_code==400
+
+
+@pytest.fixture
+def admitted_private_analysis(private_api,monkeypatch):
+    """Keep ownership tests real SQL/HTTP, with explicit synthetic eligibility."""
+    from app.domains.modules.models import UserModule,UserModulePreferences
+    from app.domains.modules.policy import DefaultFactsResolver,ModuleFacts
+    from datetime import datetime
+    a=private_api
+    UserModulePreferences.__table__.create(a.session.get_bind(),checkfirst=True)
+    UserModule.__table__.create(a.session.get_bind(),checkfirst=True)
+    for user in a.users[:2]:
+        a.session.add(UserModulePreferences(user_id=user.id,version=1,updated_at=datetime.utcnow()))
+    a.session.flush()
+    for user in a.users[:2]:a.session.add(UserModule(user_id=user.id,module_id='ai_studio',enabled=True,config={'schema_version':1},version=1,schedules_paused=False))
+    a.session.commit()
+    monkeypatch.setattr(DefaultFactsResolver,'resolve_sync',lambda *_:ModuleFacts(jurisdiction='allowed',plan='allowed',connection='ready',execution_capability=True))
+    return a

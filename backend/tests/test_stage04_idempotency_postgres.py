@@ -41,12 +41,21 @@ def database(monkeypatch):
     schema = 'stage04_' + uuid4().hex
     with base.begin() as c: c.execute(CreateSchema(schema))
     engine = base.execution_options(schema_translate_map={None:schema})
-    for m in (User, UserProfile, ActivityLog, Job, OutboxMessage, IdempotencyOperation):
+    from app.domains.modules.models import UserModule,UserModulePreferences
+    from app.domains.modules.policy import DefaultFactsResolver,ModuleFacts
+    monkeypatch.setattr(DefaultFactsResolver,'resolve_sync',lambda *_:ModuleFacts(jurisdiction='allowed',plan='allowed',connection='ready',execution_capability=True))
+    for m in (User, UserProfile, ActivityLog,UserModulePreferences,UserModule, Job, OutboxMessage, IdempotencyOperation):
         m.__table__.create(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with factory() as s:
         s.add_all([User(id=i, email=f'synthetic-{i}@invalid.test', username=f'synthetic-{i}',
                    password_hash='not-a-login-credential', is_active=True, is_verified=True) for i in (1,2)])
+        s.flush()
+        for owner in (1,2):s.add(UserModulePreferences(user_id=owner,version=1,updated_at=datetime.utcnow()))
+        s.flush()
+        for owner in (1,2):
+            for module in ('ai_studio','zerodha_rebalance','indmoney_us'):
+                s.add(UserModule(user_id=owner,module_id=module,enabled=True,version=1,config={'schema_version':1},schedules_paused=False))
         s.commit()
     ae = create_async_engine(URL.replace('postgresql+psycopg2', 'postgresql+asyncpg'),
                              execution_options={'schema_translate_map':{None:schema}}, poolclass=NullPool)

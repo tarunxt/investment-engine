@@ -246,3 +246,11 @@ class ZerodhaService:
         if expiry_ist <= login_ist:
             expiry_ist += timedelta(days=1)
         return expiry_ist.astimezone(timezone.utc)
+
+# Private broker reads and orders need a fresh originating module context;
+# connection setup/disconnect remain separate core account operations.
+from app.domains.modules.execution import guarded_effect as _module_effect
+for _name in ('get_orders','get_margins','get_quotes','get_holdings','get_positions',
+              'get_holdings_sync','get_positions_sync','get_margins_sync'):
+    setattr(ZerodhaService,_name,_module_effect(getattr(ZerodhaService,_name)))
+ZerodhaService.place_order = _module_effect(ZerodhaService.place_order, capability='execute')

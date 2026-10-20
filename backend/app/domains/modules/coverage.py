@@ -1,0 +1,56 @@
+"""Source-only canonical route classification, shared by runtime and inventory.
+
+No application imports, environment reads, database or network operations.
+"""
+DOMAIN_MODULES={
+    'zerodha':'zerodha_rebalance','indmoney_us':'indmoney_us',
+    'jobs':'ai_studio','runs':'ai_studio','prompts':'ai_studio','ai_providers':'ai_studio',
+    'google_sheets':'sheets_export','sports_rankings':'sports_rankings',
+    'polymarket':'copy_trader','polymarket_direct':'prediction_direct',
+    'polymarket_auto_live':'bullpen_live','bullpen008':'bullpen_research',
+    'bullpen_trade_analysis':'bullpen_research','bullpen_run_audit':'bullpen_research',
+    'trading_bots':'market_scanner','recommendation_audit':'ai_studio',
+}
+# History and narrow cancellation are safety/account operations, not an all-jobs
+# exemption. New work, stage updates, exports and notifications are module gated.
+SAFETY_ROUTES={('GET','/jobs'),('GET','/jobs/{job_id}'),('DELETE','/jobs/{job_id}'),
+    ('POST','/jobs/{job_id}/cancel'),('GET','/runs'),('GET','/runs/{run_id}'),
+    ('DELETE','/runs/{run_id}'),('POST','/runs/{run_id}/cancel')}
+SAFETY_ENDPOINTS={
+ 'polymarket':{'stop_polymarket_bot','emergency_stop_polymarket_live'},
+ 'polymarket_direct':{'stop_polymarket_bot','emergency_stop_polymarket_live'},
+ 'polymarket_auto_live':{'stop_auto_live','pause_auto_live','emergency_stop_auto_live','reconcile_auto_live_run_order_states','cancel_auto_live_order'},
+ 'bullpen008':{'stop_bullpen008_scheduler','pause_bullpen008_scheduler','activate_bullpen008_emergency_stop'},
+}
+
+CORE_DOMAINS={'auth','modules','api_usage','cost_drivers','health','dashboard','mails'}
+
+
+def classify_route(domain,endpoint,path,methods,source_module=''):
+    methods=set(methods or ())
+    if domain=='mails' and endpoint=='send_test_mail':return ('ai_studio','analyze')
+    if domain in CORE_DOMAINS:return None
+    if domain=='runs' and methods=={'GET'} and endpoint in {'list_runs','get_run','list_auto_rebalance_history','get_auto_rebalance_history_detail','get_final_actionable_history'}:return None
+    if domain=='zerodha' and endpoint in {'get_login_url','callback','get_status','disconnect'}:return None
+    if domain is None:
+        if source_module=='app.uat2.router':
+            # Existing synthetic read-only fixtures and status remain reviewable;
+            # queue/order/email/export operations have the same optional policy.
+            if path=='/uat2/ai':return ('ai_studio','analyze')
+            if path=='/uat2/ai/{task_id}':return ('ai_studio','view')
+            if path=='/uat2/email':return ('ai_studio','analyze')
+            if path=='/uat2/export':return ('sheets_export','export')
+            if path=='/zerodha/orders' and methods!={'GET'}:return ('zerodha_rebalance','execute')
+        return None # root/health and explicitly synthetic read-only fixtures
+    if endpoint in SAFETY_ENDPOINTS.get(domain,set()):return ('__safety__',endpoint)
+    methods=methods or set()
+    if all((method,path) in SAFETY_ROUTES for method in methods):return None
+    if domain=='google_sheets' and endpoint in {'connect','callback','status','disconnect','get_connection_status','oauth_callback','get_auth_url','exchange_code','get_status','save_default_sheet','get_admin_config','update_admin_config'}:return None
+    module='__analysis_consumer__' if domain=='runs' else DOMAIN_MODULES.get(domain)
+    if module is None:return ('unknown','view')
+    capability='view' if methods<={'GET','HEAD'} else 'analyze'
+    if 'export' in endpoint:module,capability='sheets_export','export'
+    if domain=='zerodha' and endpoint in {'place_order','place_protected_market_orders','place_protected_market_orders_sequenced'}:capability='execute'
+    if domain in {'polymarket_direct','polymarket_auto_live','polymarket','bullpen008'} and capability!='view':capability='execute'
+    return module,capability
+
