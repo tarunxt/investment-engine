@@ -7,7 +7,7 @@
     "frontend": 25,
     "http": 276,
     "lifecycle": 9,
-    "page": 67,
+    "page": 68,
     "scheduler": 16,
     "websocket": 5,
     "worker": 43
@@ -2479,6 +2479,31 @@
         "Depends",
         "call",
         "router.post",
+        "s.confirm"
+      ],
+      "capability": "confirm",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(context)",
+        "router.post('/confirm')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/confirm",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:101"
+    },
+    {
+      "calls": [
+        "Depends",
+        "call",
+        "router.post",
         "s.disconnect"
       ],
       "capability": "disconnect",
@@ -2497,13 +2522,14 @@
       "registration": "unmounted",
       "route": "/me/connection-authorization/disconnect",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/connections/authorization_router.py:101"
+      "source": "backend/app/domains/connections/authorization_router.py:107"
     },
     {
       "calls": [
         "Depends",
         "bool",
-        "router.get"
+        "router.get",
+        "runtime.get"
       ],
       "capability": "config",
       "classification": "owner-private",
@@ -2554,9 +2580,14 @@
     {
       "calls": [
         "Depends",
+        "HTTPException",
         "call",
+        "ctx[3].get",
+        "parse_qs",
         "router.post",
-        "s.start"
+        "s.start",
+        "urlencode",
+        "urlsplit"
       ],
       "capability": "start",
       "classification": "owner-private",
@@ -2598,31 +2629,6 @@
       ],
       "registration": "unmounted",
       "route": "/me/connection-authorization/callback",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/connections/authorization_router.py:89"
-    },
-    {
-      "calls": [
-        "Depends",
-        "call",
-        "router.post",
-        "s.confirm"
-      ],
-      "capability": "confirm",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "connections",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(context)",
-        "router.post('/confirm')"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "unmounted",
-      "route": "/me/connection-authorization/confirm",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/connections/authorization_router.py:95"
     },
@@ -14666,6 +14672,25 @@
     },
     {
       "calls": [],
+      "capability": "/preview-kite",
+      "classification": "public",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/preview-kite",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/preview-kite/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/zerodha/callback",
       "classification": "public",
       "kind": "page",
@@ -14800,13 +14825,13 @@
     "backend/app/domains/bullpen_trade_analysis/service.py": "f20885a588a104053e49e0bf67b1ff5208b5e2cf1b690be509f02a6c6188f5c9",
     "backend/app/domains/bullpen_trade_analysis/tasks.py": "76353c818e2c152454a075632c78fd2733359f8e9cf42b6bc5e0a491f1ba3751",
     "backend/app/domains/connections/__init__.py": "2e58dcfaee11bcbf2b130f1b5ef3eabe5fd1db196b643ae72ff281b413ff398e",
-    "backend/app/domains/connections/authorization.py": "90f4786392fb4dcb2231830e5495d6740cdd1fc8d5e675d9c7dfa9a697f68887",
-    "backend/app/domains/connections/authorization_router.py": "11241d6e360c0d11003bdb1a66f1b06f4e11b1984a83e935df30be08894e9326",
+    "backend/app/domains/connections/authorization.py": "4b8dc2537022f8f6d460ab91396aec13f0e5f2c1089e049aaf67b112d4f40318",
+    "backend/app/domains/connections/authorization_router.py": "b276d7e7425f3891d2b69bd2b8a0edaf2ec9505ae41d0101305db5877b0d1236",
     "backend/app/domains/connections/crypto.py": "d8163246e96de05783ba8c9c80c5e18cd36b76a114262cace056e8b6be62197e",
     "backend/app/domains/connections/fake_authorization.py": "20bc5579380a3be35ea21090eb2d5d78c94453437bbe934be8f6beb2f59948f4",
     "backend/app/domains/connections/kite_authorization.py": "7dd0ddf50e019b925fb4613e3eb72bdb7910c2239ccdef05b1858e5f029b302a",
     "backend/app/domains/connections/material.py": "94762fa2cb290b27ba99febb68bc04822486d0b8169297b3970122eec5306b62",
-    "backend/app/domains/connections/models.py": "15de91b9402cbb904034c1ccdad6a717c834cec72e2882c6b82130c942b78e99",
+    "backend/app/domains/connections/models.py": "3a28395f3f1c5dd3679c47716ae35b76fce11b8b7b7dfb9840a16605536dbe41",
     "backend/app/domains/connections/router.py": "cbce4976a5b7adbe3c1cc0cc57c69f857d46e2b46def50c5d1b441e3359ed6bf",
     "backend/app/domains/connections/service.py": "b1aded2ab76fba1362b300c2b39b9e4eca46d23a51c0ee7386e662afd3b5240e",
     "backend/app/domains/cost_drivers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -15079,7 +15104,7 @@
     "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
     "backend/app/main.py": "e9d542a17e156079d9488d25d8bb1ec3c236f28f81ff89f50237b2549ab110fb",
-    "backend/app/models/__init__.py": "74c963e28fa8d3afd79a9651c4a165f46ae45567743205913e22a50177d7f411",
+    "backend/app/models/__init__.py": "e3b4b98b6ee35ace717bf639646a30a18264f3a767d325a2a20c8f6f39069e0a",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",
@@ -15177,6 +15202,7 @@
     "frontend/app/database/page.tsx": "0d09f24b8bd2947fad39f124617596c55a9b24e51d8e0dabcad742f18307553c",
     "frontend/app/dev/stage-two-llm-popup/page.tsx": "542d0cccc1df003afdc0cbff772ddd680349ccbc1fdaf0829a183ef1025255d0",
     "frontend/app/page.tsx": "2b17b3f517fb3bb5e85cb3ac52d75aef5ebd8111e04544110b531201517557bf",
+    "frontend/app/preview-kite/page.tsx": "1c8764cf476c79e6ce88bd7a324b687fe87d890482fcefae1f55e76b74a68585",
     "frontend/app/zerodha/callback/page.tsx": "ed762a6e9d76483ac37d9835ee1ef74111cc24a88fe4c2b139719aa2a8419ebd",
     "frontend/next.config.ts": "cbcb5b2aab2df208fc53ce3677d2e5541a07cd827e67b8de0179f63ca1b87879",
     "frontend/proxy.ts": "a914550fae7f556dbff456e4841bcbdbfacf0b3d87b143ff533f5e47b18f75d1"

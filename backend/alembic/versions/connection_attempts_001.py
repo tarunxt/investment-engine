@@ -25,7 +25,20 @@ def upgrade():
         sa.ForeignKeyConstraint(['connection_id','owner_id'], ['integration_connections.id','integration_connections.owner_id'], ondelete='CASCADE'),
         sa.CheckConstraint('connection_version > 0', name='ck_attempt_connection_version'))
     op.create_index('ix_connection_attempts_owner_id','connection_attempts',['owner_id'])
+    op.create_table('connection_binding_history',
+        sa.Column('id',sa.String(36),primary_key=True),sa.Column('connection_id',sa.String(36),nullable=False),
+        sa.Column('owner_id',sa.Integer(),nullable=False),sa.Column('connection_version',sa.Integer(),nullable=False),
+        sa.Column('app_mode',sa.String(24),nullable=False),sa.Column('provider_account_id',sa.String(64),nullable=False),
+        sa.Column('ciphertext',sa.Text(),nullable=False),sa.Column('key_version',sa.Integer(),nullable=False),
+        sa.Column('created_at',sa.DateTime(),nullable=False,server_default=sa.func.now()),
+        sa.Column('updated_at',sa.DateTime(),nullable=False,server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(['connection_id','owner_id'],['integration_connections.id','integration_connections.owner_id'],ondelete='CASCADE'),
+        sa.UniqueConstraint('connection_id','connection_version',name='uq_binding_history_version'))
+    op.create_index('ix_connection_binding_history_owner_id','connection_binding_history',['owner_id'])
+
 
 def downgrade():
-    # Only transient candidate authorizations are removed, not connection history.
+    # Controller must privately preserve Stage10 attempt/history material first.
+    # Existing Stage09 connection identities and ciphertext tables remain.
+    op.drop_table('connection_binding_history')
     op.drop_table('connection_attempts')

@@ -1,0 +1,41 @@
+"""Local safety/provenance tests; no PostgreSQL, systemd or child processes."""
+import importlib.util
+import os
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock,patch
+
+spec=importlib.util.spec_from_file_location('stage10_controller_fixture',Path(__file__).with_name('verify_stage10_controller.py'))
+fixture=importlib.util.module_from_spec(spec);spec.loader.exec_module(fixture)
+
+class GuardTests(unittest.TestCase):
+    def setUp(self):
+        self.sha='a'*40
+        self.environment={'CI':'true','GITHUB_ACTIONS':'true','CREDX_STAGE10_CONTROLLER_ACK':'disposable-linux-ci-only','CREDX_STAGE10_SOURCE':self.sha}
+        self.git=Mock(side_effect=lambda *a:self.sha.encode()+b'\n' if a==('rev-parse','HEAD') else b'')
+        for name,value in [('CANDIDATE',self.sha),('REPO',Path('/home/runner/work/credx/repo')),('git',self.git),('Path',lambda value:SimpleNamespace(is_dir=lambda:value=='/run/systemd/system',exists=lambda:False))]:
+            p=patch.object(fixture,name,value);p.start();self.addCleanup(p.stop)
+        for p in [patch.object(fixture.os,'geteuid',return_value=0),patch.object(fixture.sys,'platform','linux'),patch.dict(os.environ,self.environment,clear=True)]:
+            p.start();self.addCleanup(p.stop)
+
+    def test_exact_clean_candidate_requires_accepted_stage09_ancestry(self):
+        self.assertEqual(fixture.guard(),self.sha)
+        self.git.assert_any_call('merge-base','--is-ancestor','ccb0b3c4682d6bc65c4b38ccf95e71a446dee117',self.sha)
+
+    def test_wrong_head_and_dirty_worktree_are_rejected(self):
+        self.git.side_effect=lambda *a:b'b'*40 if a==('rev-parse','HEAD') else b''
+        with self.assertRaisesRegex(RuntimeError,'Exact Stage10'):fixture.guard()
+        self.git.side_effect=lambda *a:self.sha.encode() if a==('rev-parse','HEAD') else (b'M unsafe' if a==('status','--porcelain') else b'')
+        with self.assertRaisesRegex(RuntimeError,'Clean committed'):fixture.guard()
+
+    def test_missing_ack_non_runner_and_non_root_are_rejected(self):
+        with patch.dict(os.environ,{'CREDX_STAGE10_CONTROLLER_ACK':'wrong'}),self.assertRaises(RuntimeError):fixture.guard()
+        with patch.object(fixture,'REPO',Path('/tmp/repo')),self.assertRaises(RuntimeError):fixture.guard()
+        with patch.object(fixture.os,'geteuid',return_value=1000),self.assertRaises(RuntimeError):fixture.guard()
+
+    def test_fixture_environment_never_inherits_cloud_or_provider_credentials(self):
+        self.assertFalse(any(key.startswith(('AWS_','GOOGLE_','ZERODHA_','OPENAI_')) for key in fixture.SAFE_ENV))
+        self.assertEqual(set(fixture.SAFE_ENV),{'PATH','PYTHONDONTWRITEBYTECODE','CI','GITHUB_ACTIONS','CREDX_STAGE10_CONTROLLER_ACK','CREDX_STAGE10_SOURCE'})
+
+if __name__=='__main__':unittest.main()

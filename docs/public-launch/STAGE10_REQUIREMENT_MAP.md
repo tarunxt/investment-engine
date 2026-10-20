@@ -28,3 +28,7 @@ Read https://kite.trade/docs/connect/v3/user/ on 20 October 2026. It documents `
 ## Gate accounting
 
 Code: LOCAL IMPLEMENTATION IN PROGRESS. CI: NOT RUN for Stage10. UAT2 deployment: NOT RUN. UAT2 verification: NOT RUN. Owner acceptance: PENDING Stage10. External provider approval: PENDING, fake approval reference is not provider evidence. Actual PostgreSQL migration/concurrency and independent source review remain required before any Stage10 deployment proposal. No production, old UAT, AWS, credentials, new access, provider or financial action occurred. Existing US$10 allowance and shutdown/retention are unchanged.
+
+## Local successor after independent review
+
+See STAGE10_RECOVERY_CI.md. The four reported blockers are addressed locally with append-only encrypted binding history, completed browser navigation/callback code, Stage10/native recovery and explicit frozen/current CI separation. The unpublished Stage10 migration now creates both attempt/history tables. Localchecks are93 backend/19 component/56 native/12 harness and actual fake browser roundtrip both modes. Actual CI/PostgreSQL/Linux and independent re-review remain pending; no deployment or provider approval inferred. Original0f026ee evidence is unchanged.

@@ -1,3 +1,7 @@
+# Current local successor preview
+
+Current URL http://localhost:53571/console/profile/connections; API53572. Both modes now navigate through an explicitly gated same-origin fake broker page and process the returned callback query before explicit account review. No live provider is contacted. See STAGE10_RECOVERY_CI.md for the reviewed-candidate corrections, current93/19/56/12 local checks and prepared/not-run CI gates. Build/start/foreground Ctrl-C instructions below still apply; rebuild allocates new ports. Earlier source/URLs/pending-implementation statements below describe the immutable0f026ee checkpoint and are retained history, superseded by this local successor. Publication/deployment remains unauthorized.
+
 # Stage10 local synthetic preview
 
 Branch: `codex/stage10-connection-authorization-local-20261020`.

@@ -66,7 +66,7 @@ async def call(operation,db):
 async def config(response:Response,user=Depends(get_current_user),runtime=Depends(authorization_runtime)):
     response.headers['Cache-Control']='no-store'
     # Default is disabled. Private preview overrides this exact dependency.
-    return {'enabled':True,'simulation':bool(runtime['provider'].simulation),'credential_entry_enabled':False}
+    return {'enabled':True,'simulation':bool(runtime['provider'].simulation),'credential_entry_enabled':False,'browser_roundtrip':bool(runtime.get('synthetic_browser_roundtrip'))}
 
 
 @router.post('/synthetic-setup')
@@ -82,7 +82,13 @@ async def setup(body:Setup,ctx=Depends(context)):
 @router.post('/start')
 async def start(body:Start,ctx=Depends(context)):
     s,o,session,_=ctx
-    return await call(s.start(o,body.connection_id,body.version,session),s.db)
+    result=await call(s.start(o,body.connection_id,body.version,session),s.db)
+    if runtime:=ctx[3].get('synthetic_browser_roundtrip'):
+        if not s.provider.simulation:raise HTTPException(403,'Fake browser login requires synthetic provider')
+        from urllib.parse import urlencode,urlsplit,parse_qs
+        params=parse_qs(urlsplit(result['login_url']).query)
+        result['login_url']='/preview-kite?'+urlencode({'redirect_params':params['redirect_params'][0]})
+    return result
 
 
 @router.post('/callback')

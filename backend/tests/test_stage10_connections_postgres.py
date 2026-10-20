@@ -69,7 +69,7 @@ def test_actual_stage10_migration_preserves_all_stage09_tables(database):
     for _ in range(2):
         migrate('upgrade','connection_attempts_001')
         assert 'connection_attempts' in inspect(engine).get_table_names()
-        assert baseline_snapshot(engine,exclude_tables=frozenset({'connection_attempts'}))==before
+        assert baseline_snapshot(engine,exclude_tables=frozenset({'connection_attempts','connection_binding_history'}))==before
         migrate('downgrade','integration_connections_001')
         assert 'connection_attempts' not in inspect(engine).get_table_names()
         assert baseline_snapshot(engine,exclude_tables=frozenset())==before

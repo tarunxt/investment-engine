@@ -1,0 +1,48 @@
+{
+  "prior_candidate": "0f026ee54a5e7ee70c03249830d7e67cfc5d25ac",
+  "local_only": true,
+  "tests": {
+    "backend": 93,
+    "components": 19,
+    "native": 56,
+    "stage10_harness": 4,
+    "historical_harness": 8
+  },
+  "zero_skips_local": true,
+  "build": "/tmp/stage10-successor-build.log passed",
+  "browser": {
+    "url": "http://localhost:53571/console/profile/connections",
+    "both_modes_real_navigation_fake_transport": true,
+    "query_removed_before_callback": true,
+    "review_confirmed": true,
+    "real_provider": false
+  },
+  "prepared_not_run": {
+    "postgres": 29,
+    "linux_controller": 20,
+    "historical_source": "ccb0b3c4682d6bc65c4b38ccf95e71a446dee117"
+  },
+  "source_sha256": {
+    "deploy/uat2/native/ctl.py": "4ac01cb976ffe83cfb75328c48fe8599d92a3cd1900b515934d46790e03e91bd",
+    "deploy/uat2/native/schema_service.py": "31d6778a2b005eabf5c3d22c804e909e7c4b37b7b807fae38e10aca37c151b1f",
+    "backend/scripts/verify_stage10_controller.py": "7ab43f9ada0d40e7a5ccac95f84ea5239bc0b5a44e4724ed011c2371ab98250c",
+    "backend/alembic/versions/connection_attempts_001.py": "338216fffe5806b4aa28e494f554a6f94eb6ac7dd967f7bb095bab93a666d80d",
+    "backend/app/domains/connections/authorization.py": "a16c86f1f34ac196b28cd5176a3fccdbdc3de932fcbe793a1cfe6826c8a3c3a0",
+    "frontend/components/connections/ConnectionAuthorization.tsx": "49d944fa5719b2441b924817cc12615a80a4f5ddb62118623cd627f02acf53ca"
+  },
+  "pending": [
+    "independent re-review",
+    "publication scope",
+    "actual CI/PostgreSQL/Linux",
+    "native artifact audit",
+    "deployment",
+    "owner acceptance",
+    "real provider approvals/config/login"
+  ],
+  "build_retry": {
+    "failure": "ENOSPC",
+    "failure_log": "/tmp/stage10-successor-build-enospc.log",
+    "correction": "removed only own generated Next cache",
+    "retry": "passed"
+  }
+}

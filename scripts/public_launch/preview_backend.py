@@ -44,7 +44,7 @@ install()
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
 from scripts.public_launch import preview_jobs, preview_stage05,preview_stage08,preview_stage09
-from app.domains.connections.models import ConnectionAttempt
+from app.domains.connections.models import ConnectionAttempt,ConnectionBindingHistory
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
 from app.domains.modules.router import router as modules_router
@@ -60,7 +60,7 @@ async def lifespan(app):
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
                       Job.__table__, Run.__table__, RunJob.__table__,AutoRebalanceWorkflow.__table__,AutoRebalanceWorkflowStage.__table__,
-                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES,*preview_stage09.TABLES, ConnectionAttempt.__table__, UserModulePreferences.__table__, UserModule.__table__):
+                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES,*preview_stage09.TABLES, ConnectionAttempt.__table__, ConnectionBindingHistory.__table__, UserModulePreferences.__table__, UserModule.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -170,6 +170,6 @@ _preview_callback = os.environ['FRONTEND_URL']+'/console/profile/connections'
 _preview_provider = FakeKiteAuthorization()
 def _authorization_runtime():
     return {'provider':_preview_provider,'callback_url':_preview_callback,
-        'allowed_callbacks':{_preview_callback},'synthetic_setup':True}
+        'allowed_callbacks':{_preview_callback},'synthetic_setup':True,'synthetic_browser_roundtrip':True}
 app.dependency_overrides[authorization_runtime] = _authorization_runtime
 app.include_router(authorization_router)

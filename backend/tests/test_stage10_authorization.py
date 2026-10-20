@@ -3,7 +3,7 @@ from datetime import datetime,timedelta,timezone
 import pytest
 from sqlalchemy import select,update
 from app.domains.connections.authorization import ConnectionAuthorization
-from app.domains.connections.models import ConnectionAttempt,IntegrationConnection
+from app.domains.connections.models import ConnectionAttempt,IntegrationConnection,ConnectionBindingHistory
 from app.domains.connections.crypto import ConnectionFault
 from app.domains.connections.fake_authorization import FakeKiteAuthorization
 from app.domains.modules.models import UserModule,UserModulePreferences
@@ -13,7 +13,7 @@ from test_private_api_ownership import private_api
 @pytest.fixture
 def auth(bindings):
     a=bindings
-    for model in (ConnectionAttempt,UserModulePreferences,UserModule):model.__table__.create(a.session.get_bind())
+    for model in (ConnectionAttempt,ConnectionBindingHistory,UserModulePreferences,UserModule):model.__table__.create(a.session.get_bind())
     a.provider=FakeKiteAuthorization()
     a.authorization=ConnectionAuthorization(a.store,a.provider,callback_url='http://localhost:54321/console/profile/connections',allowed_callbacks={'http://localhost:54321/console/profile/connections'})
     return a
@@ -243,3 +243,42 @@ async def test_same_key_material_with_changed_managed_reference_version_rejects_
     with pytest.raises(ConnectionFault,match='VERSION_CHANGED'):
         await a.authorization.callback(row.owner_id,attempt['attempt_id'],'session-a',state=attempt['state'],request_token='fake-ok')
     assert a.provider.exchanges==0
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode',['user_owned','platform_managed'])
+async def test_same_connection_account_change_retains_previous_encrypted_identity(auth,mode):
+    a=auth;row=await active(a,a.users[0].id,mode)
+    previous=(await a.store.material(row))[0].ciphertext
+    s,_=await callback(a,row,'fake-other-account')
+    await a.authorization.confirm(row.owner_id,s['attempt_id'],'session-a',version=2)
+    history=(await a.db.execute(select(ConnectionBindingHistory).where(ConnectionBindingHistory.connection_id==row.id))).scalar_one()
+    assert row.provider_account_id=='FAKEOTHER' and history.provider_account_id=='FAKEA'
+    assert history.connection_version==2 and history.app_mode==mode and history.ciphertext==previous
+    preserved=a.ring.open(history.ciphertext,history.key_version)
+    assert preserved['provider_account_id']=='FAKEA' and preserved['connection_version']==2
+    snapshot=(history.provider_account_id,history.ciphertext,history.connection_version)
+    s,_=await callback(a,row)
+    await a.authorization.confirm(row.owner_id,s['attempt_id'],'session-a',version=3)
+    a.session.refresh(history)
+    assert (history.provider_account_id,history.ciphertext,history.connection_version)==snapshot
+
+@pytest.mark.asyncio
+async def test_local_disable_still_works_for_unadopted_legacy_connection(auth):
+    a=auth;row=await active(a,a.users[0].id)
+    row.status='legacy_review';row.credential_ref='legacy:zerodha:123';row.provider_account_id=None;a.session.commit()
+    result=await a.authorization.disconnect(row.owner_id,row.id,2)
+    assert result['local_disabled'] and not result['provider_revoked'] and row.status=='disabled'
+
+@pytest.mark.asyncio
+async def test_failed_confirm_rolls_back_snapshot_and_original_cipher(auth):
+    from unittest.mock import AsyncMock
+    a=auth;row=await active(a,a.users[0].id);original=(await a.store.material(row))[0].ciphertext
+    s,_=await callback(a,row,'fake-other-account')
+    commit=a.db.commit;a.db.commit=AsyncMock(side_effect=RuntimeError('synthetic commit failure'))
+    with pytest.raises(ConnectionFault,match='STORAGE_UNAVAILABLE'):
+        await a.authorization.confirm(row.owner_id,s['attempt_id'],'session-a',version=2)
+    a.db.commit=commit
+    a.session.expire_all();row=await a.store.get(a.users[0].id,row.id)
+    assert row.provider_account_id=='FAKEA' and row.version==2
+    assert (await a.store.material(row))[0].ciphertext==original
+    assert not (await a.db.execute(select(ConnectionBindingHistory))).first()

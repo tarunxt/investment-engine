@@ -17,7 +17,7 @@ from app.domains.jobs.models import Job
 from app.domains.modules.models import UserModule, UserModulePreferences
 from .crypto import ConnectionFault
 from .material import bind_app
-from .models import ConnectionAttempt, IntegrationConnection
+from .models import ConnectionAttempt, IntegrationConnection, ConnectionBindingHistory
 from .service import ConnectionStore, claims, utc
 
 
@@ -125,7 +125,7 @@ class ConnectionAuthorization:
             attempt.candidate_key_version=key
             await self.db.commit()
             return {'attempt_id':attempt.id,'review_required':True,
-                'account_label':'***'+response['user_id'][-4:], 'app_ownership_mode':row.app_ownership_mode,
+                'connection_id':row.id,'account_label':'***'+response['user_id'][-4:], 'app_ownership_mode':row.app_ownership_mode,
                 'connection_version':attempt.connection_version,'simulation':bool(self.provider.simulation)}
         except Exception as exc:
             await self.db.rollback()
@@ -141,6 +141,16 @@ class ConnectionAuthorization:
             .values(version=UserModule.version+1,schedules_paused=True))
         await self.db.execute(update(Job).where(Job.user_id==owner,Job.module_id.is_not(None),
             Job.status.in_(['pending','processing'])).values(module_cancel_requested=True))
+
+    async def remember_binding(self,row,secret):
+        if not row.provider_account_id:return
+        # Each completed binding generation is captured before replacement.
+        # No route or service updates/deletes these snapshots. The encrypted
+        # envelope retains the original owner/connection/version claims.
+        self.db.add(ConnectionBindingHistory(connection_id=row.id,owner_id=row.owner_id,
+            connection_version=row.version,app_mode=row.app_ownership_mode,
+            provider_account_id=row.provider_account_id,ciphertext=secret.ciphertext,key_version=secret.key_version))
+        await self.db.flush()
 
     async def confirm(self, owner, attempt_id, session, *, version, previous_id=None, previous_version=None):
         try:
@@ -161,6 +171,7 @@ class ConnectionAuthorization:
                 if current.id!=previous_id or current.version!=previous_version:
                     raise ConnectionFault('ACCOUNT_SWITCH_REQUIRES_CURRENT_REVIEW')
                 prior_secret,prior_payload=await self.store.material(current)
+                await self.remember_binding(current,prior_secret)
                 prior_payload.update({**claims(current),'connection_version':previous_version+1,'token':None})
                 prior_secret.ciphertext,prior_secret.key_version=self.store.keyring.seal(prior_payload)
                 switched = await self.db.execute(update(IntegrationConnection).where(
@@ -172,6 +183,7 @@ class ConnectionAuthorization:
                 ConnectionAttempt.review_completed_at.is_(None)).values(review_completed_at=now(),candidate_ciphertext=None,candidate_key_version=None))
             if used.rowcount!=1:raise ConnectionFault('CONNECTION_REVIEW_UNAVAILABLE')
             secret,payload=await self.store.material(row)
+            await self.remember_binding(row,secret)
             payload.update({**claims(row),'connection_version':version+1,'provider_account_id':candidate['account'],
                 'app_fingerprint':app.fingerprint(),'token':candidate['token']})
             cipher,key=self.store.keyring.seal(payload)
@@ -197,6 +209,7 @@ class ConnectionAuthorization:
             row=await self.store.get(owner,connection_id)
             if row.version!=version:raise ConnectionFault('CONNECTION_VERSION_CHANGED')
             secret,payload=await self.store.material(row)
+            await self.remember_binding(row,secret)
             payload['token']=None
             await self.pause(owner)
             return await self.store._persist(row,secret,payload,version,
@@ -212,6 +225,9 @@ class ConnectionAuthorization:
         bound=None
         try:bound=await self.store.resolve_token(owner,connection_id)
         except ConnectionFault:pass  # Local disable must still work on expired/revoked sessions.
+        if row.status!='legacy_review':
+            secret,_=await self.store.material(row)
+            await self.remember_binding(row,secret)
         await self.pause(owner)
         await self.store.disable(owner)
         revoked=False
