@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+from app.domains.indmoney_us.import_validation import require_recommendation_snapshot,utc
 from app.domains.jobs.models import Job
 from app.domains.portfolio_events.common import (
     EVENT_ANALYSIS_MODEL,
@@ -28,14 +29,15 @@ class IndMoneyUsEventPromptMetadata:
 
 
 def build_indmoney_us_events_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> str:
-    captured_at_ist = snapshot.captured_at.astimezone(IST)
+    require_recommendation_snapshot(snapshot)
+    captured_at_ist = utc(snapshot.captured_at).astimezone(IST)
     prompt_sections = [
         EVENT_JOB_MARKER,
         EVENT_WEB_SEARCH_MARKER,
         "[EVENT_METADATA_DO_NOT_REPEAT]",
         f"[INDMONEY_EVENT_SNAPSHOT_ID={snapshot.id}]",
         f"[EVENT_SNAPSHOT_DATE={snapshot.snapshot_date.isoformat()}]",
-        f"[EVENT_CAPTURED_AT={snapshot.captured_at.isoformat()}]",
+        f"[EVENT_CAPTURED_AT={utc(snapshot.captured_at).isoformat()}]",
         "",
         "Use live web data before answering.",
         f"Treat {snapshot.snapshot_date.isoformat()} as the reference 'today' date when deciding whether an event is upcoming.",
@@ -50,6 +52,11 @@ def build_indmoney_us_events_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         "For US stocks, return the exchange in a TradingView-compatible form such as NASDAQ, NYSE, or AMEX when verified.",
         "If no upcoming scheduled event is found for the entire portfolio, still return exactly one data row with Date `Not found`, Exchange `Not found`, Stock Symbol `All holdings`, Stock Name `All holdings`, Event `No upcoming scheduled price-sensitive event found`, Why it may matter `No scheduled catalyst found in checked sources`, Expected Outcome `Neutral`, and Status / Source `Checked latest available sources`.",
         "",
+        "Manual import / analysis only; no direct US trading integration.",
+        f"[INDMONEY_ACCEPTED_CONTENT_SHA256={snapshot.content_hash}]",
+        f"[INDMONEY_SOURCE_SHA256={snapshot.import_provenance['source_hash']}]",
+        f"- Parser: {snapshot.import_provenance['parser_version']}; currency USD; no FX conversion.",
+        f"- Import uncertainty: {snapshot.import_provenance.get('warnings',[])}",
         "Current INDmoney US portfolio snapshot:",
         f"- Snapshot id: {snapshot.id}",
         f"- Snapshot date: {snapshot.snapshot_date.isoformat()}",

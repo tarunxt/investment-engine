@@ -16,6 +16,7 @@ import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
 import { cn } from '@/lib/utils';
+import {manualHistory,historySegments} from '@/lib/indmoneyHistory';
 import type {
   IndMoneyUsHolding,
   IndMoneyUsMarketIndex,
@@ -277,6 +278,10 @@ function EmptyState() {
   );
 }
 
+function ImportHistoryList({history,onSelect}:{history:IndMoneyUsPortfolioSnapshotSummary[];onSelect:(id:number)=>void}){
+ return <section aria-label="Import versions" className="rounded border p-4 space-y-2"><h3 className="font-semibold">Immutable import versions</h3><p className="text-sm">Unverified and quarantined sources stay visible for correction. They never become recommendation inputs.</p><div className="flex flex-wrap gap-2">{history.map(row=><button type="button" key={row.id} onClick={()=>onSelect(row.id)} className="rounded border px-3 py-2 text-sm">#{row.id} · {row.acceptance_state??'legacy_unverified'} · {formatCapturedAt(row.captured_at)}</button>)}</div></section>;
+}
+
 function SnapshotHistoryChart({
   history,
   selectedSnapshotId,
@@ -286,18 +291,14 @@ function SnapshotHistoryChart({
   selectedSnapshotId: number | null;
   onSelect: (snapshotId: number) => void;
 }) {
-  const chartData = [...history]
-    .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
-    .map((snapshot) => ({
-      ...snapshot,
-      value: snapshot.current_value || 0,
-    }));
+  const chartData = manualHistory(history);
 
   if (chartData.length === 0) {
     return null;
   }
 
-  const values = chartData.map((snapshot) => snapshot.value);
+  const values = chartData.flatMap((snapshot) => snapshot.value===null?[]:[snapshot.value]);
+  if(values.length===0)return <p className="p-5 text-sm">No accepted USD history values. Missing history is not a zero balance.</p>;
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const valueRange = maxValue - minValue || 1;
@@ -308,20 +309,21 @@ function SnapshotHistoryChart({
   const plotHeight = height - padding.top - padding.bottom;
   const points = chartData.map((snapshot, index) => {
     const x = padding.left + (chartData.length === 1 ? plotWidth / 2 : (index / (chartData.length - 1)) * plotWidth);
-    const y = padding.top + (1 - (snapshot.value - minValue) / valueRange) * plotHeight;
+    const y = padding.top + (1 - ((snapshot.value ?? minValue) - minValue) / valueRange) * plotHeight;
 
     return { ...snapshot, x, y };
   });
-  const path = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const segments = historySegments(points);
   const yTicks = [maxValue, minValue + valueRange / 2, minValue];
-  const selectedPoint = points.find((point) => point.id === selectedSnapshotId) ?? points.at(-1);
+  const validPoints=points.filter(point=>point.value!==null);
+  const selectedPoint = validPoints.find((point) => point.id === selectedSnapshotId) ?? validPoints.at(-1);
 
   return (
     <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
-          <p className="mt-1 text-sm text-gray-500">Current value trend across saved INDmoney snapshots.</p>
+          <p className="mt-1 text-sm text-gray-500">Accepted USD values only. Missing/unaccepted observations create gaps; no zero balance is invented.</p>
         </div>
         {selectedPoint ? (
           <div className="text-sm sm:text-right">
@@ -353,16 +355,8 @@ function SnapshotHistoryChart({
               </g>
             );
           })}
-          {points.length > 0 ? (
-            <>
-              <polygon
-                points={`${padding.left},${padding.top + plotHeight} ${path} ${width - padding.right},${padding.top + plotHeight}`}
-                fill="url(#indmoney-history-area)"
-              />
-              <polyline points={path} fill="none" stroke="#059669" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-            </>
-          ) : null}
-          {points.map((point) => {
+          {segments.map((segment,index)=><polyline key={index} points={segment.map(point=>`${point.x},${point.y}`).join(' ')} fill="none" stroke="#059669" strokeWidth="4" />)}
+          {validPoints.map((point) => {
             const isActive = selectedSnapshotId === point.id;
 
             return (
@@ -642,19 +636,26 @@ export function IndMoneyUsSnapshotsPanel({
   }
 
   if (!selectedSnapshot) {
-    return null;
+    return <ImportHistoryList history={history} onSelect={onSelectSnapshot}/>;
   }
 
   const reportedHoldings = selectedSnapshot.reported_holdings_count ?? selectedSnapshot.holdings_count;
-  const totalReturnTone =
-    (selectedSnapshot.total_return_value ?? selectedSnapshot.derived.parsed_holdings_total_pnl) >= 0
-      ? 'positive'
-      : 'negative';
-  const dayReturnTone = (selectedSnapshot.day_return_value ?? 0) >= 0 ? 'positive' : 'negative';
+  const totalReturn=selectedSnapshot.total_return_value ?? selectedSnapshot.derived.parsed_holdings_total_pnl;
+  const totalReturnTone = totalReturn==null?'default':totalReturn>=0?'positive':'negative';
+  const dayReturnTone = selectedSnapshot.day_return_value==null?'default':selectedSnapshot.day_return_value>=0?'positive':'negative';
   const sortedHoldings = sortIndMoneyHoldings(selectedSnapshot.holdings, holdingsSort);
 
   return (
     <div className="flex flex-col gap-5">
+      <ImportHistoryList history={history} onSelect={onSelectSnapshot}/>
+      <div role="status" className="rounded border p-3 text-sm break-words">
+        Manual import / analysis only · {selectedSnapshot.acceptance_state ?? 'legacy_unverified'} · {selectedSnapshot.freshness ?? 'unknown'}
+        <p>Currency {selectedSnapshot.import_provenance?.currency ?? 'unverified'} · As of {selectedSnapshot.captured_at}</p>
+        <p>Parser {selectedSnapshot.import_provenance?.parser_version ?? 'legacy; re-import to verify'} · Source SHA256 {selectedSnapshot.import_provenance?.source_hash ?? 'unrecorded'}</p>
+        <p>Snapshot reference {selectedSnapshot.id}{selectedSnapshot.supersedes_id?` · Corrects ${selectedSnapshot.supersedes_id}`:''} · {selectedSnapshot.content_hash ?? 'No accepted content hash'}</p>
+        {(selectedSnapshot.import_provenance?.errors??[]).map((message,index)=><p key={`error${index}`} role="alert">{message}</p>)}
+        {(selectedSnapshot.import_provenance?.warnings??[]).map((message,index)=><p key={`warning${index}`}>{message}</p>)}
+      </div>
       <div className="border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>

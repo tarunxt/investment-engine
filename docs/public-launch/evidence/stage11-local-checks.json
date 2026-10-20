@@ -1,0 +1,56 @@
+{
+  "recorded_at": "2026-10-20T18:41:03.426261+00:00",
+  "base_commit": "f30db4e4bcdb3709371213b3daa907db8887c9ea",
+  "candidate": "containing commit; full SHA in task-3/stage11-local-handoff.json",
+  "worktree": "/Users/tarunsingh/Documents/Codex/2026-10-19/task-3/stage11-indmoney-integrity",
+  "branch": "codex/stage11-indmoney-integrity-local-20261020",
+  "started_at": "2026-10-20T18:08:01Z",
+  "scope": "LOCAL ONLY; no publication/CI trigger/deployment/live provider/security/AWS changes",
+  "tests": {
+    "backend_focused_and_adjacent": 172,
+    "native_controller_helper": 84,
+    "stage11_ci_harness_guard_and_actual_loopback_fixture": 10,
+    "frontend_component_history_session": 8,
+    "typescript": "passed",
+    "next_webpack_build": "passed",
+    "actual_synthetic_preview_http": 18,
+    "source_inventory": "passed",
+    "diff_check": "passed"
+  },
+  "not_run": {
+    "docker_job": "45 collected cases, including 3 real PostgreSQL concurrency/migration cases; not executed",
+    "linux_matrix": "20 prepared cases; not executed",
+    "exact_head_ci": "not triggered",
+    "native_artifact": "not built/audited forStage11",
+    "independent_review": "pending",
+    "uat2_deployment": "not authorized/performed",
+    "owner_acceptance": "pending"
+  },
+  "browser": {
+    "native_chrome_first_build_actual_preview_then_explicit_acceptance": true,
+    "synthetic_user": "usera@stage01.example.com",
+    "synthetic_snapshot_reference": 4,
+    "current_value_usd": 110,
+    "invested_value_usd": 100,
+    "missing_daily_return_display": "\u2014",
+    "final_rebuilt_browser_walkthrough": "not completed; owner switched to live UAT2 window, agent stopped interaction",
+    "live_window_mutations": false,
+    "timezone_and_history_display_corrections": "unit/TypeScript/build/actualHTTP verified; final visual confirmation pending"
+  },
+  "preview": {
+    "url": "http://localhost:54800/console/indmoney-us",
+    "backend": "http://127.0.0.1:54801",
+    "network": "outbound denied; synthetic user/data only; real routes",
+    "live_uat2": "unchanged Stage10 f30db4e4; optional modules still disabled"
+  },
+  "migration": {
+    "revision": "indmoney_integrity_001",
+    "down_revision": "connection_attempts_001",
+    "executed_locally_or_live": false
+  },
+  "limitations": [
+    "Accepted snapshot immutability is enforced through application APIs/ORM and consumption fingerprints, not a defense against a database administrator.",
+    "Only USD; unsupported/mixed FX is quarantined. No real symbol mapping, quotes, INDmoney integration or US trading claimed.",
+    "Actual PostgreSQL/Linux/source artifacts and independent review required before future deployment approval."
+  ]
+}

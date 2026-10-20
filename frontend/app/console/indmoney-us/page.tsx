@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import {useAuth} from '@/hooks/useAuth';
+import {useSession} from 'next-auth/react';
 
 import { AlertCircle, Copy, Loader2 } from 'lucide-react';
 
@@ -22,7 +24,12 @@ function normalizeError(error: unknown) {
   return 'Something went wrong';
 }
 
-export default function IndMoneyUsPage() {
+export default function IndMoneyUsPage(){
+ const {user}=useAuth();const {data:session,status}=useSession();
+ return status==='authenticated'&&user?<IndMoneyUsPageBody key={`${user.id}:${session?.generation}`}/>:<p>Sign in to view your private imports.</p>;
+}
+
+function IndMoneyUsPageBody() {
   const [overview, setOverview] = useState<IndMoneyUsPortfolioOverviewResponse | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] = useState<IndMoneyUsPortfolioSnapshotDetail | null>(null);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(null);
@@ -118,7 +125,7 @@ export default function IndMoneyUsPage() {
     setSaveError(null);
 
     try {
-      const snapshot = await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
+      const snapshot = await apiService.indmoneyUsAcceptImport(payload.accepted_preview_id!,payload.acceptance_hash!);
       const nextOverview = await apiService.indmoneyUsPortfolioOverview();
       applyOverview(nextOverview, snapshot);
     } catch (error) {

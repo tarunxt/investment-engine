@@ -50,6 +50,7 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
     module='__analysis_consumer__' if domain=='runs' else DOMAIN_MODULES.get(domain)
     if module is None:return ('unknown','view')
     capability='view' if methods<={'GET','HEAD'} else 'analyze'
+    if domain=='indmoney_us' and endpoint in {'preview_import','accept_import','create_portfolio_snapshot'}:capability='import'
     if 'export' in endpoint:module,capability='sheets_export','export'
     if domain=='zerodha' and endpoint in {'place_order','place_protected_market_orders','place_protected_market_orders_sequenced'}:capability='execute'
     if domain in {'polymarket_direct','polymarket_auto_live','polymarket','bullpen008'} and capability!='view':capability='execute'

@@ -1,156 +1,60 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  AlertCircle,
-  CalendarDays,
-  ChevronDown,
-  ChevronUp,
-  ClipboardPaste,
-  Loader2,
-  Save,
-} from 'lucide-react';
+import {useState,useRef,useEffect} from 'react';
+import {useSession} from 'next-auth/react';
+import {useAuth} from '@/hooks/useAuth';
+import {apiService} from '@/services/api';
+import {Button} from '@/components/ui/button';
+import type {IndMoneyUsPortfolioSnapshotCreateRequest,IndMoneyUsPortfolioSnapshotDetail} from '@/types/api';
 
-import { Button } from '@/components/ui/button';
-import type { IndMoneyUsPortfolioSnapshotCreateRequest } from '@/types/api';
+const CSV_TEMPLATE='symbol,company_name,currency,quantity,market_price,invested_value,current_value,total_pnl,total_pnl_percent\nUATA,Synthetic Alpha,USD,2,55,100,110,10,10\n';
+function localTime(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}
 
-function buildLocalDateTimeValue(date = new Date()) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  const hours = `${date.getHours()}`.padStart(2, '0');
-  const minutes = `${date.getMinutes()}`.padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+export function IndMoneyUsPasteCard({saving,error,onSubmit}:{saving:boolean;error:string|null;onSubmit:(data:IndMoneyUsPortfolioSnapshotCreateRequest)=>Promise<void>}){
+ const {user}=useAuth();const {data:session,status}=useSession();
+ const owner=status==='authenticated'?user?.id:undefined;
+ // A keyed lifetime removes prior-owner text/previews before effects run.
+ return owner===undefined?<p>Sign in to review a manual import.</p>:<OwnedImport key={`${owner}:${session?.generation}`} saving={saving} error={error} onSubmit={onSubmit}/>;
 }
 
-export function IndMoneyUsPasteCard({
-  saving,
-  error,
-  onSubmit,
-}: {
-  saving: boolean;
-  error: string | null;
-  onSubmit: (data: IndMoneyUsPortfolioSnapshotCreateRequest) => Promise<void>;
-}) {
-  const [rawText, setRawText] = useState('');
-  const [capturedAt, setCapturedAt] = useState(buildLocalDateTimeValue());
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmed = rawText.trim();
-    if (!trimmed) return;
-
-    setSuccessMessage(null);
-    try {
-      await onSubmit({
-        raw_text: trimmed,
-        captured_at: capturedAt ? new Date(capturedAt).toISOString() : null,
-      });
-
-      setRawText('');
-      setCapturedAt(buildLocalDateTimeValue());
-      setSuccessMessage('Snapshot saved and parsed.');
-    } catch {
-      // The parent already surfaces the save error inline.
-    }
-  };
-
-  return (
-    <div className="border border-blue-200 bg-blue-50 shadow-sm">
-      <button
-        type="button"
-        onClick={() => setIsOpen((current) => !current)}
-        className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left"
-      >
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-full bg-white p-2 text-blue-600 shadow-sm">
-            <ClipboardPaste className="size-4" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-slate-950">Paste INDmoney snapshot</h2>
-            <p className="mt-1 text-sm text-blue-900/80">
-              Click to open the daily paste box and save a manual snapshot.
-            </p>
-          </div>
-        </div>
-        <span className="rounded-full bg-white p-2 text-blue-600 shadow-sm">
-          {isOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-        </span>
-      </button>
-
-      {isOpen ? (
-        <form onSubmit={handleSubmit} className="space-y-4 border-t border-blue-200 px-5 py-5">
-        <div className="grid gap-4 lg:grid-cols-[16rem,minmax(0,1fr)]">
-          <div className="space-y-2">
-            <label
-              htmlFor="indmoney-captured-at"
-              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-900/80"
-            >
-              <CalendarDays className="size-3.5" />
-              Snapshot timestamp
-            </label>
-            <input
-              id="indmoney-captured-at"
-              type="datetime-local"
-              value={capturedAt}
-              onChange={(event) => setCapturedAt(event.target.value)}
-              className="w-full border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition focus:border-blue-400"
-            />
-            <p className="text-xs text-blue-900/70">
-              Use the time when you copied the INDmoney screen so history stays meaningful.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label
-              htmlFor="indmoney-raw-text"
-              className="text-xs font-semibold uppercase tracking-wider text-blue-900/80"
-            >
-              Paste IndMoney data here
-            </label>
-            <textarea
-              id="indmoney-raw-text"
-              value={rawText}
-              onChange={(event) => {
-                setRawText(event.target.value);
-                setSuccessMessage(null);
-              }}
-              placeholder="Paste the copied INDmoney portfolio text here..."
-              className="min-h-[16rem] w-full resize-y border border-blue-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400"
-            />
-            <div className="flex items-center justify-between text-xs text-blue-900/70">
-              <span>Best results come from pasting the full portfolio screen, including the holdings list.</span>
-              <span>{rawText.trim().length.toLocaleString('en-IN')} chars</span>
-            </div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="flex items-start gap-2 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {successMessage && !error && (
-          <div className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-            {successMessage}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-blue-900/70">
-            Partial parsing is okay. We still keep the raw snapshot and show warnings when totals do not reconcile.
-          </p>
-          <Button type="submit" disabled={saving || !rawText.trim()} className="bg-blue-600 hover:bg-blue-700">
-            {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
-            Save Snapshot
-          </Button>
-        </div>
-        </form>
-      ) : null}
-    </div>
-  );
+export function OwnedImport({saving,error,onSubmit}:{saving:boolean;error:string|null;onSubmit:(data:IndMoneyUsPortfolioSnapshotCreateRequest)=>Promise<void>}){
+ const [open,setOpen]=useState(false),[raw,setRaw]=useState(''),[captured,setCaptured]=useState(localTime),[format,setFormat]=useState<'paste'|'csv'>('paste'),[period,setPeriod]=useState(false),[correction,setCorrection]=useState('');
+ const [preview,setPreview]=useState<IndMoneyUsPortfolioSnapshotDetail|null>(null),[pending,setPending]=useState(false),[fault,setFault]=useState<string|null>(null),[saved,setSaved]=useState(false);
+ const epoch=useRef(0);const alive=useRef(true);
+ useEffect(()=>{alive.current=true;return()=>{alive.current=false;epoch.current++;};},[]);
+ function invalidate(){epoch.current++;setPreview(null);setFault(null);setSaved(false);setPending(false);}
+ function payload():IndMoneyUsPortfolioSnapshotCreateRequest{return{raw_text:raw,captured_at:new Date(captured).toISOString(),format,currency:'USD',day_return_period:period?'1d_same_asof':'unknown',supersedes_id:correction?Number(correction):null};}
+ async function review(event:React.FormEvent){event.preventDefault();const ticket=++epoch.current;setPending(true);setPreview(null);setFault(null);setSaved(false);
+  try{const value=await apiService.indmoneyUsPreviewImport(payload());if(alive.current&&epoch.current===ticket)setPreview(value);}catch(e){if(alive.current&&epoch.current===ticket)setFault(e instanceof Error?e.message:'Preview unavailable');}finally{if(alive.current&&epoch.current===ticket)setPending(false);}}
+ async function accept(){if(!preview?.content_hash||preview.acceptance_state!=='preview')return;const ticket=epoch.current;
+  try{await onSubmit({...payload(),accepted_preview_id:preview.id,acceptance_hash:preview.content_hash});if(alive.current&&epoch.current===ticket){setPreview(null);setRaw('');setSaved(true);}}catch{/* Parent surfaces save errors. */}}
+ return <section className="space-y-4 rounded-xl border border-blue-200 bg-blue-50 p-5 min-w-0">
+  <button type="button" className="text-left font-semibold" aria-expanded={open} onClick={()=>setOpen(!open)}>Manual INDmoney import · Preview and accept</button>
+  <p className="text-sm">Manual import and analysis only. No direct US trading integration. Nothing feeds recommendations until you accept a validated preview.</p>
+  {open&&<form onSubmit={review} className="space-y-4">
+   <div className="flex flex-wrap gap-4">
+    <label>Source format <select aria-label="Source format" value={format} onChange={e=>{invalidate();setFormat(e.target.value as 'paste'|'csv');}}><option value="paste">Pasted holdings screen</option><option value="csv">CSV template v2</option></select></label>
+    <label>As-of time <input aria-label="As-of time" type="datetime-local" required value={captured} onChange={e=>{invalidate();setCaptured(e.target.value);}}/></label>
+    <label>Currency <input aria-label="Currency" value="USD" readOnly className="w-16"/></label>
+    <label>Corrects snapshot ID (optional) <input aria-label="Corrects snapshot ID" type="number" min="1" value={correction} onChange={e=>{invalidate();setCorrection(e.target.value);}} className="w-24"/></label>
+   </div>
+   <a className="underline" href={`data:text/csv;charset=utf-8,${encodeURIComponent(CSV_TEMPLATE)}`} download="indmoney-us-v2.csv">Download stable CSV template</a>
+   <label className="block">Holdings source <textarea aria-label="Holdings source" value={raw} required maxLength={200000} rows={9} className="mt-2 w-full rounded border p-3 font-mono text-sm" onChange={e=>{invalidate();setRaw(e.target.value);}}/></label>
+   <label className="flex gap-2"><input type="checkbox" checked={period} onChange={e=>{invalidate();setPeriod(e.target.checked);}}/>Daily dollars and percentage both describe the same one-day period ending at this as-of time.</label>
+   <Button type="submit" disabled={pending||saving||!raw.trim()||!captured}>{pending?'Parsing preview…':'Preview import'}</Button>
+  </form>}
+  {(fault||error)&&<p role="alert">{fault||error}</p>}
+  {saved&&<p role="status">Validated snapshot accepted. Prior versions remain in history.</p>}
+  {preview&&<section aria-label="Import preview" className="space-y-3 rounded border bg-white p-4 break-words">
+   <h3 className="font-semibold">{preview.acceptance_state==='quarantined'?'Quarantined — correction required':preview.acceptance_state==='accepted'?'Already accepted — duplicate import':'Review before acceptance'}</h3>
+   <p>{preview.holdings_count} holdings · {preview.import_provenance?.currency} · As of {preview.captured_at} · {preview.freshness}</p>
+   <p className="text-xs">Parser {preview.import_provenance?.parser_version} · Source SHA256 {preview.import_provenance?.source_hash}</p>
+   <p>FX: no conversion; USD source only. Missing values remain missing.</p>
+   {(preview.import_provenance?.errors??[]).map((x,i)=><p role="alert" key={`e${i}`}>{x}</p>)}
+   {(preview.import_provenance?.warnings??[]).map((x,i)=><p key={`w${i}`}>{x}</p>)}
+   <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Symbol / name</th><th>Quantity</th><th>Invested USD</th><th>Current USD</th><th>Quote USD</th></tr></thead><tbody>{preview.holdings.map((h,i)=><tr key={`${h.symbol}-${i}`}><td>{h.symbol} / {h.company_name}</td><td>{h.quantity??'Missing'}</td><td>{h.invested_value??'Missing'}</td><td>{h.current_value??'Missing'}</td><td>{h.market_price??'Missing'}</td></tr>)}</tbody></table></div>
+   <p className="text-xs">Snapshot reference {preview.id} · Content {preview.content_hash}</p>
+   <Button type="button" onClick={accept} disabled={saving||pending||preview.acceptance_state!=='preview'}>{saving?'Accepting…':'Accept this exact snapshot'}</Button>
+  </section>}
+ </section>;
 }

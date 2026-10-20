@@ -151,6 +151,7 @@ def time_check():
 BASE_REVISION = 'module_lifecycle_001'
 STAGE09_REVISION = 'integration_connections_001'
 STAGE10_REVISION = 'connection_attempts_001'
+STAGE11_REVISION = 'indmoney_integrity_001'
 SCHEMA_ARTIFACTS = DATA/'artifacts/native-schema'
 
 
@@ -270,7 +271,7 @@ def checked_backup(argument):
     path=raw.resolve()
     if path.parent!=(DATA/'backups').resolve() or not re.fullmatch(r'uat2-[0-9TZ]+\.dump',path.name):raise RuntimeError('Use UAT2 backup only')
     private_file(path);receipt=private_json(path.with_suffix('.json'))
-    if receipt.get('schema_version')!=2 or receipt.get('schema_revision') not in {BASE_REVISION,STAGE09_REVISION,STAGE10_REVISION}:
+    if receipt.get('schema_version')!=2 or receipt.get('schema_revision') not in {BASE_REVISION,STAGE09_REVISION,STAGE10_REVISION,STAGE11_REVISION}:
         raise RuntimeError('Fresh supported UAT2 backup with schema provenance required')
     if not re.fullmatch(r'[0-9a-f]{40}',receipt.get('source_commit','')) or not re.fullmatch(r'[0-9a-f]{64}',receipt.get('fingerprint','')):
         raise RuntimeError('Invalid backup provenance')
@@ -297,7 +298,7 @@ def rollback(argument, *, recover_only=False):
     path,receipt,target=checked_backup(argument)
     reference=backup_reference(path,receipt)
     baseline=receipt['schema_revision']
-    successor={BASE_REVISION:STAGE09_REVISION,STAGE09_REVISION:STAGE10_REVISION,STAGE10_REVISION:None}[baseline]
+    successor={BASE_REVISION:STAGE09_REVISION,STAGE09_REVISION:STAGE10_REVISION,STAGE10_REVISION:STAGE11_REVISION,STAGE11_REVISION:None}[baseline]
     old=private_json(pending()) if pending().exists() else None
     if recover_only:
         if not old or old.get('operation')!='rollback' or old.get('backup')!=reference:
@@ -330,11 +331,12 @@ def rollback(argument, *, recover_only=False):
                 mark(record,'downgrade_started')
                 schema_operation(operator,'downgrade',expected=successor,
                                  fingerprint=saved['state']['fingerprint'],material=saved['material'],
-                                 **({'target':baseline} if baseline==STAGE09_REVISION else {}))
-            elif (state['revision']!=baseline or (baseline!=STAGE10_REVISION and state.get('stage10_tables'))
+                                 **({'target':baseline} if baseline in {STAGE09_REVISION,STAGE10_REVISION} else {}))
+            elif (state['revision']!=baseline or (baseline not in {STAGE10_REVISION,STAGE11_REVISION} and state.get('stage10_tables'))
+                  or (baseline!=STAGE11_REVISION and state.get('stage11_columns'))
                   or (baseline==BASE_REVISION and state.get('stage09_tables'))):
                 raise RuntimeError('Unexpected revision or partial schema; rollback stopped')
-            elif baseline in {STAGE09_REVISION,STAGE10_REVISION}:
+            elif baseline in {STAGE09_REVISION,STAGE10_REVISION,STAGE11_REVISION}:
                 saved=schema_operation(operator,'preserve',expected=baseline)
                 mark(record,'material_preserved',material=saved['material'])
             mark(record,'restore_started')

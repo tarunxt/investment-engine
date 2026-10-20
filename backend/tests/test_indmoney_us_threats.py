@@ -19,69 +19,25 @@ from app.domains.indmoney_us.threats import (  # noqa: E402
 
 class IndMoneyUsThreatsTests(unittest.TestCase):
     def test_build_prompt_embeds_snapshot_metadata_holdings_and_indices(self):
-        snapshot = SimpleNamespace(
-            id=7,
-            snapshot_date=date(2026, 5, 30),
-            captured_at=datetime(2026, 5, 30, 9, 15, tzinfo=timezone.utc),
-            source="manual_paste",
-            parse_status="parsed",
-            parse_warnings=[],
-            reported_holdings_count=2,
-            holdings_count=2,
-            wallet_balance=1540.73,
-            current_value=5483.39,
-            invested_value=4119.32,
-            day_return_value=121.83,
-            day_return_percent=2.27,
-            total_return_value=1364.07,
-            total_return_percent=33.11,
-            market_indices=[
-                {
-                    "name": "Nasdaq 100",
-                    "value": 30340.52,
-                    "change_value": 117.87,
-                    "change_percent": 0.39,
-                    "raw_change_text": "117.87 (▲0.39%)",
-                }
-            ],
-            holdings=[
-                {
-                    "company_name": "NVIDIA Corporation",
-                    "symbol": "NVDA",
-                    "quantity": 5.220667443,
-                    "average_price": 203.77,
-                    "market_price": 211.14,
-                    "invested_value": 1063.80,
-                    "current_value": 1102.29,
-                    "total_pnl": 38.49,
-                    "total_pnl_percent": 3.62,
-                    "price_vs_average_percent": 3.62,
-                    "market_change_percent": 1.45,
-                },
-                {
-                    "company_name": "Advanced Micro Devices Inc",
-                    "symbol": "AMD",
-                    "quantity": 1.294617161,
-                    "average_price": 423.60,
-                    "market_price": 516.10,
-                    "invested_value": 548.40,
-                    "current_value": 668.15,
-                    "total_pnl": 119.75,
-                    "total_pnl_percent": 21.84,
-                    "price_vs_average_percent": 21.84,
-                    "market_change_percent": 0.38,
-                },
-            ],
-        )
+        # Original pre-acceptance fixtures are no longer admissible inputs.
+        from app.domains.indmoney_us.schemas import IndMoneyUsPortfolioSnapshotCreateRequest
+        from app.domains.indmoney_us.import_validation import parse_import
+        from app.shared.exceptions import ValidationException
+        with self.assertRaises(ValidationException):
+            build_indmoney_us_threat_prompt(SimpleNamespace(acceptance_state='legacy_unverified'))
+        captured=datetime.now(timezone.utc)
+        raw='symbol,company_name,currency,quantity,market_price,invested_value,current_value,total_pnl,total_pnl_percent\nUATA,Synthetic Alpha,USD,2,55,100,110,10,10\nUATB,Synthetic Beta,USD,1,60,50,60,10,20\n'
+        data=parse_import(IndMoneyUsPortfolioSnapshotCreateRequest(raw_text=raw,captured_at=captured,format='csv'))
+        self.assertFalse(data['import_provenance']['errors'])
+        snapshot=SimpleNamespace(id=7,**{**data,'acceptance_state':'accepted'})
 
         prompt = build_indmoney_us_threat_prompt(snapshot)
 
         self.assertIn(THREAT_JOB_MARKER, prompt)
         self.assertIn("[INDMONEY_THREAT_SNAPSHOT_ID=7]", prompt)
-        self.assertIn("[THREAT_SNAPSHOT_DATE=2026-05-30]", prompt)
-        self.assertIn("Nasdaq 100", prompt)
-        self.assertIn("NVIDIA Corporation", prompt)
-        self.assertIn("AMD", prompt)
+        self.assertIn(f"[THREAT_SNAPSHOT_DATE={snapshot.snapshot_date.isoformat()}]", prompt)
+        self.assertIn("Synthetic Alpha", prompt)
+        self.assertIn("UATB", prompt)
         self.assertIn("Table 10: Urgent Actionables / Immediate Risk-Control Actions", prompt)
         self.assertIn("For every table row about a single stock, always include Exchange, Stock Symbol, and Stock Name.", prompt)
         self.assertIn("Exact Date / Timing", prompt)
@@ -90,8 +46,8 @@ class IndMoneyUsThreatsTests(unittest.TestCase):
 
         metadata = extract_indmoney_us_threat_prompt_metadata(prompt)
         self.assertEqual(metadata.snapshot_id, 7)
-        self.assertEqual(metadata.snapshot_date, date(2026, 5, 30))
-        self.assertEqual(metadata.captured_at, datetime(2026, 5, 30, 9, 15, tzinfo=timezone.utc))
+        self.assertEqual(metadata.snapshot_date, snapshot.snapshot_date)
+        self.assertEqual(metadata.captured_at, captured)
 
     def test_parse_report_reuses_markdown_table_and_summary_parser(self):
         markdown = """

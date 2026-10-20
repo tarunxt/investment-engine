@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select,and_
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+
+
+def accepted_snapshot_predicate():
+    correction=aliased(IndMoneyUsPortfolioSnapshot)
+    superseded=select(correction.id).where(correction.user_id==IndMoneyUsPortfolioSnapshot.user_id,correction.acceptance_state=='accepted',correction.supersedes_id==IndMoneyUsPortfolioSnapshot.id).exists()
+    return and_(IndMoneyUsPortfolioSnapshot.acceptance_state=='accepted',~superseded)
 
 
 class IndMoneyUsPortfolioSnapshotRepository:
@@ -19,7 +26,7 @@ class IndMoneyUsPortfolioSnapshotRepository:
     async def get_latest_by_user(self, user_id: int) -> IndMoneyUsPortfolioSnapshot | None:
         result = await self._db.execute(
             select(IndMoneyUsPortfolioSnapshot)
-            .where(IndMoneyUsPortfolioSnapshot.user_id == user_id)
+            .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
             .order_by(
                 IndMoneyUsPortfolioSnapshot.captured_at.desc(),
                 IndMoneyUsPortfolioSnapshot.id.desc(),

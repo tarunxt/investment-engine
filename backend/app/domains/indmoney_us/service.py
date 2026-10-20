@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -50,6 +50,10 @@ NOISE_LINES = {
     "wallet",
     "toggle-visibility",
     "add money",
+    "reports",
+    "report",
+    "transactions",
+    "download reports",
     "/",
 }
 
@@ -117,8 +121,14 @@ class IndMoneyUsPortfolioService:
         return {
             "id": snapshot.id,
             "snapshot_date": snapshot.snapshot_date,
-            "captured_at": snapshot.captured_at,
+            "captured_at": self._normalize_captured_at(snapshot.captured_at),
             "source": snapshot.source,
+            "acceptance_state": getattr(snapshot,'acceptance_state',None) or 'legacy_unverified',
+            "content_hash": getattr(snapshot,'content_hash',None),
+            "import_provenance": getattr(snapshot,'import_provenance',None),
+            "accepted_at": self._normalize_captured_at(snapshot.accepted_at) if getattr(snapshot,'accepted_at',None) else None,
+            "supersedes_id": getattr(snapshot,'supersedes_id',None),
+            "freshness": 'stale' if datetime.now(timezone.utc)-self._normalize_captured_at(snapshot.captured_at)>timedelta(hours=48) else 'current',
             "parse_status": snapshot.parse_status,
             "parse_warnings": snapshot.parse_warnings or [],
             "holdings_count": snapshot.holdings_count,
@@ -138,6 +148,9 @@ class IndMoneyUsPortfolioService:
         snapshot: IndMoneyUsPortfolioSnapshot,
     ) -> dict[str, Any]:
         holdings = self._enrich_holdings(snapshot.holdings or [], snapshot.current_value)
+        if getattr(snapshot,'import_provenance',None):
+            original={h['symbol']:h for h in snapshot.holdings or []}
+            for holding in holdings:holding['total_pnl_percent']=original[holding['symbol']].get('total_pnl_percent')
         summary = {
             "wallet_balance": snapshot.wallet_balance,
             "current_value": snapshot.current_value,
@@ -365,7 +378,10 @@ class IndMoneyUsPortfolioService:
             ):
                 continue
 
+            record["reported_total_pnl_percent"] = record.get("total_pnl_percent")
+            original_keys = {key for key,value in record.items() if value is not None}
             self._backfill_holding(record)
+            record["derived_fields"] = [key for key,value in record.items() if value is not None and key not in original_keys and key not in {"derived_fields","reported_total_pnl_percent"}]
             holdings.append(record)
 
         holdings.sort(key=lambda item: item.get("current_value") or 0, reverse=True)
@@ -438,9 +454,12 @@ class IndMoneyUsPortfolioService:
         holdings: list[dict[str, Any]],
         summary: dict[str, Any],
     ) -> dict[str, Any]:
-        parsed_current_value = sum((holding.get("current_value") or 0) for holding in holdings)
-        parsed_invested_value = sum((holding.get("invested_value") or 0) for holding in holdings)
-        parsed_total_pnl = sum((holding.get("total_pnl") or 0) for holding in holdings)
+        def total(field):
+            values=[holding.get(field) for holding in holdings]
+            return sum(values) if values and all(value is not None for value in values) else None
+        parsed_current_value = total('current_value')
+        parsed_invested_value = total('invested_value')
+        parsed_total_pnl = total('total_pnl')
 
         profitable_holdings = [holding for holding in holdings if (holding.get("total_pnl") or 0) > 0]
         loss_making_holdings = [holding for holding in holdings if (holding.get("total_pnl") or 0) < 0]
@@ -494,7 +513,7 @@ class IndMoneyUsPortfolioService:
             if summary_value is None and parsed_value == 0:
                 continue
             delta = None
-            if summary_value is not None:
+            if summary_value is not None and parsed_value is not None:
                 delta = summary_value - parsed_value
             items.append(
                 {
@@ -571,14 +590,10 @@ class IndMoneyUsPortfolioService:
         for index, line in enumerate(lines):
             if line.casefold() != label_folded:
                 continue
-            candidate = IndMoneyUsPortfolioService._find_next_matching(
-                lines,
-                start=index + 1,
-                end=min(index + 6, len(lines)),
-                predicate=predicate,
-            )
-            if candidate:
-                return candidate
+            # Never borrow a later summary's number when this label is missing.
+            for candidate in lines[index+1:min(index+6,len(lines))]:
+                if candidate.casefold() in set(SUMMARY_LABELS)|set(RETURN_LABELS) or 'current holdings' in candidate.casefold():break
+                if predicate(candidate):return candidate
         return None
 
     @staticmethod
@@ -598,7 +613,7 @@ class IndMoneyUsPortfolioService:
     def _select_company_name(name_lines: list[str], ticker: str) -> str:
         unique_names: list[str] = []
         for line in name_lines:
-            if line == ticker:
+            if line == ticker or line.casefold() in NOISE_LINES:
                 continue
             if line not in unique_names:
                 unique_names.append(line)
@@ -673,7 +688,8 @@ class IndMoneyUsPortfolioService:
     def _parse_change_with_percent(self, value: str) -> tuple[float | None, float | None]:
         match = RETURN_RE.search(value)
         if not match:
-            return self._parse_money(value), self._parse_percent(value)
+            money=self._parse_money(value) if any(mark in value for mark in ("$","₹")) or "%" not in value else None
+            return money, self._parse_percent(value)
         return self._parse_money(match.group(1)), self._parse_percent(match.group(2))
 
     @staticmethod

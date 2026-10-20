@@ -1150,6 +1150,12 @@ export interface ZerodhaPortfolioSyncResponse {
 export interface IndMoneyUsPortfolioSnapshotCreateRequest {
   raw_text: string;
   captured_at?: string | null;
+  format?: 'paste' | 'csv';
+  currency?: 'USD' | 'INR' | 'EUR' | 'GBP';
+  day_return_period?: 'unknown' | '1d_same_asof';
+  supersedes_id?: number | null;
+  accepted_preview_id?: number | null;
+  acceptance_hash?: string | null;
 }
 
 export interface IndMoneyUsMarketIndex {
@@ -1183,9 +1189,9 @@ export interface IndMoneyUsReconciliationItem {
 }
 
 export interface IndMoneyUsDerivedAnalytics {
-  parsed_holdings_current_value: number;
-  parsed_holdings_invested_value: number;
-  parsed_holdings_total_pnl: number;
+  parsed_holdings_current_value: number | null;
+  parsed_holdings_invested_value: number | null;
+  parsed_holdings_total_pnl: number | null;
   profitable_holdings_count: number;
   loss_making_holdings_count: number;
   top_allocations: IndMoneyUsHolding[];
@@ -1195,6 +1201,12 @@ export interface IndMoneyUsDerivedAnalytics {
 }
 
 export interface IndMoneyUsPortfolioSnapshotSummary {
+  acceptance_state?: 'legacy_unverified' | 'preview' | 'quarantined' | 'accepted';
+  content_hash?: string | null;
+  accepted_at?: string | null;
+  supersedes_id?: number | null;
+  freshness?: 'stale' | 'current' | 'unknown';
+  import_provenance?: {parser_version:string;source_hash:string;currency:string;as_of:string;errors:string[];warnings:string[];fx:{conversion:string}} | null;
   id: number;
   snapshot_date: string;
   captured_at: string;
