@@ -11,10 +11,11 @@ Group=credx-uat2-app
 WorkingDirectory=/opt/credx-uat2/current/backend
 EnvironmentFile=/etc/credx-uat2/backend.env
 EnvironmentFile=/etc/credx-uat2/release.env
+EnvironmentFile=-/etc/credx-uat2/schema-operation.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPATH=/opt/credx-uat2/current/backend
 ExecStartPre=/usr/bin/python3 /opt/credx-uat2/current/deploy/uat2/native/runtime-preflight.py
-ExecStart=/opt/credx-uat2/current/.venv/bin/alembic upgrade head
+ExecStart=/opt/credx-uat2/current/.venv/bin/python /opt/credx-uat2/current/deploy/uat2/native/schema_service.py
 MemoryMax=1536M
 TasksMax=128
 ReadWritePaths=/var/lib/credx-uat2/artifacts

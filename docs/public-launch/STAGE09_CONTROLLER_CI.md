@@ -1,0 +1,74 @@
+# Frozen Stage09 controller integration CI
+
+Runtime/controller/helper/application remain byte-identical to
+`3395476c09e4f0257b99b788f594d4c542769711` for this local repair candidate. Only test harness/fixture, CI and this
+record change. Prior receipts remain intact. Exact runtime SHA and verification
+SHA are separately recorded; the harness refuses any unlisted changed path.
+
+The dedicated ubuntu24.04 job creates fixed UAT2-named paths and synthetic Unix
+users only on its fresh disposable GitHub VM. It refuses existing paths, a
+non-runner checkout, a non-systemd Linux environment or missing CI acknowledgement.
+It creates a fresh PostgreSQL16 cluster/database, no cloud resources, provider
+calls, live credentials, identity marker or IMDS emulation. The VM is discarded
+by GitHub after the job. The three-line syntax job dependency correction installs
+the repository's exact SQLAlchemy2.0.49 for existing helper tests.
+
+Actual unchanged operations exercised: controller backup and rollback,
+configuration/promotion/readiness, pg_dump/pg_restore, schema helper entry point,
+Alembic migrations, migration systemd unit, original UID nftables policy and
+migration confinement. The previous release comes from the pinned accepted
+Stage08 source. Backend/frontend/worker/proxy/Redis/certificate service commands
+are explicitly synthetic fixture processes. This is not actual CredX service,
+Google-login, HTTPS, UI or live-host acceptance.
+
+Cases include fresh receipt/fingerprint/sequence capture, upgrade and synthetic
+binding insertion, preservation/downgrade/transactional restore, late PostgreSQL
+DDL error, real disconnect, the controller's actual120s restore timeout, failed
+downgrade, controller SIGKILL before and after restore commit, interrupted schema
+operation/environment cleanup, unit configuration/promotion/partial-start/readiness
+failure and verification-only recovery. Database reset between cases discards only
+the disposable fixture and never acts as a recovery shortcut within a case.
+Sequence values and is_called are compared/recorded explicitly; transactional
+restore is not treated as a guarantee of sequence rollback.
+
+Source/request/action, result/export ownership,0600 modes, cross-user denial,
+material checksums and operation-environment cleanup are checked after real unit
+execution, including deliberate result-file tampering. Configuration and rename
+faults are injected at the controller OS boundary; actual unit operations,
+PostgreSQL and migration helpers are not replaced with mocks. Only the AWS host
+guard is substituted when testing the pending-marker CLI start gate on a CI VM.
+This substitution is never installed in runtime source.
+
+Known local reproduction before CI: a failed promotion rename leaves current.new;
+a later promotion raises FileExistsError. The promotion-recovery case requires
+success and is intentionally allowed to fail CI on this defect. Do not remove the
+pointer, skip the case or publish a runtime fix under test-only authorization.
+Any runtime repair is prepared/reviewed separately before publication.
+
+Each case and final receipt are retained even on test failure. Red cases are
+reported as failed, never counted as skips, expected passes or live acceptance.
+
+The first completed integration at37c29ef1 executed all19 cases:17 passed,
+zero skipped. It confirmed the promotion retry runtime defect. Schema interruption
+also exposed a test waiter error: is-active returns nonzero for activating oneshot
+services, so it must wait for ActiveState inactive/failed instead. That test-only
+waiter is corrected without changing runtime. The same19 cases are split into four
+independent disposable VM groups with fail-fast disabled; each run step has20min
+and the job25min, reserving time to retain failure diagnostics. No case is waived.
+
+The candidate additionally carries the narrowly scoped promotion-pointer repair
+from1162e811 and two direct controller regressions. Publication of this runtime
+change is pending separate approval. The published e6bef0e8 evidence remains
+pinned to original runtime1f33c88d and is not acceptance evidence for this repair.
+After approval, the unchanged19-case grouped harness is pinned to1162e811 for
+new exact-source CI. Existing local33 native tests pass; real repaired-runtime
+PostgreSQL/systemd acceptance is still pending publication and execution.
+
+Independent review of8a32053f identified a low-probability UUID collision cleanup
+issue: finally unlinked a pre-existing pointer when this attempt failed to create
+it. The local3395476c correction tracks successful creation and preserves both
+regular-file and symlink collisions. Both new regressions fail against8a32053f;
+35 native and8 rehearsal-tool tests pass locally with the correction. This
+additional runtime change remains unpublished pending approval. The ongoing8a
+CI result must be reported separately and cannot establish collision-corrected
+runtime acceptance. The local integration pin is3395476c for a later approved run.

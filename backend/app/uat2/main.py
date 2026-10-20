@@ -26,6 +26,9 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 app.include_router(auth_router)
 # Management contract only; optional domain routers remain unavailable.
 app.include_router(modules_router)
+# Masked owner connection metadata only; no setup writes or broker adapters.
+from app.domains.connections.router import router as connections_router
+app.include_router(connections_router)
 # Only portfolio read routes: price fetches and ingestion remain disabled.
 for route in us_router.routes:
     if route.path in {'/indmoney-us/portfolio', '/indmoney-us/portfolio/{snapshot_id}'} and route.methods == {'GET'}:

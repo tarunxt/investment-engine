@@ -300,6 +300,8 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(modules_router)
+from app.domains.connections.router import router as connections_router
+app.include_router(connections_router)
 app.include_router(sports_rankings_router)
 app.include_router(bullpen_run_audit_router)
 app.include_router(bullpen008_router)

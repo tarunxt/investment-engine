@@ -1,0 +1,126 @@
+"""Fixed UAT2 schema actions inside the existing confined migration service.
+
+Never a general SQL/credential interface. Result files expose hashes/counts only;
+material exports contain ciphertext and stay in private UAT2 artifact storage.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import stat
+from urllib.parse import urlsplit
+
+BASE = 'module_lifecycle_001'
+STAGE09 = 'integration_connections_001'
+TABLES = frozenset({'connection_credentials','integration_connections'})
+ARTIFACTS = Path('/var/lib/credx-uat2/artifacts/native-schema')
+PREFIX = 'CREDX_UAT2_SCHEMA_'
+
+
+def sha(data):return hashlib.sha256(data).hexdigest()
+
+
+def capture(engine):
+    import sqlalchemy as sa
+    inspector=sa.inspect(engine);names=sorted(inspector.get_table_names(schema='public'))
+    with engine.connect() as db:
+        versions=list(db.execute(sa.text('SELECT version_num FROM public.alembic_version')).scalars())
+        if len(versions)!=1 or versions[0] not in {BASE,STAGE09}:raise RuntimeError('Unexpected schema revision')
+        revision=versions[0]
+        if (set(names)&TABLES)!=(TABLES if revision==STAGE09 else set()):raise RuntimeError('Partial schema state')
+        data={}
+        for name in names:
+            table=sa.Table(name,sa.MetaData(),schema='public',autoload_with=db)
+            data[name]={'columns':[(c['name'],str(c['type']),c['nullable'],c['default']) for c in inspector.get_columns(name,schema='public')],
+                        'indexes':inspector.get_indexes(name,schema='public'),'fk':inspector.get_foreign_keys(name,schema='public'),
+                        'pk':inspector.get_pk_constraint(name,schema='public'),'unique':inspector.get_unique_constraints(name,schema='public'),
+                        'checks':inspector.get_check_constraints(name,schema='public'),
+                        'rows':sorted(json.dumps(dict(r),sort_keys=True,default=str) for r in db.execute(sa.select(table)).mappings())}
+        sequences={}
+        for name in sorted(inspector.get_sequence_names(schema='public')):
+            quoted=db.dialect.identifier_preparer.quote_identifier(name)
+            sequences[name]=list(db.execute(sa.text('SELECT last_value,is_called FROM public.'+quoted)).one())
+        # PostgreSQL catalog definitions/ACLs deliberately omit unstable OIDs.
+        catalog={key:[list(r) for r in db.execute(sa.text(query))] for key,query in {
+            'schemas':"SELECT nspname,pg_get_userbyid(nspowner),nspacl::text FROM pg_namespace WHERE nspname='public' ORDER BY nspname",
+            'views':"SELECT viewname,viewowner,definition FROM pg_views WHERE schemaname='public' ORDER BY viewname",
+            'functions':"SELECT p.proname,pg_get_function_identity_arguments(p.oid),pg_get_userbyid(p.proowner),p.proacl::text,pg_get_functiondef(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' ORDER BY p.proname,pg_get_function_identity_arguments(p.oid)",
+            'triggers':"SELECT c.relname,t.tgname,pg_get_triggerdef(t.oid,true) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND NOT t.tgisinternal ORDER BY c.relname,t.tgname",
+            'owners_acl':"SELECT c.relname,c.relkind,pg_get_userbyid(c.relowner),c.relacl::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname",
+        }.items()}
+    return {'revision':revision,'fingerprint':sha(json.dumps({'tables':data,'sequences':sequences,'catalog':catalog},sort_keys=True,default=str).encode()),
+            'stage09_tables':sorted(set(names)&TABLES),'table_count':len(names),
+            'material_rows':sum(len(data[n]['rows']) for n in TABLES if n in data)}
+
+
+def private_write(path, value):
+    payload=json.dumps(value,sort_keys=True,default=str).encode()
+    fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+    with os.fdopen(fd,'wb') as output:output.write(payload);output.flush();os.fsync(output.fileno())
+    directory=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(directory)
+    finally:os.close(directory)
+    return sha(payload)
+
+
+def execute(engine, action, request, expected, fingerprint=None, material_request=None, material_sha=None, migrate=None):
+    import sqlalchemy as sa
+    if not re.fullmatch(r'[0-9a-f]{32}',request):raise RuntimeError('Invalid schema request')
+    before=capture(engine)
+    if expected and before['revision']!=expected:raise RuntimeError('Schema revision changed')
+    material=None
+    if action=='preserve':
+        if before['revision']!=STAGE09:raise RuntimeError('Stage09 material state required')
+        with engine.connect() as db:
+            rows={name:[dict(r) for r in db.execute(sa.select(sa.Table(name,sa.MetaData(),schema='public',autoload_with=db))).mappings()] for name in sorted(TABLES)}
+        path=ARTIFACTS/(request+'-material.json')
+        material={'request':request,'sha256':private_write(path,{'revision':STAGE09,'tables':rows}),'rows':sum(map(len,rows.values()))}
+        if capture(engine)!=before:raise RuntimeError('State changed during material preservation')
+    elif action=='downgrade':
+        if before['revision']!=STAGE09 or expected!=STAGE09 or fingerprint!=before['fingerprint']:raise RuntimeError('Exact Stage09 state required for downgrade')
+        if not re.fullmatch(r'[0-9a-f]{32}',material_request or ''):raise RuntimeError('Preservation receipt required')
+        path=ARTIFACTS/(material_request+'-material.json')
+        if path.is_symlink() or not path.is_file() or path.stat().st_uid!=os.geteuid() or stat.S_IMODE(path.stat().st_mode)&0o077 or sha(path.read_bytes())!=material_sha:raise RuntimeError('Preserved material mismatch')
+        if migrate is None:raise RuntimeError('Confined migration required')
+        migrate(BASE)
+        after=capture(engine)
+        if after['revision']!=BASE or after['stage09_tables']:raise RuntimeError('Downgrade incomplete')
+        return {'state':after}
+    elif action=='verify':
+        if expected!=BASE or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
+    elif action!='inspect':raise RuntimeError('Unknown schema action')
+    return {'state':before,**({'material':material} if material else {})}
+
+
+def main():
+    import sqlalchemy as sa
+    from alembic import command
+    from alembic.config import Config
+    env=os.environ;url=env.get('DATABASE_URL','');parsed=urlsplit(url)
+    if (env.get('CREDX_UAT2'),env.get('UAT2_RUNTIME'),env.get('UAT2_ADAPTERS'))!=('1','native','simulation') or (parsed.hostname,parsed.port,parsed.username,parsed.path)!=('127.0.0.1',5542,'credx_uat2','/credx_uat2'):
+        raise RuntimeError('Dedicated simulated native UAT2 required')
+    source=env.get(PREFIX+'SOURCE') or env.get('UAT2_SOURCE_COMMIT','')
+    release=Path(__file__).resolve().parents[3]
+    if not re.fullmatch(r'[0-9a-f]{40}',source) or json.loads((release/'native-manifest.json').read_text())['source_commit']!=source:
+        raise RuntimeError('Schema helper release mismatch')
+    config=Config('alembic.ini');action=env.get(PREFIX+'ACTION','upgrade')
+    if action=='upgrade':command.upgrade(config,'head');return
+    ARTIFACTS.mkdir(mode=0o700,parents=True,exist_ok=True)
+    if ARTIFACTS.is_symlink() or ARTIFACTS.stat().st_uid!=os.geteuid() or stat.S_IMODE(ARTIFACTS.stat().st_mode)&0o077:raise RuntimeError('Unsafe schema artifact directory')
+    request=env.get(PREFIX+'REQUEST','')
+    engine=sa.create_engine(url.replace('postgresql+asyncpg://','postgresql+psycopg2://'),hide_parameters=True,
+                            connect_args={'options':'-c statement_timeout=10000 -c lock_timeout=3000'})
+    try:
+        result=execute(engine,action,request,env.get(PREFIX+'EXPECTED'),env.get(PREFIX+'FINGERPRINT'),
+                       env.get(PREFIX+'MATERIAL_REQUEST'),env.get(PREFIX+'MATERIAL_SHA'),
+                       migrate=lambda target:command.downgrade(config,target))
+        private_write(ARTIFACTS/(request+'-result.json'),{'request':request,'source':source,'action':action,**result})
+    finally:engine.dispose()
+
+
+if __name__=='__main__':
+    try:main()
+    except Exception:
+        print('Confined UAT2 schema operation failed; values withheld',file=sys.stderr);sys.exit(1)

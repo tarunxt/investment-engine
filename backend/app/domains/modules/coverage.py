@@ -23,7 +23,7 @@ SAFETY_ENDPOINTS={
  'bullpen008':{'stop_bullpen008_scheduler','pause_bullpen008_scheduler','activate_bullpen008_emergency_stop'},
 }
 
-CORE_DOMAINS={'auth','modules','api_usage','cost_drivers','health','dashboard','mails'}
+CORE_DOMAINS={'connections','auth','modules','api_usage','cost_drivers','health','dashboard','mails'}
 
 
 def classify_route(domain,endpoint,path,methods,source_module=''):

@@ -1,0 +1,38 @@
+{
+  "stage": "09",
+  "base": "61ce447ba35f4db7cd06fd550c62557450247af3",
+  "code": "tested draft; PostgreSQL CI and independent review pending",
+  "checks": {
+    "backend_required": 1274,
+    "frontend_required": 347,
+    "focused_stage09_backend": 23,
+    "component_contracts": 7,
+    "google_uat2_with_stage09": 67,
+    "baseline_synthetic": 5,
+    "production_build_typescript": "PASS",
+    "existing_auth_module_mobile_playwright": "PASS",
+    "stage09_real_api_bff": 26,
+    "broad_frontend": "14 identical baseline failures; source and normalized error comparison retained",
+    "manual_recovery": "4 identical accepted08 failures: missing trusted module context"
+  },
+  "docker": "normal daemon check fails socket absent; mandatory backend-container CI not yet run",
+  "preview": {
+    "url": "http://localhost:49848/login?redirectTo=/console/profile/preferences",
+    "backend_url": "http://127.0.0.1:49849",
+    "pids": [
+      61085,
+      61086
+    ],
+    "frontend_port": 49848,
+    "backend_port": 49849,
+    "synthetic": true,
+    "logs": "/Users/tarunsingh/Documents/Codex/2026-10-19/task-5/stage09-connection-bindings/.runtime/stage01-preview",
+    "process_stamps": {
+      "61085": "Tue Oct 20 16:49:40 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -m uvicorn scripts.public_launch.preview_backend:app --host 127.0.0.1 --port 49849",
+      "61086": "Tue Oct 20 16:49:40 2026     next-server (v16.2.5)"
+    }
+  },
+  "no_deployment": true,
+  "no_live_credentials": true,
+  "no_stage10": true
+}

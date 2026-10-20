@@ -20,6 +20,9 @@ jobs:
       - name: Compile backend Python sources
         run: python3 -m compileall -q backend/app
 
+      - name: Install schema-helper unit-test dependency
+        run: python3 -m pip install --disable-pip-version-check SQLAlchemy==2.0.49
+
       - name: Validate UAT2 lifecycle and configuration contracts
         run: |
           bash -n deploy/uat2/uat2ctl deploy/uat2/build.sh deploy/uat2/native/build.sh deploy/uat2/native/prepare-host.sh deploy/uat2/native/network-apply.sh
@@ -56,6 +59,7 @@ jobs:
           backend/tests/test_stage06_modules.py
           backend/tests/test_stage07_lifecycle.py
           backend/tests/test_stage08_presentation.py
+          backend/tests/test_stage09_connections.py
           backend/tests/test_polymarket_auto_live_order_intent_leases.py
           backend/tests/test_stage_one_export_jobs.py
           backend/tests/test_financial_data_integrity.py
@@ -170,7 +174,47 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py backend/tests/test_stage09_connections.py
+
+  stage09-connection-bindings:
+    name: Stage09 connection isolation, rotation races and additive migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install constrained backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify both modes, rotation races and actual Alembic roundtrip
+        run: python -m pytest -q --junitxml=/tmp/stage09.xml backend/tests/test_stage09_connections.py backend/tests/test_zerodha_manual_recovery.py backend/tests/test_stage09_connections_postgres.py
+      - name: Require all Stage09 checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage09.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage09 cannot skip checks'
+          assert len(root.findall('.//testcase')) >= 34
+          PY_CHECK
 
   stage07-module-policy:
     name: Stage07 module lifecycle races and migration safety
@@ -472,6 +516,7 @@ jobs:
           node --test
           tests/stage08-module-policy.test.mjs
           tests/stage08-module-provider-races.test.mjs
+          tests/stage09-connection-bindings.test.mjs
           tests/api-read-fallbacks.test.mjs
           tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs
@@ -828,3 +873,132 @@ jobs:
           path: ${{ runner.temp }}/uat2-native-retention-verification.json
           retention-days: 1
           if-no-files-found: error
+
+  stage09-rollback-rehearsal:
+    name: Stage09 PostgreSQL16 rollback rehearsal (${{ matrix.scenario }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [direct_restore, downgrade_then_restore]
+    container: python:3.13-bookworm
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      CI: 'true'
+      GITHUB_ACTIONS: 'true'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_RESTORE_ACK: disposable-ci-only
+      REHEARSAL_SCENARIO: ${{ matrix.scenario }}
+      REHEARSAL_VERIFY_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install PostgreSQL16 clients only in disposable backend container
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates git
+          install -d /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list
+          apt-get update
+          apt-get install -y --no-install-recommends postgresql-client-16
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          pg_dump --version
+          pg_restore --version
+      - name: Verify target guards and reproduce unchanged controller marker gap
+        run: python -m unittest discover -s backend/scripts -p test_verify_stage09_restore.py -v
+      - name: Rehearse actual native dump and restore flags on synthetic database
+        run: python backend/scripts/verify_stage09_restore.py "$REHEARSAL_SCENARIO"
+      - name: Require exact source and executed zero-skip result
+        run: |
+          python - <<'PY_CHECK'
+          import json,os
+          from pathlib import Path
+          r=json.loads((Path('/tmp/stage09-restore')/os.environ['REHEARSAL_SCENARIO']/'receipt.json').read_text())
+          assert r['status']=='passed' and r['skipped']==0
+          assert r['scenario']==os.environ['REHEARSAL_SCENARIO']
+          assert r['verification_commit']==os.environ['REHEARSAL_VERIFY_SHA']
+          assert r['application_source']=='6844989a55ea2408d6da7862fa07194079ff8b19'
+          assert r['application_promotion_restart_readiness_performed'] is False
+          assert r['native_controller_repaired'] is False
+          if r['scenario']=='downgrade_then_restore':
+              assert r['full_schema_data_revision_sequences_objects_grants_equal'] is True
+              assert r['downgrade_removed_only_stage09_schema'] is True
+              assert r['baseline_snapshot_sha256']==r['restored_snapshot_sha256']
+          else:
+              assert r['expected_failure']=='new Stage09 FK prevents dropping referenced users object'
+          PY_CHECK
+      - name: Retain synthetic backup, snapshots and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage09-rollback-${{ matrix.scenario }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/stage09-restore/${{ matrix.scenario }}
+          retention-days: 3
+          if-no-files-found: warn
+
+
+  stage09-controller-linux:
+    name: Stage09 frozen controller PostgreSQL16 and systemd (${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: [core, interruptions, finalization, provenance]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install disposable VM PostgreSQL16 and nftables tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 nftables
+          test -d /run/systemd/system
+      - name: Run unchanged runtime against synthetic PostgreSQL and confined systemd fixture
+        timeout-minutes: 20
+        env:
+          CI: 'true'
+          GITHUB_ACTIONS: 'true'
+          CREDX_STAGE09_CONTROLLER_ACK: disposable-linux-ci-only
+          CONTROLLER_TEST_GROUP: ${{ matrix.group }}
+        run: |
+          sudo --preserve-env=CI,GITHUB_ACTIONS,CREDX_STAGE09_CONTROLLER_ACK \
+            "$(command -v python)" backend/scripts/verify_stage09_controller.py --python "$(command -v python)" --group "$CONTROLLER_TEST_GROUP"
+      - name: Retain controller integration diagnostics even on failure
+        if: always()
+        run: |
+          sudo install -d -m 0755 "$RUNNER_TEMP/stage09-controller-diagnostics"
+          if sudo test -d /tmp/stage09-controller-ci; then
+            sudo cp -a /tmp/stage09-controller-ci/. "$RUNNER_TEMP/stage09-controller-diagnostics/"
+          fi
+          sudo journalctl --namespace=credx-uat2 --no-pager | sudo tee "$RUNNER_TEMP/stage09-controller-diagnostics/journal.log" > /dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/stage09-controller-diagnostics"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: stage09-controller-linux-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stage09-controller-diagnostics
+          retention-days: 3

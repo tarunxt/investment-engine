@@ -1,0 +1,48 @@
+{
+  "original_head": "fc4d51313e2d86e5bc807ad91db877a26aa0bb89",
+  "draft_pr": "https://github.com/tarunxt/investment-engine/pull/1250",
+  "base": "61ce447ba35f4db7cd06fd550c62557450247af3",
+  "ci": [
+    {
+      "run": 39421490754,
+      "name": "Pull Request Checks",
+      "conclusion": "success",
+      "jobs": 15,
+      "all_jobs_success": true
+    },
+    {
+      "run": 39421490792,
+      "name": "Stage 01 implementation baseline",
+      "conclusion": "success"
+    },
+    {
+      "run": 39421490732,
+      "name": "API Attempt Migration",
+      "conclusion": "success"
+    }
+  ],
+  "postgres": {
+    "job": 118623266744,
+    "result": "27 passed, 1046 warnings in39.25s",
+    "no_skip_step": "success",
+    "checkout": "7c2e45a2ce59b132644f420b886bb727b40fd8ea",
+    "checkout_kind": "PR merge of original head into accepted Stage08; not exact-head successor",
+    "log_pass_time": "2026-10-20T12:22:05.2895757Z"
+  },
+  "artifacts": [
+    {
+      "id": 12263726564,
+      "name": "uat2-native-bundle-fc4d51313e2d86e5bc807ad91db877a26aa0bb89",
+      "digest": "sha256:6daea66b3b6b2a2196d2513957aaa3a74a6ff9e72c76f8e4d936f2dce99c2a86",
+      "expires_at": "2026-10-21T12:23:00Z"
+    },
+    {
+      "id": 12263811490,
+      "name": "uat2-native-verification-fc4d51313e2d86e5bc807ad91db877a26aa0bb89",
+      "digest": "sha256:27301910a51c609721b8f60e251dd44135315284519e1a2803d75338d604553e",
+      "expires_at": "2026-10-21T12:23:24Z"
+    }
+  ],
+  "artifact_verification": "API metadata and job-step success only; archive bytes not downloaded or independently audited here",
+  "scope": "read-only remote verification, original branch/PR not modified; successor exact-head CI/artifact still pending"
+}

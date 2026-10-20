@@ -1,0 +1,270 @@
+{
+  "base": "61ce447ba35f4db7cd06fd550c62557450247af3",
+  "candidate": "fc4d51313e2d86e5bc807ad91db877a26aa0bb89",
+  "method": "fresh targeted runs of all 9 affected files on exact git archives; normalize checkout roots and stack frames only; preserve expected/actual/error details",
+  "failures": [
+    {
+      "identity": "Bullpen History event names use the canonical-link resolver",
+      "file": "frontend/tests/bullpen-canonical-market-links.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "04dcfad290781fd2c84deae1c1b2cde8387f72b2c1271f201eb970a660052004",
+      "candidate_signature": "04dcfad290781fd2c84deae1c1b2cde8387f72b2c1271f201eb970a660052004",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /BULLPEN_EVENT_BASE_URL[\\s\\S]*?\\/predictions\\/market/. Input:"
+    },
+    {
+      "identity": "Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions",
+      "file": "frontend/tests/bullpen-auto-run-progress.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "3ff67b271fbe92c3618d938d82fc78f6666f4f4666ba2badce6b90c391f41509",
+      "candidate_signature": "3ff67b271fbe92c3618d938d82fc78f6666f4f4666ba2badce6b90c391f41509",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:"
+    },
+    {
+      "identity": "Bullpen auto-run workflow view exposes Stage 1 output candidates",
+      "file": "frontend/tests/bullpen-auto-run-progress.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "fff8116fdf7712c10183619fa0e28d159804f36da6979bcc6b21b248032d8b8d",
+      "candidate_signature": "fff8116fdf7712c10183619fa0e28d159804f36da6979bcc6b21b248032d8b8d",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:"
+    },
+    {
+      "identity": "Stage 2 historical summary rows build consensus from completed and partial outputs without letting failures blank valid rows",
+      "file": "frontend/tests/bullpen-auto-run-stage2-history.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "e6a45414a26e5ec6325b00ec445b90c269fd79cdb4bd9ac55f4cfaaaca3c3e80",
+      "candidate_signature": "e6a45414a26e5ec6325b00ec445b90c269fd79cdb4bd9ac55f4cfaaaca3c3e80",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    },
+    {
+      "identity": "Stage 2 historical summary rows normalize yes_odds/no_odds aliases into canonical odds and money fields",
+      "file": "frontend/tests/bullpen-auto-run-stage2-history.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "ca13c6b00b13a921c6bd8d3ddd7abf3f7963896fe396b7d06e089aeb55082a7f",
+      "candidate_signature": "ca13c6b00b13a921c6bd8d3ddd7abf3f7963896fe396b7d06e089aeb55082a7f",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    },
+    {
+      "identity": "Stage 2 historical summary rows rebuild consensus from persisted event data",
+      "file": "frontend/tests/bullpen-auto-run-stage2-history.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "aa5152c89e2e2eadc453692a168db5d2b83381c7d18cedd23f7644061cad7168",
+      "candidate_signature": "aa5152c89e2e2eadc453692a168db5d2b83381c7d18cedd23f7644061cad7168",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:"
+    },
+    {
+      "identity": "Stage 2 invest list reuses the saved Stage 2 top-10 events summary and keeps Stage 3 handoff diagnostics separate",
+      "file": "frontend/tests/bullpen-auto-run-stage2-invest-list.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "ac791170bfb77e28cb07e177615648bb2c724e57a90f6a00ffe2657ca3335f39",
+      "candidate_signature": "ac791170bfb77e28cb07e177615648bb2c724e57a90f6a00ffe2657ca3335f39",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /if \\(decision\\.decision === \"BUY_NEW\"\\) \\{\\s*return true;/. Input:"
+    },
+    {
+      "identity": "Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investments in Stage 2",
+      "file": "frontend/tests/bullpen-auto-run-stage3-invest.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "2e9f76f12c43d0d5a80cdc4957935211b7ab2cae65fb272cb3c1e818d7f90bf2",
+      "candidate_signature": "2e9f76f12c43d0d5a80cdc4957935211b7ab2cae65fb272cb3c1e818d7f90bf2",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /formatOddsPercent\\(candidate\\.llmYesOdds\\)/. Input:"
+    },
+    {
+      "identity": "Universal Scan renders its isolated Bullpen-style auto-run controls",
+      "file": "frontend/tests/universal-scan-auto-run.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "e9925d57efb5d050b858ceff36d28a4c76bac3acf01d981eb08688a04355fe57",
+      "candidate_signature": "e9925d57efb5d050b858ceff36d28a4c76bac3acf01d981eb08688a04355fe57",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Started: \\{dateLabel\\(snapshot\\.scannedAt\\)\\}/. Input:"
+    },
+    {
+      "identity": "a stopped capture stays separate from completed workflow inputs",
+      "file": "frontend/tests/bullpen-independent-stage-one-scan.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "07b1644ad5b79b5b580bf900f0d0082c9e118c6e4e2d787cb30f6b116867a157",
+      "candidate_signature": "07b1644ad5b79b5b580bf900f0d0082c9e118c6e4e2d787cb30f6b116867a157",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /controller\\.current\\.abort\\(\\)/. Input:"
+    },
+    {
+      "identity": "an active workflow owns its yellow Stage 1 tile and reports live progress",
+      "file": "frontend/tests/bullpen-independent-stage-one-scan.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "7f30d51546760130489b0fadafb1b237952874d5a5d8c98e1660997a19504505",
+      "candidate_signature": "7f30d51546760130489b0fadafb1b237952874d5a5d8c98e1660997a19504505",
+      "signature_equal": true,
+      "error": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /data-stage-state=\\{isStageOneActive \\? \"working\" : stage\\.state\\}/. Input:"
+    },
+    {
+      "identity": "frontend distinguishes a fresh shared refresh from a display-only cached snapshot",
+      "file": "frontend/tests/bullpen-health-auto-claim.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "2e4a190c27ca284d20a38751015575bb9be1201110384b8bf624e1bf7387feb7",
+      "candidate_signature": "2e4a190c27ca284d20a38751015575bb9be1201110384b8bf624e1bf7387feb7",
+      "signature_equal": true,
+      "error": "TypeError [ERR_UNSUPPORTED_RESOLVE_REQUEST]: Failed to resolve module specifier \"@/app/api/bullpen-ai/_lib/operatorAdmission\" from \"data:text/javascript;base64,aW1wb3J0IHsgcmVxdWlyZUJ1bGxwZW5PcGVyYXRvciB9IGZyb20gIkAvYXBwL2FwaS9idWxscGVuLWFpL19saWIvb3BlcmF0b3JBZG1pc3Npb24iOwppbXBvcnQgeyByZWRhY3RCdWxs"
+    },
+    {
+      "identity": "frontend positions polling calls only the backend positions runtime endpoint",
+      "file": "frontend/tests/bullpen-health-auto-claim.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "2e4a190c27ca284d20a38751015575bb9be1201110384b8bf624e1bf7387feb7",
+      "candidate_signature": "2e4a190c27ca284d20a38751015575bb9be1201110384b8bf624e1bf7387feb7",
+      "signature_equal": true,
+      "error": "TypeError [ERR_UNSUPPORTED_RESOLVE_REQUEST]: Failed to resolve module specifier \"@/app/api/bullpen-ai/_lib/operatorAdmission\" from \"data:text/javascript;base64,aW1wb3J0IHsgcmVxdWlyZUJ1bGxwZW5PcGVyYXRvciB9IGZyb20gIkAvYXBwL2FwaS9idWxscGVuLWFpL19saWIvb3BlcmF0b3JBZG1pc3Npb24iOwppbXBvcnQgeyByZWRhY3RCdWxs"
+    },
+    {
+      "identity": "verified final cursor keeps completion and active scan keeps progress",
+      "file": "frontend/tests/bullpen-universe-completeness.test.mjs",
+      "same_identity": true,
+      "test_source_unchanged": true,
+      "base_signature": "64eb22d2f25952f2a967e10ebbbd6b0557e23fb37edc55d5f0eba57ff8189ccd",
+      "candidate_signature": "64eb22d2f25952f2a967e10ebbbd6b0557e23fb37edc55d5f0eba57ff8189ccd",
+      "signature_equal": true,
+      "error": "ReferenceError: scanProgressPercent is not defined"
+    }
+  ],
+  "same_exact_identities": true,
+  "all_test_sources_unchanged": true,
+  "all_signatures_equal": true,
+  "manual_recovery": {
+    "base_failures": {
+      "ManualRecoveryTest.test_exception_does_not_enable_background_trading_or_other_mutations": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_opt_out_revokes_both_discovery_and_scoped_transport": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_real_sequenced_route_submits_only_the_explicit_manual_sell": {
+        "errors": [
+          "AssertionError: 0 != 1"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_scoped_manual_order_reaches_mock_broker_and_scope_is_reset": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      }
+    },
+    "candidate_failures": {
+      "ManualRecoveryTest.test_exception_does_not_enable_background_trading_or_other_mutations": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_opt_out_revokes_both_discovery_and_scoped_transport": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_real_sequenced_route_submits_only_the_explicit_manual_sell": {
+        "errors": [
+          "AssertionError: 0 != 1"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_scoped_manual_order_reaches_mock_broker_and_scope_is_reset": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      }
+    },
+    "unchanged_base_test_on_candidate_failures": {
+      "ManualRecoveryTest.test_exception_does_not_enable_background_trading_or_other_mutations": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_opt_out_revokes_both_discovery_and_scoped_transport": {
+        "errors": [
+          "app.domains.modules.lifecycle.ModuleLifecycleDenied: Trusted module execution context required"
+        ],
+        "module_guard_in_route_log": true
+      },
+      "ManualRecoveryTest.test_real_sequenced_route_submits_only_the_explicit_manual_sell": {
+        "errors": [
+          "AssertionError: 503 != 200 : {\"detail\":\"Zerodha direct MARKET order placement is disabled on this server. Use the protected LIMIT Kite basket fallback unless the backend egress IP is allowed in Kite.\"}"
+        ],
+        "module_guard_in_route_log": false
+      },
+      "ManualRecoveryTest.test_scoped_manual_order_reaches_mock_broker_and_scope_is_reset": {
+        "errors": [
+          "AssertionError: False is not true"
+        ],
+        "module_guard_in_route_log": false
+      }
+    },
+    "identities_and_signatures_equal": false,
+    "whole_test_file_unchanged": false,
+    "all_six_test_method_bodies_unchanged": true,
+    "source_change": "Two imports added; setUp now supplies explicit fake AppMaterial. Test methods unchanged.",
+    "base_file_sha256": "de0d79bcd54924f706c0789ad00188a544aab3d7b3af27700f028d6ae5c56a0c",
+    "candidate_file_sha256": "02239178d0e6ec099f3d590bc9057ff8b563ffa4cc6ace3be199b4045a148395",
+    "base_and_candidate_modified_fixture_signatures_equal": true,
+    "unchanged_source_control_signatures_equal": false
+  },
+  "postgres_inspection": {
+    "source": "fc4d51313e2d86e5bc807ad91db877a26aa0bb89",
+    "file": "backend/tests/test_stage09_connections_postgres.py",
+    "executed": false,
+    "tests": [
+      "test_two_writers_one_current_connection",
+      "test_rotation_cas_one_winner_preserves_bound_token",
+      "test_disable_and_rotation_serialize_without_resurrecting_token",
+      "test_actual_additive_migration_roundtrip_preserves_legacy_ciphertext"
+    ],
+    "coverage": "Separate async sessions and concurrent gather for three writes; real Alembic subprocess upgrade from module_lifecycle_001 to head and repeated downgrade/upgrade, baseline row/schema comparison, opaque legacy ciphertext retained. Random per-test schemas dropped in teardown.",
+    "required_environment": {
+      "PYTHONPATH": "backend",
+      "ENVIRONMENT": "test",
+      "AUTH_DISABLED": "false",
+      "DATABASE_URL": "postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test",
+      "REDIS_URL": "redis://127.0.0.1:1/15",
+      "CREDX_STAGE09_DATABASE_ACK": "disposable-docker-only"
+    },
+    "command": "python -m pytest -q --junitxml=/tmp/stage09.xml backend/tests/test_stage09_connections.py backend/tests/test_stage09_connections_postgres.py",
+    "no_skip_check": "import xml.etree.ElementTree as ET; root=ET.parse('/tmp/stage09.xml').getroot(); assert not root.findall('.//testcase/skipped'); assert len(root.findall('.//testcase')) >= 27",
+    "prerequisites": [
+      "Python 3.13 Docker container with /.dockerenv",
+      "PostgreSQL 16 service hostname postgres, exact disposable database URL, schema create/drop rights",
+      "backend requirements plus pytest pytest-asyncio aiosqlite==0.22.1",
+      "No root .env or backend/.env; explicit acknowledgement",
+      "No live environment, credentials or shared service reuse"
+    ],
+    "current_limit": "This native macOS review process is not the required container. Docker CLI exists; daemon readiness was not checked. Named PostgreSQL fixture was not provisioned or contacted under read-only scope.",
+    "ci_job": ".github/workflows/pr-checks.yml:176-213",
+    "pending": "27 executed checks with zero skips and success on exact immutable source; mandatory CI result still required"
+  }
+}
