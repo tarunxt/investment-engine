@@ -1,4 +1,4 @@
-"""Stage04 full-history upgrade/downgrade/re-upgrade in a disposable Docker DB."""
+"""Stage04 named-revision roundtrip; later heads have separate forward gates."""
 import json
 import os
 from pathlib import Path
@@ -40,7 +40,7 @@ def preserved():
     snapshot['outbox']['rows']=[json.dumps({k:v for k,v in json.loads(row).items() if k not in added},sort_keys=True) for row in snapshot['outbox']['rows']]
     return snapshot
 before=preserved()
-migrate('upgrade','head')
+migrate('upgrade','tenant_idempotency_001')
 assert preserved()==before
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
 from app.infrastructure.database.outbox.models import OutboxMessage
@@ -55,7 +55,7 @@ with Session(engine) as s:
 migrate('downgrade','recommendation_audit_001')
 assert not sa.inspect(engine).has_table('idempotency_operations')
 assert preserved()==before
-migrate('upgrade','head')
+migrate('upgrade','tenant_idempotency_001')
 assert sa.inspect(engine).has_table('idempotency_operations')
 assert preserved()==before
 print('Stage04 migration upgrade/downgrade/re-upgrade PASS; existing schemas/data preserved; scoped uniqueness verified')

@@ -35,7 +35,16 @@
       "passed": 66,
       "receipt": ".runtime/stage01-preview/stage05-boundaries.json"
     },
-    "Chrome": "ordinary auto-run status403 and synthetic admin cost screen passed"
+    "Chrome": "ordinary auto-run status403 and synthetic admin cost screen passed",
+    "Stage04_named_roundtrip": {
+      "result": "passed",
+      "receipt": ".runtime/stage05-stage04-roundtrip-final.txt"
+    },
+    "Stage04_PostgreSQL_Redis_contracts": {
+      "passed": 11,
+      "skipped": 0,
+      "receipt": ".runtime/stage05-stage04-contracts-final.txt"
+    }
   },
   "additional_regressions": {
     "passed": 231,
@@ -101,5 +110,18 @@
     "Operator business unit tests explicitly admit detached synthetic fixtures; actual role gates separately exercised against SQLite and PostgreSQL",
     "UAT2 restricted composition does not expose production runtime/sports/cost routers",
     "Implementation self-checks are not independent acceptance"
-  ]
+  ],
+  "initial_CI": {
+    "source": "e5c9b76cfa403732cc0df7a6252bc1ef488a6c97",
+    "overall_PR_checks": "failed",
+    "blockers": [
+      "Stage04 mutable-head verifier rejected Stage05 added table",
+      "Webpack networkidle timeout on polling screen"
+    ],
+    "migration_forward_baseline": "passed",
+    "new_Stage05_gate": "passed",
+    "native_Linux_package": "passed",
+    "not_deployable": true,
+    "successor_exact_CI_artifact": "pending"
+  }
 }
