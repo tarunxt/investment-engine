@@ -108,6 +108,11 @@ def main(mode):
         (out/'receipt.json').write_text(json.dumps(receipt,indent=2,default=str)+'\n')
 
     def run(args, name, *, timeout=120, stdin=None, stdout=None, required=True, cwd=BACKEND):
+        if args[0]=='git':
+            # checkout's HOME-based safe.directory is intentionally not inherited.
+            # Trust only this exact CI checkout for each read-only Git command;
+            # never set global config or accept a wildcard directory.
+            args=['git','-c','safe.directory='+str(ROOT),*args[1:]]
         result = subprocess.run(args,cwd=cwd,env=env,stdin=stdin,
                                 stdout=stdout or subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
         receipt['commands'].append({'name':name,'argv':[str(a) for a in args],
