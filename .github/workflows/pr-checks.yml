@@ -987,7 +987,7 @@ jobs:
           if sudo test -d /tmp/stage09-controller-ci; then
             sudo cp -a /tmp/stage09-controller-ci/. "$RUNNER_TEMP/stage09-controller-diagnostics/"
           fi
-          sudo journalctl --namespace=credx-uat2 --no-pager > "$RUNNER_TEMP/stage09-controller-diagnostics/journal.log" || true
+          sudo journalctl --namespace=credx-uat2 --no-pager | sudo tee "$RUNNER_TEMP/stage09-controller-diagnostics/journal.log" > /dev/null || true
           sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/stage09-controller-diagnostics"
       - uses: actions/upload-artifact@v7
         if: always()

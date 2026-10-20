@@ -158,6 +158,11 @@ def run_suite(python):
     candidate=ROOT/'releases'/FROZEN;previous=ROOT/'releases'/BASE
     ctl.configure_units(candidate)
     ctl.systemctl('start',['network','postgres','redis','certs'])
+    deadline=time.monotonic()+20
+    while time.monotonic()<deadline:
+        if command(['/usr/lib/postgresql/16/bin/pg_isready','-h','/run/credx-uat2-postgres','-p','5542'],check=False).returncode==0:break
+        time.sleep(.2)
+    else:raise RuntimeError('Fresh fixture PostgreSQL did not become ready within20s')
     sql_admin("CREATE ROLE credx_uat2 LOGIN PASSWORD 'synthetic-ci-only';")
     engine=sa.create_engine(URL,hide_parameters=True,connect_args={'options':'-c statement_timeout=10000 -c lock_timeout=3000'})
     cases=[]
