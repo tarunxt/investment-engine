@@ -53,5 +53,19 @@ class PromotionRecoveryTests(unittest.TestCase):
         self.assertFalse(ctl.pending().exists())
         for name in ['current.orphan.new','current.new']:self.assertTrue((self.root/name).is_symlink(),'prior orphan is not removed as a recovery bypass')
 
+    def collision(self,kind):
+        pointer=self.root/('current.'+'e'*32+'.new')
+        if kind=='file':pointer.write_bytes(b'unrelated synthetic file')
+        else:pointer.symlink_to(self.candidate,target_is_directory=True)
+        with patch.object(ctl,'uuid4',return_value=Mock(hex='e'*32)):
+            with self.assertRaises(FileExistsError):ctl.promote(self.previous)
+        self.assertEqual(ctl.current(),self.candidate)
+        if kind=='file':self.assertEqual(pointer.read_bytes(),b'unrelated synthetic file')
+        else:self.assertTrue(pointer.is_symlink());self.assertEqual(pointer.readlink(),self.candidate)
+
+    def test_colliding_regular_file_is_preserved(self):self.collision('file')
+
+    def test_colliding_symlink_is_preserved(self):self.collision('symlink')
+
 
 if __name__=='__main__':unittest.main()

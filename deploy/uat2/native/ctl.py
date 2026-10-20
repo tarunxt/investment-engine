@@ -363,15 +363,18 @@ def promote(release):
     # Each attempt owns its temporary pointer; a killed/failed prior attempt
     # cannot collide with a verified recovery attempt.
     pointer = ROOT/('current.'+uuid4().hex+'.new')
+    created = False
     try:
         pointer.symlink_to(release,target_is_directory=True)
+        created = True
         sync_directory(ROOT)
         os.replace(pointer,ROOT/'current')
         sync_directory(ROOT)
         write_release_environment(release)
     finally:
-        pointer.unlink(missing_ok=True)
-        sync_directory(ROOT)
+        if created:
+            pointer.unlink(missing_ok=True)
+            sync_directory(ROOT)
 
 
 def write_release_environment(release):
