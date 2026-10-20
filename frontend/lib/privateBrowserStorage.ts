@@ -19,20 +19,12 @@ function storage(kind: "localStorage" | "sessionStorage") {
   return typeof window === "undefined" ? null : window[kind];
 }
 
-function facade(kind: "localStorage" | "sessionStorage"): Storage {
+// Expose only the operations private consumers use; enumeration/purge belongs
+// to the existing account-boundary cache cleanup, never to a caller facade.
+type PrivateStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+function facade(kind: "localStorage" | "sessionStorage"): PrivateStorage {
   const prefix = () => owner === null ? null : `${PRIVATE_STORAGE_PREFIX}${owner}:`;
-  const keys = () => {
-    const native = storage(kind), scope = prefix(), found: string[] = [];
-    if (!native || !scope) return found;
-    for (let i = 0; i < native.length; i++) {
-      const key = native.key(i);
-      if (key?.startsWith(scope)) found.push(key.slice(scope.length));
-    }
-    return found;
-  };
   return {
-    get length() { return keys().length; },
-    key(index: number) { return keys()[index] ?? null; },
     getItem(key: string) {
       const scope = prefix();
       return scope ? storage(kind)?.getItem(scope + key) ?? null : null;
@@ -45,7 +37,6 @@ function facade(kind: "localStorage" | "sessionStorage"): Storage {
       const scope = prefix();
       if (scope) storage(kind)?.removeItem(scope + key);
     },
-    clear() { keys().forEach(key => { const scope = prefix(); if (scope) storage(kind)?.removeItem(scope + key); }); },
   };
 }
 

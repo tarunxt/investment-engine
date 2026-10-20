@@ -1,3 +1,6 @@
+import { closePrivateWebSockets, registerPrivateSocket, unregisterPrivateSocket } from './privateSocketRegistry';
+export { closePrivateWebSockets } from './privateSocketRegistry';
+
 type MessageHandler = (data: Record<string, unknown>) => void;
 type StatusHandler = (connected: boolean) => void;
 export interface WSClientOptions {
@@ -7,10 +10,6 @@ export interface WSClientOptions {
   maxReconnectDelay?: number;
 }
 const MAX_RECONNECT_DELAY_MS = 30_000;
-const clients = new Set<WSClient>();
-export function closePrivateWebSockets() {
-  for (const client of [...clients]) client.close();
-}
 async function getWebSocketTicket(signal: AbortSignal): Promise<string | null> {
   const response = await fetch('/backend-api/auth/websocket-ticket', {
     method: 'POST', cache: 'no-store', signal,
@@ -36,13 +35,13 @@ export class WSClient {
     this.onMessage = opts.onMessage;
     this.onStatusChange = opts.onStatusChange ?? (() => {});
     this.maxReconnectDelay = opts.maxReconnectDelay ?? MAX_RECONNECT_DELAY_MS;
-    clients.add(this);
+    registerPrivateSocket(this);
   }
   connect(): void { void this._doConnect(); }
   close(code = 1000): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    clients.delete(this);
+    unregisterPrivateSocket(this);
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.ticketRequest?.abort();

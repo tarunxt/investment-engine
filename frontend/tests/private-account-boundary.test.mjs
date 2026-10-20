@@ -56,6 +56,7 @@ for (const cancellable of [false, true]) test(`late A request cannot populate B 
 });
 
 function socketFixture(fetchImpl = async () => ({ok:true,json:async () => ({ticket:'synthetic-one-use-ticket'})})) {
+  const registry = load('../services/privateSocketRegistry.ts');
   const sockets = [], timers = new Map(), events = [];
   let timerId = 0, fetches = 0;
   class Socket {
@@ -63,6 +64,10 @@ function socketFixture(fetchImpl = async () => ({ok:true,json:async () => ({tick
     close(code=1000) { this.closed=code; this.onclose?.({code}); }
   }
   const api = load('../services/websocket.ts', {
+    require: path => {
+      assert.equal(path, './privateSocketRegistry');
+      return registry;
+    },
     WebSocket:Socket, fetch:(...args) => { fetches++; return fetchImpl(...args); },
     setTimeout: fn => { timers.set(++timerId,fn); return timerId; },
     clearTimeout: id => timers.delete(id),

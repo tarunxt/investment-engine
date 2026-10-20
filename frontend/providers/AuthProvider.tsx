@@ -7,7 +7,7 @@ import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
-import { closePrivateWebSockets } from "@/services/websocket";
+import { closePrivateWebSockets } from "@/services/privateSocketRegistry";
 import { setPrivateStorageOwner, clearPrivateStorageOwner } from "@/lib/privateBrowserStorage";
 import {
   clearBrowserPrivateCacheOwner,
