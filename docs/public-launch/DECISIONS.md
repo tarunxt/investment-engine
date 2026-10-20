@@ -1,0 +1,36 @@
+# Public-launch decisions
+
+Read this ledger, STATUS.md, ROUTE_MATRIX.md and RELEASE_GATES.md before subsequent stages. Scope authority: stages/01.md and its current amendment. Historical review findings must be checked against source.
+
+| Decision | State and evidence | Owner / gate |
+| --- | --- | --- |
+| Stage 01 execution boundary | Confirmed: isolated development and local/CI tests only. Draft PR allowed. No deployment or merge. Stage 00 live acceptance remains BLOCKED. | User; Stage 00 PASS before any Stage 01 UAT deployment |
+| India residents | Confirmed product scope; eligibility enforcement belongs to later stages. No legal/provider compliance claim from this baseline. | Product/legal release review |
+| Kite application modes | Confirmed BOTH user-owned apps and approved platform-managed app, with separate user/account authorizations. No automatic fallback between modes. | Broker/commercial approval and implementation gates |
+| User-owned Kite dependency | Obtain current provider confirmation for multi-user/commercial use, callbacks and data usage. Accepting a user's API key alone does not resolve those dependencies. | Integration/product owner; evidence pending |
+| Platform-managed Kite dependency | Written provider approval and appropriate commercial/data permissions; distinct user authorizations, account-scoped limits and credential binding. Disabled until approval. Mocked support is not approval. | Integration/product owner; evidence pending |
+| Partial mode launch | Do not silently reduce both-mode launch to BYO-only. Requires explicit scope decision. | User |
+| Financial authority | Explicit confirmation for each exact order/basket; scheduled analysis is allowed, unattended financial execution excluded. This baseline submits no orders. | Later order-intent/approval/reconciliation stages |
+| Order products | Unresolved launch support. Current schema comments list CNC/MIS/NRML, MARKET/LIMIT/SL/SL-M, DAY/IOC/TTL, regular/amo; product/exchange strings are not fully enumerated by schema validators. Recovery exception documented in production-deploy.md is narrower: CNC, NSE/BSE, protected market with existing gates. Neither constitutes a public-launch support decision. Proposed initial delivery-equity CNC-only scope needs product/broker approval; do not change runtime flags. | Product/trading owner; explicit release decision |
+| Broker accounts | One active account per user is a proposal, not confirmed scope. No automatic account linkage by broker/Google email. | Product/integration decision |
+| INDmoney | Confirmed manual import and analysis unless a supported integration is separately established. | Data-quality stage |
+| Bullpen | Public live/copy/direct prediction-market execution unavailable under launch gate. Research needs separate feature-specific review. Preserve existing operator records and recovery controls. | Legal/provider and operator-boundary gates |
+| Capacity | Target concurrent users, queue fairness, availability/latency/RPO/RTO and capacity ceilings are unassigned. No new host sampling or load test in this task. Proposed analysis-only invite beta, bounded local/CI tests, no shared-host builds; measured headroom and explicit numeric budgets required before deployment. | Operations/product; pending |
+| AI/hosting budget | Free/paid/BYO-AI model, monthly ceiling, per-user credit, tokens/fanout/retries and provider cost owner unresolved. Proposal: fake AI and zero external spend in baseline tests; no implied live budget authorization. | Product/operations; pending |
+| Retention | Existing retained disks/artifacts and Stage 00 evidence remain untouched. Public data/audit/export retention periods and erasure reconciliation are unresolved. Proposal: collect minimum synthetic fixture data, temporary isolated test databases, no automatic production deletion. No retention extension authorized. | Privacy/legal/operations; pending |
+| Staging access | Owner-only admission must occur before profile/session creation, separate signing/client/data/service identities. Historical Stage 00 owner declaration is tarun.singh6893@gmail.com; this task did not independently verify its internal ID. Synthetic userA/userB/admin are isolated fixtures only, never public UAT accounts. | Stage 00 live acceptance BLOCKED |
+| User population | Production database/roster unavailable through an admitted read-only route in this task. Count, IDs, roles and profile ownership remain UNKNOWN. New Google accounts are supported; never assume one legacy user or assign rows by email fragment. Future admitted read-only audit must separately count standard/admin/disabled users and ambiguous/null ownership without exporting PII. | Migration/owner audit; pending |
+| Google baseline | Current fetched main 0c6e61e524c7a87c7b9ea79342f17b14a45e97a1 includes #1236 and prerequisite #1235 / 385f618. These are minimum history, never reset instructions. Stage 00 STATUS historically observed the same deployed SHA; current live SHA was not inspected. | Preserve IDs/roles/profiles, authoritative verified email, distinct dotted/plus accounts |
+| Runtime baseline | Production docs describe systemd/no-Docker with /etc/investor/backend.env and frontend.env; local container compatibility is required. Files in deploy/no-docker/nginx are examples, not current ingress evidence. | Actual ingress/services/config need read-only verification before later deployment |
+
+## Findings verified in source; deferred repairs
+
+- Jobs list/detail handlers in backend/app/domains/jobs/router.py have no current-user dependency and query the repository without owner scope. Recovery middleware may restrict availability; a BFF session does not establish direct-backend ownership.
+- Job-detail WebSocket checks active token identity but accepts before verifying resource ownership; its ownership check only conditions the initial snapshot, then it relays job_updates:{job_id}. Run-detail WebSocket also subscribes by run ID without an owner lookup. Capture these as later Stage 02/03 work, not fixed by the baseline.
+- get_current_user permits missing-credential development bypass when auth_disabled or environment=development. It can create a development admin. A production-startup guard remains a tracked gate; open draft #1211 is not merged.
+- Prompts mix shared system data and private records. Shared sports reads have router authentication; refresh/mutation authority needs review. Some platform cost data requires administrator classification even where current dependencies differ.
+- Source classification is a policy target. Local guard/call extraction does not prove transitive repository scoping, scheduler owner enumeration, export destination ownership, browser cache isolation or broker approval.
+
+## Required login integration regressions
+
+Keep first supported verified Google sign-in creating a new standard user/empty profile; repeat login reuses the same ID; existing admin/viewer roles and profile contents survive; distinct Gmail dotted/plus addresses remain independent; disabled/ambiguous users fail closed; forged/unverified/non-authoritative email claims fail; Google client selection remains independent of Sheets. Do not copy owner integrations. Test direct backend and BFF login/session/client flows with synthetic identities; real Google callback/UAT remains unrun.
