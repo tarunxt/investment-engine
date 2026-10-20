@@ -36,6 +36,9 @@ ALLOWED_CHANGES = frozenset({
     'deploy/uat2/native/test_native.py',
     'deploy/uat2/native/test_recovery.py',
     'deploy/uat2/native/README.md',
+    'backend/scripts/verify_stage09_controller.py',
+    'backend/scripts/stage09_fixtures/service.py',
+    'docs/public-launch/STAGE09_CONTROLLER_CI.md',
 })
 
 

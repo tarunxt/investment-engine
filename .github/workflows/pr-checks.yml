@@ -20,6 +20,9 @@ jobs:
       - name: Compile backend Python sources
         run: python3 -m compileall -q backend/app
 
+      - name: Install schema-helper unit-test dependency
+        run: python3 -m pip install --disable-pip-version-check SQLAlchemy==2.0.49
+
       - name: Validate UAT2 lifecycle and configuration contracts
         run: |
           bash -n deploy/uat2/uat2ctl deploy/uat2/build.sh deploy/uat2/native/build.sh deploy/uat2/native/prepare-host.sh deploy/uat2/native/network-apply.sh
@@ -949,3 +952,46 @@ jobs:
           path: /tmp/stage09-restore/${{ matrix.scenario }}
           retention-days: 3
           if-no-files-found: warn
+
+
+  stage09-controller-linux:
+    name: Stage09 frozen controller PostgreSQL16 and systemd integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install disposable VM PostgreSQL16 and nftables tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 nftables
+          test -d /run/systemd/system
+      - name: Run unchanged runtime against synthetic PostgreSQL and confined systemd fixture
+        env:
+          CI: 'true'
+          GITHUB_ACTIONS: 'true'
+          CREDX_STAGE09_CONTROLLER_ACK: disposable-linux-ci-only
+        run: |
+          sudo --preserve-env=CI,GITHUB_ACTIONS,CREDX_STAGE09_CONTROLLER_ACK \
+            "$(command -v python)" backend/scripts/verify_stage09_controller.py --python "$(command -v python)"
+      - name: Retain controller integration diagnostics even on failure
+        if: always()
+        run: |
+          sudo install -d -m 0755 "$RUNNER_TEMP/stage09-controller-diagnostics"
+          if sudo test -d /tmp/stage09-controller-ci; then
+            sudo cp -a /tmp/stage09-controller-ci/. "$RUNNER_TEMP/stage09-controller-diagnostics/"
+          fi
+          sudo journalctl --namespace=credx-uat2 --no-pager > "$RUNNER_TEMP/stage09-controller-diagnostics/journal.log" || true
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/stage09-controller-diagnostics"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: stage09-controller-linux-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stage09-controller-diagnostics
+          retention-days: 3
