@@ -130,10 +130,10 @@ def assert_start_blocked(ctl):
     assert_stopped(ctl)
 
 
-def wait_inactive(unit,timeout=15):
+def wait_inactive(unit,timeout=130):
     end=time.monotonic()+timeout
     while time.monotonic()<end:
-        if command(['systemctl','is-active','--quiet',unit],check=False).returncode in {3,4}:return
+        if command(['systemctl','show',unit,'--property=ActiveState','--value']).stdout.strip() in {b'inactive',b'failed'}:return
         time.sleep(.1)
     raise RuntimeError('Fixture unit did not settle')
 
@@ -150,7 +150,7 @@ def child_rollback(argument, kill_after_commit=False):
     else:ctl.rollback(argument)
 
 
-def run_suite(python):
+def run_suite(python,group):
     import sqlalchemy as sa
     sys.path.insert(0,str(ROOT/'releases'/FROZEN/'deploy/uat2/native'))
     import ctl
@@ -221,11 +221,18 @@ def run_suite(python):
     def fail_trigger(body):
         # CI cluster superuser only, no live role or permission change.
         sql_admin("CREATE OR REPLACE FUNCTION public.ci_restore_fault() RETURNS event_trigger LANGUAGE plpgsql AS $$ BEGIN "+body+" END $$; CREATE EVENT TRIGGER ci_restore_fault ON ddl_command_end WHEN TAG IN ('CREATE INDEX') EXECUTE FUNCTION public.ci_restore_fault();",database='credx_uat2')
-    scenarios=['positive','downgrade_failure','late_restore_error','restore_disconnect','restore_timeout','interrupted_before_commit','interrupted_after_commit','schema_interruption','configure_failure','promotion_failure','partial_start_failure','readiness_failure']
+    groups={
+        'core':['positive','downgrade_failure','late_restore_error','restore_disconnect'],
+        'interruptions':['restore_timeout','interrupted_before_commit','interrupted_after_commit','schema_interruption'],
+        'finalization':['configure_failure','promotion_failure','partial_start_failure','readiness_failure'],
+        'provenance':[],
+    }
+    scenarios=groups[group]
     for scenario in scenarios:
         case={'name':scenario,'status':'running','runtime_source':FROZEN,'synthetic_services':True};cases.append(case)
+        print('CASE_START '+scenario,flush=True)
         try:
-            saved,before,before_seq=prepare(scenario);case['baseline_sequences']=before_seq
+            saved,before,before_seq=prepare(scenario);case['baseline_sequences']=before_seq;case['mutated_sequences']=sequences()
             if scenario=='positive':
                 ctl.rollback(str(saved));assert helper.capture(engine)==before and sequences()==before_seq
                 assert not ctl.pending().exists() and ctl.current()==previous
@@ -273,8 +280,9 @@ def run_suite(python):
                         if child.poll() is not None:raise RuntimeError('Controller exited before interruption: '+child.communicate()[1].decode()[-1200:])
                         time.sleep(.1)
                     else:child.kill();raise RuntimeError('Restore never reached interruption boundary')
-                    os.killpg(child.pid,signal.SIGKILL);child.communicate(timeout=10)
+                    os.killpg(child.pid,signal.SIGKILL)
                     sql_admin('SELECT pg_terminate_backend('+str(int(found))+')')
+                    child.communicate(timeout=10)
                     assert child.returncode<0;case['controller_process_sigkill']=True
                     case['phase_at_interruption']=ctl.private_json(ctl.pending())['phase'];assert case['phase_at_interruption']=='restore_started'
                 else:
@@ -347,10 +355,13 @@ def run_suite(python):
             try:capture_results(case)
             except Exception as exc:case['capture_failure']=type(exc).__name__
             state_json(OUT/'cases.json',cases)
+            print('CASE_END '+scenario+' '+case['status']+' '+case.get('failure_type',''),flush=True)
     # Exercise real schema-operation response validation after actual confined
     # unit execution, with controlled file corruption only at the result boundary.
-    for variant in ['valid','source','request','action','owner','mode','material_digest']:
+    variants=['valid','source','request','action','owner','mode','material_digest'] if group=='provenance' else []
+    for variant in variants:
         case={'name':'provenance_'+variant,'status':'running'};cases.append(case)
+        print('CASE_START '+case['name'],flush=True)
         try:
             saved,_,_=prepare(case['name']);ctl.systemctl('stop',ctl.APPS)
             real_systemctl=ctl.systemctl
@@ -376,6 +387,9 @@ def run_suite(python):
             assert not (CONFIG/'schema-operation.env').exists();case['status']='passed'
         except BaseException as exc:case.update(status='failed',failure_type=type(exc).__name__,failure=str(exc)[-1500:])
         state_json(OUT/'cases.json',cases)
+        print('CASE_END '+case['name']+' '+case['status']+' '+case.get('failure_type',''),flush=True)
+    ctl.systemctl('stop',ctl.APPS)
+    ctl.schema_operation(candidate,'inspect')  # leave the exact frozen helper unit installed for confinement audit
     properties=command(['systemctl','show','credx-uat2-migrate.service','--property=User,Group,NoNewPrivileges,ProtectSystem,ProtectHome,PrivateTmp,RestrictAddressFamilies,IPAddressDeny,IPAddressAllow,MemoryMax,TasksMax,CapabilityBoundingSet,ReadWritePaths']).stdout.decode()
     write(OUT/'confined-unit-properties.txt',properties)
     assert 'User=credx-uat2-app' in properties and 'NoNewPrivileges=yes' in properties and 'ProtectSystem=strict' in properties
@@ -384,22 +398,22 @@ def run_suite(python):
     assert 'UAT2 process network confinement verified' in journal
     assert 'CapabilityBoundingSet=\n' in properties
     assert (Path('/etc/systemd/system')/'credx-uat2-migrate.service').read_text()==(candidate/'deploy/uat2/native/systemd/credx-uat2-migrate.service').read_text().replace('/opt/credx-uat2/current',str(candidate))
-    receipt={'verification_commit':git('rev-parse','HEAD').decode().strip(),'runtime_source':FROZEN,'postgres_version':command(['/usr/lib/postgresql/16/bin/pg_restore','--version']).stdout.decode().strip(),'cases':cases,'passed':sum(c['status']=='passed' for c in cases),'failed':sum(c['status']!='passed' for c in cases),'skipped':0,'actual_controller_and_helper':True,'actual_confined_migration_service':True,'actual_credx_application_services':False,'fixture_unit_replacements':['backend','frontend','worker','proxy','certs','redis'],'live_data_credentials_or_hosts':False}
+    receipt={'group':group,'verification_commit':git('rev-parse','HEAD').decode().strip(),'runtime_source':FROZEN,'postgres_version':command(['/usr/lib/postgresql/16/bin/pg_restore','--version']).stdout.decode().strip(),'cases':cases,'passed':sum(c['status']=='passed' for c in cases),'failed':sum(c['status']!='passed' for c in cases),'skipped':0,'actual_controller_and_helper':True,'actual_confined_migration_service':True,'actual_credx_application_services':False,'fixture_unit_replacements':['backend','frontend','worker','proxy','certs','redis'],'live_data_credentials_or_hosts':False}
     state_json(OUT/'receipt.json',receipt)
     if receipt['failed']:raise RuntimeError('CI controller integration failures: '+str([c['name'] for c in cases if c['status']!='passed']))
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--python');parser.add_argument('--worker');parser.add_argument('--worker-after-commit');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--python');parser.add_argument('--worker');parser.add_argument('--worker-after-commit');parser.add_argument('--group',choices=['core','interruptions','finalization','provenance'],default='core');args=parser.parse_args()
     guard()
     if args.worker or args.worker_after_commit:child_rollback(args.worker or args.worker_after_commit,bool(args.worker_after_commit));return
     install_fixture(args.python)
     # Re-exec with private dedicated dependencies, not runner user site packages.
     env={**SAFE_ENV,'PYTHONPATH':str(FIXTURE/'venv/lib/python3.12/site-packages')}
-    os.execve(str(FIXTURE/'venv/bin/python'),[str(FIXTURE/'venv/bin/python'),str(Path(__file__).resolve()),'--run-suite'],env)
+    os.execve(str(FIXTURE/'venv/bin/python'),[str(FIXTURE/'venv/bin/python'),str(Path(__file__).resolve()),'--run-suite',args.group],env)
 
 
 if __name__=='__main__':
-    if sys.argv[1:]==['--run-suite']:
-        guard();run_suite(str(FIXTURE/'venv/bin/python'))
+    if len(sys.argv)==3 and sys.argv[1]=='--run-suite':
+        guard();run_suite(str(FIXTURE/'venv/bin/python'),sys.argv[2])
     else:main()

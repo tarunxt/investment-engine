@@ -955,9 +955,14 @@ jobs:
 
 
   stage09-controller-linux:
-    name: Stage09 frozen controller PostgreSQL16 and systemd integration
+    name: Stage09 frozen controller PostgreSQL16 and systemd (${{ matrix.group }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: [core, interruptions, finalization, provenance]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -973,13 +978,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 nftables
           test -d /run/systemd/system
       - name: Run unchanged runtime against synthetic PostgreSQL and confined systemd fixture
+        timeout-minutes: 20
         env:
           CI: 'true'
           GITHUB_ACTIONS: 'true'
           CREDX_STAGE09_CONTROLLER_ACK: disposable-linux-ci-only
+          CONTROLLER_TEST_GROUP: ${{ matrix.group }}
         run: |
           sudo --preserve-env=CI,GITHUB_ACTIONS,CREDX_STAGE09_CONTROLLER_ACK \
-            "$(command -v python)" backend/scripts/verify_stage09_controller.py --python "$(command -v python)"
+            "$(command -v python)" backend/scripts/verify_stage09_controller.py --python "$(command -v python)" --group "$CONTROLLER_TEST_GROUP"
       - name: Retain controller integration diagnostics even on failure
         if: always()
         run: |
@@ -992,6 +999,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: stage09-controller-linux-${{ github.event.pull_request.head.sha || github.sha }}
+          name: stage09-controller-linux-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/stage09-controller-diagnostics
           retention-days: 3
