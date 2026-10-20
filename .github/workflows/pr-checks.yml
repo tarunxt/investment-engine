@@ -212,7 +212,7 @@ jobs:
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage07.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage07 migration gate cannot skip checks'
-          assert len(root.findall('.//testcase')) >= 6
+          assert len(root.findall('.//testcase')) >= 8
           PY_CHECK
 
   stage06-module-policy:

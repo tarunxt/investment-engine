@@ -144,6 +144,9 @@ def test_recovery_publisher_validation_closes_bounded_private_engine(stored_reco
     assert calls==["opened","closed","disposed"]
 
 
+# Detached canonical-transport test has no owned module database. Original
+# queue/connection restrictions remain asserted; Stage07 tests real admission.
+@pytest.mark.usefixtures("synthetic_module_unit_context")
 def test_real_task_delegation_accepts_only_bounded_canonical_connection(stored_recovery,monkeypatch):
     app=RecoveryCelery("stored-transport-fixture",broker="redis://127.0.0.1:6379/15",backend="redis://127.0.0.1:6379/15",task_cls=RecoveryTask,set_as_current=False)
     calls=[]

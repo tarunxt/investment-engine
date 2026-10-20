@@ -181,3 +181,43 @@ async def test_two_tabs_conflict_and_repeated_toggle_events_never_restart_histor
         s.commit()
         row=s.scalar(select(UserModule).where(UserModule.user_id==owner,UserModule.module_id=='ai_studio'))
         assert row.enabled and row.schedules_paused and row.version==4
+
+@pytest.mark.asyncio
+async def test_sync_effect_lock_wait_is_bounded_without_factory_timeouts(database):
+    import time
+    from app.domains.modules.lifecycle import effect_guard,WorkIdentity,ModuleLifecycleDenied
+    from app.domains.modules.models import UserModulePreferences
+    engine,factory,owner,schema=database
+    await patch(factory,owner,0,True)
+    normal=create_engine(URL,connect_args={'options':f'-csearch_path={schema}'},poolclass=NullPool)
+    try:
+        with Session(engine) as blocker:
+            blocker.scalar(select(UserModulePreferences).where(UserModulePreferences.user_id==owner).with_for_update())
+            def attempt():
+                started=time.monotonic()
+                with pytest.raises(ModuleLifecycleDenied,match='fence busy'):
+                    with effect_guard(sessionmaker(normal),WorkIdentity(owner,'ai_studio',1)):
+                        pytest.fail('Contended effect started')
+                return time.monotonic()-started
+            elapsed=await asyncio.to_thread(attempt)
+            assert 1.5<elapsed<4
+    finally:normal.dispose()
+
+@pytest.mark.asyncio
+async def test_async_effect_lock_wait_keeps_event_loop_responsive(database):
+    from app.domains.modules.lifecycle import async_effect_guard,WorkIdentity,ModuleLifecycleDenied
+    from app.domains.modules.models import UserModulePreferences
+    engine,factory,owner,_=database
+    await patch(factory,owner,0,True)
+    ticks=[]
+    async def heartbeat():
+        for _ in range(12):
+            await asyncio.sleep(.1);ticks.append(True)
+    with Session(engine) as blocker:
+        blocker.scalar(select(UserModulePreferences).where(UserModulePreferences.user_id==owner).with_for_update())
+        beat=asyncio.create_task(heartbeat())
+        with pytest.raises(ModuleLifecycleDenied,match='fence busy'):
+            async with async_effect_guard(factory,WorkIdentity(owner,'ai_studio',1)):
+                pytest.fail('Contended async effect started')
+        assert len(ticks)>=10
+        await beat

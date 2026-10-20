@@ -21,6 +21,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 import app.models  # noqa: F401
 from app.domains.auth.models import ActivityLog, User
+from app.domains.modules.models import UserModulePreferences,UserModule
 from app.domains.jobs.models import Job
 from app.domains.prompts.models import Prompt
 from app.domains.runs import router as routes
@@ -33,7 +34,7 @@ START = datetime(2026, 1, 2, 8, 0, tzinfo=timezone.utc)
 FINISH = datetime(2026, 1, 2, 8, 2, tzinfo=timezone.utc)
 LATE = datetime(2026, 1, 2, 8, 5, tzinfo=timezone.utc)
 TABLES = [model.__table__ for model in (
-    User, Prompt, Job, Run, RunJob, AutoRebalanceWorkflow,
+    User,UserModulePreferences,UserModule, Prompt, Job, Run, RunJob, AutoRebalanceWorkflow,
     AutoRebalanceWorkflowStage, ActivityLog,
 )]
 
@@ -70,6 +71,9 @@ def anyio_backend():
 
 @pytest.fixture
 async def postgres_db(monkeypatch):
+    from app.domains.modules.policy import DefaultFactsResolver,ModuleFacts
+    monkeypatch.setattr(DefaultFactsResolver,'resolve_sync',lambda *_:ModuleFacts(jurisdiction='allowed',plan='allowed',connection='ready',execution_capability=True))
+    monkeypatch.delenv('CREDX_UAT2',raising=False)
     raw = os.environ.get("CREDX_AUDIT_TEST_DATABASE_URL")
     if not raw:
         pytest.skip("explicit disposable local PostgreSQL test URL not configured")
@@ -95,7 +99,10 @@ async def postgres_db(monkeypatch):
         async with sessions() as db:
             db.add(User(id=7, email="owner@example.test", username="owner", password_hash="unused"))
             await db.flush()
-            db.add(AutoRebalanceWorkflow(id=7001, user_id=7, portfolio="india", sequence=42, label="India Run #42"))
+            db.add(UserModulePreferences(user_id=7,version=1,updated_at=datetime.utcnow()))
+            await db.flush()
+            db.add(UserModule(user_id=7,module_id='zerodha_rebalance',enabled=True,version=1,config={'schema_version':1},schedules_paused=False))
+            db.add(AutoRebalanceWorkflow(id=7001, user_id=7, portfolio="india", sequence=42, label="India Run #42",module_id='zerodha_rebalance',module_version=1))
             await db.commit()
         yield SimpleNamespace(engine=engine, sessions=sessions, dispatch=dispatch)
     finally:
@@ -116,7 +123,7 @@ async def test_parent_lock_serializes_real_sessions_and_refreshes_stale_identity
     class FirstSession(AsyncSession):
         async def execute(self, statement, *args, **kwargs):
             result = await super().execute(statement, *args, **kwargs)
-            if getattr(statement, "_for_update_arg", None) is not None:
+            if getattr(statement, "_for_update_arg", None) is not None and any(getattr(t,"name",None)=="auto_rebalance_workflows" for t in statement.get_final_froms()):
                 first_locked.set()
                 await asyncio.wait_for(release_first.wait(), timeout=5)
             return result

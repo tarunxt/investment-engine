@@ -8,6 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
+# Detached fake-Redis/process adapter contracts; real admission is tested in Stage07.
+pytestmark=pytest.mark.usefixtures("synthetic_module_unit_context")
+
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://test:test@localhost:5432/testdb",

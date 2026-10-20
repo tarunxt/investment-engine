@@ -8,6 +8,7 @@ no later phase may reuse its authorization. Nothing here liquidates positions.
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from sqlalchemy import select, update,func
+from sqlalchemy.exc import DBAPIError
 from fastapi import HTTPException
 from app.domains.auth.models import User
 from app.domains.jobs.models import Job
@@ -130,15 +131,63 @@ def apply_selection_event(session,message):
     return True
 
 
+def sync_owner_fence(session,owner_id):
+    if session.get_bind().dialect.name=='postgresql':
+        session.execute(select(func.set_config('lock_timeout','2000',True)))
+        session.execute(select(func.set_config('statement_timeout','5000',True)))
+    # Account changes and selection changes both serialize with effect start.
+    user=session.scalar(select(User.id).where(User.id==owner_id).with_for_update())
+    if user is None:raise ModuleLifecycleDenied('Current account required')
+    header=session.scalar(select(UserModulePreferences.user_id).where(UserModulePreferences.user_id==owner_id).with_for_update())
+    if header is None:raise ModuleLifecycleDenied('No current selection')
+
+
+def fence_error(exc):
+    code=getattr(exc.orig,'sqlstate',getattr(exc.orig,'pgcode',None))
+    if code in {'55P03','57014'}:return ModuleLifecycleDenied('Module effect fence busy; no effect started')
+    return ModuleLifecycleDenied('Module effect authorization unavailable')
+
+
 @contextmanager
-def effect_guard(factory,identity,*,capability='analyze',facts=None):
-    """Bounded synchronous effect under same owner-row fence used by disable."""
-    with factory() as session:
-        with session.begin():
-            header=session.scalar(select(UserModulePreferences.user_id).where(UserModulePreferences.user_id==identity.owner_id).with_for_update())
-            if header is None:raise ModuleLifecycleDenied('No current selection')
-            current_sync(session,identity,capability=capability,boundary='side_effect',facts=facts)
-            yield
+def effect_guard(factory,identity,*,capability='analyze',facts=None,module=None):
+    """Synchronous worker effects: bounded SQL lock/statement waits."""
+    try:
+        with factory() as session:
+            with session.begin():
+                sync_owner_fence(session,identity.owner_id)
+                if module is not None:
+                    current_sync(session,identity,capability='view',boundary='worker',facts=facts)
+                    row=sync_snapshot(session,identity.owner_id).rows.get(ModuleId(module))
+                    if row is None:raise ModuleLifecycleDenied('Effect module is not selected')
+                    identity=WorkIdentity(identity.owner_id,module,row.version)
+                current_sync(session,identity,capability=capability,boundary='side_effect',facts=facts)
+                yield
+    except DBAPIError as exc:
+        raise fence_error(exc) from None
+
+
+@asynccontextmanager
+async def async_effect_guard(factory,identity,*,capability='analyze',module=None):
+    """Async adapters never run blocking SQLAlchemy/psycopg2 on the event loop."""
+    try:
+        async with factory() as db:
+            async with db.begin():
+                if db.get_bind().dialect.name=='postgresql':
+                    await db.execute(select(func.set_config('lock_timeout','2000',True)))
+                    await db.execute(select(func.set_config('statement_timeout','5000',True)))
+                user=await db.scalar(select(User.id).where(User.id==identity.owner_id).with_for_update())
+                if user is None:raise ModuleLifecycleDenied('Current account required')
+                await lock_owner(db,identity.owner_id)
+                origin=await ModulePolicy(db).authorize(owner_id=identity.owner_id,resource_owner_id=identity.owner_id,
+                    module_id=identity.module_id,capability='view',boundary='worker')
+                version=await db.scalar(select(UserModule.version).where(UserModule.user_id==identity.owner_id,UserModule.module_id==identity.module_id))
+                if not origin.allowed or version!=identity.version:raise ModuleLifecycleDenied('Current originating module denied')
+                decision=await ModulePolicy(db).authorize(owner_id=identity.owner_id,resource_owner_id=identity.owner_id,
+                    module_id=module or identity.module_id,capability=capability,boundary='side_effect')
+                if not decision.allowed:raise ModuleLifecycleDenied('Current effect module denied')
+                yield
+    except DBAPIError as exc:
+        raise fence_error(exc) from None
 
 
 def eligible_scheduled_user_ids(session,module_id):

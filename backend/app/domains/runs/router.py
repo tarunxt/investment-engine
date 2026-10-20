@@ -677,6 +677,10 @@ async def update_auto_rebalance_stage(
 ):
     if portfolio not in AUTO_REBALANCE_LABEL_PREFIXES:
         raise HTTPException(404, detail="Auto-rebalance portfolio not found")
+    from app.domains.modules.lifecycle import admit_enqueue,analysis_module
+    # Preserve one global lock order for direct/internal callers too: selection
+    # header before workflow, the same order used by disable cancellation.
+    await admit_enqueue(db,current_user.id,analysis_module(portfolio))
     # Lock the parent row. The dashboard may send a "started" audit update and
     # an ID-linking update almost at the same time; serializing them prevents a
     # duplicate stage row and makes updates idempotent across browser retries.

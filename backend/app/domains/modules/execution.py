@@ -4,23 +4,26 @@ No context may be reconstructed from task headers, browser config or cached
 allows. Task adapters resolve persisted resource ownership before constructing it.
 """
 from contextvars import ContextVar
-from contextlib import contextmanager
+from contextlib import contextmanager,asynccontextmanager
 from dataclasses import dataclass
 from functools import wraps
 import inspect
-from .lifecycle import WorkIdentity, ModuleLifecycleDenied, current_sync, effect_guard
+import asyncio
+from .lifecycle import WorkIdentity, ModuleLifecycleDenied, current_sync, effect_guard,async_effect_guard
 from .registry import ModuleId
 
 @dataclass(frozen=True)
 class Execution:
     identity: WorkIdentity
     factory: object
+    async_factory: object | None = None
 
 _current:ContextVar[Execution|None]=ContextVar('module_execution',default=None)
+_safety_owner:ContextVar[int|None]=ContextVar('module_safety_owner',default=None)
 
 @contextmanager
-def execution_scope(identity,factory):
-    token=_current.set(Execution(identity,factory))
+def execution_scope(identity,factory,*,async_factory=None):
+    token=_current.set(Execution(identity,factory,async_factory))
     try:
         checkpoint()
         yield
@@ -49,16 +52,17 @@ def guarded_effect(function,*,capability='analyze',module=None):
     @wraps(function)
     def sync(*args,**kwargs):
         context=checkpoint()
-        identity=context.identity
-        if module is not None:identity=resolve_effect_identity(context,module)
-        with effect_guard(context.factory,identity,capability=capability):return function(*args,**kwargs)
+        with effect_guard(context.factory,context.identity,capability=capability,module=module):return function(*args,**kwargs)
     @wraps(function)
     async def asynchronous(*args,**kwargs):
-        context=checkpoint()
-        # Holding the short synchronous row-lock transaction spans this bounded
-        # adapter await; no separate DB operation is made on that connection.
-        with effect_guard(context.factory,context.identity,capability=capability):
-            return await function(*args,**kwargs)
+        context=_current.get()
+        if context is None:raise ModuleLifecycleDenied('Trusted module execution context required')
+        factory=context.async_factory
+        if factory is None:
+            from app.infrastructure.database.session import AsyncSessionLocal
+            factory=AsyncSessionLocal
+        async with async_effect_guard(factory,context.identity,capability=capability,module=module):
+            async with asyncio.timeout(30):return await function(*args,**kwargs)
     return asynchronous if inspect.iscoroutinefunction(function) else sync
 
 
@@ -70,8 +74,39 @@ def require_bullpen_context(args):
     if _reconciliation_read.get():
         if not is_write and category in {'status','balance','positions','orders-read','history'}:return
         raise ModuleLifecycleDenied('Reconciliation permits only known read commands')
-    context=checkpoint()
+    context=_current.get()
+    if context is None:raise ModuleLifecycleDenied('Trusted module execution context required')
     if context.identity.module_id not in {'bullpen_research','bullpen_live','copy_trader','prediction_direct'}:
         raise ModuleLifecycleDenied('Bullpen consumer context required')
-    with context.factory() as session:
-        current_sync(session,context.identity,capability='execute' if is_write else 'view',boundary='side_effect' if is_write else 'worker')
+    # Structural admission only. The authoritative SQL check/fence occurs at
+    # actual process creation, after every broker/auth/semaphore wait.
+
+
+@asynccontextmanager
+async def bullpen_process_fence(args):
+    require_bullpen_context(args)
+    from .tasks import _reconciliation_read
+    if _reconciliation_read.get():
+        owner=_safety_owner.get()
+        if type(owner)is not int:raise ModuleLifecycleDenied('Verified reconciliation owner required')
+        from app.infrastructure.database.session import AsyncSessionLocal
+        from app.domains.auth.models import User,UserRole
+        from sqlalchemy import select,func
+        async with AsyncSessionLocal() as db:
+            async with db.begin():
+                if db.get_bind().dialect.name=='postgresql':
+                    await db.execute(select(func.set_config('lock_timeout','2000',True)))
+                    await db.execute(select(func.set_config('statement_timeout','5000',True)))
+                row=(await db.execute(select(User.role,User.is_active).where(User.id==owner).with_for_update())).first()
+                if row is None or not row.is_active or row.role!=UserRole.ADMIN:raise ModuleLifecycleDenied('Current reconciliation owner denied')
+                yield
+        return
+    context=_current.get()
+    from app.domains.polymarket.runtime_broker import _parse_command_category
+    _,write,_=_parse_command_category(args)
+    factory=context.async_factory
+    if factory is None:
+        from app.infrastructure.database.session import AsyncSessionLocal
+        factory=AsyncSessionLocal
+    async with async_effect_guard(factory,context.identity,capability='execute' if write else 'view'):
+        yield

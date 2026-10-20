@@ -77,9 +77,13 @@ def task_identity(session,name,args,kwargs):
 def task_scope(name,args=(),kwargs=None,*,factory=None,dispatch_id=None):
     kwargs=kwargs or {}
     if name in RECONCILIATION_TASKS:
+        from .execution import _safety_owner
+        owner_token=_safety_owner.set(None)
         token=_reconciliation_read.set(True)
         try:yield
-        finally:_reconciliation_read.reset(token)
+        finally:
+            _reconciliation_read.reset(token)
+            _safety_owner.reset(owner_token)
         return
     if name in SAFETY_TASKS or name in SCHEDULERS:
         yield

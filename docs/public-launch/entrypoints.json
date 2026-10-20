@@ -6,7 +6,7 @@
     "export": 42,
     "frontend": 25,
     "http": 266,
-    "lifecycle": 7,
+    "lifecycle": 9,
     "page": 66,
     "scheduler": 16,
     "websocket": 5,
@@ -4685,6 +4685,78 @@
     },
     {
       "calls": [
+        "(await db.execute(select(User.role, User.is_active).where(User.id == owner).with_for_update())).first",
+        "AsyncSessionLocal",
+        "ModuleLifecycleDenied",
+        "_current.get",
+        "_parse_command_category",
+        "_reconciliation_read.get",
+        "_safety_owner.get",
+        "async_effect_guard",
+        "db.begin",
+        "db.execute",
+        "db.get_bind",
+        "func.set_config",
+        "require_bullpen_context",
+        "select",
+        "select(User.role, User.is_active).where",
+        "select(User.role, User.is_active).where(User.id == owner).with_for_update",
+        "type"
+      ],
+      "capability": "bullpen_process_fence",
+      "classification": "administrator-only",
+      "kind": "lifecycle",
+      "method": "",
+      "module": "modules",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "require_bullpen_context"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "asynccontextmanager",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/execution.py:86"
+    },
+    {
+      "calls": [
+        "ModuleLifecycleDenied",
+        "ModulePolicy",
+        "ModulePolicy(db).authorize",
+        "db.begin",
+        "db.execute",
+        "db.get_bind",
+        "db.scalar",
+        "factory",
+        "fence_error",
+        "func.set_config",
+        "lock_owner",
+        "select",
+        "select(User.id).where",
+        "select(User.id).where(User.id == identity.owner_id).with_for_update",
+        "select(UserModule.version).where"
+      ],
+      "capability": "async_effect_guard",
+      "classification": "administrator-only",
+      "kind": "lifecycle",
+      "method": "",
+      "module": "modules",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "ModulePolicy(db).authorize"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "asynccontextmanager",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/lifecycle.py:170"
+    },
+    {
+      "calls": [
         "Depends",
         "describe",
         "router.get"
@@ -9047,6 +9119,33 @@
     },
     {
       "calls": [
+        "Depends",
+        "HTTPException",
+        "PostgresRunRepository",
+        "repo.get",
+        "router.get"
+      ],
+      "capability": "get_run",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{run_id}', response_model=RunResponse)"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/{run_id}",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/router.py:1001"
+    },
+    {
+      "calls": [
         "(job.error_message or '').lower",
         "(job.error_message or '').lower().find",
         "Depends",
@@ -9086,7 +9185,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}/cancel",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1010"
+      "source": "backend/app/domains/runs/router.py:1014"
     },
     {
       "calls": [
@@ -9290,8 +9389,10 @@
         "_build_auto_rebalance_history",
         "_latest_timestamp",
         "add_completion_event",
+        "admit_enqueue",
         "admit_workflow_transition",
         "all",
+        "analysis_module",
         "any",
         "datetime.now",
         "db.add",
@@ -9374,7 +9475,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-completion-email",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:798"
+      "source": "backend/app/domains/runs/router.py:802"
     },
     {
       "calls": [
@@ -9412,7 +9513,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:893"
+      "source": "backend/app/domains/runs/router.py:897"
     },
     {
       "calls": [
@@ -9445,34 +9546,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:964"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
-        "PostgresRunRepository",
-        "repo.get",
-        "router.get"
-      ],
-      "capability": "get_run",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "GET",
-      "module": "runs",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "router.get('/{run_id}', response_model=RunResponse)"
-      ],
-      "owner_source": [
-        "current_user.id"
-      ],
-      "registration": "mounted",
-      "route": "/runs/{run_id}",
-      "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:997"
+      "source": "backend/app/domains/runs/router.py:968"
     },
     {
       "calls": [
@@ -14497,8 +14571,8 @@
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
     "backend/app/domains/modules/coverage.py": "37a223e39cb41be4709d2da42817cda1a8b4de9aa68635ddac7e75562030560a",
     "backend/app/domains/modules/dispatch.py": "bb9e8faf27a33a947af05d569763eb91c8ba3ff6d7a90989a8288c798201fa18",
-    "backend/app/domains/modules/execution.py": "f31a83f614bf3d1c549c4f76e93ae4ab1aa61c24e3da1668daec107f277a2d46",
-    "backend/app/domains/modules/lifecycle.py": "6693a7a70d9a7c77e1c784871ea3987087aa2f994601c9a828d441da13d2c8ea",
+    "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
+    "backend/app/domains/modules/lifecycle.py": "e05bf9a7baccc9c42bdb728bf569e4f28458099ff616eb980384b6b9eb727f2d",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/policy.py": "5a9340b3abb61d28fc7f5c34e0e88fc059027ac84745e5fa32f151e98799d626",
     "backend/app/domains/modules/registry.py": "d053888dc602a6330e5cdd6447895aedc40bc62abbe9fb347a9b36fdf58b049f",
@@ -14506,10 +14580,10 @@
     "backend/app/domains/modules/schemas.py": "b0ab41cf1f297aa29695a21469e35983bfea485b8d4cb966226dbab3fc8f2f52",
     "backend/app/domains/modules/service.py": "0e2b042014a394a266dca54e36c43ca587d944cafc1df118e4a4c073cef0e13b",
     "backend/app/domains/modules/store.py": "1c99c65203a74e0d7566575947e7e0c6a08c130a8a7a6bc6263e157e508672fd",
-    "backend/app/domains/modules/tasks.py": "ef4e5cedc7a77dd7add49efd8b1fc7158c05ce78a9260d55d455517d86b48d9f",
-    "backend/app/domains/modules/transports.py": "480938a1c973601b73ef8f6ccdd4bf72b8e3a9ff2b2ab6175bb188794dec958f",
+    "backend/app/domains/modules/tasks.py": "23b12fd7a80dec5ad1105de27b53d94eeab9ba1a0cf50adf8afb4ddd4eed691d",
+    "backend/app/domains/modules/transports.py": "54d47d0fa4582de1a32da870bff39416d2a7988bce8c8d3427f3902eb5427a5c",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
-    "backend/app/domains/polymarket/access.py": "99fb6da3d28f4b82f465908e74276fd718e737cce2ee2bb3369e4eb97dce40e0",
+    "backend/app/domains/polymarket/access.py": "8bf2536f1c66e78707f4f010798d3325ed298fdcc2cbc8f0a373d3701cc01413",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
     "backend/app/domains/polymarket/bullpen.py": "ca03ec6964cad79d2f098b0adac2b173f6f28e03620cc873245888ddaf382052",
     "backend/app/domains/polymarket/bullpen_llm_execution.py": "ef2d47412176ea329318d6802c87d3b62938d22785ffeaebc54ad6ad55a48aa7",
@@ -14524,7 +14598,7 @@
     "backend/app/domains/polymarket/providers.py": "260adb4f7c338e603c293837ec0127e7ec5d6f9f1843b4da790c8eb654f4f57e",
     "backend/app/domains/polymarket/redeem_coordinator.py": "3845c6755a1aa7114522fde60e9b05b35a031207db0430821fd1168c6a5c03d7",
     "backend/app/domains/polymarket/router.py": "737e7f0bc90f446fca7dd573c0ee79169810b9922cdb2b453a9a1d53f900d888",
-    "backend/app/domains/polymarket/runtime_broker.py": "2403286238b3fa6818787dc4bff629607a1fb2b9bd3912d1b152d3cd0262d92e",
+    "backend/app/domains/polymarket/runtime_broker.py": "183e4b9b5bcb51e5e7f827a7d9ec0293c505deaa01df8d7777082dc1b59e0a35",
     "backend/app/domains/polymarket/runtime_positions_refresh.py": "d761c920d1a1f3bfeee7ce4e48bcb5d81fd6df92dd8f56123d3e895006d1d1d5",
     "backend/app/domains/polymarket/schemas.py": "2ea73231511170c7dc51dd1cbca23b37d0885cf6f20ac99c628c743ced0dc4c1",
     "backend/app/domains/polymarket/service.py": "822fe177161b36e7e7f0111e37151e241cfeed39acd9ff8adb46bcbb47b399d7",
@@ -14616,7 +14690,7 @@
     "backend/app/domains/runs/models.py": "f37d8b723d70a5e512612ef62cb2e00f6fbbf6a0f285acfe6903ba2f24281487",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
     "backend/app/domains/runs/repository.py": "65d60c48f3688f752c470c8f17bf26ba2c8673fdb34371593e3a35d5c3d5d5c6",
-    "backend/app/domains/runs/router.py": "c41f53e8a29d589b1b34e58369a40f8f17a84a46629bb9f5f7b06b18353ed5c6",
+    "backend/app/domains/runs/router.py": "0e5cb9df35dcf40aed4d1915358227f2665f48fa60d980088719eb6d81ddb62b",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "e05a046b5af24fffe96610116cbc647799b42eb112c6f39f27ddc7950a1fb8f0",

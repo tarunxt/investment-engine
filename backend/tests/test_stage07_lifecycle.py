@@ -224,3 +224,54 @@ def test_financial_order_routes_require_execution_not_analysis():
     for name in ('place_order','place_protected_market_orders','place_protected_market_orders_sequenced'):
         assert classify_route('zerodha',name,'/zerodha/orders',{'POST'})==('zerodha_rebalance','execute')
     assert classify_route('zerodha','prepare_basket_orders','/zerodha/orders/prepare-basket',{'POST'})==('zerodha_rebalance','analyze')
+
+@pytest.mark.asyncio
+async def test_actual_cli_spawn_waits_for_fresh_fence_and_holds_it_through_start(monkeypatch):
+    """Fake executable only; production module availability remains closed."""
+    import asyncio
+    from contextlib import asynccontextmanager
+    from app.domains.modules import execution
+    from app.domains.polymarket import runtime_broker as runtime
+    from test_bullpen_runtime_broker import _build_broker,_credential_artifact
+    broker=_build_broker(monkeypatch)
+    monkeypatch.setattr(runtime,'require_bullpen_command_allowed',lambda _:None)
+    events=[];entered=asyncio.Event();release=asyncio.Event()
+    @asynccontextmanager
+    async def fence(args):
+        events.append('fence-enter');entered.set();await release.wait()
+        yield
+        events.append('fence-exit')
+    class FakeProcess:
+        pid=123;returncode=0;stdout=None;stderr=None
+        async def communicate(self):return b'{}',b''
+    async def spawn(*a,**kw):
+        assert events==['fence-enter'];events.append('spawn');return FakeProcess()
+    monkeypatch.setattr(execution,'bullpen_process_fence',fence)
+    monkeypatch.setattr(runtime.asyncio,'create_subprocess_exec',spawn)
+    monkeypatch.setattr(runtime,'_stat_credential_artifact',lambda _:_credential_artifact())
+    task=asyncio.create_task(broker._execute_process(['polymarket','positions','--output','json'],
+        timeout_seconds=1,command_category='positions',is_write=False,requires_auth=False))
+    await asyncio.wait_for(entered.wait(),1)
+    assert events==['fence-enter']
+    release.set();await task
+    assert events==['fence-enter','spawn','fence-exit']
+
+@pytest.mark.asyncio
+async def test_actual_cli_spawn_denied_by_final_fence_never_creates_process(monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.domains.modules import execution
+    from app.domains.polymarket import runtime_broker as runtime
+    from test_bullpen_runtime_broker import _build_broker,_credential_artifact
+    broker=_build_broker(monkeypatch)
+    monkeypatch.setattr(runtime,'require_bullpen_command_allowed',lambda _:None)
+    @asynccontextmanager
+    async def fence(args):
+        raise ModuleLifecycleDenied('Disabled before process start')
+        yield
+    async def spawn(*a,**kw):pytest.fail('Denied CLI started')
+    monkeypatch.setattr(execution,'bullpen_process_fence',fence)
+    monkeypatch.setattr(runtime.asyncio,'create_subprocess_exec',spawn)
+    monkeypatch.setattr(runtime,'_stat_credential_artifact',lambda _:_credential_artifact())
+    with pytest.raises(ModuleLifecycleDenied):
+        await broker._execute_process(['polymarket','positions','--output','json'],timeout_seconds=1,
+            command_category='positions',is_write=False,requires_auth=False)

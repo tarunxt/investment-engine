@@ -56,15 +56,20 @@ def synthetic_module_unit_context(monkeypatch):
     contract. Real SQL/HTTP/lifecycle/worker negative tests never request this;
     Stage07 suites independently exercise admission and cancellation without it.
     """
-    from contextlib import contextmanager,nullcontext
+    from contextlib import contextmanager,asynccontextmanager,nullcontext
     from types import SimpleNamespace
     from app.domains.modules import execution,lifecycle,tasks,dispatch
     identity=lifecycle.WorkIdentity(1,'zerodha_rebalance',1)
-    context=SimpleNamespace(identity=identity,factory=lambda:nullcontext(SimpleNamespace()))
+    context=SimpleNamespace(identity=identity,factory=lambda:nullcontext(SimpleNamespace()),async_factory=lambda:None)
+    monkeypatch.setattr(execution,'_current',__import__('contextvars').ContextVar('synthetic_module_unit',default=context))
     monkeypatch.setattr(execution,'checkpoint',lambda:context)
     monkeypatch.setattr(execution,'require_bullpen_context',lambda *_:None)
     monkeypatch.setattr(execution,'resolve_effect_identity',lambda *_:identity)
     monkeypatch.setattr(execution,'effect_guard',lambda *a,**kw:nullcontext())
+    @asynccontextmanager
+    async def admitted_async(*a,**kw):yield
+    monkeypatch.setattr(execution,'async_effect_guard',admitted_async)
+    monkeypatch.setattr(execution,'bullpen_process_fence',admitted_async)
     monkeypatch.setattr(lifecycle,'current_sync',lambda *a,**kw:None)
     monkeypatch.setattr(lifecycle,'guard_job_transition',lambda *a,**kw:None)
     @contextmanager

@@ -25,9 +25,13 @@ def install_route_policy(app):
             async def enforce(request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
                 if module=='__safety__':
                     from .tasks import _reconciliation_read
+                    from .execution import _safety_owner
+                    owner_token=_safety_owner.set(user.id)
                     token=_reconciliation_read.set(True)
                     try:yield
-                    finally:_reconciliation_read.reset(token)
+                    finally:
+                        _reconciliation_read.reset(token)
+                        _safety_owner.reset(owner_token)
                     return
                 admitted_module=module
                 if module=='__analysis_consumer__':
