@@ -6,6 +6,7 @@ installed by these routes. Atomic compare-and-swap is required even with row loc
 import asyncio
 import hashlib
 import hmac
+import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,10 @@ from .service import ConnectionStore, claims, utc
 
 def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
+
+
+def attempt_fingerprint(app):
+    return digest(json.dumps([app.fingerprint(),app.reference,app.version],separators=(',',':')))
 
 
 def now():
@@ -64,7 +69,7 @@ class ConnectionAuthorization:
         state = secrets.token_urlsafe(32)
         attempt = ConnectionAttempt(owner_id=owner, connection_id=row.id,
             connection_version=version, app_mode=row.app_ownership_mode,
-            app_fingerprint=app.fingerprint(), session_digest=digest(session),
+            app_fingerprint=attempt_fingerprint(app), session_digest=digest(session),
             state_digest=digest(state), expires_at=now()+timedelta(minutes=5))
         self.db.add(attempt)
         await self.db.flush()
@@ -95,7 +100,7 @@ class ConnectionAuthorization:
             raise ConnectionFault('CONNECTION_ATTEMPT_STATE_MISMATCH',403)
         row = await self.store.get(owner, attempt.connection_id)
         app = await self.app(row)
-        if row.version != attempt.connection_version or row.app_ownership_mode != attempt.app_mode or app.fingerprint()!=attempt.app_fingerprint:
+        if row.version != attempt.connection_version or row.app_ownership_mode != attempt.app_mode or attempt_fingerprint(app)!=attempt.app_fingerprint:
             raise ConnectionFault('CONNECTION_VERSION_CHANGED')
         result = await self.db.execute(claim_statement(owner,attempt.id,now()))
         if result.rowcount != 1:
@@ -149,7 +154,7 @@ class ConnectionAuthorization:
             if (candidate['attempt_id']!=attempt.id or candidate['owner_id']!=owner or candidate['connection_id']!=row.id
                 or row.version!=version or version!=attempt.connection_version or candidate['connection_version']!=version
                 or candidate['app_mode']!=row.app_ownership_mode or attempt.app_mode!=row.app_ownership_mode
-                or app.fingerprint()!=candidate['app_fingerprint'] or utc(datetime.fromisoformat(candidate['expires_at']))<=now()):
+                or attempt_fingerprint(app)!=candidate['app_fingerprint'] or utc(datetime.fromisoformat(candidate['expires_at']))<=now()):
                 raise ConnectionFault('CONNECTION_VERSION_CHANGED')
             current = await self.store.current(owner)
             if current is not None and current.id != row.id:

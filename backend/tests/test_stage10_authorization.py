@@ -232,3 +232,14 @@ async def test_superseded_binding_remains_reconnectable_with_fresh_review(auth):
     s,_=await callback(a,old)
     await a.authorization.confirm(old.owner_id,s['attempt_id'],'session-a',version=3,previous_id=new.id,previous_version=2)
     assert (await a.store.current(old.owner_id)).id==old.id and old.version==4
+
+@pytest.mark.asyncio
+async def test_same_key_material_with_changed_managed_reference_version_rejects_attempt(auth):
+    from app.domains.connections.material import AppMaterial
+    a=auth;row=await setup(a,'platform_managed')
+    attempt=await a.authorization.start(row.owner_id,row.id,1,'session-a')
+    # Fingerprint of key/secret alone is identical: exact app version must bind too.
+    a.platform._entries[('fake-platform',1)]=AppMaterial(a.app_material.key,a.app_material.secret,'fake-platform',2)
+    with pytest.raises(ConnectionFault,match='VERSION_CHANGED'):
+        await a.authorization.callback(row.owner_id,attempt['attempt_id'],'session-a',state=attempt['state'],request_token='fake-ok')
+    assert a.provider.exchanges==0

@@ -22,7 +22,7 @@ Walkthrough: open Connections; choose either synthetic app mode; simulate callba
 
 ## Verified locally
 
-- 88 backend checks pass: 21 Stage10 authorization cases plus23 Stage09 storage/crypto contracts and44 Google/UAT2 boundary regressions. No skips in this selection.
+- 89 backend checks pass: 22 Stage10 authorization cases plus23 Stage09 storage/crypto contracts and44 Google/UAT2 boundary regressions. No skips in this selection.
 - 13 component regressions pass, including both synthetic setup modes, session-key remount, foreign metadata rejection and existing Stage09 race protections.
 - Next.js production Webpack/TypeScript build passes; complete route inventory and workflow syntax checked.
 - Real Chrome actual UI: user-owned and managed setup/callback/review/confirm, explicit mode replacement, renewal, disconnect, persistence on reload, corrected metadata refresh.390px CSS viewport has document width390px; mobile disconnect works; temporary viewport restored.
@@ -30,7 +30,7 @@ Walkthrough: open Connections; choose either synthetic app mode; simulate callba
 
 ## Explicit pending gates and publication plan
 
-1. No Stage10 CI, PostgreSQL migration or full PostgreSQL callback race has run. New dedicated Docker-only exact-head CI job selects24 mandatory cases (21 shared contracts and3 PostgreSQL cases) and rejects skips. The Stage09 named migration regression now targets its own named revision, preserving its original snapshot assertions rather than mutable head.
+1. No Stage10 CI, PostgreSQL migration or full PostgreSQL callback race has run. New dedicated Docker-only exact-head CI job selects25 mandatory cases (22 shared contracts and3 PostgreSQL cases) and rejects skips. The Stage09 named migration regression now targets its own named revision, preserving its original snapshot assertions rather than mutable head.
 2. Existing frozen Stage09 controller/rehearsal provenance checks intentionally reject new runtime files relative to their frozen source. They remain intact. Before proposing publication, prepare a reviewed arrangement that preserves those historical exact-source gates and adds Stage10 schema/controller rollback coverage. Do not expand their allowlist or relabel old receipts as Stage10 evidence.
 3. Native UAT2 schema controller currently supports Stage09/Stage08 recovery, not this Stage10 revision. Its code and live state are unchanged. A separately reviewed Stage10 upgrade/rollback plan and fresh backup are required before deployment. This candidate is not deployable merely because its package could build.
 4. New routes are mounted only in the private synthetic preview. Production/UAT2 compositions remain closed; real credential-entry, real callback page/transport wiring and provider approval are not activated. Live registered callback/origin verification, actual Google-to-broker session roundtrip, provider revocation and owner acceptance remain pending. No real provider capability is implied by the fake managed approval fixture.
