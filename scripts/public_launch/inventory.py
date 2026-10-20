@@ -57,9 +57,9 @@ def module_for(path):
 
 
 def classify(module, kind, capability, text, method=""):
-    if "require_admin" in text or "require_singleton_bullpen_runtime_access" in text:
+    if any(guard in text for guard in ("require_admin", "require_singleton_bullpen_runtime_access", "require_operator_", "requireBullpenOperator")):
         return "administrator-only"
-    if module in {"polymarket", "polymarket_direct", "cost_drivers"}:
+    if module in {"polymarket", "polymarket_direct", "polymarket_auto_live", "bullpen008", "bullpen_trade_analysis", "bullpen_run_audit", "trading_bots", "cost_drivers"}:
         return "administrator-only"
     if kind == "worker" and re.search(r"\b(user_id|owner_id)\b", text):
         return "owner-private"

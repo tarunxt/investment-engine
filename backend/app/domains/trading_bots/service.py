@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id
+
 from datetime import UTC, datetime
 
 from app.domains.polymarket.schemas import PolymarketBotState as BullpenPolymarketState
@@ -374,6 +376,7 @@ def to_overview_card(card: TradingBotCardSummary) -> TradingBotOverviewCard:
 
 
 async def build_trading_bots_summary(user_id: int) -> TradingBotsSummaryResponse:
+    await require_operator_user_id(user_id)
     cards: list[TradingBotCardSummary] = []
 
     try:

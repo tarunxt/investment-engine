@@ -3,6 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_operator_unit_context")
+
+
 from app.domains.polymarket.passive_projection import PassiveProjectionUnavailable
 from app.domains.polymarket_direct.service import polymarket_direct_bot_manager
 from app.domains.polymarket_auto_live.schemas import (

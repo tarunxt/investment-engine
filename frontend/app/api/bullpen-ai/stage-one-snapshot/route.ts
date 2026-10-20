@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { createReadStream } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -46,7 +47,9 @@ type UniversalSummaryBuildState = {
 };
 
 export async function GET(request: NextRequest) {
-  const session = await createBackendSessionContext(request);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  const session = admission.session;
   if (!session.hasAuthJsSession || !session.accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }

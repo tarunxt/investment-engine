@@ -142,6 +142,7 @@ async def list_providers(
             .where(
                 and_(
                     Job.provider == provider["name"],
+                    Job.user_id == current_user.id,
                     Job.status == JobStatus.COMPLETED,
                     Job.estimated_cost.isnot(None),
                     Job.estimated_cost > 0,
@@ -196,6 +197,7 @@ async def list_providers(
                 .where(
                     and_(
                         Job.provider == provider["name"],
+                        Job.user_id == current_user.id,
                         Job.model == model,
                         Job.status == JobStatus.COMPLETED,
                         Job.estimated_cost.isnot(None),
@@ -216,6 +218,7 @@ async def list_providers(
                 .where(
                     and_(
                         Job.provider == provider["name"],
+                        Job.user_id == current_user.id,
                         Job.model == model,
                         Job.status == JobStatus.COMPLETED,
                     )

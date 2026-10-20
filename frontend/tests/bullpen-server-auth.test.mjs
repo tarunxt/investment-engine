@@ -34,7 +34,8 @@ test("Bullpen positions use one auth context and passive page-load reads", () =>
     "../app/api/bullpen-ai/_lib/polymarketMarketUrls.ts",
   );
 
-  assert.match(positionsSource, /createBackendSessionContext\(request\)/);
+  assert.match(positionsSource, /requireBullpenOperator\(request\)/);
+  assert.match(positionsSource, /const backendSession = admission.session/);
   assert.match(
     positionsSource,
     /loadTrackedPositionsFallback\(context: BackendSessionContext\)/,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id
+
 import asyncio
 import logging
 from collections.abc import Iterable, Sequence
@@ -1140,6 +1142,7 @@ def _apply_filters(
 async def sync_bullpen_trade_history_for_user(
     user_id: int,
 ) -> BullpenTradeHistorySyncResult:
+    await require_operator_user_id(user_id)
     trade_history_succeeded = True
     try:
         trades = await BullpenTradeHistoryReader().refresh()

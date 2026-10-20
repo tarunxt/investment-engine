@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import pytest
+
+pytestmark = pytest.mark.usefixtures("synthetic_operator_unit_context")
 from types import SimpleNamespace
 
 import app.domains.polymarket_auto_live.order_intent_lease as lease_module

@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,8 @@ function chunkSlugs(slugs: string[]) {
 }
 
 export async function POST(request: NextRequest) {
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
   const body = (await request.json()) as { slugs?: unknown[] };
   const slugs = Array.from(new Set((body.slugs ?? []).map(normalizedSlug).filter((slug): slug is string => Boolean(slug)))).slice(0, MAX_EVENTS);
   const events: Record<string, { eventSlug: string; eventTitle: string | null }> = {};

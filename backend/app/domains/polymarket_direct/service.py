@@ -5,6 +5,7 @@ from app.core.recovery import recovery_mode, require_financial_writes_allowed
 import asyncio
 from pathlib import Path
 
+from app.domains.polymarket.access import require_operator_user_id
 from app.domains.polymarket_direct.bot import PolymarketPaperCopyBot
 from app.domains.polymarket_direct.direct_polymarket import (
     DirectPolymarketBalanceReader,
@@ -31,6 +32,7 @@ class PolymarketDirectBotManager:
     async def get_bot(self, user_id: int) -> PolymarketPaperCopyBot:
         if recovery_mode():
             require_financial_writes_allowed()  # No bot init/background jobs in recovery.
+        await require_operator_user_id(user_id)
         async with self._lock:
             existing = self._bots.get(user_id)
             if existing:

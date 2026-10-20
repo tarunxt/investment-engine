@@ -6,6 +6,9 @@ from time import monotonic
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("synthetic_operator_unit_context")
+
 from fastapi import Response
 
 from app.domains.dashboard import service
@@ -168,7 +171,7 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
     monkeypatch.setattr(service, "_load_fx", load_fx)
 
     started = monotonic()
-    summary = await service.build_dashboard_summary(user_id=17)
+    summary = await service.build_dashboard_summary(user_id=17, include_singleton_bullpen=True)
     elapsed = monotonic() - started
 
     assert elapsed < 0.12
@@ -369,7 +372,7 @@ async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
     first_response = Response()
     result = await dashboard_router.get_dashboard_summary(
         response=first_response,
-        current_user=SimpleNamespace(id=19, role=UserRole.ADMIN),
+        current_user=SimpleNamespace(id=19, role=UserRole.ADMIN, is_active=True),
         if_none_match=None,
     )
 
@@ -380,7 +383,7 @@ async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
 
     not_modified = await dashboard_router.get_dashboard_summary(
         response=Response(),
-        current_user=SimpleNamespace(id=19, role=UserRole.ADMIN),
+        current_user=SimpleNamespace(id=19, role=UserRole.ADMIN, is_active=True),
         if_none_match=etag,
     )
     assert not_modified.status_code == 304

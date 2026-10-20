@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -9,7 +10,9 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const session = await createBackendSessionContext(request);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  const session = admission.session;
   const payload = await fetchBackendJsonWithSession(
     session,
     "/polymarket/runtime/health",

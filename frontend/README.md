@@ -63,6 +63,8 @@ The backend Docker image now installs the Bullpen CLI, so `Refresh doctor`, bala
 
 The Settings tab **Platform Cost Drivers** (`/console/profile/cost-drivers`) is an admin-only, read-only cost observability dashboard for Cred-x. It combines delayed AWS billing actuals with near-real-time infrastructure and website bandwidth attribution so administrators can tell whether spend is coming from data transfer, EC2 runtime, EBS, public IPv4, logs, Transfer Family, NAT/ALB, images, videos, API JSON, JavaScript bundles, HTML pages, or bots.
 
+Cost administration requires an existing active ADMIN or an explicit `cost_dashboard_admin` membership. Runtime email exceptions are removed. Deprecated `COST_DASHBOARD_ADMIN_EMAILS` is read only by the one-shot, verified legacy migration; non-ADMIN mappings require independently checked IDs and specific security approval. A cost-only membership never grants global administrator or financial-runtime access.
+
 ### Server-side AWS configuration
 
 AWS credentials must never be exposed to the browser. Configure credentials only for the backend container or use the EC2 instance/IAM role attached to the server:
@@ -70,7 +72,6 @@ AWS credentials must never be exposed to the browser. Configure credentials only
 ```bash
 AWS_REGION=ap-south-1
 AWS_COST_REGION=us-east-1
-COST_DASHBOARD_ADMIN_EMAILS=admin@example.com
 COST_DASHBOARD_CACHE_TTL_SECONDS=3600
 COST_DASHBOARD_MOCK_MODE=false
 # Optional, server-only if no IAM role is available:

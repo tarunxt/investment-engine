@@ -43,7 +43,7 @@ from scripts.public_launch.preview_streams import install
 install()
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
-from scripts.public_launch import preview_jobs
+from scripts.public_launch import preview_jobs, preview_stage05
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
 from app.domains.auth.router import router
@@ -57,7 +57,7 @@ async def lifespan(app):
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
                       Job.__table__, Run.__table__, RunJob.__table__,
-                      OutboxMessage.__table__, IdempotencyOperation.__table__):
+                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -116,7 +116,7 @@ async def synthetic_boundary(request: Request, call_next):
     private_read = request.method == "GET" and (request.url.path in {"/jobs", "/runs"} or
                    any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
                        for prefix in ("/jobs/", "/runs/")))
-    if request.method != "OPTIONS" and not private_read and (request.method, request.url.path) not in ALLOWED:
+    if request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and (request.method, request.url.path) not in ALLOWED:
         return JSONResponse({"detail": "Unavailable in synthetic Stage01 preview; no external actions are permitted"}, status_code=503)
     response = await call_next(request)
     response.headers["X-Stage01-Synthetic-Preview"] = "true"
@@ -136,3 +136,5 @@ for private_router in (jobs_router, runs_router):
 
 app.include_router(jobs_ws_router)
 app.include_router(runs_ws_router)
+
+preview_stage05.install(app)

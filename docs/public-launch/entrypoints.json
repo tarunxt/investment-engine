@@ -43,14 +43,14 @@
         "router.get",
         "select",
         "select(Job.estimated_cost, Job.response).where",
-        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
-        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
+        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
+        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
         "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where",
-        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
-        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
+        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
+        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
         "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where",
-        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.model == model, Job.status == JobStatus.COMPLETED)).order_by",
-        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.model == model, Job.status == JobStatus.COMPLETED)).order_by(desc(Job.id)).limit",
+        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED)).order_by",
+        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED)).order_by(desc(Job.id)).limit",
         "sum"
       ],
       "capability": "list_providers",
@@ -854,13 +854,14 @@
         "router.get"
       ],
       "capability": "bullpen008_settings",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/settings', response_model=Bullpen008Settings)"
       ],
       "owner_source": [
@@ -869,7 +870,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/settings",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:101"
+      "source": "backend/app/domains/bullpen008/router.py:102"
     },
     {
       "calls": [
@@ -880,13 +881,14 @@
         "update_settings"
       ],
       "capability": "save_bullpen008_settings",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "PUT",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.put('/settings', response_model=Bullpen008Settings)"
       ],
       "owner_source": [
@@ -895,7 +897,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/settings",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:109"
+      "source": "backend/app/domains/bullpen008/router.py:110"
     },
     {
       "calls": [
@@ -904,13 +906,14 @@
         "set_scheduler_running"
       ],
       "capability": "start_bullpen008_scheduler",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/scheduler/start', response_model=Bullpen008State)"
       ],
       "owner_source": [
@@ -919,7 +922,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/scheduler/start",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:125"
+      "source": "backend/app/domains/bullpen008/router.py:126"
     },
     {
       "calls": [
@@ -928,13 +931,14 @@
         "set_scheduler_running"
       ],
       "capability": "stop_bullpen008_scheduler",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/scheduler/stop', response_model=Bullpen008State)"
       ],
       "owner_source": [
@@ -943,7 +947,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/scheduler/stop",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:133"
+      "source": "backend/app/domains/bullpen008/router.py:134"
     },
     {
       "calls": [
@@ -952,13 +956,14 @@
         "set_scheduler_paused"
       ],
       "capability": "pause_bullpen008_scheduler",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/scheduler/pause', response_model=Bullpen008State)"
       ],
       "owner_source": [
@@ -967,7 +972,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/scheduler/pause",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:141"
+      "source": "backend/app/domains/bullpen008/router.py:142"
     },
     {
       "calls": [
@@ -976,13 +981,14 @@
         "set_scheduler_paused"
       ],
       "capability": "resume_bullpen008_scheduler",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/scheduler/resume', response_model=Bullpen008State)"
       ],
       "owner_source": [
@@ -991,7 +997,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/scheduler/resume",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:149"
+      "source": "backend/app/domains/bullpen008/router.py:150"
     },
     {
       "calls": [
@@ -1000,13 +1006,14 @@
         "set_emergency_stop"
       ],
       "capability": "activate_bullpen008_emergency_stop",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/emergency-stop', response_model=Bullpen008State)"
       ],
       "owner_source": [
@@ -1015,7 +1022,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/emergency-stop",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:157"
+      "source": "backend/app/domains/bullpen008/router.py:158"
     },
     {
       "calls": [
@@ -1024,13 +1031,14 @@
         "set_emergency_stop"
       ],
       "capability": "clear_bullpen008_emergency_stop",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/emergency-stop/clear', response_model=Bullpen008State)"
       ],
       "owner_source": [
@@ -1039,7 +1047,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/emergency-stop/clear",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:165"
+      "source": "backend/app/domains/bullpen008/router.py:166"
     },
     {
       "calls": [
@@ -1058,13 +1066,14 @@
         "str"
       ],
       "capability": "kill_bullpen008_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/kill', response_model=Bullpen008KillResponse)"
       ],
       "owner_source": [
@@ -1073,7 +1082,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/kill",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:173"
+      "source": "backend/app/domains/bullpen008/router.py:174"
     },
     {
       "calls": [
@@ -1086,13 +1095,14 @@
         "set_execution_control"
       ],
       "capability": "update_bullpen008_execution_control",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/execution-control', response_model=Bullpen008Settings)"
       ],
       "owner_source": [
@@ -1101,7 +1111,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/execution-control",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:219"
+      "source": "backend/app/domains/bullpen008/router.py:220"
     },
     {
       "calls": [
@@ -1128,13 +1138,14 @@
         "task.exception"
       ],
       "capability": "run_bullpen008_once",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/run-once', response_model=Bullpen008Run, status_code=202)"
       ],
       "owner_source": [
@@ -1143,7 +1154,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/run-once",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:239"
+      "source": "backend/app/domains/bullpen008/router.py:240"
     },
     {
       "calls": [
@@ -1164,7 +1175,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:268"
+      "source": "backend/app/domains/bullpen008/router.py:269"
     },
     {
       "calls": [
@@ -1174,13 +1185,14 @@
         "router.get"
       ],
       "capability": "bullpen008_runs",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs', response_model=Bullpen008HistoryPage)"
       ],
       "owner_source": [
@@ -1189,7 +1201,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/runs",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:315"
+      "source": "backend/app/domains/bullpen008/router.py:316"
     },
     {
       "calls": [
@@ -1199,13 +1211,14 @@
         "router.get"
       ],
       "capability": "bullpen008_event_trends",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/history/event-trends', response_model=Bullpen008EventTrendsResponse)"
       ],
       "owner_source": [
@@ -1214,7 +1227,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/history/event-trends",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:333"
+      "source": "backend/app/domains/bullpen008/router.py:334"
     },
     {
       "calls": [
@@ -1225,13 +1238,14 @@
         "run_from_record"
       ],
       "capability": "bullpen008_run_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}', response_model=Bullpen008Run)"
       ],
       "owner_source": [
@@ -1240,7 +1254,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/runs/{run_id}",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:346"
+      "source": "backend/app/domains/bullpen008/router.py:347"
     },
     {
       "calls": [
@@ -1269,13 +1283,14 @@
         "uuid4"
       ],
       "capability": "retry_bullpen008_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/runs/{run_id}/retry', response_model=Bullpen008Run, status_code=202)"
       ],
       "owner_source": [
@@ -1284,7 +1299,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/runs/{run_id}/retry",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:358"
+      "source": "backend/app/domains/bullpen008/router.py:359"
     },
     {
       "calls": [
@@ -1305,7 +1320,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:390"
+      "source": "backend/app/domains/bullpen008/router.py:391"
     },
     {
       "calls": [
@@ -1315,13 +1330,14 @@
         "router.get"
       ],
       "capability": "bullpen008_stage_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/stages/{stage_number}', response_model=Bullpen008StageOutput)"
       ],
       "owner_source": [
@@ -1330,7 +1346,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/runs/{run_id}/stages/{stage_number}",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:432"
+      "source": "backend/app/domains/bullpen008/router.py:433"
     },
     {
       "calls": [
@@ -1339,12 +1355,13 @@
         "router.post"
       ],
       "capability": "bullpen008_orders_disabled",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/orders', status_code=403)"
       ],
       "owner_source": [
@@ -1353,7 +1370,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/orders",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:452"
+      "source": "backend/app/domains/bullpen008/router.py:453"
     },
     {
       "calls": [
@@ -1363,13 +1380,14 @@
         "router.get"
       ],
       "capability": "bullpen008_bootstrap",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen008",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/bootstrap', response_model=Bullpen008Bootstrap)"
       ],
       "owner_source": [
@@ -1378,7 +1396,7 @@
       "registration": "mounted",
       "route": "/polymarket/bullpen008/bootstrap",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/router.py:92"
+      "source": "backend/app/domains/bullpen008/router.py:93"
     },
     {
       "calls": [
@@ -1452,6 +1470,8 @@
         "redis_client.delete",
         "redis_client.get",
         "redis_client.set",
+        "require_operator_bullpen008_run_sync",
+        "require_operator_user_id_sync",
         "row.get",
         "scan_metadata.get",
         "select",
@@ -1481,12 +1501,13 @@
         "{'finished': 'completed', 'partial': 'partial', 'cancelled': 'cancelled'}.get"
       ],
       "capability": "execute_bullpen008_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_bullpen008_run_sync",
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "not established in local function; inspect callers/repository"
@@ -1494,7 +1515,7 @@
       "registration": "celery.task(bind=True, name=CELERY_TASK_NAME, autoretry_for=(), soft_time_limit=3300, time_limit=3600)",
       "route": "",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/tasks.py:1459"
+      "source": "backend/app/domains/bullpen008/tasks.py:1462"
     },
     {
       "calls": [
@@ -1510,6 +1531,7 @@
         "redis_client.close",
         "redis_client.delete",
         "redis_client.set",
+        "require_operator_user_id_sync",
         "select",
         "select(Bullpen008StateRecord.user_id).where",
         "session.execute",
@@ -1517,12 +1539,12 @@
         "session.execute(select(Bullpen008StateRecord.user_id).where(Bullpen008StateRecord.workflow_profile == WORKFLOW_PROFILE, Bullpen008StateRecord.running.is_(True), Bullpen008StateRecord.paused.is_(False), Bullpen008StateRecord.next_run_at.is_not(None), Bullpen008StateRecord.next_run_at <= now)).scalars().all"
       ],
       "capability": "enqueue_due_bullpen008_runs",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "not established in local function; inspect callers/repository"
@@ -1530,7 +1552,7 @@
       "registration": "celery.task(name=CELERY_SCHEDULER_TASK_NAME)",
       "route": "",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/tasks.py:2916"
+      "source": "backend/app/domains/bullpen008/tasks.py:2922"
     },
     {
       "calls": [
@@ -1569,6 +1591,7 @@
         "next",
         "phase2_settings.execution_mode.upper",
         "refreshed.get",
+        "require_operator_user_id_sync",
         "result_by_action.get",
         "row.get",
         "safe",
@@ -1604,11 +1627,12 @@
         "str"
       ],
       "capability": "refresh_bullpen008_position_alerts",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "bullpen008",
       "observed_guards": [
+        "require_operator_user_id_sync",
         "select(Bullpen008AlertRecord).where(Bullpen008AlertRecord.user_id == user_id, Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE, Bullpen008AlertRecord.market_id == recovery['market_id'], Bullpen008AlertRecord.side == recovery['side'], Bullpen008AlertRecord.recovered_at.is_(None)).order_by",
         "select(Bullpen008AlertRecord).where(Bullpen008AlertRecord.user_id == user_id, Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE, Bullpen008AlertRecord.market_id == recovery['market_id'], Bullpen008AlertRecord.side == recovery['side'], Bullpen008AlertRecord.recovered_at.is_(None)).order_by(Bullpen008AlertRecord.created_at.desc()).limit",
         "session.execute(select(Bullpen008AlertRecord).where(Bullpen008AlertRecord.user_id == user_id, Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE, Bullpen008AlertRecord.market_id == recovery['market_id'], Bullpen008AlertRecord.side == recovery['side'], Bullpen008AlertRecord.recovered_at.is_(None)).order_by(Bullpen008AlertRecord.created_at.desc()).limit(1)).scalar_one_or_none"
@@ -1619,7 +1643,7 @@
       "registration": "celery.task(name='app.domains.bullpen008.tasks.refresh_bullpen008_position_alerts')",
       "route": "",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/tasks.py:2953"
+      "source": "backend/app/domains/bullpen008/tasks.py:2963"
     },
     {
       "calls": [
@@ -1627,8 +1651,8 @@
         "Bullpen008ExecutionIntentRecord.remote_order_id.is_not",
         "Bullpen008ExecutionIntentRecord.status.in_",
         "ProductionBullpen008Adapter",
+        "ProductionBullpen008Adapter().reconcile",
         "SyncSessionLocal",
-        "adapter.reconcile",
         "asyncio.run",
         "celery.task",
         "datetime.now",
@@ -1639,6 +1663,7 @@
         "logger.warning",
         "record.payload.get",
         "request.get",
+        "require_operator_bullpen008_run_sync",
         "select",
         "select(Bullpen008ExecutionIntentRecord).where",
         "session.add",
@@ -1655,7 +1680,7 @@
       "method": "",
       "module": "bullpen008",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_bullpen008_run_sync"
       ],
       "owner_source": [
         "not established in local function; inspect callers/repository"
@@ -1663,7 +1688,7 @@
       "registration": "celery.task(name='app.domains.bullpen008.tasks.recover_bullpen008_executions')",
       "route": "",
       "side_effects": "broker/runtime; AI; DB; queues; notifications",
-      "source": "backend/app/domains/bullpen008/tasks.py:3243"
+      "source": "backend/app/domains/bullpen008/tasks.py:3257"
     },
     {
       "calls": [
@@ -1677,12 +1702,13 @@
         "session.commit"
       ],
       "capability": "list_run_audits",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('', response_model=BullpenRunAuditListResponse)"
       ],
       "owner_source": [
@@ -1691,7 +1717,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:154"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:155"
     },
     {
       "calls": [
@@ -1708,12 +1734,13 @@
         "str"
       ],
       "capability": "materialize_run_audit",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/{run_id}/materialize', response_model=BullpenRunAuditMaterializeResponse)"
       ],
       "owner_source": [
@@ -1722,7 +1749,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/materialize",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:194"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:195"
     },
     {
       "calls": [
@@ -1737,12 +1764,13 @@
         "str"
       ],
       "capability": "get_run_audit_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{run_id}', response_model=BullpenRunAuditDetailResponse)"
       ],
       "owner_source": [
@@ -1751,7 +1779,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:228"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:229"
     },
     {
       "calls": [
@@ -1765,12 +1793,13 @@
         "str"
       ],
       "capability": "get_run_audit_section",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{run_id}/sections/{section}', response_model=BullpenRunAuditSectionResponse)"
       ],
       "owner_source": [
@@ -1779,7 +1808,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/sections/{section}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:252"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:253"
     },
     {
       "calls": [
@@ -1789,12 +1818,13 @@
         "router.get"
       ],
       "capability": "get_run_audit_findings",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{run_id}/findings', response_model=list[dict[str, object]])"
       ],
       "owner_source": [
@@ -1803,7 +1833,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/findings",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:275"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:276"
     },
     {
       "calls": [
@@ -1816,12 +1846,13 @@
         "session.commit"
       ],
       "capability": "add_run_audit_remark",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/{run_id}/remarks', response_model=BullpenRunAuditRemark, status_code=201)"
       ],
       "owner_source": [
@@ -1830,7 +1861,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/remarks",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:284"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:285"
     },
     {
       "calls": [
@@ -1842,12 +1873,13 @@
         "session.commit"
       ],
       "capability": "add_run_audit_manual_check",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/{run_id}/manual-checks', response_model=BullpenRunAuditManualCheck, status_code=201)"
       ],
       "owner_source": [
@@ -1856,7 +1888,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/manual-checks",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:305"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:306"
     },
     {
       "calls": [
@@ -1871,12 +1903,13 @@
         "str"
       ],
       "capability": "enqueue_run_audit_feedback",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/{run_id}/feedback', response_model=BullpenRunAuditFeedbackSummary, status_code=202)"
       ],
       "owner_source": [
@@ -1885,7 +1918,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/feedback",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:325"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:326"
     },
     {
       "calls": [
@@ -1897,12 +1930,13 @@
         "session.commit"
       ],
       "capability": "list_run_audit_feedback",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{run_id}/feedback', response_model=list[BullpenRunAuditFeedbackSummary])"
       ],
       "owner_source": [
@@ -1911,7 +1945,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/feedback",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:352"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:353"
     },
     {
       "calls": [
@@ -1925,12 +1959,13 @@
         "str"
       ],
       "capability": "get_run_audit_feedback_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{run_id}/feedback/{feedback_id}', response_model=BullpenRunAuditFeedbackDetail)"
       ],
       "owner_source": [
@@ -1939,7 +1974,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/feedback/{feedback_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:370"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:371"
     },
     {
       "calls": [
@@ -1953,7 +1988,7 @@
         "str"
       ],
       "capability": "export_run_audit_bundle",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "bullpen_run_audit",
@@ -1966,7 +2001,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:394"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:395"
     },
     {
       "calls": [
@@ -1980,12 +2015,13 @@
         "str"
       ],
       "capability": "export_run_audit_bundle",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_run_audit",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{run_id}/export')"
       ],
       "owner_source": [
@@ -1994,7 +2030,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/run-audits/{run_id}/export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:394"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:395"
     },
     {
       "calls": [
@@ -2003,7 +2039,7 @@
         "session.commit"
       ],
       "capability": "_export",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "bullpen_run_audit",
@@ -2016,14 +2052,14 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/bullpen_run_audit/router.py:398"
+      "source": "backend/app/domains/bullpen_run_audit/router.py:399"
     },
     {
       "calls": [
         "materialize_run_audit_snapshot_sync"
       ],
       "capability": "export_run_audit_bundle_sync",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "bullpen_run_audit",
@@ -2127,7 +2163,7 @@
         "uuid4"
       ],
       "capability": "refresh_bullpen_run_audit_snapshot",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "bullpen_run_audit",
@@ -2189,7 +2225,7 @@
         "time.perf_counter"
       ],
       "capability": "generate_bullpen_run_audit_feedback",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "bullpen_run_audit",
@@ -2215,13 +2251,14 @@
         "service.list_trades"
       ],
       "capability": "list_bullpen_trade_analysis",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_trade_analysis",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('', response_model=BullpenTradeAnalysisListResponse)"
       ],
       "owner_source": [
@@ -2230,7 +2267,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/trade-analysis",
       "side_effects": "private trade DB; AI; queues",
-      "source": "backend/app/domains/bullpen_trade_analysis/router.py:39"
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:40"
     },
     {
       "calls": [
@@ -2250,7 +2287,7 @@
       "registration": "",
       "route": "",
       "side_effects": "private trade DB; AI; queues",
-      "source": "backend/app/domains/bullpen_trade_analysis/router.py:68"
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:69"
     },
     {
       "calls": [
@@ -2261,13 +2298,14 @@
         "service.get_trade_detail"
       ],
       "capability": "get_bullpen_trade_analysis_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "bullpen_trade_analysis",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/{trade_id}', response_model=BullpenTradeAnalysisDetailResponse)"
       ],
       "owner_source": [
@@ -2276,7 +2314,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/trade-analysis/{trade_id}",
       "side_effects": "private trade DB; AI; queues",
-      "source": "backend/app/domains/bullpen_trade_analysis/router.py:76"
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:77"
     },
     {
       "calls": [
@@ -2287,13 +2325,14 @@
         "service.recompute_post_trade_analysis"
       ],
       "capability": "recompute_bullpen_trade_analysis",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "bullpen_trade_analysis",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/{trade_id}/post-trade-analysis', response_model=BullpenTradeAnalysisDetailResponse)"
       ],
       "owner_source": [
@@ -2302,7 +2341,7 @@
       "registration": "mounted",
       "route": "/bullpen-ai/trade-analysis/{trade_id}/post-trade-analysis",
       "side_effects": "private trade DB; AI; queues",
-      "source": "backend/app/domains/bullpen_trade_analysis/router.py:91"
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:92"
     },
     {
       "calls": [
@@ -2323,7 +2362,7 @@
       "registration": "",
       "route": "",
       "side_effects": "private trade DB; AI; queues",
-      "source": "backend/app/domains/bullpen_trade_analysis/service.py:2026"
+      "source": "backend/app/domains/bullpen_trade_analysis/service.py:2029"
     },
     {
       "calls": [
@@ -2342,17 +2381,18 @@
         "redis_client.close",
         "redis_client.get",
         "redis_client.set",
+        "require_operator_user_id_sync",
         "str",
         "str(request_token).strip",
         "sync_bullpen_trade_history_for_user"
       ],
       "capability": "refresh_bullpen_trade_analysis_history",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "bullpen_trade_analysis",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "user_id (input; authority unverified)"
@@ -2360,7 +2400,7 @@
       "registration": "celery.task(bind=True, max_retries=0, soft_time_limit=120, time_limit=135, name='app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history', queue='ai')",
       "route": "",
       "side_effects": "private trade DB; AI; queues",
-      "source": "backend/app/domains/bullpen_trade_analysis/tasks.py:139"
+      "source": "backend/app/domains/bullpen_trade_analysis/tasks.py:142"
     },
     {
       "calls": [
@@ -2385,7 +2425,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/summary",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:36"
+      "source": "backend/app/domains/cost_drivers/router.py:28"
     },
     {
       "calls": [
@@ -2408,7 +2448,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/aws",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:40"
+      "source": "backend/app/domains/cost_drivers/router.py:32"
     },
     {
       "calls": [
@@ -2431,7 +2471,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/traffic",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:44"
+      "source": "backend/app/domains/cost_drivers/router.py:36"
     },
     {
       "calls": [
@@ -2454,7 +2494,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/recommendations",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:48"
+      "source": "backend/app/domains/cost_drivers/router.py:40"
     },
     {
       "calls": [
@@ -2481,7 +2521,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/refresh",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:52"
+      "source": "backend/app/domains/cost_drivers/router.py:44"
     },
     {
       "calls": [
@@ -4648,6 +4688,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/state', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -4674,6 +4715,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/history', response_model=PolymarketHistoryResponse)"
       ],
       "owner_source": [
@@ -4707,6 +4749,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runtime/positions', response_model=BullpenRuntimePositionsResponse)"
       ],
       "owner_source": [
@@ -4751,6 +4794,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runtime/positions/display', response_model=BullpenRuntimeDisplayPositionsResponse)"
       ],
       "owner_source": [
@@ -4777,6 +4821,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runtime/health', response_model=BullpenRuntimeHealthResponse)"
       ],
       "owner_source": [
@@ -4809,6 +4854,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runtime/diagnostics', response_model=BullpenRuntimeDiagnosticsResponse)"
       ],
       "owner_source": [
@@ -4833,6 +4879,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runtime/discover')"
       ],
       "owner_source": [
@@ -4857,6 +4904,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(require_singleton_bullpen_runtime_access)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/runtime/search')"
       ],
       "owner_source": [
@@ -4884,6 +4932,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/start', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -4909,6 +4958,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/stop', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -4934,6 +4984,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/pause', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -4959,6 +5010,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/resume', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -4986,6 +5038,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/unlock', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5011,6 +5064,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/lock', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5036,6 +5090,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/doctor', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5061,6 +5116,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/balance/refresh', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5088,6 +5144,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/redeem', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5113,6 +5170,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/emergency-stop', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5138,6 +5196,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/reset-emergency-stop', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5165,6 +5224,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.patch('/live/limits', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5192,6 +5252,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/trades/{trade_id}/confirm', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5219,6 +5280,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/trades/{trade_id}/reject', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5244,6 +5306,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/trades/reject-all', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5272,6 +5335,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/manual-invest', response_model=PolymarketManualInvestResponse)"
       ],
       "owner_source": [
@@ -5299,6 +5363,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/tracked-accounts', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5326,6 +5391,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.patch('/tracked-accounts/{account_id}', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5353,6 +5419,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/tracked-accounts/{account_id}/net-worth/refresh', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5380,6 +5447,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.delete('/tracked-accounts/{account_id}', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -5406,6 +5474,7 @@
       "module": "polymarket",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/discovery/debug', response_model=PolymarketDiscoveryDebugReport)"
       ],
       "owner_source": [
@@ -5435,7 +5504,7 @@
       "registration": "",
       "route": "",
       "side_effects": "singleton wallet/runtime; broker/process/network/financial I/O possible",
-      "source": "backend/app/domains/polymarket/service.py:229"
+      "source": "backend/app/domains/polymarket/service.py:233"
     },
     {
       "calls": [
@@ -5462,7 +5531,7 @@
         "str"
       ],
       "capability": "get_clustering_progress",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
@@ -5503,7 +5572,7 @@
         "str"
       ],
       "capability": "record_clustering_progress",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
@@ -5613,7 +5682,7 @@
         "value.isoformat"
       ],
       "capability": "build_export_snapshot",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -5640,7 +5709,7 @@
         "session.execute(select(PolymarketAutoLiveRunRecord).where(PolymarketAutoLiveRunRecord.id == run_id, PolymarketAutoLiveRunRecord.user_id == user_id)).scalar_one_or_none"
       ],
       "capability": "build_owned_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -5677,6 +5746,7 @@
         "logging.getLogger(__name__).exception",
         "os.path.isfile",
         "read_job",
+        "require_operator_user_id_sync",
         "save_job",
         "select",
         "select(PolymarketAutoLiveRunRecord.payload['stage_results'].label('stage_results'), PolymarketAutoLiveRunRecord.started_at, PolymarketAutoLiveRunRecord.completed_at).where",
@@ -5689,12 +5759,12 @@
         "time.time"
       ],
       "capability": "prepare_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "user_id (input; authority unverified)"
@@ -5702,7 +5772,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/export_tasks.py:14"
+      "source": "backend/app/domains/polymarket_auto_live/export_tasks.py:15"
     },
     {
       "calls": [
@@ -5726,6 +5796,7 @@
         "logging.getLogger(__name__).exception",
         "os.path.isfile",
         "read_job",
+        "require_operator_user_id_sync",
         "save_job",
         "select",
         "select(PolymarketAutoLiveRunRecord.payload['stage_results'].label('stage_results'), PolymarketAutoLiveRunRecord.started_at, PolymarketAutoLiveRunRecord.completed_at).where",
@@ -5738,12 +5809,12 @@
         "time.time"
       ],
       "capability": "prepare_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "user_id (input; authority unverified)"
@@ -5751,7 +5822,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.export_tasks.prepare_stage_one_excel', bind=True, max_retries=70, soft_time_limit=1800, time_limit=1860, acks_late=True, reject_on_worker_lost=True)",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/export_tasks.py:14"
+      "source": "backend/app/domains/polymarket_auto_live/export_tasks.py:15"
     },
     {
       "calls": [
@@ -5782,12 +5853,13 @@
         "router.get"
       ],
       "capability": "list_auto_live_runs",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs', response_model=list[BullpenAutoLiveRun])"
       ],
       "owner_source": [
@@ -5796,7 +5868,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1025"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1026"
     },
     {
       "calls": [
@@ -5808,12 +5880,13 @@
         "router.get"
       ],
       "capability": "get_auto_live_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}', response_model=BullpenAutoLiveRun)"
       ],
       "owner_source": [
@@ -5822,7 +5895,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1038"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1039"
     },
     {
       "calls": [
@@ -5837,7 +5910,7 @@
         "session.scalar"
       ],
       "capability": "prepare_auto_live_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -5850,7 +5923,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1052"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1053"
     },
     {
       "calls": [
@@ -5865,12 +5938,13 @@
         "session.scalar"
       ],
       "capability": "prepare_auto_live_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/runs/{run_id}/stage-one-export')"
       ],
       "owner_source": [
@@ -5879,7 +5953,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/stage-one-export",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1052"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1053"
     },
     {
       "calls": [
@@ -5890,7 +5964,7 @@
         "run_in_threadpool"
       ],
       "capability": "auto_live_stage_one_excel_status",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -5903,7 +5977,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1069"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1070"
     },
     {
       "calls": [
@@ -5914,12 +5988,13 @@
         "run_in_threadpool"
       ],
       "capability": "auto_live_stage_one_excel_status",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/stage-one-export')"
       ],
       "owner_source": [
@@ -5928,7 +6003,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/stage-one-export",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1069"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1070"
     },
     {
       "calls": [
@@ -5945,7 +6020,7 @@
         "str"
       ],
       "capability": "download_auto_live_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -5958,7 +6033,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1081"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1082"
     },
     {
       "calls": [
@@ -5975,12 +6050,13 @@
         "str"
       ],
       "capability": "download_auto_live_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/stage-one.xlsx', response_class=FileResponse)"
       ],
       "owner_source": [
@@ -5989,7 +6065,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/stage-one.xlsx",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1081"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1082"
     },
     {
       "calls": [
@@ -6003,12 +6079,13 @@
         "time.perf_counter"
       ],
       "capability": "get_auto_live_stage_one_run_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/stage-one', response_model=BullpenAutoLiveRun)"
       ],
       "owner_source": [
@@ -6017,7 +6094,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/stage-one",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1126"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1127"
     },
     {
       "calls": [
@@ -6031,12 +6108,13 @@
         "time.perf_counter"
       ],
       "capability": "get_auto_live_console_run_detail",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/console', response_model=BullpenAutoLiveConsoleRunDetail)"
       ],
       "owner_source": [
@@ -6045,7 +6123,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/console",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1162"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1163"
     },
     {
       "calls": [
@@ -6057,12 +6135,13 @@
         "router.get"
       ],
       "capability": "list_auto_live_run_decisions",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/decisions', response_model=list[BullpenAutoLiveDecision])"
       ],
       "owner_source": [
@@ -6071,7 +6150,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/decisions",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1196"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1197"
     },
     {
       "calls": [
@@ -6083,12 +6162,13 @@
         "router.get"
       ],
       "capability": "get_auto_live_run_orders",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/runs/{run_id}/orders', response_model=BullpenAutoLiveRunOrdersResponse)"
       ],
       "owner_source": [
@@ -6097,7 +6177,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/orders",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1210"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1211"
     },
     {
       "calls": [
@@ -6109,12 +6189,13 @@
         "router.post"
       ],
       "capability": "reconcile_auto_live_run_order_states",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/runs/{run_id}/reconcile', response_model=BullpenAutoLiveRunOrdersResponse)"
       ],
       "owner_source": [
@@ -6123,7 +6204,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/reconcile",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1222"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1223"
     },
     {
       "calls": [
@@ -6135,12 +6216,13 @@
         "router.post"
       ],
       "capability": "retry_failed_exits_and_continue_buys",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/runs/{run_id}/retry-exits-and-continue-buys', response_model=BullpenAutoLiveRunOrdersResponse)"
       ],
       "owner_source": [
@@ -6149,7 +6231,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/runs/{run_id}/retry-exits-and-continue-buys",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1237"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1238"
     },
     {
       "calls": [
@@ -6159,12 +6241,13 @@
         "router.get"
       ],
       "capability": "list_auto_live_decisions",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/decisions', response_model=list[BullpenAutoLiveDecision])"
       ],
       "owner_source": [
@@ -6173,7 +6256,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/decisions",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1249"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1250"
     },
     {
       "calls": [
@@ -6185,12 +6268,13 @@
         "router.post"
       ],
       "capability": "retry_auto_live_order",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/orders/{intent_id}/retry', response_model=BullpenAutoLiveRunOrdersResponse)"
       ],
       "owner_source": [
@@ -6199,7 +6283,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/orders/{intent_id}/retry",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1255"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1256"
     },
     {
       "calls": [
@@ -6211,12 +6295,13 @@
         "router.post"
       ],
       "capability": "cancel_auto_live_order",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/orders/{intent_id}/cancel', response_model=BullpenAutoLiveRunOrdersResponse)"
       ],
       "owner_source": [
@@ -6225,7 +6310,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/orders/{intent_id}/cancel",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1271"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1272"
     },
     {
       "calls": [
@@ -6237,12 +6322,13 @@
         "router.post"
       ],
       "capability": "run_auto_live_once",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/run-once', response_model=BullpenAutoLiveRun)"
       ],
       "owner_source": [
@@ -6251,7 +6337,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/run-once",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1283"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1284"
     },
     {
       "calls": [
@@ -6271,12 +6357,13 @@
         "str(metadata.get('exportId') or '').strip"
       ],
       "capability": "queue_workflow_run_now",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/workflow-run-now', response_model=BullpenWorkflowRunNowResponse, status_code=202)"
       ],
       "owner_source": [
@@ -6285,7 +6372,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/workflow-run-now",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1299"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1300"
     },
     {
       "calls": [
@@ -6295,12 +6382,13 @@
         "router.post"
       ],
       "capability": "start_auto_live",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/start', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6309,7 +6397,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/start",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1372"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1373"
     },
     {
       "calls": [
@@ -6319,12 +6407,13 @@
         "router.post"
       ],
       "capability": "stop_auto_live",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/stop', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6333,7 +6422,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/stop",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1378"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1379"
     },
     {
       "calls": [
@@ -6343,12 +6432,13 @@
         "router.post"
       ],
       "capability": "pause_auto_live",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/pause', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6357,7 +6447,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/pause",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1384"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1385"
     },
     {
       "calls": [
@@ -6367,12 +6457,13 @@
         "router.post"
       ],
       "capability": "resume_auto_live",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/resume', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6381,7 +6472,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/resume",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1390"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1391"
     },
     {
       "calls": [
@@ -6391,12 +6482,13 @@
         "router.post"
       ],
       "capability": "emergency_stop_auto_live",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/emergency-stop', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6405,7 +6497,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/emergency-stop",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1396"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1397"
     },
     {
       "calls": [
@@ -6415,12 +6507,13 @@
         "router.post"
       ],
       "capability": "clear_auto_live_emergency_stop",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/clear-emergency-stop', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6429,7 +6522,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/clear-emergency-stop",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:1402"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1403"
     },
     {
       "calls": [
@@ -6443,12 +6536,13 @@
         "router.get"
       ],
       "capability": "get_auto_live_settings",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/settings', response_model=BullpenAutoLiveSettings)"
       ],
       "owner_source": [
@@ -6457,7 +6551,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/settings",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:490"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:491"
     },
     {
       "calls": [
@@ -6469,12 +6563,13 @@
         "scan_console_profile_markets"
       ],
       "capability": "get_stage1_scan_preview",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/stage1-scan-preview')"
       ],
       "owner_source": [
@@ -6483,7 +6578,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/stage1-scan-preview",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:508"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:509"
     },
     {
       "calls": [
@@ -6509,12 +6604,13 @@
         "settings.model_copy"
       ],
       "capability": "update_auto_live_settings",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "PUT",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.put('/settings', response_model=BullpenAutoLiveSettings)"
       ],
       "owner_source": [
@@ -6523,7 +6619,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/settings",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:586"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:587"
     },
     {
       "calls": [
@@ -6533,12 +6629,13 @@
         "router.post"
       ],
       "capability": "reset_auto_live_settings",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/settings/reset', response_model=BullpenAutoLiveSettings)"
       ],
       "owner_source": [
@@ -6547,7 +6644,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/settings/reset",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:631"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:632"
     },
     {
       "calls": [
@@ -6559,12 +6656,13 @@
         "router.get"
       ],
       "capability": "get_auto_live_state",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(security)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/state', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6573,7 +6671,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/state",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:644"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:645"
     },
     {
       "calls": [
@@ -6584,12 +6682,13 @@
         "router.post"
       ],
       "capability": "record_hourly_rebalance_result",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/hourly-rebalance/result', response_model=BullpenAutoLiveState)"
       ],
       "owner_source": [
@@ -6598,7 +6697,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/hourly-rebalance/result",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:663"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:664"
     },
     {
       "calls": [
@@ -6614,12 +6713,13 @@
         "time.perf_counter"
       ],
       "capability": "get_auto_live_persisted_status",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(security)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/status', response_model=BullpenAutoLivePersistedStatus)"
       ],
       "owner_source": [
@@ -6628,7 +6728,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/status",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:677"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:678"
     },
     {
       "calls": [
@@ -6640,12 +6740,13 @@
         "router.get"
       ],
       "capability": "get_auto_live_summary",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/summary', response_model=BullpenAutoLiveSummary)"
       ],
       "owner_source": [
@@ -6654,7 +6755,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/summary",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:784"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:785"
     },
     {
       "calls": [
@@ -6683,12 +6784,13 @@
         "time.perf_counter"
       ],
       "capability": "get_auto_live_dashboard_summary",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(security)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/summary/dashboard', response_model=BullpenAutoLiveSummary)"
       ],
       "owner_source": [
@@ -6697,7 +6799,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/summary/dashboard",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:793"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:794"
     },
     {
       "calls": [
@@ -6711,12 +6813,13 @@
         "time.perf_counter"
       ],
       "capability": "list_auto_live_history",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(security)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/history', response_model=BullpenAutoLiveHistoryPage)"
       ],
       "owner_source": [
@@ -6725,7 +6828,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/history",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:917"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:918"
     },
     {
       "calls": [
@@ -6745,12 +6848,13 @@
         "settings.model_copy"
       ],
       "capability": "update_event_trends_scan_count",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "PUT",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(security)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.put('/history/event-trends/scan-count', response_model=BullpenAutoLiveSettings)"
       ],
       "owner_source": [
@@ -6759,7 +6863,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/history/event-trends/scan-count",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:957"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:958"
     },
     {
       "calls": [
@@ -6773,12 +6877,13 @@
         "router.get"
       ],
       "capability": "list_auto_live_history_event_trends",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "polymarket_auto_live",
       "observed_guards": [
         "Depends(security)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/history/event-trends', response_model=BullpenAutoLiveEventTrendsResponse)"
       ],
       "owner_source": [
@@ -6787,7 +6892,7 @@
       "registration": "mounted",
       "route": "/polymarket/auto-live/history/event-trends",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/router.py:984"
+      "source": "backend/app/domains/polymarket_auto_live/router.py:985"
     },
     {
       "calls": [
@@ -6885,7 +6990,7 @@
         "zipfile.ZipFile"
       ],
       "capability": "build_stage_one_excel",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -6905,7 +7010,7 @@
         "os.unlink"
       ],
       "capability": "remove_export",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -6933,7 +7038,7 @@
         "zlib.compress"
       ],
       "capability": "encode_scan_export_data",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -6959,7 +7064,7 @@
         "zlib.decompress"
       ],
       "capability": "decode_scan_export_data",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -6985,7 +7090,7 @@
         "sorted"
       ],
       "capability": "_export_headers",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -7036,7 +7141,7 @@
         "type"
       ],
       "capability": "enrich_export_rows",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "polymarket_auto_live",
@@ -7072,6 +7177,7 @@
         "record_to_state",
         "repo.get_settings_record",
         "repo.save_state",
+        "require_operator_user_id_sync",
         "select",
         "select(PolymarketAutoLiveStateRecord).where",
         "select(PolymarketAutoLiveStateRecord).where(and_(PolymarketAutoLiveStateRecord.running.is_(True), PolymarketAutoLiveStateRecord.paused.is_(False), PolymarketAutoLiveStateRecord.next_run_at.is_not(None), PolymarketAutoLiveStateRecord.next_run_at <= now)).with_for_update",
@@ -7081,12 +7187,12 @@
         "session.execute(select(PolymarketAutoLiveStateRecord).where(and_(PolymarketAutoLiveStateRecord.running.is_(True), PolymarketAutoLiveStateRecord.paused.is_(False), PolymarketAutoLiveStateRecord.next_run_at.is_not(None), PolymarketAutoLiveStateRecord.next_run_at <= now)).with_for_update(skip_locked=True)).scalars().all"
       ],
       "capability": "enqueue_due_polymarket_auto_live_runs",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "not established in local function; inspect callers/repository"
@@ -7094,7 +7200,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs', queue='beat')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:1897"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:1903"
     },
     {
       "calls": [
@@ -7119,7 +7225,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents', queue='beat')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:1975"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:1985"
     },
     {
       "calls": [
@@ -7154,7 +7260,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.tasks.watchdog_requeue_stale_auto_live_order_intents', queue='beat')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:1999"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2009"
     },
     {
       "calls": [
@@ -7195,7 +7301,7 @@
       "registration": "celery.task(bind=True, max_retries=0, soft_time_limit=60 * 30, time_limit=60 * 30 + 60, name='app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent', queue='ai')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2037"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2047"
     },
     {
       "calls": [
@@ -7242,7 +7348,7 @@
       "registration": "celery.task(bind=True, max_retries=0, soft_time_limit=60 * 30, time_limit=60 * 30 + 60, name='app.domains.polymarket_auto_live.tasks.reconcile_auto_live_order_intent', queue='ai')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2147"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2157"
     },
     {
       "calls": [
@@ -7263,7 +7369,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders', queue='beat')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2253"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2263"
     },
     {
       "calls": [
@@ -7304,7 +7410,7 @@
       "registration": "celery.task(bind=True, max_retries=0, soft_time_limit=60 * 30, time_limit=60 * 30 + 60, name='app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent', queue='ai')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2268"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2278"
     },
     {
       "calls": [
@@ -7328,7 +7434,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders', queue='beat')",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2366"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:2376"
     },
     {
       "calls": [
@@ -7352,6 +7458,7 @@
         "list",
         "logger.error",
         "metadata.get",
+        "require_operator_user_id_sync",
         "select",
         "select(PolymarketAutoLiveRunRecord.id).where",
         "select(PolymarketAutoLiveRunRecord.id).where(and_(PolymarketAutoLiveRunRecord.user_id == user_id, PolymarketAutoLiveRunRecord.status.in_(WORKFLOW_TRIGGER_BLOCKING_RUN_STATUSES))).limit",
@@ -7362,12 +7469,12 @@
         "tuple"
       ],
       "capability": "dispatch_bullpen_workflow_trigger_batch",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "user_id (input; authority unverified)"
@@ -7375,7 +7482,7 @@
       "registration": "celery.task(bind=True, name='app.domains.polymarket_auto_live.tasks.dispatch_bullpen_workflow_trigger_batch', max_retries=WORKFLOW_TRIGGER_MAX_RETRIES)",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:626"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:630"
     },
     {
       "calls": [
@@ -7396,7 +7503,7 @@
       "registration": "celery.task(name='app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace', queue=AUTO_LIVE_QUEUE)",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:804"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:809"
     },
     {
       "calls": [
@@ -7424,17 +7531,18 @@
         "logger.warning",
         "mark_auto_live_run_task_started_sync",
         "release_auto_live_run_execution_lease_sync",
+        "require_operator_user_id_sync",
         "self.retry",
         "str",
         "uuid4"
       ],
       "capability": "execute_polymarket_auto_live_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "polymarket_auto_live",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "user_id (input; authority unverified)"
@@ -7442,7 +7550,7 @@
       "registration": "celery.task(bind=True, max_retries=480, default_retry_delay=30, soft_time_limit=60 * 60 * 2, time_limit=60 * 60 * 2 + 60, name='app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run', queue=AUTO_LIVE_QUEUE)",
       "route": "",
       "side_effects": "broker orders; wallet/runtime; DB; queues; exports",
-      "source": "backend/app/domains/polymarket_auto_live/tasks.py:992"
+      "source": "backend/app/domains/polymarket_auto_live/tasks.py:997"
     },
     {
       "calls": [
@@ -7587,6 +7695,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/redeem', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7595,7 +7704,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/redeem",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:100"
+      "source": "backend/app/domains/polymarket_direct/router.py:101"
     },
     {
       "calls": [
@@ -7612,6 +7721,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/emergency-stop', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7620,7 +7730,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/emergency-stop",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:112"
+      "source": "backend/app/domains/polymarket_direct/router.py:113"
     },
     {
       "calls": [
@@ -7637,6 +7747,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/reset-emergency-stop', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7645,7 +7756,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/reset-emergency-stop",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:121"
+      "source": "backend/app/domains/polymarket_direct/router.py:122"
     },
     {
       "calls": [
@@ -7664,6 +7775,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.patch('/live/limits', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7672,7 +7784,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/limits",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:130"
+      "source": "backend/app/domains/polymarket_direct/router.py:131"
     },
     {
       "calls": [
@@ -7691,6 +7803,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/trades/{trade_id}/confirm', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7699,7 +7812,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/trades/{trade_id}/confirm",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:143"
+      "source": "backend/app/domains/polymarket_direct/router.py:144"
     },
     {
       "calls": [
@@ -7718,6 +7831,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/trades/{trade_id}/reject', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7726,7 +7840,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/trades/{trade_id}/reject",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:155"
+      "source": "backend/app/domains/polymarket_direct/router.py:156"
     },
     {
       "calls": [
@@ -7743,6 +7857,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/trades/reject-all', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7751,7 +7866,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/trades/reject-all",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:167"
+      "source": "backend/app/domains/polymarket_direct/router.py:168"
     },
     {
       "calls": [
@@ -7770,6 +7885,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/tracked-accounts', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7778,7 +7894,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/tracked-accounts",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:174"
+      "source": "backend/app/domains/polymarket_direct/router.py:175"
     },
     {
       "calls": [
@@ -7797,6 +7913,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.patch('/tracked-accounts/{account_id}', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7805,7 +7922,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/tracked-accounts/{account_id}",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:187"
+      "source": "backend/app/domains/polymarket_direct/router.py:188"
     },
     {
       "calls": [
@@ -7824,6 +7941,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.delete('/tracked-accounts/{account_id}', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7832,7 +7950,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/tracked-accounts/{account_id}",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:201"
+      "source": "backend/app/domains/polymarket_direct/router.py:202"
     },
     {
       "calls": [
@@ -7850,6 +7968,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/discovery/debug', response_model=PolymarketDiscoveryDebugReport)"
       ],
       "owner_source": [
@@ -7858,7 +7977,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/discovery/debug",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:213"
+      "source": "backend/app/domains/polymarket_direct/router.py:214"
     },
     {
       "calls": [
@@ -7874,6 +7993,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/state', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7882,7 +8002,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/state",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:32"
+      "source": "backend/app/domains/polymarket_direct/router.py:33"
     },
     {
       "calls": [
@@ -7901,6 +8021,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/start', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7909,7 +8030,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/start",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:38"
+      "source": "backend/app/domains/polymarket_direct/router.py:39"
     },
     {
       "calls": [
@@ -7926,6 +8047,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/stop', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7934,7 +8056,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/stop",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:48"
+      "source": "backend/app/domains/polymarket_direct/router.py:49"
     },
     {
       "calls": [
@@ -7951,6 +8073,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/pause', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7959,7 +8082,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/pause",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:55"
+      "source": "backend/app/domains/polymarket_direct/router.py:56"
     },
     {
       "calls": [
@@ -7976,6 +8099,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/resume', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -7984,7 +8108,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/resume",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:62"
+      "source": "backend/app/domains/polymarket_direct/router.py:63"
     },
     {
       "calls": [
@@ -8003,6 +8127,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/unlock', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -8011,7 +8136,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/unlock",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:69"
+      "source": "backend/app/domains/polymarket_direct/router.py:70"
     },
     {
       "calls": [
@@ -8028,6 +8153,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/lock', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -8036,7 +8162,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/lock",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:79"
+      "source": "backend/app/domains/polymarket_direct/router.py:80"
     },
     {
       "calls": [
@@ -8053,6 +8179,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/doctor', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -8061,7 +8188,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/doctor",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:86"
+      "source": "backend/app/domains/polymarket_direct/router.py:87"
     },
     {
       "calls": [
@@ -8078,6 +8205,7 @@
       "module": "polymarket_direct",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/live/balance/refresh', response_model=PolymarketBotState)"
       ],
       "owner_source": [
@@ -8086,7 +8214,7 @@
       "registration": "mounted",
       "route": "/polymarket-direct/live/balance/refresh",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/router.py:93"
+      "source": "backend/app/domains/polymarket_direct/router.py:94"
     },
     {
       "calls": [
@@ -8107,7 +8235,7 @@
       "registration": "",
       "route": "",
       "side_effects": "broker orders; singleton wallet/runtime; DB",
-      "source": "backend/app/domains/polymarket_direct/service.py:83"
+      "source": "backend/app/domains/polymarket_direct/service.py:85"
     },
     {
       "calls": [
@@ -9204,7 +9332,7 @@
       "registration": "mounted",
       "route": "/api/sports-rankings/resolve",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:106"
+      "source": "backend/app/domains/sports_rankings/router.py:107"
     },
     {
       "calls": [
@@ -9236,10 +9364,11 @@
       "registration": "mounted",
       "route": "/api/sports-rankings/event-comparisons",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:120"
+      "source": "backend/app/domains/sports_rankings/router.py:121"
     },
     {
       "calls": [
+        "Depends",
         "HTTPException",
         "Redis.from_url",
         "asyncio.to_thread",
@@ -9254,6 +9383,7 @@
       "method": "POST",
       "module": "sports_rankings",
       "observed_guards": [
+        "Depends(require_admin)",
         "[Depends(get_current_user)]",
         "router.post('/refresh', status_code=202)"
       ],
@@ -9263,10 +9393,11 @@
       "registration": "mounted",
       "route": "/api/sports-rankings/refresh",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:142"
+      "source": "backend/app/domains/sports_rankings/router.py:143"
     },
     {
       "calls": [
+        "Depends",
         "HTTPException",
         "Redis.from_url",
         "asyncio.to_thread",
@@ -9282,6 +9413,7 @@
       "method": "POST",
       "module": "sports_rankings",
       "observed_guards": [
+        "Depends(require_admin)",
         "[Depends(get_current_user)]",
         "router.post('/cricket/reconcile', status_code=202)"
       ],
@@ -9291,7 +9423,7 @@
       "registration": "mounted",
       "route": "/api/sports-rankings/cricket/reconcile",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:163"
+      "source": "backend/app/domains/sports_rankings/router.py:164"
     },
     {
       "calls": [
@@ -9324,10 +9456,11 @@
       "registration": "mounted",
       "route": "/api/sports-rankings",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:52"
+      "source": "backend/app/domains/sports_rankings/router.py:53"
     },
     {
       "calls": [
+        "Depends",
         "classify",
         "router.post"
       ],
@@ -9337,6 +9470,7 @@
       "method": "POST",
       "module": "sports_rankings",
       "observed_guards": [
+        "Depends(require_admin)",
         "[Depends(get_current_user)]",
         "router.post('/classify')"
       ],
@@ -9346,7 +9480,7 @@
       "registration": "mounted",
       "route": "/api/sports-rankings/classify",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:82"
+      "source": "backend/app/domains/sports_rankings/router.py:83"
     },
     {
       "calls": [
@@ -9376,7 +9510,7 @@
       "registration": "mounted",
       "route": "/api/sports-rankings/competitions/{competition_id}",
       "side_effects": "shared catalogue DB; provider refresh/AI on mutations",
-      "source": "backend/app/domains/sports_rankings/router.py:87"
+      "source": "backend/app/domains/sports_rankings/router.py:88"
     },
     {
       "calls": [
@@ -9556,12 +9690,13 @@
         "router.get"
       ],
       "capability": "universal_scan_auto_run_status",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/universal-scan/auto-run', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9570,7 +9705,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:116"
+      "source": "backend/app/domains/trading_bots/router.py:117"
     },
     {
       "calls": [
@@ -9579,12 +9714,13 @@
         "router.post"
       ],
       "capability": "update_universal_scan_auto_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/settings', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9593,7 +9729,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/settings",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:121"
+      "source": "backend/app/domains/trading_bots/router.py:122"
     },
     {
       "calls": [
@@ -9602,12 +9738,13 @@
         "router.post"
       ],
       "capability": "enable_universal_scan_auto_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/enable', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9616,7 +9753,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/enable",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:134"
+      "source": "backend/app/domains/trading_bots/router.py:135"
     },
     {
       "calls": [
@@ -9625,12 +9762,13 @@
         "router.post"
       ],
       "capability": "disable_universal_scan_auto_run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/disable', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9639,7 +9777,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/disable",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:148"
+      "source": "backend/app/domains/trading_bots/router.py:149"
     },
     {
       "calls": [
@@ -9650,12 +9788,13 @@
         "str"
       ],
       "capability": "run_universal_scan_now",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/run-now', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9664,7 +9803,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/run-now",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:153"
+      "source": "backend/app/domains/trading_bots/router.py:154"
     },
     {
       "calls": [
@@ -9685,7 +9824,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:171"
+      "source": "backend/app/domains/trading_bots/router.py:172"
     },
     {
       "calls": [
@@ -9694,12 +9833,13 @@
         "router.post"
       ],
       "capability": "pause_universal_scan",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/pause', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9708,7 +9848,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/pause",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:180"
+      "source": "backend/app/domains/trading_bots/router.py:181"
     },
     {
       "calls": [
@@ -9717,12 +9857,13 @@
         "router.post"
       ],
       "capability": "resume_universal_scan",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/resume', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9731,7 +9872,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/resume",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:185"
+      "source": "backend/app/domains/trading_bots/router.py:186"
     },
     {
       "calls": [
@@ -9740,12 +9881,13 @@
         "router.post"
       ],
       "capability": "kill_universal_scan",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "POST",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.post('/universal-scan/auto-run/kill', response_model=UniversalScanAutoRunStatus)"
       ],
       "owner_source": [
@@ -9754,7 +9896,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/auto-run/kill",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:190"
+      "source": "backend/app/domains/trading_bots/router.py:191"
     },
     {
       "calls": [
@@ -9763,12 +9905,13 @@
         "router.get"
       ],
       "capability": "trading_bots_summary",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/summary', response_model=TradingBotsSummaryResponse)"
       ],
       "owner_source": [
@@ -9777,7 +9920,7 @@
       "registration": "mounted",
       "route": "/trading-bots/summary",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:35"
+      "source": "backend/app/domains/trading_bots/router.py:36"
     },
     {
       "calls": [
@@ -9786,12 +9929,13 @@
         "router.get"
       ],
       "capability": "trading_bots_overview",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/overview', response_model=TradingBotsOverviewResponse)"
       ],
       "owner_source": [
@@ -9800,7 +9944,7 @@
       "registration": "mounted",
       "route": "/trading-bots/overview",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:40"
+      "source": "backend/app/domains/trading_bots/router.py:41"
     },
     {
       "calls": [
@@ -9812,7 +9956,7 @@
         "status_for_user"
       ],
       "capability": "_universal_export_reference",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "trading_bots",
@@ -9825,7 +9969,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:78"
+      "source": "backend/app/domains/trading_bots/router.py:79"
     },
     {
       "calls": [
@@ -9837,7 +9981,7 @@
         "str"
       ],
       "capability": "universal_scan_export_reference",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "trading_bots",
@@ -9850,7 +9994,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:91"
+      "source": "backend/app/domains/trading_bots/router.py:92"
     },
     {
       "calls": [
@@ -9862,12 +10006,13 @@
         "str"
       ],
       "capability": "universal_scan_export_reference",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "trading_bots",
       "observed_guards": [
         "Depends(get_current_user)",
+        "[Depends(require_singleton_bullpen_runtime_access)]",
         "router.get('/universal-scan/export-reference')"
       ],
       "owner_source": [
@@ -9876,7 +10021,7 @@
       "registration": "mounted",
       "route": "/trading-bots/universal-scan/export-reference",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/router.py:91"
+      "source": "backend/app/domains/trading_bots/router.py:92"
     },
     {
       "calls": [
@@ -9893,6 +10038,7 @@
         "mark_started",
         "progress_session.commit",
         "read_state",
+        "require_operator_user_id_sync",
         "save_state",
         "scan_candidate_markets",
         "session.commit",
@@ -9906,12 +10052,12 @@
         "writer.set_pages"
       ],
       "capability": "execute_universal_polymarket_scan",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "trading_bots",
       "observed_guards": [
-        "none found locally; not proof of public access"
+        "require_operator_user_id_sync"
       ],
       "owner_source": [
         "user_id (input; authority unverified)"
@@ -9919,7 +10065,7 @@
       "registration": "celery.task(name='app.domains.trading_bots.tasks.execute_universal_polymarket_scan', bind=True, queue='ai', soft_time_limit=2700, time_limit=3000)",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/tasks.py:239"
+      "source": "backend/app/domains/trading_bots/tasks.py:244"
     },
     {
       "calls": [
@@ -9935,7 +10081,7 @@
         "utc_now"
       ],
       "capability": "enqueue_due_universal_polymarket_scans",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "trading_bots",
@@ -9948,7 +10094,7 @@
       "registration": "celery.task(name='app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans')",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/tasks.py:330"
+      "source": "backend/app/domains/trading_bots/tasks.py:336"
     },
     {
       "calls": [
@@ -9964,7 +10110,7 @@
         "session.execute(select(UniversalScanStateRecord.user_id)).scalars().all"
       ],
       "capability": "reconcile_completed_universal_scan_workflow_triggers",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "worker",
       "method": "",
       "module": "trading_bots",
@@ -9977,7 +10123,7 @@
       "registration": "celery.task(name='app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers', queue='beat')",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/trading_bots/tasks.py:349"
+      "source": "backend/app/domains/trading_bots/tasks.py:355"
     },
     {
       "calls": [
@@ -9987,7 +10133,7 @@
         "os.environ.get('BULLPEN_STAGE_ONE_EXPORT_DIRECTORY', '').strip"
       ],
       "capability": "export_directory",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "trading_bots",
@@ -10014,7 +10160,7 @@
         "tuple"
       ],
       "capability": "_readable_export_directories",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "trading_bots",
@@ -10036,7 +10182,7 @@
         "metadata.get"
       ],
       "capability": "validate_export",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "trading_bots",
@@ -10073,7 +10219,7 @@
         "set"
       ],
       "capability": "latest_completed_universal_export",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "export",
       "method": "",
       "module": "trading_bots",
@@ -12082,12 +12228,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/current-odds",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
       "observed_guards": [
-        "none found locally; inspect frontend/proxy.ts and layouts"
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12100,12 +12246,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/health",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12118,12 +12264,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/market-link",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "none found locally; inspect frontend/proxy.ts and layouts"
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12136,12 +12282,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/market-urls",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
       "observed_guards": [
-        "none found locally; inspect frontend/proxy.ts and layouts"
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12154,12 +12300,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/positions",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12172,12 +12318,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12190,12 +12336,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12208,12 +12354,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/sports-event-comparisons",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12226,12 +12372,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/sports-event-metadata",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
       "observed_guards": [
-        "none found locally; inspect frontend/proxy.ts and layouts"
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12244,12 +12390,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/stage-one-snapshot",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12262,12 +12408,12 @@
     {
       "calls": [],
       "capability": "/api/bullpen-ai/stage-one.xlsx",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12298,12 +12444,12 @@
     {
       "calls": [],
       "capability": "/api/universal-polymarket-scan/auto-run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "GET",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -12316,12 +12462,12 @@
     {
       "calls": [],
       "capability": "/api/universal-polymarket-scan/auto-run",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "frontend",
       "method": "POST",
       "module": "frontend",
       "observed_guards": [
-        "createBackendSessionContext("
+        "requireBullpenOperator("
       ],
       "owner_source": [
         "Auth.js session/backend token where enforced; inspect server helper/proxy"
@@ -13620,7 +13766,7 @@
     "backend/app/domains/ai_providers/factory.py": "aeec686a88c1cbb88af7e51e81f36d554dd8ffb2f7d6444ee08a8fa55902299b",
     "backend/app/domains/ai_providers/gemini.py": "05aa097dadfb8dcdfcfe38a727b2ca5867cd12a34bc28a912274e327ff45ad19",
     "backend/app/domains/ai_providers/openai.py": "18747a314c2947a2003beebf59e306c7947e95e1e3df8a19b8e6c5b1876bd072",
-    "backend/app/domains/ai_providers/router.py": "1eb28160abbb74e81b15983d48353c7c65bf95d904982ea9ffd1abbf4ccf9f8b",
+    "backend/app/domains/ai_providers/router.py": "47eea8dcc5fc241269aa2ec3857528dd8eb9d097ae247d6911fe890084a9d40d",
     "backend/app/domains/ai_providers/tools/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/ai_providers/tools/web_search.py": "52484bfe88c6629cb3463a978d11d9159f5ef1d385f55dbcd437f35a0a3448c7",
     "backend/app/domains/ai_providers/web_metadata.py": "9f7b547d471c0df964ada372dec4da6e6c01c34d152f4bffc58f0d9f5fd36ba0",
@@ -13634,6 +13780,7 @@
     "backend/app/domains/api_usage/schemas.py": "e1ba61871de81c3b3fab7220aec86fa8190a85369d1e3494031ba381a3bed148",
     "backend/app/domains/api_usage/usage_metadata.py": "ea4f6912cc8d28c75fd1245f8be6a505179382f9bcad284907d1a33f6a58cd91",
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/domains/auth/admin_roles.py": "9e15dec15fb801e5f3c775a00d02f7be495e1d9d65b9de3e20b9a3f056b69111",
     "backend/app/domains/auth/dependencies.py": "c201c2f025ab982413940cc5292c3bd4dcc502e7afa2b3222466b2da2dd79857",
     "backend/app/domains/auth/google_signin.py": "aef4c0e28d498070f14f85ab6611ae45f7374aa3a96dfc4e060b8beaffb60d84",
     "backend/app/domains/auth/models.py": "279ca51fd8a2c750051407bd1721c3bf2a0e83ccb1e9b33671b5bb8551e87a26",
@@ -13650,10 +13797,10 @@
     "backend/app/domains/bullpen008/models.py": "f448f23af451b79d5bb480c29206c46a9d8cfe3851f39ba3526b2180cc41ca9e",
     "backend/app/domains/bullpen008/planning.py": "cb87b85112b31d10b3709ba45897957c5b8b8b0e9b4f72cdb4808c84c229b3eb",
     "backend/app/domains/bullpen008/risk_controls.py": "a95dc4ccc5dbf48c6fafb1eebc25ebfdb22ce51d0324b1a77cf6fd48b30e7601",
-    "backend/app/domains/bullpen008/router.py": "b6a4fc4cd23cb184d235951bd5bcefefc4d78fbf6263fdd62b38a18501ad87e0",
+    "backend/app/domains/bullpen008/router.py": "f417a52323132f3a7ba22f470eb9533a30a2089afe162102e7afce997e0c1aab",
     "backend/app/domains/bullpen008/schemas.py": "61bc1782851a6d60cb6679354bef31656ad88dd158da18a1dd7999a86ce6830c",
     "backend/app/domains/bullpen008/service.py": "841319941f820fbad0fb1a5af6a4484ef01b4168950136284a94663d910f00bf",
-    "backend/app/domains/bullpen008/tasks.py": "b6d76b92e4430b1836666e954edda629752d872abff262c847807185a2da2202",
+    "backend/app/domains/bullpen008/tasks.py": "57f24a44e4487a35bd78ccdec0a3f9787174832c4c3543af199ead6a8326a882",
     "backend/app/domains/bullpen_run_audit/__init__.py": "322493073fbd2aca2e77813db644d051475469202df4b780d071b96ad4444cd3",
     "backend/app/domains/bullpen_run_audit/capture.py": "e2694e55546f0f173f6b2b42ad13481c69359234b574fc910b4faad875f29421",
     "backend/app/domains/bullpen_run_audit/constants.py": "da70903354dac60c7cb2b7d0e7dc852a6ce87128237a77e164ae73d17fccc413",
@@ -13661,7 +13808,7 @@
     "backend/app/domains/bullpen_run_audit/prompt_builder.py": "eaed7655c8d90a6291be6b3238e7e0ff6261ce24b3eb37d8fec25bf4afc451d8",
     "backend/app/domains/bullpen_run_audit/provenance.py": "59aab07f762defdfaaffa675033495f8aabcb7efe0ae9e3d455fd3a981812925",
     "backend/app/domains/bullpen_run_audit/repository.py": "7ca2b2d0af6eca8a58ed555d3b07f0314b155e9f8eec6f352ed4d968d70bccf1",
-    "backend/app/domains/bullpen_run_audit/router.py": "ac54a15b3ea73a2c3cb6c6da543599608460e62edebdcc87f6b012f6cc13b877",
+    "backend/app/domains/bullpen_run_audit/router.py": "ddeeebf067137da6b52e20099ce1d41c91f7845c134921bcf4d69b05aeb03a3b",
     "backend/app/domains/bullpen_run_audit/sanitizer.py": "92b5425b0c3a3b25f25f66a06b226735607b167e7fced61c409717ee7adddd21",
     "backend/app/domains/bullpen_run_audit/schemas.py": "449932dc985a7567ee408ca20522d84e7b81a0ef43463490c8b5dc59d29d5a96",
     "backend/app/domains/bullpen_run_audit/service.py": "b1fe6fc4596ee17eb1b4b9488525246f65c168669459c936e4548333ee5de9f8",
@@ -13670,16 +13817,16 @@
     "backend/app/domains/bullpen_trade_analysis/analytics.py": "2bee17f86536a24988aef47fdd51623222cfd71cec08affeadc1322b6b280082",
     "backend/app/domains/bullpen_trade_analysis/helpers.py": "113ee754e3baec33d1dce18a2c2fda81b0c23ebcf9ae2e3208013f0b199cd34b",
     "backend/app/domains/bullpen_trade_analysis/models.py": "990a89cece8c86fd9ed15af9dad84872e1776a35fff7a583eb28dd02b57f40e4",
-    "backend/app/domains/bullpen_trade_analysis/router.py": "4986809975f149464ccb8d20c72f656e2932efde2b48ce90b521bdb564d33393",
+    "backend/app/domains/bullpen_trade_analysis/router.py": "393f8fc55d99e074585a49223f51e94c7a3881e3f7ddb2dfbd5cbc873496353b",
     "backend/app/domains/bullpen_trade_analysis/schemas.py": "ae4fe41c30cd6dc3f72dd51d7e81f7e9bfc65502da947e268add25dbd1297493",
-    "backend/app/domains/bullpen_trade_analysis/service.py": "2157a5ae17aa92fb2110b621174cd3017b2a3787b1f5946983d6a46560186f9f",
-    "backend/app/domains/bullpen_trade_analysis/tasks.py": "e53846a747447d2ba9d67d4d754caf362d9c940aa9d03d209fd8b16461754a7c",
+    "backend/app/domains/bullpen_trade_analysis/service.py": "f20885a588a104053e49e0bf67b1ff5208b5e2cf1b690be509f02a6c6188f5c9",
+    "backend/app/domains/bullpen_trade_analysis/tasks.py": "76353c818e2c152454a075632c78fd2733359f8e9cf42b6bc5e0a491f1ba3751",
     "backend/app/domains/cost_drivers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/cost_drivers/cache.py": "d990dd39dd09bda03287aa2b5fee85c36f2fe676359cec66ecce5d265b91230a",
     "backend/app/domains/cost_drivers/estimators.py": "075281c218673419cac2c1bb6762ea3cd04c2e5a44a297252aa72ef7f4ba0738",
     "backend/app/domains/cost_drivers/models.py": "ea1628afeb9cb078c29824d3f0efac4d3f826b9ae07b9046f3b15aaa3ad4d4da",
     "backend/app/domains/cost_drivers/recommendations.py": "b9191815b92a545f6c1841a008e84943d348646521fa98f2cee0bf186c6770d7",
-    "backend/app/domains/cost_drivers/router.py": "38d642586b16dddfd1d395a0c0ae74150f33cb3b55a97d18e96427a8b5962e37",
+    "backend/app/domains/cost_drivers/router.py": "2a26b42e2b6fc02b867b1e020145050bd201ebf729944f89133350a33303a095",
     "backend/app/domains/cost_drivers/schemas.py": "973afe7dc204d6dd011ffd3e97b98a7fe6d9e47652684f6d330d271531f86e84",
     "backend/app/domains/cost_drivers/service.py": "7a11904480fe76a087ac6e7db946bb7f0f983a00584fd95ed423065aa11081c1",
     "backend/app/domains/cost_drivers/transfer.py": "66e90ae518e4d64ada01ea0505d820cb4a8ea98839e7d7d48bc92cc35bd0e474",
@@ -13687,7 +13834,7 @@
     "backend/app/domains/dashboard/models.py": "94888385aad300fd1ea0473527c3e6a0d94565a85e33294c020306e54b7b36fa",
     "backend/app/domains/dashboard/router.py": "d17469fc9ca291faf1d8db2aaa48b3d5f8cad450ca767b9a73149b272d010e9c",
     "backend/app/domains/dashboard/schemas.py": "8eed84716c178d2fdb0d567fa5673149bdc54e6dcfb3a23b57d15aff9a5d0f47",
-    "backend/app/domains/dashboard/service.py": "02bd0169dc9abe17665c0c79506c8c6553d4171c054f8bab575c90b350753035",
+    "backend/app/domains/dashboard/service.py": "b38aae831a7f6f16c7e6bc8b48067f0d7ad7da35bd6ceb1a8f53f564f6aad990",
     "backend/app/domains/dashboard/tasks.py": "5a91b4dffe8a30c02c62e4969ae71002da0c585eb5648c8c8a1c61a5ecd8c298",
     "backend/app/domains/fx_rates/__init__.py": "3f50e1de2cf5a33d4ec3e7f1f2124cde14c699dd62965ad3c75ebfbcad836eee",
     "backend/app/domains/fx_rates/models.py": "12b83795d5f44d5d392600344f5a048b88236e8a50d4223b6d429113f4594d73",
@@ -13746,7 +13893,7 @@
     "backend/app/domains/mails/service.py": "3c89dc58be89f1d305ccffc64786d9da0ae917b10706ac57d7c1b62b75507202",
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
-    "backend/app/domains/polymarket/access.py": "135a2b9ce70ecd55f5c847b355eb721f52c7070d1511cf73e99e39dafe455743",
+    "backend/app/domains/polymarket/access.py": "c803e5445fbde37d1c499fc6c8b52ee45214a51df5978fcf5f2502b1d8e87ae6",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
     "backend/app/domains/polymarket/bullpen.py": "ca03ec6964cad79d2f098b0adac2b173f6f28e03620cc873245888ddaf382052",
     "backend/app/domains/polymarket/bullpen_llm_execution.py": "ef2d47412176ea329318d6802c87d3b62938d22785ffeaebc54ad6ad55a48aa7",
@@ -13760,11 +13907,11 @@
     "backend/app/domains/polymarket/position_classification.py": "41aee2fa457f634f9c25a34ebe8b6324633b976f5b3be327bc86b23420a00f4a",
     "backend/app/domains/polymarket/providers.py": "260adb4f7c338e603c293837ec0127e7ec5d6f9f1843b4da790c8eb654f4f57e",
     "backend/app/domains/polymarket/redeem_coordinator.py": "3845c6755a1aa7114522fde60e9b05b35a031207db0430821fd1168c6a5c03d7",
-    "backend/app/domains/polymarket/router.py": "30b3dd08624d127085e25356489943b926b13ddebae76fa1fc25cd39171ce602",
+    "backend/app/domains/polymarket/router.py": "737e7f0bc90f446fca7dd573c0ee79169810b9922cdb2b453a9a1d53f900d888",
     "backend/app/domains/polymarket/runtime_broker.py": "2403286238b3fa6818787dc4bff629607a1fb2b9bd3912d1b152d3cd0262d92e",
     "backend/app/domains/polymarket/runtime_positions_refresh.py": "d761c920d1a1f3bfeee7ce4e48bcb5d81fd6df92dd8f56123d3e895006d1d1d5",
     "backend/app/domains/polymarket/schemas.py": "2ea73231511170c7dc51dd1cbca23b37d0885cf6f20ac99c628c743ced0dc4c1",
-    "backend/app/domains/polymarket/service.py": "7e5f2aef2d27238e4029bf76c6f4a47b753aeef377b88a09c3245c8aa81980ce",
+    "backend/app/domains/polymarket/service.py": "7dd2cfdf6dd8c16cb7febf2de79ddd3abbacb66e61751575cf34b5f7e9f42e78",
     "backend/app/domains/polymarket/stage2_models.py": "aee499a5d4afc0dec7b56186b6cf2767626f2470f420f8ea8565a38b9118e9f1",
     "backend/app/domains/polymarket/storage.py": "66a3ca17174ce261c63929217f4c9badc7b3149249306698635da459f469719b",
     "backend/app/domains/polymarket_auto_live/__init__.py": "385b9eeb39f4fa0069c280845cef612cc632b7caf9c555ce4e2ea7220a10e64f",
@@ -13782,18 +13929,18 @@
     "backend/app/domains/polymarket_auto_live/export_jobs.py": "4741738a5cbf53d152a84666e554459a4bfd5a345a1e35832e77e639831c8981",
     "backend/app/domains/polymarket_auto_live/export_snapshot.py": "261f7a999105c7a5f8cf35591c9593648fa8f26cfa4009639ddf27ee970e14bc",
     "backend/app/domains/polymarket_auto_live/export_source.py": "f3f8509e7789b62803771aed7f665ae5ec2073aef6197c466cc1aa1c205413f3",
-    "backend/app/domains/polymarket_auto_live/export_tasks.py": "45527a83ec5856291067df1367b43df3e028bc934f4c3248b3e0c64215960f2e",
+    "backend/app/domains/polymarket_auto_live/export_tasks.py": "e5d1d7c958c79382803ba2b7b45f3b780cbb85cec0b8f81655504a4d6ba988fe",
     "backend/app/domains/polymarket_auto_live/history_projection.py": "41ee8ff23ec7c6af8dfe17232fb44698b05a3abd5838a2fa10047a88a882ca3a",
     "backend/app/domains/polymarket_auto_live/immediate_sell.py": "14cc93d9dc094336c6fac24d7fd671d9527e889caa28c2332f0064b3fb4c598a",
     "backend/app/domains/polymarket_auto_live/llm.py": "99dd543b1b956f763e970c79d7cb29a62ae19528ed1579bad1ca2389bff45ca5",
     "backend/app/domains/polymarket_auto_live/models.py": "04b707d078663df63f479ad6ee5ccc83d5099aebf4266b90af2de2d5b8e4bbab",
     "backend/app/domains/polymarket_auto_live/normalization.py": "6a5141c458f5558204709ed0b3dc618cba6ebaf94e98688d82bd231f115d59e1",
     "backend/app/domains/polymarket_auto_live/order_intent_lease.py": "e9905875997e2d90dcd23028ece68a659a897dac826a36567e6a746408d09c05",
-    "backend/app/domains/polymarket_auto_live/order_intent_service.py": "6495e075d61cf1900e0e6584862108abe624d5db88f617919dc47a6196f34510",
+    "backend/app/domains/polymarket_auto_live/order_intent_service.py": "16f114c76e734d12258fbf01142455ad4896fb91df9b7ea2bc66bd5b7bea8451",
     "backend/app/domains/polymarket_auto_live/order_intents.py": "88c0dab19a67b31f1928244ddf6ca6be846e8495c74c88907c1dd958ebacad38",
     "backend/app/domains/polymarket_auto_live/repository.py": "48defa250b18b0f18d01ad220dbe6bd0fae83f70a96f646c31a8edc197a2aba4",
     "backend/app/domains/polymarket_auto_live/returns_formula.py": "ea12f2739e15ed7f7260531e674aac02ca8a2b46f0259c56f7b49e875ee085ff",
-    "backend/app/domains/polymarket_auto_live/router.py": "bc93f00b393195f88dfc11d2987f04964214a9023d053a6e65449215d53f313b",
+    "backend/app/domains/polymarket_auto_live/router.py": "b3c892087f289d02740347ab8c4684b888742800b22c8b029dc99c96414b88aa",
     "backend/app/domains/polymarket_auto_live/rpc_retry.py": "19632e3a37341f75183086774a2e1ca3bbb814b4453218d315cac4550eb14d7c",
     "backend/app/domains/polymarket_auto_live/rules.py": "e8ca2577a0538786c1b2bcbff224165b46b81185e5177f33ea788a47b775e4c8",
     "backend/app/domains/polymarket_auto_live/run_handoff.py": "3a1948198f0d5afc63e305b42710eddde76deb51d3e87477332132518ca7c1c0",
@@ -13803,11 +13950,11 @@
     "backend/app/domains/polymarket_auto_live/scan_source_store.py": "a2a45e8a4f280f47e346cd01e390eaee9487c97ef021a8b02272e4ef7991bef1",
     "backend/app/domains/polymarket_auto_live/scanner.py": "93bf6201d84f6b8440670dd14959f0ca335371a859483b5f77ef52fcbf1e257b",
     "backend/app/domains/polymarket_auto_live/schemas.py": "481ce56434ae335df7d209f300dfab129238a5a3d62d74f67036c944a8636fb9",
-    "backend/app/domains/polymarket_auto_live/service.py": "19e13c8ee2835ebc150d6f9548e69a53833c5a80c5740feefe7eddbdce7d1d8c",
+    "backend/app/domains/polymarket_auto_live/service.py": "c5bd9b273c86e77c0b2c9a6cbbf9b75b01e500bdd45030224b978ae45f2af4f5",
     "backend/app/domains/polymarket_auto_live/stage3_slots.py": "c37adf1328ae8ccf838b4d8383615edcf7854cf7bfa8dc46999d759c71cb5915",
     "backend/app/domains/polymarket_auto_live/stage_one_excel.py": "b1721cd112db82dd978473baa4ec40b2f42060dc479df4abcb21009a73455e70",
     "backend/app/domains/polymarket_auto_live/stage_one_export_enrichment.py": "b394e6da9ebf2fe210b7706efff936947b3ca3edb885bc4df322435fd48e8e88",
-    "backend/app/domains/polymarket_auto_live/tasks.py": "6f4fb86595d3fb63855ea50e9c805d29a64414a5144aba0d579498d0c9c34706",
+    "backend/app/domains/polymarket_auto_live/tasks.py": "74dd464c3749798518de4f0bee078821d8964cfbd4f58a37bf779cf250f21f5d",
     "backend/app/domains/polymarket_auto_live/trend_snapshot.py": "5893f31f024c8a5caf6ebe8859f755c8bc0c037ef1a846d45a029fcf88bf667a",
     "backend/app/domains/polymarket_auto_live/workspace_profiles.py": "6c5e73166cd4f42d39393fd8078bce74bb6bf544a69e5b637f758d51ec609729",
     "backend/app/domains/polymarket_direct/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
@@ -13816,9 +13963,9 @@
     "backend/app/domains/polymarket_direct/direct_polymarket.py": "6a1b3e8ac5e5e90f9f9582b406500e9859aa7ae807a5345f22cb6310d93535c5",
     "backend/app/domains/polymarket_direct/logger.py": "53e6befece01e0e9c98094acf5e834090b26cfacd921165e89ae23778528b7ad",
     "backend/app/domains/polymarket_direct/providers.py": "a38d077a1825b6ed431a6fec95bb4f3e7cb5eacab59a2f5e9de7a9a1f0657136",
-    "backend/app/domains/polymarket_direct/router.py": "8d04f6e0a94ae5a02d542b27d91aef22c845b9eb692bccd33b175e4ebd5ab5c2",
+    "backend/app/domains/polymarket_direct/router.py": "d6f595920048b81013e8c13c0bd230db373b580dcb65c1ed36714a4915d98f8b",
     "backend/app/domains/polymarket_direct/schemas.py": "7101a5c4e18c413c5f6b8e80a976a40d2fe6e746b1b4b375c7a3d250aa015922",
-    "backend/app/domains/polymarket_direct/service.py": "246af24b9822d24e61d5b40b14937fece0b789da717fc385a4c144a76673b20c",
+    "backend/app/domains/polymarket_direct/service.py": "2b190540b32882ec034dcfc19fe5f214272e19397c16d13b917d1ecaba8c693a",
     "backend/app/domains/polymarket_direct/storage.py": "66a3ca17174ce261c63929217f4c9badc7b3149249306698635da459f469719b",
     "backend/app/domains/portfolio_events/__init__.py": "08caf39f558886e8a21d6cfff08aa6f22b39b98e5d6e26cfd577f8c40e6af63e",
     "backend/app/domains/portfolio_events/common.py": "18ab19faac8d6ed5c768562135431b277cc48e1286e6e7ebddd4e68ad7b88e82",
@@ -13875,16 +14022,16 @@
     "backend/app/domains/sports_rankings/providers.py": "98645df7bc9529442aa3772523e0fe3e5ecb499489818405db68d7fb15b0636e",
     "backend/app/domains/sports_rankings/public_providers.py": "1caf12e05995a9d4d24ec49a71aef164fafd2512fe15d0a9f398dc54f7903866",
     "backend/app/domains/sports_rankings/read_projection.py": "c32904dee947e2d7d5889aa10dbd277c8af9bada7cc8dcb652ea177518957e25",
-    "backend/app/domains/sports_rankings/router.py": "18bc222e4b91677c258fa16a84b1066034e53e00c4b1a6990084664a74bf0bd6",
+    "backend/app/domains/sports_rankings/router.py": "37d47d979f0302e46dcab337d78fd3da4945171974cd90b8281c5ddbc01d13fd",
     "backend/app/domains/sports_rankings/schemas.py": "824681bb1aae81f474535015bf57ea403712a28993418318179c831a629c6e55",
     "backend/app/domains/sports_rankings/service.py": "691160e831b4cb9a50e00942a954501d4e2c6107db613c8720038c6d7bc36b1e",
     "backend/app/domains/sports_rankings/tasks.py": "83cc14707d86b748475bd5c5f31069b939f7fa4378ed90a06a89c566f150b57c",
     "backend/app/domains/trading_bots/__init__.py": "65d148b38baaa20706849ba014a7d4d446272393025b194ce78974ac1a810b39",
     "backend/app/domains/trading_bots/models.py": "0de047e2ceae09ab6a46e9e7e8b0ac2af67a803860e60526044c7d47c9c1717a",
-    "backend/app/domains/trading_bots/router.py": "572070e6cb6d647ce9b512b903f61359be53010c7859e6f3585aa88515269a49",
+    "backend/app/domains/trading_bots/router.py": "54375e0ed3bd262a28656ef524b97518d0065c9dc8ac9294101599df2663ae0e",
     "backend/app/domains/trading_bots/schemas.py": "3a0d281a23f06d576c5ed14b80e2b23fc655412fee5a63e15a90b7b76a13e02a",
-    "backend/app/domains/trading_bots/service.py": "267dd89c927019fd740cfdb95ef04a89b8d8a00a9ea9949eea3f1f530b24606d",
-    "backend/app/domains/trading_bots/tasks.py": "c7b94c3a7d1b019b34b886e0f243673fac1aeb051d4e2ea45b084b7be1973cf4",
+    "backend/app/domains/trading_bots/service.py": "c9e0f7eba78e509ef46d390b157e9868c3ba35f8baf692470034e4248c0ca8b8",
+    "backend/app/domains/trading_bots/tasks.py": "cc124b8621f9baac464b24adadde2670a41c8324b185f0956aedeab02bdc6243",
     "backend/app/domains/trading_bots/universal_scan.py": "c948a4e2aec20a389972b21278a54ef223743aebe8507571e1eef86bfa8bfb1d",
     "backend/app/domains/zerodha/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/zerodha/audit.py": "00568b5498d108efa71f94e87b0683780b97a121bb0550bc850f0d4586019711",
@@ -13906,7 +14053,7 @@
     "backend/app/domains/zerodha/threats_schemas.py": "e56577a914fe5bea3f3f558fceb71c03f0f1767ffda3612da77445dc1f7dc75a",
     "backend/app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/all_models.py": "c57090e5e4fdfbfc6ae6696dd6a81e2dcfe12213e7b4edc28a4a58cc6577d9e6",
+    "backend/app/infrastructure/database/all_models.py": "48b50771148452321d6d7b8d1430b5c53d77a14db8653e937c8658f6207d505f",
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -13925,7 +14072,7 @@
     "backend/app/infrastructure/messaging/recovery_celery.py": "e26d7687987a37581414f55bfea0d0414898d24557c7b7b746d0e292d505d0e9",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
     "backend/app/main.py": "2c4f14d6736112e705c5c10a4d3694373e9450d99fc1bf91e515f82299f94bf5",
-    "backend/app/models/__init__.py": "fd7e4f421bf91a684f2f305c8ca456a1f32257bc72e3e89ec7d18cb0647ffa35",
+    "backend/app/models/__init__.py": "03f616d7186b7675e48d640aeffceeb622c86c75abccb91640b47480bd1c287e",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",
@@ -13939,6 +14086,7 @@
     "backend/app/uat2/main.py": "b88f5331b75e183d1f4ddcdc62aed66f40c08e344d9709f86c558613493b9ee0",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
+    "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
     "backend/app/uat2/worker.py": "4e43a596627005530dcbf10a68e55b57de68ae8d963d1196020e6a2c7b220241",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
@@ -13946,18 +14094,18 @@
     "frontend/app/(auth)/reset-password/[token]/page.tsx": "3dd396ea8fdea7dde1b42f510102e70dae5755808ec6a773a9f87a0fb9275193",
     "frontend/app/admin/cost-drivers/page.tsx": "7fe99b80604b2c682e31866de2a44eb937af7ba4665b0b1ddd96e8cd8a5fb536",
     "frontend/app/api/auth/[...nextauth]/route.ts": "c3e8185d66af3fe7019dd236a463365cce7e1e8dcaea2a7c3b8f0b103e930ce4",
-    "frontend/app/api/bullpen-ai/current-odds/route.ts": "12977565c2d020367033b1dd3e738fdf6afe927d2e05e5721f39254a60a32e1e",
-    "frontend/app/api/bullpen-ai/health/route.ts": "d0f3e6a8d0ef456f44f537bfab68a303f726e631409ebcb92febd8177f2e3b24",
-    "frontend/app/api/bullpen-ai/market-link/route.ts": "5c4eeb558768d25b3801c12a4d3c9ddc7e580876d06eaaa40d079000a9471470",
-    "frontend/app/api/bullpen-ai/market-urls/route.ts": "a906eefbc1244b2d9c5bb685a567544ecd81e17535e27db49ffc6fcae9b7ac42",
-    "frontend/app/api/bullpen-ai/positions/route.ts": "516e8ff8ce7740a672f3b47d16c8febb4adb8ebb6642d8314be5871833583bb7",
-    "frontend/app/api/bullpen-ai/route.ts": "e2e1a14abe797c2445d203022d8321d4cb7e6b17d82582bdaedb14b9318beece",
-    "frontend/app/api/bullpen-ai/sports-event-comparisons/route.ts": "027b82d63e2b75b353041cc049e76f815551a9ef54397145fe5008eb52bdacc5",
-    "frontend/app/api/bullpen-ai/sports-event-metadata/route.ts": "01ca3302c683321153cf9beae6d96baf57dc8a9aed71cfdbc5a994df79c399ca",
-    "frontend/app/api/bullpen-ai/stage-one-snapshot/route.ts": "8e9acb073501028e22b16e96906154a75010cc363b89cb074aaf945769cc52db",
-    "frontend/app/api/bullpen-ai/stage-one.xlsx/route.ts": "e9022d74c294bdb896516fad574ee124e436938ef75382d8e0c1757367f91963",
+    "frontend/app/api/bullpen-ai/current-odds/route.ts": "9654e483adddaa0a29d69a563947fabef13a31cbf26283856779f4ef63b55fa0",
+    "frontend/app/api/bullpen-ai/health/route.ts": "6b3b33f14f32660e4d5411a7d09b477d9f5ab0498a12f8ce41e3222de120d397",
+    "frontend/app/api/bullpen-ai/market-link/route.ts": "3368f5cfa0c555df2124c90b1d6704ae13d4c1d7ea517d63ab3a5cc3fb3c5465",
+    "frontend/app/api/bullpen-ai/market-urls/route.ts": "f51f046caef209e28feca466f325f9a6beef749092f6d2280e15016aceab4c70",
+    "frontend/app/api/bullpen-ai/positions/route.ts": "cdd7406e9ba360697ace0bb78b80dac2da62279591e83d35e1b877d6793145cb",
+    "frontend/app/api/bullpen-ai/route.ts": "79b8e7a987979c7acdc9d287b2ee674fef02c94556c137e84f3bc517aa486794",
+    "frontend/app/api/bullpen-ai/sports-event-comparisons/route.ts": "5f1b0795944f5e5aa0bf445d7e5d604421a76377e03120edcacaadac3e6d5269",
+    "frontend/app/api/bullpen-ai/sports-event-metadata/route.ts": "e3608d546128d188e6fef033fca11bf884c53a50238b7461247fb7036f82bc8e",
+    "frontend/app/api/bullpen-ai/stage-one-snapshot/route.ts": "f0c7f659ceec1163a658a6346a25c125cfdfb7e2532588d0f6e392b6f8342303",
+    "frontend/app/api/bullpen-ai/stage-one.xlsx/route.ts": "2fcf8fc8398fee76227e3829430eeab9ae6408baf7f7e02e8b31baa230939511",
     "frontend/app/api/runtime-fingerprint/route.ts": "7367196caadada31a88ce9ee02565b9a9e9f677675c5b2aa8da9a7423ec07fb9",
-    "frontend/app/api/universal-polymarket-scan/auto-run/route.ts": "10cb2e749fc0ce85ad07e9adf4c0ef185cabfe4b2b570a88d9485855a2444c55",
+    "frontend/app/api/universal-polymarket-scan/auto-run/route.ts": "393550f47b1e629ea7184df1ad09399d3d70930de56cb0db5b3b582b4a06e874",
     "frontend/app/backend-api/[...path]/route.ts": "9717e58b3fc955a084ef5c6b668ea8bd7258dd9be0a13c29b7f16e789a969814",
     "frontend/app/console/apis/page.tsx": "cc6086c4720bb45c843e0b983bf8d9e0a0bee7cb9c852df58f1adb15c2913521",
     "frontend/app/console/auto-rebalance-runs/[portfolio]/[sequence]/page.tsx": "f5b9d76b220d2d43eefdc338b6f2aebd1f80a3ba791ebeee00541f41a80d8ff8",

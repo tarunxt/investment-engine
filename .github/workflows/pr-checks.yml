@@ -52,6 +52,10 @@ jobs:
           PYTHONPATH: backend
         run: >-
           pytest -q
+          backend/tests/test_stage05_runtime_admin.py
+          backend/tests/test_polymarket_auto_live_order_intent_leases.py
+          backend/tests/test_stage_one_export_jobs.py
+          backend/tests/test_financial_data_integrity.py
           backend/tests/test_recovery_containment.py
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_ranking_integrity.py
@@ -163,7 +167,46 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py
+
+  stage05-runtime-administration:
+    name: Stage05 equivalent roles and migration safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage05
+          POSTGRES_PASSWORD: stage05
+          POSTGRES_DB: credx_stage05_test
+        options: --health-cmd "pg_isready -U stage05 -d credx_stage05_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage05:stage05@postgres:5432/credx_stage05_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE05_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install constrained backend test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify explicit roles and actual Alembic roundtrip
+        run: python -m pytest -q --junitxml=/tmp/stage05.xml backend/tests/test_stage05_admin_migration_postgres.py
+      - name: Require all Stage05 migration checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage05.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage05 migration gate cannot skip checks'
+          assert len(root.findall('.//testcase')) >= 10
+          PY_CHECK
 
   stage04-durable-idempotency:
     name: Stage04 PostgreSQL idempotency and Redis restart contracts
@@ -354,6 +397,7 @@ jobs:
           tests/bullpen-history-portfolio.test.mjs
           tests/runtime-performance-regressions.test.mjs
           tests/bullpen-server-auth.test.mjs
+          tests/stage05-operator-admission.test.mjs
           tests/dashboard-refresh-errors.test.mjs
           tests/dashboard-portfolio-totals.test.mjs
           tests/rebalance-workflow-resilience.test.mjs

@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest, NextResponse } from "next/server";
 
 import { buildBullpenCanonicalMarketUrl } from "@/lib/bullpenMarketLinks";
@@ -65,6 +66,8 @@ async function resolveCanonicalPolymarketSlugs(marketId: string) {
 }
 
 export async function GET(request: NextRequest) {
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
   const marketId = request.nextUrl.searchParams.get("marketId")?.trim() || "";
   if (!marketId) {
     return NextResponse.json({ error: "marketId is required" }, { status: 400 });

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id_sync, require_operator_intent_sync
+
 import asyncio
 import hashlib
 import json
@@ -464,6 +466,7 @@ def _begin_order_intent_operation(
 ) -> OrderIntentOperationLease | None:
     """Claim the queued lease, or safely fence a legacy/direct task invocation."""
 
+    require_operator_intent_sync(intent_id)
     task_id = _task_request_id(task)
     normalized_intent_id = str(intent_id)
     dispatch_token = lease_token.strip() if isinstance(lease_token, str) else ""
@@ -605,6 +608,7 @@ def queue_bullpen_workflow_trigger_batch(
     universal_export_id: str | None = None,
     workspace_profiles: tuple[str, ...] = WORKFLOW_TRIGGER_PROFILES,
 ) -> None:
+    require_operator_user_id_sync(user_id)
     dispatch_bullpen_workflow_trigger_batch.apply_async(
         kwargs={
             "user_id": user_id,
@@ -642,6 +646,7 @@ def dispatch_bullpen_workflow_trigger_batch(
     single Auto-Live planning worker that must make the active run terminal.
     """
 
+    require_operator_user_id_sync(user_id)
     resolved_profiles = tuple(workspace_profiles or WORKFLOW_TRIGGER_PROFILES)
     delivery_queue = _task_delivery_queue(self)
     if delivery_queue == AUTO_LIVE_QUEUE:
@@ -997,6 +1002,7 @@ def execute_polymarket_auto_live_run(
 ) -> None:
     """Run one planner task only while its renewable run lease is owned."""
 
+    require_operator_user_id_sync(user_id)
     task_id = str(self.request.id or uuid4())
     delivery_info = getattr(self.request, "delivery_info", None)
     broker_redelivered = bool(
@@ -1932,6 +1938,10 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
 
         for state_record in due_states:
             user_id = state_record.user_id
+            try:
+                require_operator_user_id_sync(user_id)
+            except PermissionError:
+                continue
             settings = record_to_settings(repo.get_settings_record(user_id))
             if settings.emergency_stop or not settings.auto_live_enabled:
                 continue

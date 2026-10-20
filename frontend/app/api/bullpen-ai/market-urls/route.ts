@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest, NextResponse } from "next/server";
 
 import { shouldReplaceCategory } from "../_lib/polymarketCategory";
@@ -64,6 +65,8 @@ function logResolvedCategory(
 }
 
 export async function POST(request: NextRequest) {
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
   try {
     const body = (await request.json()) as {
       questions?: unknown[];

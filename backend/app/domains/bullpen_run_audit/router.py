@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -39,7 +40,7 @@ from app.domains.bullpen_run_audit.service import (
 )
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
-router = APIRouter(prefix="/bullpen-ai/run-audits", tags=["bullpen-ai"])
+router = APIRouter(prefix="/bullpen-ai/run-audits", tags=["bullpen-ai"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 logger = get_logger(__name__)
 
 

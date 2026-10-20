@@ -4,6 +4,7 @@ import asyncio
 import os
 from uuid import uuid4
 
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,7 +51,7 @@ from app.domains.bullpen_run_audit.provenance import resolve_backend_commit_sha
 from app.infrastructure.database.session import get_async_db
 from app.infrastructure.messaging.celery_app import celery
 
-router = APIRouter(prefix="/polymarket/bullpen008", tags=["bullpen008"])
+router = APIRouter(prefix="/polymarket/bullpen008", tags=["bullpen008"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 
 # The public same-origin proxy has a deliberately small mutation budget.  A
 # broker reconnect can consume several seconds even though the publish later

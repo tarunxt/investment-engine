@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
+from app.domains.auth.admin_roles import require_platform_admin as require_admin
 from app.domains.auth.models import User
 from app.infrastructure.database.session import get_async_db
 from .catalogue import CATALOGUE, REFRESH_SECONDS, SOURCE_IDS, augment_catalogue
@@ -79,7 +80,7 @@ async def catalogue(
 
 
 @router.post("/classify")
-async def classify_match(query: MatchCandidate):
+async def classify_match(query: MatchCandidate, _admin:User=Depends(require_admin)):
     return classify(query)
 
 
@@ -139,7 +140,7 @@ async def compare_events(
 
 
 @router.post("/refresh", status_code=202)
-async def refresh(query: RefreshRequest):
+async def refresh(query: RefreshRequest, _admin:User=Depends(require_admin)):
     if query.source_id not in SOURCE_IDS:
         raise HTTPException(422, "No supported feed for this source")
     # Rate-limit enqueue operations, not only worker executions.
@@ -160,7 +161,7 @@ async def refresh(query: RefreshRequest):
 
 
 @router.post("/cricket/reconcile", status_code=202)
-async def reconcile_all_cricket():
+async def reconcile_all_cricket(_admin:User=Depends(require_admin)):
     from redis.asyncio import Redis
     from app.core.config import settings
     from .tasks import reconcile_cricket

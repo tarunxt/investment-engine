@@ -26,7 +26,7 @@ from app.domains.polymarket.runtime_broker import (
 
 
 def _current_user():
-    return SimpleNamespace(id=7, role=UserRole.ADMIN)
+    return SimpleNamespace(id=7, role=UserRole.ADMIN, is_active=True)
 
 
 @pytest.mark.anyio
@@ -147,7 +147,7 @@ async def test_runtime_health_reads_cached_snapshot_without_refetching_positions
 
 
 @pytest.mark.anyio
-async def test_runtime_display_positions_allows_signed_in_user_and_strips_runtime_credentials(
+async def test_runtime_display_positions_allows_active_operator_and_strips_runtime_credentials(
     monkeypatch,
 ):
     snapshot = BullpenPositionsSnapshot(
@@ -194,7 +194,8 @@ async def test_runtime_display_positions_allows_signed_in_user_and_strips_runtim
     app.include_router(polymarket_router)
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
         id=8,
-        role=UserRole.USER,
+        role=UserRole.ADMIN,
+        is_active=True,
     )
     monkeypatch.setattr(
         "app.domains.polymarket.router.get_bullpen_runtime_broker",
@@ -258,7 +259,8 @@ async def test_passive_display_positions_does_not_refresh_a_different_cli_accoun
     app.include_router(polymarket_router)
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
         id=8,
-        role=UserRole.USER,
+        role=UserRole.ADMIN,
+        is_active=True,
     )
     monkeypatch.setattr(
         "app.domains.polymarket.router.get_bullpen_runtime_broker",

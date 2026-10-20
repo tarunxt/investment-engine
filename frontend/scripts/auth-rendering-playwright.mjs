@@ -185,7 +185,8 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
   page.on("request", (request) => requests.push(request.url()));
 
   await page.goto(`${baseUrl}/console/bullpen-ai`, {
-    waitUntil: "networkidle",
+    // Polling screens need their visible mounted marker, not network silence.
+    waitUntil: "domcontentloaded",
   });
   await page.locator('[data-bullpen-workspace="mounted"]').waitFor();
   if (await page.getByText("Interactive workspace").count()) {
@@ -201,7 +202,8 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
     dashboardRequests.push(request.url()),
   );
   await dashboardPage.goto(`${baseUrl}/console/dashboard`, {
-    waitUntil: "networkidle",
+    // Polling screens need their visible mounted marker, not network silence.
+    waitUntil: "domcontentloaded",
   });
   await dashboardPage.locator('[data-dashboard-analytics="mounted"]').waitFor();
   if (await dashboardPage.getByText("Charts and portfolio tools").count()) {
