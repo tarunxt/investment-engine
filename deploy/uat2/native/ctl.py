@@ -360,10 +360,18 @@ def configure_units(release):
 
 
 def promote(release):
-    pointer = ROOT/'current.new'
-    pointer.symlink_to(release,target_is_directory=True)
-    os.replace(pointer,ROOT/'current')
-    write_release_environment(release)
+    # Each attempt owns its temporary pointer; a killed/failed prior attempt
+    # cannot collide with a verified recovery attempt.
+    pointer = ROOT/('current.'+uuid4().hex+'.new')
+    try:
+        pointer.symlink_to(release,target_is_directory=True)
+        sync_directory(ROOT)
+        os.replace(pointer,ROOT/'current')
+        sync_directory(ROOT)
+        write_release_environment(release)
+    finally:
+        pointer.unlink(missing_ok=True)
+        sync_directory(ROOT)
 
 
 def write_release_environment(release):
