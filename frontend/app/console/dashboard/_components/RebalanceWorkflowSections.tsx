@@ -1,5 +1,7 @@
 "use client";
 
+import {useModules} from "@/providers/ModuleContext";
+import {surfaceAllowed} from "@/lib/modulePolicy";
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 
 import Link from "next/link";
@@ -5225,6 +5227,7 @@ export function RebalanceWorkflowSections({
 }: {
   onDashboardRefresh?: () => Promise<void>;
 }) {
+  const {manifest}=useModules();
   const usdInrRate = useUsdInrRate();
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
     readPersistedWorkflow(),
@@ -8574,8 +8577,8 @@ ${zerodhaExecutionMode === "direct_market"
         title: "Run Indmoney Auto-Rebalance",
         buttonLabel: "Run",
       },
-    ],
-    [],
+    ].filter(section=>surfaceAllowed(manifest,section.portfolio==='zerodha'?'/console/zerodha':'/console/indmoney-us')),
+    [manifest],
   );
 
   const renderSectionCard = (section: (typeof sections)[number]) => {

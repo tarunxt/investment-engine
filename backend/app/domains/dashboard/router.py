@@ -4,6 +4,7 @@ from hashlib import sha256
 import json
 
 from fastapi import APIRouter, Depends, Header, Response
+from app.infrastructure.database.session import get_async_db
 from fastapi.responses import Response as FastAPIResponse
 
 from app.domains.auth.dependencies import get_current_user
@@ -19,10 +20,14 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def get_dashboard_summary(
     response: Response,
     current_user: User = Depends(get_current_user),
+    db=Depends(get_async_db),
     if_none_match: str | None = Header(default=None),
 ):
+    from app.domains.modules.visibility import visible_module_ids
+    module_ids=await visible_module_ids(db,current_user.id)
     summary = await build_dashboard_summary(
         current_user.id,
+        module_ids=module_ids,
         include_singleton_bullpen=user_can_access_singleton_bullpen_runtime(
             current_user
         ),

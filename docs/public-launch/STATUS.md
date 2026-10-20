@@ -1,3 +1,15 @@
+# Stage08 narrow mobile profile-navigation repair
+
+Live26508e84 remains unchanged. This local successor fixes the390px profile-subnavigation overflow using wrapping tabs and retained desktop column layout. Regression first failed on the pre-fix actual browser build at320px/document576px; repaired browser checks pass320/360/390/430px, all five Tab-reachable with Activity/Security Enter navigation. Required frontend340 pass; production build/TypeScript/inventory and unchanged startup budgets pass. Supported Chrome local390px document equals390px; desktop column and Light/UTC/All-notifications remain. Successor exact-head CI/native verification and independent review remain required; final PR/runtime handoff supplies exact identities. No live writes, redeployment, production/oldUAT/access change or09. Earlier ledgers below are preserved historical checkpoints.
+
+# Stage08 independent-review repair checkpoint
+
+The independent review of6fd9618e reproduced a delayed PATCH overwriting a newer cross-tab disable. This successor rejects stale mutation/read callbacks using owner/session lifetimes, invalidation epochs and a persistent version floor, and refreshes authoritative policy before reopening. Nine deterministic provider regressions and the real two-tab delayed-response browser regression pass; required frontend340/340 pass; broad784/798 retains the exact14 Stage07 failures. Production build, TypeScript, source inventory and unchanged local startup budgets pass. Successor exact-head CI/native artifact verification and independent re-review remain required; final runtime handoff/PR identify the tested successor. No deployment, live UAT writes, production changes, access expansion or09. Prior ledgers below are historical.
+
+# Stage08 active — accepted deployed Stage07
+
+Owner explicitly accepted07 and requested08 at20Oct2026 08:06:07UTC. Accepted base dc3063d06605c5c93494a2861bfa840f61c8d94a; all exact CI/native artifact, independent/server and fresh owner browser checks passed; no owner acceptance inferred beyond that explicit message. See STAGE08_REQUIREMENT_MAP.md. Code:IN_PROGRESS / CI:NOT_RUN08 / deployment:NOT_RUN08 / UAT2 verification:NOT_RUN08 / owner acceptance:PENDING08 / external approval:UNCHANGED. No deployment this implementation turn or09 progression. Prior ledgers are preserved historical checkpoints.
+
 # Public-launch implementation status
 
 ## Stage07 active — owner-accepted deployed06

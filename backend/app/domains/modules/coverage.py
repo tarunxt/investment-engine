@@ -28,6 +28,7 @@ CORE_DOMAINS={'auth','modules','api_usage','cost_drivers','health','dashboard','
 
 def classify_route(domain,endpoint,path,methods,source_module=''):
     methods=set(methods or ())
+    if domain=='ai_providers' and endpoint=='list_providers' and methods=={'GET'}:return ('__analysis_metadata__','view')
     if domain=='mails' and endpoint=='send_test_mail':return ('ai_studio','analyze')
     if domain in CORE_DOMAINS:return None
     if domain=='runs' and methods=={'GET'} and endpoint in {'list_runs','get_run','list_auto_rebalance_history','get_auto_rebalance_history_detail','get_final_actionable_history'}:return None

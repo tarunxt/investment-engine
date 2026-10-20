@@ -1,0 +1,874 @@
+{
+  "modules": [
+    {
+      "availability": {
+        "available": true,
+        "reason": null
+      },
+      "capabilities": {
+        "analyze": {
+          "allowed": true,
+          "boundary": "http",
+          "capability": "analyze",
+          "module_id": "zerodha_rebalance",
+          "owner_id": 71,
+          "reasons": [],
+          "selection_version": 1
+        },
+        "execute": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "execute",
+          "module_id": "zerodha_rebalance",
+          "owner_id": 71,
+          "reasons": [],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": true,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "zerodha_rebalance",
+          "owner_id": 71,
+          "reasons": [],
+          "selection_version": 1
+        }
+      },
+      "category": "investing",
+      "connection": {
+        "kind": "kite",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Zerodha Rebalance",
+      "module_id": "zerodha_rebalance",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": true,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": true,
+        "reason": null
+      },
+      "capabilities": {
+        "analyze": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "analyze",
+          "module_id": "indmoney_us",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "import": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "import",
+          "module_id": "indmoney_us",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "indmoney_us",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "investing",
+      "connection": {
+        "kind": "manual_import",
+        "state": "not_required"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "INDmoney US",
+      "module_id": "indmoney_us",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": false,
+        "reason": "Public singleton runtime/research is not approved; existing operator policy is separate"
+      },
+      "capabilities": {
+        "analyze": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "analyze",
+          "module_id": "bullpen_research",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "bullpen_research",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "research",
+      "connection": {
+        "kind": "singleton_operator",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Bullpen Research",
+      "module_id": "bullpen_research",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": false,
+        "reason": "Public singleton runtime/research is not approved; existing operator policy is separate"
+      },
+      "capabilities": {
+        "execute": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "execute",
+          "module_id": "bullpen_live",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "bullpen_live",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "operator",
+      "connection": {
+        "kind": "singleton_operator",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Bullpen Live",
+      "module_id": "bullpen_live",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": false,
+        "reason": "Public singleton runtime/research is not approved; existing operator policy is separate"
+      },
+      "capabilities": {
+        "execute": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "execute",
+          "module_id": "copy_trader",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "copy_trader",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "operator",
+      "connection": {
+        "kind": "singleton_operator",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Copy Trader",
+      "module_id": "copy_trader",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": false,
+        "reason": "Public singleton runtime/research is not approved; existing operator policy is separate"
+      },
+      "capabilities": {
+        "execute": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "execute",
+          "module_id": "prediction_direct",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "prediction_direct",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "operator",
+      "connection": {
+        "kind": "singleton_operator",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Prediction Direct",
+      "module_id": "prediction_direct",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": true,
+        "reason": null
+      },
+      "capabilities": {
+        "analyze": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "analyze",
+          "module_id": "market_scanner",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "market_scanner",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "research",
+      "connection": {
+        "kind": "none",
+        "state": "not_required"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Market Scanner",
+      "module_id": "market_scanner",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": true,
+        "reason": null
+      },
+      "capabilities": {
+        "analyze": {
+          "allowed": true,
+          "boundary": "http",
+          "capability": "analyze",
+          "module_id": "ai_studio",
+          "owner_id": 71,
+          "reasons": [],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": true,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "ai_studio",
+          "owner_id": 71,
+          "reasons": [],
+          "selection_version": 1
+        }
+      },
+      "category": "analysis",
+      "connection": {
+        "kind": "ai_provider",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "AI Studio",
+      "module_id": "ai_studio",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": true,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": true,
+        "reason": null
+      },
+      "capabilities": {
+        "export": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "export",
+          "module_id": "sheets_export",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        },
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "sheets_export",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "connections",
+      "connection": {
+        "kind": "google_sheets",
+        "state": "ready"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Sheets Export",
+      "module_id": "sheets_export",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    },
+    {
+      "availability": {
+        "available": true,
+        "reason": null
+      },
+      "capabilities": {
+        "view": {
+          "allowed": false,
+          "boundary": "http",
+          "capability": "view",
+          "module_id": "sports_rankings",
+          "owner_id": 71,
+          "reasons": [
+            "MODULE_NOT_SELECTED"
+          ],
+          "selection_version": 1
+        }
+      },
+      "category": "research",
+      "connection": {
+        "kind": "none",
+        "state": "not_required"
+      },
+      "entitlement": {
+        "jurisdiction": "allowed",
+        "plan": "allowed"
+      },
+      "execution": {
+        "action_confirmed": false,
+        "capable": false
+      },
+      "label": "Sports Rankings",
+      "module_id": "sports_rankings",
+      "requires": [],
+      "selection": {
+        "config": {
+          "schema_version": 1
+        },
+        "enabled": false,
+        "schedules_paused": true,
+        "version": 1
+      }
+    }
+  ],
+  "operational_enforcement_complete": false,
+  "owner_id": 71,
+  "presentation": {
+    "api_rules": [
+      {
+        "capability": "view",
+        "module_ids": [
+          "zerodha_rebalance"
+        ],
+        "path": "/zerodha"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "indmoney_us"
+        ],
+        "path": "/indmoney-us"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "bullpen_live"
+        ],
+        "path": "/bullpen-ai-auto-live"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "bullpen_live"
+        ],
+        "path": "/polymarket-auto-live"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "bullpen_research"
+        ],
+        "path": "/bullpen-ai"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "bullpen_research"
+        ],
+        "path": "/bullpen008"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "prediction_direct"
+        ],
+        "path": "/polymarket-direct"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "copy_trader"
+        ],
+        "path": "/polymarket-bot"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "bullpen_live"
+        ],
+        "path": "/polymarket/auto-live"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "bullpen_research"
+        ],
+        "path": "/polymarket"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "market_scanner"
+        ],
+        "path": "/technical-setups"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "sheets_export"
+        ],
+        "path": "/google-sheets"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "sports_rankings"
+        ],
+        "path": "/sports-rankings"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "ai_studio"
+        ],
+        "path": "/prompts"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "ai_studio",
+          "bullpen_research",
+          "indmoney_us",
+          "market_scanner",
+          "zerodha_rebalance"
+        ],
+        "path": "/providers"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "zerodha_rebalance"
+        ],
+        "path": "/runs/auto-rebalance-history",
+        "query_params": {
+          "portfolio": "india"
+        }
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "indmoney_us"
+        ],
+        "path": "/runs/auto-rebalance-history",
+        "query_params": {
+          "portfolio": "indmoney_us"
+        }
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "zerodha_rebalance"
+        ],
+        "path": "/runs/auto-rebalance-history/india"
+      },
+      {
+        "capability": "view",
+        "module_ids": [
+          "indmoney_us"
+        ],
+        "path": "/runs/auto-rebalance-history/indmoney_us"
+      }
+    ],
+    "connections_path": "/console/profile/connections",
+    "core_paths": [
+      "/console/profile",
+      "/console/uat2",
+      "/console/apis",
+      "/console/mails",
+      "/console/jobs",
+      "/console/runs"
+    ],
+    "preferences_path": "/console/profile/preferences",
+    "safety_activity_path": "/console/profile/activity",
+    "schema_version": 1,
+    "surfaces": [
+      {
+        "capability": "view",
+        "label": "India Portfolio",
+        "module_ids": [
+          "zerodha_rebalance"
+        ],
+        "path": "/console/zerodha"
+      },
+      {
+        "capability": "view",
+        "label": "India analysis",
+        "module_ids": [
+          "zerodha_rebalance"
+        ],
+        "path": "/console/zerodha-swing-run"
+      },
+      {
+        "capability": "view",
+        "label": "India history",
+        "module_ids": [
+          "zerodha_rebalance"
+        ],
+        "path": "/console/auto-rebalance-runs/zerodha"
+      },
+      {
+        "capability": "view",
+        "label": "US Portfolio",
+        "module_ids": [
+          "indmoney_us"
+        ],
+        "path": "/console/indmoney-us"
+      },
+      {
+        "capability": "view",
+        "label": "US analysis",
+        "module_ids": [
+          "indmoney_us"
+        ],
+        "path": "/console/indmoney-us-swing-run"
+      },
+      {
+        "capability": "view",
+        "label": "US history",
+        "module_ids": [
+          "indmoney_us"
+        ],
+        "path": "/console/auto-rebalance-runs/indmoneyUs"
+      },
+      {
+        "capability": "view",
+        "label": "Portfolio analysis",
+        "module_ids": [
+          "zerodha_rebalance",
+          "indmoney_us"
+        ],
+        "path": "/console/automated-rebalance"
+      },
+      {
+        "capability": "view",
+        "label": "Bullpen Live",
+        "module_ids": [
+          "bullpen_live"
+        ],
+        "path": "/console/bullpen-ai-auto-live"
+      },
+      {
+        "capability": "view",
+        "label": "Bullpen Live",
+        "module_ids": [
+          "bullpen_live"
+        ],
+        "path": "/console/trading-bots/bullpen-ai-auto-live"
+      },
+      {
+        "capability": "view",
+        "label": "Bullpen Research",
+        "module_ids": [
+          "bullpen_research"
+        ],
+        "path": "/console/bullpen-ai"
+      },
+      {
+        "capability": "view",
+        "label": "Bullpen Sports",
+        "module_ids": [
+          "bullpen_research"
+        ],
+        "path": "/console/bullpen-sports"
+      },
+      {
+        "capability": "view",
+        "label": "Bullpen Research",
+        "module_ids": [
+          "bullpen_research"
+        ],
+        "path": "/console/bullpen008"
+      },
+      {
+        "capability": "view",
+        "label": "Copy Trader",
+        "module_ids": [
+          "copy_trader"
+        ],
+        "path": "/console/polymarket-bot"
+      },
+      {
+        "capability": "view",
+        "label": "Prediction Direct",
+        "module_ids": [
+          "prediction_direct"
+        ],
+        "path": "/console/polymarket-direct-bot"
+      },
+      {
+        "capability": "view",
+        "label": "Trading Bots",
+        "module_ids": [
+          "bullpen_research",
+          "bullpen_live",
+          "copy_trader",
+          "prediction_direct"
+        ],
+        "path": "/console/trading-bots"
+      },
+      {
+        "capability": "view",
+        "label": "Market Scanner",
+        "module_ids": [
+          "market_scanner"
+        ],
+        "path": "/console/technical-setups"
+      },
+      {
+        "capability": "view",
+        "label": "AI Studio prompts",
+        "module_ids": [
+          "ai_studio"
+        ],
+        "path": "/console/prompts"
+      },
+      {
+        "capability": "view",
+        "label": "AI Studio",
+        "module_ids": [
+          "ai_studio"
+        ],
+        "path": "/console/llms"
+      },
+      {
+        "capability": "view",
+        "label": "Sheets Export",
+        "module_ids": [
+          "sheets_export"
+        ],
+        "path": "/console/google-sheets"
+      },
+      {
+        "capability": "view",
+        "label": "Sports Rankings",
+        "module_ids": [
+          "sports_rankings"
+        ],
+        "path": "/console/sports-rankings"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "version": 1
+}

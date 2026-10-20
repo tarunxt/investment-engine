@@ -1,3 +1,6 @@
+"use client";
+import {useModules} from "@/providers/ModuleContext";
+import {surfaceVisible} from "@/lib/modulePolicy";
 import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
@@ -44,6 +47,7 @@ export function PortfolioAnalysisNav({
   active?: ActiveTab;
   className?: string;
 }) {
+  const {manifest}=useModules();
   return (
     <div className={cn('flex flex-wrap items-start gap-3', className)}>
       {TABS.map((item) => (
@@ -65,27 +69,7 @@ export function PortfolioAnalysisNav({
           </Button>
 
           <div className="flex items-center justify-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em]">
-            <Link
-              href={ROUTES.zerodha[item.key]}
-              aria-current={portfolio === 'zerodha' ? 'page' : undefined}
-              className={cn(
-                'border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',
-                portfolio === 'zerodha' ? 'border-gray-950 text-gray-950' : '',
-              )}
-            >
-              Ind
-            </Link>
-            <span className="text-gray-300">|</span>
-            <Link
-              href={ROUTES.indmoneyUs[item.key]}
-              aria-current={portfolio === 'indmoneyUs' ? 'page' : undefined}
-              className={cn(
-                'border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',
-                portfolio === 'indmoneyUs' ? 'border-gray-950 text-gray-950' : '',
-              )}
-            >
-              US
-            </Link>
+            {(['zerodha','indmoneyUs'] as const).filter(p=>surfaceVisible(manifest,ROUTES[p].portfolio)).map(p=><Link key={p} href={ROUTES[p][item.key]} prefetch={false} aria-current={portfolio===p?'page':undefined} className={cn('border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',portfolio===p?'border-gray-950 text-gray-950':'')}>{p==='zerodha'?'Ind':'US'}</Link>)}
           </div>
         </div>
       ))}

@@ -18,6 +18,8 @@ import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
 import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
+import {useModules} from '@/providers/ModuleContext';
+import {allowedModule} from '@/lib/modulePolicy';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -488,6 +490,7 @@ function ManualTokenForm({ onConnected }: { onConnected: () => void }) {
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function ZerodhaPage() {
+  const {manifest}=useModules();const canExecute=allowedModule(manifest,'zerodha_rebalance','execute');
   const [status, setStatus] = useState<ZerodhaStatusResponse | null>(null);
   const [loginUrl, setLoginUrl] = useState('');
   const [configured, setConfigured] = useState(true);
@@ -800,8 +803,7 @@ export default function ZerodhaPage() {
         <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span>
-            Zerodha is not configured. Add <code className="font-mono text-xs">ZERODHA_API_KEY</code> and{' '}
-            <code className="font-mono text-xs">ZERODHA_API_SECRET</code> to your backend <code className="font-mono text-xs">.env</code> file.
+            Broker connection is not configured. Review your connection setup and the current provider requirements. Synthetic previews keep real broker connections disabled.
           </span>
         </div>
       )}
@@ -917,6 +919,8 @@ export default function ZerodhaPage() {
           <div className="border border-gray-200 bg-white shadow-sm">
             <button
               onClick={() => setShowOrderForm((v) => !v)}
+              disabled={!canExecute}
+              title={!canExecute?"Orders are not authorized by module selection. Existing provider and confirmation gates must pass.":undefined}
               className="flex w-full items-center justify-between border-b border-gray-200 px-5 py-3 text-left"
             >
               <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">

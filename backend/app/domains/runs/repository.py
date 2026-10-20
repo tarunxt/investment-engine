@@ -73,6 +73,7 @@ class PostgresRunRepository:
         query: PagedQuery,
         *,
         user_id: int,
+        module_ids: list[str] | None = None,
         summary: bool = False,
     ) -> PagedResult[Run]:
         # Full run payloads include every linked LLM response and can grow to
@@ -86,6 +87,7 @@ class PostgresRunRepository:
             )
 
         stmt = self._owned_query(user_id)
+        if module_ids is not None:stmt=stmt.where(Run.module_id.in_(module_ids))
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total: int = (await self._session.execute(count_stmt)).scalar_one()
         if summary:

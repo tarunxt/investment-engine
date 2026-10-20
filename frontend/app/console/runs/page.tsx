@@ -22,6 +22,8 @@ import {
 import { cn } from '@/lib/utils';
 import { apiService, APIError } from '@/services/api';
 import type { BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
+import {useModules} from '@/providers/ModuleContext';
+import {surfaceVisible,surfaceAllowed} from '@/lib/modulePolicy';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -278,9 +280,14 @@ export default function RunsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const initialTab = TABS.some((tab) => tab.id === requestedTab)
+  const {manifest}=useModules();
+  const paths={indmoney:'/console/indmoney-us',zerodha:'/console/zerodha',bullpen:'/console/bullpen-ai-auto-live'};
+  const tabs=TABS.filter(tab=>surfaceVisible(manifest,paths[tab.id]));
+  const allowPortfolios=surfaceAllowed(manifest,paths.indmoney)||surfaceAllowed(manifest,paths.zerodha);
+  const allowBullpen=surfaceAllowed(manifest,paths.bullpen);
+  const initialTab = tabs.some((tab) => tab.id === requestedTab)
     ? (requestedTab as RunTab)
-    : 'indmoney';
+    : tabs[0]?.id??'indmoney';
 
   const [activeTab, setActiveTab] = useState<RunTab>(initialTab);
   const [portfolioRuns, setPortfolioRuns] = useState<RunListItem[]>([]);
@@ -298,8 +305,8 @@ export default function RunsPage() {
     setLoading(true);
     setError(null);
     const [portfolioResult, bullpenResult] = await Promise.allSettled([
-      loadAllPortfolioRuns(),
-      loadAllBullpenRuns(controller.signal),
+      allowPortfolios?loadAllPortfolioRuns():Promise.resolve([]),
+      allowBullpen?loadAllBullpenRuns(controller.signal):Promise.resolve([]),
     ]);
     if (controller.signal.aborted) return;
 
@@ -319,7 +326,7 @@ export default function RunsPage() {
     setError(errors.length ? errors.join(' ') : null);
     setLastUpdated(new Date());
     setLoading(false);
-  }, []);
+  }, [allowPortfolios,allowBullpen]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadRuns(), 0);
@@ -398,7 +405,7 @@ export default function RunsPage() {
         role="tablist"
         aria-label="Run categories"
       >
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const count =
             tab.id === 'bullpen'
               ? bullpenRuns.length
@@ -437,7 +444,7 @@ export default function RunsPage() {
         {loading && selectedItems.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
             <Loader2 className="mx-auto mb-3 size-5 animate-spin text-gray-400" />
-            Loading all {TABS.find((tab) => tab.id === activeTab)?.label}…
+            Loading all {tabs.find((tab) => tab.id === activeTab)?.label}…
           </div>
         ) : visibleItems.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">

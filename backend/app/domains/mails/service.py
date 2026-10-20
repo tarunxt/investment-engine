@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select,or_
 from sqlalchemy.orm import Session
 
 from app.domains.auth.models import ActivityLog
@@ -664,6 +664,9 @@ def send_logged_email_sync(
         "provider_message": None,
         "how_to_fix": [],
     }
+    from app.domains.modules.execution import _current
+    context=_current.get()
+    if context is not None and context.identity.owner_id==user_id:details['module_id']=context.identity.module_id
     sell_action = _initial_sell_action(warnings or [], at=attempted_at)
     if sell_action is not None:
         details["sell_action"] = sell_action
@@ -960,13 +963,16 @@ def update_mail_sell_action_sync(
         return dict(sell_action)
 
 
-def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, object]]:
+def list_mail_history_sync(user_id: int, *, limit: int = 100, selected_modules: list[str] | None = None) -> list[dict[str, object]]:
     bounded_limit = max(1, min(limit, 200))
     with SyncSessionLocal() as session:
+        from app.domains.modules.notification_visibility import CORE_MAIL_ACTIONS
+        scope=or_(ActivityLog.action.in_(CORE_MAIL_ACTIONS),*[ActivityLog.details.contains('"module_id": "'+module+'"',autoescape=True) for module in selected_modules]) if selected_modules is not None else True
         rows = (
             session.execute(
                 select(ActivityLog)
                 .where(ActivityLog.user_id == user_id)
+                .where(scope)
                 .where(ActivityLog.resource_type == MAIL_RESOURCE_TYPE)
                 .where(ActivityLog.action.like(f"{MAIL_ACTION_PREFIX}%"))
                 .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())

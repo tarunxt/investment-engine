@@ -351,16 +351,17 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
 
 async def _load_portfolio_history(
     user_id: int,
+    *, module_ids: list[str] | None = None,
 ) -> DashboardPortfolioHistory:
+    fields={'zerodha_total_inr':'zerodha_rebalance','indmoney_total_inr':'indmoney_us','bullpen_total_inr':'bullpen_research'}
+    columns=[DashboardPortfolioDailySnapshot.captured_at]
+    columns.extend(getattr(DashboardPortfolioDailySnapshot,name) for name,module in fields.items() if module_ids is None or module in module_ids)
+    if module_ids is None:columns.append(DashboardPortfolioDailySnapshot.combined_total_inr)
     async with AsyncSessionLocal() as db:
         rows = (
             await db.execute(
                 select(
-                    DashboardPortfolioDailySnapshot.captured_at,
-                    DashboardPortfolioDailySnapshot.zerodha_total_inr,
-                    DashboardPortfolioDailySnapshot.indmoney_total_inr,
-                    DashboardPortfolioDailySnapshot.bullpen_total_inr,
-                    DashboardPortfolioDailySnapshot.combined_total_inr,
+                    *columns,
                 )
                 .where(DashboardPortfolioDailySnapshot.user_id == user_id)
                 .order_by(
@@ -380,7 +381,7 @@ async def _load_portfolio_history(
                 value=float(value),
             )
             for row in rows
-            if (value := getattr(row, field)) is not None
+            if (value := getattr(row, field,None)) is not None
         ]
 
     return DashboardPortfolioHistory(
@@ -445,7 +446,9 @@ async def build_dashboard_summary(
     user_id: int,
     *,
     include_singleton_bullpen: bool = False,
+    module_ids: list[str] | None = None,
 ) -> DashboardSummaryResponse:
+    if module_ids is not None:include_singleton_bullpen=include_singleton_bullpen and 'bullpen_research' in module_ids
     if include_singleton_bullpen: await require_operator_user_id(user_id)
     loaders = [
         _timed_section("zerodha", _load_zerodha, user_id),
@@ -455,6 +458,16 @@ async def build_dashboard_summary(
     ]
     if include_singleton_bullpen:
         loaders.append(_timed_section("bullpen", _load_bullpen, user_id))
+    if module_ids is not None:
+        # Decide before starting loaders; never query a hidden portfolio/token.
+        for pending in loaders:pending.close()
+        loaders=[]
+        if 'zerodha_rebalance' in module_ids:loaders.append(_timed_section('zerodha',_load_zerodha,user_id))
+        if 'indmoney_us' in module_ids:loaders.append(_timed_section('indmoney_us',_load_indmoney,user_id))
+        if any(module in module_ids for module in ('zerodha_rebalance','indmoney_us','bullpen_research')):
+            async def scoped_history(owner):return await _load_portfolio_history(owner,module_ids=module_ids)
+            loaders.extend([_timed_section('portfolio_history',scoped_history,user_id),_timed_section('fx',_load_fx,user_id)])
+        if include_singleton_bullpen:loaders.append(_timed_section('bullpen',_load_bullpen,user_id))
     results = await asyncio.gather(*loaders)
     values = {name: value for name, value, _meta in results}
     sections = {name: meta for name, _value, meta in results}
@@ -465,6 +478,10 @@ async def build_dashboard_summary(
             duration_ms=0,
             error="Bullpen runtime is restricted to the singleton system account.",
         )
+    for name in ('zerodha','indmoney_us','bullpen','portfolio_history','fx'):
+        if name not in values:
+            values[name]=None
+            sections[name]=DashboardSectionMeta(status='unavailable',duration_ms=0,error='Module not selected or not currently permitted')
     history = values["portfolio_history"]
     if not include_singleton_bullpen and isinstance(history, DashboardPortfolioHistory):
         # Older own-user snapshots may include the singleton wallet. Combined

@@ -969,13 +969,17 @@ async def list_runs(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     summary: bool = Query(False),
+    selected_only: bool = Query(False),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.modules.visibility import visible_module_ids
+    module_ids=await visible_module_ids(db,current_user.id) if selected_only is True else None
     repo = PostgresRunRepository(db)
     result = await repo.list(
         PagedQuery(page=page, limit=limit),
         user_id=current_user.id,
+        module_ids=module_ids,
         summary=summary,
     )
     items = (

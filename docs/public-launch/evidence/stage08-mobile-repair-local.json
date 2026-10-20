@@ -1,0 +1,53 @@
+{
+  "base": "26508e8469b23d38d9a86c44c9e51c39eb9a2073",
+  "checked_at": "2026-10-20T10:17:54.983810+00:00",
+  "change": "Only wrapping profile tabs, navigation label/current-page attribute and actual-browser regressions",
+  "before": "Actual browser failed320px/document576px pre-fix",
+  "after_widths": [
+    320,
+    360,
+    390,
+    430
+  ],
+  "after": "Each document fits; all5 links in viewport and Tab order; Activity/Security Enter navigation works",
+  "required_frontend": 340,
+  "build_typescript_inventory": "passed",
+  "preserved_race_auth_browser": "passed",
+  "local_budget": {
+    "files": 15,
+    "gzip_level6_bytes": 211200,
+    "decoded_bytes": 682286,
+    "compressed_limit": 235942,
+    "decoded_limit": 760197,
+    "passed": true
+  },
+  "Chrome": "390 CSS viewport/document390; wrapped tabs visible; Tab order and navigation passed; desktop column/preferences retained; viewport restored",
+  "preview": {
+    "url": "http://localhost:65047/login?redirectTo=/console/profile/preferences",
+    "backend_url": "http://127.0.0.1:65048",
+    "pids": [
+      52333,
+      52334
+    ],
+    "frontend_port": 65047,
+    "backend_port": 65048,
+    "synthetic": true,
+    "logs": "/Users/tarunsingh/Documents/Codex/2026-10-19/task-5/stage08-module-preferences/.runtime/stage01-preview",
+    "process_stamps": {
+      "52333": "Tue Oct 20 15:44:11 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -m uvicorn scripts.public_launch.preview_backend:app --host 127.0.0.1 --port 65048",
+      "52334": "Tue Oct 20 15:44:11 2026     next-server (v16.2.5)"
+    }
+  },
+  "ci": "Successor pending; previous commit results not transferred",
+  "live": "26508e84 unchanged; no redeployment/live writes/production/oldUAT/access/09",
+  "logs": {
+    "stage08-mobile-regression-before.txt": "3f5b69c8ae3afb85c4106ece0770dabee22754f72278a89754e7d09734d7ee40",
+    "stage08-mobile-required-frontend.txt": "9dd05f1e5da378032d30a65454bdb25732e4337a6c1cac61b3a36479f3ffb865",
+    "stage08-mobile-auth-browser.txt": "074b84c9eccd9c7c8031485df3ae343288106bf8482c604e26848fef70c05429",
+    "stage08-mobile-preview-build.txt": "c8e55d87ab895e24b08b151591ed8b042a491db2f328eb0cf882a9e76e5138ee"
+  },
+  "screenshots": {
+    "preferences-desktop.jpg": "298e79976f5b5e44cbd8b92ca2ee5321b184ef7379bc7237862e584de0fa1b47",
+    "preferences-390.jpg": "cbcbe029c131dbeea5e24adad8781f553f1d0ab185fe72086af3314c44d18ddc"
+  }
+}

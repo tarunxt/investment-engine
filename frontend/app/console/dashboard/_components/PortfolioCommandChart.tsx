@@ -1,5 +1,7 @@
 "use client";
 
+import {useModules} from "@/providers/ModuleContext";
+import {surfaceAllowed} from "@/lib/modulePolicy";
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 
 import { useEffect, useMemo, useState } from "react";
@@ -168,10 +170,12 @@ function ChartSelector({
   options,
   selectedChart,
   onChange,
+  visibleKeys=PORTFOLIO_COMMAND_CHART_KEYS,
 }: {
   options: Record<PortfolioCommandChartKey, PortfolioCommandChartOption>;
   selectedChart: PortfolioCommandChartKey;
   onChange: (value: PortfolioCommandChartKey) => void;
+  visibleKeys?: PortfolioCommandChartKey[];
 }) {
   return (
     <label className="block">
@@ -184,7 +188,7 @@ function ChartSelector({
         }
         className="max-w-full rounded-xl border border-white/20 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 outline-none transition hover:border-white/40 focus:border-blue-300 focus:ring-2 focus:ring-blue-400/30"
       >
-        {PORTFOLIO_COMMAND_CHART_KEYS.map((key) => (
+        {visibleKeys.map((key) => (
           <option key={key} value={key}>
             {options[key].label}
           </option>
@@ -201,6 +205,9 @@ export function PortfolioCommandChart({
   userId: number | null | undefined;
   options: Record<PortfolioCommandChartKey, PortfolioCommandChartOption>;
 }) {
+  const {manifest}=useModules();
+  const chartPaths={india:'/console/zerodha',indmoney:'/console/indmoney-us',bullpen:'/console/bullpen-ai'};
+  const visibleKeys=PORTFOLIO_COMMAND_CHART_KEYS.filter(key=>key==='combined'?Object.values(chartPaths).some(path=>surfaceAllowed(manifest,path)):surfaceAllowed(manifest,chartPaths[key]));
   const [selectedChart, setSelectedChart] =
     useState<PortfolioCommandChartKey>(() => readChartPreference(userId));
   const [selectedRange, setSelectedRange] =
@@ -262,11 +269,12 @@ export function PortfolioCommandChart({
     });
   }, [options, userId]);
 
-  const selectedOption = options[selectedChart];
+  const effectiveChart=visibleKeys.includes(selectedChart)?selectedChart:visibleKeys[0]??'combined';
+  const selectedOption = options[effectiveChart];
   const trendPoints =
     selectedOption.trendPoints.length >= MIN_GENUINE_PORTFOLIO_POINTS
       ? selectedOption.trendPoints
-      : localHistory[selectedChart];
+      : localHistory[effectiveChart];
   const visibleTrendPoints = useMemo(
     () => filterGenuinePortfolioTrend(trendPoints, selectedRange),
     [selectedRange, trendPoints],
@@ -278,7 +286,8 @@ export function PortfolioCommandChart({
   const selector = (
     <ChartSelector
       options={options}
-      selectedChart={selectedChart}
+      selectedChart={effectiveChart}
+      visibleKeys={visibleKeys}
       onChange={(value) => {
         setSelectedChart(value);
         setHoveredPointIndex(null);

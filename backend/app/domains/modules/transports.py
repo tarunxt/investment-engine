@@ -23,6 +23,14 @@ def install_route_policy(app):
         if binding is None:continue
         def dependency(module,capability):
             async def enforce(request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
+                if module=='__analysis_metadata__':
+                    from .registry import INTERNAL_ANALYSIS_CONSUMERS
+                    for consumer in INTERNAL_ANALYSIS_CONSUMERS:
+                        decision=await ModulePolicy(db).authorize(owner_id=user.id,resource_owner_id=user.id,module_id=consumer.value,capability='view',boundary='http')
+                        if decision.allowed:break
+                    else:raise HTTPException(403,{'code':'MODULE_POLICY_DENIED','reasons':['NO_ELIGIBLE_ANALYSIS_CONSUMER']})
+                    yield decision
+                    return
                 if module=='__safety__':
                     from .tasks import _reconciliation_read
                     from .execution import _safety_owner

@@ -1,0 +1,69 @@
+{
+  "stage": "08",
+  "checked_at_utc": "2026-10-20T09:38:16.284807+00:00",
+  "base": "dc3063d06605c5c93494a2861bfa840f61c8d94a",
+  "code": "independent-review race repaired; successor local verification passed",
+  "ci": "successor exact-head CI pending; prior CI not transferred",
+  "deployment": "not performed",
+  "owner_acceptance": "pending08",
+  "checks": {
+    "backend_release": {
+      "log": ".runtime/stage08-release-publish.txt",
+      "sha256": "3e33ccdab9a303a256380663beb210492f26e0bfc7c0a515c0503f618be0a343"
+    },
+    "google_uat2": {
+      "log": ".runtime/stage08-google-uat2-boundaries.txt",
+      "sha256": "9b589b7d9c22d223c557f8acc1e340752e4248584bb1dd32faca5a2763508db6"
+    },
+    "required_frontend": {
+      "log": ".runtime/stage08-race-required-frontend.txt",
+      "sha256": "28c03e17aeca366d565c962c925b8569463ccbaa5ecac8e6b3786994a0a4d06f"
+    },
+    "policy_and_requests": {
+      "log": ".runtime/stage08-final-unit-policies.txt",
+      "sha256": "f3744a136f88f11b6a6b15ee63d191f6368f4c94e8eb78fe5ab6b470a81c415c"
+    },
+    "auth_browser": {
+      "log": ".runtime/stage08-race-auth-browser.txt",
+      "sha256": "dfb635c6e781676e3fc69c1457c7fc8a7469090f32c36efd1d0df486086b0efa"
+    },
+    "functional": {
+      "log": ".runtime/stage08-functional-published.txt",
+      "sha256": "812e2d1d804b4661b143d5419ed75066e28432f5c92a6d7ab09039e206e771a1"
+    },
+    "provider_races": {
+      "log": ".runtime/stage08-race-tests.txt",
+      "sha256": "bd2ea3dd3a5ba3180f11a6981ce9611eb7c5537c966f8d15a81492e4dceb75b9"
+    }
+  },
+  "backend_release_passed": 1251,
+  "google_uat2_passed": 44,
+  "required_frontend_passed": 331,
+  "policy_request_passed": 16,
+  "broad_frontend": {
+    "tests": 789,
+    "passed": 775,
+    "baseline_failures": 14,
+    "exact_identity_and_normalized_message_match": true,
+    "receipt": "docs/public-launch/evidence/stage08-frontend-baseline-comparison.json"
+  },
+  "synthetic_only": true,
+  "no_real_provider_or_order_or_email_or_paid_ai": true,
+  "external_approval": "unchanged",
+  "startup_budget": {
+    "files": 15,
+    "gzip_level6_bytes": 211201,
+    "decoded_bytes": 682286,
+    "compressed_limit": 235942,
+    "decoded_limit": 760197,
+    "passed": true
+  },
+  "broad_successor": {
+    "tests": 798,
+    "passed": 784,
+    "failed": 14,
+    "same_exact_identities": true,
+    "all_normalized_messages_identical": true,
+    "all_test_sources_unchanged": true
+  }
+}

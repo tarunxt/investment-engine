@@ -84,7 +84,26 @@ class ModuleState(BaseModel):
     capabilities: dict[str, ModuleDecision]
 
 
+class PresentationSurface(BaseModel):
+    path: str
+    label: str = ''
+    module_ids: list[ModuleId]
+    capability: Literal['view'] = 'view'
+    query_params: dict[str,str] = {}
+
+
+class PresentationManifest(BaseModel):
+    schema_version: Literal[1]
+    surfaces: list[PresentationSurface]
+    api_rules: list[PresentationSurface]
+    core_paths: list[str]
+    safety_activity_path: str
+    preferences_path: str
+    connections_path: str
+
+
 class ModuleCollection(BaseModel):
+    presentation: PresentationManifest | None = None
     schema_version: Literal[1]
     owner_id: int = Field(gt=0)
     version: int = Field(ge=0)

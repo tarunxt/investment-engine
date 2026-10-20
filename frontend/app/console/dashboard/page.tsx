@@ -17,10 +17,11 @@ export default async function DashboardPage() {
     const session = await createBackendSessionContext({
       headers: requestHeaders,
     });
-    initialSummary = await fetchBackendJsonWithSession<DashboardSummaryResponse>(
-      session,
-      "/dashboard/summary",
-    );
+    // Read only the owner policy before deciding whether portfolio data may load.
+    const policy=await fetchBackendJsonWithSession<import('@/lib/modulePolicy').ModuleCollection>(session,'/me/modules');
+    if(policy.modules.some(m=>m.selection.enabled&&m.availability.available&&m.capabilities.view?.allowed)){
+      initialSummary = await fetchBackendJsonWithSession<DashboardSummaryResponse>(session,"/dashboard/summary");
+    }
   } catch (error) {
     if (error instanceof BackendRuntimeHttpError && error.status === 401) {
       redirect("/login?reason=session-expired");

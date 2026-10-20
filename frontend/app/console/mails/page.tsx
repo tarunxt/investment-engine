@@ -1,5 +1,6 @@
 'use client';
 
+import {moduleRequestSignal} from '@/lib/moduleRequests';
 import { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
@@ -640,9 +641,10 @@ export default function MailsPage() {
     setPreferencesLoading(true);
     setPreferencesError(null);
     try {
-      const response = await fetch(URLs.mails.preferences(), {
+      const response = await fetch(URLs.mails.preferences()+'?selected_only=true', {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        signal:moduleRequestSignal(URLs.mails.history()),
       });
       const payload = (await response.json().catch(() => null)) as
         | { items?: MailPreference[] }
@@ -725,9 +727,10 @@ export default function MailsPage() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const response = await fetch(URLs.mails.history(), {
+      const response = await fetch(URLs.mails.history()+'?selected_only=true', {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
+        signal:moduleRequestSignal(URLs.mails.history()),
       });
       const payload = (await response.json().catch(() => null)) as
         | { items?: MailHistoryItem[]; detail?: unknown }
