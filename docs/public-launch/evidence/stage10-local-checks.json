@@ -1,0 +1,56 @@
+{
+  "stage": 10,
+  "title": "Complete connection authorization, renewal and disconnect",
+  "base": "ccb0b3c4682d6bc65c4b38ccf95e71a446dee117",
+  "branch": "codex/stage10-connection-authorization-local-20261020",
+  "local_only": true,
+  "backend_checks": {
+    "passed": 88,
+    "skipped": 0,
+    "log": "/tmp/stage10-boundaries-final.log"
+  },
+  "component_checks": {
+    "passed": 13,
+    "skipped": 0,
+    "log": "/tmp/stage10-frontend-tests.log"
+  },
+  "production_build": "passed /tmp/stage10-build-final.log",
+  "browser": {
+    "url": "http://localhost:53082/console/profile/connections",
+    "synthetic_only": true,
+    "passed": [
+      "both_modes_setup_callback_review_confirm",
+      "explicit_mode_switch",
+      "renewal",
+      "disconnect",
+      "reload_persistence",
+      "both_panels_refresh",
+      "390px_document_width_390",
+      "mobile_disconnect"
+    ],
+    "live_google_or_provider_login": false,
+    "physical_mobile_device": false
+  },
+  "pending": [
+    "PostgreSQL migration/full callback race",
+    "CI and exact artifact",
+    "independent source review",
+    "frozen Stage09 CI strategy",
+    "Stage10 native schema recovery",
+    "UAT2 route composition and real provider wiring/approval",
+    "deployment",
+    "owner acceptance"
+  ],
+  "source_sha256": {
+    "backend/app/domains/connections/authorization.py": "90f4786392fb4dcb2231830e5495d6740cdd1fc8d5e675d9c7dfa9a697f68887",
+    "backend/app/domains/connections/authorization_router.py": "11241d6e360c0d11003bdb1a66f1b06f4e11b1984a83e935df30be08894e9326",
+    "backend/app/domains/connections/kite_authorization.py": "7dd0ddf50e019b925fb4613e3eb72bdb7910c2239ccdef05b1858e5f029b302a",
+    "backend/app/domains/connections/models.py": "15de91b9402cbb904034c1ccdad6a717c834cec72e2882c6b82130c942b78e99",
+    "frontend/components/connections/ConnectionAuthorization.tsx": "b5bf0b0bcf3b94d2cd4e6ce2a331a8ad0e6a21a774f6f96c5e279122ca19d266"
+  },
+  "parent_message_attempt": {
+    "target": "01a1580c-0169-72bf-b4cb-a31bf41d001b",
+    "result": "thread not found; not delivered; no retry or alternative route"
+  },
+  "no_live_changes": true
+}

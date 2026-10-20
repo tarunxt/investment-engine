@@ -5,7 +5,7 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 270,
+    "http": 276,
     "lifecycle": 9,
     "page": 67,
     "scheduler": 16,
@@ -2473,6 +2473,158 @@
       "route": "",
       "side_effects": "private trade DB; AI; queues",
       "source": "backend/app/domains/bullpen_trade_analysis/tasks.py:142"
+    },
+    {
+      "calls": [
+        "Depends",
+        "call",
+        "router.post",
+        "s.disconnect"
+      ],
+      "capability": "disconnect",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(context)",
+        "router.post('/disconnect')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/disconnect",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:101"
+    },
+    {
+      "calls": [
+        "Depends",
+        "bool",
+        "router.get"
+      ],
+      "capability": "config",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(authorization_runtime)",
+        "Depends(get_current_user)",
+        "router.get('/config')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/config",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:66"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "call",
+        "router.post",
+        "runtime.get",
+        "service.store.provision"
+      ],
+      "capability": "setup",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(context)",
+        "router.post('/synthetic-setup')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/synthetic-setup",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:73"
+    },
+    {
+      "calls": [
+        "Depends",
+        "call",
+        "router.post",
+        "s.start"
+      ],
+      "capability": "start",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(context)",
+        "router.post('/start')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/start",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:83"
+    },
+    {
+      "calls": [
+        "Depends",
+        "call",
+        "router.post",
+        "s.callback"
+      ],
+      "capability": "callback",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(context)",
+        "router.post('/callback')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/callback",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:89"
+    },
+    {
+      "calls": [
+        "Depends",
+        "call",
+        "router.post",
+        "s.confirm"
+      ],
+      "capability": "confirm",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(context)",
+        "router.post('/confirm')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/me/connection-authorization/confirm",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/authorization_router.py:95"
     },
     {
       "calls": [
@@ -14648,10 +14800,14 @@
     "backend/app/domains/bullpen_trade_analysis/service.py": "f20885a588a104053e49e0bf67b1ff5208b5e2cf1b690be509f02a6c6188f5c9",
     "backend/app/domains/bullpen_trade_analysis/tasks.py": "76353c818e2c152454a075632c78fd2733359f8e9cf42b6bc5e0a491f1ba3751",
     "backend/app/domains/connections/__init__.py": "2e58dcfaee11bcbf2b130f1b5ef3eabe5fd1db196b643ae72ff281b413ff398e",
+    "backend/app/domains/connections/authorization.py": "90f4786392fb4dcb2231830e5495d6740cdd1fc8d5e675d9c7dfa9a697f68887",
+    "backend/app/domains/connections/authorization_router.py": "11241d6e360c0d11003bdb1a66f1b06f4e11b1984a83e935df30be08894e9326",
     "backend/app/domains/connections/crypto.py": "d8163246e96de05783ba8c9c80c5e18cd36b76a114262cace056e8b6be62197e",
+    "backend/app/domains/connections/fake_authorization.py": "20bc5579380a3be35ea21090eb2d5d78c94453437bbe934be8f6beb2f59948f4",
+    "backend/app/domains/connections/kite_authorization.py": "7dd0ddf50e019b925fb4613e3eb72bdb7910c2239ccdef05b1858e5f029b302a",
     "backend/app/domains/connections/material.py": "94762fa2cb290b27ba99febb68bc04822486d0b8169297b3970122eec5306b62",
-    "backend/app/domains/connections/models.py": "a0ee2cdc9e2ac9df2f11747a690dbf857d18a7f7e33080f7a24bede523440ebc",
-    "backend/app/domains/connections/router.py": "80ec4b297a5d01d93d0fe7b592aa043eeb172e79cbc83327cafd46bb38e6940c",
+    "backend/app/domains/connections/models.py": "15de91b9402cbb904034c1ccdad6a717c834cec72e2882c6b82130c942b78e99",
+    "backend/app/domains/connections/router.py": "cbce4976a5b7adbe3c1cc0cc57c69f857d46e2b46def50c5d1b441e3359ed6bf",
     "backend/app/domains/connections/service.py": "b1aded2ab76fba1362b300c2b39b9e4eca46d23a51c0ee7386e662afd3b5240e",
     "backend/app/domains/cost_drivers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/cost_drivers/cache.py": "d990dd39dd09bda03287aa2b5fee85c36f2fe676359cec66ecce5d265b91230a",
@@ -14923,7 +15079,7 @@
     "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
     "backend/app/main.py": "e9d542a17e156079d9488d25d8bb1ec3c236f28f81ff89f50237b2549ab110fb",
-    "backend/app/models/__init__.py": "dc125eda1edd699a132cf747ae5ad56e96fbaea60c5104fbde854a5fa9bf1348",
+    "backend/app/models/__init__.py": "74c963e28fa8d3afd79a9651c4a165f46ae45567743205913e22a50177d7f411",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",
@@ -14998,7 +15154,7 @@
     "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
     "frontend/app/console/profile/activity/page.tsx": "46c115394ec684f3a8e5adc616feffdc71681140e39d419a24d013c93a6c6fe6",
-    "frontend/app/console/profile/connections/page.tsx": "c1d7f3ad693843290636179202c15490ae1e64f22057c18a8b051a47fd6ba3d1",
+    "frontend/app/console/profile/connections/page.tsx": "541bdcaab4c43e254878b78da3f1003c36eedf0fe0b85c66945c5fac22feac4a",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
     "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",

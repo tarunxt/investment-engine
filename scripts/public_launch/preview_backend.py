@@ -44,6 +44,7 @@ install()
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
 from scripts.public_launch import preview_jobs, preview_stage05,preview_stage08,preview_stage09
+from app.domains.connections.models import ConnectionAttempt
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
 from app.domains.modules.router import router as modules_router
@@ -59,7 +60,7 @@ async def lifespan(app):
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
                       Job.__table__, Run.__table__, RunJob.__table__,AutoRebalanceWorkflow.__table__,AutoRebalanceWorkflowStage.__table__,
-                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES,*preview_stage09.TABLES, UserModulePreferences.__table__, UserModule.__table__):
+                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES,*preview_stage09.TABLES, ConnectionAttempt.__table__, UserModulePreferences.__table__, UserModule.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -132,7 +133,7 @@ async def synthetic_boundary(request: Request, call_next):
     private_read = request.method == "GET" and (request.url.path.startswith("/me/connections/") or request.url.path in {"/me/connections","/jobs", "/runs","/me/modules/safety-activity"}|preview_stage08.READS or
                    request.url.path.startswith('/me/modules/resource-access/') or any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
                        for prefix in ("/jobs/", "/runs/","/indmoney-us/portfolio/")))
-    if request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and (request.method, request.url.path) not in ALLOWED:
+    if request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and not (request.method=='POST' and request.url.path in {'/me/connection-authorization/synthetic-setup','/me/connection-authorization/start','/me/connection-authorization/callback','/me/connection-authorization/confirm','/me/connection-authorization/disconnect'}) and request.url.path!='/me/connection-authorization/config' and (request.method, request.url.path) not in ALLOWED:
         return JSONResponse({"detail": "Unavailable in synthetic Stage01 preview; no external actions are permitted"}, status_code=503)
     response = await call_next(request)
     response.headers["X-Stage01-Synthetic-Preview"] = "true"
@@ -161,3 +162,14 @@ preview_stage08.install(app)
 
 from app.domains.modules.transports import install_route_policy
 install_route_policy(app)
+
+# Local-only fake composition: no production/UAT2 entrypoint installs this.
+from app.domains.connections.authorization_router import router as authorization_router, authorization_runtime
+from app.domains.connections.fake_authorization import FakeKiteAuthorization
+_preview_callback = os.environ['FRONTEND_URL']+'/console/profile/connections'
+_preview_provider = FakeKiteAuthorization()
+def _authorization_runtime():
+    return {'provider':_preview_provider,'callback_url':_preview_callback,
+        'allowed_callbacks':{_preview_callback},'synthetic_setup':True}
+app.dependency_overrides[authorization_runtime] = _authorization_runtime
+app.include_router(authorization_router)

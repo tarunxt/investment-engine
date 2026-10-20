@@ -1,3 +1,11 @@
+# Stage10 local implementation checkpoint — Stage09 completed
+
+Canonical title: **10 · Complete connection authorization, renewal and disconnect**. Parent confirmed Stage09 complete after independent live verification at20October2026 15:54:56UTC: exact deployed/controller/frontend ccb0b3c4682d6bc65c4b38ccf95e71a446dee117, manifest e2ea827c, integration_connections_001, eight services healthy, owner-only simulation. Existing failed/pending Stage09 receipts below remain historical evidence, not current deployment holds. Fresh nonowner Google/provider flows were explicitly untested/disabled; completion is limited to the accepted owner-only simulation scope.
+
+New isolated branch codex/stage10-connection-authorization-local-20261020, task-3/stage10-connection-authorization, exact Stage09 base above. Code LOCAL SYNTHETIC CANDIDATE; CI NOT RUN; UAT2 deployment NOT RUN; UAT2 verification NOT RUN; Owner acceptance PENDING10; External provider approval PENDING. Local88 backend and13 component checks and actual Next production build pass. Real Chrome both-mode synthetic onboarding, review, renewal/disconnect/reload and390px controls pass. See STAGE10_REQUIREMENT_MAP.md and STAGE10_PREVIEW.md for exact scope, evidence and pending gates.
+
+Parent instruction restricts new Stage10 source to local work. No publication/deployment or Stage11; no production/oldUAT/AWS/credentials/provider/financial action. Docker PostgreSQL/CI and native Stage10 schema rollback remain required. Frozen Stage09 CI provenance guards are intentionally intact and need an explicit reviewed Stage10 strategy before publication; no skip/waiver or deployment readiness claim. Earlier ledgers below are preserved unchanged.
+
 # Stage09 CI-only rollback verification — deployment HOLD
 
 Application runtime remains exactly `6844989a55ea2408d6da7862fa07194079ff8b19`. The current containing commit is a separately identified test-only verification head on PR1251, authorized by the owner's explicit approval to publish/run the rollback rehearsal. Only backend/scripts test harness/safety tests, PR Checks and these documentation paths may differ; strict CI provenance enforces that allowlist. No runtime controller/frontend/app/migration/requirements change. Earlier6844989a/6e56dc99 source and artifact receipts remain preserved.

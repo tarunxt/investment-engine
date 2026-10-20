@@ -23,7 +23,7 @@ async def describe_connection(store,row):
     if uat2_mode():ready=False;reason='UAT2_SIMULATION_ONLY'
     account=row.provider_account_id
     return {'id':row.id,'provider':row.provider,'app_ownership_mode':row.app_ownership_mode,
-        'account_label':('***'+account[-4:]) if account else None,'version':row.version,'status':row.status,
+        'is_current':row.is_current,'account_label':('***'+account[-4:]) if account else None,'version':row.version,'status':row.status,
         'token_expires_at':row.token_expires_at,'encryption_key_version':key_version,
         'credential_storage':'encrypted_per_connection' if row.app_ownership_mode=='user_owned' else 'platform_app_service_and_encrypted_per_connection_token',
         'readiness':{'ready_for_adapter':ready,'reason':reason,'platform_approval_verified':platform_approved if row.app_ownership_mode=='platform_managed' else None,

@@ -93,7 +93,7 @@ def test_actual_additive_migration_roundtrip_preserves_legacy_ciphertext(databas
         legacy=ZerodhaCredential(user_id=owner,access_token=cipher,login_time=datetime.now(timezone.utc),expires_at=datetime.now(timezone.utc)+timedelta(hours=1));s.add(legacy);s.commit();legacy_id=legacy.id
     sys.path.insert(0,str(backend/'scripts'));from verify_api_attempt_migration import baseline_snapshot
     before=baseline_snapshot(engine,exclude_tables=frozenset())
-    migrate('upgrade','head')
+    migrate('upgrade','integration_connections_001')
     after=baseline_snapshot(engine,exclude_tables=frozenset({'integration_connections','connection_credentials'}))
     assert before==after
     from app.domains.connections.models import IntegrationConnection,ConnectionCredential
@@ -105,4 +105,4 @@ def test_actual_additive_migration_roundtrip_preserves_legacy_ciphertext(databas
         migrate('downgrade','module_lifecycle_001')
         assert baseline_snapshot(engine,exclude_tables=frozenset())==before
         assert 'integration_connections' not in inspect(engine).get_table_names()
-        migrate('upgrade','head')
+        migrate('upgrade','integration_connections_001')
