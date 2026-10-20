@@ -33,20 +33,20 @@ async def create_job(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
-    if not ProviderFactory.supports(body.provider):
-        raise HTTPException(400, detail=f"Unsupported provider: '{body.provider}'")
-    if not ProviderFactory.is_configured(body.provider):
-        raise HTTPException(
-            400,
-            detail=f"Provider '{body.provider}' is not configured. Set the API key in your environment.",
-        )
+    def validate_provider():
+        if not ProviderFactory.supports(body.provider):
+            raise HTTPException(400, detail=f"Unsupported provider: '{body.provider}'")
+        if not ProviderFactory.is_configured(body.provider):
+            raise HTTPException(
+                400,
+                detail=f"Provider '{body.provider}' is not configured. Set the API key in your environment.",
+            )
 
-    redis = _get_redis()
     uc = CreateJobUseCase(
         session=db,
         event_bus=event_bus,
-        lock=RedisLock(redis),
-        idempotency=IdempotencyStore(redis),
+        before_create=validate_provider,
+        idempotency=IdempotencyStore(db),
     )
     try:
         result = await uc.execute(

@@ -27,6 +27,9 @@ _backend = settings.celery_result_backend or settings.redis_url
 
 celery = RecoveryCelery("worker", broker=_broker, backend=_backend, task_cls=RecoveryTask)
 
+from app.infrastructure.database.outbox.job_dispatch import JobOutboxRelay
+celery.steps["consumer"].add(JobOutboxRelay)
+
 # Recovery of advisory verification requests lives in the consumer service,
 # rather than adding a recurring Beat task or touching financial workflows.
 if not audit_recovery_blocked():

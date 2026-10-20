@@ -56,7 +56,14 @@ def test_lookup_error_is_contained_and_does_not_log_private_error(caplog):
         def __enter__(self): return self
         def __exit__(self,*args): return False
     db=SimpleNamespace(begin_nested=Nested,execute=Mock(side_effect=RuntimeError("private connection value")))
-    result=resolve_job_usage_identity(db,job())
+    from app.domains.jobs.usage_identity import logger
+    # A prior lifespan may configure a non-propagating app logger. Capture this
+    # logger directly so the privacy assertion does not depend on suite order.
+    logger.addHandler(caplog.handler)
+    try:
+        result=resolve_job_usage_identity(db,job())
+    finally:
+        logger.removeHandler(caplog.handler)
     assert result["run_id"] is None
     assert "RuntimeError" in caplog.text
     assert "private connection value" not in caplog.text

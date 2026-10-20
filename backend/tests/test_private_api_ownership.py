@@ -25,6 +25,7 @@ from app.domains.runs.models import Run, RunJob
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.google_sheets.models import GoogleSheetsCredential
 from app.infrastructure.database.outbox.models import OutboxMessage
+from app.infrastructure.messaging.operation_models import IdempotencyOperation
 from app.infrastructure.database.session import get_async_db
 from app.shared.types import JobStatus
 
@@ -58,7 +59,7 @@ def private_api(monkeypatch):
         engine = create_engine('sqlite://', poolclass=StaticPool,
                                connect_args={'check_same_thread': False})
     for model in (User, UserProfile, ActivityLog, Prompt, Job, Run, RunJob,
-                  OutboxMessage, GoogleSheetsCredential, IndMoneyUsPortfolioSnapshot):
+                  OutboxMessage, IdempotencyOperation, GoogleSheetsCredential, IndMoneyUsPortfolioSnapshot):
         model.__table__.create(engine)
     session = Session(engine, expire_on_commit=False)
     users = []
@@ -88,7 +89,10 @@ def private_api(monkeypatch):
         session.add(IndMoneyUsPortfolioSnapshot(user_id=user.id, snapshot_date=date.today(),
                     captured_at=datetime.now(), raw_text='synthetic', holdings=[]))
     session.commit()
-    db = SimpleNamespace(add=session.add, execute=AsyncMock(side_effect=session.execute),
+    @asynccontextmanager
+    async def nested():
+        with session.begin_nested(): yield
+    db = SimpleNamespace(get_bind=session.get_bind, begin_nested=nested, add=session.add, execute=AsyncMock(side_effect=session.execute),
         scalar=AsyncMock(side_effect=session.scalar), flush=AsyncMock(side_effect=session.flush),
         refresh=AsyncMock(side_effect=session.refresh), commit=AsyncMock(side_effect=session.commit),
         rollback=AsyncMock(side_effect=session.rollback))
@@ -207,17 +211,6 @@ def test_create_replay_uses_server_owner_and_per_owner_cache(private_api, monkey
     a = private_api
     from app.domains.jobs import router, tasks
     from app.domains.jobs.use_cases import create_job
-    cache = {}
-    class Idempotency:
-        async def get(self, key): return cache.get(key)
-        async def set(self, key, value): cache[key] = value
-    class Lock:
-        @asynccontextmanager
-        async def acquire(self, *args, **kwargs): yield
-    monkeypatch.setattr(router, '_get_redis', lambda: None)
-    monkeypatch.setattr(router, 'IdempotencyStore', lambda _: Idempotency())
-    monkeypatch.setattr(router, 'RedisLock', lambda _: Lock())
-    monkeypatch.setattr(create_job, 'register_job_task', AsyncMock())
     monkeypatch.setattr(router.event_bus, 'publish', AsyncMock())
     dispatch = Mock(return_value=SimpleNamespace(id='synthetic-task'))
     monkeypatch.setattr(tasks.execute_ai_job, 'delay', dispatch)
@@ -232,7 +225,9 @@ def test_create_replay_uses_server_owner_and_per_owner_cache(private_api, monkey
         job = a.session.get(Job, first.json()['id'])
         assert job.user_id == owner.id
         created.append(job.id)
-    assert created[0] != created[1] and dispatch.call_count == 2
+    assert created[0] != created[1] and dispatch.call_count == 0
+    assert len(list(a.session.scalars(select(IdempotencyOperation)))) == 2
+    assert len(list(a.session.scalars(select(OutboxMessage)))) == 2
 
 
 @pytest.mark.asyncio
@@ -338,3 +333,17 @@ def test_uat2_mounts_only_read_handlers_and_retains_fail_closed_mutations(privat
     finally:
         client.close()
         app.dependency_overrides.clear()
+
+
+def test_owned_durable_replay_survives_provider_unavailability(private_api, monkeypatch):
+    from app.domains.jobs import router
+    a=private_api
+    body=dict(prompt='synthetic durable provider replay',provider='fake',model='offline')
+    h={**a.headers[0],'Idempotency-Key':'provider-offline-replay'}
+    first=a.client.post('/jobs',json=body,headers=h)
+    assert first.status_code==200
+    monkeypatch.setattr(router.ProviderFactory,'is_configured',lambda *_:False)
+    again=a.client.post('/jobs',json=body,headers=h)
+    assert again.status_code==200 and again.json()['id']==first.json()['id']
+    fresh=a.client.post('/jobs',json=body,headers={**h,'Idempotency-Key':'a-new-key'})
+    assert fresh.status_code==400

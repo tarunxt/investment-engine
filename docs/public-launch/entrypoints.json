@@ -2,7 +2,7 @@
   "baseline_sha": "0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
-    "background": 30,
+    "background": 31,
     "export": 42,
     "frontend": 25,
     "http": 262,
@@ -3615,7 +3615,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/events/latest",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/events_router.py:55"
+      "source": "backend/app/domains/indmoney_us/events_router.py:56"
     },
     {
       "calls": [
@@ -3642,7 +3642,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/events/history",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/events_router.py:66"
+      "source": "backend/app/domains/indmoney_us/events_router.py:67"
     },
     {
       "calls": [
@@ -3671,7 +3671,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/events/{job_id}",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/events_router.py:76"
+      "source": "backend/app/domains/indmoney_us/events_router.py:77"
     },
     {
       "calls": [
@@ -3679,18 +3679,16 @@
         "CreateJobUseCase",
         "Depends",
         "HTTPException",
+        "Header",
         "IdempotencyStore",
         "IndMoneyUsEventsRunResponse",
         "IndMoneyUsPortfolioSnapshotRepository",
         "PostgresJobRepository",
         "PostgresJobRepository(db).get",
-        "RedisLock",
         "UserId",
-        "_get_redis",
         "_resolve_events_target",
         "build_indmoney_us_events_prompt",
         "logger.info",
-        "redis.aclose",
         "router.post",
         "snapshot_repo.get_latest_by_user",
         "use_case.execute"
@@ -3711,7 +3709,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/events/run",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/events_router.py:89"
+      "source": "backend/app/domains/indmoney_us/events_router.py:90"
     },
     {
       "calls": [
@@ -3857,7 +3855,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/threats/{job_id}",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/threats_router.py:102"
+      "source": "backend/app/domains/indmoney_us/threats_router.py:103"
     },
     {
       "calls": [
@@ -3865,18 +3863,16 @@
         "CreateJobUseCase",
         "Depends",
         "HTTPException",
+        "Header",
         "IdempotencyStore",
         "IndMoneyUsPortfolioSnapshotRepository",
         "IndMoneyUsThreatRunResponse",
         "PostgresJobRepository",
         "PostgresJobRepository(db).get",
-        "RedisLock",
         "UserId",
-        "_get_redis",
         "_resolve_threat_target",
         "build_indmoney_us_threat_prompt",
         "logger.info",
-        "redis.aclose",
         "router.post",
         "snapshot_repo.get_latest_by_user",
         "use_case.execute",
@@ -3898,7 +3894,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/threats/run",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/threats_router.py:115"
+      "source": "backend/app/domains/indmoney_us/threats_router.py:116"
     },
     {
       "calls": [
@@ -3925,7 +3921,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/threats/latest",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/threats_router.py:68"
+      "source": "backend/app/domains/indmoney_us/threats_router.py:69"
     },
     {
       "calls": [
@@ -3952,7 +3948,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/threats/history",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/threats_router.py:92"
+      "source": "backend/app/domains/indmoney_us/threats_router.py:93"
     },
     {
       "calls": [
@@ -4046,9 +4042,7 @@
         "PostgresJobRepository",
         "ProviderFactory.is_configured",
         "ProviderFactory.supports",
-        "RedisLock",
         "UserId",
-        "_get_redis",
         "repo.get",
         "router.post",
         "uc.execute"
@@ -4181,6 +4175,7 @@
         "db.execute(sa_select(Job).join(RunJob, RunJob.job_id == Job.id).where(RunJob.run_id == run_job.run_id)).scalars",
         "db.execute(sa_select(Job).join(RunJob, RunJob.job_id == Job.id).where(RunJob.run_id == run_job.run_id)).scalars().all",
         "db.execute(sa_select(RunJob).where(RunJob.job_id == job_id)).scalar_one_or_none",
+        "defer_retry",
         "execute_bullpen_llm_target",
         "failure_metadata",
         "getattr",
@@ -4245,7 +4240,7 @@
       "registration": "celery.task(name='app.domains.jobs.tasks.execute_ai_job', bind=True, max_retries=3, default_retry_delay=30, queue='ai')",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/tasks.py:1191"
+      "source": "backend/app/domains/jobs/tasks.py:1193"
     },
     {
       "calls": [
@@ -10117,7 +10112,7 @@
       "registration": "mounted",
       "route": "/zerodha/events/latest",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/events_router.py:55"
+      "source": "backend/app/domains/zerodha/events_router.py:56"
     },
     {
       "calls": [
@@ -10144,7 +10139,7 @@
       "registration": "mounted",
       "route": "/zerodha/events/history",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/events_router.py:66"
+      "source": "backend/app/domains/zerodha/events_router.py:67"
     },
     {
       "calls": [
@@ -10173,7 +10168,7 @@
       "registration": "mounted",
       "route": "/zerodha/events/{job_id}",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/events_router.py:76"
+      "source": "backend/app/domains/zerodha/events_router.py:77"
     },
     {
       "calls": [
@@ -10181,18 +10176,16 @@
         "CreateJobUseCase",
         "Depends",
         "HTTPException",
+        "Header",
         "IdempotencyStore",
         "PostgresJobRepository",
         "PostgresJobRepository(db).get",
-        "RedisLock",
         "UserId",
         "ZerodhaEventsRunResponse",
         "ZerodhaPortfolioSnapshotRepository",
-        "_get_redis",
         "_resolve_events_target",
         "build_zerodha_events_prompt",
         "logger.info",
-        "redis.aclose",
         "router.post",
         "snapshot_repo.get_latest_by_user",
         "use_case.execute"
@@ -10213,7 +10206,7 @@
       "registration": "mounted",
       "route": "/zerodha/events/run",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/events_router.py:89"
+      "source": "backend/app/domains/zerodha/events_router.py:90"
     },
     {
       "calls": [
@@ -10787,7 +10780,7 @@
       "registration": "mounted",
       "route": "/zerodha/threats/{job_id}",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/threats_router.py:101"
+      "source": "backend/app/domains/zerodha/threats_router.py:102"
     },
     {
       "calls": [
@@ -10795,18 +10788,16 @@
         "CreateJobUseCase",
         "Depends",
         "HTTPException",
+        "Header",
         "IdempotencyStore",
         "PostgresJobRepository",
         "PostgresJobRepository(db).get",
-        "RedisLock",
         "UserId",
         "ZerodhaPortfolioSnapshotRepository",
         "ZerodhaThreatRunResponse",
-        "_get_redis",
         "_resolve_threat_target",
         "build_zerodha_threat_prompt",
         "logger.info",
-        "redis.aclose",
         "router.post",
         "snapshot_repo.get_latest_by_user",
         "use_case.execute"
@@ -10827,7 +10818,7 @@
       "registration": "mounted",
       "route": "/zerodha/threats/run",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/threats_router.py:114"
+      "source": "backend/app/domains/zerodha/threats_router.py:115"
     },
     {
       "calls": [
@@ -10854,7 +10845,7 @@
       "registration": "mounted",
       "route": "/zerodha/threats/latest",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/threats_router.py:67"
+      "source": "backend/app/domains/zerodha/threats_router.py:68"
     },
     {
       "calls": [
@@ -10881,7 +10872,27 @@
       "registration": "mounted",
       "route": "/zerodha/threats/history",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/threats_router.py:91"
+      "source": "backend/app/domains/zerodha/threats_router.py:92"
+    },
+    {
+      "calls": [
+        "Thread"
+      ],
+      "capability": "Thread(target=run, name='job-outbox-relay', daemon=True)",
+      "classification": "administrator-only",
+      "kind": "background",
+      "method": "",
+      "module": "platform",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:88"
     },
     {
       "calls": [
@@ -10942,6 +10953,26 @@
       "calls": [
         "crontab"
       ],
+      "capability": "app.domains.sports_rankings.tasks.reconcile_cricket",
+      "classification": "administrator-only",
+      "kind": "scheduler",
+      "method": "",
+      "module": "platform",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "{'task': 'app.domains.sports_rankings.tasks.reconcile_cricket', 'schedule': crontab(minute=10, hour=3)}",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/infrastructure/messaging/celery_app.py:102"
+    },
+    {
+      "calls": [
+        "crontab"
+      ],
       "capability": "app.domains.sports_rankings.tasks.dispatch_refresh",
       "classification": "administrator-only",
       "kind": "scheduler",
@@ -10956,7 +10987,7 @@
       "registration": "{'task': 'app.domains.sports_rankings.tasks.dispatch_refresh', 'schedule': crontab(minute='*/15'), 'options': {'expires': 900}}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:103"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:106"
     },
     {
       "calls": [
@@ -10976,7 +11007,7 @@
       "registration": "{'task': 'app.domains.mails.tasks.recover_completion_emails', 'schedule': crontab(minute='*')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:108"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:111"
     },
     {
       "calls": [
@@ -10996,7 +11027,7 @@
       "registration": "{'task': 'app.domains.fx_rates.tasks.refresh_usd_inr_rate', 'schedule': crontab(minute=7, hour='*/6')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:112"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:115"
     },
     {
       "calls": [
@@ -11016,7 +11047,7 @@
       "registration": "{'task': 'app.domains.dashboard.tasks.capture_daily_dashboard_portfolios', 'schedule': crontab(minute=25, hour=18)}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:119"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:122"
     },
     {
       "calls": [
@@ -11036,7 +11067,7 @@
       "registration": "{'task': 'app.domains.zerodha.tasks.enqueue_daily_portfolio_sync', 'schedule': crontab(minute=40, hour=10)}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:124"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:127"
     },
     {
       "calls": [
@@ -11056,7 +11087,7 @@
       "registration": "{'task': 'app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs', 'schedule': schedule(run_every=10.0)}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:128"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:131"
     },
     {
       "calls": [
@@ -11076,7 +11107,7 @@
       "registration": "{'task': 'app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans', 'schedule': schedule(run_every=10.0)}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:136"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:139"
     },
     {
       "calls": [
@@ -11096,7 +11127,7 @@
       "registration": "{'task': 'app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers', 'schedule': schedule(run_every=10.0)}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:140"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:143"
     },
     {
       "calls": [
@@ -11116,7 +11147,7 @@
       "registration": "{'task': 'app.domains.bullpen008.tasks.enqueue_due_bullpen008_runs', 'schedule': crontab(minute='*')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:144"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:147"
     },
     {
       "calls": [
@@ -11136,7 +11167,7 @@
       "registration": "{'task': 'app.domains.bullpen008.tasks.refresh_bullpen008_position_alerts', 'schedule': crontab(minute='*')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:148"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:151"
     },
     {
       "calls": [
@@ -11156,7 +11187,7 @@
       "registration": "{'task': 'app.domains.bullpen008.tasks.recover_bullpen008_executions', 'schedule': crontab(minute='*')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:152"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:155"
     },
     {
       "calls": [
@@ -11176,7 +11207,7 @@
       "registration": "{'task': 'app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents', 'schedule': crontab(minute='*')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:156"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:159"
     },
     {
       "calls": [
@@ -11196,7 +11227,7 @@
       "registration": "{'task': 'app.domains.polymarket_auto_live.tasks.watchdog_requeue_stale_auto_live_order_intents', 'schedule': schedule(run_every=30.0)}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:160"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:163"
     },
     {
       "calls": [
@@ -11216,7 +11247,7 @@
       "registration": "{'task': 'app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders', 'schedule': crontab(minute='*')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:164"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:167"
     },
     {
       "calls": [
@@ -11236,7 +11267,7 @@
       "registration": "{'task': 'app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs', 'schedule': crontab(minute=37, hour='*/6')}",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:168"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:171"
     },
     {
       "calls": [
@@ -11267,7 +11298,7 @@
       "registration": "task_received.connect",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:212"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:215"
     },
     {
       "calls": [
@@ -11293,27 +11324,7 @@
       "registration": "worker_ready.connect",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:272"
-    },
-    {
-      "calls": [
-        "crontab"
-      ],
-      "capability": "app.domains.sports_rankings.tasks.reconcile_cricket",
-      "classification": "administrator-only",
-      "kind": "scheduler",
-      "method": "",
-      "module": "platform",
-      "observed_guards": [
-        "none found locally; not proof of public access"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "{'task': 'app.domains.sports_rankings.tasks.reconcile_cricket', 'schedule': crontab(minute=10, hour=3)}",
-      "route": "",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/messaging/celery_app.py:99"
+      "source": "backend/app/infrastructure/messaging/celery_app.py:275"
     },
     {
       "calls": [
@@ -13696,7 +13707,7 @@
     "backend/app/domains/health/router.py": "a53888b3d29c4c678c55118336631fc3e5cb598a350d8e335d5884015b831543",
     "backend/app/domains/indmoney_us/__init__.py": "bf70baf7f2a22b8703238187201179d0f1b275798fb2ae7532c1b88a894da292",
     "backend/app/domains/indmoney_us/events.py": "7d5f2285d6d6530841a726d2a14dbab0eee3a241dc45135f6be22da6cbe4d513",
-    "backend/app/domains/indmoney_us/events_router.py": "372eb56d1290c17defb8bee2ff6da4d60e7e03b111b68e1ba5a4a186bdb78774",
+    "backend/app/domains/indmoney_us/events_router.py": "06ac7c29da9e438f814dc0b39a703fe1779d23301d3f13f7deab64bdda591433",
     "backend/app/domains/indmoney_us/events_schemas.py": "5501e8a96ad76142101b920091d64a259db162dc36fab06d7b4c665502f53a55",
     "backend/app/domains/indmoney_us/models.py": "cc750803095ed9d323c0ee45e6e6396053c259e20fd59711a83c5f0b5a6f3009",
     "backend/app/domains/indmoney_us/price_service.py": "bbf5cfe65525efb7b71e4ebe6e88e2507bcfbfd025eecf69709456d4e6e6e647",
@@ -13706,7 +13717,7 @@
     "backend/app/domains/indmoney_us/service.py": "3e3c74319633be198675e547d09c7872a8641b06828d8553c916bee38af71b15",
     "backend/app/domains/indmoney_us/snapshot_validation.py": "77cf6200281e1633324d5f687ab2f518ffa325b5abedd2c14acf3d7593348d1d",
     "backend/app/domains/indmoney_us/threats.py": "f8d4982f17bce42821eb025b0d20d6c7bf3721fbd6187d71e6cedb806da34c71",
-    "backend/app/domains/indmoney_us/threats_router.py": "cd25aaa0baa3c6f16a58cb8d469eede5aae950d9e7d769d697dbdada7f132c17",
+    "backend/app/domains/indmoney_us/threats_router.py": "a61c11f889de730b38ee177060e31376929bd0652aafa26e4a30903d678919ad",
     "backend/app/domains/indmoney_us/threats_schemas.py": "a2ef4417e7a59a5aec671a0b2913be2d3ad8994bd0304eca1c18c771f86da51d",
     "backend/app/domains/jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/jobs/events.py": "efbdca60f1b437064acac1722a9a4b19a11b489ba74b581503d7eec9f46a50ff",
@@ -13721,12 +13732,12 @@
     "backend/app/domains/jobs/output_runtime.py": "95773ac85373141a83886d0e6641d14124621b2cf856b831d3ad544033a9ebd3",
     "backend/app/domains/jobs/output_sources.py": "c8f788994e78be1bdba2c56450660581a7e4c7992a2bf8cc3635d6eb130a26fb",
     "backend/app/domains/jobs/repository.py": "0860a240f6efe062c21f78e28a26df5218d781a36b194779a2ccbaad268edc76",
-    "backend/app/domains/jobs/router.py": "01213de54a214e29c6caea02a99a4caf28ab7b727a6503206b67d3d62f02fb7f",
+    "backend/app/domains/jobs/router.py": "080841568f18218d1d5e02592a06e8ef299970a3a830442abe7a3f7eaba9cf37",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
-    "backend/app/domains/jobs/tasks.py": "25fc1f3393462af3df18dec27015443b2958b50758be55765a9a25ce7b69f823",
+    "backend/app/domains/jobs/tasks.py": "30d3ce7d3b5bcceaf3ffe51a6039a20e0182069b180db32260fc0b2c3f853cb3",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
     "backend/app/domains/jobs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/jobs/use_cases/create_job.py": "d85170896cf823dc130fd5860927a708887a7471556c93c33d6d1028f1681531",
+    "backend/app/domains/jobs/use_cases/create_job.py": "a38638a48c7ed4e430c25ae51425d72e6fe428dc6fda2b7daa6950d4ce084241",
     "backend/app/domains/jobs/ws_router.py": "44421350ee99857304f94ec92ea7757b12c786d86b1a749cf3058157a4dd8885",
     "backend/app/domains/mails/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/mails/completion_events.py": "9b59846d2bce41790fb39a6952c397fbfbbf84337028043a18a42857b1f5879a",
@@ -13880,7 +13891,7 @@
     "backend/app/domains/zerodha/basket.py": "2c453eb7df28c7924538b1960d25dbdeed7c615c53fc046f1c528204f18b2361",
     "backend/app/domains/zerodha/crypto.py": "5b3efb6fb65aa33dbb7cf3d63dc53367cc64815887cd3d8887fb57a75a985a5f",
     "backend/app/domains/zerodha/events.py": "aa3ddc3c9050de72713c0b8d1376a406484e282175fa5aaf9db6002d7545dee5",
-    "backend/app/domains/zerodha/events_router.py": "1a81f430cc88c5e90d79f484f6a6df9b0a631fe97436b83df246f679c87d115b",
+    "backend/app/domains/zerodha/events_router.py": "cbd1e42ef18476bd46fcf843b794aa63d5732751b1923ac63068d278f5c51391",
     "backend/app/domains/zerodha/events_schemas.py": "6626acae75529fa26e989947b552e86eb9d48bda044db90f082381ca95778870",
     "backend/app/domains/zerodha/models.py": "4dd730f5322c0fa05d4c7818eda0c827598b9d5b7b7dc6436508d29223b3cba4",
     "backend/app/domains/zerodha/order_validation.py": "979bfb228e9f6b7a431f269dcf92ffdb8d7d65cd25032978c1dc27cd063ae284",
@@ -13891,27 +13902,30 @@
     "backend/app/domains/zerodha/service.py": "29ae95966805ee763e41558a991cc49152267d44af16524523705276f0945046",
     "backend/app/domains/zerodha/tasks.py": "20f507d262892031fce4e3e6a3eb463c6d9e7fa6458828d20527597a1fd11c29",
     "backend/app/domains/zerodha/threats.py": "56d5bb802a3423b6b4ae2cd620f088d790e9d99c2e4167e1cbdc103fa323d4af",
-    "backend/app/domains/zerodha/threats_router.py": "8b203cd468d6a0df2f41a901664ab3e82cf59641d90248c7e823f264881b3a4a",
+    "backend/app/domains/zerodha/threats_router.py": "80368e13fba08e91c3a27e0128592bc96b98f41b29c9e77df69d9f7aacce041d",
     "backend/app/domains/zerodha/threats_schemas.py": "e56577a914fe5bea3f3f558fceb71c03f0f1767ffda3612da77445dc1f7dc75a",
     "backend/app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/all_models.py": "c4c050a5b11fe068ccdf571fde03d0800d4616f9575c53af703990721c480c01",
+    "backend/app/infrastructure/database/all_models.py": "c57090e5e4fdfbfc6ae6696dd6a81e2dcfe12213e7b4edc28a4a58cc6577d9e6",
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/outbox/models.py": "91bf03157ea35368222508e658b29b5888f8dd4e4b343b8bac696e97830c0a0d",
+    "backend/app/infrastructure/database/outbox/job_dispatch.py": "490f18332325f50d8b8d76db92a79904729bcb842472c930750d7d76f0cf952b",
+    "backend/app/infrastructure/database/outbox/models.py": "a331a3011182c6a6f7d959db71615c6622419d51f2d6d52a83750f5a5b0c703d",
     "backend/app/infrastructure/database/session.py": "a9677b6bab386476db0493aa2f849a66c5f63312810aafa99a5e0be54947c2e9",
     "backend/app/infrastructure/database/sync_session.py": "f974fe13644cf266ef6b1eba8e4280b5412475ce6a47b5f62be90dfd857cd29e",
     "backend/app/infrastructure/locks/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/locks/redis_lock.py": "31b04789da00e370d88d48300e19d38b825a3ee2fccca0b7337e3ac356305195",
     "backend/app/infrastructure/messaging/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/messaging/celery_app.py": "0d9de619b9a3418131eccfe272e4fc83c50022310d15c8a8009d8a03d1fb8d05",
+    "backend/app/infrastructure/messaging/celery_app.py": "1b7c9d842bf3d7f5b8ce23b4908232f188b19c90abeaeaee5ca32543e811237d",
     "backend/app/infrastructure/messaging/event_bus.py": "cd35d7f367b6de1d1a59214b178ea599e14c654818e9eb815ad93e3f61ae904a",
-    "backend/app/infrastructure/messaging/idempotency.py": "eccfb53841be4346e620c7a4527960bd155b16562cfbdfef38d5de5137fac968",
+    "backend/app/infrastructure/messaging/idempotency.py": "73b3756d0e42518d7392ab116f70c123a3b2f86d6dfaf1c2c5a3e8dec20a1022",
+    "backend/app/infrastructure/messaging/job_delivery.py": "5ed60b6b8bb9da32c96e37418cc0349f62256f59c8651b86b90bd3964fb1f463",
+    "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
     "backend/app/infrastructure/messaging/recovery_celery.py": "e26d7687987a37581414f55bfea0d0414898d24557c7b7b746d0e292d505d0e9",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
     "backend/app/main.py": "2c4f14d6736112e705c5c10a4d3694373e9450d99fc1bf91e515f82299f94bf5",
-    "backend/app/models/__init__.py": "b37a9cff3296493058dfbf5703d89e2f793c66d507c57dd1516a19f04ea20b99",
+    "backend/app/models/__init__.py": "fd7e4f421bf91a684f2f305c8ca456a1f32257bc72e3e89ec7d18cb0647ffa35",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",

@@ -83,6 +83,7 @@ from app.domains.trading_bots.models import UniversalScanSettingsRecord, Univers
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 __all__ = [
+    "IdempotencyOperation",
     "SportsRankingSnapshot",
     "UniversalScanSettingsRecord",
     "UniversalScanStateRecord",
@@ -159,3 +160,5 @@ __all__ = [
 from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
+
+from app.infrastructure.messaging.operation_models import IdempotencyOperation  # noqa: F401

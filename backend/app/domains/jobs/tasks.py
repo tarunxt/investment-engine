@@ -38,6 +38,7 @@ from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_tar
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.runs.schemas import PolymarketEventRunContext
 from app.infrastructure.messaging.task_registry import register_job_task_sync
+from app.infrastructure.messaging.job_delivery import defer_retry, guarded_job_delivery
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
@@ -1188,6 +1189,7 @@ def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
     default_retry_delay=30,
     queue="ai",
 )
+@guarded_job_delivery
 def execute_ai_job(self, job_id: int) -> None:
     if recovery_mode():
         # Validate before task registration, status writes, or provider work.
@@ -1668,6 +1670,8 @@ def execute_ai_job(self, job_id: int) -> None:
             )
             return
 
+        if defer_retry(countdown):
+            return
         try:
             raise self.retry(exc=exc, countdown=countdown, max_retries=self.max_retries)
         except MaxRetriesExceededError:

@@ -24,3 +24,7 @@ class OutboxMessage(Base):
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Dispatch retry count and execution attempt count are distinct.
+    available_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    execution_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
