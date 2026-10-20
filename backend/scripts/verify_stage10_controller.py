@@ -58,6 +58,34 @@ def guard():
     return git('rev-parse','HEAD').decode().strip()
 
 
+READINESS_FAILURE_MESSAGE='Bounded UAT2 readiness failed; inspect private logs'
+
+class ObservedReadinessFailure(RuntimeError):
+    """Only emitted after positive503 evidence and the actual controller error."""
+
+
+def observe_readiness_failure(readiness, statuses, case, *, timeout=10, interval=.1):
+    deadline=time.monotonic()+timeout
+    while True:
+        try:observed=statuses()
+        except (RuntimeError,OSError,ValueError):observed=None
+        if observed==[503,503]:break
+        if time.monotonic()>=deadline:
+            raise AssertionError('Both application503 responses were not observed')
+        time.sleep(interval)
+    case['injected_http_statuses']=observed
+    started=time.monotonic()
+    try:readiness()
+    except RuntimeError as exc:
+        if str(exc)!=READINESS_FAILURE_MESSAGE:
+            raise AssertionError('Unexpected controller error, not bounded readiness failure') from exc
+        case['controller_readiness_failure_observed']=True
+        case['controller_readiness_error']=str(exc)
+        case['controller_readiness_elapsed_seconds']=round(time.monotonic()-started,3)
+        raise ObservedReadinessFailure('Observed503 and actual bounded controller readiness failure') from exc
+    raise AssertionError('Injected readiness fault did not fail the actual controller check')
+
+
 def write(path,text,mode=0o600):
     path.parent.mkdir(parents=True,exist_ok=True);path.write_text(text);path.chmod(mode)
 
@@ -385,17 +413,19 @@ def run_suite(python,group):
                     if scenario=='promotion_failure' and Path(dst)==ROOT/'current':raise OSError('synthetic rename failure')
                     return original_replace(src,dst)
                 def app_statuses():
-                    return [int(command(['/usr/bin/curl','--silent','--show-error','--max-time','5','--output','/dev/null','--write-out','%{http_code}',f'http://127.0.0.1:{port}/']).stdout) for port in (8002,3002)]
+                    return [int(command(['/usr/bin/curl','--silent','--show-error','--max-time','1','--output','/dev/null','--write-out','%{http_code}',f'http://127.0.0.1:{port}/']).stdout) for port in (8002,3002)]
                 def readiness():
                     if scenario=='readiness_failure':
-                        case['injected_http_statuses']=app_statuses()
-                        assert case['injected_http_statuses']==[503,503], 'Readiness fault was not actually injected'
+                        return observe_readiness_failure(original_readiness,app_statuses,case)
                     return original_readiness()
                 if scenario=='partial_start_failure':write(unit,re.sub(r'^ExecStartPre=.*$', 'ExecStartPre=/bin/false',unit_original,flags=re.M),0o644)
                 if scenario=='readiness_failure':write(FIXTURE/'readiness-fail','synthetic',0o644)
                 try:
                     with patch.object(ctl,'configure_units',side_effect=configure),patch.object(ctl.os,'replace',side_effect=replace),patch.object(ctl,'readiness',side_effect=readiness):ctl.rollback(str(saved))
-                except (RuntimeError,OSError):pass
+                except ObservedReadinessFailure:
+                    assert scenario=='readiness_failure' and case.get('controller_readiness_failure_observed') is True
+                except (RuntimeError,OSError) as exc:
+                    if scenario=='readiness_failure':raise AssertionError('Unrelated setup/controller error cannot satisfy readiness failure') from exc
                 else:raise AssertionError('Finalization failure not reached')
                 assert_start_blocked(ctl);assert helper.capture(engine)==before
                 write(unit,unit_original,0o644);(FIXTURE/'readiness-fail').unlink(missing_ok=True)

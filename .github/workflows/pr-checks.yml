@@ -1111,6 +1111,12 @@ jobs:
           assert r['passed']==len(r['cases'])==expected and r['failed']==r['skipped']==0
           assert r['actual_controller_and_helper'] and r['actual_confined_migration_service']
           assert r['actual_credx_application_services'] is False
+          if os.environ['GROUP']=='finalization':
+              case=next(c for c in r['cases'] if c['name']=='readiness_failure')
+              assert case['injected_http_statuses']==[503,503]
+              assert case['cleared_http_statuses']==[200,200]
+              assert case['controller_readiness_failure_observed'] is True
+              assert case['controller_readiness_error']=='Bounded UAT2 readiness failed; inspect private logs'
           PY_CHECK
       - name: Retain controller integration diagnostics even on failure
         if: always()

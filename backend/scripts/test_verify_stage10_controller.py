@@ -38,7 +38,6 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(any(key.startswith(('AWS_','GOOGLE_','ZERODHA_','OPENAI_')) for key in fixture.SAFE_ENV))
         self.assertEqual(set(fixture.SAFE_ENV),{'PATH','PYTHONDONTWRITEBYTECODE','CI','GITHUB_ACTIONS','CREDX_STAGE10_CONTROLLER_ACK','CREDX_STAGE10_SOURCE'})
 
-if __name__=='__main__':unittest.main()
 
 class ReadinessFixtureTests(unittest.TestCase):
     def fixture(self):
@@ -76,3 +75,33 @@ class ReadinessFixtureTests(unittest.TestCase):
             root=Path(directory);(root/'readiness-fail').write_text('synthetic app-only failure')
             server=self.fixture().make_server(0,readiness=False,directory=root);self.start(server)
             self.assertEqual(self.status(server),200)
+
+class ReadinessEvidenceTests(unittest.TestCase):
+    def test_transient_startup_then503_requires_exact_controller_failure(self):
+        case={};statuses=Mock(side_effect=[OSError('synthetic startup'),[503,503]])
+        readiness=Mock(side_effect=RuntimeError(fixture.READINESS_FAILURE_MESSAGE))
+        with self.assertRaises(fixture.ObservedReadinessFailure):
+            fixture.observe_readiness_failure(readiness,statuses,case,timeout=1,interval=0)
+        self.assertEqual(case['injected_http_statuses'],[503,503])
+        self.assertTrue(case['controller_readiness_failure_observed']);readiness.assert_called_once()
+
+    def test_missing503_or_transport_error_cannot_pass_or_invoke_readiness(self):
+        for statuses in [Mock(return_value=[200,200]),Mock(side_effect=RuntimeError('synthetic curl failure'))]:
+            case={};readiness=Mock(side_effect=RuntimeError(fixture.READINESS_FAILURE_MESSAGE))
+            with self.assertRaisesRegex(AssertionError,'not observed'):
+                fixture.observe_readiness_failure(readiness,statuses,case,timeout=0)
+            readiness.assert_not_called();self.assertNotIn('controller_readiness_failure_observed',case)
+
+    def test_unrelated_runtime_error_cannot_satisfy_expected_failure(self):
+        case={}
+        with self.assertRaisesRegex(AssertionError,'Unexpected controller error'):
+            fixture.observe_readiness_failure(Mock(side_effect=RuntimeError('synthetic setup error')),lambda:[503,503],case)
+        self.assertNotIn('controller_readiness_failure_observed',case)
+
+    def test_unexpected_healthy_return_is_a_failure(self):
+        case={}
+        with self.assertRaisesRegex(AssertionError,'did not fail'):
+            fixture.observe_readiness_failure(Mock(return_value=None),lambda:[503,503],case)
+        self.assertNotIn('controller_readiness_failure_observed',case)
+
+if __name__=='__main__':unittest.main()
