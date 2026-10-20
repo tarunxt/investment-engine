@@ -12,6 +12,8 @@ from collections.abc import Mapping, Sequence
 import httpx
 
 from app.core.config import settings
+from app.domains.connections.material import AppMaterial, BoundToken
+from app.domains.connections.crypto import ConnectionFault
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -27,9 +29,14 @@ class ZerodhaService:
     KITE_BASE = "https://api.kite.trade"
     LOGIN_BASE = "https://kite.zerodha.com/connect/login"
 
+    def __init__(self, app_binding: AppMaterial | None = None):
+        # No environment credential fallback. Shared apps must be resolved by
+        # the versioned platform credential service, then explicitly supplied.
+        self._app_binding = app_binding
+
     @property
     def is_configured(self) -> bool:
-        return bool(settings.zerodha_api_key and settings.zerodha_api_secret)
+        return self._app_binding is not None
 
     @property
     def direct_market_orders_enabled(self) -> bool:
@@ -50,29 +57,67 @@ class ZerodhaService:
         return None
 
     def get_login_url(self) -> str:
-        return f"{self.LOGIN_BASE}?v=3&api_key={settings.zerodha_api_key}"
+        if self._app_binding is None:raise ConnectionFault("CONNECTION_APP_BINDING_REQUIRED")
+        return f"{self.LOGIN_BASE}?v=3&api_key={self._app_binding.key.get_secret_value()}"
 
     def _checksum(self, request_token: str) -> str:
-        raw = f"{settings.zerodha_api_key}{request_token}{settings.zerodha_api_secret}"
+        if self._app_binding is None:raise ConnectionFault("CONNECTION_APP_BINDING_REQUIRED")
+        raw = f"{self._app_binding.key.get_secret_value()}{request_token}{self._app_binding.secret.get_secret_value()}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    def _auth_headers(self, access_token: str) -> dict[str, str]:
+    def _auth_headers(self, access_token: BoundToken) -> dict[str, str]:
+        if not isinstance(access_token,BoundToken):raise ConnectionFault("CONNECTION_BOUND_TOKEN_REQUIRED")
+        access_token.validate()
+        from app.domains.modules.execution import _current
+        context=_current.get()
+        if context is not None:
+            if context.identity.owner_id!=access_token.owner_id:raise ConnectionFault("CONNECTION_OWNER_MISMATCH",403)
+        if self._app_binding is not None and self._app_binding.fingerprint()!=access_token.app.fingerprint():raise ConnectionFault("CONNECTION_APP_BINDING_CHANGED")
         return {
             "X-Kite-Version": "3",
-            "Authorization": f"token {settings.zerodha_api_key}:{access_token}",
+            "Authorization": f"token {access_token.app.key.get_secret_value()}:{access_token.token.get_secret_value()}",
         }
 
-    def _raise_for_kite(self, resp: httpx.Response) -> None:
+    def _binding_query(self, token):
+        from sqlalchemy import select
+        from app.domains.connections.models import IntegrationConnection
+        return select(IntegrationConnection.version).where(
+            IntegrationConnection.id==token.connection_id,
+            IntegrationConnection.owner_id==token.owner_id,
+            IntegrationConnection.version==token.version,
+            IntegrationConnection.is_current.is_(True),IntegrationConnection.status=='active')
+
+    async def _current_binding_async(self, token):
+        from app.domains.modules.execution import _current
+        context=_current.get()
+        if context is None:return
+        factory=context.async_factory
+        if factory is None:
+            from app.infrastructure.database.session import AsyncSessionLocal
+            factory=AsyncSessionLocal
+        async with factory() as db:
+            if await db.scalar(self._binding_query(token)) is None:raise ConnectionFault('CONNECTION_VERSION_CHANGED')
+
+    def _current_binding_sync(self, token):
+        from app.domains.modules.execution import _current
+        context=_current.get()
+        if context is None:return
+        with context.factory() as db:
+            if db.scalar(self._binding_query(token)) is None:raise ConnectionFault('CONNECTION_VERSION_CHANGED')
+
+    def _raise_for_kite(self, resp: httpx.Response, redactions=()) -> None:
         try:
             body = resp.json()
         except Exception:
             resp.raise_for_status()
             return
         if body.get("status") == "error":
-            raise KiteError(
-                body.get("message", "Unknown Kite error"),
-                body.get("error_type", "GeneralException"),
-            )
+            message=str(body.get("message", "Unknown Kite error"))
+            for secret in redactions:
+                if secret:message=message.replace(secret,"[redacted]")
+            kind=body.get("error_type", "GeneralException")
+            if kind not in {"GeneralException","TokenException","PermissionException","InputException","NetworkException","DataException","OrderException"}:kind="GeneralException"
+            raise KiteError(message[:500],kind)
         resp.raise_for_status()
 
     async def _request_async(
@@ -93,6 +138,7 @@ class ZerodhaService:
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
+            await self._current_binding_async(access_token)
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.request(
@@ -102,7 +148,11 @@ class ZerodhaService:
                 params=params,
                 headers=request_headers,
             )
-            self._raise_for_kite(resp)
+            secrets=[]
+            if isinstance(access_token,BoundToken):secrets.extend([access_token.app.key.get_secret_value(),access_token.app.secret.get_secret_value(),access_token.token.get_secret_value()])
+            if self._app_binding:secrets.extend([self._app_binding.key.get_secret_value(),self._app_binding.secret.get_secret_value()])
+            if path=="/session/token":secrets.extend(str(v) for v in (data or {}).values())
+            self._raise_for_kite(resp,secrets)
             return resp.json().get("data")
 
     def _request_sync(
@@ -123,6 +173,7 @@ class ZerodhaService:
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
+            self._current_binding_sync(access_token)
 
         with httpx.Client(timeout=timeout) as client:
             resp = client.request(
@@ -132,7 +183,11 @@ class ZerodhaService:
                 params=params,
                 headers=request_headers,
             )
-            self._raise_for_kite(resp)
+            secrets=[]
+            if isinstance(access_token,BoundToken):secrets.extend([access_token.app.key.get_secret_value(),access_token.app.secret.get_secret_value(),access_token.token.get_secret_value()])
+            if self._app_binding:secrets.extend([self._app_binding.key.get_secret_value(),self._app_binding.secret.get_secret_value()])
+            if path=="/session/token":secrets.extend(str(v) for v in (data or {}).values())
+            self._raise_for_kite(resp,secrets)
             return resp.json().get("data")
 
     async def exchange_token(self, request_token: str) -> dict:
@@ -141,7 +196,7 @@ class ZerodhaService:
             "POST",
             "/session/token",
             data={
-                "api_key": settings.zerodha_api_key,
+                "api_key": self._app_binding.key.get_secret_value(),
                 "request_token": request_token,
                 "checksum": checksum,
             },

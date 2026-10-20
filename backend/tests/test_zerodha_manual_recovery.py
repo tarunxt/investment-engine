@@ -1,3 +1,5 @@
+from app.domains.connections.material import AppMaterial
+from pydantic import SecretStr
 """Manual protected orders work while background financial writes stay denied."""
 import asyncio
 import os
@@ -35,7 +37,7 @@ class ManualRecoveryTest(unittest.TestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.svc = ZerodhaService()
+        self.svc = ZerodhaService(AppMaterial(SecretStr("fixture"),SecretStr("fixture"),"fake",1))
         self.requests = []
         def respond(request):
             self.requests.append(request)

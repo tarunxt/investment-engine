@@ -1,0 +1,27 @@
+# Stage09 connection binding design and review
+
+09 · Implement dual-mode connection storage and adapters. The complete controlling prompt remains stages/09.md. This implements storage/adapters and read-only metadata; Stage10 owns OAuth attempts/state, consent/setup, renewal and provider-revocation UX.
+
+## Private storage and consistent resolution
+
+IntegrationConnection is owner-scoped and provider-specific, with stable UUID, ownership mode, account ID, credential reference, expiry, status and monotonic version. A partial unique index permits one current connection per owner/provider while retaining non-current rows for later multi-account support. ConnectionCredential has an owner/connection compound foreign key. Its authenticated encrypted envelope includes owner, connection, provider, mode, account ID and connection version. User-owned app key/secret/token are encrypted together. Managed app credentials stay in the server credential service, resolved by exact reference/version; only the reference, fingerprint and per-user encrypted token enter the envelope. There is no platform-to-owner fallback, trial key or global app-key/token mixing.
+
+ZerodhaService receives explicit app material for token exchange and a BoundToken for authenticated transport. Bare token strings are denied. Existing public effect decorators/recovery/module gates remain intact. Inside the owner effect fence, adapters recheck current connection version/status before transport. No financial flag or entitlement is granted by binding readiness. Existing unbound login/callback stays unavailable until Stage10 supplies a verified binding. Legacy repository upsert explicitly refuses unbound sessions.
+
+## Additive legacy migration and verified adoption plan
+
+integration_connections_001 follows module_lifecycle_001 and adds two tables only. It backfills deterministic metadata rows in legacy_review without decrypting, copying, deleting or changing old ciphertext, provider accounts or roles. It does not assume the configured shared app belongs to a legacy token.
+
+Production adoption is NOT executed or authorized here. A future separately reviewed operator flow must inventory affected owner/legacy row IDs without reading secrets into chat, confirm provider app provenance and approval, retain key-version availability and a rollback snapshot, then invoke the server-only adopt_legacy interface. That interface locks the owner, checks expected version and exact legacy reference, resolves the explicitly approved app version, decrypts only in the server process, and performs a bounded authenticated provider identity read through the supplied verifier. The exact expected account must match before a new encrypted binding is committed. No public HTTP adoption endpoint exists. Fake-provider tests prove success, account mismatch denial and byte-for-byte retention. An incorrect operator app reference must fail provider identity verification; user-supplied account strings alone are not proof. A failed adoption rolls back metadata and leaves the legacy ciphertext unchanged.
+
+Rollback before adoption drops only the additive tables. After adoption/rotation, first disable new consumers and preserve the additive encrypted material before any downgrade; dropping those tables would remove newly established bindings. Original legacy ciphertext remains retained and is not an automatic runtime fallback.
+
+## Key rotation and recovery
+
+Server configuration accepts an explicit version-to-key ring and active version; at most eight versions. Bare legacy Fernet format remains unchanged. If the new ring is absent, the existing configured legacy key is explicitly version1 only; v2+ never retries version1. Connection rotation decrypts exactly the stored version, verifies the candidate encryption, then atomically CAS-updates metadata/envelope and appends a secret-free audit event. Missing target keys, stale versions and interrupted commit preserve the prior binding. Retain old keys until the complete connection inventory is verified rotated and rollback retention expires; no key provisioning/retirement occurs in this stage. Losing a key fails closed and requires the separately scoped credential recovery/reauthorization flow. Do not change live encryption configuration merely to exercise tests.
+
+## User-facing metadata and limitations
+
+/console/profile/connections displays current owner's masked account, mode, connection/key version and readiness. GET /me/connections and /{id} are authenticated, no-store and owner-scoped; administrators gain no foreign access. Credentials/reference/ciphertext are absent. Owner or session changes abort in-flight reads and clear prior display. Managed approval is checked for the exact referenced entry. UAT2 forces adapter readiness false and remains simulation only; its optional real router remains unmounted.
+
+The actual local Next/Auth.js/FastAPI harness adds synthetic A user-owned, B managed-with-fake-approval and admin managed-pending fixtures in its own SQLite database. It blocks outbound sockets and all unlisted mutations. Fake approval is NOT provider evidence. No real broker/AI/email/orders or cloud operations are performed. Local SQL tests do not prove PostgreSQL migration/concurrency; the mandatory Docker backend CI job must pass without skips. Independent review, UAT2 deployment/verification, owner acceptance and external provider approval remain distinct pending gates.

@@ -5,7 +5,7 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 268,
+    "http": 270,
     "lifecycle": 9,
     "page": 67,
     "scheduler": 16,
@@ -2473,6 +2473,68 @@
       "route": "",
       "side_effects": "private trade DB; AI; queues",
       "source": "backend/app/domains/bullpen_trade_analysis/tasks.py:142"
+    },
+    {
+      "calls": [
+        "(await db.execute(select(IntegrationConnection).where(IntegrationConnection.owner_id == current_user.id).order_by(IntegrationConnection.created_at.desc()).limit(50))).scalars",
+        "(await db.execute(select(IntegrationConnection).where(IntegrationConnection.owner_id == current_user.id).order_by(IntegrationConnection.created_at.desc()).limit(50))).scalars().all",
+        "ConnectionStore",
+        "Depends",
+        "IntegrationConnection.created_at.desc",
+        "db.execute",
+        "describe_connection",
+        "router.get",
+        "select",
+        "select(IntegrationConnection).where",
+        "select(IntegrationConnection).where(IntegrationConnection.owner_id == current_user.id).order_by",
+        "select(IntegrationConnection).where(IntegrationConnection.owner_id == current_user.id).order_by(IntegrationConnection.created_at.desc()).limit"
+      ],
+      "capability": "list_connections",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/connections",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/router.py:33"
+    },
+    {
+      "calls": [
+        "ConnectionStore",
+        "Depends",
+        "HTTPException",
+        "describe_connection",
+        "router.get",
+        "store.get"
+      ],
+      "capability": "get_connection",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "connections",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{connection_id}')"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/connections/{connection_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/connections/router.py:43"
     },
     {
       "calls": [
@@ -12223,7 +12285,7 @@
       "registration": "mounted",
       "route": "/",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/main.py:333"
+      "source": "backend/app/main.py:335"
     },
     {
       "calls": [
@@ -12289,7 +12351,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:49"
+      "source": "backend/app/uat2/main.py:52"
     },
     {
       "calls": [
@@ -12311,7 +12373,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -12333,7 +12395,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -12355,7 +12417,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -12377,7 +12439,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -12399,7 +12461,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -12421,7 +12483,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -12443,7 +12505,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:63"
     },
     {
       "calls": [
@@ -14514,7 +14576,7 @@
   "source_sha256": {
     "backend/app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/core/__init__.py": "691e5ed6014a69a3200d83084b8cdaa37cf9430b57d33b0584ca6a7b707f3b06",
-    "backend/app/core/config.py": "d75516ce06ddca3c5754ca206cf545d4328e2a9adcd755ca61ec0756d4ba5541",
+    "backend/app/core/config.py": "508f335a0cb5fcaad21ede0207bf9dae7199b97d8d51f15ff419933655fbc576",
     "backend/app/core/logging.py": "34ec5aec553941e669ca8c256b7e43bdedb37d7784da70e52d198d30e048799e",
     "backend/app/core/recovery.py": "af003514eb40361bb832e42397bd309cdaa7a28ebd38762df0c1a1c1369cb29c",
     "backend/app/core/request_timing.py": "ac30e9e77498d78c16e72cb72cf1821bf808b680c22b3c36c62e1a612fbe4ec4",
@@ -14585,6 +14647,12 @@
     "backend/app/domains/bullpen_trade_analysis/schemas.py": "ae4fe41c30cd6dc3f72dd51d7e81f7e9bfc65502da947e268add25dbd1297493",
     "backend/app/domains/bullpen_trade_analysis/service.py": "f20885a588a104053e49e0bf67b1ff5208b5e2cf1b690be509f02a6c6188f5c9",
     "backend/app/domains/bullpen_trade_analysis/tasks.py": "76353c818e2c152454a075632c78fd2733359f8e9cf42b6bc5e0a491f1ba3751",
+    "backend/app/domains/connections/__init__.py": "2e58dcfaee11bcbf2b130f1b5ef3eabe5fd1db196b643ae72ff281b413ff398e",
+    "backend/app/domains/connections/crypto.py": "d8163246e96de05783ba8c9c80c5e18cd36b76a114262cace056e8b6be62197e",
+    "backend/app/domains/connections/material.py": "94762fa2cb290b27ba99febb68bc04822486d0b8169297b3970122eec5306b62",
+    "backend/app/domains/connections/models.py": "a0ee2cdc9e2ac9df2f11747a690dbf857d18a7f7e33080f7a24bede523440ebc",
+    "backend/app/domains/connections/router.py": "80ec4b297a5d01d93d0fe7b592aa043eeb172e79cbc83327cafd46bb38e6940c",
+    "backend/app/domains/connections/service.py": "b1aded2ab76fba1362b300c2b39b9e4eca46d23a51c0ee7386e662afd3b5240e",
     "backend/app/domains/cost_drivers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/cost_drivers/cache.py": "d990dd39dd09bda03287aa2b5fee85c36f2fe676359cec66ecce5d265b91230a",
     "backend/app/domains/cost_drivers/estimators.py": "075281c218673419cac2c1bb6762ea3cd04c2e5a44a297252aa72ef7f4ba0738",
@@ -14658,7 +14726,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "c5a86fffae0874c7cc158b7b22c4ee47ddb68a853f4bbb716f29ab7f9e224731",
+    "backend/app/domains/modules/coverage.py": "cb16c50194cbb9f333b292130e0469ba19ed3f72df97d71380969a9def622505",
     "backend/app/domains/modules/dispatch.py": "bb9e8faf27a33a947af05d569763eb91c8ba3ff6d7a90989a8288c798201fa18",
     "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
     "backend/app/domains/modules/lifecycle.py": "e05bf9a7baccc9c42bdb728bf569e4f28458099ff616eb980384b6b9eb727f2d",
@@ -14826,10 +14894,10 @@
     "backend/app/domains/zerodha/models.py": "4dd730f5322c0fa05d4c7818eda0c827598b9d5b7b7dc6436508d29223b3cba4",
     "backend/app/domains/zerodha/order_validation.py": "979bfb228e9f6b7a431f269dcf92ffdb8d7d65cd25032978c1dc27cd063ae284",
     "backend/app/domains/zerodha/portfolio.py": "504831439117570d44043630009ba53ecc22c9fa18e31523bf87ff9147279567",
-    "backend/app/domains/zerodha/repository.py": "f985fb3eb11d0a96fea0bf5c5513c1cbf9b03602b19c461a05e46de6bd389af2",
+    "backend/app/domains/zerodha/repository.py": "eba12f682fa04ca0deec3dbd476e99a4ea7b21516c11f6da47149162c3a2d1fe",
     "backend/app/domains/zerodha/router.py": "e5d4e1e29a2d8e712ad4b3fa25debe93e7268570b68347a008229a37b6af8628",
     "backend/app/domains/zerodha/schemas.py": "d4a93c5f2bba2e12dbc4112286125bc030c957e9ab3d0139cf5e4768adf3667e",
-    "backend/app/domains/zerodha/service.py": "c3cb5a6d9b2f5be8bff92439854762e90c72f193bbfd85685ec81dfa0fd49d84",
+    "backend/app/domains/zerodha/service.py": "f0bd4f1993e978447cbe674169220b597883a241e5614d155714d8905a00c178",
     "backend/app/domains/zerodha/tasks.py": "7dbd93a59aebbcb0182a4ab53a41b6aad1f01e051faca9f1bccf1d210c9cf1fd",
     "backend/app/domains/zerodha/threats.py": "56d5bb802a3423b6b4ae2cd620f088d790e9d99c2e4167e1cbdc103fa323d4af",
     "backend/app/domains/zerodha/threats_router.py": "80368e13fba08e91c3a27e0128592bc96b98f41b29c9e77df69d9f7aacce041d",
@@ -14854,8 +14922,8 @@
     "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
     "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "076631185dd3acb188de4612c628721d09033c04ca094d8c94f29e9aac2a235d",
-    "backend/app/models/__init__.py": "6216721873771a689d511e4f841eccca718d1d9be5ba9e773322b1d9a7289e63",
+    "backend/app/main.py": "e9d542a17e156079d9488d25d8bb1ec3c236f28f81ff89f50237b2549ab110fb",
+    "backend/app/models/__init__.py": "dc125eda1edd699a132cf747ae5ad56e96fbaea60c5104fbde854a5fa9bf1348",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",
@@ -14866,7 +14934,7 @@
     "backend/app/shared/ws_relay.py": "249b615b0ad457839d530eb25f0f504bead19a5a63874adec607c4622504296b",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/main.py": "a01db4d928abec3cdc4e5af787963ca37fc094bf430c2784ff025904bb9d645d",
+    "backend/app/uat2/main.py": "aaa6b377a57f9bc8dd3bdd504cb29fd12f7d939bcf45bfe594cb5e99b95a0358",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
@@ -14930,7 +14998,7 @@
     "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
     "frontend/app/console/profile/activity/page.tsx": "46c115394ec684f3a8e5adc616feffdc71681140e39d419a24d013c93a6c6fe6",
-    "frontend/app/console/profile/connections/page.tsx": "3c78264eba6663fbae4c66c92b4b90be5503ce5bc4a169e954d33b1496bee758",
+    "frontend/app/console/profile/connections/page.tsx": "c1d7f3ad693843290636179202c15490ae1e64f22057c18a8b051a47fd6ba3d1",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
     "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",

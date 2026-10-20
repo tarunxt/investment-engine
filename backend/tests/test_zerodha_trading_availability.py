@@ -1,3 +1,5 @@
+from app.domains.connections.material import AppMaterial
+from pydantic import SecretStr
 """Capability discovery must agree with recovery enforcement; no broker calls."""
 import os
 import unittest
@@ -21,7 +23,7 @@ class TradingAvailabilityTest(unittest.TestCase):
         ))
         self.settings.start()
         self.addCleanup(self.settings.stop)
-        self.svc = service.ZerodhaService()
+        self.svc = service.ZerodhaService(AppMaterial(SecretStr("fixture"),SecretStr("fixture"),"fake",1))
         self.policy = patch.object(settings, "zerodha_recovery_manual_orders_enabled", False)
         self.policy.start()
         self.addCleanup(self.policy.stop)

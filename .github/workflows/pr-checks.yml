@@ -56,6 +56,7 @@ jobs:
           backend/tests/test_stage06_modules.py
           backend/tests/test_stage07_lifecycle.py
           backend/tests/test_stage08_presentation.py
+          backend/tests/test_stage09_connections.py
           backend/tests/test_polymarket_auto_live_order_intent_leases.py
           backend/tests/test_stage_one_export_jobs.py
           backend/tests/test_financial_data_integrity.py
@@ -170,7 +171,46 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py backend/tests/test_stage09_connections.py
+
+  stage09-connection-bindings:
+    name: Stage09 connection isolation, rotation races and additive migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install constrained backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify both modes, rotation races and actual Alembic roundtrip
+        run: python -m pytest -q --junitxml=/tmp/stage09.xml backend/tests/test_stage09_connections.py backend/tests/test_stage09_connections_postgres.py
+      - name: Require all Stage09 checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage09.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage09 cannot skip checks'
+          assert len(root.findall('.//testcase')) >= 27
+          PY_CHECK
 
   stage07-module-policy:
     name: Stage07 module lifecycle races and migration safety
@@ -472,6 +512,7 @@ jobs:
           node --test
           tests/stage08-module-policy.test.mjs
           tests/stage08-module-provider-races.test.mjs
+          tests/stage09-connection-bindings.test.mjs
           tests/api-read-fallbacks.test.mjs
           tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs
