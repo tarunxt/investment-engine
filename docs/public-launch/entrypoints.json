@@ -14933,7 +14933,7 @@
     "frontend/app/console/profile/connections/page.tsx": "b7c1f602ff081ff1653152fb2bd1fdcdadbfbf2153b7fcdd349eb93387d43f01",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
-    "frontend/app/console/profile/preferences/page.tsx": "f1c59cc84c664f425abc76d93d2678c6a0b96a02718088bc2ca1e8730090a2bc",
+    "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",
     "frontend/app/console/profile/security/page.tsx": "c39f32aae2cf5f63b12d6e0fec9ef1dd64e81288eb92e01b7d2fd77beaad98e3",
     "frontend/app/console/prompts/page.tsx": "ea1d6bb90c7f95ceed02a3ee1da3493170ee9b18bb39343a0ec9d24b7aa41bdd",
     "frontend/app/console/runs/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
