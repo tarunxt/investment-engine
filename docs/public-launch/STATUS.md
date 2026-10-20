@@ -1,5 +1,14 @@
 # Public-launch implementation status
 
+## Stage06 active — owner-accepted/deployed05
+
+Prerequisite05 is accepted at deployed10c5a2c1561e8d1cf0e5b54c5b53e89e0c564c95. Exact CI39371432073/39371432077/39371432106 and native bundle12241567561 verified; sole executor deployed20Oct10:38:51IST with the specifically approved narrow cost-only membership, User.role remains user and no routes enabled. Independent checks53 runtime/ownership/financial +10 migrations passed; two optimizer failures match unchanged Stage04. Fresh signed-in Mac browser Jobs/refresh, Runs/Bullpen unavailable, Preferences/reload passed. User explicitly accepted05 and authorized06 at05:17:35UTC. These results supersede historical05 pending entries below.
+
+Stage06 isolated codex/stage06-module-policy-20261020 in task-5/stage06-module-policy from that exact base. Read complete stages/06.md; see STAGE06_REQUIREMENT_MAP.md. Code:IMPLEMENTED_LOCAL_CHECKS_PASS / CI:NOT_RUN06 / UAT2 deployment:NOT_RUN06 / independent verification:PENDING06 / owner acceptance:PENDING06 / external approvals:UNCHANGED. Current scope is canonical module registry, additive versioned user selection/config, owner-bound atomic API/preview, default-deny onboarding and shared policy interfaces; all remaining enforcement integrations are tracked for07–08. No07 until user acceptance. Production/allowlist/simulation, US$10 total and21Oct2026 21:04:13IST stop unchanged; existing executor is the only live deployment handoff.
+
+
+Stage06 local checkpoint:104 affected tests,110 ownership regressions,7 mandatory disposable Docker PostgreSQL concurrency/migration/rollback tests and11 real Auth.js/BFF preview flows passed; Next production build passed. Preview localhost60473/API60474, backend15870/frontend15871. See STAGE06_REVIEW.md. Browser, exact-head CI/artifact, independent review and UAT2 acceptance remain pending06.
+
 ## Stage05 active — independently checked and owner-accepted04
 
 Base/deployed04:23be68c9366ea41bb252c34974525e3ec9c6c0ff. Owner: "confirmed. you also run and check Stage 4 changes and tell me you did. Then move onto stage 5". Parent reports live server verification09:19:38IST and separate independent pytest11 passed/no failures/skips at03:51:59–03:52:36UTC. Fresh signed-in live walkthrough remains unavailable/disclosed, not passed. Stage04 CI/artifact evidence is inPR1245/handoff; its implementation-time pending entries below are superseded.

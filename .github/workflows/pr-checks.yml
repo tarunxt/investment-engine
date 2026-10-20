@@ -53,6 +53,7 @@ jobs:
         run: >-
           pytest -q
           backend/tests/test_stage05_runtime_admin.py
+          backend/tests/test_stage06_modules.py
           backend/tests/test_polymarket_auto_live_order_intent_leases.py
           backend/tests/test_stage_one_export_jobs.py
           backend/tests/test_financial_data_integrity.py
@@ -167,7 +168,46 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py
+
+  stage06-module-policy:
+    name: Stage06 module policy concurrency and migration safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage06
+          POSTGRES_PASSWORD: stage06
+          POSTGRES_DB: credx_stage06_test
+        options: --health-cmd "pg_isready -U stage06 -d credx_stage06_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage06:stage06@postgres:5432/credx_stage06_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE06_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install constrained backend test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify module concurrency and actual Alembic roundtrip
+        run: python -m pytest -q --junitxml=/tmp/stage06.xml backend/tests/test_stage06_modules_postgres.py
+      - name: Require all Stage06 migration checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage06.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage06 migration gate cannot skip checks'
+          assert len(root.findall('.//testcase')) >= 7
+          PY_CHECK
 
   stage05-runtime-administration:
     name: Stage05 equivalent roles and migration safety

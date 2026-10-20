@@ -103,6 +103,8 @@ async def resolve_google_user(db: AsyncSession, email: str) -> User:
         role=UserRole.USER,
         is_active=True,
         is_verified=True,
+        # Optional modules default-deny by absence in the same transaction.
+        # Never copy another user's selection, connection or execution grants.
         profile=UserProfile(),
     )
     try:

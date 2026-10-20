@@ -5,7 +5,7 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 262,
+    "http": 265,
     "lifecycle": 7,
     "page": 66,
     "scheduler": 16,
@@ -4546,6 +4546,78 @@
       "route": "",
       "side_effects": "private mail history; external email delivery",
       "source": "backend/app/domains/mails/tasks.py:59"
+    },
+    {
+      "calls": [
+        "Depends",
+        "describe",
+        "router.get"
+      ],
+      "capability": "get_modules",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "modules",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('', response_model=ModuleCollection)"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/modules",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/router.py:12"
+    },
+    {
+      "calls": [
+        "Depends",
+        "patch_modules",
+        "router.patch"
+      ],
+      "capability": "update_modules",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "PATCH",
+      "module": "modules",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.patch('', response_model=ModuleCollection)"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/modules",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/router.py:18"
+    },
+    {
+      "calls": [
+        "Depends",
+        "disable_impact",
+        "router.post"
+      ],
+      "capability": "preview_disable",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "modules",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/disable-impact', response_model=DisableImpact)"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/modules/disable-impact",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/router.py:25"
     },
     {
       "calls": [
@@ -11503,7 +11575,7 @@
       "registration": "asynccontextmanager",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/main.py:121"
+      "source": "backend/app/main.py:122"
     },
     {
       "calls": [],
@@ -11521,7 +11593,7 @@
       "registration": "framework default",
       "route": "/docs",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:162"
+      "source": "backend/app/main.py:163"
     },
     {
       "calls": [],
@@ -11539,7 +11611,7 @@
       "registration": "framework default",
       "route": "/docs/oauth2-redirect",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:162"
+      "source": "backend/app/main.py:163"
     },
     {
       "calls": [],
@@ -11557,7 +11629,7 @@
       "registration": "framework default",
       "route": "/openapi.json",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:162"
+      "source": "backend/app/main.py:163"
     },
     {
       "calls": [],
@@ -11575,7 +11647,7 @@
       "registration": "framework default",
       "route": "/redoc",
       "side_effects": "schema/documentation only",
-      "source": "backend/app/main.py:162"
+      "source": "backend/app/main.py:163"
     },
     {
       "calls": [
@@ -11595,7 +11667,7 @@
       "registration": "mounted",
       "route": "/",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/main.py:331"
+      "source": "backend/app/main.py:333"
     },
     {
       "calls": [
@@ -11638,7 +11710,7 @@
       "registration": "asynccontextmanager",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:17"
+      "source": "backend/app/uat2/main.py:18"
     },
     {
       "calls": [
@@ -11658,7 +11730,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:46"
+      "source": "backend/app/uat2/main.py:49"
     },
     {
       "calls": [
@@ -11679,7 +11751,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:51"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -11700,7 +11772,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:51"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -11721,7 +11793,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:51"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -11742,7 +11814,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:51"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -11763,7 +11835,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:51"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -11784,7 +11856,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:51"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -11805,7 +11877,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -13782,7 +13854,7 @@
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/auth/admin_roles.py": "9e15dec15fb801e5f3c775a00d02f7be495e1d9d65b9de3e20b9a3f056b69111",
     "backend/app/domains/auth/dependencies.py": "c201c2f025ab982413940cc5292c3bd4dcc502e7afa2b3222466b2da2dd79857",
-    "backend/app/domains/auth/google_signin.py": "aef4c0e28d498070f14f85ab6611ae45f7374aa3a96dfc4e060b8beaffb60d84",
+    "backend/app/domains/auth/google_signin.py": "2aded3d094678f35ba29afe5915aad64386c15aea655072298cb3b7583a6396e",
     "backend/app/domains/auth/models.py": "279ca51fd8a2c750051407bd1721c3bf2a0e83ccb1e9b33671b5bb8551e87a26",
     "backend/app/domains/auth/router.py": "27b37c78026e524e5ab2cff8a87478e996dde3ea0290967e4a0136812f05cb1e",
     "backend/app/domains/auth/schemas.py": "b9ed808ca03f82e2a2ec47c655a4241cfa91532714827c28d37c740b9aaddbf3",
@@ -13892,6 +13964,15 @@
     "backend/app/domains/mails/router.py": "8e55d321482dbead46fbef071032265a9241ee81c5fbdaa382d275c64f19bd20",
     "backend/app/domains/mails/service.py": "3c89dc58be89f1d305ccffc64786d9da0ae917b10706ac57d7c1b62b75507202",
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
+    "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
+    "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
+    "backend/app/domains/modules/models.py": "0917e467a167811e5728c798c25b5c12ea77f934cac8ace29ccfb440ec175e68",
+    "backend/app/domains/modules/policy.py": "b691fd1159271477b71571dbd851a14289b0f4da976391b23e02bbf3de625716",
+    "backend/app/domains/modules/registry.py": "d053888dc602a6330e5cdd6447895aedc40bc62abbe9fb347a9b36fdf58b049f",
+    "backend/app/domains/modules/router.py": "1a04b6b6b8e075d83552fc7619677fbaeb3331c9d6bfc8b08bff69029fe88a38",
+    "backend/app/domains/modules/schemas.py": "ae3f2c8f64f39c12d81a9638f88b91449f8cfc60f95b529b320c2a6fafbc64d7",
+    "backend/app/domains/modules/service.py": "f69c1792c583d5aff807a40d26fb8004b8cef677c82ea8b5b1b8cb7639bde525",
+    "backend/app/domains/modules/store.py": "d0ffc0e67bb19d7e781c3d070e867132435a223d00f7dab411bc83d7054e2daf",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
     "backend/app/domains/polymarket/access.py": "c803e5445fbde37d1c499fc6c8b52ee45214a51df5978fcf5f2502b1d8e87ae6",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
@@ -14053,7 +14134,7 @@
     "backend/app/domains/zerodha/threats_schemas.py": "e56577a914fe5bea3f3f558fceb71c03f0f1767ffda3612da77445dc1f7dc75a",
     "backend/app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/all_models.py": "48b50771148452321d6d7b8d1430b5c53d77a14db8653e937c8658f6207d505f",
+    "backend/app/infrastructure/database/all_models.py": "ada71e35fef9154bd355649db6799cdc602d965d684d5dca2873db1d8b656a96",
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -14071,8 +14152,8 @@
     "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
     "backend/app/infrastructure/messaging/recovery_celery.py": "e26d7687987a37581414f55bfea0d0414898d24557c7b7b746d0e292d505d0e9",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "2c4f14d6736112e705c5c10a4d3694373e9450d99fc1bf91e515f82299f94bf5",
-    "backend/app/models/__init__.py": "03f616d7186b7675e48d640aeffceeb622c86c75abccb91640b47480bd1c287e",
+    "backend/app/main.py": "a2fde3916245ea368978273f425824a744436660bd188662535d92e1a937eee3",
+    "backend/app/models/__init__.py": "6216721873771a689d511e4f841eccca718d1d9be5ba9e773322b1d9a7289e63",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",
@@ -14083,7 +14164,7 @@
     "backend/app/shared/ws_relay.py": "109dec6742fe9b2787efd793d07526a3ffbaf7262b9d6477de854fdc2936799a",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/main.py": "b88f5331b75e183d1f4ddcdc62aed66f40c08e344d9709f86c558613493b9ee0",
+    "backend/app/uat2/main.py": "9d1970a69018668f145227e4ba0fa3fd84b7900ce9207b22b8495786167e0295",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
