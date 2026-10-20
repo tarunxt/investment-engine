@@ -11,6 +11,7 @@ import {
 import { URLs } from '@/lib/urls';
 import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
+import { ModuleRouteGate } from '@/components/modules/ModuleRouteGate';
 import { SidebarNavigation } from './SidebarNavigation';
 
 export function ConsoleShell({
@@ -59,6 +60,7 @@ export function ConsoleShell({
 
             {/* Sidebar */}
             <div
+                id="console-sidebar"
                 className={`fixed inset-y-0 left-0 z-30 w-[min(92vw,var(--console-sidebar-width))] border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transform transition-transform duration-300 ease-in-out lg:w-[var(--console-sidebar-width)] lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     }`}
             >
@@ -85,6 +87,7 @@ export function ConsoleShell({
                         <button
                             type="button"
                             onClick={() => setSidebarOpen(false)}
+                            aria-label="Close navigation"
                             className="absolute right-4 rounded-md p-2 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground lg:hidden"
                         >
                             <HiOutlineX />
@@ -112,6 +115,8 @@ export function ConsoleShell({
                     onClick={() => setSidebarOpen(true)}
                     className="fixed left-4 top-4 z-10 rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
                     aria-label="Open navigation"
+                    aria-expanded={sidebarOpen}
+                    aria-controls="console-sidebar"
                 >
                     <HiOutlineMenu />
                 </button>
@@ -129,7 +134,7 @@ export function ConsoleShell({
                             {error}
                         </div>
                     ) : null}
-                    {children}
+                    <ModuleRouteGate>{children}</ModuleRouteGate>
                 </main>
             </div>
         </div>

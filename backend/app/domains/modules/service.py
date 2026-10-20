@@ -30,8 +30,9 @@ async def describe(db, owner_id: int, *, snapshot=None) -> dict:
                 active=True, module_id=id.value, capability=capability, boundary='http',
                 snapshot=snapshot, facts=facts, uat2=uat2_mode()).model_dump()
                 for capability in sorted(spec.capabilities)}})
+    from .presentation import presentation_manifest
     return {'schema_version': 1, 'owner_id': owner_id, 'version': snapshot.version,
-        'modules': modules, 'operational_enforcement_complete': False}
+        'presentation': presentation_manifest(), 'modules': modules, 'operational_enforcement_complete': False}
 
 
 def validate_selection(snapshot, patch):

@@ -10,6 +10,7 @@ from fastapi.routing import APIRoute
 from sqlalchemy import select
 
 from test_private_api_ownership import private_api
+from test_stage06_modules import modules,payload
 from app.domains.auth.models import UserRole
 from app.domains.auth.admin_roles import AdministrativeRoleGrant, require_cost_dashboard_admin
 from app.domains.polymarket import access
@@ -165,8 +166,11 @@ def test_sync_workers_recheck_roles_before_broker(boundary, monkeypatch):
         with pytest.raises(PermissionError): call()
 
 
-def test_provider_catalogue_costs_and_web_metadata_are_owned(private_api, monkeypatch):
-    a = private_api
+def test_provider_catalogue_costs_and_web_metadata_are_owned(modules, monkeypatch):
+    a = modules
+    from app.domains.modules.policy import DefaultFactsResolver,ModuleFacts
+    monkeypatch.setattr(DefaultFactsResolver,'resolve_sync',lambda *_:ModuleFacts(jurisdiction='allowed',plan='allowed',connection='ready',execution_capability=True))
+    assert a.client.patch('/me/modules',headers=a.headers[0],json=payload(0,('ai_studio',True))).status_code==200
     from app.domains.ai_providers import router as providers
     a.app.include_router(providers.router)
     monkeypatch.setattr(providers.ProviderFactory, 'list_providers', lambda: [
@@ -177,6 +181,7 @@ def test_provider_catalogue_costs_and_web_metadata_are_owned(private_api, monkey
     from app.shared.types import JobStatus
     for user, cost, label in [(a.users[0], .1, 'owned'), (a.users[1], 99, 'foreign-secret')]:
         row = a.jobs[(user.id-1)*3]
+        row.module_id='ai_studio'; row.module_version=1
         row.status=JobStatus.COMPLETED; row.provider='fake'; row.model='fake-model'
         row.estimated_cost=cost; row.response='Synthetic valid response'
         row.web_search_used=True; row.web_search_queries=[label]; row.web_sources=[label]

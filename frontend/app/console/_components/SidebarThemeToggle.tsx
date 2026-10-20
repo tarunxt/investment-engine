@@ -28,6 +28,7 @@ export function SidebarThemeToggle() {
   const [themePreference, setThemePreference] = useState<ThemePreference>(
     () => getStoredThemePreference() ?? "light",
   );
+  const [systemDark,setSystemDark]=useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,8 +57,11 @@ export function SidebarThemeToggle() {
       syncThemePreference();
     };
 
+    syncThemePreference();
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mediaQuery.matches);
     const handleSystemThemeChanged = () => {
+      setSystemDark(mediaQuery.matches);
       const storedTheme = getStoredThemePreference();
       if (storedTheme === "system") {
         setThemePreference("system");
@@ -77,7 +81,7 @@ export function SidebarThemeToggle() {
 
   const resolvedTheme =
     themePreference === "system"
-      ? resolveThemePreference(themePreference)
+      ? (systemDark?"dark":"light")
       : themePreference;
 
   async function handleThemeSelect(nextTheme: "light" | "dark") {

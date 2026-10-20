@@ -71,7 +71,7 @@ _original_facts=DefaultFactsResolver.resolve_sync
 def synthetic_facts(self,owner,module):
     from sqlalchemy import select
     with factory() as session:email=session.scalar(select(User.email).where(User.id==owner))
-    if module==ModuleId.AI_STUDIO and email in {name+'@stage01.example.com' for name in ('usera','userb','admin')}:
+    if module in {ModuleId.AI_STUDIO,ModuleId.ZERODHA_REBALANCE,ModuleId.INDMONEY_US,ModuleId.SHEETS_EXPORT} and email in {name+'@stage01.example.com' for name in ('usera','userb','admin')}:
         return ModuleFacts(jurisdiction='allowed',plan='allowed',connection='ready',execution_capability=True)
     return _original_facts(self,owner,module)
 DefaultFactsResolver.resolve_sync=synthetic_facts

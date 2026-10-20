@@ -1,5 +1,7 @@
 'use client';
 
+import {useModules} from '@/providers/ModuleProvider';
+import {allowedModule} from '@/lib/modulePolicy';
 import { useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,6 +23,7 @@ export default function ExportToSheetsModal({
   job,
   onExported,
 }: ExportToSheetsModalProps) {
+  const {manifest}=useModules();const canExport=allowedModule(manifest,'sheets_export','export');
   const [isOpen, setIsOpen] = useState(false);
   const [sheetUrl, setSheetUrl] = useState('');
   const [sheetName, setSheetName] = useState('Stock Ideas');
@@ -32,6 +35,7 @@ export default function ExportToSheetsModal({
   const [successUrl, setSuccessUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    if(!canExport)return;
     if (!isOpen || sheetUrl.trim()) return;
 
     let active = true;
@@ -49,7 +53,7 @@ export default function ExportToSheetsModal({
     return () => {
       active = false;
     };
-  }, [isOpen, sheetUrl]);
+  }, [isOpen, sheetUrl,canExport]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +86,7 @@ export default function ExportToSheetsModal({
     }
   };
 
+  if(!canExport)return null;
   if (!isOpen) {
     return (
       <Button

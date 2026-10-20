@@ -1,3 +1,4 @@
+import { moduleRequestSignal } from "@/lib/moduleRequests";
 import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
 import {
@@ -539,7 +540,7 @@ class apiServiceClass implements IApiService {
       void _skipUnauthorizedRefresh;
       void _timeoutMs;
       void _validate;
-      abortContext = createRequestAbortContext(callerSignal, timeoutMs);
+      abortContext = createRequestAbortContext(moduleRequestSignal(url,callerSignal), timeoutMs);
 
       this.log("Config:", {
         url,
@@ -1079,7 +1080,7 @@ class apiServiceClass implements IApiService {
   }
 
   getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {
-    const qs = new URLSearchParams();
+    const qs = new URLSearchParams({selected_only:'true'});
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.summary) qs.set("summary", "true");
@@ -1134,7 +1135,7 @@ class apiServiceClass implements IApiService {
    * Get paginated AI jobs with optional server-side filtering.
    */
   getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }, signal?: AbortSignal): Promise<PaginatedResponse<JobResponse>> {
-    const qs = new URLSearchParams();
+    const qs = new URLSearchParams({selected_only:'true'});
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.status && params.status !== "all") qs.set("status", params.status);

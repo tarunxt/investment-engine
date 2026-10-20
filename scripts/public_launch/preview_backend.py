@@ -43,7 +43,7 @@ from scripts.public_launch.preview_streams import install
 install()
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
-from scripts.public_launch import preview_jobs, preview_stage05
+from scripts.public_launch import preview_jobs, preview_stage05,preview_stage08
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
 from app.domains.modules.router import router as modules_router
@@ -59,7 +59,7 @@ async def lifespan(app):
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
                       Job.__table__, Run.__table__, RunJob.__table__,AutoRebalanceWorkflow.__table__,AutoRebalanceWorkflowStage.__table__,
-                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES, UserModulePreferences.__table__, UserModule.__table__):
+                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES, UserModulePreferences.__table__, UserModule.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -85,6 +85,8 @@ async def lifespan(app):
                 db.add_all([job, run])
                 await db.flush()
                 db.add(RunJob(run_id=run.id, job_id=job.id))
+        from app.uat2.fixtures import seed_portfolio
+        for user in users:await seed_portfolio(db,user.id)
         await db.commit()
     async def fake_consumer():
         while True:
@@ -112,13 +114,23 @@ ALLOWED = {("POST", "/auth/login"), ("POST", "/auth/refresh"), ("POST", "/auth/l
 
 @app.middleware("http")
 async def synthetic_boundary(request: Request, call_next):
+    import json
+    counters=getattr(app.state,'stage08_requests',{});key=request.method+' '+request.url.path;counters[key]=counters.get(key,0)+1;app.state.stage08_requests=counters
+    if request.url.path=='/preview-requests':return JSONResponse(counters)
+    if request.method=='GET' and request.url.path=='/me/modules':
+        fault_file=ROOT/'.runtime/stage01-preview/faults.json'
+        if fault_file.exists():
+            faults=json.loads(fault_file.read_text())
+            if faults.get('mode')=='slow':await asyncio.sleep(min(max(float(faults.get('seconds',2)),0),10))
+            if faults.get('mode')=='fail':return JSONResponse({'detail':'Synthetic policy outage'},status_code=503)
+
     if request.url.path == "/auth/google/config" and request.method == "GET":
         return JSONResponse({"enabled": False, "client_id": None, "synthetic_preview": True})
     if request.url.path == "/preview-health":
         return JSONResponse({"synthetic": True, "database": "isolated SQLite", "outbound_network": "denied"})
-    private_read = request.method == "GET" and (request.url.path in {"/jobs", "/runs"} or
-                   any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
-                       for prefix in ("/jobs/", "/runs/")))
+    private_read = request.method == "GET" and (request.url.path in {"/jobs", "/runs","/me/modules/safety-activity"}|preview_stage08.READS or
+                   request.url.path.startswith('/me/modules/resource-access/') or any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
+                       for prefix in ("/jobs/", "/runs/","/indmoney-us/portfolio/")))
     if request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and (request.method, request.url.path) not in ALLOWED:
         return JSONResponse({"detail": "Unavailable in synthetic Stage01 preview; no external actions are permitted"}, status_code=503)
     response = await call_next(request)
@@ -142,6 +154,7 @@ app.include_router(jobs_ws_router)
 app.include_router(runs_ws_router)
 
 preview_stage05.install(app)
+preview_stage08.install(app)
 
 from app.domains.modules.transports import install_route_policy
 install_route_policy(app)

@@ -1,5 +1,8 @@
 "use client";
 
+import {useModules} from "@/providers/ModuleProvider";
+import {surfaceAllowed} from "@/lib/modulePolicy";
+import {ModuleSurface} from "@/components/modules/ModuleSurface";
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 
 import {
@@ -599,6 +602,7 @@ function PortfolioCommandSummary({
   refreshingBullpen: boolean;
   fx: DashboardSummaryResponse["fx"] | null;
 }) {
+  const {manifest}=useModules();
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
   const formatPrivateInvestmentValue = (
     value: number | null | undefined,
@@ -636,6 +640,8 @@ function PortfolioCommandSummary({
     refreshingTile: boolean;
     currency?: "INR" | "USD";
   }) => {
+    const paths={zerodha:'/console/zerodha',indmoney:'/console/indmoney-us',bullpen:'/console/bullpen-ai'};
+    if(!surfaceAllowed(manifest,paths[keyName]))return null;
     const formatter = (amount: number | null | undefined) =>
       formatPrivateInvestmentValue(amount, currency);
 
@@ -1033,6 +1039,12 @@ function dashboardSummaryToState(
   };
 }
 
+function scopeSummary(summary:DashboardSummaryResponse,manifest:import('@/lib/modulePolicy').ModuleCollection|null):DashboardSummaryResponse{
+ const india=surfaceAllowed(manifest,'/console/zerodha'),us=surfaceAllowed(manifest,'/console/indmoney-us'),bullpen=surfaceAllowed(manifest,'/console/bullpen-ai');
+ return {...summary,zerodha:india?summary.zerodha:null,indmoney_us:us?summary.indmoney_us:null,bullpen:bullpen?summary.bullpen:null,
+ portfolio_history:summary.portfolio_history?{...summary.portfolio_history,india:india?summary.portfolio_history.india:[],indmoney:us?summary.portfolio_history.indmoney:[],bullpen:bullpen?summary.portfolio_history.bullpen:[],combined:[]}:summary.portfolio_history};
+}
+
 function DashboardPageForUser({
   userId,
   initialSummary,
@@ -1040,11 +1052,13 @@ function DashboardPageForUser({
   userId: number | null | undefined;
   initialSummary?: DashboardSummaryResponse | null;
 }) {
+  const {manifest}=useModules();
+  const allowIndia=surfaceAllowed(manifest,"/console/zerodha"),allowUs=surfaceAllowed(manifest,"/console/indmoney-us");
   const [dashboard, setDashboard] = useState<DashboardState>(() => {
     if (initialSummary) {
       return {
         ...INITIAL_STATE,
-        ...dashboardSummaryToState(initialSummary),
+        ...dashboardSummaryToState(scopeSummary(initialSummary,manifest)),
       };
     }
     const cachedOverview = readDashboardOverviewCache(userId);
@@ -1128,7 +1142,7 @@ function DashboardPageForUser({
       .getDashboardSummary()
       .then((summary) => {
         if (requestId !== requestIdRef.current) return;
-        const update = dashboardSummaryToState(summary);
+        const update = dashboardSummaryToState(scopeSummary(summary,manifest));
         setDataProvenance({
           source: "live-summary",
           asOf: Date.parse(summary.generated_at),
@@ -1209,7 +1223,7 @@ function DashboardPageForUser({
     }));
 
     const loaders = [
-      apiService
+      !allowIndia?Promise.resolve():apiService
         .zerodhaThreatsLatest()
         .then(({ analysis }) => {
           setDashboard((current) => {
@@ -1234,7 +1248,7 @@ function DashboardPageForUser({
             zerodhaThreat: false,
           })),
         ),
-      apiService
+      !allowUs?Promise.resolve():apiService
         .indmoneyUsThreatsLatest()
         .then(({ analysis }) => {
           setDashboard((current) => {
@@ -1271,7 +1285,7 @@ function DashboardPageForUser({
 
   useEffect(() => {
     if (initialSummary) {
-      const initialState = dashboardSummaryToState(initialSummary);
+      const initialState = dashboardSummaryToState(scopeSummary(initialSummary,manifest));
       for (const key of DASHBOARD_CRITICAL_KEYS) {
         const value = initialState[key];
         if (value !== undefined) {
@@ -1675,7 +1689,7 @@ function DashboardPageForUser({
       ) : null}
 
       <section className="grid gap-6 xl:grid-cols-2">
-        {showIndiaPortfolioSkeleton ? (
+        <ModuleSurface path="/console/zerodha">{showIndiaPortfolioSkeleton ? (
           <DashboardMarketCardSkeleton />
         ) : (
           <MarketPortfolioCard
@@ -1764,9 +1778,9 @@ function DashboardPageForUser({
                 : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
             }
           />
-        )}
+        )}</ModuleSurface>
 
-        {showUsPortfolioSkeleton ? (
+        <ModuleSurface path="/console/indmoney-us">{showUsPortfolioSkeleton ? (
           <DashboardMarketCardSkeleton />
         ) : (
           <MarketPortfolioCard
@@ -1868,7 +1882,7 @@ function DashboardPageForUser({
                 : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
             }
           />
-        )}
+        )}</ModuleSurface>
       </section>
 
       <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -1892,22 +1906,22 @@ function DashboardPageForUser({
               Open automated workflow
             </Link>
           </Button>
-          <Button asChild variant="outline" className="rounded-full">
+          <ModuleSurface path="/console/zerodha"><Button asChild variant="outline" className="rounded-full">
             <Link
               href={URLs.routes.console.autoRebalanceRuns("zerodha")}
               prefetch={false}
             >
               India run history
             </Link>
-          </Button>
-          <Button asChild variant="outline" className="rounded-full">
+          </Button></ModuleSurface>
+          <ModuleSurface path="/console/indmoney-us"><Button asChild variant="outline" className="rounded-full">
             <Link
               href={URLs.routes.console.autoRebalanceRuns("indmoneyUs")}
               prefetch={false}
             >
               US run history
             </Link>
-          </Button>
+          </Button></ModuleSurface>
         </div>
       </section>
 
@@ -1923,22 +1937,22 @@ function DashboardPageForUser({
           open the market-specific report.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
-          <Button asChild variant="outline" className="rounded-full">
+          <ModuleSurface path="/console/zerodha"><Button asChild variant="outline" className="rounded-full">
             <Link
               href={URLs.routes.console.zerodhaFinalActionables()}
               prefetch={false}
             >
               India actionables
             </Link>
-          </Button>
-          <Button asChild variant="outline" className="rounded-full">
+          </Button></ModuleSurface>
+          <ModuleSurface path="/console/indmoney-us"><Button asChild variant="outline" className="rounded-full">
             <Link
               href={URLs.routes.console.indmoneyUsFinalActionables()}
               prefetch={false}
             >
               US actionables
             </Link>
-          </Button>
+          </Button></ModuleSurface>
         </div>
       </section>
 
@@ -1956,7 +1970,7 @@ function DashboardPageForUser({
         }}
       >
         <section className="grid gap-6 xl:grid-cols-2">
-        {showIndiaThreatSkeleton ? (
+        <ModuleSurface path="/console/zerodha">{showIndiaThreatSkeleton ? (
           <DashboardThreatCardSkeleton />
         ) : (
           <ThreatMarketCard
@@ -1978,9 +1992,9 @@ function DashboardPageForUser({
                   : "Threat insights will appear here after your first India portfolio sync."
             }
           />
-        )}
+        )}</ModuleSurface>
 
-        {showUsThreatSkeleton ? (
+        <ModuleSurface path="/console/indmoney-us">{showUsThreatSkeleton ? (
           <DashboardThreatCardSkeleton />
         ) : (
           <ThreatMarketCard
@@ -2002,7 +2016,7 @@ function DashboardPageForUser({
                   : "Threat insights will appear here after your first INDmoney US snapshot."
             }
           />
-        )}
+        )}</ModuleSurface>
         </section>
       </LazyMount>
     </div>

@@ -114,6 +114,8 @@ async def list_providers(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    from app.domains.modules.visibility import visible_module_ids
+    module_ids=await visible_module_ids(db,current_user.id)
     base = ProviderFactory.list_providers()
     fx = await load_persisted_usd_inr_rate()
     usd_inr_rate = fx.valid_value
@@ -143,6 +145,7 @@ async def list_providers(
                 and_(
                     Job.provider == provider["name"],
                     Job.user_id == current_user.id,
+                    Job.module_id.in_(module_ids),
                     Job.status == JobStatus.COMPLETED,
                     Job.estimated_cost.isnot(None),
                     Job.estimated_cost > 0,
@@ -198,6 +201,7 @@ async def list_providers(
                     and_(
                         Job.provider == provider["name"],
                         Job.user_id == current_user.id,
+                    Job.module_id.in_(module_ids),
                         Job.model == model,
                         Job.status == JobStatus.COMPLETED,
                         Job.estimated_cost.isnot(None),
@@ -219,6 +223,7 @@ async def list_providers(
                     and_(
                         Job.provider == provider["name"],
                         Job.user_id == current_user.id,
+                    Job.module_id.in_(module_ids),
                         Job.model == model,
                         Job.status == JobStatus.COMPLETED,
                     )

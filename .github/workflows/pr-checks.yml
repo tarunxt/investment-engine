@@ -55,6 +55,7 @@ jobs:
           backend/tests/test_stage05_runtime_admin.py
           backend/tests/test_stage06_modules.py
           backend/tests/test_stage07_lifecycle.py
+          backend/tests/test_stage08_presentation.py
           backend/tests/test_polymarket_auto_live_order_intent_leases.py
           backend/tests/test_stage_one_export_jobs.py
           backend/tests/test_financial_data_integrity.py
@@ -169,7 +170,7 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py
 
   stage07-module-policy:
     name: Stage07 module lifecycle races and migration safety
@@ -469,6 +470,7 @@ jobs:
       - name: Run dashboard regression tests
         run: >-
           node --test
+          tests/stage08-module-policy.test.mjs
           tests/api-read-fallbacks.test.mjs
           tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs

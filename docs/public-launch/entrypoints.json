@@ -5,9 +5,9 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 266,
+    "http": 268,
     "lifecycle": 9,
-    "page": 66,
+    "page": 67,
     "scheduler": 16,
     "websocket": 5,
     "worker": 43
@@ -21,6 +21,7 @@
         "(prompt or '').strip",
         "Depends",
         "Job.estimated_cost.isnot",
+        "Job.module_id.in_",
         "ProviderFactory.list_providers",
         "ProviderFactory.model_compatibility",
         "Query",
@@ -43,22 +44,23 @@
         "router.get",
         "select",
         "select(Job.estimated_cost, Job.response).where",
-        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
-        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
+        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.module_id.in_(module_ids), Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
+        "select(Job.estimated_cost, Job.response).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.module_id.in_(module_ids), Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
         "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where",
-        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
-        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
+        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.module_id.in_(module_ids), Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by",
+        "select(Job.estimated_cost, Job.response, Job.prompt, Job.user_id).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.module_id.in_(module_ids), Job.model == model, Job.status == JobStatus.COMPLETED, Job.estimated_cost.isnot(None), Job.estimated_cost > 0)).order_by(desc(Job.id)).limit",
         "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where",
-        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED)).order_by",
-        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.model == model, Job.status == JobStatus.COMPLETED)).order_by(desc(Job.id)).limit",
-        "sum"
+        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.module_id.in_(module_ids), Job.model == model, Job.status == JobStatus.COMPLETED)).order_by",
+        "select(Job.web_search_used, Job.web_search_queries, Job.web_sources).where(and_(Job.provider == provider['name'], Job.user_id == current_user.id, Job.module_id.in_(module_ids), Job.model == model, Job.status == JobStatus.COMPLETED)).order_by(desc(Job.id)).limit",
+        "sum",
+        "visible_module_ids"
       ],
       "capability": "list_providers",
       "classification": "shared-read",
       "kind": "http",
       "method": "GET",
       "module": "ai_providers",
-      "module_lifecycle_gate": "ai_studio / view via modules.transports.install_route_policy",
+      "module_lifecycle_gate": "__analysis_metadata__ / view via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -2615,7 +2617,8 @@
         "sha256",
         "sha256(canonical_payload).hexdigest",
         "summary.model_dump",
-        "user_can_access_singleton_bullpen_runtime"
+        "user_can_access_singleton_bullpen_runtime",
+        "visible_module_ids"
       ],
       "capability": "get_dashboard_summary",
       "classification": "owner-private",
@@ -2624,6 +2627,7 @@
       "module": "dashboard",
       "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
+        "Depends(get_async_db)",
         "Depends(get_current_user)",
         "router.get('/summary', response_model=DashboardSummaryResponse)"
       ],
@@ -2633,7 +2637,7 @@
       "registration": "mounted",
       "route": "/dashboard/summary",
       "side_effects": "private portfolio DB; broker snapshots; platform cost reads",
-      "source": "backend/app/domains/dashboard/router.py:19"
+      "source": "backend/app/domains/dashboard/router.py:20"
     },
     {
       "calls": [
@@ -4158,7 +4162,36 @@
       "registration": "",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/repository.py:207"
+      "source": "backend/app/domains/jobs/repository.py:210"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "JobId",
+        "PostgresJobRepository",
+        "repo.get",
+        "router.get"
+      ],
+      "capability": "get_job",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "jobs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "[Depends(get_current_user)]",
+        "router.get('/{job_id}', response_model=JobResponse)"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/jobs/{job_id}",
+      "side_effects": "job DB; Redis; queued AI; export destinations",
+      "source": "backend/app/domains/jobs/router.py:102"
     },
     {
       "calls": [
@@ -4192,7 +4225,7 @@
       "registration": "mounted",
       "route": "/jobs/{job_id}/cancel",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/router.py:111"
+      "source": "backend/app/domains/jobs/router.py:115"
     },
     {
       "calls": [
@@ -4240,7 +4273,8 @@
         "Query",
         "repo.list",
         "result.to_dict",
-        "router.get"
+        "router.get",
+        "visible_module_ids"
       ],
       "capability": "list_jobs",
       "classification": "owner-private",
@@ -4261,35 +4295,6 @@
       "route": "/jobs",
       "side_effects": "job DB; Redis; queued AI; export destinations",
       "source": "backend/app/domains/jobs/router.py:72"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
-        "JobId",
-        "PostgresJobRepository",
-        "repo.get",
-        "router.get"
-      ],
-      "capability": "get_job",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "GET",
-      "module": "jobs",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "[Depends(get_current_user)]",
-        "router.get('/{job_id}', response_model=JobResponse)"
-      ],
-      "owner_source": [
-        "current_user.id"
-      ],
-      "registration": "mounted",
-      "route": "/jobs/{job_id}",
-      "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/router.py:98"
     },
     {
       "calls": [
@@ -4480,9 +4485,12 @@
         "Depends",
         "MailPreferenceItem.model_validate",
         "MailPreferencesResponse",
+        "Query",
         "int",
+        "preference_visible",
         "router.get",
-        "run_in_threadpool"
+        "run_in_threadpool",
+        "visible_module_ids"
       ],
       "capability": "get_mail_preferences",
       "classification": "owner-private",
@@ -4491,6 +4499,7 @@
       "module": "mails",
       "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
+        "Depends(get_async_db)",
         "Depends(get_current_user)",
         "router.get('/preferences', response_model=MailPreferencesResponse)"
       ],
@@ -4500,7 +4509,7 @@
       "registration": "mounted",
       "route": "/mails/preferences",
       "side_effects": "private mail history; external email delivery",
-      "source": "backend/app/domains/mails/router.py:121"
+      "source": "backend/app/domains/mails/router.py:122"
     },
     {
       "calls": [
@@ -4527,7 +4536,7 @@
       "registration": "mounted",
       "route": "/mails/preferences",
       "side_effects": "private mail history; external email delivery",
-      "source": "backend/app/domains/mails/router.py:134"
+      "source": "backend/app/domains/mails/router.py:141"
     },
     {
       "calls": [
@@ -4537,7 +4546,8 @@
         "Query",
         "int",
         "router.get",
-        "run_in_threadpool"
+        "run_in_threadpool",
+        "visible_module_ids"
       ],
       "capability": "get_mail_history",
       "classification": "owner-private",
@@ -4546,6 +4556,7 @@
       "module": "mails",
       "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
+        "Depends(get_async_db)",
         "Depends(get_current_user)",
         "router.get('/history', response_model=MailHistoryResponse)"
       ],
@@ -4555,7 +4566,7 @@
       "registration": "mounted",
       "route": "/mails/history",
       "side_effects": "private mail history; external email delivery",
-      "source": "backend/app/domains/mails/router.py:149"
+      "source": "backend/app/domains/mails/router.py:156"
     },
     {
       "calls": [
@@ -4583,7 +4594,7 @@
       "registration": "mounted",
       "route": "/mails/history/{history_id}/sell-action",
       "side_effects": "private mail history; external email delivery",
-      "source": "backend/app/domains/mails/router.py:167"
+      "source": "backend/app/domains/mails/router.py:178"
     },
     {
       "calls": [
@@ -4612,7 +4623,7 @@
       "registration": "mounted",
       "route": "/mails/send-test",
       "side_effects": "private mail history; external email delivery",
-      "source": "backend/app/domains/mails/router.py:203"
+      "source": "backend/app/domains/mails/router.py:214"
     },
     {
       "calls": [
@@ -4854,6 +4865,64 @@
       "route": "/me/modules/{module_id}/resume-schedules",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/modules/router.py:32"
+    },
+    {
+      "calls": [
+        "Depends",
+        "router.get",
+        "safety_activity"
+      ],
+      "capability": "get_safety_activity",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "modules",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/safety-activity')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/me/modules/safety-activity",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/router.py:40"
+    },
+    {
+      "calls": [
+        "(await db.execute(select(model.id, model.module_id).where(model.id == resource_id, model.user_id == user.id))).first",
+        "Depends",
+        "HTTPException",
+        "ModulePolicy",
+        "ModulePolicy(db).authorize",
+        "db.execute",
+        "router.get",
+        "select",
+        "select(model.id, model.module_id).where",
+        "{'jobs': Job, 'runs': Run}.get"
+      ],
+      "capability": "resource_access",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "modules",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "ModulePolicy(db).authorize",
+        "router.get('/resource-access/{kind}/{resource_id}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/me/modules/resource-access/{kind}/{resource_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/modules/router.py:47"
     },
     {
       "calls": [
@@ -9115,7 +9184,7 @@
       "registration": "",
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/repository.py:176"
+      "source": "backend/app/domains/runs/repository.py:178"
     },
     {
       "calls": [
@@ -9142,7 +9211,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1001"
+      "source": "backend/app/domains/runs/router.py:1005"
     },
     {
       "calls": [
@@ -9185,7 +9254,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}/cancel",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1014"
+      "source": "backend/app/domains/runs/router.py:1018"
     },
     {
       "calls": [
@@ -9527,7 +9596,8 @@
         "_serialize_run_list_item",
         "repo.list",
         "result.to_dict",
-        "router.get"
+        "router.get",
+        "visible_module_ids"
       ],
       "capability": "list_runs",
       "classification": "owner-private",
@@ -13945,6 +14015,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/profile/connections",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/connections",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/connections/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/profile/cost-drivers",
       "classification": "owner-private",
       "kind": "page",
@@ -14441,7 +14530,7 @@
     "backend/app/domains/ai_providers/factory.py": "aeec686a88c1cbb88af7e51e81f36d554dd8ffb2f7d6444ee08a8fa55902299b",
     "backend/app/domains/ai_providers/gemini.py": "05aa097dadfb8dcdfcfe38a727b2ca5867cd12a34bc28a912274e327ff45ad19",
     "backend/app/domains/ai_providers/openai.py": "18747a314c2947a2003beebf59e306c7947e95e1e3df8a19b8e6c5b1876bd072",
-    "backend/app/domains/ai_providers/router.py": "47eea8dcc5fc241269aa2ec3857528dd8eb9d097ae247d6911fe890084a9d40d",
+    "backend/app/domains/ai_providers/router.py": "4aa4275a20a42a8a126b748de782f8f812e6cb0ffe32e539bf3b81877eb55935",
     "backend/app/domains/ai_providers/tools/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/ai_providers/tools/web_search.py": "52484bfe88c6629cb3463a978d11d9159f5ef1d385f55dbcd437f35a0a3448c7",
     "backend/app/domains/ai_providers/web_metadata.py": "9f7b547d471c0df964ada372dec4da6e6c01c34d152f4bffc58f0d9f5fd36ba0",
@@ -14507,9 +14596,9 @@
     "backend/app/domains/cost_drivers/transfer.py": "66e90ae518e4d64ada01ea0505d820cb4a8ea98839e7d7d48bc92cc35bd0e474",
     "backend/app/domains/dashboard/__init__.py": "04b269ae770e44af85e4c7cb7ec5dc553cca428293365179b291040f2c0be43d",
     "backend/app/domains/dashboard/models.py": "94888385aad300fd1ea0473527c3e6a0d94565a85e33294c020306e54b7b36fa",
-    "backend/app/domains/dashboard/router.py": "d17469fc9ca291faf1d8db2aaa48b3d5f8cad450ca767b9a73149b272d010e9c",
+    "backend/app/domains/dashboard/router.py": "698e48fd609123099385273d77478752bf5dadef970c7452073f1072a01cc5b3",
     "backend/app/domains/dashboard/schemas.py": "8eed84716c178d2fdb0d567fa5673149bdc54e6dcfb3a23b57d15aff9a5d0f47",
-    "backend/app/domains/dashboard/service.py": "b38aae831a7f6f16c7e6bc8b48067f0d7ad7da35bd6ceb1a8f53f564f6aad990",
+    "backend/app/domains/dashboard/service.py": "e437f34c9e21f2f457a8f8601dc0d7d8852ce145442eb04140aa630cced51804",
     "backend/app/domains/dashboard/tasks.py": "5a91b4dffe8a30c02c62e4969ae71002da0c585eb5648c8c8a1c61a5ecd8c298",
     "backend/app/domains/fx_rates/__init__.py": "3f50e1de2cf5a33d4ec3e7f1f2124cde14c699dd62965ad3c75ebfbcad836eee",
     "backend/app/domains/fx_rates/models.py": "12b83795d5f44d5d392600344f5a048b88236e8a50d4223b6d429113f4594d73",
@@ -14553,8 +14642,8 @@
     "backend/app/domains/jobs/output_contracts/validation.py": "e26e01f2e1e3cc693805db5eeea49dbc344dc3cecc03590286ffabc3e68decf5",
     "backend/app/domains/jobs/output_runtime.py": "95773ac85373141a83886d0e6641d14124621b2cf856b831d3ad544033a9ebd3",
     "backend/app/domains/jobs/output_sources.py": "c8f788994e78be1bdba2c56450660581a7e4c7992a2bf8cc3635d6eb130a26fb",
-    "backend/app/domains/jobs/repository.py": "33d9ba34aec2b005ae619d03a1e1e9bcda9b254899ca0ad635792f7746ba279e",
-    "backend/app/domains/jobs/router.py": "080841568f18218d1d5e02592a06e8ef299970a3a830442abe7a3f7eaba9cf37",
+    "backend/app/domains/jobs/repository.py": "138e6543466e3fdc26f26a0219753419f87221fc343d594289da018d469661cc",
+    "backend/app/domains/jobs/router.py": "fccad20a785a4109ffc56d55f183f839d653d64b5cc20ed9340c30733f7186ac",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
     "backend/app/domains/jobs/tasks.py": "30d3ce7d3b5bcceaf3ffe51a6039a20e0182069b180db32260fc0b2c3f853cb3",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
@@ -14564,24 +14653,28 @@
     "backend/app/domains/mails/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/mails/completion_events.py": "9b59846d2bce41790fb39a6952c397fbfbbf84337028043a18a42857b1f5879a",
     "backend/app/domains/mails/completion_preferences.py": "fffc8d76b73b5f48f364206bb4f377b0e5e98b89be61a65514a9a7f3c8c08931",
-    "backend/app/domains/mails/router.py": "8e55d321482dbead46fbef071032265a9241ee81c5fbdaa382d275c64f19bd20",
-    "backend/app/domains/mails/service.py": "dd151c2365d8fc7cfa224c070844387dfe266d083ba48fa462c078056c5e53d1",
+    "backend/app/domains/mails/router.py": "de2a644eaa9c7d94e62962e5b0ebdb31d19089eff7cbcbfa2205f3cbba0a1d73",
+    "backend/app/domains/mails/service.py": "dff5292952f4edb3f9bd2e2d2ce68e27047ab6ebfc42201fb59290ca0a9d0c58",
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "37a223e39cb41be4709d2da42817cda1a8b4de9aa68635ddac7e75562030560a",
+    "backend/app/domains/modules/coverage.py": "c5a86fffae0874c7cc158b7b22c4ee47ddb68a853f4bbb716f29ab7f9e224731",
     "backend/app/domains/modules/dispatch.py": "bb9e8faf27a33a947af05d569763eb91c8ba3ff6d7a90989a8288c798201fa18",
     "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
     "backend/app/domains/modules/lifecycle.py": "e05bf9a7baccc9c42bdb728bf569e4f28458099ff616eb980384b6b9eb727f2d",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
+    "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
     "backend/app/domains/modules/policy.py": "5a9340b3abb61d28fc7f5c34e0e88fc059027ac84745e5fa32f151e98799d626",
+    "backend/app/domains/modules/presentation.py": "46e1fa59088519d61d5ca227e4f4239cfc8eb386f3ee4f563afe194912f5bbe3",
     "backend/app/domains/modules/registry.py": "d053888dc602a6330e5cdd6447895aedc40bc62abbe9fb347a9b36fdf58b049f",
-    "backend/app/domains/modules/router.py": "65563a31a7418c66677aa8bbb9ad4019322f02b11a3b3965b6d18065eb437a46",
-    "backend/app/domains/modules/schemas.py": "b0ab41cf1f297aa29695a21469e35983bfea485b8d4cb966226dbab3fc8f2f52",
-    "backend/app/domains/modules/service.py": "0e2b042014a394a266dca54e36c43ca587d944cafc1df118e4a4c073cef0e13b",
+    "backend/app/domains/modules/router.py": "6c5c7e366ea709307498f3f2201ddd0869918ef80a7b53b95ec0e540c8b7e888",
+    "backend/app/domains/modules/safety.py": "319c7ef40e7027347a8df5ad4b4425ceb73ce009574184a63b328a24f02d9df7",
+    "backend/app/domains/modules/schemas.py": "7cc900780b66cd7a61c6c943c016df38215003c5d423b33b93d5aaade0475360",
+    "backend/app/domains/modules/service.py": "cc2c0439dd751d2eb57b7c9bb662e4f0c6f5eb6b25b50254cd1d0ba8585c6664",
     "backend/app/domains/modules/store.py": "1c99c65203a74e0d7566575947e7e0c6a08c130a8a7a6bc6263e157e508672fd",
     "backend/app/domains/modules/tasks.py": "23b12fd7a80dec5ad1105de27b53d94eeab9ba1a0cf50adf8afb4ddd4eed691d",
-    "backend/app/domains/modules/transports.py": "54d47d0fa4582de1a32da870bff39416d2a7988bce8c8d3427f3902eb5427a5c",
+    "backend/app/domains/modules/transports.py": "76a61a9f1b4b8cca2ba6349c5a53c316c584ebd9dc3313ff3eed486ce650886e",
+    "backend/app/domains/modules/visibility.py": "7dd7b86df04922dcdf7df1d81ad85d99c59c00c78b81c000ca81b7a9feb8a0fb",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
     "backend/app/domains/polymarket/access.py": "8bf2536f1c66e78707f4f010798d3325ed298fdcc2cbc8f0a373d3701cc01413",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
@@ -14689,8 +14782,8 @@
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "f37d8b723d70a5e512612ef62cb2e00f6fbbf6a0f285acfe6903ba2f24281487",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
-    "backend/app/domains/runs/repository.py": "65d60c48f3688f752c470c8f17bf26ba2c8673fdb34371593e3a35d5c3d5d5c6",
-    "backend/app/domains/runs/router.py": "0e5cb9df35dcf40aed4d1915358227f2665f48fa60d980088719eb6d81ddb62b",
+    "backend/app/domains/runs/repository.py": "6451ef66d1130960bd4ff3b20b4869feb2b00081c6982724459d5c74179d72c4",
+    "backend/app/domains/runs/router.py": "81f643755ee26d9b9df22a4c1933ef8b9e165f787a6375137d6fb0da067b9561",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "e05a046b5af24fffe96610116cbc647799b42eb112c6f39f27ddc7950a1fb8f0",
@@ -14820,7 +14913,7 @@
     "frontend/app/console/bullpen008/history/page.tsx": "409511021f20207787e4e467f647bb69075910733a6271bdbff4212b1770038b",
     "frontend/app/console/bullpen008/page.tsx": "d385faf3b0442acd171170aab3184400a755180485b9b80a0b14eb9068ef616f",
     "frontend/app/console/bullpen008/runs/[runId]/page.tsx": "51f5db9da76b763bf15b30a19f6db8903f959ea1addd173bf4ed37ae2165a5c2",
-    "frontend/app/console/dashboard/page.tsx": "0609b38184a354aa5243955f6200f84b17b7df0769eee9f42a81d07ba6bbede5",
+    "frontend/app/console/dashboard/page.tsx": "a62c52eceeeae2e22276c31b5bc6477b99eab924781335e242a47ce15a99faf9",
     "frontend/app/console/google-sheets/callback/page.tsx": "272561226de5762adeb940fdbe9513da1ddce29359d23e7d351709575d894ce2",
     "frontend/app/console/google-sheets/page.tsx": "47ccecf7cbf94700513b444c5927a95893404eeb00cfb730e34909ce807f2e43",
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
@@ -14833,17 +14926,18 @@
     "frontend/app/console/jobs/[id]/page.tsx": "b77a6915c1d3a8b34c68d794e7ca190d6cc1ca763d9b84c935136c725ef04a3e",
     "frontend/app/console/jobs/page.tsx": "748373d257af144754b9a21adbad80415ed81b382437bb48c5f7c8614a1396fe",
     "frontend/app/console/llms/page.tsx": "6b50a4724aae4e4bc694a131c7cb4c92bce506b79d1f60528528f0effab8e797",
-    "frontend/app/console/mails/page.tsx": "7d708e3a6ddbfad9dbb65eeab29e59bac2da24d8e1112d058b6c5fd370bf3272",
+    "frontend/app/console/mails/page.tsx": "bc7e518a3a65e76fc45af257c44efe0c1e16c94ac2b374406e6161c811abc5d4",
     "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
-    "frontend/app/console/profile/activity/page.tsx": "30f3a85d78546341dcbafcb1a04e5e1b48bd23381c8501ae6f2332c03a7e9ba3",
+    "frontend/app/console/profile/activity/page.tsx": "46c115394ec684f3a8e5adc616feffdc71681140e39d419a24d013c93a6c6fe6",
+    "frontend/app/console/profile/connections/page.tsx": "b7c1f602ff081ff1653152fb2bd1fdcdadbfbf2153b7fcdd349eb93387d43f01",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
-    "frontend/app/console/profile/preferences/page.tsx": "c0279e41f7936c801642108c52453bb560dfd51fd1de0e19c7ffd0b33b4d3a4b",
+    "frontend/app/console/profile/preferences/page.tsx": "f1c59cc84c664f425abc76d93d2678c6a0b96a02718088bc2ca1e8730090a2bc",
     "frontend/app/console/profile/security/page.tsx": "c39f32aae2cf5f63b12d6e0fec9ef1dd64e81288eb92e01b7d2fd77beaad98e3",
     "frontend/app/console/prompts/page.tsx": "ea1d6bb90c7f95ceed02a3ee1da3493170ee9b18bb39343a0ec9d24b7aa41bdd",
     "frontend/app/console/runs/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
-    "frontend/app/console/runs/page.tsx": "5a238e3573487bf44520dc50779bd7e0727485f0cf74186d89abecefe7b6b802",
+    "frontend/app/console/runs/page.tsx": "60f8188de739d07defac33cec4e8f2f320f714707e49822f51a663945fc15aa5",
     "frontend/app/console/sports-rankings/page.tsx": "c291f5ea36e7585416f562a51d0d50633a126a74eb8fe180819db38327528947",
     "frontend/app/console/technical-setups/page.tsx": "8b4dd8e5b9d693eadcea9178199fd0d5af2a2c4f267a4598972d35c709fd9bcc",
     "frontend/app/console/trading-bots/bullpen-ai-auto-live/page.tsx": "9defcad1af48185e15277051e253f6694a5006b3112b5fe1b48d93e77c59d6fe",
@@ -14852,7 +14946,7 @@
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
     "frontend/app/console/zerodha/final-actionables/page.tsx": "054a42b3efcfd5b740e28fab42407c8c2ffb7f5c3dff18867acd0f7adc206e01",
-    "frontend/app/console/zerodha/page.tsx": "572843c05e754a4f01a848010c8374ceb77df07339d51ad913e24f2271a7a3a7",
+    "frontend/app/console/zerodha/page.tsx": "101df0bd82fc22829b55d12436558a5821294c2a811f45099b619902028abc0f",
     "frontend/app/console/zerodha/rebalance/page.tsx": "54ef0bf3714f0dc5d1a1aceae9e937fce06c4b726a20588aefb0d945b748b03d",
     "frontend/app/console/zerodha/swing-trade/page.tsx": "9fac9e718e9aaae148aae3294e59a843c0953b720c47194e48be021a764dcf7c",
     "frontend/app/console/zerodha/threats/page.tsx": "252b68e29530d742f8802dca1f4d46c92757a115d3a25c709711ec29ac7b3e45",

@@ -3,6 +3,7 @@
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import {readFileSync} from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { encode } from "next-auth/jwt";
@@ -43,12 +44,12 @@ async function waitForServer(baseUrl, child) {
   throw new Error("Timed out waiting for the Playwright Next.js runtime");
 }
 
-async function sessionCookie(baseUrl, { expired = false } = {}) {
+async function sessionCookie(baseUrl, { expired = false,owner=71 } = {}) {
   const cookieName = "authjs.session-token";
   const now = Math.floor(Date.now() / 1_000);
   const userData = {
-    id: 71,
-    email: "playwright-auth@example.invalid",
+    id: owner,
+    email: `playwright-auth-${owner}@example.invalid`,
     username: "playwright-auth",
     full_name: "Playwright Auth",
     role: "admin",
@@ -100,9 +101,16 @@ async function authenticatedContext(browser, baseUrl, options) {
   });
 }
 
+async function installSyntheticModulePolicy(page,{none=false,fail=false}={}){
+  const fixture=JSON.parse(readFileSync(path.join(frontendRoot,'tests/fixtures/stage08-ready-manifest.json'),'utf8'));
+  if(none)for(const module of fixture.modules){module.selection.enabled=false;for(const decision of Object.values(module.capabilities))decision.allowed=false;}
+  await page.route('**/backend-api/me/modules',route=>route.fulfill({status:fail?503:200,contentType:'application/json',body:JSON.stringify(fail?{detail:'Synthetic policy outage'}:fixture)}));
+}
+
 async function assertDelayedBootstrapDoesNotGateContent(browser, baseUrl) {
   const context = await authenticatedContext(browser, baseUrl);
   const page = await context.newPage();
+  await installSyntheticModulePolicy(page);
   let sessionRequestCompleted = false;
   await page.route("**/api/auth/session", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
@@ -188,7 +196,11 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
     // Polling screens need their visible mounted marker, not network silence.
     waitUntil: "domcontentloaded",
   });
-  await page.locator('[data-bullpen-workspace="mounted"]').waitFor();
+  await installSyntheticModulePolicy(page);
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.getByRole('heading',{name:'Module unavailable or disabled'}).waitFor();
+  if(await page.locator('[data-bullpen-workspace="mounted"]').count())throw new Error('Unavailable Bullpen workspace mounted');
+  if(requests.some(url=>/\/(backend-api|api)\/(bullpen|polymarket)/.test(url)))throw new Error('Disabled Bullpen issued a data request');
   if (await page.getByText("Interactive workspace").count()) {
     throw new Error("Bullpen workspace still shows the interaction prompt");
   }
@@ -201,6 +213,7 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
   dashboardPage.on("request", (request) =>
     dashboardRequests.push(request.url()),
   );
+  await installSyntheticModulePolicy(dashboardPage);
   await dashboardPage.goto(`${baseUrl}/console/dashboard`, {
     // Polling screens need their visible mounted marker, not network silence.
     waitUntil: "domcontentloaded",
@@ -213,7 +226,61 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
     throw new Error("Dashboard did not load its analytics route chunks");
   }
 
+  const empty=await context.newPage();await installSyntheticModulePolicy(empty,{none:true});
+  await empty.goto(`${baseUrl}/console/dashboard`,{waitUntil:'domcontentloaded'});
+  await empty.getByRole('heading',{name:'Choose your modules'}).waitFor();
+  if(await empty.locator('[data-dashboard-analytics="mounted"]').count())throw new Error('No-module dashboard mounted hidden analytics');
+  const failed=await context.newPage();await installSyntheticModulePolicy(failed,{fail:true});
+  await failed.goto(`${baseUrl}/console/zerodha`,{waitUntil:'domcontentloaded'});
+  await failed.getByRole('heading',{name:'Module preferences unavailable'}).waitFor();
   await context.close();
+}
+
+async function assertStage08PreferenceFlows(browser,baseUrl){
+ const context=await authenticatedContext(browser,baseUrl);
+ let manifest=JSON.parse(readFileSync(path.join(frontendRoot,'tests/fixtures/stage08-ready-manifest.json'),'utf8'));
+ for(const module of manifest.modules){module.selection.enabled=false;for(const d of Object.values(module.capabilities))d.allowed=false;}
+ const bind=async(page)=>{
+  await page.route('**/backend-api/me/modules',async route=>{
+   if(route.request().method()==='PATCH'){
+    const body=route.request().postDataJSON();
+    if(body.expected_version!==manifest.version)return route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({detail:{code:'MODULE_VERSION_CONFLICT'}})});
+    for(const update of body.updates){const module=manifest.modules.find(m=>m.module_id===update.module_id);module.selection.enabled=update.enabled;for(const [cap,d] of Object.entries(module.capabilities))d.allowed=update.enabled&&module.availability.available&&['view','analyze'].includes(cap);}
+    manifest.version++;
+   }
+   return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(manifest)});
+  });
+  await page.route('**/backend-api/me/modules/disable-impact',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({version:manifest.version,active_work:{queued_analysis:0,running_analysis:0,reason:'Private synthetic browser fixture; no actual jobs'},dependent_modules:[]})}));
+ };
+ const first=await context.newPage();await bind(first);
+ await first.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
+ await first.getByRole('heading',{name:'Start with the modules you need'}).waitFor();
+ if(await first.getByRole('checkbox',{name:'Select Bullpen Live',exact:true}).isEnabled())throw new Error('Unavailable Bullpen checkbox enabled');
+ const second=await context.newPage();await bind(second);
+ await second.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
+ await second.getByRole('heading',{name:'Start with the modules you need'}).waitFor();
+ await first.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).click();
+ await second.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).waitFor({state:'visible'});
+ await second.waitForFunction(()=>document.querySelector('[aria-label="Select Zerodha Rebalance"]')?.checked===true);
+ await first.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).click();
+ await first.getByRole('alertdialog').waitFor();await first.keyboard.press('Escape');
+ if(!(await first.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).isChecked()))throw new Error('Cancelled disable changed selection');
+ // Simulate an unseen external version update. UI must reload, not overwrite.
+ manifest.version++;
+ await first.getByRole('checkbox',{name:'Select INDmoney US',exact:true}).click();
+ await first.getByText('Preferences changed or this module is unavailable.',{exact:false}).waitFor();
+ if(await first.getByRole('checkbox',{name:'Select INDmoney US',exact:true}).isChecked())throw new Error('Conflicted save granted a selection');
+ await first.setViewportSize({width:390,height:844});
+ await first.getByRole('button',{name:'Open navigation',exact:true}).click();
+ if(await first.getByRole('button',{name:'Open navigation',exact:true}).getAttribute('aria-expanded')!=='true')throw new Error('Mobile navigation did not expand');
+ await first.getByRole('button',{name:'Close navigation',exact:true}).click();
+ // Owner swap uses signed synthetic identities, never the live owner or Google.
+ await context.addCookies([await sessionCookie(baseUrl,{owner:72})]);
+ manifest.owner_id=72;manifest.version=0;for(const module of manifest.modules){module.selection.enabled=false;module.selection.version=0;for(const d of Object.values(module.capabilities)){d.allowed=false;d.owner_id=72;d.selection_version=0;}}
+ await first.reload({waitUntil:'domcontentloaded'});
+ await first.getByRole('heading',{name:'Start with the modules you need'}).waitFor();
+ if(await first.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).isChecked())throw new Error('Account switch retained prior selections');
+ await context.close();
 }
 
 async function main() {
@@ -252,6 +319,8 @@ async function main() {
     await assertDelayedBootstrapDoesNotGateContent(browser, baseUrl);
     await assertAuthFailureStates(browser, baseUrl);
     await assertInteractiveRoutesLoadByDefault(browser, baseUrl);
+    await assertStage08PreferenceFlows(browser,baseUrl);
+    console.log("Stage08 policy, cross-tab, conflict, cancelled-disable, mobile and synthetic-account-switch checks passed");
     console.log("Auth rendering and lazy-route Playwright checks passed");
   } catch (error) {
     if (output) console.error(output);

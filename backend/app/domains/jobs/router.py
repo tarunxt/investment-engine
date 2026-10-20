@@ -74,9 +74,12 @@ async def list_jobs(
     limit: int = Query(20, ge=1, le=100),
     status: str | None = Query(None),
     q: str | None = Query(None),
+    selected_only: bool = Query(False),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.modules.visibility import visible_module_ids
+    module_ids=await visible_module_ids(db,current_user.id) if selected_only is True else None
     repo = PostgresJobRepository(db)
     status_filter: JobStatus | None = None
     if status and status != "all":
@@ -88,6 +91,7 @@ async def list_jobs(
     result = await repo.list(
         PagedQuery(page=page, limit=limit),
         user_id=current_user.id,
+        module_ids=module_ids,
         status=status_filter,
         search=q or None,
     )

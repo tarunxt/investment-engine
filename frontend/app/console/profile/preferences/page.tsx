@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ModulePreferences } from "@/components/modules/ModulePreferences";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -11,6 +12,8 @@ import {
   getStoredThemePreference,
   isThemePreference,
   persistThemePreference,
+  THEME_CHANGED_EVENT,
+  THEME_STORAGE_KEY,
   type ThemePreference,
 } from "@/lib/theme";
 
@@ -52,6 +55,13 @@ export default function PreferencesPage() {
     }
     loadPreferences();
   }, []);
+
+  useEffect(()=>{
+    const changed=(event:Event)=>{if(event instanceof StorageEvent&&event.key!==null&&event.key!==THEME_STORAGE_KEY)return;const value=event instanceof CustomEvent?event.detail:getStoredThemePreference();if(isThemePreference(value))setFormData(previous=>({...previous,theme_preference:value}));};
+    window.addEventListener(THEME_CHANGED_EVENT,changed);
+    window.addEventListener('storage',changed);
+    return()=>{window.removeEventListener(THEME_CHANGED_EVENT,changed);window.removeEventListener('storage',changed);};
+  },[]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -177,6 +187,7 @@ export default function PreferencesPage() {
           {loading ? "Saving..." : "Update preferences"}
         </Button>
       </form>
+      <ModulePreferences />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import {SafetyActivity} from "@/components/modules/SafetyActivity";
 import { Separator } from "@/components/ui/separator";
 
 export default function ActivityPage() {
@@ -13,9 +14,7 @@ export default function ActivityPage() {
       </div>
       <Separator />
       
-      <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground space-y-4 border rounded-md border-dashed">
-        <p>Activity logs are not available at this moment.</p>
-      </div>
+      <SafetyActivity />
     </div>
   );
 }

@@ -40,6 +40,7 @@ function loadApiService() {
         url, stage: "primary", transport: "same-origin-proxy",
       }],
     },
+    "@/lib/moduleRequests": loadModule('../lib/moduleRequests.ts',{'./modulePolicy':loadModule('../lib/modulePolicy.ts')}),
     "@/lib/apiReadCircuitBreaker": loadModule("../lib/apiReadCircuitBreaker.ts"),
     "@/lib/privateRequestDeduplicator": loadModule("../lib/privateRequestDeduplicator.ts"),
   }).apiService;
@@ -197,6 +198,8 @@ test("a superseded Runs refresh cannot publish its older result", async () => {
       useSearchParams: () => new URLSearchParams(),
     },
     "@/lib/utils": { cn: () => "" },
+    "@/providers/ModuleProvider": {useModules:()=>({manifest:{}})},
+    "@/lib/modulePolicy": {surfaceVisible:()=>true,surfaceAllowed:()=>true},
     "@/services/api": {
       apiService: {
         getRuns: () => Promise.resolve({ items: [], pages: 1 }),

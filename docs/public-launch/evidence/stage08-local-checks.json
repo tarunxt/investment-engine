@@ -1,0 +1,49 @@
+{
+  "stage": "08",
+  "checked_at_utc": "2026-10-20T09:00:27.167266+00:00",
+  "base": "dc3063d06605c5c93494a2861bfa840f61c8d94a",
+  "code": "implemented; final visual theme correction under verification",
+  "ci": "not yet run08",
+  "deployment": "not performed",
+  "owner_acceptance": "pending08",
+  "checks": {
+    "backend_release": {
+      "log": ".runtime/stage08-release-publish.txt",
+      "sha256": "3e33ccdab9a303a256380663beb210492f26e0bfc7c0a515c0503f618be0a343"
+    },
+    "google_uat2": {
+      "log": ".runtime/stage08-google-uat2-boundaries.txt",
+      "sha256": "9b589b7d9c22d223c557f8acc1e340752e4248584bb1dd32faca5a2763508db6"
+    },
+    "required_frontend": {
+      "log": ".runtime/stage08-ci-frontend-first.txt",
+      "sha256": "c886d75619136cb557eb43f678722646e632a26ee540906e4a3cbe497f8be409"
+    },
+    "policy_and_requests": {
+      "log": ".runtime/stage08-final-unit-policies.txt",
+      "sha256": "f3744a136f88f11b6a6b15ee63d191f6368f4c94e8eb78fe5ab6b470a81c415c"
+    },
+    "auth_browser": {
+      "log": ".runtime/stage08-auth-render-complete.txt",
+      "sha256": "ed32a6714dffb9d340b0d239bef4d7f77b644da9b455d682e26f53d86988db7d"
+    },
+    "functional": {
+      "log": ".runtime/stage08-functional-final.txt",
+      "sha256": "c6dcb137c4ae00c8783f5a815d70f3c97f05d14410b6f7f1528fc292d81e17af"
+    }
+  },
+  "backend_release_passed": 1251,
+  "google_uat2_passed": 44,
+  "required_frontend_passed": 331,
+  "policy_request_passed": 16,
+  "broad_frontend": {
+    "tests": 789,
+    "passed": 775,
+    "baseline_failures": 14,
+    "exact_identity_and_normalized_message_match": true,
+    "receipt": "docs/public-launch/evidence/stage08-frontend-baseline-comparison.json"
+  },
+  "synthetic_only": true,
+  "no_real_provider_or_order_or_email_or_paid_ai": true,
+  "external_approval": "unchanged"
+}

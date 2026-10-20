@@ -4,6 +4,7 @@ import { SessionProvider } from "next-auth/react";
 import type { Session } from "next-auth";
 import type { UserResponse } from "@/types/api";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { ModuleProvider } from "@/providers/ModuleProvider";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 
 export function ConsoleProviders({
@@ -22,7 +23,7 @@ export function ConsoleProviders({
       refetchInterval={30}
     >
       <AuthProvider initialUser={initialUser}>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider><ModuleProvider>{children}</ModuleProvider></ThemeProvider>
       </AuthProvider>
     </SessionProvider>
   );

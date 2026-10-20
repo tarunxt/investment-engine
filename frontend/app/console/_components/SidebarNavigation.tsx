@@ -1,5 +1,7 @@
 'use client';
 
+import { useModules } from '@/providers/ModuleProvider';
+import { surfaceVisible } from '@/lib/modulePolicy';
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 
 import {
@@ -784,6 +786,7 @@ export function SidebarNavigation({
     onLogout,
     onNavigate,
 }: SidebarNavigationProps) {
+    const {manifest}=useModules();
     const [isReordering, setIsReordering] = useState(false);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
@@ -867,8 +870,14 @@ export function SidebarNavigation({
                     name: nameOverrides[`${kind}:${entry.id}`] ?? entry.name,
                 };
             }),
-        }))
-    ), [childOrder, defaultChildOrder, nameOverrides, navigationOrder]);
+        })).map(section=>({...section,entries:section.entries.flatMap<NavigationEntry>(entry=>{
+            if(entry.type==='group'){
+                const children=entry.children.filter(child=>surfaceVisible(manifest,child.href));
+                return children.length?[{...entry,children}]:[];
+            }
+            return surfaceVisible(manifest,entry.href)?[entry]:[];
+        })})).filter(section=>section.entries.length>0)
+    ), [childOrder, defaultChildOrder, nameOverrides, navigationOrder,manifest]);
     const activeGroupId = useMemo(
         () => findActiveGroupIds(pathname, sections)[0] ?? null,
         [pathname, sections],

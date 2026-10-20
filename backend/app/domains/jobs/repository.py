@@ -20,6 +20,7 @@ class JobRepository(Protocol):
         query: PagedQuery,
         *,
         user_id: int,
+        module_ids: list[str] | None = None,
         status: JobStatus | None = None,
         search: str | None = None,
     ) -> PagedResult[Job]: ...
@@ -62,10 +63,12 @@ class PostgresJobRepository:
         query: PagedQuery,
         *,
         user_id: int,
+        module_ids: list[str] | None = None,
         status: JobStatus | None = None,
         search: str | None = None,
     ) -> PagedResult[Job]:
         stmt = select(Job).where(Job.user_id == user_id)
+        if module_ids is not None:stmt=stmt.where(Job.module_id.in_(module_ids))
         if status:
             stmt = stmt.where(Job.status == status)
         if search:

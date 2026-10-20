@@ -5,6 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import AnyHttpUrl, BaseModel, EmailStr, Field
 
 from app.core.config import settings
+from app.infrastructure.database.session import get_async_db
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.mails.service import (
@@ -120,11 +121,17 @@ def _safe_smtp_config() -> dict[str, object]:
 @router.get("/preferences", response_model=MailPreferencesResponse)
 async def get_mail_preferences(
     current_user: User = Depends(get_current_user),
+    selected_only: bool = Query(False),db=Depends(get_async_db),
 ) -> MailPreferencesResponse:
     items = await run_in_threadpool(
         list_mail_preferences_sync,
         int(current_user.id),
     )
+    if selected_only is True:
+        from app.domains.modules.visibility import visible_module_ids
+        from app.domains.modules.notification_visibility import preference_visible
+        modules=await visible_module_ids(db,current_user.id)
+        items=[item for item in items if preference_visible(item,modules)]
     return MailPreferencesResponse(
         items=[MailPreferenceItem.model_validate(item) for item in items]
     )
@@ -149,11 +156,15 @@ async def update_mail_preferences(
 async def get_mail_history(
     limit: int = Query(default=100, ge=1, le=200),
     current_user: User = Depends(get_current_user),
+    selected_only: bool = Query(False),db=Depends(get_async_db),
 ) -> MailHistoryResponse:
+    from app.domains.modules.visibility import visible_module_ids
+    selected_modules=await visible_module_ids(db,current_user.id) if selected_only is True else None
     items = await run_in_threadpool(
         list_mail_history_sync,
         int(current_user.id),
         limit=limit,
+        **({"selected_modules":selected_modules} if selected_only is True else {}),
     )
     return MailHistoryResponse(
         items=[MailHistoryItem.model_validate(item) for item in items]

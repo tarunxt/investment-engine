@@ -364,10 +364,14 @@ async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
         _user_id: int,
         *,
         include_singleton_bullpen: bool,
+        module_ids: list[str],
     ):
+        assert module_ids==[]
         assert include_singleton_bullpen is True
         return summary
 
+    async def visible(*_):return []
+    monkeypatch.setattr("app.domains.modules.visibility.visible_module_ids",visible)
     monkeypatch.setattr(dashboard_router, "build_dashboard_summary", build_summary)
     first_response = Response()
     result = await dashboard_router.get_dashboard_summary(
