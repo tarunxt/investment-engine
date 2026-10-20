@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useEffect, useMemo, useState } from "react";
 import { Upload } from "lucide-react";
 
@@ -84,7 +86,7 @@ function isChartKey(value: string | null): value is PortfolioCommandChartKey {
 function readChartPreference(userId: number | null | undefined) {
   if (typeof window === "undefined") return "india" as const;
   try {
-    const stored = window.localStorage.getItem(chartPreferenceKey(userId));
+    const stored = privateLocalStorage.getItem(chartPreferenceKey(userId));
     return isChartKey(stored) ? stored : ("india" as const);
   } catch {
     return "india" as const;
@@ -97,7 +99,7 @@ function readLocalChartHistory(
   if (typeof window === "undefined") return emptyLocalHistory();
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(chartHistoryKey(userId)) ?? "{}",
+      privateLocalStorage.getItem(chartHistoryKey(userId)) ?? "{}",
     ) as Partial<LocalChartHistory>;
     const result = emptyLocalHistory();
     for (const key of PORTFOLIO_COMMAND_CHART_KEYS) {
@@ -212,7 +214,7 @@ export function PortfolioCommandChart({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
+      privateLocalStorage.setItem(
         chartPreferenceKey(userId),
         selectedChart,
       );
@@ -249,7 +251,7 @@ export function PortfolioCommandChart({
       }
       if (!changed) return current;
       try {
-        window.localStorage.setItem(
+        privateLocalStorage.setItem(
           chartHistoryKey(userId),
           JSON.stringify(next),
         );

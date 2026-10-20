@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import {
   useCallback,
   useEffect,
@@ -241,7 +243,7 @@ function readDashboardOverviewCachePayload(
   if (typeof window === "undefined" || !userId) return emptyPayload;
 
   try {
-    const raw = window.localStorage.getItem(dashboardOverviewCacheKey(userId));
+    const raw = privateLocalStorage.getItem(dashboardOverviewCacheKey(userId));
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<DashboardOverviewCachePayload>;
       if (parsed.version === 2 && isRecord(parsed.entries)) {
@@ -321,7 +323,7 @@ function writeDashboardOverviewCacheEntry(
       cachedAt: Date.now(),
       value: sanitizeDashboardCacheValue(key, value),
     };
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       dashboardOverviewCacheKey(userId),
       JSON.stringify(payload),
     );

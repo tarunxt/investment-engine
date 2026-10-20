@@ -1,5 +1,7 @@
 'use client';
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import {
     useEffect,
     useMemo,
@@ -195,7 +197,7 @@ function readNavigationOrder(
         return fallback;
     }
 
-    const raw = window.localStorage.getItem(storageKey);
+    const raw = privateLocalStorage.getItem(storageKey);
     const cachedSnapshot = navigationOrderSnapshotCache.get(storageKey);
 
     if (cachedSnapshot && cachedSnapshot.raw === raw) {
@@ -274,7 +276,7 @@ function persistNavigationOrder(
     }
 
     navigationOrderSnapshotCache.set(storageKey, { raw, value: normalized });
-    window.localStorage.setItem(storageKey, raw);
+    privateLocalStorage.setItem(storageKey, raw);
     window.dispatchEvent(new CustomEvent(SIDEBAR_ORDER_UPDATED_EVENT, { detail: storageKey }));
 }
 

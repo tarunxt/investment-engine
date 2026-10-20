@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { RecommendationAuditPanel } from "@/components/RecommendationAuditPanel";
@@ -520,7 +522,7 @@ function readFinalActionablesRunCache(cacheKey: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(cacheKey);
+    const raw = privateLocalStorage.getItem(cacheKey);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as Partial<CachedFinalActionablesRuns>;
@@ -582,7 +584,7 @@ function readHistoricalActionRowsCache(market: SwingTradeMarket) {
   if (typeof window === "undefined") return [] as HistoricalDashboardActionRow[];
 
   try {
-    const raw = window.localStorage.getItem(getHistoricalActionRowsCacheKey(market));
+    const raw = privateLocalStorage.getItem(getHistoricalActionRowsCacheKey(market));
     if (!raw) return [] as HistoricalDashboardActionRow[];
 
     const parsed = JSON.parse(raw) as { version?: number; rows?: HistoricalDashboardActionRow[] };
@@ -642,7 +644,7 @@ function readDashboardFinalActionablesCache() {
   if (typeof window === "undefined") return null;
 
   try {
-    const raw = window.localStorage.getItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY);
+    const raw = privateLocalStorage.getItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as Partial<CachedDashboardFinalActionables>;
@@ -970,7 +972,7 @@ type DashboardActionablesRefreshDetail = {
 function readDashboardActionablesCompletedAt(market: SwingTradeMarket) {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(DASHBOARD_WORKFLOW_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(DASHBOARD_WORKFLOW_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as {
       states?: Partial<Record<"zerodha" | "indmoneyUs", {
@@ -1044,7 +1046,7 @@ export function loadScoreMatrixFormulaConfig() {
   if (typeof window === "undefined") return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
 
   try {
-    const raw = window.localStorage.getItem(SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY);
     if (!raw) return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
     return normalizeScoreMatrixFormulaConfig(JSON.parse(raw));
   } catch (error) {
@@ -1057,7 +1059,7 @@ export function saveScoreMatrixFormulaConfig(config: ScoreMatrixFormulaConfig) {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY,
       JSON.stringify(normalizeScoreMatrixFormulaConfig(config)),
     );
@@ -6022,7 +6024,7 @@ function normalizeActionablesCalculationLayout(
 function loadActionablesCalculationLayout(market: SwingTradeMarket) {
   if (typeof window === "undefined") return createDefaultActionablesCalculationLayout();
   try {
-    const raw = window.localStorage.getItem(getActionablesCalculationLayoutStorageKey(market));
+    const raw = privateLocalStorage.getItem(getActionablesCalculationLayoutStorageKey(market));
     if (!raw) return createDefaultActionablesCalculationLayout();
     return normalizeActionablesCalculationLayout(JSON.parse(raw));
   } catch {
@@ -6888,7 +6890,7 @@ function OpenActionablesCalculationsModal({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       getActionablesCalculationLayoutStorageKey(market),
       JSON.stringify(normalizeActionablesCalculationLayout(columnLayout)),
     );
@@ -7269,7 +7271,7 @@ function normalizeFinalActionableLayout(layout?: Partial<FinalActionableColumnLa
 function loadFinalActionableLayout() {
   if (typeof window === "undefined") return normalizeFinalActionableLayout();
   try {
-    const raw = window.localStorage.getItem(getFinalActionableLayoutStorageKey());
+    const raw = privateLocalStorage.getItem(getFinalActionableLayoutStorageKey());
     return raw ? normalizeFinalActionableLayout(JSON.parse(raw)) : normalizeFinalActionableLayout();
   } catch {
     return normalizeFinalActionableLayout();
@@ -7717,7 +7719,7 @@ export function DashboardFinalActionablesTables() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(getFinalActionableLayoutStorageKey(), JSON.stringify(normalizeFinalActionableLayout(finalActionableLayout)));
+    privateLocalStorage.setItem(getFinalActionableLayoutStorageKey(), JSON.stringify(normalizeFinalActionableLayout(finalActionableLayout)));
   }, [finalActionableLayout]);
 
   useEffect(() => {

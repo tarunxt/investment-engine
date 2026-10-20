@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useCallback, useEffect, useState } from "react";
 
 export const DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS = 30;
@@ -22,7 +24,7 @@ export function normalizeEventTrendsTimeoutSeconds(value: unknown) {
 function readSavedTimeoutSeconds() {
   if (typeof window === "undefined") return DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS;
   try {
-    return normalizeEventTrendsTimeoutSeconds(window.localStorage.getItem(STORAGE_KEY));
+    return normalizeEventTrendsTimeoutSeconds(privateLocalStorage.getItem(STORAGE_KEY));
   } catch {
     return DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS;
   }
@@ -47,7 +49,7 @@ export function useEventTrendsTimeout() {
   const saveTimeoutSeconds = useCallback((value: number) => {
     const next = normalizeEventTrendsTimeoutSeconds(value);
     try {
-      window.localStorage.setItem(STORAGE_KEY, String(next));
+      privateLocalStorage.setItem(STORAGE_KEY, String(next));
     } catch {
       // The current tab still uses the selected value when storage is blocked.
     }

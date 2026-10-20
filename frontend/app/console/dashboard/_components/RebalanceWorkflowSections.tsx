@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import Link from "next/link";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
@@ -442,7 +444,7 @@ function buildInitialStates() {
 function readPersistedWorkflow(): PersistedWorkflow | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(WORKFLOW_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(WORKFLOW_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedWorkflow;
     if (!parsed?.states?.zerodha || !parsed?.states?.indmoneyUs) return null;
@@ -455,7 +457,7 @@ function readPersistedWorkflow(): PersistedWorkflow | null {
 function persistWorkflow(snapshot: PersistedWorkflow) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(snapshot));
+    privateLocalStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(snapshot));
   } catch {
     // Progress persistence is best-effort; the visible in-memory state remains authoritative.
   }
@@ -782,7 +784,7 @@ function summarizeThreat(
 function readSavedModelMixes(): SavedModelMix[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(MODEL_MIX_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
       ? parsed.filter(
@@ -801,7 +803,7 @@ function readSavedModelMixes(): SavedModelMix[] {
 function getRunTargetsFromStoredMix(providers: ProviderInfo[]) {
   let parsed: SavedModelMix[] = [];
   try {
-    const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(MODEL_MIX_STORAGE_KEY);
     parsed = raw ? JSON.parse(raw) : [];
   } catch {
     parsed = [];
@@ -1678,7 +1680,7 @@ function getCompatibleTargets(providers: ProviderInfo[]) {
 
 function readStageLlmSelection(stage: WorkflowStageKey) {
   try {
-    const raw = window.localStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
     return Array.isArray(parsed?.[stage]) ? (parsed[stage] as string[]) : [];
   } catch {
@@ -1688,9 +1690,9 @@ function readStageLlmSelection(stage: WorkflowStageKey) {
 
 function writeStageLlmSelection(stage: WorkflowStageKey, keys: string[]) {
   try {
-    const raw = window.localStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       STAGE_LLM_SELECTION_STORAGE_KEY,
       JSON.stringify({ ...parsed, [stage]: keys }),
     );
@@ -4934,7 +4936,7 @@ function StageLlmSelectorDialog({
   const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
     setSavedMixes(mixes);
     try {
-      window.localStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(mixes));
+      privateLocalStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(mixes));
     } catch {
       // Keep selector usable even when localStorage is unavailable.
     }

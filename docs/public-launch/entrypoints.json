@@ -2,7 +2,7 @@
   "baseline_sha": "0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
-    "background": 32,
+    "background": 30,
     "export": 42,
     "frontend": 25,
     "http": 262,
@@ -426,7 +426,7 @@
       "registration": "mounted",
       "route": "/auth/login",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:123"
+      "source": "backend/app/domains/auth/router.py:125"
     },
     {
       "calls": [
@@ -436,6 +436,7 @@
         "JWTUtils.verify_token",
         "LoginResponse",
         "UserResponse.model_validate",
+        "authentication_time",
         "db.execute",
         "int",
         "payload.get",
@@ -445,7 +446,8 @@
         "select",
         "select(User).where",
         "select(User).where(User.id == int(sub)).options",
-        "selectinload"
+        "selectinload",
+        "session_is_current"
       ],
       "capability": "refresh_token",
       "classification": "public",
@@ -463,7 +465,7 @@
       "registration": "mounted",
       "route": "/auth/refresh",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:158"
+      "source": "backend/app/domains/auth/router.py:160"
     },
     {
       "calls": [
@@ -489,12 +491,15 @@
       "registration": "mounted",
       "route": "/auth/logout",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:186"
+      "source": "backend/app/domains/auth/router.py:191"
     },
     {
       "calls": [
         "Depends",
+        "HTTPException",
+        "JWTUtils.verify_token",
         "WebSocketTicketResponse",
+        "claims.get",
         "issue_websocket_ticket",
         "router.post"
       ],
@@ -505,6 +510,7 @@
       "module": "auth",
       "observed_guards": [
         "Depends(get_current_user)",
+        "Depends(security)",
         "router.post('/websocket-ticket', response_model=WebSocketTicketResponse)"
       ],
       "owner_source": [
@@ -513,7 +519,7 @@
       "registration": "mounted",
       "route": "/auth/websocket-ticket",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:196"
+      "source": "backend/app/domains/auth/router.py:201"
     },
     {
       "calls": [
@@ -536,7 +542,7 @@
       "registration": "mounted",
       "route": "/auth/me",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:206"
+      "source": "backend/app/domains/auth/router.py:215"
     },
     {
       "calls": [
@@ -569,7 +575,7 @@
       "registration": "mounted",
       "route": "/auth/forgot-password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:213"
+      "source": "backend/app/domains/auth/router.py:222"
     },
     {
       "calls": [
@@ -603,7 +609,7 @@
       "registration": "mounted",
       "route": "/auth/reset-password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:230"
+      "source": "backend/app/domains/auth/router.py:239"
     },
     {
       "calls": [
@@ -634,7 +640,7 @@
       "registration": "mounted",
       "route": "/auth/password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:257"
+      "source": "backend/app/domains/auth/router.py:266"
     },
     {
       "calls": [
@@ -665,7 +671,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:278"
+      "source": "backend/app/domains/auth/router.py:287"
     },
     {
       "calls": [
@@ -698,7 +704,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:302"
+      "source": "backend/app/domains/auth/router.py:311"
     },
     {
       "calls": [
@@ -722,7 +728,7 @@
       "registration": "mounted",
       "route": "/auth/google/config",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:45"
+      "source": "backend/app/domains/auth/router.py:47"
     },
     {
       "calls": [
@@ -758,7 +764,7 @@
       "registration": "mounted",
       "route": "/auth/google",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:53"
+      "source": "backend/app/domains/auth/router.py:55"
     },
     {
       "calls": [
@@ -803,7 +809,7 @@
       "registration": "mounted",
       "route": "/auth/register",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:77"
+      "source": "backend/app/domains/auth/router.py:79"
     },
     {
       "calls": [
@@ -4239,18 +4245,18 @@
       "registration": "celery.task(name='app.domains.jobs.tasks.execute_ai_job', bind=True, max_retries=3, default_retry_delay=30, queue='ai')",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/tasks.py:1189"
+      "source": "backend/app/domains/jobs/tasks.py:1191"
     },
     {
       "calls": [
         "Query",
+        "authenticate_websocket",
         "logger.error",
         "logger.info",
         "relay_channel",
         "router.websocket",
-        "user_id_from_ws_token",
-        "websocket.accept",
-        "websocket.close"
+        "stream_is_current",
+        "websocket.accept"
       ],
       "capability": "ws_job_list",
       "classification": "owner-private",
@@ -4258,8 +4264,7 @@
       "method": "WEBSOCKET",
       "module": "jobs",
       "observed_guards": [
-        "router.websocket('/ws/jobs')",
-        "user_id_from_ws_token"
+        "router.websocket('/ws/jobs')"
       ],
       "owner_source": [
         "token (input; authority unverified)"
@@ -4267,7 +4272,7 @@
       "registration": "mounted",
       "route": "/ws/jobs",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/ws_router.py:18"
+      "source": "backend/app/domains/jobs/ws_router.py:19"
     },
     {
       "calls": [
@@ -4275,15 +4280,17 @@
         "PostgresJobRepository",
         "PostgresJobRepository(db).get",
         "Query",
+        "authenticate_websocket",
         "hasattr",
         "job.updated_at.isoformat",
+        "job_channel",
         "logger.error",
         "logger.info",
         "logger.warning",
         "relay_channel",
         "router.websocket",
         "str",
-        "user_id_from_ws_token",
+        "stream_is_current",
         "websocket.accept",
         "websocket.close",
         "websocket.send_json"
@@ -4294,8 +4301,7 @@
       "method": "WEBSOCKET",
       "module": "jobs",
       "observed_guards": [
-        "router.websocket('/ws/jobs/{job_id}')",
-        "user_id_from_ws_token"
+        "router.websocket('/ws/jobs/{job_id}')"
       ],
       "owner_source": [
         "token (input; authority unverified)"
@@ -4303,7 +4309,7 @@
       "registration": "mounted",
       "route": "/ws/jobs/{job_id}",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/ws_router.py:38"
+      "source": "backend/app/domains/jobs/ws_router.py:40"
     },
     {
       "calls": [
@@ -8533,7 +8539,7 @@
       "registration": "",
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/repository.py:170"
+      "source": "backend/app/domains/runs/repository.py:176"
     },
     {
       "calls": [
@@ -9062,13 +9068,13 @@
     {
       "calls": [
         "Query",
+        "authenticate_websocket",
         "logger.error",
         "logger.info",
         "relay_channel",
         "router.websocket",
-        "user_id_from_ws_token",
-        "websocket.accept",
-        "websocket.close"
+        "stream_is_current",
+        "websocket.accept"
       ],
       "capability": "ws_run_list",
       "classification": "owner-private",
@@ -9076,8 +9082,7 @@
       "method": "WEBSOCKET",
       "module": "runs",
       "observed_guards": [
-        "router.websocket('/ws/runs')",
-        "user_id_from_ws_token"
+        "router.websocket('/ws/runs')"
       ],
       "owner_source": [
         "token (input; authority unverified)"
@@ -9085,7 +9090,7 @@
       "registration": "mounted",
       "route": "/ws/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/ws_router.py:18"
+      "source": "backend/app/domains/runs/ws_router.py:19"
     },
     {
       "calls": [
@@ -9093,11 +9098,13 @@
         "PostgresRunRepository",
         "PostgresRunRepository(db).get",
         "Query",
+        "authenticate_websocket",
         "logger.error",
         "logger.info",
         "relay_channel",
         "router.websocket",
-        "user_id_from_ws_token",
+        "run_channel",
+        "stream_is_current",
         "websocket.accept",
         "websocket.close"
       ],
@@ -9107,8 +9114,7 @@
       "method": "WEBSOCKET",
       "module": "runs",
       "observed_guards": [
-        "router.websocket('/ws/runs/{run_id}')",
-        "user_id_from_ws_token"
+        "router.websocket('/ws/runs/{run_id}')"
       ],
       "owner_source": [
         "token (input; authority unverified)"
@@ -9116,7 +9122,7 @@
       "registration": "mounted",
       "route": "/ws/runs/{run_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/ws_router.py:38"
+      "source": "backend/app/domains/runs/ws_router.py:40"
     },
     {
       "calls": [
@@ -11436,10 +11442,10 @@
     },
     {
       "calls": [
-        "_redis_to_ws",
-        "asyncio.create_task"
+        "asyncio.create_task",
+        "fn"
       ],
-      "capability": "asyncio.create_task(_redis_to_ws(), name='redis_to_ws')",
+      "capability": "asyncio.create_task(fn())",
       "classification": "administrator-only",
       "kind": "background",
       "method": "",
@@ -11453,49 +11459,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/shared/ws_relay.py:106"
-    },
-    {
-      "calls": [
-        "_ws_drain",
-        "asyncio.create_task"
-      ],
-      "capability": "asyncio.create_task(_ws_drain(), name='ws_drain')",
-      "classification": "administrator-only",
-      "kind": "background",
-      "method": "",
-      "module": "platform",
-      "observed_guards": [
-        "none found locally; not proof of public access"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "",
-      "route": "",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/shared/ws_relay.py:107"
-    },
-    {
-      "calls": [
-        "_keepalive",
-        "asyncio.create_task"
-      ],
-      "capability": "asyncio.create_task(_keepalive(), name='keepalive')",
-      "classification": "administrator-only",
-      "kind": "background",
-      "method": "",
-      "module": "platform",
-      "observed_guards": [
-        "none found locally; not proof of public access"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "",
-      "route": "",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/shared/ws_relay.py:108"
+      "source": "backend/app/shared/ws_relay.py:158"
     },
     {
       "calls": [
@@ -13633,7 +13597,7 @@
     "backend/app/core/logging.py": "34ec5aec553941e669ca8c256b7e43bdedb37d7784da70e52d198d30e048799e",
     "backend/app/core/recovery.py": "7e1c77bbd8a82a65b3f42cc647f7c9b28bc266f8e37f701ab2871247a64f7e19",
     "backend/app/core/request_timing.py": "ac30e9e77498d78c16e72cb72cf1821bf808b680c22b3c36c62e1a612fbe4ec4",
-    "backend/app/core/security.py": "638f8d50878292a3d5dffea7de88a078bec497e8216acf57dc0308626a2bf2d7",
+    "backend/app/core/security.py": "ef02ce03628c92e029bb66bb0c61ca65f175858ddfac9ac98e34baa99ef97c66",
     "backend/app/core/seed.py": "f00e773efffc3ca505c20048fb592868dce6fd241ee8b1479ab51441d611d7a1",
     "backend/app/core/uat2.py": "bab4c74498a7db818c695bec717a31d4f2bafa55711b620bbbc28f7ede5a0894",
     "backend/app/domains/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -13659,13 +13623,14 @@
     "backend/app/domains/api_usage/schemas.py": "e1ba61871de81c3b3fab7220aec86fa8190a85369d1e3494031ba381a3bed148",
     "backend/app/domains/api_usage/usage_metadata.py": "ea4f6912cc8d28c75fd1245f8be6a505179382f9bcad284907d1a33f6a58cd91",
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/auth/dependencies.py": "4e36c15b99ecaadfdb205c192f5b1291b3add41ab234bc85d1e45540665bab76",
+    "backend/app/domains/auth/dependencies.py": "c201c2f025ab982413940cc5292c3bd4dcc502e7afa2b3222466b2da2dd79857",
     "backend/app/domains/auth/google_signin.py": "aef4c0e28d498070f14f85ab6611ae45f7374aa3a96dfc4e060b8beaffb60d84",
     "backend/app/domains/auth/models.py": "279ca51fd8a2c750051407bd1721c3bf2a0e83ccb1e9b33671b5bb8551e87a26",
-    "backend/app/domains/auth/router.py": "9fb69fc28f9080d8a534a7b168ec448fdbc00a2f00747ce7a97ea3946393c29e",
+    "backend/app/domains/auth/router.py": "27b37c78026e524e5ab2cff8a87478e996dde3ea0290967e4a0136812f05cb1e",
     "backend/app/domains/auth/schemas.py": "b9ed808ca03f82e2a2ec47c655a4241cfa91532714827c28d37c740b9aaddbf3",
+    "backend/app/domains/auth/session_revocation.py": "15f90b7efa30edcfc0b1a8e82ea603e3f7a03d273956642d68f97a93962a00b3",
     "backend/app/domains/auth/tasks.py": "491bcc47f793f324dabe8dd8a79c5560cdae422e688dd89981fd1b9aa7b4a7b8",
-    "backend/app/domains/auth/websocket_tickets.py": "0187fb0e6237a04793b365a8c6a29691f2757646a8c24dd07dfec884af20d254",
+    "backend/app/domains/auth/websocket_tickets.py": "9d73f9d5d434245108a5009b5b8fbf8dfdf8fa7af75b8c4fd6e1ded06aaeb64f",
     "backend/app/domains/bullpen008/__init__.py": "c034bbfe18342ffcdcbf7bd42e1621d13b3dd4c880bb9d82607edc28ff1cd39d",
     "backend/app/domains/bullpen008/alerts.py": "d70d54ec486a2b464af6c30f50f42b05215e35946c1689ee160d705e956e7c8e",
     "backend/app/domains/bullpen008/constants.py": "9c1a75e0d9ff7738a31fb4958e2dcbe3774d85882ac854ccbff97f4db4d018f3",
@@ -13758,11 +13723,11 @@
     "backend/app/domains/jobs/repository.py": "0860a240f6efe062c21f78e28a26df5218d781a36b194779a2ccbaad268edc76",
     "backend/app/domains/jobs/router.py": "01213de54a214e29c6caea02a99a4caf28ab7b727a6503206b67d3d62f02fb7f",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
-    "backend/app/domains/jobs/tasks.py": "a016cc31dd1ddc9825a8292f74bd29845d8658ab6d60f5d043e8c5a8a0585183",
+    "backend/app/domains/jobs/tasks.py": "25fc1f3393462af3df18dec27015443b2958b50758be55765a9a25ce7b69f823",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
     "backend/app/domains/jobs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/jobs/use_cases/create_job.py": "d85170896cf823dc130fd5860927a708887a7471556c93c33d6d1028f1681531",
-    "backend/app/domains/jobs/ws_router.py": "9fec16b815d9aad86bc184048f9d4e1c74b5750e321c6630c4527e27fd20b936",
+    "backend/app/domains/jobs/ws_router.py": "44421350ee99857304f94ec92ea7757b12c786d86b1a749cf3058157a4dd8885",
     "backend/app/domains/mails/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/mails/completion_events.py": "9b59846d2bce41790fb39a6952c397fbfbbf84337028043a18a42857b1f5879a",
     "backend/app/domains/mails/completion_preferences.py": "fffc8d76b73b5f48f364206bb4f377b0e5e98b89be61a65514a9a7f3c8c08931",
@@ -13876,14 +13841,14 @@
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "3296ad11b77f50ca9c8b43924758f53ad422dbb12092f9315b951700d3db9d3d",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
-    "backend/app/domains/runs/repository.py": "65227f558355f1863e440fd9903a81a17445dae051584edd9ae7c16105a66260",
+    "backend/app/domains/runs/repository.py": "65d60c48f3688f752c470c8f17bf26ba2c8673fdb34371593e3a35d5c3d5d5c6",
     "backend/app/domains/runs/router.py": "5ba7839d089501c57dcabcea5b67fd5cbb21fc637e8a3213ca490965acbb6a5e",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "e05a046b5af24fffe96610116cbc647799b42eb112c6f39f27ddc7950a1fb8f0",
     "backend/app/domains/runs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/runs/use_cases/create_run.py": "6ceee7f87e879c7f7b516cd063713dda1b8bb8706996d18df8cc9154c6df83f8",
-    "backend/app/domains/runs/ws_router.py": "407a53eed784365e61ec1c8dfccf8475efc652aa1aab1275fa732acbd94923c0",
+    "backend/app/domains/runs/ws_router.py": "feabc8791610cad44485bae5060f8205415a876de51f5932e2e36c2898890326",
     "backend/app/domains/sports_rankings/__init__.py": "a42cf39ed63a3cf2677034f74a4ef88a788a621375b5955acf3db39b45143759",
     "backend/app/domains/sports_rankings/capture.py": "c39ce090b0e21cbf1345741f9bac2cc182460d1416e422bc8efcab17839674d4",
     "backend/app/domains/sports_rankings/catalogue.py": "3b780e0b9213cb9e4341f64e4b9aaa715083056452a6e3f2ac1dd22d4ff33137",
@@ -13953,7 +13918,8 @@
     "backend/app/shared/pagination.py": "9c57ee246506332db9e6365518a0f363911fab129bebfaa7f5e90e4f5d9f0938",
     "backend/app/shared/portfolio_summary.py": "20bccb9fafbeb7d8ebca0b1da793bc935d873103c581b530da801559ba1c851e",
     "backend/app/shared/types.py": "d2ecdcbf27e937c869e1bfd0b508681eb2a3b40b0ca8070dec39561bb8ca900b",
-    "backend/app/shared/ws_relay.py": "67309dd4713fda2d6eec9600f33aa4d3bc7f182c57bdc1ebd9f9f5eb4607b54e",
+    "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
+    "backend/app/shared/ws_relay.py": "109dec6742fe9b2787efd793d07526a3ffbaf7262b9d6477de854fdc2936799a",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/main.py": "b88f5331b75e183d1f4ddcdc62aed66f40c08e344d9709f86c558613493b9ee0",
@@ -14015,7 +13981,7 @@
     "frontend/app/console/jobs/page.tsx": "748373d257af144754b9a21adbad80415ed81b382437bb48c5f7c8614a1396fe",
     "frontend/app/console/llms/page.tsx": "6b50a4724aae4e4bc694a131c7cb4c92bce506b79d1f60528528f0effab8e797",
     "frontend/app/console/mails/page.tsx": "7d708e3a6ddbfad9dbb65eeab29e59bac2da24d8e1112d058b6c5fd370bf3272",
-    "frontend/app/console/polymarket-bot/page.tsx": "d550bb30b2cbcd5ae23d9385a8f3e02c82535afe3a096efd615991ee80226b67",
+    "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
     "frontend/app/console/profile/activity/page.tsx": "30f3a85d78546341dcbafcb1a04e5e1b48bd23381c8501ae6f2332c03a7e9ba3",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",

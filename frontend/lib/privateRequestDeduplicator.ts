@@ -9,6 +9,8 @@ export class PrivateRequestDeduplicator {
   private readonly inFlight = new Map<string, Promise<unknown>>();
   private sessionGeneration = "anonymous";
 
+  getSessionGeneration() { return this.sessionGeneration; }
+
   setSessionGeneration(generation: string) {
     const normalized = generation.trim() || "anonymous";
     if (normalized === this.sessionGeneration) return;
@@ -35,12 +37,22 @@ export class PrivateRequestDeduplicator {
   run<T>(identity: RequestIdentity, operation: () => Promise<T>): Promise<T> {
     // Sharing a promise would couple caller-owned cancellation. Independently
     // cancellable callers therefore receive independent requests.
-    if (identity.signal) return operation();
+    const generation = this.sessionGeneration;
+    const guarded = async () => {
+      const result = await operation();
+      if (generation !== this.sessionGeneration) {
+        const error = new Error("Private request belongs to an inactive account");
+        error.name = "AbortError";
+        throw error;
+      }
+      return result;
+    };
+    if (identity.signal) return guarded();
 
     const key = this.key(identity);
     const existing = this.inFlight.get(key);
     if (existing) return existing as Promise<T>;
-    const request = operation().finally(() => {
+    const request = guarded().finally(() => {
       if (this.inFlight.get(key) === request) {
         this.inFlight.delete(key);
       }

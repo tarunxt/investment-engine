@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import JWTUtils
-from app.domains.auth.models import User, UserProfile, UserRole
+from app.domains.auth.models import ActivityLog, User, UserProfile, UserRole
 from app.domains.recommendation_audit.models import DecisionRecord, EvidenceRecord, SpendAccount, SpendAttempt, VerificationRecord
 from app.domains.recommendation_audit.router import router
 from app.domains.recommendation_audit.service import create_verification
@@ -41,7 +41,8 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     from app.domains.recommendation_audit.tasks import verify_reversal
     database=tmp_path/"audit-auth-queue.sqlite"
     engine=create_engine(f"sqlite:///{database}",connect_args={"check_same_thread":False})
-    Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
+    # Real authentication now checks the existing durable logout ledger.
+    Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,ActivityLog,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
     monkeypatch.setattr(settings,"recommendation_audit_enabled",True)
     monkeypatch.setattr(settings,"recommendation_audit_recovery_stored_only_enabled",recovery)
     monkeypatch.setattr(settings,"recommendation_audit_external_enabled",False)

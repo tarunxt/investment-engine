@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage, privateSessionStorage } from "@/lib/privateBrowserStorage";
+
 import {
   useCallback,
   useEffect,
@@ -948,7 +950,7 @@ function isRequestAbort(error: unknown) {
 
 function readBrowserCachedAutoRunStatus(cacheKey: string | null) {
   if (typeof window === "undefined" || !cacheKey) return null;
-  return readCachedBullpenAutoRunStatus(window.sessionStorage, {}, cacheKey);
+  return readCachedBullpenAutoRunStatus(privateSessionStorage, {}, cacheKey);
 }
 
 function saveBrowserCachedAutoRunStatus(
@@ -958,7 +960,7 @@ function saveBrowserCachedAutoRunStatus(
   if (typeof window === "undefined" || !cacheKey) return null;
   const savedAt = Date.now();
   writeCachedBullpenAutoRunStatus(
-    window.sessionStorage,
+    privateSessionStorage,
     data,
     savedAt,
     cacheKey,
@@ -1280,7 +1282,7 @@ function readLegacyBullpenLlmTargetsFromStorage() {
   if (typeof window === "undefined") return [];
 
   try {
-    const raw = window.localStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     const candidateTargets = Array.isArray(parsed)
       ? parsed

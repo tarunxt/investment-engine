@@ -1,3 +1,4 @@
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 export type StockParameter = {
   id: string;
   parameter: string;
@@ -56,7 +57,7 @@ export function createStockParameter(parameter: string, validationRule = 'text',
 export function loadStockParametersFromStorage(): StockParameter[] {
   if (typeof window === 'undefined') return DEFAULT_STOCK_PARAMETERS;
   try {
-    const raw = window.localStorage.getItem(STOCK_PARAMETERS_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(STOCK_PARAMETERS_STORAGE_KEY);
     if (!raw) return DEFAULT_STOCK_PARAMETERS;
     const parsed = JSON.parse(raw) as StockParameter[];
     if (!Array.isArray(parsed)) return DEFAULT_STOCK_PARAMETERS;
@@ -75,7 +76,7 @@ export function loadStockParametersFromStorage(): StockParameter[] {
 
 export function saveStockParametersToStorage(parameters: StockParameter[]) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STOCK_PARAMETERS_STORAGE_KEY, JSON.stringify(parameters));
+  privateLocalStorage.setItem(STOCK_PARAMETERS_STORAGE_KEY, JSON.stringify(parameters));
   window.dispatchEvent(new CustomEvent('stock-parameters-updated', { detail: parameters }));
 }
 

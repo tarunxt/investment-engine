@@ -1,0 +1,30 @@
+{
+  "baseline_sha": "a2e82f0e7f36d4fdafc78f7dbe01553aca49af11",
+  "baseline_full_source_archive": true,
+  "baseline": {
+    "tests": 764,
+    "passed": 752,
+    "failed": 12
+  },
+  "stage03_working_tree": {
+    "tests": 772,
+    "passed": 760,
+    "failed": 12
+  },
+  "new_failures": [],
+  "unchanged_preexisting_failures": [
+    "Bullpen History event names use the canonical-link resolver",
+    "Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions",
+    "Bullpen auto-run workflow view exposes Stage 1 output candidates",
+    "Stage 2 historical summary rows build consensus from completed and partial outputs without letting failures blank valid rows",
+    "Stage 2 historical summary rows normalize yes_odds/no_odds aliases into canonical odds and money fields",
+    "Stage 2 historical summary rows rebuild consensus from persisted event data",
+    "Stage 2 invest list reuses the saved Stage 2 top-10 events summary and keeps Stage 3 handoff diagnostics separate",
+    "Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investments in Stage 2",
+    "Universal Scan renders its isolated Bullpen-style auto-run controls",
+    "a stopped capture stays separate from completed workflow inputs",
+    "an active workflow owns its yellow Stage 1 tile and reports live progress",
+    "verified final cursor keeps completion and active scan keeps progress"
+  ],
+  "scope": "Closed Bullpen/operator workflow source-contract tests; not repaired by Stage03 and not a whole-suite pass claim. Existing CI gates remain unchanged, with Stage03 regression coverage added."
+}

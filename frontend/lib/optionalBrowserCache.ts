@@ -1,13 +1,14 @@
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 // These derived snapshots are an optional startup aid, never the source of truth.
 // Keep the entire previous snapshot when a replacement cannot fit. Do not evict
 // other keys or retry with fewer rows/jobs: that would make a partial source group
 // look complete. A reload permits another attempt if the storage budget changes.
-const quotaBlockedKeys = new WeakMap<Storage, Set<string>>();
+const quotaBlockedKeys = new WeakMap<Pick<Storage, "setItem">, Set<string>>();
 
 export function writeOptionalBrowserCache(key: string, createPayload: () => unknown): boolean {
   if (typeof window === "undefined") return false;
 
-  const storage = window.localStorage;
+  const storage = privateLocalStorage;
   if (quotaBlockedKeys.get(storage)?.has(key)) return false;
 
   // Only setItem quota failures are optional. Serialization/programming errors

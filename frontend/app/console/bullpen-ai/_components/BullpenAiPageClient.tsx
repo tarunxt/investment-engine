@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import {
   Suspense,
   useEffect,
@@ -357,7 +359,7 @@ function getInitialEc2Commands() {
   if (typeof window === "undefined") return DEFAULT_EC2_COMMANDS;
 
   try {
-    const savedCommands = window.localStorage.getItem(EC2_COMMANDS_STORAGE_KEY);
+    const savedCommands = privateLocalStorage.getItem(EC2_COMMANDS_STORAGE_KEY);
     if (!savedCommands) return DEFAULT_EC2_COMMANDS;
 
     const parsedCommands = JSON.parse(savedCommands);
@@ -704,7 +706,7 @@ function normalizeCustomExclusionKeywords(keywords: unknown) {
 function readStoredCustomExclusionKeywords(profile: BullpenWorkspaceProfile) {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(
+    const raw = privateLocalStorage.getItem(
       scopeBullpenWorkspaceStorageKey(
         BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
         profile,
@@ -746,7 +748,7 @@ function writeStoredCustomExclusionKeywords(
   filters: BullpenScanFilters,
   profile: BullpenWorkspaceProfile,
 ) {
-  window.localStorage.setItem(
+  privateLocalStorage.setItem(
     scopeBullpenWorkspaceStorageKey(
       BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
       profile,
@@ -1310,7 +1312,7 @@ function readBullpenSnapshotsFromStorage(
   }
 
   try {
-    const raw = window.localStorage.getItem(
+    const raw = privateLocalStorage.getItem(
       scopeBullpenWorkspaceStorageKey(BULLPEN_SNAPSHOT_STORAGE_KEY, profile),
     );
     const parsed = raw ? JSON.parse(raw) : null;
@@ -1321,7 +1323,7 @@ function readBullpenSnapshotsFromStorage(
   }
 
   try {
-    const raw = window.localStorage.getItem(
+    const raw = privateLocalStorage.getItem(
       scopeBullpenWorkspaceStorageKey(
         BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY,
         profile,
@@ -1440,7 +1442,7 @@ function writeBullpenSnapshotsToLocalStorage({
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       scopeBullpenWorkspaceStorageKey(
         BULLPEN_SNAPSHOT_STORAGE_KEY,
         profile ?? "bullpen007",
@@ -1509,7 +1511,7 @@ function readActivePositionAnalysesFromStorage() {
   if (typeof window === "undefined") return {};
 
   try {
-    const raw = window.localStorage.getItem(
+    const raw = privateLocalStorage.getItem(
       BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY,
     );
     const parsed = raw ? JSON.parse(raw) : null;
@@ -1535,7 +1537,7 @@ function writeActivePositionAnalysesToStorage(
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY,
       JSON.stringify(analysesByKey),
     );
@@ -1548,7 +1550,7 @@ function readLastLlmTargetsFromStorage() {
   if (typeof window === "undefined") return [];
 
   try {
-    const raw = window.localStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     if (Array.isArray(parsed)) {
       return parsed
@@ -1566,7 +1568,7 @@ function writeLastLlmTargetsToStorage(targets: ProviderModelTarget[]) {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       BULLPEN_LAST_LLM_TARGET_STORAGE_KEY,
       JSON.stringify(targets),
     );
@@ -1581,7 +1583,7 @@ function readBullpenLlmPromptFromStorage() {
   }
 
   try {
-    const stored = window.localStorage.getItem(BULLPEN_LLM_PROMPT_STORAGE_KEY);
+    const stored = privateLocalStorage.getItem(BULLPEN_LLM_PROMPT_STORAGE_KEY);
     const normalizedStored = stored?.trim();
     if (!normalizedStored) {
       return DEFAULT_BULLPEN_LLM_PROMPT_TEMPLATE;
@@ -1599,7 +1601,7 @@ function writeBullpenLlmPromptToStorage(template: string) {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(BULLPEN_LLM_PROMPT_STORAGE_KEY, template);
+    privateLocalStorage.setItem(BULLPEN_LLM_PROMPT_STORAGE_KEY, template);
   } catch {
     // Best effort only.
   }
@@ -1613,7 +1615,7 @@ function normalizeServerBullpenLlmPromptTemplate(value: string | null | undefine
 function readStoredBoolean(key: string, fallback: boolean) {
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = window.localStorage.getItem(key);
+    const raw = privateLocalStorage.getItem(key);
     if (raw === "true") return true;
     if (raw === "false") return false;
   } catch {
@@ -1625,7 +1627,7 @@ function readStoredBoolean(key: string, fallback: boolean) {
 function writeStoredBoolean(key: string, value: boolean) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(key, String(value));
+    privateLocalStorage.setItem(key, String(value));
   } catch {
     // Best effort only.
   }
@@ -4317,7 +4319,7 @@ function BullpenAiPageContent({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
+      privateLocalStorage.setItem(
         EC2_COMMANDS_STORAGE_KEY,
         JSON.stringify(ec2Commands),
       );

@@ -477,6 +477,16 @@ class apiServiceClass implements IApiService {
     this.readDeduplicator.setSessionGeneration(generation);
   }
 
+  private handleSessionLoss(status: number, message: string, generation: string | undefined) {
+    if (typeof window === "undefined" || !generation ||
+        generation !== this.readDeduplicator.getSessionGeneration()) return;
+    if ((status === 401 || status === 403) && [
+      "Not authenticated", "Invalid or expired token", "Access token required",
+      "Invalid token payload", "User not found", "User account is inactive",
+      "Session is no longer active",
+    ].includes(message)) window.dispatchEvent(new Event("private-session-revoked"));
+  }
+
   async parseErrorResponse(response: Response): Promise<unknown> {
     const text = await response.text();
     if (!text.trim()) {
@@ -498,6 +508,7 @@ class apiServiceClass implements IApiService {
     url: string,
     options: ApiRequestOptions = {},
   ): Promise<T> {
+    const requestGeneration = this.readDeduplicator?.getSessionGeneration?.();
     const method = options.method || "GET";
     const timeoutMs = options.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS;
     const startedAt =
@@ -563,6 +574,7 @@ class apiServiceClass implements IApiService {
         const fallbackMessage =
           response.statusText || `Request failed with status ${response.status}`;
         const errorMessage = deriveApiErrorMessage(errorData, fallbackMessage);
+        this.handleSessionLoss?.(response.status, errorMessage, requestGeneration);
 
         this.error(`API request failed with HTTP ${response.status}.`, {
           method,

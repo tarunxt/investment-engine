@@ -31,9 +31,9 @@ test("interactive-island preference is durable and storage failures are non-bloc
     "../app/console/_components/usePersistentInteractiveIsland.ts",
   );
 
-  assert.match(source, /localStorage\.getItem\(storageKey\)/);
-  assert.match(source, /localStorage\.setItem\(storageKey, OPEN_VALUE\)/);
-  assert.match(source, /memoryOpenKeys\.add\(storageKey\)[\s\S]*localStorage\.setItem/);
+  assert.match(source, /privateLocalStorage\.getItem\(storageKey\)/);
+  assert.match(source, /privateLocalStorage\.setItem\(storageKey, OPEN_VALUE\)/);
+  assert.match(source, /memoryOpenKeys\.add\(storageKey\)[\s\S]*privateLocalStorage\.setItem/);
   assert.match(source, /window\.addEventListener\("storage", handleStorage\)/);
   assert.match(source, /useSyncExternalStore/);
 });

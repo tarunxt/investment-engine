@@ -93,8 +93,8 @@ test("History uses a saved configurable refresh interval without overlapping req
 
   assert.match(historyScreen, /DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300/);
   assert.match(historyScreen, /RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY/);
-  assert.match(historyScreen, /window\.localStorage\.getItem/);
-  assert.match(historyScreen, /window\.localStorage\.setItem/);
+  assert.match(historyScreen, /privateLocalStorage\.getItem/);
+  assert.match(historyScreen, /privateLocalStorage\.setItem/);
   assert.match(historyScreen, /const refreshInProgress = useRef\(false\)/);
   assert.match(historyScreen, /if \(refreshInProgress\.current\) return/);
   assert.match(historyScreen, /window\.setInterval\([\s\S]*?refreshIntervalSeconds \* 1_000/);

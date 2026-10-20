@@ -250,7 +250,7 @@ test("event trends timeout is editable, persisted, and sent to the proxy", () =>
 
   assert.match(timeoutHook, /DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS = 30/);
   assert.match(timeoutHook, /bullpen-event-trends-timeout-seconds-v1/);
-  assert.match(timeoutHook, /window\.localStorage\.setItem/);
+  assert.match(timeoutHook, /privateLocalStorage\.setItem/);
   assert.match(historyContent, /Backend wait threshold/);
   assert.match(historyContent, /Save threshold/);
   assert.match(historyContent, /onClick=\{onConfigure\}/);
@@ -321,7 +321,7 @@ test("Bullpen event links use the direct market route instead of the trending se
 
 test("event trends support deadlines, persistent table controls, and stable scan details", () => {
   assert.match(trendsTable, /label: "Deadline"/);
-  assert.match(trendsTable, /localStorage\.setItem\(storageKey/);
+  assert.match(trendsTable, /privateLocalStorage\.setItem\(storageKey/);
   assert.match(trendsTable, /draggable/);
   assert.match(trendsTable, /cursor-col-resize/);
   assert.match(trendsTable, /data-returns-divider="0\.1"/);

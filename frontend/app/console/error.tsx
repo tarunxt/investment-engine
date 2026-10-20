@@ -1,5 +1,7 @@
 'use client';
 
+import { privateSessionStorage } from "@/lib/privateBrowserStorage";
+
 import { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
@@ -22,7 +24,7 @@ function isChunkLoadError(error: Error) {
 }
 
 function clearChunkReloadAttempt() {
-  window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
+  privateSessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
 }
 
 export default function ConsoleError({
@@ -46,12 +48,12 @@ export default function ConsoleError({
       return;
     }
 
-    const previousAttempt = window.sessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY);
+    const previousAttempt = privateSessionStorage.getItem(CHUNK_RELOAD_STORAGE_KEY);
     if (previousAttempt === window.location.pathname) {
       return;
     }
 
-    window.sessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, window.location.pathname);
+    privateSessionStorage.setItem(CHUNK_RELOAD_STORAGE_KEY, window.location.pathname);
     window.location.reload();
   }, [isRecoverableChunkError]);
 

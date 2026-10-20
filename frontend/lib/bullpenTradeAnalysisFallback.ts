@@ -1,3 +1,4 @@
+import { privateSessionStorage } from "@/lib/privateBrowserStorage";
 import type { BullpenTradeAnalysisListResponse } from "@/types/api";
 
 const TRADE_ANALYSIS_CACHE_KEY =
@@ -94,7 +95,7 @@ export function readTradeAnalysisCache(input: {
   }
 
   try {
-    const raw = window.sessionStorage.getItem(TRADE_ANALYSIS_CACHE_KEY);
+    const raw = privateSessionStorage.getItem(TRADE_ANALYSIS_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<TradeAnalysisCacheEnvelope>;
     const now = input.now ?? Date.now();
@@ -107,7 +108,7 @@ export function readTradeAnalysisCache(input: {
       now - parsed.cachedAt > TRADE_ANALYSIS_CACHE_MAX_AGE_MS ||
       !isBullpenTradeAnalysisListResponse(parsed.data)
     ) {
-      window.sessionStorage.removeItem(TRADE_ANALYSIS_CACHE_KEY);
+      privateSessionStorage.removeItem(TRADE_ANALYSIS_CACHE_KEY);
       return null;
     }
     return {
@@ -141,7 +142,7 @@ export function writeTradeAnalysisCache(input: {
     data: input.data,
   };
   try {
-    window.sessionStorage.setItem(
+    privateSessionStorage.setItem(
       TRADE_ANALYSIS_CACHE_KEY,
       JSON.stringify(envelope),
     );

@@ -111,7 +111,7 @@ test("portfolio command chart supports and remembers every portfolio view", () =
   }
   assert.match(chartSource, /aria-label="Choose portfolio chart"/);
   assert.match(chartSource, /dashboard-command-chart:v1:user:/);
-  assert.match(chartSource, /window\.localStorage\.setItem/);
+  assert.match(chartSource, /privateLocalStorage\.setItem/);
   assert.match(chartSource, /dashboard-command-chart-history:v1:user:/);
 });
 

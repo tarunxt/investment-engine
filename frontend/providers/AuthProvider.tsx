@@ -7,6 +7,8 @@ import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import { closePrivateWebSockets } from "@/services/privateSocketRegistry";
+import { setPrivateStorageOwner, clearPrivateStorageOwner } from "@/lib/privateBrowserStorage";
 import {
   clearBrowserPrivateCacheOwner,
   purgeBrowserPrivateDashboardCaches,
@@ -56,23 +58,69 @@ export function AuthProvider({
   const [loading, setLoading] = useState(!devAuthDisabled && !initialUser);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
-  const previousUserIdRef = useRef<number | null>(initialUser?.id ?? null);
+  const [boundaryOwner, setBoundaryOwner] = useState<number | null>(initialUser?.id ?? null);
+  const closingBoundary = useRef(false);
+  const mountedOwner = useRef<number | null>(null);
+  const sessionOwner = status === "unauthenticated" ? null :
+    Number(session?.user?.id || user?.id) || null;
+
+  const clearPrivateBoundary = useCallback(() => {
+    closingBoundary.current = true;
+    setBoundaryOwner(null);
+    closePrivateWebSockets();
+    apiService.setSessionGeneration("anonymous");
+    clearPrivateStorageOwner();
+    purgeBrowserPrivateDashboardCaches();
+    clearBrowserPrivateCacheOwner();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (closingBoundary.current) return;
+    if (mountedOwner.current !== null && sessionOwner !== mountedOwner.current) {
+      clearPrivateBoundary();
+      // A new document prevents old callbacks/module state from adopting B's storage.
+      window.location.replace(sessionOwner ? window.location.href : "/login");
+      return;
+    }
+    if (sessionOwner === null || user?.id !== sessionOwner) return;
+    if (!setPrivateStorageOwner(sessionOwner)) {
+      clearPrivateBoundary();
+      window.location.reload();
+      return;
+    }
+    reconcileBrowserPrivateCacheOwner(sessionOwner);
+    mountedOwner.current = sessionOwner;
+    setBoundaryOwner(sessionOwner);
+  }, [sessionOwner, session?.generation, user?.id, clearPrivateBoundary]);
 
   useEffect(() => {
-    const nextUserId = user?.id ?? null;
-    const previousUserId = previousUserIdRef.current;
-    if (
-      previousUserId !== null &&
-      nextUserId !== null &&
-      previousUserId !== nextUserId
-    ) {
-      purgeBrowserPrivateDashboardCaches();
-    }
-    if (nextUserId !== null) {
-      reconcileBrowserPrivateCacheOwner(nextUserId);
-    }
-    previousUserIdRef.current = nextUserId;
-  }, [user?.id]);
+    const revoked = () => {
+      if (closingBoundary.current) return;
+      clearPrivateBoundary();
+      void nextSignOut({ redirect: false }).finally(() => window.location.assign("/login"));
+    };
+    const changed = (event: StorageEvent) => {
+      if (event.key === "investment-engine:private-cache-owner:v1" &&
+          mountedOwner.current !== null && event.newValue !== String(mountedOwner.current)) {
+        clearPrivateBoundary();
+        window.location.reload();
+      }
+    };
+    window.addEventListener("private-session-revoked", revoked);
+    window.addEventListener("storage", changed);
+    return () => {
+      window.removeEventListener("private-session-revoked", revoked);
+      window.removeEventListener("storage", changed);
+    };
+  }, [clearPrivateBoundary]);
+
+
+  // Register server identity during commit, before descendant private effects.
+  useLayoutEffect(() => {
+    apiService.setSessionGeneration(
+      session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
+    );
+  }, [session?.generation, user]);
 
   const clearErrorState = useCallback(() => {
     setError(null);
@@ -186,15 +234,6 @@ export function AuthProvider({
     }
   }, [session, status]);
 
-  // Child pages begin private reads in passive effects. Register the already
-  // authenticated identity during commit, before any of those reads capture
-  // the singleton's session key. This also runs before StrictMode effect replay.
-  useLayoutEffect(() => {
-    apiService.setSessionGeneration(
-      session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
-    );
-  }, [session?.generation, user]);
-
   const login = useCallback(async (
     emailOrUsername: string,
     password: string,
@@ -301,6 +340,7 @@ export function AuthProvider({
 
     clearErrorState();
     setLoading(true);
+    clearPrivateBoundary();
 
     try {
       if (user) {
@@ -318,7 +358,7 @@ export function AuthProvider({
       setLoading(false);
       window.location.href = "/login";
     }
-  }, [clearErrorState, user]);
+  }, [clearErrorState, user, clearPrivateBoundary]);
 
   const refreshAuth = useCallback(async () => {
     if (devAuthDisabled) {
@@ -368,5 +408,8 @@ export function AuthProvider({
     clearError,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  const ready = !closingBoundary.current && user?.id === sessionOwner && boundaryOwner === sessionOwner;
+  return <AuthContext.Provider value={value}>
+    {ready ? <div key={`private-user:${sessionOwner}`} style={{ display: "contents" }}>{children}</div> : null}
+  </AuthContext.Provider>;
 }

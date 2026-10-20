@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
@@ -86,7 +87,8 @@ class JWTUtils:
         user_id: int,
         email: str,
         role: str,
-        expires_delta: Optional[timedelta] = None
+        expires_delta: Optional[timedelta] = None,
+        *, auth_time: float | None = None
     ) -> str:
         """
         Create JWT access token.
@@ -110,14 +112,15 @@ class JWTUtils:
             "email": email,
             "role": role,
             "exp": expire,
-            "iat": datetime.utcnow()
+            "iat": datetime.utcnow(),
+            "auth_time": time.time() if auth_time is None else auth_time
         }
         
         encoded_jwt = jwt.encode(token_claims(token_data), signing_key(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
-    def create_refresh_token(user_id: int, email: str) -> str:
+    def create_refresh_token(user_id: int, email: str, *, auth_time: float | None = None) -> str:
         """
         Create JWT refresh token.
         
@@ -135,7 +138,8 @@ class JWTUtils:
             "email": email,
             "type": "refresh",
             "exp": expire,
-            "iat": datetime.utcnow()
+            "iat": datetime.utcnow(),
+            "auth_time": time.time() if auth_time is None else auth_time
         }
         
         encoded_jwt = jwt.encode(token_claims(token_data), signing_key(), algorithm=ALGORITHM)
@@ -189,7 +193,7 @@ class AuthUtils:
     """Combined authentication utilities."""
     
     @staticmethod
-    def create_tokens(user_id: int, email: str, role: str) -> Dict[str, str]:
+    def create_tokens(user_id: int, email: str, role: str, *, auth_time: float | None = None) -> Dict[str, str]:
         """
         Create both access and refresh tokens.
         
@@ -201,8 +205,9 @@ class AuthUtils:
         Returns:
             Dictionary with access_token and refresh_token
         """
+        authenticated = time.time() if auth_time is None else auth_time
         return {
-            "access_token": JWTUtils.create_access_token(user_id, email, role),
-            "refresh_token": JWTUtils.create_refresh_token(user_id, email),
+            "access_token": JWTUtils.create_access_token(user_id, email, role, auth_time=authenticated),
+            "refresh_token": JWTUtils.create_refresh_token(user_id, email, auth_time=authenticated),
             "token_type": "bearer"
         }
