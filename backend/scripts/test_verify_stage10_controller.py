@@ -39,3 +39,40 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(set(fixture.SAFE_ENV),{'PATH','PYTHONDONTWRITEBYTECODE','CI','GITHUB_ACTIONS','CREDX_STAGE10_CONTROLLER_ACK','CREDX_STAGE10_SOURCE'})
 
 if __name__=='__main__':unittest.main()
+
+class ReadinessFixtureTests(unittest.TestCase):
+    def fixture(self):
+        spec=importlib.util.spec_from_file_location('stage10_http_fixture',Path(__file__).parent/'stage10_fixtures/service.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+    def status(self,server):
+        from urllib.request import urlopen
+        from urllib.error import HTTPError
+        try:
+            with urlopen('http://127.0.0.1:'+str(server.server_port)+'/',timeout=3) as response:return response.status
+        except HTTPError as exc:return exc.code
+
+    def start(self,server):
+        import threading
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        def stop():server.shutdown();server.server_close();thread.join(timeout=3)
+        self.addCleanup(stop)
+
+    def test_real_http_failure_flag_is_local_to_stage10_then_clears(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);own=root/'stage10';own.mkdir();historical=root/'stage09';historical.mkdir()
+            (historical/'readiness-fail').write_text('historical synthetic flag')
+            server=self.fixture().make_server(0,readiness=True,directory=own);self.start(server)
+            self.assertEqual(self.status(server),200)
+            flag=own/'readiness-fail';flag.write_text('synthetic failure')
+            self.assertEqual(self.status(server),503)
+            flag.unlink();self.assertEqual(self.status(server),200)
+            self.assertTrue((historical/'readiness-fail').exists())
+
+    def test_dependency_endpoint_stays_healthy_when_app_flag_exists(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'readiness-fail').write_text('synthetic app-only failure')
+            server=self.fixture().make_server(0,readiness=False,directory=root);self.start(server)
+            self.assertEqual(self.status(server),200)

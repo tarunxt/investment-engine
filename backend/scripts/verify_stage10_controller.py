@@ -77,7 +77,8 @@ def install_fixture(python):
         command(['useradd','--system','--no-create-home','--shell','/usr/sbin/nologin','credx-uat2-'+name])
     command([python,'-m','venv',FIXTURE/'venv'])
     command([FIXTURE/'venv/bin/pip','install','--disable-pip-version-check','-r',REPO/'backend/requirements.txt'])
-    shutil.copyfile(REPO/'backend/scripts/stage09_fixtures/service.py',FIXTURE/'service.py');(FIXTURE/'service.py').chmod(0o644)
+    shutil.copyfile(REPO/'backend/scripts/stage10_fixtures/service.py',FIXTURE/'service.py');(FIXTURE/'service.py').chmod(0o644)
+    assert (FIXTURE/'service.py').read_bytes()==git('show',CANDIDATE+':backend/scripts/stage10_fixtures/service.py')
     for source in [BASE,CANDIDATE]:
         release=ROOT/'releases'/source;release.mkdir(parents=True)
         archive=git('archive',source,'backend','deploy/uat2')
@@ -375,7 +376,7 @@ def run_suite(python,group):
                 else:raise AssertionError('Unrestored database finalized')
                 assert not (CONFIG/'schema-operation.env').exists();case['interrupted_environment_cleaned_by_failed_verified_recovery']=True
             else:
-                original_configure=ctl.configure_units;original_replace=ctl.os.replace
+                original_configure=ctl.configure_units;original_replace=ctl.os.replace;original_readiness=ctl.readiness
                 unit=previous/'deploy/uat2/native/systemd/credx-uat2-worker.service';unit_original=unit.read_text()
                 def configure(release):
                     original_configure(release)
@@ -383,15 +384,25 @@ def run_suite(python,group):
                 def replace(src,dst):
                     if scenario=='promotion_failure' and Path(dst)==ROOT/'current':raise OSError('synthetic rename failure')
                     return original_replace(src,dst)
+                def app_statuses():
+                    return [int(command(['/usr/bin/curl','--silent','--show-error','--max-time','5','--output','/dev/null','--write-out','%{http_code}',f'http://127.0.0.1:{port}/']).stdout) for port in (8002,3002)]
+                def readiness():
+                    if scenario=='readiness_failure':
+                        case['injected_http_statuses']=app_statuses()
+                        assert case['injected_http_statuses']==[503,503], 'Readiness fault was not actually injected'
+                    return original_readiness()
                 if scenario=='partial_start_failure':write(unit,re.sub(r'^ExecStartPre=.*$', 'ExecStartPre=/bin/false',unit_original,flags=re.M),0o644)
                 if scenario=='readiness_failure':write(FIXTURE/'readiness-fail','synthetic',0o644)
                 try:
-                    with patch.object(ctl,'configure_units',side_effect=configure),patch.object(ctl.os,'replace',side_effect=replace):ctl.rollback(str(saved))
+                    with patch.object(ctl,'configure_units',side_effect=configure),patch.object(ctl.os,'replace',side_effect=replace),patch.object(ctl,'readiness',side_effect=readiness):ctl.rollback(str(saved))
                 except (RuntimeError,OSError):pass
                 else:raise AssertionError('Finalization failure not reached')
                 assert_start_blocked(ctl);assert helper.capture(engine)==before
                 write(unit,unit_original,0o644);(FIXTURE/'readiness-fail').unlink(missing_ok=True)
                 recover(saved,before,before_seq)  # Must succeed with unchanged runtime or case fails.
+                if scenario=='readiness_failure':
+                    case['cleared_http_statuses']=app_statuses()
+                    assert case['cleared_http_statuses']==[200,200]
                 case['verified_recovery_after_finalization_failure']=True
             case['status']='passed'
         except BaseException as exc:
