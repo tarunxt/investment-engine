@@ -649,6 +649,7 @@ export function IndMoneyUsSnapshotsPanel({
     <div className="flex flex-col gap-5">
       <ImportHistoryList history={history} onSelect={onSelectSnapshot}/>
       <div role="status" className="rounded border p-3 text-sm break-words">
+        {selectedSnapshot.parser_current!==true&&<p>Earlier parser version: this historical receipt is retained, but requires a new preview before current analysis.</p>}
         Manual import / analysis only · {selectedSnapshot.acceptance_state ?? 'legacy_unverified'} · {selectedSnapshot.freshness ?? 'unknown'}
         <p>Currency {selectedSnapshot.import_provenance?.currency ?? 'unverified'} · As of {selectedSnapshot.captured_at}</p>
         <p>Parser {selectedSnapshot.import_provenance?.parser_version ?? 'legacy; re-import to verify'} · Source SHA256 {selectedSnapshot.import_provenance?.source_hash ?? 'unrecorded'}</p>

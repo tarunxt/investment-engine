@@ -81,6 +81,7 @@ class IndMoneyUsPortfolioSnapshotSummaryResponse(BaseModel):
     captured_at: datetime
     source: str
     acceptance_state: str = 'legacy_unverified'
+    parser_current: bool = False
     content_hash: str | None = None
     import_provenance: dict | None = None
     accepted_at: datetime | None = None

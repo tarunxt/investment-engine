@@ -1,5 +1,5 @@
 """Exercise real import handlers in the guarded loopback-only synthetic preview."""
-import json,urllib.request,urllib.error
+import json,hashlib,urllib.request,urllib.error
 from pathlib import Path
 from datetime import datetime,timezone,timedelta
 ROOT=Path(__file__).resolve().parents[2]
@@ -55,4 +55,13 @@ code,new,_=request('POST',f"/indmoney-us/imports/{correction['id']}/accept",{'ac
 check('earlier-asof accepted correction becomes current',code==200 and request('GET','/indmoney-us/portfolio',token=a)[1]['latest']['id']==new['id'])
 check('prior immutable snapshot retained',request('GET',f"/indmoney-us/portfolio/{accepted['id']}",token=a)[1]['holdings'][0]['current_value']==110)
 check('provider price endpoint stays unmounted',request('POST','/indmoney-us/prices/current',{'quotes':[{'exchange':'NASDAQ','symbol':'UATA'}]},a)[0]==503)
+check('current parser3 acceptance receipt',accepted['parser_current'] is True and accepted['import_provenance']['parser_version']=='indmoney-manual-3')
+header=CSV_TEMPLATE.splitlines()[0]+'\n'
+review_cases=[('tiny_opposite_sign',header+'UATA,Synthetic Alpha,USD,1,99.99,100,99.99,-0.01,0.01\n','csv'),
+ ('unrepresentable_cent',header+'UATA,Synthetic Alpha,USD,1,,1000000000000000,1000000000000000,0,0\nUATB,Synthetic Beta,USD,1,,0.01,0.01,0,0\n','csv'),
+ ('oversized_paste','Current Value\n$'+'9'*400+'\nInvested Value\n$100\nCurrent Holdings (1)\nSynthetic Alpha\nUATA\n$55\n$100\n2 Qty\n$50 Avg.\n$110\n+$10\n+10%','paste')]
+for name,raw,format in review_cases:
+    code,rejected,_=request('POST','/indmoney-us/imports/preview',{**body,'raw_text':raw,'format':format},a)
+    check(name+' JSON-safe quarantine and source hash',code==200 and rejected['acceptance_state']=='quarantined' and rejected['import_provenance']['source_hash']==hashlib.sha256(raw.encode()).hexdigest())
+    check(name+' exact-hash acceptance denied',request('POST',f"/indmoney-us/imports/{rejected['id']}/accept",{'accept':True,'content_hash':rejected['content_hash']},a)[0]==422)
 print(json.dumps({'checked_at':datetime.now(timezone.utc).isoformat(),'url':state['url'],'passed':len(checks),'failed':0,'checks':checks,'synthetic_only':True,'tokens_saved_or_printed':False,'live_systems_changed':False},indent=2))

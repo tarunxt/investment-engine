@@ -8,9 +8,10 @@ from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 
 
 def accepted_snapshot_predicate():
+    from app.domains.indmoney_us.import_validation import PARSER_VERSION
     correction=aliased(IndMoneyUsPortfolioSnapshot)
     superseded=select(correction.id).where(correction.user_id==IndMoneyUsPortfolioSnapshot.user_id,correction.acceptance_state=='accepted',correction.supersedes_id==IndMoneyUsPortfolioSnapshot.id).exists()
-    return and_(IndMoneyUsPortfolioSnapshot.acceptance_state=='accepted',~superseded)
+    return and_(IndMoneyUsPortfolioSnapshot.acceptance_state=='accepted',IndMoneyUsPortfolioSnapshot.import_provenance['parser_version'].as_string()==PARSER_VERSION,~superseded)
 
 
 class IndMoneyUsPortfolioSnapshotRepository:

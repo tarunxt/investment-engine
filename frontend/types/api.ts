@@ -1201,6 +1201,7 @@ export interface IndMoneyUsDerivedAnalytics {
 }
 
 export interface IndMoneyUsPortfolioSnapshotSummary {
+  parser_current?: boolean;
   acceptance_state?: 'legacy_unverified' | 'preview' | 'quarantined' | 'accepted';
   content_hash?: string | null;
   accepted_at?: string | null;

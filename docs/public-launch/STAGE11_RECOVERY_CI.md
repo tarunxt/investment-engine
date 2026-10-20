@@ -1,3 +1,5 @@
+Current local numeric-review successor: see STAGE11_NUMERIC_REVIEW_FIX.md and evidence/stage11-numeric-review-checks.json. Parser3 and the new67case CI plan supersede earlier numeric/code-count checkpoints below; prior evidence remains preserved and unexecuted gates remain pending. No external action is authorized.
+
 # Stage11 local recovery and CI preparation
 
 Migration indmoney_integrity_001 is additive after connection_attempts_001. Existing rows remain unchanged and receive legacy_unverified status; no source hashes/acceptance are fabricated for legacy data. One owner/import-key unique constraint deduplicates previews, and a restrictive self-reference retains correction links. No local/live Alembic command was run. Actual migration/parallel duplicate/acceptance tests are prepared in test_stage11_postgres.py and guarded to the named disposable backend Docker PostgreSQL fixture. They are not certified by SQLite tests.

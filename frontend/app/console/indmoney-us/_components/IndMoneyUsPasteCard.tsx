@@ -26,7 +26,7 @@ export function OwnedImport({saving,error,onSubmit}:{saving:boolean;error:string
  function payload():IndMoneyUsPortfolioSnapshotCreateRequest{return{raw_text:raw,captured_at:new Date(captured).toISOString(),format,currency:'USD',day_return_period:period?'1d_same_asof':'unknown',supersedes_id:correction?Number(correction):null};}
  async function review(event:React.FormEvent){event.preventDefault();const ticket=++epoch.current;setPending(true);setPreview(null);setFault(null);setSaved(false);
   try{const value=await apiService.indmoneyUsPreviewImport(payload());if(alive.current&&epoch.current===ticket)setPreview(value);}catch(e){if(alive.current&&epoch.current===ticket)setFault(e instanceof Error?e.message:'Preview unavailable');}finally{if(alive.current&&epoch.current===ticket)setPending(false);}}
- async function accept(){if(!preview?.content_hash||preview.acceptance_state!=='preview')return;const ticket=epoch.current;
+ async function accept(){if(!preview?.content_hash||preview.parser_current!==true||preview.acceptance_state!=='preview')return;const ticket=epoch.current;
   try{await onSubmit({...payload(),accepted_preview_id:preview.id,acceptance_hash:preview.content_hash});if(alive.current&&epoch.current===ticket){setPreview(null);setRaw('');setSaved(true);}}catch{/* Parent surfaces save errors. */}}
  return <section className="space-y-4 rounded-xl border border-blue-200 bg-blue-50 p-5 min-w-0">
   <button type="button" className="text-left font-semibold" aria-expanded={open} onClick={()=>setOpen(!open)}>Manual INDmoney import · Preview and accept</button>
@@ -49,12 +49,13 @@ export function OwnedImport({saving,error,onSubmit}:{saving:boolean;error:string
    <h3 className="font-semibold">{preview.acceptance_state==='quarantined'?'Quarantined — correction required':preview.acceptance_state==='accepted'?'Already accepted — duplicate import':'Review before acceptance'}</h3>
    <p>{preview.holdings_count} holdings · {preview.import_provenance?.currency} · As of {preview.captured_at} · {preview.freshness}</p>
    <p className="text-xs">Parser {preview.import_provenance?.parser_version} · Source SHA256 {preview.import_provenance?.source_hash}</p>
+   {preview.parser_current!==true&&<p role="alert">Earlier parser preview: create a new preview before acceptance.</p>}
    <p>FX: no conversion; USD source only. Missing values remain missing.</p>
    {(preview.import_provenance?.errors??[]).map((x,i)=><p role="alert" key={`e${i}`}>{x}</p>)}
    {(preview.import_provenance?.warnings??[]).map((x,i)=><p key={`w${i}`}>{x}</p>)}
    <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th>Symbol / name</th><th>Quantity</th><th>Invested USD</th><th>Current USD</th><th>Quote USD</th></tr></thead><tbody>{preview.holdings.map((h,i)=><tr key={`${h.symbol}-${i}`}><td>{h.symbol} / {h.company_name}</td><td>{h.quantity??'Missing'}</td><td>{h.invested_value??'Missing'}</td><td>{h.current_value??'Missing'}</td><td>{h.market_price??'Missing'}</td></tr>)}</tbody></table></div>
    <p className="text-xs">Snapshot reference {preview.id} · Content {preview.content_hash}</p>
-   <Button type="button" onClick={accept} disabled={saving||pending||preview.acceptance_state!=='preview'}>{saving?'Accepting…':'Accept this exact snapshot'}</Button>
+   <Button type="button" onClick={accept} disabled={saving||pending||preview.parser_current!==true||preview.acceptance_state!=='preview'}>{saving?'Accepting…':'Accept this exact snapshot'}</Button>
   </section>}
  </section>;
 }

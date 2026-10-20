@@ -3,7 +3,7 @@ from datetime import datetime,timezone
 from sqlalchemy import select,update
 from sqlalchemy.exc import IntegrityError
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot as Snapshot
-from app.domains.indmoney_us.import_validation import parse_import,content_digest
+from app.domains.indmoney_us.import_validation import parse_import,content_digest,validate_financial_data,require_source_provenance
 from app.shared.exceptions import ValidationException,NotFoundException,ConflictException
 
 class ManualImportService:
@@ -34,6 +34,9 @@ class ManualImportService:
         row=await self.owned(owner,snapshot_id)
         data={key:getattr(row,key) for key in ('wallet_balance','current_value','invested_value','day_return_value','day_return_percent','total_return_value','total_return_percent','raw_text','snapshot_date','captured_at','source','holdings','market_indices','reported_holdings_count','import_provenance','supersedes_id','holdings_count','parse_status','parse_warnings','indices_count','dashboard_top_holdings')}
         if row.content_hash!=content_hash or content_digest(data)!=content_hash:raise ConflictException('Preview changed; review the exact content again.')
+        require_source_provenance(data)
+        current_errors=validate_financial_data(data)
+        if current_errors:raise ValidationException('Preview fails current financial validation; create a corrected preview.',{'errors':current_errors})
         if row.acceptance_state=='accepted':return row
         if row.acceptance_state!='preview' or (row.import_provenance or {}).get('errors'):raise ValidationException('Quarantined or legacy data cannot be accepted; create a corrected preview.')
         result=await self.db.execute(update(Snapshot).where(Snapshot.id==snapshot_id,Snapshot.user_id==owner,Snapshot.acceptance_state=='preview',Snapshot.content_hash==content_hash).values(acceptance_state='accepted',accepted_at=datetime.now(timezone.utc)).execution_options(synchronize_session=False))

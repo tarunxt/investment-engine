@@ -6,6 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+from app.domains.indmoney_us.numeric import stored_sum,safe_numbers
 from app.shared.portfolio_summary import (
     build_persisted_portfolio_summary,
     signed_holding_return_percent,
@@ -118,8 +119,10 @@ class IndMoneyUsPortfolioService:
         self,
         snapshot: IndMoneyUsPortfolioSnapshot,
     ) -> dict[str, Any]:
+        from app.domains.indmoney_us.import_validation import PARSER_VERSION
         return {
             "id": snapshot.id,
+            "parser_current": (getattr(snapshot,'import_provenance',None) or {}).get('parser_version')==PARSER_VERSION,
             "snapshot_date": snapshot.snapshot_date,
             "captured_at": self._normalize_captured_at(snapshot.captured_at),
             "source": snapshot.source,
@@ -161,13 +164,17 @@ class IndMoneyUsPortfolioService:
             "total_return_percent": snapshot.total_return_percent,
             "reported_holdings_count": snapshot.reported_holdings_count,
         }
-        return {
+        detail = {
             **self.serialize_summary(snapshot),
             "raw_text": snapshot.raw_text,
             "market_indices": snapshot.market_indices or [],
             "holdings": holdings,
             "derived": self._build_derived(holdings, summary),
         }
+        display_errors=[]
+        detail=safe_numbers(detail,display_errors,'display')
+        if display_errors:detail['parse_warnings']=[*detail['parse_warnings'],*display_errors]
+        return detail
 
     @staticmethod
     def _normalize_captured_at(captured_at: datetime | None) -> datetime:
@@ -456,7 +463,8 @@ class IndMoneyUsPortfolioService:
     ) -> dict[str, Any]:
         def total(field):
             values=[holding.get(field) for holding in holdings]
-            return sum(values) if values and all(value is not None for value in values) else None
+            try:return stored_sum(values)
+            except ValueError:return None
         parsed_current_value = total('current_value')
         parsed_invested_value = total('invested_value')
         parsed_total_pnl = total('total_pnl')

@@ -1,3 +1,5 @@
+Current local numeric-review successor: see STAGE11_NUMERIC_REVIEW_FIX.md and evidence/stage11-numeric-review-checks.json. Parser3 and the new67case CI plan supersede earlier numeric/code-count checkpoints below; prior evidence remains preserved and unexecuted gates remain pending. No external action is authorized.
+
 # Stage11 manual imports — local synthetic candidate
 
 Canonical scope and mapping: stages/11.md / STAGE11_REQUIREMENT_MAP.md. Local branch codex/stage11-indmoney-integrity-local-20261020, based on accepted Stage10 f30db4e4bcdb3709371213b3daa907db8887c9ea. Current candidate is this document's containing commit; full SHA is recorded externally in task-3/stage11-local-handoff.json. No publication or deployment is authorized in this phase.
