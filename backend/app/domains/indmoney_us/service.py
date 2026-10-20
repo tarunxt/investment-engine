@@ -6,7 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
-from app.domains.indmoney_us.numeric import stored_sum,safe_numbers
+from app.domains.indmoney_us.numeric import stored_sum,safe_numbers,stored_product,stored_quotient,stored_difference,derived_percent
 from app.shared.portfolio_summary import (
     build_persisted_portfolio_summary,
     signed_holding_return_percent,
@@ -395,35 +395,22 @@ class IndMoneyUsPortfolioService:
         return holdings
 
     def _backfill_holding(self, record: dict[str, Any]) -> None:
-        quantity = record.get("quantity")
-        market_price = record.get("market_price")
-        invested_value = record.get("invested_value")
-        average_price = record.get("average_price")
-        current_value = record.get("current_value")
-        total_pnl = record.get("total_pnl")
-
-        if average_price is None and invested_value is not None and quantity not in (None, 0):
-            record["average_price"] = invested_value / quantity
-            average_price = record["average_price"]
-
-        if current_value is None and market_price is not None and quantity not in (None, 0):
-            record["current_value"] = market_price * quantity
-            current_value = record["current_value"]
-
-        if invested_value is None and average_price is not None and quantity not in (None, 0):
-            record["invested_value"] = average_price * quantity
-            invested_value = record["invested_value"]
-
-        if total_pnl is None and current_value is not None and invested_value is not None:
-            record["total_pnl"] = current_value - invested_value
-            total_pnl = record["total_pnl"]
-
-        if (
-            record.get("total_pnl_percent") is None
-            and invested_value not in (None, 0)
-            and total_pnl is not None
-        ):
-            record["total_pnl_percent"] = (total_pnl / invested_value) * 100
+        def derive(field, operation, left, right):
+            if record.get(field) is not None or left is None or right is None:
+                return
+            try:record[field] = operation(left,right)
+            except (ValueError,ArithmeticError):
+                record[field] = None
+                record.setdefault('derivation_errors',[]).append(
+                    f'{field}: source backfill cannot be stored faithfully; corrected source required.')
+        quantity=record.get('quantity')
+        if quantity not in (None,0):
+            derive('average_price',stored_quotient,record.get('invested_value'),quantity)
+            derive('current_value',stored_product,record.get('market_price'),quantity)
+            derive('invested_value',stored_product,record.get('average_price'),quantity)
+        derive('total_pnl',stored_difference,record.get('current_value'),record.get('invested_value'))
+        if record.get('invested_value') not in (None,0):
+            derive('total_pnl_percent',derived_percent,record.get('total_pnl'),record.get('invested_value'))
 
     def _enrich_holdings(
         self,
@@ -431,7 +418,8 @@ class IndMoneyUsPortfolioService:
         summary_current_value: float | None,
     ) -> list[dict[str, Any]]:
         copied = [dict(holding) for holding in holdings]
-        parsed_current_value = sum((holding.get("current_value") or 0) for holding in copied)
+        try:parsed_current_value = stored_sum([holding.get("current_value") for holding in copied])
+        except ValueError:parsed_current_value = None
         denominator = parsed_current_value or summary_current_value or 0
 
         for holding in copied:
@@ -444,12 +432,14 @@ class IndMoneyUsPortfolioService:
                 invested_value=holding.get("invested_value"),
             )
             if denominator and current_value is not None:
-                holding["portfolio_weight_percent"] = (current_value / denominator) * 100
+                try:holding["portfolio_weight_percent"] = derived_percent(current_value,denominator)
+                except (ValueError,ArithmeticError):holding["portfolio_weight_percent"] = None
             else:
                 holding["portfolio_weight_percent"] = None
 
             if average_price not in (None, 0) and market_price is not None:
-                holding["price_vs_average_percent"] = ((market_price - average_price) / average_price) * 100
+                try:holding["price_vs_average_percent"] = derived_percent(stored_difference(market_price,average_price),average_price)
+                except (ValueError,ArithmeticError):holding["price_vs_average_percent"] = None
             else:
                 holding["price_vs_average_percent"] = None
 
@@ -522,7 +512,8 @@ class IndMoneyUsPortfolioService:
                 continue
             delta = None
             if summary_value is not None and parsed_value is not None:
-                delta = summary_value - parsed_value
+                try:delta = stored_difference(summary_value,parsed_value)
+                except (ValueError,ArithmeticError):delta = None
             items.append(
                 {
                     "label": label,

@@ -293,7 +293,7 @@ jobs:
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage11.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage11 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 67
+          assert len(root.findall('.//testcase')) == 77
           PY_CHECK
 
   stage07-module-policy:

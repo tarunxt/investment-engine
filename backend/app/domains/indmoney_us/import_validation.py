@@ -12,7 +12,7 @@ from app.domains.indmoney_us.service import IndMoneyUsPortfolioService
 from app.domains.indmoney_us.snapshot_validation import validate_holdings_snapshot
 from app.shared.exceptions import ValidationException
 
-PARSER_VERSION = 'indmoney-manual-3'
+PARSER_VERSION = 'indmoney-manual-4'
 CSV_COLUMNS = ['symbol','company_name','currency','quantity','market_price','invested_value','current_value','total_pnl','total_pnl_percent']
 CSV_TEMPLATE = ','.join(CSV_COLUMNS)+'\nUATA,Synthetic Alpha,USD,2,55,100,110,10,10\n'
 NOISE = {'reports','report','transactions','explore','my us stocks','current holdings','stock name','market price','total pnl','invested (qty/price)'}
@@ -76,6 +76,7 @@ def _validate_financial_data(data):
         if folded in names and names[folded]!=holding.get('symbol'):errors.append('One company name maps to multiple symbols; clarify the share class/name in the CSV.')
         names[folded]=holding.get('symbol')
         symbol=str(holding.get('symbol') or '')
+        errors.extend(holding.get('derivation_errors') or [])
         name=str(holding.get('company_name') or '').strip()
         if not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,9}',symbol) or name.casefold() in NOISE or not name or name==symbol:
             errors.append('Symbol/name mapping is ambiguous; supply the full company name in the CSV template.')
@@ -88,11 +89,15 @@ def _validate_financial_data(data):
             if abs(delta-pnl)>threshold('.02'):errors.append(f'{symbol}: cost/current value/P&L do not reconcile.')
         effective_pnl=pnl if pnl is not None else delta
         # Sign is an invariant BEFORE any display/rounding tolerance.
-        if opposite_signs(effective_pnl,percent):errors.append(f'{symbol}: nonzero return signs disagree.')
+        if opposite_signs(delta,percent) or opposite_signs(effective_pnl,percent):errors.append(f'{symbol}: nonzero return signs disagree.')
         if invested is not None and effective_pnl is not None and percent is not None:
             if invested<=0 or abs(effective_pnl/invested*100-percent)>threshold('.15'):
                 errors.append(f'{symbol}: total-return percentage has a different sign or denominator.')
         quantity,price=dec(holding.get('quantity')),dec(holding.get('market_price'))
+        for basis in (price,dec(holding.get('average_price'))):
+            if quantity is not None and basis is not None:
+                try:storage_number(quantity*basis)
+                except ValueError:errors.append(f'{symbol}: exact quantity × price cannot be stored faithfully.')
         if quantity is not None and price is not None and (price<0 or (current is not None and abs(quantity*price-current)>max(threshold('.03'),abs(current)*threshold('.001')))):
             errors.append(f'{symbol}: quantity × quote differs from current value; quote may be from a different period.')
     for field in ('current_value','invested_value'):
@@ -112,7 +117,7 @@ def _validate_financial_data(data):
         if opposite_signs(delta,total):errors.append('Summary total-return sign contradicts current value minus cost.')
         if abs(delta-total)>threshold('.03'):errors.append('Summary total returns do not reconcile.')
     effective_total=total if total is not None else delta
-    if opposite_signs(effective_total,percent):errors.append('Summary nonzero return signs disagree.')
+    if opposite_signs(delta,percent) or opposite_signs(effective_total,percent):errors.append('Summary nonzero return signs disagree.')
     if effective_total is not None and percent is not None and (cost is None or cost<=0 or abs(effective_total/cost*100-percent)>threshold('.15')):errors.append('Summary total-return denominator/sign is ambiguous.')
     return list(dict.fromkeys(errors))
 

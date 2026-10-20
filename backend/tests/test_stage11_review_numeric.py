@@ -140,3 +140,77 @@ def test_earlier_parser_receipt_remains_history_but_is_not_current_or_reaccepted
         assert IndMoneyUsPortfolioService().serialize_detail(row)['parser_current'] is False
         with pytest.raises(ValidationException,match='provenance'):await ManualImportService(db).accept(1,row.id,row.content_hash)
     asyncio.run(scenario(body))
+
+@pytest.mark.parametrize('current,percent',[('99.99','0.01'),('100.01','-0.01')])
+@pytest.mark.parametrize('pnl',['0',''])
+def test_exact_delta_sign_cannot_be_hidden_by_zero_or_missing_pnl(current,percent,pnl):
+    data=parse_import(req(tiny(current,pnl,percent)))
+    assert data['acceptance_state']=='quarantined'
+    data['total_return_value']=0;data['total_return_percent']=float(percent)
+    assert any('Summary nonzero return signs' in e for e in validate_financial_data(data))
+    with pytest.raises(ValidationException):require_recommendation_snapshot(snapshot(data))
+
+
+def backfill_paste(price='0.10',quantity='3',cost='0.30',summary='0.30'):
+    return f'Current Value\n${summary}\nInvested Value\n${cost}\nCurrent Holdings (1)\nSynthetic Alpha\nUATA\n${price}\n${cost}\n{quantity} Qty'
+
+
+def test_paste_backfill_does_not_invent_binary_pnl():
+    data=parse_import(req(backfill_paste(),'paste'))
+    assert data['acceptance_state']=='preview',data['import_provenance']['errors']
+    h=data['holdings'][0]
+    assert h['current_value']==0.3 and h['total_pnl']==0 and h['total_pnl_percent']==0
+    require_recommendation_snapshot(snapshot(data))
+
+
+def test_paste_unrepresentable_product_quarantines_instead_of_rounding():
+    raw=backfill_paste('1.0000000000000002','90000000000000','90000000000000.02','90000000000000.02')
+    data=parse_import(req(raw,'paste'))
+    assert data['acceptance_state']=='quarantined'
+    assert data['holdings'][0]['current_value'] is None
+    assert any('backfill cannot be stored faithfully' in e for e in data['import_provenance']['errors'])
+    assert data['import_provenance']['source_hash']==hashlib.sha256(raw.encode()).hexdigest()
+    json.dumps(data,default=str,allow_nan=False)
+    with pytest.raises(ValidationException):require_recommendation_snapshot(snapshot(data))
+
+
+def test_backfill_products_divisions_and_differences_are_checked():
+    svc=IndMoneyUsPortfolioService()
+    for record,field in [({'quantity':3,'invested_value':1},'average_price'),({'quantity':90000000000000,'average_price':1.0000000000000002},'invested_value')]:
+        svc._backfill_holding(record)
+        assert record[field] is None and record['derivation_errors']
+    record={'current_value':0.3,'invested_value':0.3}
+    svc._backfill_holding(record);assert record['total_pnl']==0
+
+
+def test_http_zero_pnl_and_unrepresentable_backfill_cannot_be_accepted(private_api):
+    a=private_api
+    cases=[(tiny('99.99','0','0.01'),'csv'),(tiny('100.01','0','-0.01'),'csv'),(backfill_paste('1.0000000000000002','90000000000000','90000000000000.02','90000000000000.02'),'paste')]
+    for raw,fmt in cases:
+        r=a.client.post('/indmoney-us/imports/preview',json={'raw_text':raw,'captured_at':NOW.isoformat(),'format':fmt},headers=a.headers[0]);assert r.status_code==200,r.text
+        d=r.json();assert d['acceptance_state']=='quarantined'
+        assert d['import_provenance']['source_hash']==hashlib.sha256(raw.encode()).hexdigest()
+        assert a.client.post(f"/indmoney-us/imports/{d['id']}/accept",json={'accept':True,'content_hash':d['content_hash']},headers=a.headers[0]).status_code==422
+
+
+def test_accept_revalidates_zero_reported_pnl_against_exact_delta():
+    async def body(db):
+        from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+        d=parse_import(req(tiny('99.99','0','0.01')))
+        d['acceptance_state']='preview';d['import_provenance']['errors']=[];d['parse_warnings']=[];d['content_hash']=content_digest(d)
+        row=IndMoneyUsPortfolioSnapshot(user_id=1,**d);db.add(row);await db.commit()
+        with pytest.raises(ValidationException):await ManualImportService(db).accept(1,row.id,row.content_hash)
+    asyncio.run(scenario(body))
+
+
+def test_old_rounded_backfill_cannot_pass_current_consumption_or_acceptance():
+    async def body(db):
+        from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+        d=parse_import(req(backfill_paste('1.0000000000000002','90000000000000','90000000000000.02','90000000000000.02'),'paste'))
+        h=d['holdings'][0];h.update(current_value=90000000000000.02,total_pnl=0,total_pnl_percent=0)
+        h.pop('derivation_errors',None)
+        d['acceptance_state']='preview';d['import_provenance']['errors']=[];d['parse_warnings']=[];d['content_hash']=content_digest(d)
+        with pytest.raises(ValidationException):require_recommendation_snapshot(snapshot(d))
+        row=IndMoneyUsPortfolioSnapshot(user_id=1,**d);db.add(row);await db.commit()
+        with pytest.raises(ValidationException):await ManualImportService(db).accept(1,row.id,row.content_hash)
+    asyncio.run(scenario(body))

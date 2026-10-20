@@ -1,3 +1,11 @@
+# Second independent numeric review correction
+
+The fd1a072e candidate remains preserved. The successor independently checks percentage signs against exact value minus cost even when reported P&L is zero or missing. Pasted-source products, quotients and differences use checked Decimal arithmetic; unrepresentable results remain missing with quarantine errors, never rounded into accepted cash. Current consumption also rejects a previously rounded quantity-price product even if its stored hash is consistent. Parser version 4 excludes earlier receipts from current use without modifying historical records.
+
+Fresh checks: 204 backend tests, including 32 numeric review regressions. Docker collection is now 77 cases (74 local and 3 PostgreSQL); execution and the 20 Linux cases remain pending. Frontend, native controller and Linux harness bytes are unchanged from the prior candidate, so their prior results are reused, not represented as fresh runs. No publication or deployment.
+
+The earlier correction and evidence follow unchanged.
+
 # Stage 11 local numeric-review successor
 
 Prior candidate 8ced2c8f20fce3c4263a84bc6f22a46e6a4efdb8 and its evidence remain immutable. Independent review found acceptance of opposite tiny nonzero signs within rounding tolerance, loss of a cent in float aggregation, and a 400-digit paste escaping quarantine as nonfinite JSON. The first focused reproduction run retained 11 failures / 3 passes. No publication, deployment, provider, credential, security or AWS action is authorized here.

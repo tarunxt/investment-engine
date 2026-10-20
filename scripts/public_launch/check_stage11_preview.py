@@ -55,11 +55,15 @@ code,new,_=request('POST',f"/indmoney-us/imports/{correction['id']}/accept",{'ac
 check('earlier-asof accepted correction becomes current',code==200 and request('GET','/indmoney-us/portfolio',token=a)[1]['latest']['id']==new['id'])
 check('prior immutable snapshot retained',request('GET',f"/indmoney-us/portfolio/{accepted['id']}",token=a)[1]['holdings'][0]['current_value']==110)
 check('provider price endpoint stays unmounted',request('POST','/indmoney-us/prices/current',{'quotes':[{'exchange':'NASDAQ','symbol':'UATA'}]},a)[0]==503)
-check('current parser3 acceptance receipt',accepted['parser_current'] is True and accepted['import_provenance']['parser_version']=='indmoney-manual-3')
+check('current parser4 acceptance receipt',accepted['parser_current'] is True and accepted['import_provenance']['parser_version']=='indmoney-manual-4')
 header=CSV_TEMPLATE.splitlines()[0]+'\n'
 review_cases=[('tiny_opposite_sign',header+'UATA,Synthetic Alpha,USD,1,99.99,100,99.99,-0.01,0.01\n','csv'),
  ('unrepresentable_cent',header+'UATA,Synthetic Alpha,USD,1,,1000000000000000,1000000000000000,0,0\nUATB,Synthetic Beta,USD,1,,0.01,0.01,0,0\n','csv'),
  ('oversized_paste','Current Value\n$'+'9'*400+'\nInvested Value\n$100\nCurrent Holdings (1)\nSynthetic Alpha\nUATA\n$55\n$100\n2 Qty\n$50 Avg.\n$110\n+$10\n+10%','paste')]
+review_cases.extend([
+ ('zero_pnl_loss',header+'UATA,Synthetic Alpha,USD,1,99.99,100,99.99,0,0.01\n','csv'),
+ ('zero_pnl_gain',header+'UATA,Synthetic Alpha,USD,1,100.01,100,100.01,0,-0.01\n','csv'),
+ ('unrepresentable_backfill','Current Value\n$90000000000000.02\nInvested Value\n$90000000000000.02\nCurrent Holdings (1)\nSynthetic Alpha\nUATA\n$1.0000000000000002\n$90000000000000.02\n90000000000000 Qty','paste')])
 for name,raw,format in review_cases:
     code,rejected,_=request('POST','/indmoney-us/imports/preview',{**body,'raw_text':raw,'format':format},a)
     check(name+' JSON-safe quarantine and source hash',code==200 and rejected['acceptance_state']=='quarantined' and rejected['import_provenance']['source_hash']==hashlib.sha256(raw.encode()).hexdigest())

@@ -69,3 +69,19 @@ def safe_numbers(value,errors,path='parsed'):
     if isinstance(value,dict):return {key:safe_numbers(item,errors,path+'.'+str(key)) for key,item in value.items()}
     if isinstance(value,list):return [safe_numbers(item,errors,path+'.'+str(index)) for index,item in enumerate(value)]
     return value
+
+
+def stored_product(left,right):
+    with localcontext() as context:
+        context.prec=ARITHMETIC_PRECISION
+        return storage_number(decimal_value(left)*decimal_value(right))
+
+
+def stored_quotient(left,right):
+    with localcontext() as context:
+        context.prec=ARITHMETIC_PRECISION
+        numerator,denominator=decimal_value(left),decimal_value(right)
+        result=numerator/denominator
+        if result*denominator!=numerator:
+            raise ValueError('Nonterminating quotient cannot be stored faithfully')
+        return storage_number(result)

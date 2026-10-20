@@ -1,0 +1,16 @@
+{
+  "recorded_at": "2026-10-20T19:14:33.060479+00:00",
+  "prior_candidate": "fd1a072e2053ba58e448eb61b52ece183634b9de",
+  "fresh_backend": 204,
+  "numeric_regressions": 32,
+  "docker_collection": 77,
+  "docker_execution": "not run",
+  "linux20": "not run",
+  "prior_frontend_native_harness": "unchanged source; previous results reused",
+  "corrections": [
+    "percentage sign vs exact delta independent of zero/missing reported P&L",
+    "checked Decimal parser backfill and consumption product checks"
+  ],
+  "source_provenance": "raw bytes and hash preserved; parser 4 gates current receipts",
+  "scope": "local only; no publication/deployment"
+}
