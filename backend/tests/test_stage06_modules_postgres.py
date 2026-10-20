@@ -197,3 +197,22 @@ async def test_post_flush_response_failure_rolls_back_actual_postgres(database,m
     with Session(engine) as s:
         for model in (UserModulePreferences,UserModule,ActivityLog):
             assert s.scalar(select(func.count()).select_from(model))==0
+
+
+@pytest.mark.asyncio
+async def test_reused_reader_refreshes_selection_after_other_transaction_disables(database):
+    from app.domains.modules.service import patch_modules
+    from app.domains.modules.schemas import ModulePatch
+    from app.domains.modules.store import read_snapshot
+    from app.domains.modules.registry import ModuleId
+    _,factory,ids,_=database
+    def change(version,enabled):
+        return ModulePatch.model_validate({'expected_version':version,
+            'updates':[{'module_id':'sports_rankings','enabled':enabled}]})
+    async with factory() as writer:await patch_modules(writer,ids[0],change(0,True))
+    async with factory() as reader:
+        original=await read_snapshot(reader,ids[0]);assert original.selected(ModuleId.SPORTS_RANKINGS)
+        async with factory() as writer:await patch_modules(writer,ids[0],change(1,False))
+        current=await read_snapshot(reader,ids[0])
+        assert current.version==2 and not current.selected(ModuleId.SPORTS_RANKINGS)
+        assert current.rows[ModuleId.SPORTS_RANKINGS].version==2

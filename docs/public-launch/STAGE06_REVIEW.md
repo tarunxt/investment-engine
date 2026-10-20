@@ -11,17 +11,17 @@ Verified locally:
 - 1,213 existing PR backend release-selection tests passed.
 - 104 affected API, Google, Stage05, UAT2 and baseline tests passed.
 - 110 ownership/live-boundary/module regression tests passed.
-- Seven actual disposable PostgreSQL checks passed, including first-writer and existing-version races, mixed-patch atomicity, concurrent and failed Google onboarding, all-prior-table migration preservation/roundtrip, and response-failure rollback after flushed changes.
+- Eight actual disposable PostgreSQL checks passed, including first-writer and existing-version races, mixed-patch atomicity, concurrent and failed Google onboarding, all-prior-table migration preservation/roundtrip, response-failure rollback after flushed changes, and reused-session refresh after another transaction disables a module.
 - Real Next production Webpack build and TypeScript checks passed.
 - Eleven real localhost Auth.js/BFF/FastAPI module checks passed: active identity, two-owner isolation, atomic patch, stale409, ten registry entries, disable preview, authority injection rejection and denied execution. Synthetic selection was restored afterward.
 
-A test exposed SQLite's first-SAVEPOINT release committing the version header prematurely; the service now uses a dialect-specific SQLAlchemy INSERT ON CONFLICT CAS in the outer transaction. Both SQLite and PostgreSQL post-flush rollback tests pass. An initial migration comparison included an existing table omitted by its baseline helper; comparison now explicitly includes every prior table. An initial broad invocation lacked PYTHONPATH and failed collection; the documented corrected invocation passed. No failed check is counted as passed or waived.
+A test exposed SQLite's first-SAVEPOINT release committing the version header prematurely; the service now uses a dialect-specific SQLAlchemy INSERT ON CONFLICT CAS in the outer transaction. Both SQLite and PostgreSQL post-flush rollback tests pass. A final review added explicit ORM refresh so reused policy sessions cannot retain a selection disabled by another transaction; the independent-reader/writer PostgreSQL regression passes. Preview restart now tolerates closed TIME_WAIT sockets while still refusing active listeners. An initial migration comparison included an existing table omitted by its baseline helper; comparison now explicitly includes every prior table. An initial broad invocation lacked PYTHONPATH and failed collection; the documented corrected invocation passed. No failed check is counted as passed or waived.
 
 ## Runnable Mac preview
 
 URL: http://localhost:60473/login?redirectTo=/console/profile/preferences
 API: http://127.0.0.1:60474
-Backend PID15870, frontend PID15871. State/verified process stamps: `.runtime/stage01-preview/state.json`.
+Current verified PIDs are in the state file below (restart changes them). State/verified process stamps: `.runtime/stage01-preview/state.json`.
 
 From this worktree:
 
@@ -38,4 +38,4 @@ Sign in with `usera@stage01.example.com` or `userb@stage01.example.com`, passwor
 
 Backend outbound socket connections are denied, all users/data are synthetic, fake consumer and offline catalogue/cost/health adapters remain. No provider, email, order, paid AI, AWS or production data/action is used. SQLite preview is distinct from the separately verified disposable PostgreSQL tests and is not live UAT acceptance.
 
-Pending at this checkpoint: exact-commit CI/native artifact verification, mandatory independent review, coordinated Mac-browser walkthrough, sole-executor UAT2 handoff and new owner acceptance. No old CI/artifact/browser identity is transferred to06. Existing US$10 total and21Oct2026 21:04:13IST stop remain unchanged. No new access/role/credential approval is requested or implied.
+Pending at this checkpoint: exact-commit CI/native artifact verification, mandatory independent review, sole-executor UAT2 handoff and new owner acceptance. Fresh Chrome Preferences/reload, authenticated module catalogue and explicitly unavailable Runs/Bullpen walkthrough passed; screenshots/receipt are under `.runtime/stage06-browser/`. The browser used an existing synthetic ADMIN session; two ordinary users were separately exercised through real Auth.js/BFF. No old CI/artifact/browser identity is transferred to06. Existing US$10 total and21Oct2026 21:04:13IST stop remain unchanged. No new access/role/credential approval is requested or implied.

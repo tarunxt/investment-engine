@@ -30,7 +30,8 @@ async def read_snapshot(db, owner_id: int) -> SelectionSnapshot:
     # including under READ COMMITTED concurrent PATCH requests.
     rows = (await db.execute(select(UserModulePreferences.version, UserModule)
         .outerjoin(UserModule, UserModule.user_id == UserModulePreferences.user_id)
-        .where(UserModulePreferences.user_id == owner_id))).all()
+        .where(UserModulePreferences.user_id == owner_id)
+        .execution_options(populate_existing=True))).all()
     if not rows:
         return SelectionSnapshot(owner_id, 0, {})
     version = rows[0][0]
