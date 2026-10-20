@@ -186,6 +186,9 @@ def test_commit_before_dispatch_redis_restart_and_duplicate_real_celery_delivery
     from app.shared.types import JobStatus
     engine, factory, af = database
     monkeypatch.setattr(tasks, 'SyncSessionLocal', factory)
+    # The registered outer lifecycle wrapper resolves this canonical factory.
+    # Keep both layers on this test's private schema, preserving real admission.
+    monkeypatch.setattr('app.infrastructure.database.sync_session.SyncSessionLocal',factory)
     job_id=asyncio.run(create(af, command())).job_id  # Crash after commit: no dispatcher ran.
     with factory() as s:
         message_id=str(s.scalar(select(OutboxMessage.id)))
