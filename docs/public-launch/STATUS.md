@@ -1,3 +1,23 @@
+# Stage10 CI blocked on local-only fingerprint correction
+
+Draft PR1252 is published at diagnostic3dfa94826684176e679f37577de0d67918184860; runtime remains identical to reviewed4668e2a9. Both CI runs39460845285 and39462281660 are terminal23/26 success, three Linux groups failed. Current matrix executed20 cases:13 pass/7 fail/zero skips;29 PostgreSQL and all19 historical Stage09 cases passed. Native4668 source/offline/artifact audit passed separately. No CI/deployment acceptance claimed.
+
+Exact snapshots isolate one deparsed PostgreSQL check-expression spelling change. A narrow runtime correction is LOCAL ONLY pending separate publication approval, with58 native tests and retained-snapshot replay passing; new real PostgreSQL contract is prepared/not run. See STAGE10_CONSTRAINT_FINGERPRINT.md. Existing source/evidence below remains preserved history. No merge, deploy, live DB/AWS/credentials/provider or Stage11 action occurred.
+
+# Stage10 local successor — independent review findings addressed locally
+
+The immutable reviewed0f026ee candidate/evidence is preserved. Local successor adds Stage10→Stage09 and same-schema recovery support; privately preserves both new tables plus current connection material; retains binding history for same-ID account changes; and completes validated login navigation/returned-query handling through a gated fake broker page. See STAGE10_RECOVERY_CI.md. Historical Stage09 jobs are pinned explicitly to acceptedccb; their runtime guards/test sources are unchanged. Separate current-head Stage10 Docker29-case and Linux20-case matrices are prepared, NOT run.
+
+Local93 backend,19 component/navigation,56 native controller/helper and12 harness safety checks pass; production build and actual both-mode fake browser navigation/callback/review/confirmation pass. Current preview localhost53571/API53572. Code LOCAL SUCCESSOR; CI NOT RUN; independent re-review PENDING; UAT2 deployment/verification NOT RUN; Owner acceptance PENDING10; External approval PENDING. No publication, deployment, live DB/AWS/credentials/access change or Stage11. Entries below remain historical evidence, not a current readiness claim.
+
+# Stage10 local implementation checkpoint — Stage09 completed
+
+Canonical title: **10 · Complete connection authorization, renewal and disconnect**. Parent confirmed Stage09 complete after independent live verification at20October2026 15:54:56UTC: exact deployed/controller/frontend ccb0b3c4682d6bc65c4b38ccf95e71a446dee117, manifest e2ea827c, integration_connections_001, eight services healthy, owner-only simulation. Existing failed/pending Stage09 receipts below remain historical evidence, not current deployment holds. Fresh nonowner Google/provider flows were explicitly untested/disabled; completion is limited to the accepted owner-only simulation scope.
+
+New isolated branch codex/stage10-connection-authorization-local-20261020, task-3/stage10-connection-authorization, exact Stage09 base above. Code LOCAL SYNTHETIC CANDIDATE; CI NOT RUN; UAT2 deployment NOT RUN; UAT2 verification NOT RUN; Owner acceptance PENDING10; External provider approval PENDING. Local89 backend and13 component checks and actual Next production build pass. Real Chrome both-mode synthetic onboarding, review, renewal/disconnect/reload and390px controls pass. See STAGE10_REQUIREMENT_MAP.md and STAGE10_PREVIEW.md for exact scope, evidence and pending gates.
+
+Parent instruction restricts new Stage10 source to local work. No publication/deployment or Stage11; no production/oldUAT/AWS/credentials/provider/financial action. Docker PostgreSQL/CI and native Stage10 schema rollback remain required. Frozen Stage09 CI provenance guards are intentionally intact and need an explicit reviewed Stage10 strategy before publication; no skip/waiver or deployment readiness claim. Earlier ledgers below are preserved unchanged.
+
 # Stage09 CI-only rollback verification — deployment HOLD
 
 Application runtime remains exactly `6844989a55ea2408d6da7862fa07194079ff8b19`. The current containing commit is a separately identified test-only verification head on PR1251, authorized by the owner's explicit approval to publish/run the rollback rehearsal. Only backend/scripts test harness/safety tests, PR Checks and these documentation paths may differ; strict CI provenance enforces that allowlist. No runtime controller/frontend/app/migration/requirements change. Earlier6844989a/6e56dc99 source and artifact receipts remain preserved.

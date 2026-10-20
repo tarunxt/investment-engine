@@ -154,7 +154,7 @@ class ProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'checksum'):ctl.checked_backup(str(self.dump))
 
     def test_legacy_wrong_revision_future_time_and_manifest_rejected(self):
-        for key,value in [('schema_version',1),('schema_revision',ctl.STAGE09_REVISION),('created_at','2999-01-01T00:00:00+00:00'),('manifest_sha256','0'*64)]:
+        for key,value in [('schema_version',1),('schema_revision','unsupported_future_revision'),('created_at','2999-01-01T00:00:00+00:00'),('manifest_sha256','0'*64)]:
             old=self.receipt[key];self.receipt[key]=value;self.save()
             with self.assertRaises((RuntimeError,ValueError)):ctl.checked_backup(str(self.dump))
             self.receipt[key]=old

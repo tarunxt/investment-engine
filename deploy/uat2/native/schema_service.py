@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 BASE = 'module_lifecycle_001'
 STAGE09 = 'integration_connections_001'
+STAGE10 = 'connection_attempts_001'
+ATTEMPTS = frozenset({'connection_attempts','connection_binding_history'})
 TABLES = frozenset({'connection_credentials','integration_connections'})
 ARTIFACTS = Path('/var/lib/credx-uat2/artifacts/native-schema')
 PREFIX = 'CREDX_UAT2_SCHEMA_'
@@ -22,21 +24,38 @@ PREFIX = 'CREDX_UAT2_SCHEMA_'
 def sha(data):return hashlib.sha256(data).hexdigest()
 
 
+# PostgreSQL16 dump/restore can move this implicit varchar[] -> text[] cast
+# onto each literal. These two exact catalog decompilations express the same
+# fixed two-value text domain; do not strip casts or normalize arbitrary SQL.
+MODE_CHECK_FORMS = (
+    "app_ownership_mode::text = ANY (ARRAY['user_owned'::character varying, 'platform_managed'::character varying]::text[])",
+    "app_ownership_mode::text = ANY (ARRAY['user_owned'::character varying::text, 'platform_managed'::character varying::text])",
+)
+
+
+def canonical_checks(table, checks):
+    return [dict(check,sqltext=MODE_CHECK_FORMS[0])
+            if table=='integration_connections' and check.get('name')=='ck_connection_mode'
+            and check.get('sqltext') in MODE_CHECK_FORMS else dict(check)
+            for check in checks]
+
+
 def capture(engine):
     import sqlalchemy as sa
     inspector=sa.inspect(engine);names=sorted(inspector.get_table_names(schema='public'))
     with engine.connect() as db:
         versions=list(db.execute(sa.text('SELECT version_num FROM public.alembic_version')).scalars())
-        if len(versions)!=1 or versions[0] not in {BASE,STAGE09}:raise RuntimeError('Unexpected schema revision')
+        if len(versions)!=1 or versions[0] not in {BASE,STAGE09,STAGE10}:raise RuntimeError('Unexpected schema revision')
         revision=versions[0]
-        if (set(names)&TABLES)!=(TABLES if revision==STAGE09 else set()):raise RuntimeError('Partial schema state')
+        if (set(names)&TABLES)!=(TABLES if revision in {STAGE09,STAGE10} else set()):raise RuntimeError('Partial schema state')
+        if (set(names)&ATTEMPTS)!=(ATTEMPTS if revision==STAGE10 else set()):raise RuntimeError('Partial attempt schema state')
         data={}
         for name in names:
             table=sa.Table(name,sa.MetaData(),schema='public',autoload_with=db)
             data[name]={'columns':[(c['name'],str(c['type']),c['nullable'],c['default']) for c in inspector.get_columns(name,schema='public')],
                         'indexes':inspector.get_indexes(name,schema='public'),'fk':inspector.get_foreign_keys(name,schema='public'),
                         'pk':inspector.get_pk_constraint(name,schema='public'),'unique':inspector.get_unique_constraints(name,schema='public'),
-                        'checks':inspector.get_check_constraints(name,schema='public'),
+                        'checks':canonical_checks(name,inspector.get_check_constraints(name,schema='public')),
                         'rows':sorted(json.dumps(dict(r),sort_keys=True,default=str) for r in db.execute(sa.select(table)).mappings())}
         sequences={}
         for name in sorted(inspector.get_sequence_names(schema='public')):
@@ -51,8 +70,8 @@ def capture(engine):
             'owners_acl':"SELECT c.relname,c.relkind,pg_get_userbyid(c.relowner),c.relacl::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname",
         }.items()}
     return {'revision':revision,'fingerprint':sha(json.dumps({'tables':data,'sequences':sequences,'catalog':catalog},sort_keys=True,default=str).encode()),
-            'stage09_tables':sorted(set(names)&TABLES),'table_count':len(names),
-            'material_rows':sum(len(data[n]['rows']) for n in TABLES if n in data)}
+            'stage09_tables':sorted(set(names)&TABLES),'stage10_tables':sorted(set(names)&ATTEMPTS),'table_count':len(names),
+            'material_rows':sum(len(data[n]['rows']) for n in TABLES|ATTEMPTS if n in data)}
 
 
 def private_write(path, value):
@@ -65,31 +84,35 @@ def private_write(path, value):
     return sha(payload)
 
 
-def execute(engine, action, request, expected, fingerprint=None, material_request=None, material_sha=None, migrate=None):
+def execute(engine, action, request, expected, fingerprint=None, material_request=None, material_sha=None, migrate=None, target=None):
     import sqlalchemy as sa
     if not re.fullmatch(r'[0-9a-f]{32}',request):raise RuntimeError('Invalid schema request')
     before=capture(engine)
     if expected and before['revision']!=expected:raise RuntimeError('Schema revision changed')
     material=None
     if action=='preserve':
-        if before['revision']!=STAGE09:raise RuntimeError('Stage09 material state required')
+        if before['revision'] not in {STAGE09,STAGE10}:raise RuntimeError('Supported connection material state required')
+        tables=TABLES|(ATTEMPTS if before['revision']==STAGE10 else frozenset())
         with engine.connect() as db:
-            rows={name:[dict(r) for r in db.execute(sa.select(sa.Table(name,sa.MetaData(),schema='public',autoload_with=db))).mappings()] for name in sorted(TABLES)}
+            rows={name:[dict(r) for r in db.execute(sa.select(sa.Table(name,sa.MetaData(),schema='public',autoload_with=db))).mappings()] for name in sorted(tables)}
         path=ARTIFACTS/(request+'-material.json')
-        material={'request':request,'sha256':private_write(path,{'revision':STAGE09,'tables':rows}),'rows':sum(map(len,rows.values()))}
+        material={'request':request,'sha256':private_write(path,{'revision':before['revision'],'tables':rows}),'rows':sum(map(len,rows.values()))}
         if capture(engine)!=before:raise RuntimeError('State changed during material preservation')
     elif action=='downgrade':
-        if before['revision']!=STAGE09 or expected!=STAGE09 or fingerprint!=before['fingerprint']:raise RuntimeError('Exact Stage09 state required for downgrade')
+        baseline={STAGE09:BASE,STAGE10:STAGE09}.get(before['revision'])
+        if baseline is None or expected!=before['revision'] or fingerprint!=before['fingerprint'] or (target or BASE)!=baseline:raise RuntimeError('Exact supported schema transition required for downgrade')
         if not re.fullmatch(r'[0-9a-f]{32}',material_request or ''):raise RuntimeError('Preservation receipt required')
         path=ARTIFACTS/(material_request+'-material.json')
         if path.is_symlink() or not path.is_file() or path.stat().st_uid!=os.geteuid() or stat.S_IMODE(path.stat().st_mode)&0o077 or sha(path.read_bytes())!=material_sha:raise RuntimeError('Preserved material mismatch')
         if migrate is None:raise RuntimeError('Confined migration required')
-        migrate(BASE)
+        migrate(baseline)
         after=capture(engine)
-        if after['revision']!=BASE or after['stage09_tables']:raise RuntimeError('Downgrade incomplete')
+        if (after['revision']!=baseline or after.get('stage10_tables')
+            or (baseline==BASE and after['stage09_tables'])
+            or (baseline==STAGE09 and set(after['stage09_tables'])!=TABLES)):raise RuntimeError('Downgrade incomplete')
         return {'state':after}
     elif action=='verify':
-        if expected!=BASE or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
+        if expected not in {BASE,STAGE09,STAGE10} or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
     elif action!='inspect':raise RuntimeError('Unknown schema action')
     return {'state':before,**({'material':material} if material else {})}
 
@@ -115,7 +138,7 @@ def main():
     try:
         result=execute(engine,action,request,env.get(PREFIX+'EXPECTED'),env.get(PREFIX+'FINGERPRINT'),
                        env.get(PREFIX+'MATERIAL_REQUEST'),env.get(PREFIX+'MATERIAL_SHA'),
-                       migrate=lambda target:command.downgrade(config,target))
+                       migrate=lambda target:command.downgrade(config,target),target=env.get(PREFIX+'TARGET'))
         private_write(ARTIFACTS/(request+'-result.json'),{'request':request,'source':source,'action':action,**result})
     finally:engine.dispose()
 

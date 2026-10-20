@@ -26,14 +26,14 @@ export function ConnectionBindings(){
   <p className="text-sm text-muted-foreground">Use your own Kite app or an approved CredX-managed app. Each account retains its own authorization. App secrets and tokens are never displayed here.</p>
   {owner===undefined?<p>Sign in to view your connections.</p>:!visible?.data&&!visible?.error?<p role="status">Loading private connection metadata…</p>:null}
   {visible?.error&&<p role="alert">{visible.error}</p>}
-  {visible?.data?.connections.length===0&&<p>No connection is stored for your account. Authorization setup is pending the next stage.</p>}
+  {visible?.data?.connections.length===0&&<p>No connection is stored for your account. Use the authorization panel below when available.</p>}
   {visible?.data?.connections.map(row=><article key={row.id} className="space-y-1 rounded-lg border p-4 break-words" data-connection-mode={row.app_ownership_mode}>
    <h3 className="font-medium">{row.app_ownership_mode==='user_owned'?'Your Kite app':'CredX-managed Kite app'}</h3>
    <p>Account {row.account_label??'awaiting verification'} · {row.status.replaceAll('_',' ')}</p>
    <p>Connection version {row.version} · Encryption key version {row.encryption_key_version??'awaiting verification'}</p>
    <p>{row.readiness.ready_for_adapter?'Credential binding verified.':'Credential binding unavailable: '+(row.readiness.reason??'authorization required').replaceAll('_',' ').toLowerCase()+'.'}</p>
    {row.app_ownership_mode==='platform_managed'&&<p>Provider approval: {row.readiness.platform_approval_verified?'verified':'pending; activation blocked'}</p>}
-   <p className="text-sm text-muted-foreground">Storage readiness grants no module access or financial execution. Authorization and connection management are pending the next stage.</p>
+   <p className="text-sm text-muted-foreground">Storage readiness grants no module access or financial execution. Authorization and connection management require separate review below.</p>
   </article>)}
   {owner!==undefined&&<button type="button" className="underline" onClick={()=>setRetry(v=>v+1)}>Refresh connection metadata</button>}
  </section>;

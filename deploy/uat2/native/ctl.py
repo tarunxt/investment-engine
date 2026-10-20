@@ -150,6 +150,7 @@ def time_check():
 
 BASE_REVISION = 'module_lifecycle_001'
 STAGE09_REVISION = 'integration_connections_001'
+STAGE10_REVISION = 'connection_attempts_001'
 SCHEMA_ARTIFACTS = DATA/'artifacts/native-schema'
 
 
@@ -198,7 +199,7 @@ def require_apps_stopped():
         if result.returncode!=3:raise RuntimeError('All UAT2 applications must be verifiably stopped')
 
 
-def schema_operation(release, action, *, expected=None, fingerprint=None, material=None):
+def schema_operation(release, action, *, expected=None, fingerprint=None, material=None, target=None):
     # Reuse exactly the existing migration identity/cgroup/network sandbox.
     require_apps_stopped()
     active=subprocess.run(['systemctl','is-active','--quiet','credx-uat2-migrate.service'],
@@ -209,6 +210,7 @@ def schema_operation(release, action, *, expected=None, fingerprint=None, materi
     request=uuid4().hex
     values={'ACTION':action,'REQUEST':request,'SOURCE':release.name}
     if expected:values['EXPECTED']=expected
+    if target:values['TARGET']=target
     if fingerprint:values['FINGERPRINT']=fingerprint
     if material:values.update(MATERIAL_REQUEST=material['request'],MATERIAL_SHA=material['sha256'])
     if action not in {'inspect','preserve','downgrade','verify'}:raise RuntimeError('Unknown schema operation')
@@ -268,8 +270,8 @@ def checked_backup(argument):
     path=raw.resolve()
     if path.parent!=(DATA/'backups').resolve() or not re.fullmatch(r'uat2-[0-9TZ]+\.dump',path.name):raise RuntimeError('Use UAT2 backup only')
     private_file(path);receipt=private_json(path.with_suffix('.json'))
-    if receipt.get('schema_version')!=2 or receipt.get('schema_revision')!=BASE_REVISION:
-        raise RuntimeError('Fresh Stage08 backup with schema provenance required')
+    if receipt.get('schema_version')!=2 or receipt.get('schema_revision') not in {BASE_REVISION,STAGE09_REVISION,STAGE10_REVISION}:
+        raise RuntimeError('Fresh supported UAT2 backup with schema provenance required')
     if not re.fullmatch(r'[0-9a-f]{40}',receipt.get('source_commit','')) or not re.fullmatch(r'[0-9a-f]{64}',receipt.get('fingerprint','')):
         raise RuntimeError('Invalid backup provenance')
     timestamp=datetime.fromisoformat(receipt['created_at'])
@@ -294,6 +296,8 @@ def mark(record, phase, **extra):
 def rollback(argument, *, recover_only=False):
     path,receipt,target=checked_backup(argument)
     reference=backup_reference(path,receipt)
+    baseline=receipt['schema_revision']
+    successor={BASE_REVISION:STAGE09_REVISION,STAGE09_REVISION:STAGE10_REVISION,STAGE10_REVISION:None}[baseline]
     old=private_json(pending()) if pending().exists() else None
     if recover_only:
         if not old or old.get('operation')!='rollback' or old.get('backup')!=reference:
@@ -317,17 +321,22 @@ def rollback(argument, *, recover_only=False):
         systemctl('stop',APPS);require_apps_stopped()
         if recover_only:
             # Never repeat a possibly completed restore after interruption.
-            schema_operation(operator,'verify',expected=BASE_REVISION,fingerprint=receipt['fingerprint'])
+            schema_operation(operator,'verify',expected=baseline,fingerprint=receipt['fingerprint'])
         else:
             state=schema_operation(operator,'inspect')['state']
-            if state['revision']==STAGE09_REVISION:
-                saved=schema_operation(operator,'preserve',expected=STAGE09_REVISION)
+            if state['revision']==successor:
+                saved=schema_operation(operator,'preserve',expected=successor)
                 mark(record,'material_preserved',material=saved['material'])
                 mark(record,'downgrade_started')
-                schema_operation(operator,'downgrade',expected=STAGE09_REVISION,
-                                 fingerprint=saved['state']['fingerprint'],material=saved['material'])
-            elif state['revision']!=BASE_REVISION or state.get('stage09_tables'):
+                schema_operation(operator,'downgrade',expected=successor,
+                                 fingerprint=saved['state']['fingerprint'],material=saved['material'],
+                                 **({'target':baseline} if baseline==STAGE09_REVISION else {}))
+            elif (state['revision']!=baseline or (baseline!=STAGE10_REVISION and state.get('stage10_tables'))
+                  or (baseline==BASE_REVISION and state.get('stage09_tables'))):
                 raise RuntimeError('Unexpected revision or partial schema; rollback stopped')
+            elif baseline in {STAGE09_REVISION,STAGE10_REVISION}:
+                saved=schema_operation(operator,'preserve',expected=baseline)
+                mark(record,'material_preserved',material=saved['material'])
             mark(record,'restore_started')
             with path.open('rb') as stream:
                 result=subprocess.run(['runuser','-u','credx-uat2-db','--','/usr/lib/postgresql/16/bin/pg_restore',
@@ -335,7 +344,7 @@ def rollback(argument, *, recover_only=False):
                                        '--clean','--if-exists','--exit-on-error','--single-transaction'],
                                       stdin=stream,stderr=subprocess.PIPE,timeout=120)
             if result.returncode:raise RuntimeError('Restore failed; apps remain stopped and recovery marker retained')
-            schema_operation(operator,'verify',expected=BASE_REVISION,fingerprint=receipt['fingerprint'])
+            schema_operation(operator,'verify',expected=baseline,fingerprint=receipt['fingerprint'])
         mark(record,'database_verified')
         configure_units(target);promote(target)
         mark(record,'finalizing')

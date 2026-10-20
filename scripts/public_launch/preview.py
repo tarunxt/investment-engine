@@ -31,6 +31,7 @@ def port():
 def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("action", choices=["build", "start", "stop", "status"])
+    parser.add_argument("--foreground", action="store_true", help="Keep owned child handles; Ctrl-C stops this preview")
     args = parser.parse_args()
     if args.action not in {"build", "start"}:
         if not STATE.exists():
@@ -119,10 +120,21 @@ def main():
                 ([node, "node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1",
                   "--port", str(ui_port)], ROOT / "frontend", frontend, "frontend.log")]
     pids = []
+    children = []
     for command, cwd, env, log_name in commands:
         with (RUNTIME / log_name).open("a") as output:
             child = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=output, start_new_session=True)
             pids.append(child.pid)
+            children.append(child)
+    def stop_children():
+        for child in children:
+            if child.poll() is None: child.terminate()
+        for child in children:
+            try: child.wait(timeout=8)
+            except subprocess.TimeoutExpired: child.kill(); child.wait()
+    if args.foreground:
+        import atexit
+        atexit.register(stop_children)
     state = {"url": url + "/login?redirectTo=/console/profile/preferences", "backend_url": f"http://127.0.0.1:{api_port}",
              "pids": pids, "frontend_port": ui_port, "backend_port": api_port,
              "synthetic": True, "logs": str(RUNTIME)}
@@ -140,6 +152,18 @@ def main():
         else:
             raise SystemExit(f"Startup incomplete at {target}; inspect logs and run stop")
     print("Ready: synthetic usera/userb/admin@stage01.example.com; password SyntheticPreview123!")
+    if args.foreground:
+        print("Foreground preview: Ctrl-C stops only these owned children", flush=True)
+        try:
+            while all(child.poll() is None for child in children):
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            stop_children()
+            if STATE.exists() and json.loads(STATE.read_text()).get('pids') == pids:
+                STATE.unlink()
+        return
     state["process_stamps"] = {str(pid): process_stamp(pid) for pid in pids}
     STATE.write_text(json.dumps(state, indent=2) + "\n")
 

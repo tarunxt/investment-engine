@@ -170,3 +170,9 @@ from app.domains.auth.admin_roles import AdministrativeRoleGrant  # noqa: F401
 
 from app.domains.connections.models import IntegrationConnection, ConnectionCredential  # noqa: F401
 __all__ += ["IntegrationConnection", "ConnectionCredential"]
+
+from app.domains.connections.models import ConnectionAttempt  # noqa: F401
+__all__ += ['ConnectionAttempt']
+
+from app.domains.connections.models import ConnectionBindingHistory  # noqa: F401
+__all__ += ['ConnectionBindingHistory']

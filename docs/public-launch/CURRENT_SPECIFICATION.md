@@ -1,3 +1,7 @@
+# Current phase clarification — 20 October2026 Stage10 local only
+
+Parent verified Stage09 completion on ccb0b3c4682d6bc65c4b38ccf95e71a446dee117 and relayed the owner's conditional instruction “once Stage9 is completed,start Stage10.” stages/10.md remains the full canonical scope. Local-only implementation/preview is active; external publication/deployment and Stage11 are excluded. See STATUS.md, STAGE10_REQUIREMENT_MAP.md and STAGE10_PREVIEW.md. The original pack provenance/instruction synchronization below is preserved history; earlier Stage01-only/pending entries do not override this current phase.
+
 # Current execution authority — UAT2 revision
 
 Library libfile_8c0887a3e4f88191b24fba523ef6959e, CredX-UAT2-execution-prompts(1).html; read all 888 rendered lines. User-supplied original HTML SHA256 c25d5b69b160b0a9228667d6374b17f5e6b135ac8e941f2eee7404a81e8f1449. Original HTML bytes were not independently materialized/hashed on this text-read route; the HTML was not changed. Do not rewrite or replace the HTML. Active complete decoded prompts are stages/00.md through 20.md; previous01 and older shared-server00 reference are archived. Earlier ledgers/plan snapshots are under history/.

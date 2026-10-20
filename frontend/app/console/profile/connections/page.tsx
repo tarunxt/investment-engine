@@ -1,10 +1,13 @@
 'use client';
 import Link from 'next/link';
+import {useState} from 'react';
+import {ConnectionAuthorization} from '@/components/connections/ConnectionAuthorization';
 import {ConnectionBindings} from '@/components/connections/ConnectionBindings';
 import {useModules} from '@/providers/ModuleContext';
 export default function ConnectionsPage(){
+ const [bindingsRevision,setBindingsRevision]=useState(0);
  const {manifest,loading,error,refresh}=useModules();
- return <section className="space-y-5"><h1 className="text-xl font-semibold">Connection setup</h1><ConnectionBindings/><p>Connections belong to your account. Module selection does not connect an account or authorize an operation.</p>{loading&&<p role="status">Loading connection readiness…</p>}{error&&<p role="alert">{error} <button onClick={()=>void refresh()}>Retry</button></p>}
+ return <section className="space-y-5"><h1 className="text-xl font-semibold">Connection setup</h1><ConnectionBindings key={bindingsRevision}/><ConnectionAuthorization onChanged={()=>setBindingsRevision(value=>value+1)}/><p>Connections belong to your account. Module selection does not connect an account or authorize an operation.</p>{loading&&<p role="status">Loading connection readiness…</p>}{error&&<p role="alert">{error} <button onClick={()=>void refresh()}>Retry</button></p>}
  {manifest?.modules.filter(m=>m.selection.enabled).map(module=>{
   const surface=manifest.presentation.surfaces.find(s=>s.module_ids.length===1&&s.module_ids[0]===module.module_id);
   const ready=module.capabilities.view?.allowed===true;
