@@ -28,6 +28,7 @@ from app.domains.jobs.output_runtime import (
     output_validation_metadata, reset_output_context,
 )
 from app.domains.jobs.repository import SyncJobRepository
+from app.shared.ws_channels import job_channel as private_job_channel, run_channel as private_run_channel
 from app.domains.jobs.models import Job
 from app.domains.jobs.failure_diagnostics import (
     build_failure_diagnostics,
@@ -701,7 +702,7 @@ def _publish_job_update(job: Job) -> None:
         r = _sync_redis.from_url(redis_url, decode_responses=True)
         
         # Publish to job-specific channel
-        job_channel = f"job_updates:{job.id}"
+        job_channel = private_job_channel(job.user_id, job.id)
         job_receivers = r.publish(job_channel, payload)
         logger.info("Published to %s: %s receiver(s)", job_channel, job_receivers)
         
@@ -834,7 +835,8 @@ def _publish_run_update(
         "exported_sheet_url": exported_sheet_url,
     }
     # Per-run channel — consumed by the run detail page
-    _redis_publish(f"run_updates:{run_id}", payload)
+    if user_id:
+        _redis_publish(private_run_channel(user_id, run_id), payload)
     # User-level channel — consumed by the dashboard list
     if user_id:
         _redis_publish(f"user_run_updates:{user_id}", payload)
@@ -910,13 +912,13 @@ def _refresh_run_status(db, job_id: int) -> None:
             # Push the triggering job's full data to the per-run channel so the
             # detail page can update response text, tokens, and cost in real-time.
             updated_job = next((j for j in stage_jobs if j.id == job_id), None)
-            if updated_job is not None:
+            if updated_job is not None and updated_job.user_id == run.user_id and run.user_id is not None:
                 status_val = (
                     updated_job.status.value
                     if hasattr(updated_job.status, "value")
                     else str(updated_job.status)
                 )
-                _redis_publish(f"run_updates:{rj.run_id}", {
+                _redis_publish(private_run_channel(run.user_id, rj.run_id), {
                     "type": "job.updated",
                     "run_id": rj.run_id,
                     "job_id": updated_job.id,

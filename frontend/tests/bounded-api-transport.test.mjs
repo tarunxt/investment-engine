@@ -326,7 +326,8 @@ test("private responses never deduplicate across session generations", async () 
   const first = deduplicator.run(identity, async () => ++calls);
   deduplicator.setSessionGeneration("user-2:session-b");
   const second = deduplicator.run(identity, async () => ++calls);
-  assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+  await assert.rejects(first, { name: "AbortError" });
+  assert.equal(await second, 2);
 });
 
 test("caller-owned cancellation remains independent", async () => {

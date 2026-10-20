@@ -12,7 +12,9 @@ from app.core.uat2 import require_password_auth_allowed, require_uat2_owner
 from app.core.logging import get_logger
 from app.core.recovery import recovery_mode
 from app.core.security import AuthUtils, JWTUtils, PasswordUtils
-from app.domains.auth.dependencies import get_current_user, require_admin
+from app.domains.auth.dependencies import get_current_user, require_admin, security
+from fastapi.security import HTTPAuthorizationCredentials
+from app.domains.auth.session_revocation import session_is_current, authentication_time
 from app.domains.auth.models import ActivityLog, User, UserProfile, UserRole
 from app.domains.auth.schemas import (
     GoogleSignInRequest,
@@ -172,7 +174,10 @@ async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
     require_uat2_owner(user.email)
-    tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
+    if not await session_is_current(db, user.id, payload):
+        raise HTTPException(401, "Session is no longer active")
+    tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value,
+                                   auth_time=authentication_time(payload))
     return LoginResponse(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],
@@ -195,9 +200,13 @@ async def logout(
 @router.post("/websocket-ticket", response_model=WebSocketTicketResponse)
 async def create_websocket_ticket(
     current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
+    claims = JWTUtils.verify_token(credentials.credentials) if credentials else None
+    if not claims or claims.get("type") == "refresh":
+        raise HTTPException(401, "Access token required")
     return WebSocketTicketResponse(
-        ticket=await issue_websocket_ticket(current_user.id),
+        ticket=await issue_websocket_ticket(current_user.id, claims),
         expires_in=WEBSOCKET_TICKET_TTL_SECONDS,
     )
 

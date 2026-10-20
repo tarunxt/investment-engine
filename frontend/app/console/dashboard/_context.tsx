@@ -1,5 +1,7 @@
 'use client';
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import {
   createContext,
   useCallback,
@@ -299,7 +301,7 @@ export function DashboardProvider({
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+      const raw = privateLocalStorage.getItem(MODEL_MIX_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return;
@@ -320,7 +322,7 @@ export function DashboardProvider({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(savedModelMixes));
+      privateLocalStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(savedModelMixes));
     } catch (err) {
       console.warn('Failed to persist model mixes:', err);
     }

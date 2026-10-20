@@ -88,6 +88,8 @@ jobs:
           backend/tests/test_google_sheets_output_contracts.py
           backend/tests/test_google_sheets_tasks.py
           backend/tests/test_private_api_ownership.py
+          backend/tests/test_live_boundaries.py
+          backend/tests/test_auth_websocket_tickets.py
           backend/tests/test_trade_analysis_display.py
           backend/tests/test_final_actionable_history_identity.py
           backend/tests/test_final_actionable_history_parser.py
@@ -161,7 +163,7 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py
 
   recommendation-audit-release-gates:
     name: Recommendation audit migration, concurrency and authenticated delivery
@@ -298,6 +300,9 @@ jobs:
           tests/sports-rankings-summary.test.mjs
           tests/sports-rankings-error-dialog.test.mjs
           tests/bounded-api-transport.test.mjs
+          tests/private-account-boundary.test.mjs
+          tests/private-dashboard-cache.test.mjs
+          tests/final-actionables-optional-cache.test.mjs
           tests/bullpen-proxy-timeout-budget.test.mjs
           tests/bullpen-history-portfolio.test.mjs
           tests/runtime-performance-regressions.test.mjs

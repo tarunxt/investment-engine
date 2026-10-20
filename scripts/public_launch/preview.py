@@ -71,9 +71,20 @@ def main():
             if (directory / name).exists():
                 raise SystemExit(f"Refusing inherited application environment file: {directory / name}")
     RUNTIME.mkdir(parents=True, exist_ok=True)
-    ui_port, api_port = port(), port()
-    while api_port == ui_port:
-        api_port = port()
+    build_ports = RUNTIME / "build-ports.json"
+    if args.action == "start":
+        if not build_ports.exists():
+            raise SystemExit("Build this preview first so compiled WebSocket URLs match its unused ports")
+        ports = json.loads(build_ports.read_text())
+        ui_port, api_port = ports["frontend_port"], ports["backend_port"]
+        for value in (ui_port, api_port):
+            with socket.socket() as check:
+                try: check.bind(("127.0.0.1", value))
+                except OSError: raise SystemExit("Preview build port is in use; build again to select fresh unused ports")
+    else:
+        ui_port, api_port = port(), port()
+        while api_port == ui_port:
+            api_port = port()
     url = f"http://localhost:{ui_port}"
     # Deliberately do not inherit provider, cloud, SMTP, broker or production env.
     common = {"PATH": str(Path(node).parent) + ":/usr/bin:/bin:/usr/local/bin",
@@ -96,6 +107,7 @@ def main():
         frontend.pop("NODE_OPTIONS")
         subprocess.run([node, "node_modules/next/dist/bin/next", "build", "--webpack"],
                        cwd=ROOT / "frontend", env=frontend, check=True)
+        build_ports.write_text(json.dumps({"frontend_port": ui_port, "backend_port": api_port}) + "\n")
         return
     if not (ROOT / "frontend/.next/BUILD_ID").exists():
         raise SystemExit("Run preview.py build first; development mode bypasses client auth in this baseline")

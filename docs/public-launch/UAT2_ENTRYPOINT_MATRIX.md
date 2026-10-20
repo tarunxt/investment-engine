@@ -6,19 +6,19 @@ The complete auth router is included, with existing UAT2 exact-owner checks befo
 
 | Method | UAT2 path | Source | Composition / authority |
 | --- | --- | --- | --- |
-| GET | /auth/google/config | backend/app/domains/auth/router.py:45 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/google | backend/app/domains/auth/router.py:53 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/register | backend/app/domains/auth/router.py:77 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/login | backend/app/domains/auth/router.py:123 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/refresh | backend/app/domains/auth/router.py:158 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/logout | backend/app/domains/auth/router.py:186 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/websocket-ticket | backend/app/domains/auth/router.py:196 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| GET | /auth/me | backend/app/domains/auth/router.py:206 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/forgot-password | backend/app/domains/auth/router.py:213 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| POST | /auth/reset-password | backend/app/domains/auth/router.py:230 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| PUT | /auth/password | backend/app/domains/auth/router.py:257 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| GET | /auth/profile | backend/app/domains/auth/router.py:278 | Real auth router; UAT2 owner and alternate-auth guards retained |
-| PUT | /auth/profile | backend/app/domains/auth/router.py:302 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| GET | /auth/google/config | backend/app/domains/auth/router.py:47 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/google | backend/app/domains/auth/router.py:55 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/register | backend/app/domains/auth/router.py:79 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/login | backend/app/domains/auth/router.py:125 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/refresh | backend/app/domains/auth/router.py:160 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/logout | backend/app/domains/auth/router.py:191 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/websocket-ticket | backend/app/domains/auth/router.py:201 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| GET | /auth/me | backend/app/domains/auth/router.py:215 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/forgot-password | backend/app/domains/auth/router.py:222 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| POST | /auth/reset-password | backend/app/domains/auth/router.py:239 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| PUT | /auth/password | backend/app/domains/auth/router.py:266 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| GET | /auth/profile | backend/app/domains/auth/router.py:287 | Real auth router; UAT2 owner and alternate-auth guards retained |
+| PUT | /auth/profile | backend/app/domains/auth/router.py:311 | Real auth router; UAT2 owner and alternate-auth guards retained |
 | GET | /uat2/status | backend/app/uat2/router.py:15 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | GET | /zerodha/portfolio | backend/app/uat2/router.py:24 | UAT2 synthetic router; router-level get_current_user enforces exact owner |
 | GET | /zerodha/status | backend/app/uat2/router.py:29 | UAT2 synthetic router; router-level get_current_user enforces exact owner |

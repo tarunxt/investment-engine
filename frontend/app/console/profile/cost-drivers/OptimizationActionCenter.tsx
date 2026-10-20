@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -241,7 +243,7 @@ export function OptimizationActionCenter() {
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(actionStatusKey(selectedMonth));
+      const saved = privateLocalStorage.getItem(actionStatusKey(selectedMonth));
       setActionStatuses(saved ? (JSON.parse(saved) as ActionStatusMap) : {});
     } catch {
       setActionStatuses({});
@@ -261,7 +263,7 @@ export function OptimizationActionCenter() {
       setActionStatuses((current) => {
         const next = { ...current, [actionId]: status };
         try {
-          window.localStorage.setItem(
+          privateLocalStorage.setItem(
             actionStatusKey(selectedMonth),
             JSON.stringify(next),
           );

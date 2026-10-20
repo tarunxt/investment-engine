@@ -1,3 +1,4 @@
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 export type BullpenTableColumnId =
   | "select"
   | "serialNumber"
@@ -101,7 +102,7 @@ export function readBullpenTableColumnOrderFromStorage(
   if (typeof window === "undefined") return [...visibleColumnIds];
 
   try {
-    const raw = window.localStorage.getItem(
+    const raw = privateLocalStorage.getItem(
       BULLPEN_TABLE_COLUMN_ORDER_STORAGE_KEY,
     );
     if (!raw) return [...visibleColumnIds];
@@ -131,7 +132,7 @@ export function writeBullpenTableColumnOrderToStorage(
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       BULLPEN_TABLE_COLUMN_ORDER_STORAGE_KEY,
       JSON.stringify(columnIds),
     );
@@ -145,7 +146,7 @@ export function readBullpenTableColumnWidthsFromStorage() {
   if (typeof window === "undefined") return widths;
 
   try {
-    const raw = window.localStorage.getItem(
+    const raw = privateLocalStorage.getItem(
       BULLPEN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
     );
     if (!raw) return widths;
@@ -173,7 +174,7 @@ export function writeBullpenTableColumnWidthsToStorage(
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       BULLPEN_TABLE_COLUMN_WIDTHS_STORAGE_KEY,
       JSON.stringify(widths),
     );

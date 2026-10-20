@@ -1,5 +1,13 @@
 # Public-launch implementation status
 
+## Stage03 start — informed progression approval
+
+Stage02 is deployed at a2e82f0e7f36d4fdafc78f7dbe01553aca49af11. Parent/live executor reports fresh20 October06:28:49IST QA confirmed exact commit, eight services, simulation and anonymous401 boundaries. Fresh authenticated browser recheck was unavailable; historical deployment browser checks had passed. After hearing that explicit limitation, user said “ठीक है ओके स्टेज थ्री पे जाओ”. This authorizes informed progression to03; it is NOT evidence that the user performed fresh Stage02 browser checks.
+
+Stage03 is isolated on codex/stage03-live-boundaries-20261020, task-5/stage03-live-boundaries, from that deployed commit. Previous worktrees/code/migrations remain preserved. Full stages/03.md is authoritative and unchanged. Production and UAT2 owner-only/simulation stay unchanged. US$10 allowance and stop21 October2026 21:04:13IST remain unchanged; parent/existing executor checks readiness before any deployment. No old UAT recovery, new user/credential/key, live security/access/permission change or expanded paid resource is authorized here. Stage04 requires next review.
+
+Code:IMPLEMENTED with local verification; exact-head CI:PENDING. UAT2 deployment:NOT_RUN. UAT2 verification:NOT_RUN for03. Owner acceptance:PENDING03. External approvals:UNCHANGED. Prior status entries below are historical checkpoints superseded by this active-stage entry.
+
 ## Stage02 implementation checkpoint (supersedes prior active-stage status)
 
 Stage01 is owner-accepted on deployed67cb8e6d plus separately approved proxy709bbac; clean repeatable-source base4b69c472 is preserved. Stage02 is authorized on separate codex/stage02-private-ownership-20261019 in task-5/stage02-private-ownership; no Stage01 branch edits. Full stages/02.md was verified exact against authoritative HTML p02; instruction history is unchanged.

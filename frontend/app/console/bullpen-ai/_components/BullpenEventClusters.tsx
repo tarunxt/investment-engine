@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,7 +19,7 @@ export function useBullpenEventClusters() {
   useEffect(() => {
     if (!storageKey) return;
     const read = () => {
-      try { setSaved({ key: storageKey, rows: loadClusterOverrides(publishedRows, localStorage.getItem(storageKey)) }); setError(null); }
+      try { setSaved({ key: storageKey, rows: loadClusterOverrides(publishedRows, privateLocalStorage.getItem(storageKey)) }); setError(null); }
       catch { setSaved({ key: storageKey, rows: publishedRows }); setError("Browser overrides could not be loaded. Showing the published cluster mapping."); }
     };
     const timer = window.setTimeout(read, 0);
@@ -29,7 +31,7 @@ export function useBullpenEventClusters() {
   const clusters = useMemo(() => new Map(rows.map(row => [row.market_id, row.cluster_id])), [rows]);
   const save = (next: ClusterAssignment[]) => {
     if (!storageKey) throw new Error("Sign in before saving cluster assignments.");
-    try { localStorage.setItem(storageKey, JSON.stringify({ revision: publishedRevision, rows: next })); }
+    try { privateLocalStorage.setItem(storageKey, JSON.stringify({ revision: publishedRevision, rows: next })); }
     catch { throw new Error("Cluster IDs could not be saved in this browser. Check available browser storage and retry."); }
     setSaved({ key: storageKey, rows: next });
     setError(null);

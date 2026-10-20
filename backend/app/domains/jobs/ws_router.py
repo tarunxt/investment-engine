@@ -7,7 +7,8 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.domains.jobs.repository import PostgresJobRepository
 from app.shared.types import JobId
-from app.shared.ws_relay import relay_channel, user_id_from_ws_token
+from app.shared.ws_relay import relay_channel, authenticate_websocket, stream_is_current
+from app.shared.ws_channels import job_channel
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +18,20 @@ router = APIRouter(tags=["websocket"])
 @router.websocket("/ws/jobs")
 async def ws_job_list(websocket: WebSocket, token: str | None = Query(None)):
     """Stream real-time status updates for all jobs of the authenticated user."""
-    user_id = await user_id_from_ws_token(token)
-    if user_id is None:
-        await websocket.close(code=4001, reason="Unauthorized")
+    access = await authenticate_websocket(websocket, token)
+    if access is None:
         return
+    user_id = access.user_id
 
     await websocket.accept()
     logger.info("WS /ws/jobs connected user_id=%s", user_id)
     try:
-        await relay_channel(websocket, f"user_job_updates:{user_id}")
+        await relay_channel(websocket, f"user_job_updates:{user_id}",
+                            authorize=lambda message: stream_is_current(access, message=message), expires_at=access.expires_at)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs disconnected user_id=%s", user_id)
-    except Exception as e:
-        logger.error("WS /ws/jobs error user_id=%s: %s", user_id, e)
+    except Exception:
+        logger.error("WS /ws/jobs error user_id=%s", user_id)
     finally:
         logger.info("WS /ws/jobs closed user_id=%s", user_id)
 
@@ -37,10 +39,10 @@ async def ws_job_list(websocket: WebSocket, token: str | None = Query(None)):
 @router.websocket("/ws/jobs/{job_id}")
 async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None = Query(None)):
     """Stream real-time status updates for a specific job."""
-    user_id = await user_id_from_ws_token(token)
-    if user_id is None:
-        await websocket.close(code=4001, reason="Unauthorized")
+    access = await authenticate_websocket(websocket, token)
+    if access is None:
         return
+    user_id = access.user_id
 
     async with AsyncSessionLocal() as db:
         job = await PostgresJobRepository(db).get(job_id, user_id=user_id)
@@ -55,7 +57,7 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
     try:
         async with AsyncSessionLocal() as db:
             job = await PostgresJobRepository(db).get(job_id, user_id=user_id)
-            if job and job.user_id == user_id:
+            if job and job.user_id == user_id and await stream_is_current(access, job_id=job_id):
                 status_val = (
                     job.status.value if hasattr(job.status, "value") else str(job.status)
                 )
@@ -77,13 +79,14 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
                     }
                 )
     except Exception:
-        logger.warning("Failed to send initial state for job %d", job_id, exc_info=True)
+        logger.warning("Failed to send initial state for job %d", job_id)
 
     try:
-        await relay_channel(websocket, f"job_updates:{job_id}")
+        await relay_channel(websocket, job_channel(user_id, job_id),
+                            authorize=lambda message: stream_is_current(access, job_id=job_id, message=message), expires_at=access.expires_at)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs/%d disconnected user_id=%s", job_id, user_id)
-    except Exception as e:
-        logger.error("WS /ws/jobs/%d error user_id=%s: %s", job_id, user_id, e)
+    except Exception:
+        logger.error("WS /ws/jobs/%d error user_id=%s", job_id, user_id)
     finally:
         logger.info("WS /ws/jobs/%d closed user_id=%s", job_id, user_id)

@@ -31,6 +31,10 @@ from app.domains.prompts.models import Prompt
 from app.domains.runs.models import Run, RunJob
 from app.domains.jobs.router import router as jobs_router
 from app.domains.runs.router import router as runs_router
+from app.domains.jobs.ws_router import router as jobs_ws_router
+from app.domains.runs.ws_router import router as runs_ws_router
+from scripts.public_launch.preview_streams import install
+install()
 from app.shared.types import JobStatus
 from app.domains.auth.router import router
 from app.core.security import PasswordUtils
@@ -78,7 +82,8 @@ app.add_middleware(CORSMiddleware, allow_origins=[os.environ["FRONTEND_URL"]],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 ALLOWED = {("POST", "/auth/login"), ("POST", "/auth/refresh"), ("POST", "/auth/logout"),
-           ("GET", "/auth/me"), ("GET", "/auth/profile"), ("PUT", "/auth/profile")}
+           ("GET", "/auth/me"), ("GET", "/auth/profile"), ("PUT", "/auth/profile"),
+           ("POST", "/auth/websocket-ticket")}
 
 
 @app.middleware("http")
@@ -103,3 +108,6 @@ for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
         if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
             app.include_router(APIRouter(routes=[route]))
+
+app.include_router(jobs_ws_router)
+app.include_router(runs_ws_router)

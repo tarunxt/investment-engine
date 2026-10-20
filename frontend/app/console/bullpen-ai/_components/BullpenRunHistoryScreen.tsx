@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -70,7 +72,7 @@ function readCachedHistoryPage(
   if (typeof window === "undefined") return null;
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(
+      privateLocalStorage.getItem(
         workspaceCacheKey(HISTORY_PAGE_CACHE_KEY, profile),
       ) || "null",
     ) as BullpenAutoLiveHistoryPage | null;
@@ -86,7 +88,7 @@ function cacheHistoryPage(
 ) {
   if (page.page !== 1) return;
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       workspaceCacheKey(HISTORY_PAGE_CACHE_KEY, profile),
       JSON.stringify(page),
     );
@@ -121,7 +123,7 @@ function readCachedEventTrends(
   if (typeof window === "undefined") return null;
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(
+      privateLocalStorage.getItem(
         workspaceCacheKey(EVENT_TRENDS_CACHE_KEY, profile),
       ) || "null",
     ) as BullpenAutoLiveEventTrendsResponse | null;
@@ -136,7 +138,7 @@ function cacheEventTrends(
   profile: BullpenWorkspaceProfile,
 ) {
   try {
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       workspaceCacheKey(EVENT_TRENDS_CACHE_KEY, profile),
       JSON.stringify(trends),
     );
@@ -592,7 +594,7 @@ export function BullpenRunHistoryScreen({
 
   useEffect(() => {
     const savedSeconds = Number.parseInt(
-      window.localStorage.getItem(RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY) ?? "",
+      privateLocalStorage.getItem(RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY) ?? "",
       10,
     );
     if (
@@ -606,7 +608,7 @@ export function BullpenRunHistoryScreen({
 
   const saveRefreshInterval = useCallback((seconds: number) => {
     setRefreshIntervalSeconds(seconds);
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY,
       String(seconds),
     );

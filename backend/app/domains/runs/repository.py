@@ -62,6 +62,12 @@ class PostgresRunRepository:
         )
         return result.scalar_one_or_none()
 
+    async def is_owned(self, run_id: int, *, user_id: int) -> bool:
+        """Bounded current-access probe, reusing the full relationship predicate."""
+        return await self._session.scalar(
+            self._owned_query(user_id).with_only_columns(Run.id).where(Run.id == run_id)
+        ) is not None
+
     async def list(
         self,
         query: PagedQuery,

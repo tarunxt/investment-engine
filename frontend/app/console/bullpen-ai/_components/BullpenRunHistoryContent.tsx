@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ExternalLink, Info, Loader2, Menu, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -457,7 +459,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<Set<BullpenEventTrendColumnKey>>(() => new Set(DEFAULT_BULLPEN_EVENT_TREND_COLUMN_KEYS));
   useEffect(() => {
     try {
-      const saved = JSON.parse(window.localStorage.getItem(EVENT_TREND_COLUMN_VISIBILITY_STORAGE_KEY) || "null") as unknown;
+      const saved = JSON.parse(privateLocalStorage.getItem(EVENT_TREND_COLUMN_VISIBILITY_STORAGE_KEY) || "null") as unknown;
       if (Array.isArray(saved)) {
         const validKeys = new Set<BullpenEventTrendColumnKey>(DEFAULT_BULLPEN_EVENT_TREND_COLUMN_KEYS);
         setVisibleColumnKeys(new Set(saved.filter((key): key is BullpenEventTrendColumnKey => typeof key === "string" && validKeys.has(key as BullpenEventTrendColumnKey))));
@@ -468,7 +470,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
     setVisibleColumnKeys(current => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key); else next.add(key);
-      try { window.localStorage.setItem(EVENT_TREND_COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify([...next])); } catch { /* The selector still works for this session. */ }
+      try { privateLocalStorage.setItem(EVENT_TREND_COLUMN_VISIBILITY_STORAGE_KEY, JSON.stringify([...next])); } catch { /* The selector still works for this session. */ }
       return next;
     });
   };

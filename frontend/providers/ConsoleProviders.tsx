@@ -18,7 +18,8 @@ export function ConsoleProviders({
   return (
     <SessionProvider
       session={initialSession}
-      refetchOnWindowFocus={false}
+      refetchOnWindowFocus={true}
+      refetchInterval={30}
     >
       <AuthProvider initialUser={initialUser}>
         <ThemeProvider>{children}</ThemeProvider>

@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
@@ -609,7 +611,7 @@ function getInitialEc2Commands() {
   if (typeof window === "undefined") return DEFAULT_EC2_COMMANDS;
 
   try {
-    const savedCommands = window.localStorage.getItem(EC2_COMMANDS_STORAGE_KEY);
+    const savedCommands = privateLocalStorage.getItem(EC2_COMMANDS_STORAGE_KEY);
     if (!savedCommands) return DEFAULT_EC2_COMMANDS;
 
     const parsedCommands = JSON.parse(savedCommands);
@@ -1570,7 +1572,7 @@ export default function PolymarketBotPage() {
   );
   useEffect(() => {
     try {
-      window.localStorage.setItem(
+      privateLocalStorage.setItem(
         EC2_COMMANDS_STORAGE_KEY,
         JSON.stringify(ec2Commands),
       );

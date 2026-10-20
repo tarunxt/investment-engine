@@ -12,6 +12,7 @@ from app.core.security import JWTUtils, PasswordUtils
 from app.core.logging import get_logger
 from app.core.request_timing import add_auth_duration
 from app.domains.auth.models import User, UserRole, UserProfile
+from app.domains.auth.session_revocation import session_is_current
 from app.infrastructure.database.session import get_async_db
 
 logger = get_logger(__name__)
@@ -72,7 +73,7 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if uat2_mode() and payload.get("type") == "refresh":
+        if payload.get("type") == "refresh":
             raise HTTPException(401, "Access token required")
         sub = payload.get("sub")
         if not sub:
@@ -87,6 +88,8 @@ async def get_current_user(
         if not user.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive")
         require_uat2_owner(user.email)
+        if not await session_is_current(db, user.id, payload):
+            raise HTTPException(401, "Session is no longer active")
         return user
     finally:
         add_auth_duration((monotonic() - started_at) * 1000)

@@ -1,5 +1,7 @@
 "use client";
 
+import { privateSessionStorage } from "@/lib/privateBrowserStorage";
+
 import Link from "next/link";
 import { UniversalPolymarketScan } from "./UniversalPolymarketScan";
 import { startTransition, useEffect, useState } from "react";
@@ -287,7 +289,7 @@ function readCachedOverview() {
   }
 
   try {
-    const raw = window.sessionStorage.getItem(OVERVIEW_CACHE_KEY);
+    const raw = privateSessionStorage.getItem(OVERVIEW_CACHE_KEY);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as {
@@ -315,7 +317,7 @@ function writeCachedOverview(overview: TradingBotsOverview) {
     return;
   }
 
-  window.sessionStorage.setItem(OVERVIEW_CACHE_KEY, JSON.stringify(overview));
+  privateSessionStorage.setItem(OVERVIEW_CACHE_KEY, JSON.stringify(overview));
 }
 
 function usesFallbackData(overview: TradingBotsOverview) {

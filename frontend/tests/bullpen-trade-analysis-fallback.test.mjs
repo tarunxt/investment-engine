@@ -30,8 +30,13 @@ function loadFallbackModule() {
   new Function("exports", "module", "require", compiled.outputText)(
     loadedModule.exports,
     loadedModule,
-    () => {
-      throw new Error("The fallback module must have no runtime imports.");
+    (name) => {
+      assert.equal(name, "@/lib/privateBrowserStorage", "fallback may only depend on the scoped storage facade");
+      return { privateSessionStorage: {
+        getItem: (...args) => window.sessionStorage.getItem(...args),
+        setItem: (...args) => window.sessionStorage.setItem(...args),
+        removeItem: (...args) => window.sessionStorage.removeItem(...args),
+      } };
     },
   );
   return loadedModule.exports;

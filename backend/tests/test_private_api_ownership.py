@@ -4,6 +4,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 import os
+import time
 from uuid import uuid4
 
 import pytest
@@ -252,7 +253,9 @@ def test_foreign_websocket_never_subscribes(private_api, monkeypatch, kind):
     @asynccontextmanager
     async def database(): yield a.db
     monkeypatch.setattr(module, 'AsyncSessionLocal', database)
-    monkeypatch.setattr(module, 'user_id_from_ws_token', AsyncMock(return_value=a.users[0].id))
+    from app.domains.auth.websocket_tickets import StreamAccess
+    monkeypatch.setattr(module, 'authenticate_websocket', AsyncMock(return_value=
+        StreamAccess(a.users[0].id, time.time(), time.time()+60)))
     relay = AsyncMock()
     monkeypatch.setattr(module, 'relay_channel', relay)
     app = FastAPI()

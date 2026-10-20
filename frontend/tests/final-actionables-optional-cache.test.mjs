@@ -5,6 +5,7 @@ import ts from 'typescript';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 function load(source, bindings = {}) {
+  bindings = { require: () => ({ privateLocalStorage: undefined }), ...bindings };
   const compiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -48,6 +49,8 @@ function fixture({ errorForKey = () => null, initial = [] } = {}) {
   };
   const bindings = {
     window: { localStorage: storage },
+    privateLocalStorage: storage,
+    require: () => ({ privateLocalStorage: storage }),
     console: { info: (...args) => notices.push(args), warn: (...args) => warnings.push(args) },
   };
   const cache = load(read('../lib/optionalBrowserCache.ts'), bindings);

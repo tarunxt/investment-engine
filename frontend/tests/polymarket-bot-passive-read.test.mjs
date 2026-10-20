@@ -110,6 +110,7 @@ function renderColdPage(readSource, screen) {
   const grids = [];
   const passthrough = ({ children }) => children;
   const modules = {
+    "@/lib/privateBrowserStorage": { privateLocalStorage: { getItem: () => null, setItem() {} } },
     react: {
       useState(initial) {
         const index = hook++;

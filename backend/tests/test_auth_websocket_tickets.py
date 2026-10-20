@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+import json
+import time
 
 from app.domains.auth import websocket_tickets
 
@@ -32,11 +34,11 @@ async def test_websocket_ticket_is_hashed_short_lived_and_one_time(
         lambda *_args, **_kwargs: fake_redis,
     )
 
-    ticket = await websocket_tickets.issue_websocket_ticket(42)
+    ticket = await websocket_tickets.issue_websocket_ticket(42, {"sub": "42", "iat": time.time(), "exp": time.time()+60})
 
     assert ticket
     assert all(ticket not in key for key in fake_redis.values)
-    assert list(fake_redis.values.values()) == ["42"]
+    assert json.loads(next(iter(fake_redis.values.values())))["user_id"] == 42
     assert list(fake_redis.expirations.values()) == [
         websocket_tickets.WEBSOCKET_TICKET_TTL_SECONDS
     ]

@@ -39,6 +39,7 @@ function helpers(overrides = {}, transform) {
   const calls = [];
   const technicalCalls = { count: 0 };
   const exports = load(sourcePath, {
+    privateLocalStorage: overrides.window?.localStorage,
     ...imported, ...ui, cn: (...values) => values.filter(Boolean).join(' '),
     useUsdInrRate: () => null,
     URLs: { routes: { console: { runDetail: (id) => `/console/runs/${id}`, technicalSetups: () => '/technical-setups' } } },

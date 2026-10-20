@@ -1,5 +1,7 @@
 "use client";
 
+import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -91,7 +93,7 @@ interface PickerPosition {
 function readSavedModelMixes(): SavedModelMix[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(MODEL_MIX_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed
@@ -119,7 +121,7 @@ function readSavedModelMixes(): SavedModelMix[] {
 function writeSavedModelMixes(mixes: SavedModelMix[]) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(mixes));
+    privateLocalStorage.setItem(MODEL_MIX_STORAGE_KEY, JSON.stringify(mixes));
   } catch {
     // Keep the picker usable if localStorage is unavailable.
   }
@@ -128,7 +130,7 @@ function writeSavedModelMixes(mixes: SavedModelMix[]) {
 function readLastModelSelection(): LastModelSelection | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(LAST_MODEL_SELECTION_STORAGE_KEY);
+    const raw = privateLocalStorage.getItem(LAST_MODEL_SELECTION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.targets)) return null;
@@ -152,10 +154,10 @@ function writeLastModelSelection(selection: LastModelSelection | null) {
   if (typeof window === "undefined") return;
   try {
     if (!selection || selection.targets.length === 0) {
-      window.localStorage.removeItem(LAST_MODEL_SELECTION_STORAGE_KEY);
+      privateLocalStorage.removeItem(LAST_MODEL_SELECTION_STORAGE_KEY);
       return;
     }
-    window.localStorage.setItem(
+    privateLocalStorage.setItem(
       LAST_MODEL_SELECTION_STORAGE_KEY,
       JSON.stringify(selection),
     );
