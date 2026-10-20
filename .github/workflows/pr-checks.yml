@@ -870,3 +870,82 @@ jobs:
           path: ${{ runner.temp }}/uat2-native-retention-verification.json
           retention-days: 1
           if-no-files-found: error
+
+  stage09-rollback-rehearsal:
+    name: Stage09 PostgreSQL16 rollback rehearsal (${{ matrix.scenario }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [direct_restore, downgrade_then_restore]
+    container: python:3.13-bookworm
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      CI: 'true'
+      GITHUB_ACTIONS: 'true'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_RESTORE_ACK: disposable-ci-only
+      REHEARSAL_SCENARIO: ${{ matrix.scenario }}
+      REHEARSAL_VERIFY_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install PostgreSQL16 clients only in disposable backend container
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates git
+          install -d /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error --location https://www.postgresql.org/media/keys/ACCC4CF8.asc --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list
+          apt-get update
+          apt-get install -y --no-install-recommends postgresql-client-16
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          pg_dump --version
+          pg_restore --version
+      - name: Verify target guards and reproduce unchanged controller marker gap
+        run: python -m unittest discover -s backend/scripts -p test_verify_stage09_restore.py -v
+      - name: Rehearse actual native dump and restore flags on synthetic database
+        run: python backend/scripts/verify_stage09_restore.py "$REHEARSAL_SCENARIO"
+      - name: Require exact source and executed zero-skip result
+        run: |
+          python - <<'PY_CHECK'
+          import json,os
+          from pathlib import Path
+          r=json.loads((Path('/tmp/stage09-restore')/os.environ['REHEARSAL_SCENARIO']/'receipt.json').read_text())
+          assert r['status']=='passed' and r['skipped']==0
+          assert r['scenario']==os.environ['REHEARSAL_SCENARIO']
+          assert r['verification_commit']==os.environ['REHEARSAL_VERIFY_SHA']
+          assert r['application_source']=='6844989a55ea2408d6da7862fa07194079ff8b19'
+          assert r['application_promotion_restart_readiness_performed'] is False
+          assert r['native_controller_repaired'] is False
+          if r['scenario']=='downgrade_then_restore':
+              assert r['full_schema_data_revision_sequences_objects_grants_equal'] is True
+              assert r['downgrade_removed_only_stage09_schema'] is True
+              assert r['baseline_snapshot_sha256']==r['restored_snapshot_sha256']
+          else:
+              assert r['expected_failure']=='new Stage09 FK prevents dropping referenced users object'
+          PY_CHECK
+      - name: Retain synthetic backup, snapshots and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage09-rollback-${{ matrix.scenario }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/stage09-restore/${{ matrix.scenario }}
+          retention-days: 3
+          if-no-files-found: warn

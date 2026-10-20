@@ -1,3 +1,13 @@
+# Stage09 CI-only rollback verification — deployment HOLD
+
+Application runtime remains exactly `6844989a55ea2408d6da7862fa07194079ff8b19`. The current containing commit is a separately identified test-only verification head on PR1251, authorized by the owner's explicit approval to publish/run the rollback rehearsal. Only backend/scripts test harness/safety tests, PR Checks and these documentation paths may differ; strict CI provenance enforces that allowlist. No runtime controller/frontend/app/migration/requirements change. Earlier6844989a/6e56dc99 source and artifact receipts remain preserved.
+
+Local no-DB checks:8 safety/controller tests PASS. Actual PostgreSQL16 direct-restore negative and downgrade-then-restore positive cases are prepared; exact-head CI results PENDING at this checkpoint. See STAGE09_ROLLBACK_REHEARSAL.md. The harness separately checks revision, sequence state, complete schema SQL/objects/ACLs and ciphertext preservation; a successful migration roundtrip alone is not restore proof. It exports synthetic post-migration material before downgrade. Fixtures and client tools exist only inside disposable CI; no local/shared daemon was started.
+
+Two unchanged P1 controller gaps remain explicit: --clean restore may fail against new FK dependencies after partial changes, and standalone rollback creates no pending marker, so a later start may proceed. Tests reproduce/document these behaviors, not fix them. Existing pending marker blocks start after injected restore failure; the proposed manual guarded sequence retains its test marker after downgrade/restore failures. No live recovery sequence is authorized. Deployment remains HOLD pending separately reviewed controller repair/operational gate, live verification and owner completion. Stage10 is only conditionally authorized after full Stage09 completion and has not started. No UAT2/production/oldUAT/AWS/credential/access change, merge or limit extension.
+
+Earlier checkpoints below are preserved history; they do not override these current holds or authorize deployment.
+
 # Stage09 same-owner display repair — local successor only
 
 Current branch remains `codex/stage09-recovery-successor-20261020-task3`, worktree task-3/stage09-recovery-successor. Parent authorized local repair only, based on exact published `6e56dc99b355f3a1c1ce76ea0433f6865e3750be`. The new candidate is this checkpoint's containing commit, recorded fully in parent handoff. Original task-5 checkout/branch/processes are preserved. Published draft PR1251 and its passing CI/artifact receipts stay at6e56dc99; no changed SHA is pushed, no remote metadata is edited, and no deployment occurs in this phase.
