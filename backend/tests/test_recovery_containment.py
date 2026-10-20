@@ -492,7 +492,7 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
     from app.infrastructure.database.session import get_async_db
     now = datetime.now(timezone.utc)
     snapshot = SimpleNamespace(snapshot_date=date.today(), captured_at=now)
-    jobs, publications = [], []
+    jobs, publications, outbox = [], [], []
     class Repo:
         def __init__(self, db): pass
         async def create(self, job):
@@ -504,7 +504,6 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
         @asynccontextmanager
         async def acquire(self, *args, **kwargs): yield None
     monkeypatch.setattr(producer, "PostgresJobRepository", Repo)
-    monkeypatch.setattr(producer, "register_job_task", AsyncMock())
     monkeypatch.setattr(routes, "PostgresJobRepository", Repo)
     monkeypatch.setattr(routes, "ZerodhaPortfolioSnapshotRepository", lambda _: SimpleNamespace(get_latest_by_user=AsyncMock(return_value=snapshot)))
     monkeypatch.setattr(routes, "_resolve_threat_target", AsyncMock(return_value=("fixture-provider", "fixture-model")))
@@ -516,7 +515,7 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
     app = FastAPI()
     app.add_middleware(RecoveryMiddleware)
     app.include_router(routes.router)
-    db = SimpleNamespace(add=lambda _: None, commit=AsyncMock())
+    db = SimpleNamespace(add=outbox.append, commit=AsyncMock())
     async def session(): yield db
     app.dependency_overrides[get_async_db] = session
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=123)
@@ -539,6 +538,12 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
         assert result.json()["job_id"] == 123
     assert jobs[0].auto_rebalance_portfolio == "india"
     assert jobs[0].auto_rebalance_sequence == 12
+    assert publications == []  # Commit precedes the single recoverable dispatcher.
+    assert len(outbox) == 1 and outbox[0].topic == "job.created.v2"
+    assert outbox[0].payload["user_id"] == 123
+    from app.infrastructure.database.outbox.job_dispatch import publish_job
+    from uuid import uuid4
+    publish_job(123, str(uuid4()))
     assert publications[0][0] == ANALYSIS_TASK
     assert publications[0][1]["queue"] == ANALYSIS_QUEUE
     db.commit.assert_awaited_once()

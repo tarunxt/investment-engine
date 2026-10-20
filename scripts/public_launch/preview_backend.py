@@ -2,6 +2,7 @@
 
 No production import path references this module. Invoke via preview.py only.
 """
+import asyncio
 import os
 import socket
 from contextlib import asynccontextmanager
@@ -11,6 +12,11 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+
+@compiles(JSONB, "sqlite")
+def synthetic_sqlite_json(_type, _compiler, **_kw): return "JSON"
 
 ROOT = Path(__file__).resolve().parents[2]
 expected = f"sqlite+aiosqlite:///{ROOT / '.runtime/stage01-preview/preview.sqlite3'}"
@@ -35,6 +41,10 @@ from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.runs.ws_router import router as runs_ws_router
 from scripts.public_launch.preview_streams import install
 install()
+from app.infrastructure.database.outbox.models import OutboxMessage
+from app.infrastructure.messaging.operation_models import IdempotencyOperation
+from scripts.public_launch import preview_jobs
+from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
 from app.domains.auth.router import router
 from app.core.security import PasswordUtils
@@ -46,7 +56,8 @@ async def lifespan(app):
     async with async_engine.begin() as connection:
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
-                      Job.__table__, Run.__table__, RunJob.__table__):
+                      Job.__table__, Run.__table__, RunJob.__table__,
+                      OutboxMessage.__table__, IdempotencyOperation.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -73,8 +84,18 @@ async def lifespan(app):
                 await db.flush()
                 db.add(RunJob(run_id=run.id, job_id=job.id))
         await db.commit()
-    yield
-    await async_engine.dispose()
+    async def fake_consumer():
+        while True:
+            await asyncio.to_thread(preview_jobs.tick)
+            await asyncio.sleep(1)
+    consumer=asyncio.create_task(fake_consumer())
+    try:
+        yield
+    finally:
+        consumer.cancel()
+        await asyncio.gather(consumer,return_exceptions=True)
+        preview_jobs.engine.dispose()
+        await async_engine.dispose()
 
 
 app = FastAPI(title="Stage01 synthetic preview (real auth/profile handlers)", lifespan=lifespan)
@@ -83,7 +104,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[os.environ["FRONTEND_URL"]],
 
 ALLOWED = {("POST", "/auth/login"), ("POST", "/auth/refresh"), ("POST", "/auth/logout"),
            ("GET", "/auth/me"), ("GET", "/auth/profile"), ("PUT", "/auth/profile"),
-           ("POST", "/auth/websocket-ticket")}
+           ("POST", "/auth/websocket-ticket"), ("POST", "/jobs")}
 
 
 @app.middleware("http")
@@ -102,11 +123,15 @@ async def synthetic_boundary(request: Request, call_next):
     return response
 
 
+@app.exception_handler(AppException)
+async def operation_error(_request, exc):
+    return JSONResponse({'detail':exc.message},status_code=exc.status_code)
+
 app.include_router(router)
 
 for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
-        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
+        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and (route.methods == {'GET'} or route.path == '/jobs' and route.methods == {'POST'}):
             app.include_router(APIRouter(routes=[route]))
 
 app.include_router(jobs_ws_router)

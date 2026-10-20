@@ -1,0 +1,68 @@
+{
+  "base_commit": "a1643521a08ce221512579297ce3724c6d21b24f",
+  "code": "implemented",
+  "CI": "pending_exact_head",
+  "independent_acceptance": "pending_separate_existing_UAT2_task",
+  "owner_acceptance": "pending_stage04",
+  "UAT2_deployment": "not_run_here",
+  "checks": {
+    "docker_migration_up_down_up": "passed_with_baseline_data_and_legacy_outbox_preserved",
+    "real_PostgreSQL_Redis_contracts": {
+      "passed": 11,
+      "skipped": 0
+    },
+    "backend_regressions": {
+      "passed": 199
+    },
+    "stage01_baseline": {
+      "passed": 5
+    },
+    "actual_Next_Webpack_build": "passed",
+    "native_contracts": {
+      "passed": 16
+    },
+    "shared_UAT2_contracts": {
+      "passed": 7
+    },
+    "actual_local_API_BFF_idempotency": "passed",
+    "actual_local_Chrome_B_own_job5_foreign_A_job4_denied": "passed",
+    "API_attempt_guard_unit_tests": {
+      "passed": 9
+    },
+    "API_attempt_full_guarded_Docker_roundtrip": "passed_through_tenant_idempotency_001_with_repeated_head_unchanged"
+  },
+  "local_replay": {
+    "result": "passed",
+    "frontend_url": "http://localhost:58519",
+    "backend_url": "http://127.0.0.1:58520",
+    "checks": [
+      "eight real concurrent API requests one job",
+      "BFF owned replay",
+      "different payload409",
+      "same key across owners independent",
+      "known foreign direct/BFF404",
+      "actual outbox with offline fake completion",
+      "durable SQLite bindings, not Redis cache"
+    ],
+    "jobs": {
+      "usera": 4,
+      "userb": 5
+    },
+    "tokens_cookies_credentials_retained": false,
+    "scope": "Synthetic localhost only. Distributed PostgreSQL/Redis consumer proof is separate Docker/CI gate; no UAT2 signed-in claim."
+  },
+  "limits": {
+    "total_allowance_usd": 10,
+    "stop": "2026-10-21T21:04:13+05:30",
+    "renewal": "none"
+  },
+  "coverage_limits": [
+    "Implementation self-checks are not independent acceptance",
+    "No fresh signed-in live UAT2 walkthrough",
+    "Controlled crash-window fault injection; no real paid-provider crash",
+    "SQLite preview uses fake execution; distributed guard proven separately in real PostgreSQL/Redis",
+    "Historical unversioned outbox/cache state is not automatically recovered",
+    "Financial order deduplication remains Stage14",
+    "Broader Stage03 frontend suite retains12 known inherited failures; frontend source unchanged"
+  ]
+}

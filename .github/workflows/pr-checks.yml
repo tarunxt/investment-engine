@@ -165,6 +165,53 @@ jobs:
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
         run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py
 
+  stage04-durable-idempotency:
+    name: Stage04 PostgreSQL idempotency and Redis restart contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage04
+          POSTGRES_PASSWORD: stage04
+          POSTGRES_DB: credx_stage04_test
+        options: --health-cmd "pg_isready -U stage04 -d credx_stage04_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage04:stage04@postgres:5432/credx_stage04_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE04_DATABASE_URL: postgresql+psycopg2://stage04:stage04@postgres:5432/credx_stage04_test
+      CREDX_STAGE04_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install backend fixture dependencies and real disposable Redis
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends redis-server
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest==8.4.2 pytest-asyncio==1.4.0 aiosqlite==0.22.1
+      - name: Upgrade, downgrade and re-upgrade only disposable Stage04 DB
+        run: python backend/scripts/verify_stage04_migration.py
+      - name: Run real concurrency, restart, crash, duplicate and retry contracts
+        run: pytest -q --junitxml=/tmp/stage04.xml backend/tests/test_stage04_idempotency_postgres.py
+      - name: Require every Stage04 contract to execute
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage04.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage04 contracts must not skip'
+          assert len(root.findall('.//testcase')) >= 10, 'Stage04 contract selection incomplete'
+          print('All Stage04 real PostgreSQL/Redis contracts executed.')
+          PY
+
   recommendation-audit-release-gates:
     name: Recommendation audit migration, concurrency and authenticated delivery
     runs-on: ubuntu-latest

@@ -83,3 +83,4 @@ from app.domains.trading_bots.models import (  # noqa: F401
 from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
+from app.infrastructure.messaging.operation_models import IdempotencyOperation  # noqa: F401

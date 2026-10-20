@@ -1,5 +1,12 @@
 # Public-launch implementation status
 
+## Stage04 active — owner-accepted Stage03 baseline
+
+Owner accepted Stage03 and authorized04: "all good. move to next stage" (20 October2026). Deployed03:a1643521a08ce221512579297ce3724c6d21b24f. Parent reports live server/anonymous access checks and targeted local/CI browser-boundary tests; no fresh authenticated UAT2 walkthrough. Acceptance/progression is recorded separately from those evidence limits.
+
+Stage04 uses isolated codex/stage04-durable-idempotency-20261020 in task-5/stage04-durable-idempotency, from exact deployed03. Full04 verified against authoritative Library HTML; unchanged specification and prior migrations/Google fixes preserved. See STAGE04_REQUIREMENT_MAP.md. Code:IMPLEMENTED with local verification / exact-head CI:PENDING / UAT2 deployment:NOT_RUN_HERE / UAT2 verification:PENDING04 / owner acceptance:PENDING04 / external approval:UNCHANGED. Independent acceptance:PENDING the separate existing UAT2 verification task, per owner request to independently check every completed stage. Implementation self-tests are not that acceptance. Stage05 requires new owner review. US$10 total and stop21 October2026 21:04:13IST unchanged. Parent/existing executor owns current READY/limit check and live deployment; no production/security/credential/infrastructure change here. Prior entries below are historical and superseded as active-stage instructions.
+
+
 ## Stage03 start — informed progression approval
 
 Stage02 is deployed at a2e82f0e7f36d4fdafc78f7dbe01553aca49af11. Parent/live executor reports fresh20 October06:28:49IST QA confirmed exact commit, eight services, simulation and anonymous401 boundaries. Fresh authenticated browser recheck was unavailable; historical deployment browser checks had passed. After hearing that explicit limitation, user said “ठीक है ओके स्टेज थ्री पे जाओ”. This authorizes informed progression to03; it is NOT evidence that the user performed fresh Stage02 browser checks.

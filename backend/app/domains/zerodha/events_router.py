@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,6 +91,7 @@ async def run_events_analysis(
     body: PortfolioEventRunRequest | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ):
     provider, model = await _resolve_events_target(body, db)
 
@@ -102,31 +104,29 @@ async def run_events_analysis(
         )
 
     prompt = build_zerodha_events_prompt(latest_snapshot)
-    redis = _get_redis()
-    try:
-        use_case = CreateJobUseCase(
-            session=db,
-            event_bus=event_bus,
-            lock=RedisLock(redis),
-            idempotency=IdempotencyStore(redis),
+    use_case = CreateJobUseCase(
+        session=db,
+        event_bus=event_bus,
+        idempotency=IdempotencyStore(db),
+    )
+    result = await use_case.execute(
+        CreateJobCommand(
+            operation="zerodha.events.create",
+            idempotency_key=idempotency_key,
+            prompt=prompt,
+            provider=provider,
+            model=model,
+            user_id=UserId(current_user.id),
+            auto_rebalance_portfolio=(
+                body.auto_rebalance_portfolio if body else None
+            ),
+            auto_rebalance_sequence=(
+                body.auto_rebalance_sequence if body else None
+            ),
+            auto_rebalance_label=body.auto_rebalance_label if body else None,
         )
-        result = await use_case.execute(
-            CreateJobCommand(
-                prompt=prompt,
-                provider=provider,
-                model=model,
-                user_id=UserId(current_user.id),
-                auto_rebalance_portfolio=(
-                    body.auto_rebalance_portfolio if body else None
-                ),
-                auto_rebalance_sequence=(
-                    body.auto_rebalance_sequence if body else None
-                ),
-                auto_rebalance_label=body.auto_rebalance_label if body else None,
-            )
-        )
-    finally:
-        await redis.aclose()
+    )
+
 
     job = await PostgresJobRepository(db).get(result.job_id, user_id=current_user.id)
     if not job:
