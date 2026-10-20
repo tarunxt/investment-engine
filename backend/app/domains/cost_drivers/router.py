@@ -1,7 +1,6 @@
-import os
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from app.domains.auth.dependencies import get_current_user
-from app.domains.auth.models import User, UserRole
+from app.domains.auth.admin_roles import require_cost_dashboard_admin
+from app.domains.auth.models import User
 from .schemas import CostDriversDashboard
 from .cache import RefreshCooldownError
 from .service import get_dashboard
@@ -10,14 +9,7 @@ import re
 router = APIRouter(prefix="/api/admin/cost-drivers", tags=["cost-drivers"])
 
 
-def _allowed_admin(user: User = Depends(get_current_user)) -> User:
-    allowed = {
-        "tarun.singh6893@gmail.com",
-        *(email.strip().lower() for email in os.getenv("COST_DASHBOARD_ADMIN_EMAILS", "").split(",") if email.strip()),
-    }
-    if user.role == UserRole.ADMIN or user.email.lower() in allowed:
-        return user
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cost dashboard admin access required")
+_allowed_admin = require_cost_dashboard_admin
 
 def _month_param(month: str | None) -> str | None:
     if month is None or month == "":

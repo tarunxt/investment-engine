@@ -449,6 +449,9 @@ def test_unhashable_request_still_invokes_upstream(ledger):
 
 
 def test_commit_failure_does_not_change_success_or_expose_parameters(monkeypatch, caplog):
+    # Other application-import tests install non-propagating app handlers.
+    # Capture this logger directly so the privacy assertion is order-independent.
+    monkeypatch.setattr(metering.logger, "handlers", [*metering.logger.handlers, caplog.handler])
     monkeypatch.setattr(metering, "_persist_attempt", PERSIST)
     sessions = Mock()
     sessions.return_value.__enter__ = Mock(return_value=NS(

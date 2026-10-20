@@ -7325,6 +7325,7 @@ def test_console_market_filter_reasons_block_released_by_markets():
     assert "Excluded release-by event market." in reasons
 
 
+@pytest.mark.usefixtures("synthetic_operator_unit_context")
 @pytest.mark.anyio
 async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
     async def fake_bullpen_state():

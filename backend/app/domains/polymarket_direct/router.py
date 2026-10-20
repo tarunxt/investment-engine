@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.domains.auth.dependencies import get_current_user
@@ -14,7 +15,7 @@ from app.domains.polymarket_direct.schemas import (
 )
 from app.domains.polymarket_direct.service import polymarket_direct_bot_manager
 
-router = APIRouter(prefix="/polymarket-direct", tags=["polymarket"])
+router = APIRouter(prefix="/polymarket-direct", tags=["polymarket"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 
 
 async def _get_bot(current_user: User) -> object:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,7 @@ from app.domains.bullpen_trade_analysis.tasks import (
 )
 from app.infrastructure.database.session import get_async_db
 
-router = APIRouter(prefix="/bullpen-ai/trade-analysis", tags=["bullpen-ai"])
+router = APIRouter(prefix="/bullpen-ai/trade-analysis", tags=["bullpen-ai"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 
 
 def _parse_optional_date(value: str | None) -> datetime | None:

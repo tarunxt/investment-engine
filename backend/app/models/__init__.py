@@ -83,6 +83,7 @@ from app.domains.trading_bots.models import UniversalScanSettingsRecord, Univers
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 __all__ = [
+    "AdministrativeRoleGrant",
     "IdempotencyOperation",
     "SportsRankingSnapshot",
     "UniversalScanSettingsRecord",
@@ -162,3 +163,4 @@ from app.domains.recommendation_audit.models import (  # noqa: F401
 )
 
 from app.infrastructure.messaging.operation_models import IdempotencyOperation  # noqa: F401
+from app.domains.auth.admin_roles import AdministrativeRoleGrant  # noqa: F401

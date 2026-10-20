@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -59,7 +60,9 @@ function autoRunErrorResponse(error: unknown, fallback: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await createBackendSessionContext(request);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  const session = admission.session;
   if (!session.hasAuthJsSession || !session.accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -77,7 +80,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await createBackendSessionContext(request);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  const session = admission.session;
   if (!session.hasAuthJsSession || !session.accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }

@@ -92,14 +92,16 @@ def test_fx_provider_payload_requires_rate_source_timestamp_and_sanity():
 
 @pytest.mark.anyio
 async def test_singleton_bullpen_runtime_is_admin_only():
-    admin = SimpleNamespace(role=UserRole.ADMIN)
-    user = SimpleNamespace(role=UserRole.USER)
+    admin = SimpleNamespace(id=7, role=UserRole.ADMIN, is_active=True)
+    user = SimpleNamespace(id=8, role=UserRole.USER, is_active=True)
 
     assert user_can_access_singleton_bullpen_runtime(admin)
     assert not user_can_access_singleton_bullpen_runtime(user)
-    assert await require_singleton_bullpen_runtime_access(admin) is admin
+    from fastapi import Request
+    request = Request({"type":"http", "method":"GET", "path":"/polymarket/runtime/health", "headers":[], "scheme":"http", "server":("test",80)})
+    assert await require_singleton_bullpen_runtime_access(request, admin) is admin
     with pytest.raises(HTTPException) as error:
-        await require_singleton_bullpen_runtime_access(user)
+        await require_singleton_bullpen_runtime_access(request, user)
     assert error.value.status_code == 403
 
 

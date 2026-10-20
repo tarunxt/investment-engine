@@ -34,7 +34,7 @@ from app.domains.polymarket.schemas import (
 )
 from app.domains.polymarket.service import polymarket_bot_manager
 
-router = APIRouter(prefix="/polymarket", tags=["polymarket"])
+router = APIRouter(prefix="/polymarket", tags=["polymarket"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 
 
 class BullpenRuntimePositionsResponse(BaseModel):

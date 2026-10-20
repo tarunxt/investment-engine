@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypeVar
 
+from app.domains.polymarket.access import require_operator_user_id
 from app.domains.polymarket.bot import PolymarketPaperCopyBot
 from app.domains.polymarket.bullpen import (
     BullpenBalanceReader,
@@ -64,6 +65,7 @@ class PolymarketBotManager:
 
     async def read_state(self, user_id: int) -> PolymarketBotState:
         """Project existing evidence, without initializing or repairing a runtime."""
+        await require_operator_user_id(user_id)
         existing = self._bots.get(user_id)
         if existing and existing.loop is asyncio.get_running_loop():
             if existing.display_future is not None:
@@ -149,6 +151,7 @@ class PolymarketBotManager:
         return await asyncio.to_thread(deepcopy, snapshot)
 
     async def read_history(self, user_id: int, limit: int) -> PolymarketHistoryResponse:
+        await require_operator_user_id(user_id)
         existing = self._bots.get(user_id)
         if existing and existing.loop is asyncio.get_running_loop():
             bot = existing.bot
@@ -174,6 +177,7 @@ class PolymarketBotManager:
         loop = asyncio.get_running_loop()
         if recovery_mode():
             require_financial_writes_allowed()  # No bot init/background jobs in recovery.
+        await require_operator_user_id(user_id)
         async with self._lock_for_current_loop():
             existing = self._bots.get(user_id)
             if existing and existing.loop is loop:

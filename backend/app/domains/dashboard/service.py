@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id
+
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -442,8 +444,9 @@ async def _timed_section(
 async def build_dashboard_summary(
     user_id: int,
     *,
-    include_singleton_bullpen: bool = True,
+    include_singleton_bullpen: bool = False,
 ) -> DashboardSummaryResponse:
+    if include_singleton_bullpen: await require_operator_user_id(user_id)
     loaders = [
         _timed_section("zerodha", _load_zerodha, user_id),
         _timed_section("indmoney_us", _load_indmoney, user_id),
@@ -462,6 +465,11 @@ async def build_dashboard_summary(
             duration_ms=0,
             error="Bullpen runtime is restricted to the singleton system account.",
         )
+    history = values["portfolio_history"]
+    if not include_singleton_bullpen and isinstance(history, DashboardPortfolioHistory):
+        # Older own-user snapshots may include the singleton wallet. Combined
+        # values also encode it; retain private India/INDmoney series only.
+        values["portfolio_history"] = history.model_copy(update={"bullpen": [], "combined": []})
     fx = values["fx"]
     if not isinstance(fx, DashboardFxRate):
         fx = DashboardFxRate(

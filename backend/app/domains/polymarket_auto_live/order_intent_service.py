@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_intent_sync
+
 import hashlib
 import json
 import os
@@ -4052,6 +4054,7 @@ def retry_order_intent_sync(
     intent_id: str,
     remote_absence_verified: bool = False,
 ) -> BullpenAutoLiveRunOrdersResponse:
+    require_operator_intent_sync(intent_id)
     record = _lock_intent_for_user_mutation(
         session,
         user_id=user_id,
@@ -5862,6 +5865,7 @@ def _automatic_attempt_budget_allows(
 
 
 def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = None) -> str | None:
+    require_operator_intent_sync(intent_id)
     with SyncSessionLocal() as session:
         record = _lock_intent_for_execution(session, intent_id)
         if record is None:
@@ -8089,6 +8093,7 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
 
 
 def reconcile_order_intent_sync(intent_id: str) -> str | None:
+    require_operator_intent_sync(intent_id)
     with SyncSessionLocal() as session:
         record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
         if record is None:

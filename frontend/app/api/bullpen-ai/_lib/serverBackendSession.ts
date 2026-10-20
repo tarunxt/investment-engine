@@ -204,9 +204,11 @@ export async function fetchBackendJsonWithSession<T = unknown>(
   {
     body,
     method = "GET",
+    signal,
   }: {
     body?: unknown;
     method?: "GET" | "POST";
+    signal?: AbortSignal;
   } = {},
 ): Promise<T> {
   if (
@@ -221,6 +223,7 @@ export async function fetchBackendJsonWithSession<T = unknown>(
       accessToken: context.accessToken,
       body,
       method,
+      signal,
     });
   } catch (error) {
     if (!(error instanceof BackendRuntimeHttpError) || error.status !== 401) {
@@ -232,6 +235,7 @@ export async function fetchBackendJsonWithSession<T = unknown>(
       accessToken: context.accessToken,
       body,
       method,
+      signal,
     });
   }
 }

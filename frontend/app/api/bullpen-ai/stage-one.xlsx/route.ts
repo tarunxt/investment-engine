@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import exhaustiveHeaders from "@/lib/bullpenStageOneExcelColumns.json";
 import { createReadStream } from "node:fs";
 import { access, open as openFile, rename, rm } from "node:fs/promises";
@@ -274,7 +275,9 @@ function buildWorkbookStream(
 }
 
 export async function GET(request: NextRequest) {
-  const session = await createBackendSessionContext(request);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  const session = admission.session;
   if (!session.hasAuthJsSession || !session.accessToken) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const exportId = request.nextUrl.searchParams.get("exportId")?.trim();
   if (!exportId) return NextResponse.json({ error: "Missing Stage 1 export identifier." }, { status: 400 });

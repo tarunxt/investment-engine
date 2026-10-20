@@ -41,7 +41,7 @@ from app.domains.trading_bots.schemas import (
 
 
 def _current_user():
-    return SimpleNamespace(id=7)
+    return SimpleNamespace(id=7, role="admin", is_active=True)
 
 
 def _build_test_app(*routers) -> FastAPI:

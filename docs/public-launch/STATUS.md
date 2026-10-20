@@ -1,5 +1,17 @@
 # Public-launch implementation status
 
+## Stage05 active — independently checked and owner-accepted04
+
+Base/deployed04:23be68c9366ea41bb252c34974525e3ec9c6c0ff. Owner: "confirmed. you also run and check Stage 4 changes and tell me you did. Then move onto stage 5". Parent reports live server verification09:19:38IST and separate independent pytest11 passed/no failures/skips at03:51:59–03:52:36UTC. Fresh signed-in live walkthrough remains unavailable/disclosed, not passed. Stage04 CI/artifact evidence is inPR1245/handoff; its implementation-time pending entries below are superseded.
+
+Stage05 isolated branch codex/stage05-runtime-admin-20261020, task-5/stage05-runtime-admin, exact base above. Full05 matched authoritative Library HTML p05; see STAGE05_REQUIREMENT_MAP.md. Code:IMPLEMENTED_LOCAL_CHECKS_PASS / CI:PENDING_EXACT_HEAD / deployment:NOT_RUN_HERE / UAT2 verification:PENDING05 / independent acceptance:PENDING existing verifier / owner acceptance:PENDING05 / external approval:UNCHANGED. No06 until new owner review. No production/security/access expansion, credential generation, infrastructure or order changes; US$10 and21Oct2026 21:04:13IST stop unchanged. Parent/existing executor coordinates live readiness/deployment. Migration is restricted to equivalent existing privilege; any unverified/ambiguous legacy mapping must fail closed and be reported for fresh specific security authorization. Prior entries below are historical.
+
+
+Stage05 local evidence:1175 backend release-selection tests passed;46 actual PostgreSQL private HTTP/role checks passed;10 Docker migration checks passed with no skips;323 selected frontend tests and real Next production build passed;66 real localhost API/BFF checks and Chrome ordinary-denial/admin-cost walkthrough passed. See STAGE05_REVIEW.md and evidence/stage05-local-checks.json. Cached historical Bullpen and combined dashboard series are omitted for ordinary users without rewriting stored history. Additional affected worker/domain suite:231 passed,2 optimizer failures reproduced identically on unchanged Stage04; no optimizer change or whole-suite-green claim. Original44 failures were reconciled and targeted checks pass; a separately reproduced baseline logger-capture failure was repaired only in the test. No test waived.
+
+Current synthetic preview http://localhost:59388/console/trading-bots ; cost screen /console/profile/cost-drivers ; API59389; final frontendPID9050/backendPID9049. Offline-only health/cost/catalogue; no AWS/CLI/provider call. Exact-head PR/CI/artifact and live role-equivalence preflight remain required. Packaged read-only module app.uat2.stage05_role_preflight reports current matching IDs/roles and proposed cost-only grants without writes/secrets; any proposal/ambiguity/invalid mapping blocks live migration until specific security approval. This task has not queried live roles or granted any role. Existing executor owns current READY/US$10/21Oct21:04:13IST recheck and isolated UAT2 deployment; no production action. Stage06 must wait for new owner acceptance.
+
+
 ## Stage04 active — owner-accepted Stage03 baseline
 
 Owner accepted Stage03 and authorized04: "all good. move to next stage" (20 October2026). Deployed03:a1643521a08ce221512579297ce3724c6d21b24f. Parent reports live server/anonymous access checks and targeted local/CI browser-boundary tests; no fresh authenticated UAT2 walkthrough. Acceptance/progression is recorded separately from those evidence limits.

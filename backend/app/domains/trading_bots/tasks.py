@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id_sync
+
 import asyncio
 import time
 from datetime import timedelta
@@ -77,6 +79,7 @@ def ensure_completed_universal_scan_workflow_trigger(
     """
 
     # Bind repair to the DB-selected export; directory ordering is not lineage.
+    require_operator_user_id_sync(user_id)
     if universal_export_id is None:
         with SyncSessionLocal() as session:
             universal_export_id = read_state(session.get(UniversalScanStateRecord, user_id)).get("workflow_trigger_export_id")
@@ -197,6 +200,7 @@ def prepare_universal_scan(
     *,
     triggered_by: str,
 ) -> tuple[dict[str, object], bool]:
+    require_operator_user_id_sync(user_id)
     run_id = f"universal-scan-{uuid4().hex}"
     with SyncSessionLocal() as session:
         record = session.scalar(
@@ -213,6 +217,7 @@ def prepare_universal_scan(
 
 
 def dispatch_universal_scan(user_id: int, run_id: str) -> None:
+    require_operator_user_id_sync(user_id)
     try:
         execute_universal_polymarket_scan.apply_async(args=[user_id, run_id])
     except Exception as exc:
@@ -237,6 +242,7 @@ def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object
     time_limit=3_000,
 )
 def execute_universal_polymarket_scan(_task, user_id: int, run_id: str) -> dict[str, object]:
+    require_operator_user_id_sync(user_id)
     started_at = utc_now()
     with SyncSessionLocal() as session:
         if not mark_started(session, user_id, run_id):

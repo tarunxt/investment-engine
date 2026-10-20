@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest } from "next/server";
 
 import { redactBullpenSensitiveText } from "../_lib/bullpenHealthCore.ts";
@@ -434,7 +435,9 @@ async function trackedFallbackResponse(
 }
 
 export async function GET(request: NextRequest) {
-  const backendSession = await createBackendSessionContext(request);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  const backendSession = admission.session;
   const forceFresh = isTruthyQueryValue(
     request.nextUrl.searchParams.get("force_fresh"),
   );

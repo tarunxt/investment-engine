@@ -14,6 +14,9 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+
+pytestmark = pytest.mark.usefixtures("synthetic_operator_unit_context")
+
 from fastapi import FastAPI
 
 from app.domains.auth.dependencies import get_current_user
@@ -430,7 +433,7 @@ async def test_incomplete_evidence_is_503_not_fake_zero(tmp_path, monkeypatch, d
         monkeypatch.setattr(passive_projection, "MAX_PASSIVE_TOTAL_BYTES", 1024)
     app = FastAPI()
     app.include_router(router_module.router)
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=7)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=7, role=UserRole.ADMIN, is_active=True)
     monkeypatch.setattr(router_module, "polymarket_bot_manager", PolymarketBotManager())
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://synthetic") as client:
         with _deny_side_effects(monkeypatch):
@@ -448,8 +451,8 @@ async def test_read_routes_never_call_operational_manager(tmp_path, monkeypatch)
     monkeypatch.setattr(manager, "get_bot", lambda *_: pytest.fail("Operational get_bot called"))
     monkeypatch.setattr(router_module, "polymarket_bot_manager", manager)
     with _deny_side_effects(monkeypatch):
-        state = await router_module.get_polymarket_state(SimpleNamespace(id=7))
-        history = await router_module.get_polymarket_history(limit=100, current_user=SimpleNamespace(id=7))
+        state = await router_module.get_polymarket_state(SimpleNamespace(id=7, role=UserRole.ADMIN, is_active=True))
+        history = await router_module.get_polymarket_history(limit=100, current_user=SimpleNamespace(id=7, role=UserRole.ADMIN, is_active=True))
     assert state.read_source == history.read_source == "unavailable"
 
 
@@ -490,7 +493,7 @@ async def test_passive_display_uses_matching_cache_and_preserves_stale_evidence(
     with _deny_side_effects(monkeypatch):
         response = await router_module.get_bullpen_runtime_display_positions(
             force_fresh=False, passive=True, caller_source="synthetic", max_age_seconds=20,
-            expected_account_identity=wallet, current_user=SimpleNamespace(id=7),
+            expected_account_identity=wallet, current_user=SimpleNamespace(id=7, role=UserRole.ADMIN, is_active=True),
         )
     assert response.ok is expected_ok
     visible = response.snapshot if expected_ok else response.stale_snapshot

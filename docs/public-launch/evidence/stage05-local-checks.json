@@ -1,0 +1,105 @@
+{
+  "base_commit": "23be68c9366ea41bb252c34974525e3ec9c6c0ff",
+  "checked_at_utc": "2026-10-20T04:40:12.586928+00:00",
+  "candidate_branch": "codex/stage05-runtime-admin-20261020",
+  "code": "implemented_locally_verified",
+  "exact_head_CI": "pending",
+  "UAT2_deployment": "not_run_here",
+  "independent_acceptance": "pending_existing_review_task",
+  "owner_acceptance": "pending05",
+  "checks": {
+    "backend_release_selection": {
+      "passed": 1175,
+      "receipt": ".runtime/stage05-ci-backend-final.txt"
+    },
+    "real_PostgreSQL_HTTP_role_ownership": {
+      "passed": 46,
+      "skipped": 0,
+      "receipt": ".runtime/stage05-real-postgres-api-final.txt"
+    },
+    "Docker_admin_role_migrations": {
+      "passed": 10,
+      "skipped": 0,
+      "receipt": ".runtime/stage05-docker-migration-final.txt"
+    },
+    "frontend_release_selection": {
+      "passed": 323,
+      "receipt": ".runtime/stage05-frontend-ci-final.txt"
+    },
+    "Next_production_Webpack_and_TypeScript": "passed",
+    "stage01_baseline": {
+      "passed": 5,
+      "receipt": ".runtime/stage05-baseline-final.txt"
+    },
+    "running_localhost_API_BFF": {
+      "passed": 66,
+      "receipt": ".runtime/stage01-preview/stage05-boundaries.json"
+    },
+    "Chrome": "ordinary auto-run status403 and synthetic admin cost screen passed"
+  },
+  "additional_regressions": {
+    "passed": 231,
+    "failed": 2,
+    "failures": [
+      "test_optimizer_authoritatively_trims_adverse_scenario_to_cluster_cap",
+      "test_optimizer_outputs_every_row_and_weights_the_target_portfolio"
+    ],
+    "both_reproduced_on_exact_base": true,
+    "receipt": ".runtime/stage05-additional-workers-final.txt",
+    "base_receipt": ".runtime/stage05-base-optimizer-reproduction.txt",
+    "not_waived": true
+  },
+  "coverage": {
+    "backend_runtime_routes": 126,
+    "frontend_handlers": 13,
+    "real_SQL_new_cases": 17,
+    "identities": [
+      "anonymous",
+      "ordinary",
+      "viewer",
+      "inactive",
+      "cost-only",
+      "active ADMIN",
+      "revoked ADMIN"
+    ]
+  },
+  "preview": {
+    "url": "http://localhost:59388/login?redirectTo=/console/profile/preferences",
+    "backend_url": "http://127.0.0.1:59389",
+    "pids": [
+      9049,
+      9050
+    ],
+    "frontend_port": 59388,
+    "backend_port": 59389,
+    "synthetic": true,
+    "logs": "/Users/tarunsingh/Documents/Codex/2026-10-19/task-5/stage05-runtime-admin/.runtime/stage01-preview",
+    "process_stamps": {
+      "9049": "Tue Oct 20 10:05:42 2026     /Library/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python -m uvicorn scripts.public_launch.preview_backend:app --host 127.0.0.1 --port 59389",
+      "9050": "Tue Oct 20 10:05:42 2026     next-server (v16.2.5)"
+    },
+    "browser_denial": ".runtime/stage01-preview/stage05-browser-denial.png",
+    "browser_admin": ".runtime/stage01-preview/stage05-browser-admin.png",
+    "adapters": "offline runtime health; empty sports/catalogue/billing; actual auth and SQL; no external integration"
+  },
+  "live_migration_gate": {
+    "preflight": "app.uat2.stage05_role_preflight",
+    "read_only": true,
+    "role_grants_performed": false,
+    "live_mapping": "not_queried_here",
+    "specific_approval_required_for_any_proposed_grant": true
+  },
+  "production": "unchanged; no main merge/deploy",
+  "limits": {
+    "total_usd": 10,
+    "stop": "2026-10-21T21:04:13+05:30",
+    "extended": false
+  },
+  "limitations": [
+    "No fresh authenticated live UAT2 browser walkthrough",
+    "Local preview SQLite is not distributed parity",
+    "Operator business unit tests explicitly admit detached synthetic fixtures; actual role gates separately exercised against SQLite and PostgreSQL",
+    "UAT2 restricted composition does not expose production runtime/sports/cost routers",
+    "Implementation self-checks are not independent acceptance"
+  ]
+}

@@ -1,3 +1,4 @@
+import { requireBullpenOperator } from "@/app/api/bullpen-ai/_lib/operatorAdmission";
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -1732,8 +1733,8 @@ function activePositionCandidate(position: BullpenActivePositionView): Filterabl
 async function handleScan(
   request: NextRequest,
   activePositions: BullpenActivePositionView[],
+  backendSession: Awaited<ReturnType<typeof createBackendSessionContext>>,
 ) {
-  const backendSession = await createBackendSessionContext(request);
   if (!backendSession.hasAuthJsSession || !backendSession.accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -1978,15 +1979,20 @@ async function handleScan(
 }
 
 export async function GET(request: NextRequest) {
-  return handleScan(request, []);
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
+  return handleScan(request, [], admission.session);
 }
 
 export async function POST(request: NextRequest) {
+  const admission = await requireBullpenOperator(request);
+  if (admission.response) return admission.response;
   const payload = (await request.json().catch(() => ({}))) as {
     activePositions?: BullpenActivePositionView[];
   };
   return handleScan(
     request,
     Array.isArray(payload.activePositions) ? payload.activePositions.slice(0, 250) : [],
+    admission.session,
   );
 }

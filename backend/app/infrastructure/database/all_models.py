@@ -84,3 +84,4 @@ from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
 from app.infrastructure.messaging.operation_models import IdempotencyOperation  # noqa: F401
+from app.domains.auth.admin_roles import AdministrativeRoleGrant  # noqa: F401

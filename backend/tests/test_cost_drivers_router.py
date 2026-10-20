@@ -7,6 +7,9 @@ import pytest
 from fastapi import FastAPI
 
 from app.domains.auth.models import UserRole
+from app.domains.auth.dependencies import get_current_user
+from app.infrastructure.database.session import get_async_db
+from unittest.mock import AsyncMock, Mock
 from app.domains.cost_drivers import router as routes
 from app.domains.cost_drivers import service
 from app.domains.cost_drivers.cache import RefreshCooldownError
@@ -18,9 +21,13 @@ def _app(role=UserRole.ADMIN):
     app.include_router(routes.router)
 
     async def current_user():
-        return SimpleNamespace(role=role, email="fixture@example.test")
+        return SimpleNamespace(id=7, is_active=True, role=role, email="fixture@example.test")
 
-    app.dependency_overrides[routes.get_current_user] = current_user
+    app.dependency_overrides[get_current_user] = current_user
+    async def fake_db():
+        result = Mock(); result.scalar_one_or_none.return_value = None
+        yield SimpleNamespace(execute=AsyncMock(return_value=result))
+    app.dependency_overrides[get_async_db] = fake_db
 
     @app.get("/probe")
     async def probe():

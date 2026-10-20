@@ -369,7 +369,8 @@ test("Sports History shows linked ranking comparisons immediately after Score", 
   assert.match(backendProxy, /SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000/);
   assert.match(backendProxy, /method === "POST" && path === "api\/sports-rankings\/event-comparisons"/);
   assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
-  assert.match(sportsEventComparisonsRoute, /createBackendSessionContext\(request\)/);
+  assert.match(sportsEventComparisonsRoute, /requireBullpenOperator\(request\)/);
+  assert.match(sportsEventComparisonsRoute, /const session = admission.session/);
   assert.match(sportsEventComparisonsRoute, /"\/api\/sports-rankings\/event-comparisons"/);
   assert.match(sportsEventComparisonsRoute, /method: "POST", body/);
 });

@@ -48,6 +48,8 @@ from app.domains.polymarket.position_classification import (
 def _current_user():
     return SimpleNamespace(
         id=7,
+        role="admin",
+        is_active=True,
         full_name="Tarun Singh",
         username="tarun",
         email="tarun@example.com",

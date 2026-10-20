@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id_sync, require_operator_user_id, require_operator_bullpen008_run_sync
+
 import asyncio
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -762,6 +764,7 @@ async def _execute_live_plan(
     activated_contingent_action_ids: set[str] | None = None,
 ) -> dict[str, object]:
     """Execute certified actions in dependency order with durable evidence."""
+    await require_operator_user_id(user_id)
     if not (
         settings.execution_enabled
         and settings.live_control_armed
@@ -1457,6 +1460,7 @@ def _persist_loss_prevention_artifacts(
     time_limit=3600,
 )
 def execute_bullpen008_run(self, run_id: str) -> str:
+    require_operator_bullpen008_run_sync(run_id)
     redis_client = _redis()
     lock_token = str(uuid4())
     lock_key = _run_lock_key(run_id)
@@ -1485,6 +1489,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                 return run.status
             settings = Bullpen008Settings.model_validate(run.settings_snapshot)
             user_id = run.user_id
+            require_operator_user_id_sync(user_id)
             run.status = "running"
             run.summary = "Bullpen 008 shadow run is executing the six-stage pipeline."
             run.task_metadata = {
@@ -2470,6 +2475,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
 
 
 def _create_scheduled_run(user_id: int) -> str | None:
+    require_operator_user_id_sync(user_id)
     now = datetime.now(UTC)
     with SyncSessionLocal() as session:
         settings_record = session.execute(
@@ -2933,6 +2939,10 @@ def enqueue_due_bullpen008_runs() -> int:
     redis_client = _redis()
     try:
         for user_id in user_ids:
+            try:
+                require_operator_user_id_sync(user_id)
+            except PermissionError:
+                continue
             if not redis_client.set(
                 _pending_key(user_id),
                 "scheduler",
@@ -2967,6 +2977,10 @@ def refresh_bullpen008_position_alerts() -> int:
         ).scalars().all()
     created = 0
     for user_id in user_ids:
+        try:
+            require_operator_user_id_sync(user_id)
+        except PermissionError:
+            continue
         with SyncSessionLocal() as session:
             settings_record = session.execute(
                 select(Bullpen008SettingsRecord).where(
@@ -3253,12 +3267,15 @@ def recover_bullpen008_executions() -> int:
             )
         ).scalars().all()
         intent_ids = [record.id for record in records]
-    adapter = ProductionBullpen008Adapter()
     reconciled_count = 0
     for intent_id in intent_ids:
         with SyncSessionLocal() as session:
             record = session.get(Bullpen008ExecutionIntentRecord, intent_id)
             if record is None or not record.remote_order_id:
+                continue
+            try:
+                require_operator_bullpen008_run_sync(record.run_id)
+            except PermissionError:
                 continue
             request = record.payload.get("sanitized_request")
             action = request.get("action") if isinstance(request, dict) else None
@@ -3269,7 +3286,7 @@ def recover_bullpen008_executions() -> int:
                 continue
             remote_id = record.remote_order_id
         try:
-            evidence = asyncio.run(adapter.reconcile(remote_id=remote_id, action=action))
+            evidence = asyncio.run(ProductionBullpen008Adapter().reconcile(remote_id=remote_id, action=action))
         except Exception as exc:
             logger.warning("Bullpen 008 recovery could not reconcile intent %s: %s", intent_id, exc)
             continue

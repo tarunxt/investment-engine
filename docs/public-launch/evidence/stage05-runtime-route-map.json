@@ -1,0 +1,1013 @@
+{
+  "base": "23be68c9366ea41bb252c34974525e3ec9c6c0ff",
+  "routes": [
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/state",
+      "handler": "get_polymarket_state",
+      "source": "backend/app/domains/polymarket/router.py:138",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/history",
+      "handler": "get_polymarket_history",
+      "source": "backend/app/domains/polymarket/router.py:146",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/runtime/positions",
+      "handler": "get_bullpen_runtime_positions",
+      "source": "backend/app/domains/polymarket/router.py:159",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/runtime/positions/display",
+      "handler": "get_bullpen_runtime_display_positions",
+      "source": "backend/app/domains/polymarket/router.py:233",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/runtime/health",
+      "handler": "get_bullpen_runtime_health",
+      "source": "backend/app/domains/polymarket/router.py:337",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/runtime/diagnostics",
+      "handler": "get_bullpen_runtime_diagnostics",
+      "source": "backend/app/domains/polymarket/router.py:361",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "GET",
+      "path_suffix": "/runtime/discover",
+      "handler": "get_bullpen_runtime_discover",
+      "source": "backend/app/domains/polymarket/router.py:390",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/runtime/search",
+      "handler": "search_bullpen_runtime_markets",
+      "source": "backend/app/domains/polymarket/router.py:425",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/start",
+      "handler": "start_polymarket_bot",
+      "source": "backend/app/domains/polymarket/router.py:438",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/stop",
+      "handler": "stop_polymarket_bot",
+      "source": "backend/app/domains/polymarket/router.py:448",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/pause",
+      "handler": "pause_polymarket_bot",
+      "source": "backend/app/domains/polymarket/router.py:455",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/resume",
+      "handler": "resume_polymarket_bot",
+      "source": "backend/app/domains/polymarket/router.py:462",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/unlock",
+      "handler": "unlock_polymarket_live",
+      "source": "backend/app/domains/polymarket/router.py:469",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/lock",
+      "handler": "lock_polymarket_live",
+      "source": "backend/app/domains/polymarket/router.py:479",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/doctor",
+      "handler": "refresh_polymarket_doctor",
+      "source": "backend/app/domains/polymarket/router.py:486",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/balance/refresh",
+      "handler": "refresh_polymarket_balance",
+      "source": "backend/app/domains/polymarket/router.py:493",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/redeem",
+      "handler": "redeem_polymarket_live_positions",
+      "source": "backend/app/domains/polymarket/router.py:503",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/emergency-stop",
+      "handler": "emergency_stop_polymarket_live",
+      "source": "backend/app/domains/polymarket/router.py:516",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/reset-emergency-stop",
+      "handler": "reset_polymarket_live_emergency_stop",
+      "source": "backend/app/domains/polymarket/router.py:525",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "PATCH",
+      "path_suffix": "/live/limits",
+      "handler": "update_polymarket_live_limits",
+      "source": "backend/app/domains/polymarket/router.py:534",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/trades/{trade_id}/confirm",
+      "handler": "confirm_polymarket_trade",
+      "source": "backend/app/domains/polymarket/router.py:547",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/trades/{trade_id}/reject",
+      "handler": "reject_polymarket_trade",
+      "source": "backend/app/domains/polymarket/router.py:559",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/trades/reject-all",
+      "handler": "reject_all_polymarket_trades",
+      "source": "backend/app/domains/polymarket/router.py:571",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/manual-invest",
+      "handler": "manual_invest_polymarket_orders",
+      "source": "backend/app/domains/polymarket/router.py:578",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/tracked-accounts",
+      "handler": "add_polymarket_tracked_account",
+      "source": "backend/app/domains/polymarket/router.py:594",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "PATCH",
+      "path_suffix": "/tracked-accounts/{account_id}",
+      "handler": "update_polymarket_tracked_account",
+      "source": "backend/app/domains/polymarket/router.py:607",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/tracked-accounts/{account_id}/net-worth/refresh",
+      "handler": "refresh_polymarket_tracked_account_net_worth",
+      "source": "backend/app/domains/polymarket/router.py:624",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "DELETE",
+      "path_suffix": "/tracked-accounts/{account_id}",
+      "handler": "delete_polymarket_tracked_account",
+      "source": "backend/app/domains/polymarket/router.py:636",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket",
+      "method": "POST",
+      "path_suffix": "/live/discovery/debug",
+      "handler": "debug_polymarket_discovery",
+      "source": "backend/app/domains/polymarket/router.py:648",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "GET",
+      "path_suffix": "/state",
+      "handler": "get_polymarket_state",
+      "source": "backend/app/domains/polymarket_direct/router.py:33",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/start",
+      "handler": "start_polymarket_bot",
+      "source": "backend/app/domains/polymarket_direct/router.py:39",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/stop",
+      "handler": "stop_polymarket_bot",
+      "source": "backend/app/domains/polymarket_direct/router.py:49",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/pause",
+      "handler": "pause_polymarket_bot",
+      "source": "backend/app/domains/polymarket_direct/router.py:56",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/resume",
+      "handler": "resume_polymarket_bot",
+      "source": "backend/app/domains/polymarket_direct/router.py:63",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/unlock",
+      "handler": "unlock_polymarket_live",
+      "source": "backend/app/domains/polymarket_direct/router.py:70",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/lock",
+      "handler": "lock_polymarket_live",
+      "source": "backend/app/domains/polymarket_direct/router.py:80",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/doctor",
+      "handler": "refresh_polymarket_doctor",
+      "source": "backend/app/domains/polymarket_direct/router.py:87",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/balance/refresh",
+      "handler": "refresh_polymarket_balance",
+      "source": "backend/app/domains/polymarket_direct/router.py:94",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/redeem",
+      "handler": "redeem_polymarket_live_positions",
+      "source": "backend/app/domains/polymarket_direct/router.py:101",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/emergency-stop",
+      "handler": "emergency_stop_polymarket_live",
+      "source": "backend/app/domains/polymarket_direct/router.py:113",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/reset-emergency-stop",
+      "handler": "reset_polymarket_live_emergency_stop",
+      "source": "backend/app/domains/polymarket_direct/router.py:122",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "PATCH",
+      "path_suffix": "/live/limits",
+      "handler": "update_polymarket_live_limits",
+      "source": "backend/app/domains/polymarket_direct/router.py:131",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/trades/{trade_id}/confirm",
+      "handler": "confirm_polymarket_trade",
+      "source": "backend/app/domains/polymarket_direct/router.py:144",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/trades/{trade_id}/reject",
+      "handler": "reject_polymarket_trade",
+      "source": "backend/app/domains/polymarket_direct/router.py:156",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/trades/reject-all",
+      "handler": "reject_all_polymarket_trades",
+      "source": "backend/app/domains/polymarket_direct/router.py:168",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/tracked-accounts",
+      "handler": "add_polymarket_tracked_account",
+      "source": "backend/app/domains/polymarket_direct/router.py:175",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "PATCH",
+      "path_suffix": "/tracked-accounts/{account_id}",
+      "handler": "update_polymarket_tracked_account",
+      "source": "backend/app/domains/polymarket_direct/router.py:188",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "DELETE",
+      "path_suffix": "/tracked-accounts/{account_id}",
+      "handler": "delete_polymarket_tracked_account",
+      "source": "backend/app/domains/polymarket_direct/router.py:202",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_direct",
+      "method": "POST",
+      "path_suffix": "/live/discovery/debug",
+      "handler": "debug_polymarket_discovery",
+      "source": "backend/app/domains/polymarket_direct/router.py:214",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/settings",
+      "handler": "get_auto_live_settings",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:491",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/stage1-scan-preview",
+      "handler": "get_stage1_scan_preview",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:509",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "PUT",
+      "path_suffix": "/settings",
+      "handler": "update_auto_live_settings",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:587",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/settings/reset",
+      "handler": "reset_auto_live_settings",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:632",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/state",
+      "handler": "get_auto_live_state",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:645",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/hourly-rebalance/result",
+      "handler": "record_hourly_rebalance_result",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:664",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/status",
+      "handler": "get_auto_live_persisted_status",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:678",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/summary",
+      "handler": "get_auto_live_summary",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:785",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/summary/dashboard",
+      "handler": "get_auto_live_dashboard_summary",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:794",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/history",
+      "handler": "list_auto_live_history",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:918",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "PUT",
+      "path_suffix": "/history/event-trends/scan-count",
+      "handler": "update_event_trends_scan_count",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:958",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/history/event-trends",
+      "handler": "list_auto_live_history_event_trends",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:985",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs",
+      "handler": "list_auto_live_runs",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1026",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}",
+      "handler": "get_auto_live_run",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1039",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/runs/{run_id}/stage-one-export",
+      "handler": "prepare_auto_live_stage_one_excel",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1053",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/stage-one-export",
+      "handler": "auto_live_stage_one_excel_status",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1070",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/stage-one.xlsx",
+      "handler": "download_auto_live_stage_one_excel",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1082",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/stage-one",
+      "handler": "get_auto_live_stage_one_run_detail",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1127",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/console",
+      "handler": "get_auto_live_console_run_detail",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1163",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/decisions",
+      "handler": "list_auto_live_run_decisions",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1197",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/orders",
+      "handler": "get_auto_live_run_orders",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1211",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/runs/{run_id}/reconcile",
+      "handler": "reconcile_auto_live_run_order_states",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1223",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/runs/{run_id}/retry-exits-and-continue-buys",
+      "handler": "retry_failed_exits_and_continue_buys",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1238",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "GET",
+      "path_suffix": "/decisions",
+      "handler": "list_auto_live_decisions",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1250",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/orders/{intent_id}/retry",
+      "handler": "retry_auto_live_order",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1256",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/orders/{intent_id}/cancel",
+      "handler": "cancel_auto_live_order",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1272",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/run-once",
+      "handler": "run_auto_live_once",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1284",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/workflow-run-now",
+      "handler": "queue_workflow_run_now",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1300",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/start",
+      "handler": "start_auto_live",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1373",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/stop",
+      "handler": "stop_auto_live",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1379",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/pause",
+      "handler": "pause_auto_live",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1385",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/resume",
+      "handler": "resume_auto_live",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1391",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/emergency-stop",
+      "handler": "emergency_stop_auto_live",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1397",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "polymarket_auto_live",
+      "method": "POST",
+      "path_suffix": "/clear-emergency-stop",
+      "handler": "clear_auto_live_emergency_stop",
+      "source": "backend/app/domains/polymarket_auto_live/router.py:1403",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "GET",
+      "path_suffix": "/bootstrap",
+      "handler": "bullpen008_bootstrap",
+      "source": "backend/app/domains/bullpen008/router.py:93",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "GET",
+      "path_suffix": "/settings",
+      "handler": "bullpen008_settings",
+      "source": "backend/app/domains/bullpen008/router.py:102",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "PUT",
+      "path_suffix": "/settings",
+      "handler": "save_bullpen008_settings",
+      "source": "backend/app/domains/bullpen008/router.py:110",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/scheduler/start",
+      "handler": "start_bullpen008_scheduler",
+      "source": "backend/app/domains/bullpen008/router.py:126",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/scheduler/stop",
+      "handler": "stop_bullpen008_scheduler",
+      "source": "backend/app/domains/bullpen008/router.py:134",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/scheduler/pause",
+      "handler": "pause_bullpen008_scheduler",
+      "source": "backend/app/domains/bullpen008/router.py:142",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/scheduler/resume",
+      "handler": "resume_bullpen008_scheduler",
+      "source": "backend/app/domains/bullpen008/router.py:150",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/emergency-stop",
+      "handler": "activate_bullpen008_emergency_stop",
+      "source": "backend/app/domains/bullpen008/router.py:158",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/emergency-stop/clear",
+      "handler": "clear_bullpen008_emergency_stop",
+      "source": "backend/app/domains/bullpen008/router.py:166",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/kill",
+      "handler": "kill_bullpen008_run",
+      "source": "backend/app/domains/bullpen008/router.py:174",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/execution-control",
+      "handler": "update_bullpen008_execution_control",
+      "source": "backend/app/domains/bullpen008/router.py:220",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/run-once",
+      "handler": "run_bullpen008_once",
+      "source": "backend/app/domains/bullpen008/router.py:240",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "GET",
+      "path_suffix": "/runs",
+      "handler": "bullpen008_runs",
+      "source": "backend/app/domains/bullpen008/router.py:316",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "GET",
+      "path_suffix": "/history/event-trends",
+      "handler": "bullpen008_event_trends",
+      "source": "backend/app/domains/bullpen008/router.py:334",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}",
+      "handler": "bullpen008_run_detail",
+      "source": "backend/app/domains/bullpen008/router.py:347",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/runs/{run_id}/retry",
+      "handler": "retry_bullpen008_run",
+      "source": "backend/app/domains/bullpen008/router.py:359",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "GET",
+      "path_suffix": "/runs/{run_id}/stages/{stage_number}",
+      "handler": "bullpen008_stage_detail",
+      "source": "backend/app/domains/bullpen008/router.py:433",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen008",
+      "method": "POST",
+      "path_suffix": "/orders",
+      "handler": "bullpen008_orders_disabled",
+      "source": "backend/app/domains/bullpen008/router.py:453",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_trade_analysis",
+      "method": "GET",
+      "path_suffix": "",
+      "handler": "list_bullpen_trade_analysis",
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:40",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_trade_analysis",
+      "method": "GET",
+      "path_suffix": "/{trade_id}",
+      "handler": "get_bullpen_trade_analysis_detail",
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:77",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_trade_analysis",
+      "method": "POST",
+      "path_suffix": "/{trade_id}/post-trade-analysis",
+      "handler": "recompute_bullpen_trade_analysis",
+      "source": "backend/app/domains/bullpen_trade_analysis/router.py:92",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "",
+      "handler": "list_run_audits",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:155",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "POST",
+      "path_suffix": "/{run_id}/materialize",
+      "handler": "materialize_run_audit",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:195",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "/{run_id}",
+      "handler": "get_run_audit_detail",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:229",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "/{run_id}/sections/{section}",
+      "handler": "get_run_audit_section",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:253",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "/{run_id}/findings",
+      "handler": "get_run_audit_findings",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:276",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "POST",
+      "path_suffix": "/{run_id}/remarks",
+      "handler": "add_run_audit_remark",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:285",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "POST",
+      "path_suffix": "/{run_id}/manual-checks",
+      "handler": "add_run_audit_manual_check",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:306",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "POST",
+      "path_suffix": "/{run_id}/feedback",
+      "handler": "enqueue_run_audit_feedback",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:326",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "/{run_id}/feedback",
+      "handler": "list_run_audit_feedback",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:353",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "/{run_id}/feedback/{feedback_id}",
+      "handler": "get_run_audit_feedback_detail",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:371",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "bullpen_run_audit",
+      "method": "GET",
+      "path_suffix": "/{run_id}/export",
+      "handler": "export_run_audit_bundle",
+      "source": "backend/app/domains/bullpen_run_audit/router.py:395",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "GET",
+      "path_suffix": "/summary",
+      "handler": "trading_bots_summary",
+      "source": "backend/app/domains/trading_bots/router.py:36",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "GET",
+      "path_suffix": "/overview",
+      "handler": "trading_bots_overview",
+      "source": "backend/app/domains/trading_bots/router.py:41",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "GET",
+      "path_suffix": "/universal-scan/export-reference",
+      "handler": "universal_scan_export_reference",
+      "source": "backend/app/domains/trading_bots/router.py:92",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "GET",
+      "path_suffix": "/universal-scan/auto-run",
+      "handler": "universal_scan_auto_run_status",
+      "source": "backend/app/domains/trading_bots/router.py:117",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/settings",
+      "handler": "update_universal_scan_auto_run",
+      "source": "backend/app/domains/trading_bots/router.py:122",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/enable",
+      "handler": "enable_universal_scan_auto_run",
+      "source": "backend/app/domains/trading_bots/router.py:135",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/disable",
+      "handler": "disable_universal_scan_auto_run",
+      "source": "backend/app/domains/trading_bots/router.py:149",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/run-now",
+      "handler": "run_universal_scan_now",
+      "source": "backend/app/domains/trading_bots/router.py:154",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/pause",
+      "handler": "pause_universal_scan",
+      "source": "backend/app/domains/trading_bots/router.py:181",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/resume",
+      "handler": "resume_universal_scan",
+      "source": "backend/app/domains/trading_bots/router.py:186",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    },
+    {
+      "family": "trading_bots",
+      "method": "POST",
+      "path_suffix": "/universal-scan/auto-run/kill",
+      "handler": "kill_universal_scan",
+      "source": "backend/app/domains/trading_bots/router.py:191",
+      "policy": "active ADMIN only; singleton-bound research unavailable to ordinary users"
+    }
+  ]
+}

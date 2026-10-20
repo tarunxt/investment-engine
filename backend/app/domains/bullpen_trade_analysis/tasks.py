@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket.access import require_operator_user_id_sync
+
 import asyncio
 import json
 from uuid import uuid4
@@ -69,6 +71,7 @@ def request_bullpen_trade_analysis_history_sync(user_id: int) -> bool:
     deliberately does not run the Bullpen CLI inside the API process.
     """
 
+    require_operator_user_id_sync(user_id)
     normalized_user_id = int(user_id)
     pending_key = _sync_key("pending", normalized_user_id)
     token = str(uuid4())
@@ -149,6 +152,7 @@ def refresh_bullpen_trade_analysis_history(
     idempotent, while this task intentionally has no Celery retries.
     """
 
+    require_operator_user_id_sync(user_id)
     del self
     normalized_user_id = int(user_id)
     token = str(request_token).strip()

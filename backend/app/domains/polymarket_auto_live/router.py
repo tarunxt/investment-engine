@@ -8,6 +8,7 @@ import json
 import time
 from datetime import UTC, datetime
 
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
@@ -68,7 +69,7 @@ from app.domains.polymarket_auto_live.workspace_profiles import (
 from app.domains.polymarket_auto_live.export_source import build_owned_stage_one_excel
 from app.infrastructure.database.session import AsyncSessionLocal
 
-router = APIRouter(prefix="/polymarket/auto-live", tags=["polymarket"])
+router = APIRouter(prefix="/polymarket/auto-live", tags=["polymarket"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 from app.domains.polymarket_auto_live.clustering_progress import router as clustering_progress_router
 router.include_router(clustering_progress_router)
 logger = get_logger(__name__)

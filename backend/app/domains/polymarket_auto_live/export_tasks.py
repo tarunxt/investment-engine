@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.domains.polymarket.access import require_operator_user_id_sync
 import logging
 import os
 import time
@@ -12,6 +13,7 @@ from app.domains.polymarket_auto_live.export_jobs import ROOT, client, job_key, 
 
 @celery.task(name='app.domains.polymarket_auto_live.export_tasks.prepare_stage_one_excel', bind=True, max_retries=70, soft_time_limit=1800, time_limit=1860, acks_late=True, reject_on_worker_lost=True)
 def prepare_stage_one_excel(self, user_id: int, run_id: str, scope: str):
+    require_operator_user_id_sync(user_id)
     key = job_key(user_id, run_id, scope)
     with client() as cache:
         lock = cache.lock(key + ':lock', timeout=1900, blocking_timeout=0)

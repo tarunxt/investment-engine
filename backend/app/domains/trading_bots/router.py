@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from fastapi import APIRouter, BackgroundTasks, Depends
 
 from app.domains.auth.dependencies import get_current_user
@@ -28,7 +29,7 @@ from app.domains.trading_bots.universal_scan import (
 )
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
-router = APIRouter(prefix="/trading-bots", tags=["trading-bots"])
+router = APIRouter(prefix="/trading-bots", tags=["trading-bots"], dependencies=[Depends(require_singleton_bullpen_runtime_access)])
 
 
 @router.get("/summary", response_model=TradingBotsSummaryResponse)
