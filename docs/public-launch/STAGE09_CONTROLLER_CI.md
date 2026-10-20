@@ -1,7 +1,7 @@
 # Frozen Stage09 controller integration CI
 
 Runtime/controller/helper/application remain byte-identical to
-`1162e81165112a5fccc2bf8d2860b9e8082c2c22` for this local repair candidate. Only test harness/fixture, CI and this
+`3395476c09e4f0257b99b788f594d4c542769711` for this local repair candidate. Only test harness/fixture, CI and this
 record change. Prior receipts remain intact. Exact runtime SHA and verification
 SHA are separately recorded; the harness refuses any unlisted changed path.
 
@@ -63,3 +63,12 @@ pinned to original runtime1f33c88d and is not acceptance evidence for this repai
 After approval, the unchanged19-case grouped harness is pinned to1162e811 for
 new exact-source CI. Existing local33 native tests pass; real repaired-runtime
 PostgreSQL/systemd acceptance is still pending publication and execution.
+
+Independent review of8a32053f identified a low-probability UUID collision cleanup
+issue: finally unlinked a pre-existing pointer when this attempt failed to create
+it. The local3395476c correction tracks successful creation and preserves both
+regular-file and symlink collisions. Both new regressions fail against8a32053f;
+35 native and8 rehearsal-tool tests pass locally with the correction. This
+additional runtime change remains unpublished pending approval. The ongoing8a
+CI result must be reported separately and cannot establish collision-corrected
+runtime acceptance. The local integration pin is3395476c for a later approved run.
