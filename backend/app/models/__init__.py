@@ -1,6 +1,7 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
 from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
+from app.domains.modules.models import UserModule, UserModulePreferences
 from app.domains.api_usage.models import (
     ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
@@ -83,6 +84,8 @@ from app.domains.trading_bots.models import UniversalScanSettingsRecord, Univers
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 __all__ = [
+    "UserModule",
+    "UserModulePreferences",
     "AdministrativeRoleGrant",
     "IdempotencyOperation",
     "SportsRankingSnapshot",

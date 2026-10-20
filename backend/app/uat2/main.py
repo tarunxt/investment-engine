@@ -4,6 +4,7 @@ from fastapi import APIRouter, FastAPI, WebSocket
 from fastapi.responses import JSONResponse
 from app.core.uat2 import validate_uat2_startup, uat2_mode
 from app.domains.auth.router import router as auth_router
+from app.domains.modules.router import router as modules_router
 from app.domains.indmoney_us.router import router as us_router
 from app.uat2.router import router
 from app.domains.jobs.router import router as jobs_router
@@ -23,6 +24,8 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(auth_router)
+# Management contract only; optional domain routers remain unavailable.
+app.include_router(modules_router)
 # Only portfolio read routes: price fetches and ingestion remain disabled.
 for route in us_router.routes:
     if route.path in {'/indmoney-us/portfolio', '/indmoney-us/portfolio/{snapshot_id}'} and route.methods == {'GET'}:

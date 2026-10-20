@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "stage": "06",
+  "base": "10c5a2c1561e8d1cf0e5b54c5b53e89e0c564c95",
+  "checks": {
+    "api_google_uat2": {
+      "passed": 104,
+      "log": ".runtime/stage06-regressions-fixed.txt",
+      "sha256": "0e322342a412cb97cd586ef9dfbe2c873e4a448de0a3f27b196a0b6837c34ca4"
+    },
+    "ownership": {
+      "passed": 110,
+      "log": ".runtime/stage06-ownership-regressions.txt",
+      "sha256": "1d3ee7c5b94919b07b58c96c6cf81329494a77bf90b09feb740c4797f7babe7b"
+    },
+    "release_selection": {
+      "passed": 1213,
+      "log": ".runtime/stage06-release-regressions.txt",
+      "sha256": "8d0aa78a842c351df9624e6cb064225fa3a23b094cfc8819d59625254585c0ae"
+    },
+    "postgres_migration_concurrency": {
+      "passed": 8,
+      "log": ".runtime/stage06-docker-postgres-refresh.txt",
+      "sha256": "b715a4ce60e73ad814115765ab540216246ac1bbeea2f8f130e6a92e4af7c0f1"
+    },
+    "preview": {
+      "result": "passed",
+      "count": 11,
+      "checks": [
+        {
+          "check": "anonymous BFF module denial",
+          "status": 401
+        },
+        {
+          "check": "usera login",
+          "status": 200
+        },
+        {
+          "check": "usera authenticated BFF read",
+          "status": 200
+        },
+        {
+          "check": "userb login",
+          "status": 200
+        },
+        {
+          "check": "userb authenticated BFF read",
+          "status": 200
+        },
+        {
+          "check": "atomic BFF patch",
+          "status": 200
+        },
+        {
+          "check": "stale BFF patch",
+          "status": 409
+        },
+        {
+          "check": "second owner isolation",
+          "status": 200
+        },
+        {
+          "check": "read-only disable impact",
+          "status": 200
+        },
+        {
+          "check": "owner override rejected",
+          "status": 422
+        },
+        {
+          "check": "restore synthetic selection",
+          "status": 200
+        }
+      ],
+      "frontend_url": "http://localhost:60473",
+      "backend_url": "http://127.0.0.1:60474",
+      "tokens_cookies_retained": false,
+      "scope": "Actual Next/Auth.js/BFF/FastAPI/SQL. Synthetic SQLite and offline adapters; no live provider, order, email, paid AI or UAT acceptance."
+    },
+    "fresh_selection_ownership": {
+      "passed": 110,
+      "log": ".runtime/stage06-refresh-regressions.txt"
+    }
+  },
+  "browser_walkthrough": "Fresh synthetic Chrome Preferences/reload, authenticated catalogue and unavailable Runs/Bullpen passed; runtime receipt available",
+  "exact_commit_ci": "pending",
+  "independent_review": "pending",
+  "uat2_deployment": "not_run_here",
+  "owner_acceptance": "pending",
+  "production_actions": false,
+  "aws_actions": false,
+  "new_access_grants": false
+}

@@ -79,6 +79,9 @@ def main():
         ui_port, api_port = ports["frontend_port"], ports["backend_port"]
         for value in (ui_port, api_port):
             with socket.socket() as check:
+                # Ignore closed connections in TIME_WAIT; an active listener
+                # still prevents this bind (SO_REUSEPORT is never enabled).
+                check.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 try: check.bind(("127.0.0.1", value))
                 except OSError: raise SystemExit("Preview build port is in use; build again to select fresh unused ports")
     else:

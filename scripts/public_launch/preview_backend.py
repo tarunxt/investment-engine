@@ -46,6 +46,8 @@ from app.infrastructure.messaging.operation_models import IdempotencyOperation
 from scripts.public_launch import preview_jobs, preview_stage05
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
+from app.domains.modules.router import router as modules_router
+from app.domains.modules.models import UserModulePreferences, UserModule
 from app.domains.auth.router import router
 from app.core.security import PasswordUtils
 from app.infrastructure.database.session import async_engine, AsyncSessionLocal
@@ -57,7 +59,7 @@ async def lifespan(app):
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
                       Job.__table__, Run.__table__, RunJob.__table__,
-                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES):
+                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES, UserModulePreferences.__table__, UserModule.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -104,7 +106,8 @@ app.add_middleware(CORSMiddleware, allow_origins=[os.environ["FRONTEND_URL"]],
 
 ALLOWED = {("POST", "/auth/login"), ("POST", "/auth/refresh"), ("POST", "/auth/logout"),
            ("GET", "/auth/me"), ("GET", "/auth/profile"), ("PUT", "/auth/profile"),
-           ("POST", "/auth/websocket-ticket"), ("POST", "/jobs")}
+           ("POST", "/auth/websocket-ticket"), ("POST", "/jobs"), ("GET", "/me/modules"), ("PATCH", "/me/modules"),
+           ("POST", "/me/modules/disable-impact")}
 
 
 @app.middleware("http")
@@ -128,6 +131,7 @@ async def operation_error(_request, exc):
     return JSONResponse({'detail':exc.message},status_code=exc.status_code)
 
 app.include_router(router)
+app.include_router(modules_router)
 
 for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
