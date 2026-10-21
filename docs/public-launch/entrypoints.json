@@ -15836,7 +15836,7 @@
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "5c512281b2fdcd797610ab64c283b4f3e01b6584d46497fac0bca62dd3b95afc",
-    "backend/app/domains/public_service/redaction.py": "356625a7eafa61ad0614c2beecb3960d486e357b3de9e90da0efa6c54eb3cba1",
+    "backend/app/domains/public_service/redaction.py": "c2227e491bcfa5a54cf415b0c6bc389e23fa57610bc0d85be25658f5368421e9",
     "backend/app/domains/public_service/router.py": "f148118a457abcf510c67c32747e455a8d69b3e0c1fd6b80f93aefb26bdf7169",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
     "backend/app/domains/recommendation_audit/__init__.py": "c3139e78f64ae4d6c83bb1c4ffe47918936c4a1dc6e8d61c1903c8619b3ce195",

@@ -195,3 +195,72 @@ def test_account_operations_require_authentication_without_database_lookup(monke
             assert (await c.get('/account/operations/eligibility')).status_code==401
             assert (await c.post('/account/operations/privacy-requests',json={'key':'one','kind':'delete','confirmed':True})).status_code==401
     asyncio.run(run())
+
+@pytest.mark.parametrize('message,forbidden',[
+ ('Authorization: Basic U1lOVEhFVElDX1NFQ1JFVA==','U1lOVEhFVElDX1NFQ1JFVA=='),
+ (r'upstream {"\u0070assword":"SYNTHETIC escaped key"}', 'SYNTHETIC'),
+ (r'upstream {\"password\":\"SYNTHETIC escaped quotes\"}', 'SYNTHETIC'),
+ ('{"password":"SYNTHETIC first second"}','SYNTHETIC first second'),
+ ("{'api_secret': 'SYNTHETIC_SECRET'}",'SYNTHETIC_SECRET'),
+ ('upstream {"password": "SYNTHETIC first second"} end','first second'),
+ ("upstream {'api_secret': 'SYNTHETIC_SECRET'} end",'SYNTHETIC_SECRET'),
+ ('Proxy-Authorization: Digest username="SYNTHETIC user", response="SYNTHETIC digest"','SYNTHETIC'),
+ ('password="SYNTHETIC first\\\" second" trace','SYNTHETIC'),
+ ("password = 'SYNTHETIC first\nsecond'",'second'),
+ ('Cookie: a=one; session=SYNTHETIC cookie with spaces','SYNTHETIC'),
+ ('Basic U1lOVEhFVElDX1NFQ1JFVA==','U1lOVEhFVElDX1NFQ1JFVA=='),
+ ('OPENAI_API_KEY=SYNTHETIC provider value','SYNTHETIC'),
+ ('apiKey=SYNTHETIC value with spaces&status=ok','SYNTHETIC'),
+ ('{"outer":[{"accessToken":{"nested":"SYNTHETIC"}},{"safe":"ok"}]}','SYNTHETIC'),
+ ("{'outer': [{'client-secret': ['SYNTHETIC', 'tail']}], 'status': 'ok'}",'SYNTHETIC'),
+])
+def test_complete_credential_values_are_removed(message,forbidden):
+    import logging
+    from app.domains.public_service.redaction import RedactingFormatter
+    record=logging.LogRecord('synthetic',logging.ERROR,'synthetic.py',1,'%s',(message,),None)
+    for fmt in ['%(message)s','%(levelname)s %(message)s']:
+        value=RedactingFormatter(fmt).format(record)
+        assert forbidden not in value and '[redacted]' in value
+
+@pytest.mark.parametrize('document',[
+ {'password':'SYNTHETIC first second','status':'ok'},
+ {'OPENAI_API_KEY':'SYNTHETIC provider','smtpPassword':'SYNTHETIC password','status':'ok'},
+ {'nested':[{'api_secret':'SYNTHETIC'}, {'status':'ok'}]},
+ {'Authorization':{'scheme':'Basic','value':'SYNTHETIC'},'status':'ok'},
+ {'cookie':['SYNTHETIC one','SYNTHETIC two'],'status':'ok'},
+ {'safe':'{"password":"SYNTHETIC nested string","status":"ok"}','status':'ok'},
+])
+def test_structured_redaction_preserves_noncredential_fields(document):
+    from app.domains.public_service.redaction import redact
+    for representation in [document,json.dumps(document),repr(document)]:
+        value=redact(representation)
+        assert 'SYNTHETIC' not in value and 'ok' in value
+        assert isinstance(json.loads(value),dict)
+
+def test_redaction_bounds_malformed_and_oversized_input():
+    from app.domains.public_service.redaction import redact
+    assert redact('x'*65537)=='[redacted]'
+    value={'password':'SYNTHETIC'}
+    for _ in range(20):value={'nested':value}
+    assert 'SYNTHETIC' not in redact(value)
+    assert 'SYNTHETIC' not in redact('prefix password = "SYNTHETIC broken\nremaining')
+
+
+@pytest.mark.parametrize('argument',[
+ json.dumps('{"password":"SYNTHETIC wrapped JSON"}'),
+ '{"\\u0070assword":"SYNTHETIC encoded key"}',
+ {"nested":[{"api_key":"SYNTHETIC structured argument"}]},
+])
+def test_structured_arguments_redact_before_log_prefix(argument):
+    import logging
+    from app.domains.public_service.redaction import RedactingFormatter
+    record=logging.LogRecord('synthetic',logging.ERROR,'synthetic.py',1,'upstream %s',(argument,),None)
+    original_args=record.args
+    value=RedactingFormatter('%(levelname)s %(message)s').format(record)
+    assert 'SYNTHETIC' not in value and record.args is original_args
+
+def test_redactor_retains_ordinary_numeric_formatting():
+    import logging
+    from app.domains.public_service.redaction import RedactingFormatter
+    record=logging.LogRecord('synthetic',logging.INFO,'synthetic.py',1,'status=%d elapsed=%.2f',(200,1.25),None)
+    assert RedactingFormatter('%(message)s').format(record)=='status=200 elapsed=1.25'
