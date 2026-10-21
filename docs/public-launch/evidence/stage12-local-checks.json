@@ -1,0 +1,66 @@
+{
+  "recorded_at": "2026-10-21T02:59:26.860320+00:00",
+  "branch": "codex/stage12-durable-analysis-local-20261021",
+  "base": "7c210e7b24dc2a6012daf98844a7279767e9a9df",
+  "started_at": "2026-10-21T02:22:21Z",
+  "local_only": true,
+  "checks": {
+    "backend_workflow_http_effects": 63,
+    "backend_related_regressions": 101,
+    "backend_total": 164,
+    "native_controller_helper": 105,
+    "linux_harness_unit": 10,
+    "frontend_stage12": 7,
+    "frontend_stage11_regression": 10,
+    "actual_local_http": 16,
+    "typescript_and_next_build": "PASS",
+    "inventory": "PASS",
+    "workflow_yaml_frozen_assertions": "PASS"
+  },
+  "prepared_not_run": {
+    "postgresql": 4,
+    "postgresql_job_total": 67,
+    "linux_systemd_matrix": 20,
+    "CI": true,
+    "artifact_audit": true,
+    "independent_review": true,
+    "UAT2_deployment": true,
+    "UAT2_browser_acceptance": true
+  },
+  "logs": {
+    "backend": {
+      "path": "docs/public-launch/evidence/stage12-backend.log",
+      "sha256": "b3329100845ec5a455fc6bf8543fc8f0a6e55f41a88c9fb9b7d146bdec168acb"
+    },
+    "native_harness": {
+      "path": "docs/public-launch/evidence/stage12-native_harness.log",
+      "sha256": "b354e82e7076106ea082861f8c71d756064a0ed252e32971125ef56b1f59e1ae"
+    },
+    "frontend": {
+      "path": "docs/public-launch/evidence/stage12-frontend.log",
+      "sha256": "5e9647d10f3d5331656f4ae3d4b4ce7925de35394d983eb399cbcbd0b528f097"
+    },
+    "build": {
+      "path": "docs/public-launch/evidence/stage12-build.log",
+      "sha256": "e38590351ddf8f231118d23ba8de575ded3f20eea3f566484e1dafdc8a71851f"
+    },
+    "inventory": {
+      "path": "docs/public-launch/evidence/stage12-inventory.log",
+      "sha256": "eb4b691afc419e2e73a21fd91235cae0b372909414958d1c2ea16ca77b4db2ac"
+    }
+  },
+  "preview": {
+    "frontend": "http://localhost:50500",
+    "backend": "http://127.0.0.1:50501",
+    "build_id": "e-kKvUHMWUF7S76Hr3V7e",
+    "outbound_network": "denied",
+    "runtime": "explicit deterministic synthetic adapter only"
+  },
+  "limitations": [
+    "Production composition disabled; approved plan/calendar/entitlements remain unbound",
+    "One-shot scheduled tick admission only; no recurring schedule activation",
+    "SQLite local tests do not certify PostgreSQL lock semantics",
+    "Transactional messaging does not guarantee exactly-once external billing",
+    "No live providers, migration, deployment, merge or Stage13"
+  ]
+}

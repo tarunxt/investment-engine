@@ -16,6 +16,9 @@ BASE = 'module_lifecycle_001'
 STAGE09 = 'integration_connections_001'
 STAGE10 = 'connection_attempts_001'
 STAGE11 = 'indmoney_integrity_001'
+STAGE12 = 'durable_analysis_001'
+WORKFLOW_COLUMNS={'auto_rebalance_workflows':frozenset({'orchestration_kind','request_key','execution_json','control_version'}),'auto_rebalance_workflow_stages':frozenset({'checkpoint_json','attempt_count'})}
+ANALYSIS_MATERIAL = frozenset(WORKFLOW_COLUMNS)|{'jobs','outbox'}
 IMPORT_TABLE = 'indmoney_us_portfolio_snapshots'
 IMPORT_COLUMNS = frozenset({'acceptance_state','import_key','content_hash','import_provenance','accepted_at','supersedes_id'})
 ATTEMPTS = frozenset({'connection_attempts','connection_binding_history'})
@@ -43,11 +46,14 @@ def canonical_checks(table, checks):
             for check in checks]
 
 
-def validate_shape(revision,names,import_columns):
-    if revision not in {BASE,STAGE09,STAGE10,STAGE11}:raise RuntimeError('Unexpected schema revision')
-    if (set(names)&TABLES)!=(TABLES if revision in {STAGE09,STAGE10,STAGE11} else set()):raise RuntimeError('Partial schema state')
-    if (set(names)&ATTEMPTS)!=(ATTEMPTS if revision in {STAGE10,STAGE11} else set()):raise RuntimeError('Partial attempt schema state')
-    if (set(import_columns)&IMPORT_COLUMNS)!=(IMPORT_COLUMNS if revision==STAGE11 else set()):raise RuntimeError('Partial import schema state')
+def validate_shape(revision,names,import_columns,workflow_columns=None):
+    if revision not in {BASE,STAGE09,STAGE10,STAGE11,STAGE12}:raise RuntimeError('Unexpected schema revision')
+    if (set(names)&TABLES)!=(TABLES if revision in {STAGE09,STAGE10,STAGE11,STAGE12} else set()):raise RuntimeError('Partial schema state')
+    if (set(names)&ATTEMPTS)!=(ATTEMPTS if revision in {STAGE10,STAGE11,STAGE12} else set()):raise RuntimeError('Partial attempt schema state')
+    if (set(import_columns)&IMPORT_COLUMNS)!=(IMPORT_COLUMNS if revision in {STAGE11,STAGE12} else set()):raise RuntimeError('Partial import schema state')
+    for table,expected in WORKFLOW_COLUMNS.items():
+        actual=set((workflow_columns or {}).get(table,()))&expected
+        if actual!=(expected if revision==STAGE12 else set()):raise RuntimeError('Partial workflow schema state')
 
 
 def capture(engine):
@@ -58,7 +64,8 @@ def capture(engine):
         if len(versions)!=1:raise RuntimeError('Unexpected schema revision')
         revision=versions[0]
         import_columns={c['name'] for c in inspector.get_columns(IMPORT_TABLE,schema='public')} if IMPORT_TABLE in names else set()
-        validate_shape(revision,names,import_columns)
+        workflow_columns={name:{c['name'] for c in inspector.get_columns(name,schema='public')} if name in names else set() for name in WORKFLOW_COLUMNS}
+        validate_shape(revision,names,import_columns,workflow_columns)
         data={}
         for name in names:
             table=sa.Table(name,sa.MetaData(),schema='public',autoload_with=db)
@@ -80,8 +87,8 @@ def capture(engine):
             'owners_acl':"SELECT c.relname,c.relkind,pg_get_userbyid(c.relowner),c.relacl::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname",
         }.items()}
     return {'revision':revision,'fingerprint':sha(json.dumps({'tables':data,'sequences':sequences,'catalog':catalog},sort_keys=True,default=str).encode()),
-            'stage11_columns':sorted(import_columns&IMPORT_COLUMNS),'stage09_tables':sorted(set(names)&TABLES),'stage10_tables':sorted(set(names)&ATTEMPTS),'table_count':len(names),
-            'material_rows':sum(len(data[n]['rows']) for n in TABLES|ATTEMPTS|({IMPORT_TABLE} if revision==STAGE11 else set()) if n in data)}
+            'stage12_columns':sorted(table+'.'+column for table,expected in WORKFLOW_COLUMNS.items() for column in workflow_columns[table]&expected),'stage11_columns':sorted(import_columns&IMPORT_COLUMNS),'stage09_tables':sorted(set(names)&TABLES),'stage10_tables':sorted(set(names)&ATTEMPTS),'table_count':len(names),
+            'material_rows':sum(len(data[n]['rows']) for n in TABLES|ATTEMPTS|({IMPORT_TABLE} if revision in {STAGE11,STAGE12} else set()) if n in data)}
 
 
 def private_write(path, value):
@@ -101,15 +108,15 @@ def execute(engine, action, request, expected, fingerprint=None, material_reques
     if expected and before['revision']!=expected:raise RuntimeError('Schema revision changed')
     material=None
     if action=='preserve':
-        if before['revision'] not in {STAGE09,STAGE10,STAGE11}:raise RuntimeError('Supported connection material state required')
-        tables=TABLES|(ATTEMPTS if before['revision'] in {STAGE10,STAGE11} else frozenset())|({IMPORT_TABLE} if before['revision']==STAGE11 else frozenset())
+        if before['revision'] not in {STAGE09,STAGE10,STAGE11,STAGE12}:raise RuntimeError('Supported connection material state required')
+        tables=(ANALYSIS_MATERIAL if before['revision']==STAGE12 else set())|TABLES|(ATTEMPTS if before['revision'] in {STAGE10,STAGE11,STAGE12} else frozenset())|({IMPORT_TABLE} if before['revision'] in {STAGE11,STAGE12} else frozenset())
         with engine.connect() as db:
             rows={name:[dict(r) for r in db.execute(sa.select(sa.Table(name,sa.MetaData(),schema='public',autoload_with=db))).mappings()] for name in sorted(tables)}
         path=ARTIFACTS/(request+'-material.json')
         material={'request':request,'sha256':private_write(path,{'revision':before['revision'],'tables':rows}),'rows':sum(map(len,rows.values()))}
         if capture(engine)!=before:raise RuntimeError('State changed during material preservation')
     elif action=='downgrade':
-        baseline={STAGE09:BASE,STAGE10:STAGE09,STAGE11:STAGE10}.get(before['revision'])
+        baseline={STAGE09:BASE,STAGE10:STAGE09,STAGE11:STAGE10,STAGE12:STAGE11}.get(before['revision'])
         if baseline is None or expected!=before['revision'] or fingerprint!=before['fingerprint'] or (target or BASE)!=baseline:raise RuntimeError('Exact supported schema transition required for downgrade')
         if not re.fullmatch(r'[0-9a-f]{32}',material_request or ''):raise RuntimeError('Preservation receipt required')
         path=ARTIFACTS/(material_request+'-material.json')
@@ -117,14 +124,16 @@ def execute(engine, action, request, expected, fingerprint=None, material_reques
         if migrate is None:raise RuntimeError('Confined migration required')
         migrate(baseline)
         after=capture(engine)
-        if (after['revision']!=baseline or after.get('stage11_columns')
-            or (baseline!=STAGE10 and after.get('stage10_tables'))
-            or (baseline==STAGE10 and set(after.get('stage10_tables',[]))!=ATTEMPTS)
+        if (after['revision']!=baseline or after.get('stage12_columns')
+            or (baseline!=STAGE11 and after.get('stage11_columns'))
+            or (baseline==STAGE11 and set(after.get('stage11_columns',[]))!=IMPORT_COLUMNS)
+            or (baseline not in {STAGE10,STAGE11} and after.get('stage10_tables'))
+            or (baseline in {STAGE10,STAGE11} and set(after.get('stage10_tables',[]))!=ATTEMPTS)
             or (baseline==BASE and after['stage09_tables'])
-            or (baseline in {STAGE09,STAGE10} and set(after['stage09_tables'])!=TABLES)):raise RuntimeError('Downgrade incomplete')
+            or (baseline in {STAGE09,STAGE10,STAGE11} and set(after['stage09_tables'])!=TABLES)):raise RuntimeError('Downgrade incomplete')
         return {'state':after}
     elif action=='verify':
-        if expected not in {BASE,STAGE09,STAGE10,STAGE11} or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
+        if expected not in {BASE,STAGE09,STAGE10,STAGE11,STAGE12} or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
     elif action!='inspect':raise RuntimeError('Unknown schema action')
     return {'state':before,**({'material':material} if material else {})}
 

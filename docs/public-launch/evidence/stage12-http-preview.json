@@ -1,0 +1,27 @@
+{
+  "recorded_at": "2026-10-21T02:57:27.503300+00:00",
+  "base": "http://127.0.0.1:50501",
+  "passed": 16,
+  "checks": [
+    "network-denied isolated fixture",
+    "anonymous list denied",
+    "explicit fake runtime has no order authority",
+    "real create route and private cache",
+    "idempotent repeated start",
+    "cross-owner detail denied",
+    "cross-owner cancel denied",
+    "explicit pause persists",
+    "stale control denied",
+    "explicit resume uses current receipt",
+    "server completes without browser handoffs",
+    "six persisted checkpoints",
+    "owner and source provenance retained",
+    "automatic order authority absent",
+    "wrong-owner history excludes workflow",
+    "direct financial route unavailable"
+  ],
+  "workflow_id": 3,
+  "synthetic": true,
+  "browser_handoffs_required": false,
+  "live_systems_touched": false
+}

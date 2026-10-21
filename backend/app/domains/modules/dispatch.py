@@ -43,7 +43,7 @@ def prepare_dispatch(name,args,kwargs,options,*,factory=None):
     headers=dict(options.get('headers') or {})
     with factory() as session:
         identity=task_identity(session,name,args,kwargs)
-        if name=='app.domains.jobs.tasks.execute_ai_job':
+        if name in {'app.domains.jobs.tasks.execute_ai_job','app.domains.runs.tasks.advance_analysis_workflow'}:
             current_sync(session,identity);return options # Job is already durable/versioned.
         session.execute(select(UserModulePreferences.user_id).where(UserModulePreferences.user_id==identity.owner_id).with_for_update())
         if headers.get(HEADER):

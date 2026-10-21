@@ -166,6 +166,7 @@ class AutoRebalanceWorkflow(Base, TimestampMixin):
             "sequence",
             name="uq_auto_rebalance_workflow_user_portfolio_sequence",
         ),
+        UniqueConstraint("user_id", "request_key", name="uq_analysis_owner_request"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -182,6 +183,12 @@ class AutoRebalanceWorkflow(Base, TimestampMixin):
     current_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="sync")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Nullable kind preserves legacy browser/manual audit behavior.
+    orchestration_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    request_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    execution_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    control_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     user: Mapped[User] = relationship()
     stages: Mapped[list[AutoRebalanceWorkflowStage]] = relationship(
@@ -220,4 +227,18 @@ class AutoRebalanceWorkflowStage(Base, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    checkpoint_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
     workflow: Mapped[AutoRebalanceWorkflow] = relationship(back_populates="stages")
+
+
+# Application-enforced immutable identity/input receipts. Not a DBA-proof store.
+from sqlalchemy import event, inspect as sa_inspect
+@event.listens_for(AutoRebalanceWorkflow,'before_update')
+def immutable_server_analysis_inputs(mapper,connection,target):
+    state=sa_inspect(target)
+    old=state.attrs.orchestration_kind.history.deleted
+    if target.orchestration_kind=='analysis_v1' or old and old[0]=='analysis_v1':
+        for name in ['user_id','portfolio','sequence','orchestration_kind','request_key','execution_json','module_id','module_version']:
+            if state.attrs[name].history.has_changes():raise ValueError('Server analysis identity and input receipts are immutable')

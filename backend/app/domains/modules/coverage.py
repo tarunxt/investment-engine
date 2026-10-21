@@ -30,6 +30,10 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
     methods=set(methods or ())
     if domain=='ai_providers' and endpoint=='list_providers' and methods=={'GET'}:return ('__analysis_metadata__','view')
     if domain=='mails' and endpoint=='send_test_mail':return ('ai_studio','analyze')
+    if domain=='runs' and path.startswith('/runs/analysis-workflows'):
+        # Own read/control paths enforce owner + fresh dynamic module policy in
+        # the service; cancellation/history remain available after disable.
+        return None
     if domain in CORE_DOMAINS:return None
     if domain=='runs' and methods=={'GET'} and endpoint in {'list_runs','get_run','list_auto_rebalance_history','get_auto_rebalance_history_detail','get_final_actionable_history'}:return None
     if domain=='zerodha' and endpoint in {'get_login_url','callback','get_status','disconnect'}:return None
