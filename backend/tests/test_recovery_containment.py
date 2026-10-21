@@ -316,6 +316,14 @@ def test_full_api_lifespan_and_route_guard_with_isolated_dependencies(recovery, 
     from unittest.mock import AsyncMock
     from fastapi.testclient import TestClient
     import app.main as main
+    # Exercise recovery in production mode with an admitted SYNTHETIC public
+    # configuration. Do not bypass the real startup validation or use dev mode.
+    monkeypatch.setenv("CREDX_UAT2", "0")
+    monkeypatch.setenv("JWT_SIGNING_KEY", "synthetic-recovery-only-" + "k" * 40)
+    monkeypatch.setattr(main.settings, "environment", "production")
+    monkeypatch.setattr(main.settings, "auth_disabled", False)
+    monkeypatch.setattr(main.settings, "debug", False)
+    monkeypatch.setattr(main.settings, "frontend_url", "https://synthetic.invalid")
     class Session:
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass

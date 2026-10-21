@@ -344,3 +344,30 @@ def test_unexpected_redactor_failure_cannot_escape_to_logging_stderr(monkeypatch
     logger=logging.Logger('synthetic-fault',level=logging.DEBUG);logger.addHandler(handler);logger.propagate=False
     with contextlib.redirect_stderr(stderr):logger.error('password=%s','SYNTHETIC_FORMAT_SECRET')
     assert stderr.getvalue()=='' and output.getvalue()=='[redacted log: formatting failed]\n'
+
+
+@pytest.mark.parametrize('fault,reason',[
+ ('missing_key','independent signing key'),
+ ('auth_bypass','Auth bypass requires'),
+ ('debug','authentication and debug disabled'),
+ ('http_origin','HTTPS frontend origin'),
+])
+def test_actual_public_lifespan_keeps_security_guards_before_any_effect(monkeypatch,fault,reason):
+    from fastapi.testclient import TestClient
+    import app.main as main
+    monkeypatch.setenv('CREDX_UAT2','0')
+    monkeypatch.setenv('CREDX_RECOVERY_MODE','1')
+    monkeypatch.setenv('JWT_SIGNING_KEY','synthetic-startup-only-'+'x'*40)
+    monkeypatch.setattr(main.settings,'environment','production')
+    monkeypatch.setattr(main.settings,'auth_disabled',False)
+    monkeypatch.setattr(main.settings,'debug',False)
+    monkeypatch.setattr(main.settings,'frontend_url','https://synthetic.invalid')
+    if fault=='missing_key':monkeypatch.delenv('JWT_SIGNING_KEY')
+    if fault=='auth_bypass':monkeypatch.setattr(main.settings,'auth_disabled',True)
+    if fault=='debug':monkeypatch.setattr(main.settings,'debug',True)
+    if fault=='http_origin':monkeypatch.setattr(main.settings,'frontend_url','http://synthetic.invalid')
+    def no_effect(*args,**kwargs):raise AssertionError('startup reached database/broker before rejecting unsafe configuration')
+    monkeypatch.setattr(main,'AsyncSessionLocal',no_effect)
+    monkeypatch.setattr(main,'get_bullpen_runtime_broker',no_effect)
+    with pytest.raises(RuntimeError,match=reason):
+        with TestClient(main.app):pass
