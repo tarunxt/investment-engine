@@ -171,6 +171,9 @@ class SyncZerodhaPortfolioSnapshotRepository:
             snapshot_data["holdings"],
             total_value=snapshot_data["holdings_market_value"],
         )
+        # This legacy acquisition path has no verified IntegrationConnection binding.
+        # Invalidate an earlier receipt on every overwrite; do not accept caller provenance.
+        snapshot.acquisition_json = None
         snapshot.captured_at = snapshot_data["captured_at"]
         snapshot.source = snapshot_data["source"]
         snapshot.holdings_count = snapshot_data["holdings_count"]

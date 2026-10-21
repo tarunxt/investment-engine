@@ -1,0 +1,296 @@
+....................................F...........FFFFFF.................. [ 85%]
+............                                                             [100%]
+=================================== FAILURES ===================================
+_ test_queue_adapter_uses_existing_job_and_transactional_outbox_without_provider _
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10dce1e50>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+
+    def test_queue_adapter_uses_existing_job_and_transactional_outbox_without_provider(env):
+        e=env;row=create(e);runtime=Runtime(e.runtime.policy,e.runtime.source,e.runtime.plan,QueuedAI(),e.runtime.calendar)
+        assert service(e,runtime).consume(message(e).id,now=NOW)=='completed';e.db.commit()
+        assert service(e,runtime).consume(message(e).id,now=NOW)=='waiting';e.db.commit()
+        job=e.db.scalar(select(Job));assert job.user_id==1 and job.export_status=='disabled' and job.request_context_json['orders_authorized'] is False
+        assert len(e.db.scalars(select(OutboxMessage).where(OutboxMessage.topic=='job.created.v2')).all())==1
+        from app.shared.types import JobStatus
+        job.status=JobStatus.COMPLETED;job.response='Synthetic queued result';job.estimated_cost=0;e.db.commit()
+>       assert service(e,runtime).consume(message(e,NOW+timedelta(seconds=6)).id,now=NOW+timedelta(seconds=6))=='completed';e.db.commit()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 'failed' == 'completed'
+E         
+E         - completed
+E         + failed
+
+backend/tests/test_stage12_durable_analysis.py:192: AssertionError
+_______ test_provider_effect_rechecks_current_persisted_binding[source] ________
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10dc306e0>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e8aac10>
+mutation = 'source'
+
+    @pytest.mark.parametrize('mutation',['source','plan','pause','cancel','module','binding'])
+    def test_provider_effect_rechecks_current_persisted_binding(env,monkeypatch,mutation):
+        from app.domains.runs.analysis_workflows.effects import job_scope,validate_effect
+        from app.domains.runs.analysis_workflows import runtime as composition
+        e=env;row=create(e);rt=__import__('dataclasses').replace(e.runtime,adapter=QueuedAI())
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        stage=service(e).stages(row)[1];job=e.db.get(Job,stage.job_id)
+        monkeypatch.setattr(composition,'_registered',rt)
+>       with job_scope(job.id):validate_effect(e.db)
+                               ^^^^^^^^^^^^^^^^^^^^^
+
+backend/tests/test_stage12_durable_analysis.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/app/domains/runs/analysis_workflows/effects.py:48: in validate_effect
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+row = <app.domains.runs.models.AutoRebalanceWorkflow object at 0x10dce14f0>
+stage = <app.domains.runs.models.AutoRebalanceWorkflowStage object at 0x10e746a90>
+job = <app.domains.jobs.models.Job object at 0x10ea7a710>
+dependencies = [{'cost_usd': '0', 'data': {'connection': {'valid': True, 'version': 1}, 'owner_id': 1, 'snapshot_id': 1, 'version': 1}, 'owner_id': 1, 'plan_hash': '02f30e4999d8c204f1a071dc481c8cc0a6534aa789373e45fb8947fc477f7c26', ...}]
+
+    def validate_job_request(row,stage,job,dependencies):
+        expected=frozen_request(row,stage,dependencies)
+        if (job is None or job.id!=stage.job_id or job.user_id!=row.user_id
+            or job.module_id!=row.module_id or job.module_version!=row.module_version
+            or job.provider!=expected['provider'] or job.model!=expected['model']
+>           or job.prompt!=expected['prompt'] or job.prompt_id is not None
+                                                 ^^^^^^^^^^^^^
+            or job.auto_rebalance_portfolio!=row.portfolio or job.auto_rebalance_sequence!=row.sequence
+            or job.auto_rebalance_label!=row.label or not isinstance(job.request_context_json,dict)
+            or any(type(job.request_context_json.get(k)) is not type(v) or job.request_context_json.get(k)!=v
+                   for k,v in expected['context'].items())):
+E                  AttributeError: 'Job' object has no attribute 'prompt_id'. Did you mean: 'prompt'?
+
+backend/app/domains/runs/analysis_workflows/bindings.py:38: AttributeError
+________ test_provider_effect_rechecks_current_persisted_binding[plan] _________
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10de7c410>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e22a350>
+mutation = 'plan'
+
+    @pytest.mark.parametrize('mutation',['source','plan','pause','cancel','module','binding'])
+    def test_provider_effect_rechecks_current_persisted_binding(env,monkeypatch,mutation):
+        from app.domains.runs.analysis_workflows.effects import job_scope,validate_effect
+        from app.domains.runs.analysis_workflows import runtime as composition
+        e=env;row=create(e);rt=__import__('dataclasses').replace(e.runtime,adapter=QueuedAI())
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        stage=service(e).stages(row)[1];job=e.db.get(Job,stage.job_id)
+        monkeypatch.setattr(composition,'_registered',rt)
+>       with job_scope(job.id):validate_effect(e.db)
+                               ^^^^^^^^^^^^^^^^^^^^^
+
+backend/tests/test_stage12_durable_analysis.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/app/domains/runs/analysis_workflows/effects.py:48: in validate_effect
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+row = <app.domains.runs.models.AutoRebalanceWorkflow object at 0x10de7f890>
+stage = <app.domains.runs.models.AutoRebalanceWorkflowStage object at 0x10ec68120>
+job = <app.domains.jobs.models.Job object at 0x10ea7b250>
+dependencies = [{'cost_usd': '0', 'data': {'connection': {'valid': True, 'version': 1}, 'owner_id': 1, 'snapshot_id': 1, 'version': 1}, 'owner_id': 1, 'plan_hash': '02f30e4999d8c204f1a071dc481c8cc0a6534aa789373e45fb8947fc477f7c26', ...}]
+
+    def validate_job_request(row,stage,job,dependencies):
+        expected=frozen_request(row,stage,dependencies)
+        if (job is None or job.id!=stage.job_id or job.user_id!=row.user_id
+            or job.module_id!=row.module_id or job.module_version!=row.module_version
+            or job.provider!=expected['provider'] or job.model!=expected['model']
+>           or job.prompt!=expected['prompt'] or job.prompt_id is not None
+                                                 ^^^^^^^^^^^^^
+            or job.auto_rebalance_portfolio!=row.portfolio or job.auto_rebalance_sequence!=row.sequence
+            or job.auto_rebalance_label!=row.label or not isinstance(job.request_context_json,dict)
+            or any(type(job.request_context_json.get(k)) is not type(v) or job.request_context_json.get(k)!=v
+                   for k,v in expected['context'].items())):
+E                  AttributeError: 'Job' object has no attribute 'prompt_id'. Did you mean: 'prompt'?
+
+backend/app/domains/runs/analysis_workflows/bindings.py:38: AttributeError
+________ test_provider_effect_rechecks_current_persisted_binding[pause] ________
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10e05d310>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e2fb2a0>
+mutation = 'pause'
+
+    @pytest.mark.parametrize('mutation',['source','plan','pause','cancel','module','binding'])
+    def test_provider_effect_rechecks_current_persisted_binding(env,monkeypatch,mutation):
+        from app.domains.runs.analysis_workflows.effects import job_scope,validate_effect
+        from app.domains.runs.analysis_workflows import runtime as composition
+        e=env;row=create(e);rt=__import__('dataclasses').replace(e.runtime,adapter=QueuedAI())
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        stage=service(e).stages(row)[1];job=e.db.get(Job,stage.job_id)
+        monkeypatch.setattr(composition,'_registered',rt)
+>       with job_scope(job.id):validate_effect(e.db)
+                               ^^^^^^^^^^^^^^^^^^^^^
+
+backend/tests/test_stage12_durable_analysis.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/app/domains/runs/analysis_workflows/effects.py:48: in validate_effect
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+row = <app.domains.runs.models.AutoRebalanceWorkflow object at 0x10e1346e0>
+stage = <app.domains.runs.models.AutoRebalanceWorkflowStage object at 0x10ec875f0>
+job = <app.domains.jobs.models.Job object at 0x10ea7a5d0>
+dependencies = [{'cost_usd': '0', 'data': {'connection': {'valid': True, 'version': 1}, 'owner_id': 1, 'snapshot_id': 1, 'version': 1}, 'owner_id': 1, 'plan_hash': '02f30e4999d8c204f1a071dc481c8cc0a6534aa789373e45fb8947fc477f7c26', ...}]
+
+    def validate_job_request(row,stage,job,dependencies):
+        expected=frozen_request(row,stage,dependencies)
+        if (job is None or job.id!=stage.job_id or job.user_id!=row.user_id
+            or job.module_id!=row.module_id or job.module_version!=row.module_version
+            or job.provider!=expected['provider'] or job.model!=expected['model']
+>           or job.prompt!=expected['prompt'] or job.prompt_id is not None
+                                                 ^^^^^^^^^^^^^
+            or job.auto_rebalance_portfolio!=row.portfolio or job.auto_rebalance_sequence!=row.sequence
+            or job.auto_rebalance_label!=row.label or not isinstance(job.request_context_json,dict)
+            or any(type(job.request_context_json.get(k)) is not type(v) or job.request_context_json.get(k)!=v
+                   for k,v in expected['context'].items())):
+E                  AttributeError: 'Job' object has no attribute 'prompt_id'. Did you mean: 'prompt'?
+
+backend/app/domains/runs/analysis_workflows/bindings.py:38: AttributeError
+_______ test_provider_effect_rechecks_current_persisted_binding[cancel] ________
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10ea3b020>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10eb90fa0>
+mutation = 'cancel'
+
+    @pytest.mark.parametrize('mutation',['source','plan','pause','cancel','module','binding'])
+    def test_provider_effect_rechecks_current_persisted_binding(env,monkeypatch,mutation):
+        from app.domains.runs.analysis_workflows.effects import job_scope,validate_effect
+        from app.domains.runs.analysis_workflows import runtime as composition
+        e=env;row=create(e);rt=__import__('dataclasses').replace(e.runtime,adapter=QueuedAI())
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        stage=service(e).stages(row)[1];job=e.db.get(Job,stage.job_id)
+        monkeypatch.setattr(composition,'_registered',rt)
+>       with job_scope(job.id):validate_effect(e.db)
+                               ^^^^^^^^^^^^^^^^^^^^^
+
+backend/tests/test_stage12_durable_analysis.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/app/domains/runs/analysis_workflows/effects.py:48: in validate_effect
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+row = <app.domains.runs.models.AutoRebalanceWorkflow object at 0x10ed645f0>
+stage = <app.domains.runs.models.AutoRebalanceWorkflowStage object at 0x10ec84fc0>
+job = <app.domains.jobs.models.Job object at 0x10ea7a0d0>
+dependencies = [{'cost_usd': '0', 'data': {'connection': {'valid': True, 'version': 1}, 'owner_id': 1, 'snapshot_id': 1, 'version': 1}, 'owner_id': 1, 'plan_hash': '02f30e4999d8c204f1a071dc481c8cc0a6534aa789373e45fb8947fc477f7c26', ...}]
+
+    def validate_job_request(row,stage,job,dependencies):
+        expected=frozen_request(row,stage,dependencies)
+        if (job is None or job.id!=stage.job_id or job.user_id!=row.user_id
+            or job.module_id!=row.module_id or job.module_version!=row.module_version
+            or job.provider!=expected['provider'] or job.model!=expected['model']
+>           or job.prompt!=expected['prompt'] or job.prompt_id is not None
+                                                 ^^^^^^^^^^^^^
+            or job.auto_rebalance_portfolio!=row.portfolio or job.auto_rebalance_sequence!=row.sequence
+            or job.auto_rebalance_label!=row.label or not isinstance(job.request_context_json,dict)
+            or any(type(job.request_context_json.get(k)) is not type(v) or job.request_context_json.get(k)!=v
+                   for k,v in expected['context'].items())):
+E                  AttributeError: 'Job' object has no attribute 'prompt_id'. Did you mean: 'prompt'?
+
+backend/app/domains/runs/analysis_workflows/bindings.py:38: AttributeError
+_______ test_provider_effect_rechecks_current_persisted_binding[module] ________
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10e4a7a70>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10ea5fd20>
+mutation = 'module'
+
+    @pytest.mark.parametrize('mutation',['source','plan','pause','cancel','module','binding'])
+    def test_provider_effect_rechecks_current_persisted_binding(env,monkeypatch,mutation):
+        from app.domains.runs.analysis_workflows.effects import job_scope,validate_effect
+        from app.domains.runs.analysis_workflows import runtime as composition
+        e=env;row=create(e);rt=__import__('dataclasses').replace(e.runtime,adapter=QueuedAI())
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        stage=service(e).stages(row)[1];job=e.db.get(Job,stage.job_id)
+        monkeypatch.setattr(composition,'_registered',rt)
+>       with job_scope(job.id):validate_effect(e.db)
+                               ^^^^^^^^^^^^^^^^^^^^^
+
+backend/tests/test_stage12_durable_analysis.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/app/domains/runs/analysis_workflows/effects.py:48: in validate_effect
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+row = <app.domains.runs.models.AutoRebalanceWorkflow object at 0x10e4a6b70>
+stage = <app.domains.runs.models.AutoRebalanceWorkflowStage object at 0x10e042270>
+job = <app.domains.jobs.models.Job object at 0x108566c10>
+dependencies = [{'cost_usd': '0', 'data': {'connection': {'valid': True, 'version': 1}, 'owner_id': 1, 'snapshot_id': 1, 'version': 1}, 'owner_id': 1, 'plan_hash': '02f30e4999d8c204f1a071dc481c8cc0a6534aa789373e45fb8947fc477f7c26', ...}]
+
+    def validate_job_request(row,stage,job,dependencies):
+        expected=frozen_request(row,stage,dependencies)
+        if (job is None or job.id!=stage.job_id or job.user_id!=row.user_id
+            or job.module_id!=row.module_id or job.module_version!=row.module_version
+            or job.provider!=expected['provider'] or job.model!=expected['model']
+>           or job.prompt!=expected['prompt'] or job.prompt_id is not None
+                                                 ^^^^^^^^^^^^^
+            or job.auto_rebalance_portfolio!=row.portfolio or job.auto_rebalance_sequence!=row.sequence
+            or job.auto_rebalance_label!=row.label or not isinstance(job.request_context_json,dict)
+            or any(type(job.request_context_json.get(k)) is not type(v) or job.request_context_json.get(k)!=v
+                   for k,v in expected['context'].items())):
+E                  AttributeError: 'Job' object has no attribute 'prompt_id'. Did you mean: 'prompt'?
+
+backend/app/domains/runs/analysis_workflows/bindings.py:38: AttributeError
+_______ test_provider_effect_rechecks_current_persisted_binding[binding] _______
+
+env = namespace(db=<sqlalchemy.orm.session.Session object at 0x10db173e0>, engine=Engine(sqlite:////private/var/folders/4t/j...ables': {'provider': 'synthetic', 'model': 'offline', 'prompt_version': 'p1', 'template': 'Synthetic analysis only'}}})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e4ed2b0>
+mutation = 'binding'
+
+    @pytest.mark.parametrize('mutation',['source','plan','pause','cancel','module','binding'])
+    def test_provider_effect_rechecks_current_persisted_binding(env,monkeypatch,mutation):
+        from app.domains.runs.analysis_workflows.effects import job_scope,validate_effect
+        from app.domains.runs.analysis_workflows import runtime as composition
+        e=env;row=create(e);rt=__import__('dataclasses').replace(e.runtime,adapter=QueuedAI())
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
+        stage=service(e).stages(row)[1];job=e.db.get(Job,stage.job_id)
+        monkeypatch.setattr(composition,'_registered',rt)
+>       with job_scope(job.id):validate_effect(e.db)
+                               ^^^^^^^^^^^^^^^^^^^^^
+
+backend/tests/test_stage12_durable_analysis.py:298: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+backend/app/domains/runs/analysis_workflows/effects.py:48: in validate_effect
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+row = <app.domains.runs.models.AutoRebalanceWorkflow object at 0x10db15b80>
+stage = <app.domains.runs.models.AutoRebalanceWorkflowStage object at 0x10ebc4c80>
+job = <app.domains.jobs.models.Job object at 0x10d457750>
+dependencies = [{'cost_usd': '0', 'data': {'connection': {'valid': True, 'version': 1}, 'owner_id': 1, 'snapshot_id': 1, 'version': 1}, 'owner_id': 1, 'plan_hash': '02f30e4999d8c204f1a071dc481c8cc0a6534aa789373e45fb8947fc477f7c26', ...}]
+
+    def validate_job_request(row,stage,job,dependencies):
+        expected=frozen_request(row,stage,dependencies)
+        if (job is None or job.id!=stage.job_id or job.user_id!=row.user_id
+            or job.module_id!=row.module_id or job.module_version!=row.module_version
+            or job.provider!=expected['provider'] or job.model!=expected['model']
+>           or job.prompt!=expected['prompt'] or job.prompt_id is not None
+                                                 ^^^^^^^^^^^^^
+            or job.auto_rebalance_portfolio!=row.portfolio or job.auto_rebalance_sequence!=row.sequence
+            or job.auto_rebalance_label!=row.label or not isinstance(job.request_context_json,dict)
+            or any(type(job.request_context_json.get(k)) is not type(v) or job.request_context_json.get(k)!=v
+                   for k,v in expected['context'].items())):
+E                  AttributeError: 'Job' object has no attribute 'prompt_id'. Did you mean: 'prompt'?
+
+backend/app/domains/runs/analysis_workflows/bindings.py:38: AttributeError
+=============================== warnings summary ===============================
+backend/tests/test_stage12_durable_analysis.py: 2079 warnings
+  /Users/tarunsingh/Documents/Codex/2026-10-19/task-5/investment-engine/.venv-preview/lib/python3.13/site-packages/sqlalchemy/sql/schema.py:3624: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED backend/tests/test_stage12_durable_analysis.py::test_queue_adapter_uses_existing_job_and_transactional_outbox_without_provider
+FAILED backend/tests/test_stage12_durable_analysis.py::test_provider_effect_rechecks_current_persisted_binding[source]
+FAILED backend/tests/test_stage12_durable_analysis.py::test_provider_effect_rechecks_current_persisted_binding[plan]
+FAILED backend/tests/test_stage12_durable_analysis.py::test_provider_effect_rechecks_current_persisted_binding[pause]
+FAILED backend/tests/test_stage12_durable_analysis.py::test_provider_effect_rechecks_current_persisted_binding[cancel]
+FAILED backend/tests/test_stage12_durable_analysis.py::test_provider_effect_rechecks_current_persisted_binding[module]
+FAILED backend/tests/test_stage12_durable_analysis.py::test_provider_effect_rechecks_current_persisted_binding[binding]
+7 failed, 77 passed, 2079 warnings in 3.77s

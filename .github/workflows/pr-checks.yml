@@ -326,14 +326,14 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify manual import, owner isolation, duplicate/acceptance races and actual Alembic roundtrip
-        run: python -m pytest -q --junitxml=/tmp/stage12.xml backend/tests/test_stage12_durable_analysis.py backend/tests/test_stage12_postgres.py
+        run: python -m pytest -q --junitxml=/tmp/stage12.xml backend/tests/test_stage12_durable_analysis.py backend/tests/test_stage12_review_bindings.py backend/tests/test_stage12_postgres.py
       - name: Require all Stage12 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage12.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage12 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 67
+          assert len(root.findall('.//testcase')) == 128
           PY_CHECK
 
   stage07-module-policy:

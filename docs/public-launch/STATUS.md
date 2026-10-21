@@ -1,3 +1,7 @@
+# Stage12 review correction — independent re-review pending
+
+Original local candidate88b8acda is preserved. The local successor corrects acquisition provenance, actual provider/model/prompt binding and future snapshot times.331 backend/native checks and8unaffected harness tests pass; the reviewer's2denied socket-binding tests were not retried. Real PostgreSQL4/Linux20, exact CI and independent re-review remain pending. See STAGE12_REVIEW_CORRECTION.md. Normal runtime is disabled; real India snapshots without a trusted acquisition receipt remain unavailable. No push/deploy/provider/security/AWS change orStage13. Earlier checkpoints below are historical, including original local evidence.
+
 # Current checkpoint — Stage11 accepted with qualifications; Stage12 local only
 
 The parent handoff records Stage11 exact `7c210e7b24dc2a6012daf98844a7279767e9a9df` accepted by the owner on 21 October 2026 at 02:17:46 UTC ("Confirmed and proceed"). Its 33 checks, exact artifact/source audit, local exact-source import browser tests and live owner build/navigation/reload checks passed. **Live INDmoney remains disabled**; import/chart acceptance is qualified by local synthetic coverage, not live module availability or provider certification. Stage11 deployment/evidence remains unchanged.

@@ -1,3 +1,5 @@
+Current review successor: see [STAGE12_REVIEW_CORRECTION.md](STAGE12_REVIEW_CORRECTION.md). Original verification below belongs to88b8acda; fresh correction evidence is separate.
+
 # Stage12 local review handoff
 
 Scope: durable server-owned analysis, never unattended financial execution. Candidate SHA is recorded in the external `stage12-local-handoff.json` after commit; this document's containing commit is the source candidate. Stage11 source, acceptance qualification and live environment are preserved.
@@ -31,4 +33,4 @@ The accepted Stage11 Linux job is frozen at7c210e7b, with its assertions unchang
 
 ## Future schema recovery prerequisites
 
-Migration `durable_analysis_001` follows `indmoney_integrity_001`, adding nullable immutable input metadata and counters/checkpoints to existing workflow tables with a unique owner/request key. A future deployment needs a fresh private Stage11 backup with exact source/manifest/revision/fingerprint and recorded deploy provenance. On rollback, stop app services, preserve new workflow/stage/job/outbox plus previous import/connection material privately, downgrade only the exact successor, transactionally restore the verified backup, verify the complete catalog/data/sequence fingerprint, then restore the pinned application release. Persistent pending markers continue to block startup; interrupted restores require verification-only recovery, not a blind repeat. Local tests do not certify a live restore.
+Migration `durable_analysis_001` follows `indmoney_integrity_001`, adding nullable immutable input metadata and counters/checkpoints to existing workflow tables plus nullable acquisition provenance on existing Zerodha snapshots with a unique owner/request key. A future deployment needs a fresh private Stage11 backup with exact source/manifest/revision/fingerprint and recorded deploy provenance. On rollback, stop app services, preserve new workflow/stage/job/outbox plus previous import/connection material privately, downgrade only the exact successor, transactionally restore the verified backup, verify the complete catalog/data/sequence fingerprint, then restore the pinned application release. Persistent pending markers continue to block startup; interrupted restores require verification-only recovery, not a blind repeat. Local tests do not certify a live restore.

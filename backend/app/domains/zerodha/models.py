@@ -44,6 +44,9 @@ class ZerodhaPortfolioSnapshot(Base, TimestampMixin):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
 
+    # Nullable legacy rows remain unverified; never backfill from a current connection.
+    acquisition_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     holdings_count: Mapped[int] = mapped_column(nullable=False, default=0)
     net_positions_count: Mapped[int] = mapped_column(nullable=False, default=0)
     day_positions_count: Mapped[int] = mapped_column(nullable=False, default=0)

@@ -29,18 +29,21 @@ def policy(db,owner,portfolio,*,version=None,scheduled=False,facts=None):
     except ModuleLifecycleDenied:raise WorkflowDenied('Current policy or token unavailable') from None
 
 
-def owned_source(db,owner,portfolio,snapshot_id=None):
+def owned_source(db,owner,portfolio,snapshot_id=None,*,now=None):
+    from .acquisition import sane_capture,validate_acquisition
+    now=utc(now or datetime.now(timezone.utc))
     if portfolio=='indmoney_us':
         snapshot=db.scalar(select(IndMoneyUsPortfolioSnapshot).where(IndMoneyUsPortfolioSnapshot.user_id==owner,accepted_snapshot_predicate()).order_by(IndMoneyUsPortfolioSnapshot.captured_at.desc(),IndMoneyUsPortfolioSnapshot.id.desc()).limit(1).execution_options(populate_existing=True))
         if snapshot is None or snapshot_id is not None and snapshot.id!=snapshot_id:raise WorkflowDenied('Current accepted portfolio required')
-        try:require_recommendation_snapshot(snapshot)
+        sane_capture(snapshot.captured_at,now=now)
+        try:require_recommendation_snapshot(snapshot,now=now)
         except Exception:raise WorkflowDenied('Accepted portfolio validation failed') from None
         return {'owner_id':owner,'portfolio':portfolio,'snapshot_id':snapshot.id,'content_hash':snapshot.content_hash,'captured_at':utc(snapshot.captured_at).isoformat(),'currency':'USD','holdings':deepcopy(snapshot.holdings),'connection':None}
     if portfolio!='india':raise WorkflowDenied('Unknown portfolio')
     snapshot=db.scalar(select(ZerodhaPortfolioSnapshot).where(ZerodhaPortfolioSnapshot.user_id==owner).order_by(ZerodhaPortfolioSnapshot.captured_at.desc(),ZerodhaPortfolioSnapshot.id.desc()).limit(1).execution_options(populate_existing=True))
     connection=db.scalar(select(IntegrationConnection).where(IntegrationConnection.owner_id==owner,IntegrationConnection.provider=='zerodha',IntegrationConnection.is_current.is_(True)).execution_options(populate_existing=True))
     if not snapshot or snapshot_id is not None and snapshot.id!=snapshot_id:raise WorkflowDenied('Current portfolio required')
-    if not connection or connection.status!='active' or not connection.token_expires_at or utc(connection.token_expires_at)<=datetime.now(timezone.utc):raise WorkflowDenied('Valid current connection required')
-    if datetime.now(timezone.utc)-utc(snapshot.captured_at)>timedelta(hours=48):raise WorkflowDenied('Stale portfolio')
-    body={'owner_id':owner,'portfolio':portfolio,'snapshot_id':snapshot.id,'captured_at':utc(snapshot.captured_at).isoformat(),'currency':'INR','holdings':deepcopy(snapshot.holdings),'net_positions':deepcopy(snapshot.net_positions),'day_positions':deepcopy(snapshot.day_positions),'connection':{'id':connection.id,'version':connection.version,'account':connection.provider_account_id,'mode':connection.app_ownership_mode}}
+    if not connection or connection.status!='active' or not connection.token_expires_at or utc(connection.token_expires_at)<=now:raise WorkflowDenied('Valid current connection required')
+    receipt=validate_acquisition(snapshot,connection,owner,now=now)
+    body={'owner_id':owner,'portfolio':portfolio,'snapshot_id':snapshot.id,'captured_at':utc(snapshot.captured_at).isoformat(),'currency':'INR','holdings':deepcopy(snapshot.holdings),'net_positions':deepcopy(snapshot.net_positions),'day_positions':deepcopy(snapshot.day_positions),'connection':{'id':connection.id,'version':connection.version,'account':connection.provider_account_id,'mode':connection.app_ownership_mode},'acquisition':receipt}
     body['content_hash']=digest(body);return body

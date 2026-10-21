@@ -35,7 +35,9 @@ def validate_effect(session):
     if runtime is None:
         raise ModuleLifecycleDenied('Durable analysis runtime unavailable')
     service = Workflows(session, runtime)
-    row = service.owned(job.user_id, context.get('workflow_id'))
+    from app.shared.exceptions import NotFoundException
+    try:row = service.owned(job.user_id, context.get('workflow_id'))
+    except NotFoundException:raise ModuleLifecycleDenied('Owned analysis workflow binding unavailable') from None
     service.validate_current(row)
     stage = next((s for s in service.stages(row) if s.stage == context.get('stage')), None)
     if (row.status != 'processing' or stage is None or stage.job_id != job.id
@@ -43,3 +45,6 @@ def validate_effect(session):
             or context.get('source_hash') != row.execution_json['source_hash']
             or context.get('plan_hash') != row.execution_json['plan_hash']):
         raise ModuleLifecycleDenied('Analysis job no longer binds current owned work')
+
+    from .bindings import dependency_results,validate_job_request
+    validate_job_request(row,stage,job,dependency_results(service.stages(row),stage))

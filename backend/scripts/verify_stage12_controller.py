@@ -248,6 +248,7 @@ def run_suite(python,group):
             conn.execute(sa.text("INSERT INTO indmoney_us_portfolio_snapshots (id,user_id,snapshot_date,captured_at,source,raw_text,parse_status,parse_warnings,holdings_count,indices_count,market_indices,dashboard_top_holdings,holdings,created_at,updated_at,acceptance_state,import_key,content_hash,import_provenance,accepted_at) VALUES (9002,:owner,CURRENT_DATE,now(),'synthetic_ci','SYNTHETIC ACCEPTED PORTFOLIO','parsed','[]',0,0,'[]','[]','[]',now(),now(),'accepted',:key,:hash,:provenance,now())").bindparams(sa.bindparam('provenance',type_=sa.JSON)),{'owner':owner,'key':'1'*64,'hash':'2'*64,'provenance':{'parser_version':'synthetic-controller-only','source_hash':'3'*64,'currency':'USD'}})
             conn.execute(sa.text("INSERT INTO auto_rebalance_workflows (id,user_id,portfolio,sequence,label,status,current_stage,orchestration_kind,request_key,execution_json,control_version,created_at,updated_at) VALUES (9001,:owner,'indmoney_us',1,'Synthetic durable workflow','partial','threats','analysis_v1','synthetic-controller-key',:inputs,0,now(),now())").bindparams(sa.bindparam('inputs',type_=sa.JSON)),{'owner':owner,'inputs':{'synthetic':True,'orders_authorized':False}})
             conn.execute(sa.text("INSERT INTO auto_rebalance_workflow_stages (workflow_id,stage,status,checkpoint_json,attempt_count,created_at,updated_at) VALUES (9001,'sync','completed',:checkpoint,1,now(),now())").bindparams(sa.bindparam('checkpoint',type_=sa.JSON)),{'checkpoint':{'attempts':[{'number':1,'cost_usd':'0'}],'synthetic':True}})
+            conn.execute(sa.text("INSERT INTO zerodha_portfolio_snapshots (user_id,snapshot_date,captured_at,source,holdings_count,net_positions_count,day_positions_count,holdings_market_value,holdings_pnl,holdings_day_change_value,available_margin,positions_pnl,positions_m2m,dashboard_top_holdings,holdings,net_positions,day_positions,acquisition_json,created_at,updated_at) VALUES (:owner,CURRENT_DATE,now(),'synthetic_ci',0,0,0,0,0,0,0,0,0,'[]','[]','[]','[]',:receipt,now(),now())").bindparams(sa.bindparam('receipt',type_=sa.JSON)),{'owner':owner,'receipt':{'synthetic':True,'provider_calls':False}})
             conn.execute(sa.text("UPDATE ci_payload SET value='post-backup mutation' WHERE id=1"))
             conn.execute(sa.text("SELECT setval('public.ci_explicit_sequence',177,false)"))
         ctl.promote(candidate)
@@ -276,9 +277,10 @@ def run_suite(python,group):
         assert command(['runuser','-u','credx-uat2-web','--','test','-r',path],check=False).returncode!=0
         payload=json.loads(path.read_text())
         assert payload['revision']=='durable_analysis_001'
-        assert set(payload['tables'])=={'integration_connections','connection_credentials','connection_attempts','connection_binding_history','indmoney_us_portfolio_snapshots','auto_rebalance_workflows','auto_rebalance_workflow_stages','jobs','outbox'}
+        assert set(payload['tables'])=={'integration_connections','connection_credentials','connection_attempts','connection_binding_history','indmoney_us_portfolio_snapshots','auto_rebalance_workflows','auto_rebalance_workflow_stages','jobs','outbox','zerodha_portfolio_snapshots'}
         assert payload['tables']['auto_rebalance_workflows'][0]['execution_json']['synthetic'] is True
         assert payload['tables']['auto_rebalance_workflow_stages'][0]['checkpoint_json']['attempts'][0]['cost_usd']=='0'
+        assert payload['tables']['zerodha_portfolio_snapshots'][0]['acquisition_json']=={'synthetic':True,'provider_calls':False}
         imports=payload['tables']['indmoney_us_portfolio_snapshots']
         assert {row['id'] for row in imports}=={9001,9002}
         accepted=next(row for row in imports if row['id']==9002)

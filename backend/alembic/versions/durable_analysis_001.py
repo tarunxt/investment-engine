@@ -6,6 +6,7 @@ down_revision='indmoney_integrity_001'
 branch_labels=depends_on=None
 
 def upgrade():
+    op.add_column('zerodha_portfolio_snapshots',sa.Column('acquisition_json',sa.JSON(),nullable=True))
     for name,kind in [('orchestration_kind',sa.String(24)),('request_key',sa.String(128)),('execution_json',sa.JSON())]:
         op.add_column('auto_rebalance_workflows',sa.Column(name,kind,nullable=True))
     op.add_column('auto_rebalance_workflows',sa.Column('control_version',sa.Integer(),nullable=False,server_default='0'))
@@ -14,6 +15,7 @@ def upgrade():
     op.add_column('auto_rebalance_workflow_stages',sa.Column('attempt_count',sa.Integer(),nullable=False,server_default='0'))
 
 def downgrade():
+    op.drop_column('zerodha_portfolio_snapshots','acquisition_json')
     # An approved rollback must preserve all new workflow/checkpoint evidence.
     op.drop_column('auto_rebalance_workflow_stages','attempt_count')
     op.drop_column('auto_rebalance_workflow_stages','checkpoint_json')

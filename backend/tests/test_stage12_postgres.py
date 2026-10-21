@@ -5,7 +5,7 @@ from copy import deepcopy
 import os,subprocess,sys
 from pathlib import Path
 import pytest
-from sqlalchemy import select,text,inspect
+from sqlalchemy import select,text,inspect,Table,MetaData
 from sqlalchemy.orm import Session
 from app.domains.modules.models import UserModulePreferences,UserModule
 from app.domains.modules.policy import ModuleFacts
@@ -63,10 +63,17 @@ def test_real_stage12_migration_roundtrip_preserves_stage11_and_legacy_workflow(
     migrate('upgrade','indmoney_integrity_001')
     with engine.begin() as db:
         db.execute(text("INSERT INTO users (email,username,password_hash,role,is_active,is_verified,created_at,updated_at) VALUES ('migration@stage12.example.invalid','synthetic12','unusable','USER',true,true,now(),now())"))
+        from app.domains.zerodha.portfolio import build_portfolio_snapshot
+        now=datetime.now(timezone.utc)
+        source=build_portfolio_snapshot([],{'net':[],'day':[]},captured_at=now,source='manual')
+        source.update(user_id=db.scalar(text('SELECT id FROM users LIMIT 1')),created_at=now,updated_at=now,dashboard_top_holdings=[],holdings_invested_value=0)
+        db.execute(Table('zerodha_portfolio_snapshots',MetaData(),autoload_with=db).insert().values(**source))
     def snapshot():
-        with engine.connect() as db:return {name:[tuple(row) for row in db.execute(text('SELECT * FROM '+name+' ORDER BY id'))] for name in ['users','indmoney_us_portfolio_snapshots','integration_connections','connection_attempts','auto_rebalance_workflows','auto_rebalance_workflow_stages']}
+        with engine.connect() as db:return {name:[tuple(row) for row in db.execute(text('SELECT * FROM '+name+' ORDER BY id'))] for name in ['users','indmoney_us_portfolio_snapshots','integration_connections','connection_attempts','auto_rebalance_workflows','auto_rebalance_workflow_stages','zerodha_portfolio_snapshots']}
     before=snapshot()
     for _ in range(2):
         migrate('upgrade','durable_analysis_001')
         assert {'execution_json','control_version','request_key'}<={c['name'] for c in inspect(engine).get_columns('auto_rebalance_workflows')}
+        assert 'acquisition_json' in {c['name'] for c in inspect(engine).get_columns('zerodha_portfolio_snapshots')}
+        with engine.connect() as db:assert db.scalar(text('SELECT acquisition_json FROM zerodha_portfolio_snapshots LIMIT 1')) is None
         migrate('downgrade','indmoney_integrity_001');assert snapshot()==before
