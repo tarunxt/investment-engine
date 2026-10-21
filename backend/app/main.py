@@ -323,6 +323,8 @@ app.include_router(providers_router)
 app.include_router(api_usage_router)
 from app.domains.recommendation_audit.router import router as recommendation_audit_router
 app.include_router(recommendation_audit_router)
+from app.domains.runs.analysis_router import router as analysis_workflows_router
+app.include_router(analysis_workflows_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
 app.include_router(trading_bots_router)

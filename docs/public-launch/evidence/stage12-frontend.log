@@ -1,0 +1,25 @@
+✔ real zero retained, missing and unaccepted history become gaps (9.205791ms)
+✔ line segments never connect across a missing observation (0.141ms)
+✔ legacy/currency/nonfinite history is not a zero balance (0.096917ms)
+✔ actual card does not accept until preview and explicit second click (36.979542ms)
+✔ actual card quarantines invalid data and disables acceptance (17.285167ms)
+✔ late preview cannot authorize changed source text (11.211709ms)
+✔ format, asof and correction changes invalidate an existing preview (33.628625ms)
+✔ owner or same-owner session replacement changes the private import lifetime before effects (8.12925ms)
+✔ historical accepted parser receipts create gaps instead of current value points (0.098583ms)
+✔ older preview cannot be accepted even with a stored hash (11.86025ms)
+✔ disabled runtime cannot start work and never submits on mount (52.091042ms)
+✔ enabled observer only reads; persisted completion never launches next browser stage (17.121209ms)
+✔ double start submits one request until the server returns (11.088458ms)
+✔ pause uses authoritative server workflow and CAS version (7.909542ms)
+✔ unmount invalidates a pending control response (7.590833ms)
+✔ status outage exposes error without inventing data or starting fallback work (6.905125ms)
+✔ owner and same-owner session changes replace private component lifetime (9.777625ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 387.410292

@@ -41,6 +41,16 @@ def task_identity(session,name,args,kwargs):
     from app.domains.runs.models import Run
     domain=name.split('.')[2] if name.startswith('app.domains.') else None
     module=DOMAIN_MODULES.get(domain)
+    if name=='app.domains.runs.tasks.advance_analysis_workflow':
+        from uuid import UUID
+        from app.infrastructure.database.outbox.models import OutboxMessage
+        from app.domains.runs.models import AutoRebalanceWorkflow
+        from app.domains.runs.analysis_workflows.contracts import TOPIC
+        try:message=session.get(OutboxMessage,UUID(str(kwargs.get('message_id',args[0] if args else None))),populate_existing=True)
+        except (ValueError,TypeError):raise ModuleLifecycleDenied('Invalid workflow dispatch locator') from None
+        record=session.get(AutoRebalanceWorkflow,message.payload.get('workflow_id'),populate_existing=True) if message and message.topic==TOPIC else None
+        if record is None or record.orchestration_kind!='analysis_v1' or record.user_id!=message.payload.get('owner_id') or not record.module_id or record.module_version is None:raise ModuleLifecycleDenied('Persisted workflow binding required')
+        return WorkIdentity(record.user_id,record.module_id,record.module_version)
     if name=='app.domains.jobs.tasks.execute_ai_job':
         record=session.get(Job,kwargs.get('job_id',args[0] if args else None),populate_existing=True)
         if record is None or record.module_cancel_requested or not record.module_id or record.module_version is None:
@@ -93,7 +103,7 @@ def task_scope(name,args=(),kwargs=None,*,factory=None,dispatch_id=None):
     if factory is None:
         from app.infrastructure.database.sync_session import SyncSessionLocal
         factory=SyncSessionLocal
-    if name!='app.domains.jobs.tasks.execute_ai_job':
+    if name not in {'app.domains.jobs.tasks.execute_ai_job','app.domains.runs.tasks.advance_analysis_workflow'}:
         from .dispatch import bound_execution
         with bound_execution(factory,dispatch_id,name,args,kwargs) as identity:
             with execution_scope(identity,factory):yield
@@ -104,7 +114,9 @@ def task_scope(name,args=(),kwargs=None,*,factory=None,dispatch_id=None):
             current_sync(session,identity,boundary='worker',scheduled=kwargs.get('source')=='scheduled' or 'scheduled' in args)
     except SQLAlchemyError:
         raise ModuleLifecycleDenied('Current module policy unavailable') from None
-    with execution_scope(identity,factory):yield
+    from app.domains.runs.analysis_workflows.effects import job_scope
+    with job_scope(kwargs.get('job_id',args[0] if args else None) if name=='app.domains.jobs.tasks.execute_ai_job' else None):
+        with execution_scope(identity,factory):yield
 
 
 def closed_scheduler(name):

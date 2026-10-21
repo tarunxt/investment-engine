@@ -1,0 +1,109 @@
+▲ Next.js 16.2.5 (webpack)
+
+  Creating an optimized production build ...
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOSPC: no space left on device, write
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOSPC: no space left on device, write
+✓ Compiled successfully in 21.0s
+  Running TypeScript ...
+  Finished TypeScript in 16.1s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/53) ...
+  Generating static pages using 7 workers (13/53)
+Initial dashboard summary was unavailable. { error_type: 'Error' }
+  Generating static pages using 7 workers (26/53)
+  Generating static pages using 7 workers (39/53)
+✓ Generating static pages using 7 workers (53/53) in 596ms
+  Finalizing page optimization ...
+  Collecting build traces ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /admin/cost-drivers
+├ ƒ /api/auth/[...nextauth]
+├ ƒ /api/bullpen-ai
+├ ƒ /api/bullpen-ai/current-odds
+├ ƒ /api/bullpen-ai/health
+├ ƒ /api/bullpen-ai/market-link
+├ ƒ /api/bullpen-ai/market-urls
+├ ƒ /api/bullpen-ai/positions
+├ ƒ /api/bullpen-ai/sports-event-comparisons
+├ ƒ /api/bullpen-ai/sports-event-metadata
+├ ƒ /api/bullpen-ai/stage-one-snapshot
+├ ƒ /api/bullpen-ai/stage-one.xlsx
+├ ƒ /api/runtime-fingerprint
+├ ƒ /api/universal-polymarket-scan/auto-run
+├ ƒ /backend-api/[...path]
+├ ƒ /console/apis
+├ ƒ /console/auto-rebalance-runs/[portfolio]
+├ ƒ /console/auto-rebalance-runs/[portfolio]/[sequence]
+├ ƒ /console/automated-rebalance
+├ ƒ /console/bullpen-ai
+├ ƒ /console/bullpen-ai-auto-live
+├ ƒ /console/bullpen-ai/008history
+├ ƒ /console/bullpen-ai/analyse-events
+├ ƒ /console/bullpen-ai/analyse-events/[tradeId]
+├ ƒ /console/bullpen-ai/analyse-runs
+├ ƒ /console/bullpen-ai/analyse-runs/[runId]
+├ ƒ /console/bullpen-ai/export-stage-one
+├ ƒ /console/bullpen-ai/history
+├ ƒ /console/bullpen-ai/runs/[runId]
+├ ƒ /console/bullpen-sports
+├ ƒ /console/bullpen-sports/history
+├ ƒ /console/bullpen-sports/runs/[runId]
+├ ƒ /console/bullpen008
+├ ƒ /console/bullpen008/analyse-events
+├ ƒ /console/bullpen008/analyse-runs
+├ ƒ /console/bullpen008/history
+├ ƒ /console/bullpen008/runs/[runId]
+├ ƒ /console/dashboard
+├ ƒ /console/google-sheets
+├ ƒ /console/google-sheets/callback
+├ ƒ /console/indmoney-us
+├ ƒ /console/indmoney-us-swing-run/[id]
+├ ƒ /console/indmoney-us/events
+├ ƒ /console/indmoney-us/final-actionables
+├ ƒ /console/indmoney-us/rebalance
+├ ƒ /console/indmoney-us/swing-trade
+├ ƒ /console/indmoney-us/threats
+├ ƒ /console/jobs
+├ ƒ /console/jobs/[id]
+├ ƒ /console/llms
+├ ƒ /console/mails
+├ ƒ /console/polymarket-bot
+├ ƒ /console/polymarket-direct-bot
+├ ƒ /console/profile
+├ ƒ /console/profile/activity
+├ ƒ /console/profile/connections
+├ ƒ /console/profile/cost-drivers
+├ ƒ /console/profile/preferences
+├ ƒ /console/profile/security
+├ ƒ /console/prompts
+├ ƒ /console/runs
+├ ƒ /console/runs/[id]
+├ ƒ /console/sports-rankings
+├ ƒ /console/technical-setups
+├ ƒ /console/trading-bots
+├ ƒ /console/trading-bots/bullpen-ai-auto-live
+├ ƒ /console/uat2
+├ ƒ /console/zerodha
+├ ƒ /console/zerodha-swing-run/[id]
+├ ƒ /console/zerodha/events
+├ ƒ /console/zerodha/final-actionables
+├ ƒ /console/zerodha/rebalance
+├ ƒ /console/zerodha/swing-trade
+├ ƒ /console/zerodha/threats
+├ ○ /database
+├ ○ /dev/stage-two-llm-popup
+├ ○ /forgot-password
+├ ○ /login
+├ ƒ /preview-kite
+├ ○ /register
+├ ƒ /reset-password/[token]
+└ ƒ /zerodha/callback
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand

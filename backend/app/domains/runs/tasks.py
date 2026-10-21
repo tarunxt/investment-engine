@@ -402,3 +402,15 @@ def backfill_final_actionable_history_task(self, user_id: int) -> dict[str, int]
             if self.request.retries >= self.max_retries:
                 _clear_final_actionable_history_backfill_marker(user_id)
             raise self.retry(exc=exc)
+
+
+@celery.task(name='app.domains.runs.tasks.advance_analysis_workflow',acks_late=True,reject_on_worker_lost=True,soft_time_limit=20,time_limit=25)
+def advance_analysis_workflow(message_id):
+    from .analysis_workflows.runtime import configured_runtime
+    from .analysis_workflows.service import Workflows
+    runtime=configured_runtime()
+    if runtime is None:return {'status':'disabled'}
+    with SyncSessionLocal() as db:
+        result=Workflows(db,runtime).consume(message_id)
+        db.commit()
+        return {'status':result}

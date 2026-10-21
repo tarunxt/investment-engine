@@ -5,12 +5,12 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 279,
+    "http": 284,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
     "websocket": 5,
-    "worker": 43
+    "worker": 44
   },
   "entries": [
     {
@@ -5047,6 +5047,7 @@
         "db.begin",
         "db.execute",
         "db.get_bind",
+        "db.run_sync",
         "db.scalar",
         "factory",
         "fence_error",
@@ -5072,7 +5073,7 @@
       "registration": "asynccontextmanager",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/modules/lifecycle.py:170"
+      "source": "backend/app/domains/modules/lifecycle.py:172"
     },
     {
       "calls": [
@@ -9475,6 +9476,158 @@
     },
     {
       "calls": [
+        "Depends",
+        "router.get"
+      ],
+      "capability": "analysis_config",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_current_user)",
+        "Depends(optional_analysis_runtime)",
+        "router.get('/config')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/config",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:46"
+    },
+    {
+      "calls": [
+        "AutoRebalanceWorkflow.id.desc",
+        "Depends",
+        "Workflows",
+        "Workflows(s, runtime).detail",
+        "db.run_sync",
+        "router.get",
+        "s.scalars",
+        "s.scalars(select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id == user.id, AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1').order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all",
+        "select",
+        "select(AutoRebalanceWorkflow).where",
+        "select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id == user.id, AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1').order_by",
+        "select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id == user.id, AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1').order_by(AutoRebalanceWorkflow.id.desc()).limit"
+      ],
+      "capability": "list_analysis_workflows",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:50"
+    },
+    {
+      "calls": [
+        "Depends",
+        "Workflows",
+        "Workflows(s, runtime).detail",
+        "db.run_sync",
+        "router.get"
+      ],
+      "capability": "get_analysis_workflow",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{workflow_id}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/{workflow_id}",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:57"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Workflows",
+        "Workflows(s, runtime).create",
+        "Workflows(s, runtime).detail",
+        "body.model_dump",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "router.post"
+      ],
+      "capability": "create_analysis_workflow",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:61"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Workflows",
+        "Workflows(s, runtime).control",
+        "Workflows(s, runtime).detail",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "router.post"
+      ],
+      "capability": "control_analysis_workflow",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/{workflow_id}/controls')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/{workflow_id}/controls",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:68"
+    },
+    {
+      "calls": [
         "self._session.commit"
       ],
       "capability": "update_export_state",
@@ -9519,7 +9672,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1005"
+      "source": "backend/app/domains/runs/router.py:1007"
     },
     {
       "calls": [
@@ -9562,7 +9715,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}/cancel",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1018"
+      "source": "backend/app/domains/runs/router.py:1020"
     },
     {
       "calls": [
@@ -9852,7 +10005,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-completion-email",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:802"
+      "source": "backend/app/domains/runs/router.py:804"
     },
     {
       "calls": [
@@ -9890,7 +10043,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:897"
+      "source": "backend/app/domains/runs/router.py:899"
     },
     {
       "calls": [
@@ -9924,7 +10077,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:968"
+      "source": "backend/app/domains/runs/router.py:970"
     },
     {
       "calls": [
@@ -10038,6 +10191,32 @@
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
       "source": "backend/app/domains/runs/tasks.py:388"
+    },
+    {
+      "calls": [
+        "SyncSessionLocal",
+        "Workflows",
+        "Workflows(db, runtime).consume",
+        "celery.task",
+        "configured_runtime",
+        "db.commit"
+      ],
+      "capability": "advance_analysis_workflow",
+      "classification": "administrator-only",
+      "kind": "worker",
+      "method": "",
+      "module": "runs",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "celery.task(name='app.domains.runs.tasks.advance_analysis_workflow', acks_late=True, reject_on_worker_lost=True, soft_time_limit=20, time_limit=25)",
+      "route": "",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/tasks.py:408"
     },
     {
       "calls": [
@@ -11948,7 +12127,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:104"
+      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:110"
     },
     {
       "calls": [
@@ -12531,7 +12710,7 @@
       "registration": "mounted",
       "route": "/",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/main.py:335"
+      "source": "backend/app/main.py:337"
     },
     {
       "calls": [
@@ -14998,10 +15177,10 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "462f0fbe1d8f3ce036a657645eb21db7a5450e7e43a74d0b86279eeb2efd08b0",
-    "backend/app/domains/modules/dispatch.py": "bb9e8faf27a33a947af05d569763eb91c8ba3ff6d7a90989a8288c798201fa18",
+    "backend/app/domains/modules/coverage.py": "4f333093bcdc22c2d83fc423a569a45192171f1c71fe72886abbfe9d22b9587e",
+    "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
-    "backend/app/domains/modules/lifecycle.py": "e05bf9a7baccc9c42bdb728bf569e4f28458099ff616eb980384b6b9eb727f2d",
+    "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
     "backend/app/domains/modules/policy.py": "5a9340b3abb61d28fc7f5c34e0e88fc059027ac84745e5fa32f151e98799d626",
@@ -15012,7 +15191,7 @@
     "backend/app/domains/modules/schemas.py": "7cc900780b66cd7a61c6c943c016df38215003c5d423b33b93d5aaade0475360",
     "backend/app/domains/modules/service.py": "cc2c0439dd751d2eb57b7c9bb662e4f0c6f5eb6b25b50254cd1d0ba8585c6664",
     "backend/app/domains/modules/store.py": "1c99c65203a74e0d7566575947e7e0c6a08c130a8a7a6bc6263e157e508672fd",
-    "backend/app/domains/modules/tasks.py": "23b12fd7a80dec5ad1105de27b53d94eeab9ba1a0cf50adf8afb4ddd4eed691d",
+    "backend/app/domains/modules/tasks.py": "0025bc5b8ac1ae1ba1d5f53d580c3a2075f50cbb1285902c22603fef9208f34d",
     "backend/app/domains/modules/transports.py": "76a61a9f1b4b8cca2ba6349c5a53c316c584ebd9dc3313ff3eed486ce650886e",
     "backend/app/domains/modules/visibility.py": "7dd7b86df04922dcdf7df1d81ad85d99c59c00c78b81c000ca81b7a9feb8a0fb",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
@@ -15118,15 +15297,25 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/domains/runs/analysis_router.py": "dd0e5f3cf8a6a3270bc640c2084ada81cec8a68f8bf371ea277f618a88cdb1f9",
+    "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
+    "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
+    "backend/app/domains/runs/analysis_workflows/adapters.py": "030896cbeb26376d1213e79d7ad7af4eaf3f46471cca8075fc70dea7518c7a59",
+    "backend/app/domains/runs/analysis_workflows/bindings.py": "fc436ee6f49bbdb39a20dd63b6356f4cbe982878121db4202f4015e6256fe563",
+    "backend/app/domains/runs/analysis_workflows/contracts.py": "6a0549dac46ae6833aa74475f7d4ab550605d4758866e8501a42f4821da5ff3d",
+    "backend/app/domains/runs/analysis_workflows/dispatch.py": "4afbd05e90c1834b1495dae96e30c909944a542631bb1236bb937de0cb330bb5",
+    "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
+    "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
+    "backend/app/domains/runs/analysis_workflows/service.py": "4d25f2f20bd81353707945c127202b4ec9f806c5dd4621e05c87c68514ff0653",
     "backend/app/domains/runs/auto_rebalance_audit.py": "32e04c7bf212bcf7e989252f6877bf205ecfef13942babec807441efac0dbcab",
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
-    "backend/app/domains/runs/models.py": "f37d8b723d70a5e512612ef62cb2e00f6fbbf6a0f285acfe6903ba2f24281487",
+    "backend/app/domains/runs/models.py": "0676320045948635562975a39d85e7a590578d1dbad85bc98464563bdb7ae21b",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
     "backend/app/domains/runs/repository.py": "6451ef66d1130960bd4ff3b20b4869feb2b00081c6982724459d5c74179d72c4",
-    "backend/app/domains/runs/router.py": "81f643755ee26d9b9df22a4c1933ef8b9e165f787a6375137d6fb0da067b9561",
+    "backend/app/domains/runs/router.py": "d9a316d520575bbc274e92e8f91567d7779c112e6692cfe02a6b70f2e13e9df8",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
-    "backend/app/domains/runs/tasks.py": "e05a046b5af24fffe96610116cbc647799b42eb112c6f39f27ddc7950a1fb8f0",
+    "backend/app/domains/runs/tasks.py": "0618d24488224f4d67a0224cc6f89208c7368cce2b885b5642bf2fc03062cdaa",
     "backend/app/domains/runs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/runs/use_cases/create_run.py": "6ebc9862f3964c8343322d977ead5462910c6630ee4e8f2ff16702f86d24b2d5",
     "backend/app/domains/runs/ws_router.py": "feabc8791610cad44485bae5060f8205415a876de51f5932e2e36c2898890326",
@@ -15163,10 +15352,10 @@
     "backend/app/domains/zerodha/events.py": "aa3ddc3c9050de72713c0b8d1376a406484e282175fa5aaf9db6002d7545dee5",
     "backend/app/domains/zerodha/events_router.py": "cbd1e42ef18476bd46fcf843b794aa63d5732751b1923ac63068d278f5c51391",
     "backend/app/domains/zerodha/events_schemas.py": "6626acae75529fa26e989947b552e86eb9d48bda044db90f082381ca95778870",
-    "backend/app/domains/zerodha/models.py": "4dd730f5322c0fa05d4c7818eda0c827598b9d5b7b7dc6436508d29223b3cba4",
+    "backend/app/domains/zerodha/models.py": "1f24307717521bfb6f1e19080af9ca6b791313da2e165c0afacd26b463fe9b21",
     "backend/app/domains/zerodha/order_validation.py": "979bfb228e9f6b7a431f269dcf92ffdb8d7d65cd25032978c1dc27cd063ae284",
     "backend/app/domains/zerodha/portfolio.py": "504831439117570d44043630009ba53ecc22c9fa18e31523bf87ff9147279567",
-    "backend/app/domains/zerodha/repository.py": "eba12f682fa04ca0deec3dbd476e99a4ea7b21516c11f6da47149162c3a2d1fe",
+    "backend/app/domains/zerodha/repository.py": "41a025df1c45adf8c77a90d6670e217f95b126c2d8c16bd558e7c3b38d2b9729",
     "backend/app/domains/zerodha/router.py": "e5d4e1e29a2d8e712ad4b3fa25debe93e7268570b68347a008229a37b6af8628",
     "backend/app/domains/zerodha/schemas.py": "d4a93c5f2bba2e12dbc4112286125bc030c957e9ab3d0139cf5e4768adf3667e",
     "backend/app/domains/zerodha/service.py": "f0bd4f1993e978447cbe674169220b597883a241e5614d155714d8905a00c178",
@@ -15180,7 +15369,7 @@
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/outbox/job_dispatch.py": "a51df2517b52900cf4ab9b1ab6943efd67b8acb87b1276ba90b71bb82da55f6e",
+    "backend/app/infrastructure/database/outbox/job_dispatch.py": "021b44031560a9321214be3543faac030e530acbcf04074b9c4211916f99b694",
     "backend/app/infrastructure/database/outbox/models.py": "a331a3011182c6a6f7d959db71615c6622419d51f2d6d52a83750f5a5b0c703d",
     "backend/app/infrastructure/database/session.py": "a9677b6bab386476db0493aa2f849a66c5f63312810aafa99a5e0be54947c2e9",
     "backend/app/infrastructure/database/sync_session.py": "f974fe13644cf266ef6b1eba8e4280b5412475ce6a47b5f62be90dfd857cd29e",
@@ -15194,7 +15383,7 @@
     "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
     "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "e9d542a17e156079d9488d25d8bb1ec3c236f28f81ff89f50237b2549ab110fb",
+    "backend/app/main.py": "3d84402a0edd5055db59612c33610008a5e5408cd826e0d211e2ee5e419f81e1",
     "backend/app/models/__init__.py": "e3b4b98b6ee35ace717bf639646a30a18264f3a767d325a2a20c8f6f39069e0a",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

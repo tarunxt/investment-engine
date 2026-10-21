@@ -8910,14 +8910,10 @@ ${zerodhaExecutionMode === "direct_market"
     );
   };
 
-  const zerodhaSection = sections[0];
-  const indmoneySection = sections[1];
-
   return (
     <>
       <section className="grid gap-6 xl:grid-cols-2">
-        {renderSectionCard(zerodhaSection)}
-        {renderSectionCard(indmoneySection)}
+        {sections.map(section => <div key={section.portfolio}>{renderSectionCard(section)}</div>)}
       </section>
 
       <section className="mt-6">

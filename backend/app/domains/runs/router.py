@@ -699,6 +699,8 @@ async def update_auto_rebalance_stage(
         raise HTTPException(404, detail="Auto-rebalance run not found")
     from app.domains.modules.lifecycle import admit_workflow_transition
     await admit_workflow_transition(db,current_user.id,workflow)
+    if workflow.orchestration_kind is not None:
+        raise HTTPException(409, 'Server-owned analysis uses durable workflow controls')
     stage_record = next((item for item in workflow.stages if item.stage == stage), None)
     existing_status = stage_record.status.lower() if stage_record else "queued"
     was_terminal = existing_status in AUTO_REBALANCE_TERMINAL_STATUSES

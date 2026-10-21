@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 def dispatch_due(session, publisher, *, now=None, limit=MAX_BATCH, should_stop=lambda: False):
     from app.domains.modules.lifecycle import relay_selection_events
     relay_selection_events(session)
+    from app.domains.runs.analysis_workflows.runtime import configured_runtime
+    runtime=configured_runtime()
+    if runtime is not None:
+        from app.domains.runs.analysis_workflows.dispatch import dispatch
+        from app.domains.runs.tasks import advance_analysis_workflow
+        dispatch(session,lambda message_id:advance_analysis_workflow.apply_async(args=[message_id],queue='ai',retry=False),runtime,now=now)
     now = now or datetime.utcnow()
     due = or_(OutboxMessage.published_at.is_(None), OutboxMessage.published_at <= now - timedelta(seconds=RETRY_SECONDS))
     joined = (OutboxMessage.payload['job_id'].as_integer() == Job.id) & (OutboxMessage.payload['user_id'].as_integer() == Job.user_id)

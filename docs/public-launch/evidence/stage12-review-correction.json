@@ -1,0 +1,73 @@
+{
+  "recorded_at": "2026-10-21T03:20:53.358605+00:00",
+  "reviewed_candidate": "88b8acda2a1c52c7324e6abbd128c514fc9618e2",
+  "review_sha256": "7720fa482c0de7813f20ab8c2c42a93962a14f45c6a13995386434f71f58bc6f",
+  "state": "LOCAL_CORRECTION_PENDING_INDEPENDENT_REREVIEW",
+  "findings": {
+    "source_provenance": "Exact nullable acquisition receipt, all content/identity/connection versions matched; no backfill; legacy overwrite invalidates receipt",
+    "actual_job_request": "Same frozen request generator used at creation, side-effect validation and result consumption; actual provider/model/prompt and owner/module/context/dependency checks",
+    "future_time": "Both sources require captured_at no later than60seconds ahead and no older than48hours"
+  },
+  "passed": {
+    "original_stage12_backend": 63,
+    "new_review_regressions": 61,
+    "other_backend_regressions": 102,
+    "native_recovery": 105,
+    "combined": 331,
+    "safe_harness_tests": 8,
+    "prepared_collection": 128,
+    "inventory": true
+  },
+  "not_run": {
+    "denied_readiness_fixture_tests": 2,
+    "actual_postgresql": 4,
+    "actual_linux_systemd": 20,
+    "CI": true,
+    "independent_rereview": true,
+    "deployment": true
+  },
+  "denial_preserved": {
+    "action": "Reviewer ReadinessFixtureTests HTTPServer bind to127.0.0.1 ephemeral port",
+    "outcome": "denied in reviewer sandbox",
+    "retry_or_bypass": false,
+    "qualification": "Eight unaffected harness tests rerun; CI retains both readiness tests and all20Linux cases without skips"
+  },
+  "limitations": [
+    "Normal runtime remains disabled; no orders",
+    "No trusted live acquisition producer issues acquisition_json yet; real India legacy/manual snapshots therefore remain unavailable, not automatically relabelled",
+    "No Alembic executed outside Docker; unpublished Stage12 migration extends3existingtables",
+    "Frontend source unchanged from independently verified88b8acda; fresh isolated preview follows separately",
+    "No publication, deployment, providers, security/AWS orStage13"
+  ],
+  "logs": {
+    "full": {
+      "path": "docs/public-launch/evidence/stage12-review-full.log",
+      "sha256": "11083b2205e1ccd0007da791683908a9fcca724a80544028e54b3c175dfbcb77"
+    },
+    "harness_safe": {
+      "path": "docs/public-launch/evidence/stage12-review-harness_safe.log",
+      "sha256": "9e62fdde0e00fd9b740c534ed7d5b2c6ba69430654ef445e5a216fe6e48ad634"
+    },
+    "collection": {
+      "path": "docs/public-launch/evidence/stage12-review-collection.log",
+      "sha256": "17ae420ebe334655082113c7946ebb0c1bf0a9ddf59aed82519f6ccb2020cbf5"
+    },
+    "inventory": {
+      "path": "docs/public-launch/evidence/stage12-review-inventory.log",
+      "sha256": "eb4b691afc419e2e73a21fd91235cae0b372909414958d1c2ea16ca77b4db2ac"
+    },
+    "initial_failures": {
+      "path": "docs/public-launch/evidence/stage12-review-initial_failures.log",
+      "sha256": "c6514b8a776e03f150dacddc168419939cfab01efa671d26f1f0df807917210d"
+    },
+    "focused_after_corrections": {
+      "path": "docs/public-launch/evidence/stage12-review-regression_failures.log",
+      "sha256": "58f0aae5ebc807852a0a95521a9a0e50e3f684f893c8276888bab44cba2473ca"
+    }
+  },
+  "frontend": {
+    "passed": 17,
+    "source_unchanged_from": "88b8acda2a1c52c7324e6abbd128c514fc9618e2",
+    "build": "previous exact-source frontend remains byte-identical; fresh isolated preview pending"
+  }
+}

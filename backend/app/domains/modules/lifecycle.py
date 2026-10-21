@@ -161,6 +161,8 @@ def effect_guard(factory,identity,*,capability='analyze',facts=None,module=None)
                     if row is None:raise ModuleLifecycleDenied('Effect module is not selected')
                     identity=WorkIdentity(identity.owner_id,module,row.version)
                 current_sync(session,identity,capability=capability,boundary='side_effect',facts=facts)
+                from app.domains.runs.analysis_workflows.effects import validate_effect
+                validate_effect(session)
                 yield
     except DBAPIError as exc:
         raise fence_error(exc) from None
@@ -185,6 +187,8 @@ async def async_effect_guard(factory,identity,*,capability='analyze',module=None
                 decision=await ModulePolicy(db).authorize(owner_id=identity.owner_id,resource_owner_id=identity.owner_id,
                     module_id=module or identity.module_id,capability=capability,boundary='side_effect')
                 if not decision.allowed:raise ModuleLifecycleDenied('Current effect module denied')
+                from app.domains.runs.analysis_workflows.effects import validate_effect
+                await db.run_sync(validate_effect)
                 yield
     except DBAPIError as exc:
         raise fence_error(exc) from None

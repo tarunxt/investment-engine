@@ -1,0 +1,38 @@
+........................................................................ [ 21%]
+........................................................................ [ 43%]
+........................................................................ [ 65%]
+........................................................................ [ 87%]
+...........................................                              [100%]
+=============================== warnings summary ===============================
+backend/tests/test_stage12_durable_analysis.py: 2100 warnings
+backend/tests/test_stage12_review_bindings.py: 1144 warnings
+backend/tests/test_stage07_lifecycle.py: 515 warnings
+backend/tests/test_stage06_modules.py: 1271 warnings
+backend/tests/test_stage11_import_integrity.py: 96 warnings
+  /Users/tarunsingh/Documents/Codex/2026-10-19/task-5/investment-engine/.venv-preview/lib/python3.13/site-packages/sqlalchemy/sql/schema.py:3624: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+backend/tests/test_stage07_lifecycle.py: 33 warnings
+backend/tests/test_stage06_modules.py: 99 warnings
+backend/tests/test_stage11_import_integrity.py: 6 warnings
+  /Users/tarunsingh/Documents/Codex/2026-10-19/task-3/stage12-durable-analysis/backend/app/core/security.py:108: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+backend/tests/test_stage07_lifecycle.py: 33 warnings
+backend/tests/test_stage06_modules.py: 99 warnings
+backend/tests/test_stage11_import_integrity.py: 6 warnings
+  /Users/tarunsingh/Documents/Codex/2026-10-19/task-3/stage12-durable-analysis/backend/app/core/security.py:115: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "iat": datetime.utcnow(),
+
+backend/tests/test_stage07_lifecycle.py: 11 warnings
+backend/tests/test_stage06_modules.py: 13 warnings
+  /Users/tarunsingh/Documents/Codex/2026-10-19/task-3/stage12-durable-analysis/backend/app/domains/modules/store.py:68: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    user_id=snapshot.owner_id, version=next_version, updated_at=datetime.utcnow())
+
+backend/tests/test_stage07_lifecycle.py: 13 warnings
+backend/tests/test_stage06_modules.py: 6 warnings
+  /Users/tarunsingh/Documents/Codex/2026-10-19/task-3/stage12-durable-analysis/backend/app/domains/modules/store.py:77: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    version=next_version, updated_at=datetime.utcnow()))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+331 passed, 5445 warnings in 10.44s

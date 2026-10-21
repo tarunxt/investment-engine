@@ -1,3 +1,15 @@
+# Stage12 review correction — independent re-review pending
+
+Original local candidate88b8acda is preserved. The local successor corrects acquisition provenance, actual provider/model/prompt binding and future snapshot times.331 backend/native checks and8unaffected harness tests pass; the reviewer's2denied socket-binding tests were not retried. Real PostgreSQL4/Linux20, exact CI and independent re-review remain pending. See STAGE12_REVIEW_CORRECTION.md. Normal runtime is disabled; real India snapshots without a trusted acquisition receipt remain unavailable. No push/deploy/provider/security/AWS change orStage13. Earlier checkpoints below are historical, including original local evidence.
+
+# Current checkpoint — Stage11 accepted with qualifications; Stage12 local only
+
+The parent handoff records Stage11 exact `7c210e7b24dc2a6012daf98844a7279767e9a9df` accepted by the owner on 21 October 2026 at 02:17:46 UTC ("Confirmed and proceed"). Its 33 checks, exact artifact/source audit, local exact-source import browser tests and live owner build/navigation/reload checks passed. **Live INDmoney remains disabled**; import/chart acceptance is qualified by local synthetic coverage, not live module availability or provider certification. Stage11 deployment/evidence remains unchanged.
+
+Stage12 **Move rebalance orchestration to durable server workflows** is implemented and locally verified on `codex/stage12-durable-analysis-local-20261021`, based on that accepted source. See [requirement map](STAGE12_REQUIREMENT_MAP.md) and [handoff](STAGE12_LOCAL.md). Authorization covers local synthetic code, tests and an isolated preview only. Publication, CI execution, UAT2 deployment, provider activation, credentials/security/AWS changes, merge and Stage13 are not authorized. Runtime composition is closed by default. Earlier pending statements below are retained historical checkpoints and do not override this record.
+
+Code LOCAL_CANDIDATE / local checks PASS with documented coverage limits / independent review PENDING / PostgreSQL and Linux integration NOT_RUN / exact CI NOT_TRIGGERED / artifact NOT_BUILT12 / UAT2 deployment NOT_RUN12 / UAT2 verification NOT_RUN12 / Stage12 owner acceptance PENDING / provider approval unchanged and disabled. Existing US$10 allowance, 21 October 21:04:13 IST stop and 26 October retention remain unchanged; current billing has not been reverified. No automatic-stop guarantee is inferred.
+
 # Current phase clarification — 20 October2026 Stage10 local only
 
 Parent verified Stage09 completion on ccb0b3c4682d6bc65c4b38ccf95e71a446dee117 and relayed the owner's conditional instruction “once Stage9 is completed,start Stage10.” stages/10.md remains the full canonical scope. Local-only implementation/preview is active; external publication/deployment and Stage11 are excluded. See STATUS.md, STAGE10_REQUIREMENT_MAP.md and STAGE10_PREVIEW.md. The original pack provenance/instruction synchronization below is preserved history; earlier Stage01-only/pending entries do not override this current phase.

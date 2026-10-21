@@ -98,13 +98,78 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
     return snapshot
 
 
+def normalize_stage12_additions(before: dict, checked: dict) -> None:
+    """Remove only fully verified Stage12 additions from the legacy comparison.
+
+    The caller already deep-copied evidence. Older fields and all unrecognized
+    objects remain for the final exact schema/data comparison.
+    """
+    additions={
+        'auto_rebalance_workflows':{
+            'orchestration_kind':('VARCHAR(24)',True,None),
+            'request_key':('VARCHAR(128)',True,None),
+            'execution_json':('JSON',True,None),
+            'control_version':('INTEGER',False,0)},
+        'auto_rebalance_workflow_stages':{
+            'checkpoint_json':('JSON',True,None),
+            'attempt_count':('INTEGER',False,0)},
+        'zerodha_portfolio_snapshots':{'acquisition_json':('JSON',True,None)}}
+    for table,expected in additions.items():
+        if table not in before or table not in checked:continue
+        old_names={column[0] for column in before[table]['columns']}
+        added={column[0]:column for column in checked[table]['columns'] if column[0] not in old_names}
+        introduced=set(added)&set(expected)
+        if not introduced:continue
+        require(introduced==set(expected) and not old_names&set(expected),
+                'Incomplete Stage12 column addition: '+table)
+        for name,(kind,nullable,default) in expected.items():
+            column=added[name]
+            require(column[1]==kind and type(column[2]) is bool and column[2] is nullable,
+                    'Unexpected Stage12 column definition: '+table+'.'+name)
+            require(column[3] is None if default is None else column[3] in ('0',"'0'","'0'::integer"),
+                    'Unexpected Stage12 column default: '+table+'.'+name)
+        if table=='auto_rebalance_workflows':
+            name='uq_analysis_owner_request'
+            definitions={
+                'unique':{'column_names':['user_id','request_key']},
+                'indexes':{'column_names':['user_id','request_key'],'unique':True,'duplicates_constraint':name}}
+            for category,fields in definitions.items():
+                matches=[item for item in checked[table][category] if item.get('name')==name]
+                require(len(matches)==1,'Missing/duplicate Stage12 constraint/index: '+name)
+                item=matches[0]
+                require(all(type(item.get(key)) is type(value) and item.get(key)==value for key,value in fields.items()),
+                        'Changed Stage12 constraint/index: '+name)
+                extras=set(item)-{'name',*fields}
+                require(extras<=({'comment','dialect_options'} if category=='unique' else {'include_columns','dialect_options'}),
+                        'Unknown Stage12 constraint metadata')
+                require(item.get('comment') is None and item.get('include_columns',[])==[],
+                        'Unexpected Stage12 index/comment metadata')
+                dialect=item.get('dialect_options',{})
+                require(set(dialect)<={'postgresql_include','postgresql_nulls_not_distinct'}
+                        and dialect.get('postgresql_include',[])==[]
+                        and dialect.get('postgresql_nulls_not_distinct',False) is False,
+                        'Unexpected Stage12 dialect metadata')
+                checked[table][category]=[entry for entry in checked[table][category] if entry.get('name')!=name]
+        checked[table]['columns']=[column for column in checked[table]['columns'] if column[0] not in expected]
+        rows=[]
+        for row in checked[table]['rows']:
+            values=json.loads(row)
+            for name,(_,_,default) in expected.items():
+                value=values.pop(name,'missing')
+                require(value is None if default is None else type(value) is int and value==0,
+                        'Legacy Stage12 input/checkpoint was invented: '+table+'.'+name)
+            rows.append(json.dumps(values,sort_keys=True))
+        checked[table]['rows']=sorted(rows)
+
+
 def require_forward_baseline_preserved(before: dict, after: dict) -> None:
-    """Permit only named Stage04/07/11 additive fields, never arbitrary drift.
+    """Permit only named Stage04/07/11/12 additive fields, never arbitrary drift.
 
     Existing columns, constraints, indexes and values retain the strict check.
     The separate Stage04 Docker gate proves its full up/down/up migration.
     """
     checked = deepcopy(after)
+    normalize_stage12_additions(before,checked)
     if "outbox" in before and "outbox" in checked:
         old_names = {column[0] for column in before["outbox"]["columns"]}
         added = {column[0]:column for column in checked["outbox"]["columns"] if column[0] not in old_names}
