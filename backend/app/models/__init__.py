@@ -179,3 +179,6 @@ __all__ += ['ConnectionBindingHistory']
 
 from app.domains.order_intents.models import OrderIntent,OrderLeg  # noqa: F401
 __all__ += ['OrderIntent','OrderLeg']
+
+from app.domains.order_intents.execution_models import ExecutionFence, ExecutionRun, ExecutionAttempt  # noqa: F401
+__all__ += ['ExecutionFence', 'ExecutionRun', 'ExecutionAttempt']

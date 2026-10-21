@@ -1485,7 +1485,7 @@ jobs:
           retention-days: 3
 
   stage14-controller-linux:
-    name: Stage14 exact-head controller PostgreSQL16 and systemd (${{ matrix.group }})
+    name: Historical Stage14 802790f6 frozen controller PostgreSQL16 and systemd (${{ matrix.group }})
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
@@ -1496,7 +1496,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: 802790f675169bf446d1083f6d542b79d272d6a7
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v6
@@ -1515,14 +1515,14 @@ jobs:
           CI: 'true'
           GITHUB_ACTIONS: 'true'
           CREDX_STAGE14_CONTROLLER_ACK: disposable-linux-ci-only
-          CREDX_STAGE14_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+          CREDX_STAGE14_SOURCE: 802790f675169bf446d1083f6d542b79d272d6a7
           CONTROLLER_TEST_GROUP: ${{ matrix.group }}
         run: |
           sudo --preserve-env=CI,GITHUB_ACTIONS,CREDX_STAGE14_CONTROLLER_ACK,CREDX_STAGE14_SOURCE \
             "$(command -v python)" backend/scripts/verify_stage14_controller.py --python "$(command -v python)" --group "$CONTROLLER_TEST_GROUP"
       - name: Require exact Stage14 and Stage13 baseline provenance with zero skips
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: 802790f675169bf446d1083f6d542b79d272d6a7
           GROUP: ${{ matrix.group }}
         run: |
           sudo --preserve-env=EXPECTED_SHA,GROUP python3 - <<'PY_CHECK'
@@ -1556,12 +1556,128 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: stage14-controller-linux-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
+          name: historical-802790f6-stage14-controller-linux-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/stage14-controller-diagnostics
           retention-days: 3
 
   stage14-order-approvals:
-    name: Stage14 explicit approval PostgreSQL and migration
+    name: Historical Stage14 802790f6 explicit approval PostgreSQL and migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 802790f675169bf446d1083f6d542b79d272d6a7
+          persist-credentials: false
+      - name: Install constrained backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify exact approval, ownership, dispatch races and actual Alembic roundtrip
+        run: python -m pytest -q --junitxml=/tmp/stage14.xml backend/tests/test_stage14_order_intents.py backend/tests/test_stage14_http_and_legacy.py backend/tests/test_stage14_postgres.py
+      - name: Require all Stage14 checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage14.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage14 cannot skip checks'
+          assert len(root.findall('.//testcase')) == 160
+          PY_CHECK
+
+  stage15-controller-linux:
+    name: Stage15 exact-head controller PostgreSQL16 and systemd (${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: [core, interruptions, finalization, provenance]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify Stage15 disposable runner safety guards locally
+        run: python -m unittest discover -s backend/scripts -p test_verify_stage15_controller.py -v
+      - name: Install disposable VM PostgreSQL16 and nftables tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-16 postgresql-client-16 nftables
+          test -d /run/systemd/system
+      - name: Run exact Stage15 runtime against synthetic PostgreSQL and confined systemd fixture
+        timeout-minutes: 20
+        env:
+          CI: 'true'
+          GITHUB_ACTIONS: 'true'
+          CREDX_STAGE15_CONTROLLER_ACK: disposable-linux-ci-only
+          CREDX_STAGE15_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+          CONTROLLER_TEST_GROUP: ${{ matrix.group }}
+        run: |
+          sudo --preserve-env=CI,GITHUB_ACTIONS,CREDX_STAGE15_CONTROLLER_ACK,CREDX_STAGE15_SOURCE \
+            "$(command -v python)" backend/scripts/verify_stage15_controller.py --python "$(command -v python)" --group "$CONTROLLER_TEST_GROUP"
+      - name: Require exact Stage15 and Stage13 baseline provenance with zero skips
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GROUP: ${{ matrix.group }}
+        run: |
+          sudo --preserve-env=EXPECTED_SHA,GROUP python3 - <<'PY_CHECK'
+          import json,os
+          from pathlib import Path
+          r=json.loads(Path('/tmp/stage15-controller-ci/receipt.json').read_text())
+          expected={'core':5,'interruptions':4,'finalization':4,'provenance':7}[os.environ['GROUP']]
+          assert r['runtime_source']==r['verification_commit']==os.environ['EXPECTED_SHA']
+          assert r['baseline_source']=='802790f675169bf446d1083f6d542b79d272d6a7'
+          assert r['baseline_revision']=='order_intents_001'
+          assert r['candidate_revision']=='order_execution_001'
+          assert r['passed']==len(r['cases'])==expected and r['failed']==r['skipped']==0
+          assert r['actual_controller_and_helper'] and r['actual_confined_migration_service']
+          assert r['actual_credx_application_services'] is False
+          if os.environ['GROUP']=='finalization':
+              case=next(c for c in r['cases'] if c['name']=='readiness_failure')
+              assert case['injected_http_statuses']==[503,503]
+              assert case['cleared_http_statuses']==[200,200]
+              assert case['controller_readiness_failure_observed'] is True
+              assert case['controller_readiness_error']=='Bounded UAT2 readiness failed; inspect private logs'
+          PY_CHECK
+      - name: Retain controller integration diagnostics even on failure
+        if: always()
+        run: |
+          sudo install -d -m 0755 "$RUNNER_TEMP/stage15-controller-diagnostics"
+          if sudo test -d /tmp/stage15-controller-ci; then
+            sudo cp -a /tmp/stage15-controller-ci/. "$RUNNER_TEMP/stage15-controller-diagnostics/"
+          fi
+          sudo journalctl --namespace=credx-uat2 --no-pager | sudo tee "$RUNNER_TEMP/stage15-controller-diagnostics/journal.log" > /dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/stage15-controller-diagnostics"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: stage15-controller-linux-${{ matrix.group }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stage15-controller-diagnostics
+          retention-days: 3
+
+  stage15-guarded-execution:
+    name: Stage15 explicit approval PostgreSQL and migration
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container: python:3.13
@@ -1590,12 +1706,12 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify exact approval, ownership, dispatch races and actual Alembic roundtrip
-        run: python -m pytest -q --junitxml=/tmp/stage14.xml backend/tests/test_stage14_order_intents.py backend/tests/test_stage14_http_and_legacy.py backend/tests/test_stage14_postgres.py
-      - name: Require all Stage14 checks to execute
+        run: python -m pytest -q --junitxml=/tmp/stage15.xml backend/tests/test_stage15_execution.py backend/tests/test_stage15_postgres.py
+      - name: Require all Stage15 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
-          root=ET.parse('/tmp/stage14.xml').getroot()
-          assert not root.findall('.//testcase/skipped'), 'Stage14 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 160
+          root=ET.parse('/tmp/stage15.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage15 cannot skip checks'
+          assert len(root.findall('.//testcase')) == 100
           PY_CHECK
