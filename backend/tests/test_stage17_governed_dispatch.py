@@ -82,3 +82,25 @@ def test_deadline_elapsing_in_final_analysis_source_read_prevents_generate(env,m
     q=OperationalQueues(e.db,SyntheticWorkBindings(e.db,residency=p,analysis=runtime));q.enqueue(1,'analysis',str(job.id),now=NOW);e.db.commit()
     result=q.work_once('analysis',now=NOW)
     assert reads[0]==2 and result['state']=='uncertain' and len(providers)==1 and providers[0].calls==0
+
+
+def test_early_completed_domain_return_releases_locks_before_scheduler_control(env,monkeypatch):
+    from sqlalchemy import event
+    import app.domains.public_service.dispatch as dispatch
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    e=env;runtime,providers=governed(e);row,job=first_job(e,runtime)
+    for m in (IntegrationConnection,OrderIntent,OrderLeg):m.__table__.create(e.engine,checkfirst=True)
+    monitors(e.db,e.engine,1,NOW);p,_=proof(e.db,1,NOW)
+    q=OperationalQueues(e.db,SyntheticWorkBindings(e.db,residency=p,analysis=runtime));item=q.enqueue(1,'analysis',str(job.id),now=NOW);e.db.commit()
+    assert q.work_once('analysis',now=NOW)['state']=='completed'
+    # Synthetic redelivery fault: actual completed job must make no new effect.
+    item=e.db.get(OutboxMessage,item.id);item.payload={**item.payload,'state':'queued','attempts':0,'outcome':'not_started'};e.db.commit()
+    trace=[];run=q.bindings.run;control=dispatch.control
+    def wrapped(*args,**kwargs):result=run(*args,**kwargs);trace.append('returned');return result
+    def scheduling(*args,**kwargs):trace.append('control');return control(*args,**kwargs)
+    def committed(session):trace.append('commit')
+    event.listen(e.db,'after_commit',committed);monkeypatch.setattr(q.bindings,'run',wrapped);monkeypatch.setattr(dispatch,'control',scheduling)
+    try:assert q.work_once('analysis',now=NOW)['state']=='completed'
+    finally:event.remove(e.db,'after_commit',committed)
+    at=trace.index('returned');assert trace[at:at+3]==['returned','commit','control']
+    assert sum(provider.calls for provider in providers)==1

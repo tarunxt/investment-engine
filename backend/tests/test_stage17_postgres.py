@@ -100,3 +100,71 @@ def test_pg_effect_lease_row_lock_and_expired_claimant_fence(database,tmp_path):
             with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):q.fence(key,lease,now=now)
             db.rollback();assert not broker.calls
     finally:broker.engine.dispose()
+
+
+def test_pg_concurrent_enqueue_and_dispatch_use_one_owner_queue_lock_order(database,tmp_path):
+    """Force the reviewed interleaving, not merely a NOWAIT row-lock probe.
+
+    Old queue-first worker + owner-first enqueuer form a deterministic cycle.
+    Correct owner-first worker makes the enqueuer wait before taking an owner,
+    so both transactions complete and the broker sees exactly one submission.
+    """
+    from datetime import datetime,timezone,timedelta
+    from threading import Event
+    from sqlalchemy import event as sql_event
+    from cryptography.fernet import Fernet
+    from app.domains.connections.crypto import ConnectionKeyring
+    from app.domains.public_service.residency import SyntheticResidencyProducer
+    from app.domains.public_service.dispatch import SyntheticWorkBindings,OperationalQueues,TOPIC as QUEUE_TOPIC
+    from test_stage15_postgres import prepared,worker
+    engine,owner,event,intent,broker,source=prepared(database,tmp_path);now=datetime.now(timezone.utc)
+    producer=SyntheticResidencyProducer(ConnectionKeyring({1:Fernet.generate_key().decode()}))
+    first=Event();release=Event();enqueue_owner_attempt=Event();enqueue_owner_acquired=Event();worker_owner_attempt=Event();kind=[]
+    def lock_kind(statement):
+        sql=' '.join(statement.upper().split())
+        if not sql.startswith('SELECT') or 'FOR UPDATE' not in sql:return None
+        if 'FROM USERS ' in sql:return 'owner'
+        if 'FROM OUTBOX ' in sql:return 'queue'
+        return None
+    try:
+        with Session(engine) as db:
+            producer.record(db,owner,country='IN',evidence_reference='synthetic:document',reviewer='synthetic:operator',now=now,expires=now+timedelta(hours=1))
+            OperationalQueues(db,SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source))).enqueue(owner,'execution',str(event),now=now);db.commit()
+        def dispatch():
+            with Session(engine) as db:
+                q=OperationalQueues(db,SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source)))
+                def after_claim():
+                    connection=db.connection()
+                    def before(conn,cursor,statement,params,context,many):
+                        if first.is_set() and kind==['queue'] and lock_kind(statement)=='owner':worker_owner_attempt.set()
+                    def after(conn,cursor,statement,params,context,many):
+                        k=lock_kind(statement)
+                        if k and not first.is_set():
+                            kind.append(k);first.set();assert release.wait(5),'Interleaving release missing'
+                    sql_event.listen(connection,'before_cursor_execute',before);sql_event.listen(connection,'after_cursor_execute',after)
+                return q.work_once('execution',now=now,after_claim=after_claim)
+        def enqueue():
+            with Session(engine) as db:
+                connection=db.connection()
+                def before(conn,cursor,statement,params,context,many):
+                    if lock_kind(statement)=='owner':enqueue_owner_attempt.set()
+                def after(conn,cursor,statement,params,context,many):
+                    if lock_kind(statement)=='owner':
+                        enqueue_owner_acquired.set()
+                        if kind==['queue']:assert worker_owner_attempt.wait(5),'Old worker did not reach inverted owner lock'
+                sql_event.listen(connection,'before_cursor_execute',before);sql_event.listen(connection,'after_cursor_execute',after)
+                row=OperationalQueues(db,SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source))).enqueue(owner,'execution',str(event),now=now);key=row.id;db.commit();return key
+        with ThreadPoolExecutor(2) as pool:
+            executing=pool.submit(dispatch)
+            try:
+                assert first.wait(3),'Worker did not acquire an effect lock'
+                enqueuing=pool.submit(enqueue);assert enqueue_owner_attempt.wait(3)
+                if kind==['queue']:assert enqueue_owner_acquired.wait(3)
+            finally:release.set()
+            assert executing.result(timeout=8)['state']=='completed'
+            assert enqueuing.result(timeout=8)
+        assert kind==['owner'] and len(broker.calls)==1
+        with Session(engine) as db:
+            rows=list(db.scalars(select(OutboxMessage).where(OutboxMessage.topic==QUEUE_TOPIC)))
+            assert len(rows)==1 and rows[0].payload['state']=='completed' and rows[0].payload['attempts']==1
+    finally:release.set();broker.engine.dispose()

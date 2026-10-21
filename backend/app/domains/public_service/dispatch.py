@@ -78,11 +78,17 @@ class SyntheticWorkBindings:
     def _run(self,id,lane,key,now,fence):
         fence()
         self.resource(id,lane,key,now=now)
-        if lane=='analysis':return execute_governed_job(self.db,int(key),self.analysis,now=now,effect_fence=fence)
+        if lane=='analysis':
+            self.db.commit()
+            return execute_governed_job(self.db,int(key),self.analysis,now=now,effect_fence=fence)
         intent=self.db.get(OutboxMessage,UUID(key)).payload['intent_id'] if lane=='execution' else key
         owned=self.db.scalar(select(OrderIntent).where(OrderIntent.id==intent,OrderIntent.owner_id==id))
         worker=self.executions[venue_binding(owned)]
-        if lane=='execution':row=worker.dispatch(key,before_effect=fence,effect_fence=fence)
+        # Enter domain locking with no preflight owner/queue locks. Execution
+        # takes account/platform fences before owners; its policy and final
+        # effect hook reacquire the queue fence in that established order.
+        self.db.commit()
+        if lane=='execution':row=worker.dispatch(key,effect_fence=fence)
         else:row=worker.reconcile(id,key)
         return {'status':row.state,'intent_id':row.id}
 
@@ -137,19 +143,24 @@ class OperationalQueues:
         options=admission(p['lane'],attempt=p['attempts'],outcome='uncertain')
         row.payload={**p,'state':'queued','available_at':(now+timedelta(seconds=options['retry_delay_seconds'])).isoformat()};self.db.commit()
     def fence(self,id,lease,*,now):
-        # Lock only this queue row, never the global scheduling control. Domain
-        # workers retain this transaction through I/O and commit afterwards.
-        # Their own durable claim commits release it, so every effect policy
-        # and the execution before_effect hook must reacquire and revalidate.
+        # Owner BEFORE queue, matching enqueue/retry/finalization. Scheduling
+        # alone takes control -> queue and never requests an owner. Workers
+        # never request scheduling control while holding owner/queue locks.
+        # SQLite needs its database-wide writer fence before any reads; unlike
+        # PostgreSQL it has no independent owner/queue row locks to order.
         if self.db.get_bind().dialect.name=='sqlite':
             self.db.execute(update(OutboxMessage).where(OutboxMessage.id==id,OutboxMessage.topic==TOPIC).values(execution_attempts=OutboxMessage.execution_attempts))
+        hint=self.db.get(OutboxMessage,id,populate_existing=True)
+        if hint is None or hint.topic!=TOPIC:raise BoundaryDenied('QUEUE_LEASE_CHANGED')
+        expected_owner=self.validate(hint)['owner_id']
+        owner(self.db,expected_owner,verified=True)
         row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id,OutboxMessage.topic==TOPIC).with_for_update().execution_options(populate_existing=True))
         if row is None:raise BoundaryDenied('QUEUE_LEASE_CHANGED')
         p=self.validate(row)
         # Evaluate the clock AFTER lock acquisition; lock waits do not extend a
         # lease. Explicit timestamps remain useful to direct synthetic callers.
         checked_at=utc(now() if callable(now) else now)
-        if p.get('lease')!=lease or p['state']!='running' or utc(datetime.fromisoformat(p['deadline']))<=checked_at:raise BoundaryDenied('QUEUE_LEASE_CHANGED')
+        if p['owner_id']!=expected_owner or p.get('lease')!=lease or p['state']!='running' or utc(datetime.fromisoformat(p['deadline']))<=checked_at:raise BoundaryDenied('QUEUE_LEASE_CHANGED')
         return p
     def work_once(self,lane,*,now=None,after_claim=lambda:None):
         now=utc(now or datetime.now(timezone.utc));started_at=monotonic()
@@ -169,10 +180,13 @@ class OperationalQueues:
             if self.bindings.resource(p['owner_id'],lane,p['resource'],now=now)!=p['binding']:raise BoundaryDenied('QUEUE_RESOURCE_CHANGED')
             self.db.commit();started=True
             result=self.bindings.run(p['owner_id'],lane,p['resource'],current_time(),fence=fence)
+            # Even an early/no-work domain return can retain owner/queue locks.
+            # Release them BEFORE requesting the scheduler's global control.
+            self.db.commit()
             state='uncertain' if result['status']in {'uncertain','unknown','submitting','cancelled_uncertain'} else ('queued' if result['status']=='waiting_for_admission' else 'completed')
         except Exception:
             self.db.rollback();result={'status':'uncertain' if started else 'blocked'};state=result['status']
-        control(self.db,'queues');row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id).with_for_update().execution_options(populate_existing=True))
+        control(self.db,'queues');owner(self.db,p['owner_id'],verified=True);row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id).with_for_update().execution_options(populate_existing=True))
         if row.payload.get('lease')!=lease or row.payload['state']!='running':
             self.db.rollback();raise BoundaryDenied('QUEUE_LEASE_CHANGED')
         if state=='queued':

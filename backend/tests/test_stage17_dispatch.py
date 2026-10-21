@@ -183,3 +183,27 @@ def test_deadline_clock_is_evaluated_after_queue_row_lock_wait(setup,monkeypatch
     with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):
         q.fence(id,lease,now=lambda:NOW+timedelta(seconds=elapsed[0]))
     e.env.db.rollback();assert not e.broker.calls
+
+
+def test_effect_fence_acquires_owner_before_queue_row(setup,monkeypatch):
+    import app.domains.public_service.dispatch as dispatch
+    e=setup();q,p,r=queue(e);q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit();id,lease=q.claim('execution',now=NOW)
+    trace=[];own=dispatch.owner;scalar=e.env.db.scalar
+    def owned(*args,**kwargs):trace.append('owner');return own(*args,**kwargs)
+    def selected(statement,*args,**kwargs):
+        if getattr(statement,'_for_update_arg',None)is not None and any(d.get('entity')is OutboxMessage for d in statement.column_descriptions):trace.append('queue')
+        return scalar(statement,*args,**kwargs)
+    monkeypatch.setattr(dispatch,'owner',owned);monkeypatch.setattr(e.env.db,'scalar',selected)
+    q.fence(id,lease,now=NOW);assert trace==['owner','queue'];e.env.db.rollback()
+    assert not e.broker.calls
+
+
+def test_domain_dispatch_starts_without_preflight_owner_queue_locks(setup,monkeypatch):
+    e=setup();q,p,r=queue(e);q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    worker=next(iter(q.bindings.executions.values()));dispatch=worker.dispatch;entries=[]
+    def entered(*args,**kwargs):
+        entries.append(e.env.db.in_transaction());assert entries==[False]
+        return dispatch(*args,**kwargs)
+    monkeypatch.setattr(worker,'dispatch',entered)
+    assert q.work_once('execution',now=NOW)['result']['status']=='filled'
+    assert len(e.broker.calls)==1
