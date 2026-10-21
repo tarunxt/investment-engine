@@ -19,6 +19,13 @@ STAGE11 = 'indmoney_integrity_001'
 STAGE12 = 'durable_analysis_001'
 STAGE13 = 'ai_limits_001'
 STAGE14 = 'order_intents_001'
+STAGE15 = 'order_execution_001'
+EXECUTION_COLUMNS={
+    'order_execution_fences': frozenset({'key','stopped'}),
+    'order_execution_runs': frozenset({'intent_id','outbox_id','binding_digest','approval_digest','started_at','limits_json'}),
+    'order_execution_attempts': frozenset({'leg_id','intent_id','binding_digest','state','claimed_at','polls','next_poll_at','observed_at','evidence_json','last_error'}),
+}
+EXECUTION_TABLES=frozenset(EXECUTION_COLUMNS)
 ORDER_COLUMNS={'confirmed_order_intents': frozenset({'created_at', 'review_digest', 'request_digest', 'approval_nonce', 'connection_id', 'payload_json', 'approved_at', 'app_mode', 'approval_digest', 'operation_key_digest', 'expires_at', 'account_id', 'risk_json', 'module_version', 'owner_id', 'module_id', 'approved_by', 'state', 'connection_version', 'id'}), 'confirmed_order_legs': frozenset({'position', 'reconciliation_json', 'filled_quantity', 'state', 'broker_order_id', 'intent_id', 'client_reference', 'id', 'payload_digest'})}
 ORDER_TABLES=frozenset(ORDER_COLUMNS)
 SPEND_COLUMNS={'recommendation_spend_accounts':frozenset({'last_admitted_owner'}),'recommendation_spend_attempts':frozenset({'operation_key','module_id','module_version','request_hash','limits_json','input_tokens','output_tokens'})}
@@ -59,21 +66,24 @@ def canonical_checks(table, checks):
     return result
 
 
-def validate_shape(revision,names,import_columns,workflow_columns=None,spend_columns=None,order_columns=None):
-    if revision not in {BASE,STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14}:raise RuntimeError('Unexpected schema revision')
-    if (set(names)&TABLES)!=(TABLES if revision in {STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} else set()):raise RuntimeError('Partial schema state')
-    if (set(names)&ATTEMPTS)!=(ATTEMPTS if revision in {STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} else set()):raise RuntimeError('Partial attempt schema state')
-    if (set(import_columns)&IMPORT_COLUMNS)!=(IMPORT_COLUMNS if revision in {STAGE11,STAGE12,STAGE13,STAGE14} else set()):raise RuntimeError('Partial import schema state')
+def validate_shape(revision,names,import_columns,workflow_columns=None,spend_columns=None,order_columns=None,execution_columns=None):
+    if (set(names)&EXECUTION_TABLES)!=(EXECUTION_TABLES if revision==STAGE15 else set()):raise RuntimeError('Partial execution schema state')
+    for table,expected in EXECUTION_COLUMNS.items():
+        if set((execution_columns or {}).get(table,()))!=(expected if revision==STAGE15 else set()):raise RuntimeError('Partial execution columns')
+    if revision not in {BASE,STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14,STAGE15}:raise RuntimeError('Unexpected schema revision')
+    if (set(names)&TABLES)!=(TABLES if revision in {STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} else set()):raise RuntimeError('Partial schema state')
+    if (set(names)&ATTEMPTS)!=(ATTEMPTS if revision in {STAGE10,STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} else set()):raise RuntimeError('Partial attempt schema state')
+    if (set(import_columns)&IMPORT_COLUMNS)!=(IMPORT_COLUMNS if revision in {STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} else set()):raise RuntimeError('Partial import schema state')
     for table,expected in WORKFLOW_COLUMNS.items():
         actual=set((workflow_columns or {}).get(table,()))&expected
-        if actual!=(expected if revision in {STAGE12,STAGE13,STAGE14} else set()):raise RuntimeError('Partial workflow schema state')
-    if (set(names)&ORDER_TABLES)!=(ORDER_TABLES if revision==STAGE14 else set()):raise RuntimeError('Partial order schema state')
+        if actual!=(expected if revision in {STAGE12,STAGE13,STAGE14,STAGE15} else set()):raise RuntimeError('Partial workflow schema state')
+    if (set(names)&ORDER_TABLES)!=(ORDER_TABLES if revision in {STAGE14,STAGE15} else set()):raise RuntimeError('Partial order schema state')
     for table,expected in ORDER_COLUMNS.items():
         actual=set((order_columns or {}).get(table,()))
-        if actual!=(expected if revision==STAGE14 else set()):raise RuntimeError('Partial order columns')
+        if actual!=(expected if revision in {STAGE14,STAGE15} else set()):raise RuntimeError('Partial order columns')
     for table,expected in SPEND_COLUMNS.items():
         actual=set((spend_columns or {}).get(table,()))&expected
-        if actual!=(expected if revision in {STAGE13,STAGE14} else set()):raise RuntimeError('Partial spend schema state')
+        if actual!=(expected if revision in {STAGE13,STAGE14,STAGE15} else set()):raise RuntimeError('Partial spend schema state')
 
 
 def capture(engine):
@@ -87,7 +97,8 @@ def capture(engine):
         workflow_columns={name:{c['name'] for c in inspector.get_columns(name,schema='public')} if name in names else set() for name in WORKFLOW_COLUMNS}
         spend_columns={name:{c['name'] for c in inspector.get_columns(name,schema='public')} if name in names else set() for name in SPEND_COLUMNS}
         order_columns={name:{c['name'] for c in inspector.get_columns(name,schema='public')} if name in names else set() for name in ORDER_COLUMNS}
-        validate_shape(revision,names,import_columns,workflow_columns,spend_columns,order_columns)
+        execution_columns={name:{c['name'] for c in inspector.get_columns(name,schema='public')} if name in names else set() for name in EXECUTION_COLUMNS}
+        validate_shape(revision,names,import_columns,workflow_columns,spend_columns,order_columns,execution_columns)
         data={}
         for name in names:
             table=sa.Table(name,sa.MetaData(),schema='public',autoload_with=db)
@@ -109,8 +120,8 @@ def capture(engine):
             'owners_acl':"SELECT c.relname,c.relkind,pg_get_userbyid(c.relowner),c.relacl::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname",
         }.items()}
     return {'revision':revision,'fingerprint':sha(json.dumps({'tables':data,'sequences':sequences,'catalog':catalog},sort_keys=True,default=str).encode()),
-            'stage14_tables':sorted(set(names)&ORDER_TABLES),'stage13_columns':sorted(table+'.'+column for table,expected in SPEND_COLUMNS.items() for column in spend_columns[table]&expected),'stage12_columns':sorted(table+'.'+column for table,expected in WORKFLOW_COLUMNS.items() for column in workflow_columns[table]&expected),'stage11_columns':sorted(import_columns&IMPORT_COLUMNS),'stage09_tables':sorted(set(names)&TABLES),'stage10_tables':sorted(set(names)&ATTEMPTS),'table_count':len(names),
-            'material_rows':sum(len(data[n]['rows']) for n in TABLES|ATTEMPTS|(ORDER_TABLES if revision==STAGE14 else set())|({IMPORT_TABLE} if revision in {STAGE11,STAGE12,STAGE13,STAGE14} else set()) if n in data)}
+            'stage15_tables':sorted(set(names)&EXECUTION_TABLES),'stage14_tables':sorted(set(names)&ORDER_TABLES),'stage13_columns':sorted(table+'.'+column for table,expected in SPEND_COLUMNS.items() for column in spend_columns[table]&expected),'stage12_columns':sorted(table+'.'+column for table,expected in WORKFLOW_COLUMNS.items() for column in workflow_columns[table]&expected),'stage11_columns':sorted(import_columns&IMPORT_COLUMNS),'stage09_tables':sorted(set(names)&TABLES),'stage10_tables':sorted(set(names)&ATTEMPTS),'table_count':len(names),
+            'material_rows':sum(len(data[n]['rows']) for n in TABLES|ATTEMPTS|(EXECUTION_TABLES if revision==STAGE15 else set())|(ORDER_TABLES if revision in {STAGE14,STAGE15} else set())|({IMPORT_TABLE} if revision in {STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} else set()) if n in data)}
 
 
 def private_write(path, value):
@@ -130,21 +141,27 @@ def execute(engine, action, request, expected, fingerprint=None, material_reques
     if expected and before['revision']!=expected:raise RuntimeError('Schema revision changed')
     material=None
     if action=='preserve':
-        if before['revision'] not in {STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14}:raise RuntimeError('Supported connection material state required')
-        tables=(ORDER_TABLES if before['revision']==STAGE14 else set())|(set(SPEND_COLUMNS) if before['revision'] in {STAGE13,STAGE14} else set())|(ANALYSIS_MATERIAL if before['revision'] in {STAGE12,STAGE13,STAGE14} else set())|TABLES|(ATTEMPTS if before['revision'] in {STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} else frozenset())|({IMPORT_TABLE} if before['revision'] in {STAGE11,STAGE12,STAGE13,STAGE14} else frozenset())
+        if before['revision'] not in {STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14,STAGE15}:raise RuntimeError('Supported connection material state required')
+        tables=(EXECUTION_TABLES if before['revision']==STAGE15 else set())|(ORDER_TABLES if before['revision'] in {STAGE14,STAGE15} else set())|(set(SPEND_COLUMNS) if before['revision'] in {STAGE13,STAGE14,STAGE15} else set())|(ANALYSIS_MATERIAL if before['revision'] in {STAGE12,STAGE13,STAGE14,STAGE15} else set())|TABLES|(ATTEMPTS if before['revision'] in {STAGE10,STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} else frozenset())|({IMPORT_TABLE} if before['revision'] in {STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} else frozenset())
         with engine.connect() as db:
             rows={name:[dict(r) for r in db.execute(sa.select(sa.Table(name,sa.MetaData(),schema='public',autoload_with=db))).mappings()] for name in sorted(tables)}
         path=ARTIFACTS/(request+'-material.json')
         material={'request':request,'sha256':private_write(path,{'revision':before['revision'],'tables':rows}),'rows':sum(map(len,rows.values()))}
         if capture(engine)!=before:raise RuntimeError('State changed during material preservation')
     elif action=='downgrade':
-        baseline={STAGE09:BASE,STAGE10:STAGE09,STAGE11:STAGE10,STAGE12:STAGE11,STAGE13:STAGE12,STAGE14:STAGE13}.get(before['revision'])
+        baseline={STAGE09:BASE,STAGE10:STAGE09,STAGE11:STAGE10,STAGE12:STAGE11,STAGE13:STAGE12,STAGE14:STAGE13,STAGE15:STAGE14}.get(before['revision'])
         if baseline is None or expected!=before['revision'] or fingerprint!=before['fingerprint'] or (target or BASE)!=baseline:raise RuntimeError('Exact supported schema transition required for downgrade')
         if not re.fullmatch(r'[0-9a-f]{32}',material_request or ''):raise RuntimeError('Preservation receipt required')
         path=ARTIFACTS/(material_request+'-material.json')
         if path.is_symlink() or not path.is_file() or path.stat().st_uid!=os.geteuid() or stat.S_IMODE(path.stat().st_mode)&0o077 or sha(path.read_bytes())!=material_sha:raise RuntimeError('Preserved material mismatch')
         if migrate is None:raise RuntimeError('Confined migration required')
-        if before['revision']==STAGE14:
+        if before['revision']==STAGE15:
+            with engine.begin() as db:
+                for name in ['order_execution_attempts','order_execution_runs','order_execution_fences']:
+                    table=sa.Table(name,sa.MetaData(),autoload_with=db,schema='public')
+                    db.execute(sa.delete(table))
+                migrate(baseline,connection=db)
+        elif before['revision']==STAGE14:
             # Private exact preservation and fingerprint are mandatory above.
             # Delete children and intent evidence only inside the same DDL
             # transaction; any failure retains every row and schema object.
@@ -165,19 +182,21 @@ def execute(engine, action, request, expected, fingerprint=None, material_reques
                 migrate(baseline,connection=db)
         else:migrate(baseline)
         after=capture(engine)
-        if (after['revision']!=baseline or after.get('stage14_tables')
-            or (baseline!=STAGE13 and after.get('stage13_columns'))
-            or (baseline==STAGE13 and set(after.get('stage13_columns',[]))!={t+'.'+c for t,cols in SPEND_COLUMNS.items() for c in cols})
-            or (baseline not in {STAGE12,STAGE13} and after.get('stage12_columns'))
-            or (baseline in {STAGE11,STAGE12,STAGE13} and set(after.get('stage11_columns',[]))!=IMPORT_COLUMNS)
-            or (baseline not in {STAGE11,STAGE12,STAGE13} and after.get('stage11_columns'))
-            or (baseline in {STAGE10,STAGE11,STAGE12,STAGE13} and set(after.get('stage10_tables',[]))!=ATTEMPTS)
-            or (baseline not in {STAGE10,STAGE11,STAGE12,STAGE13} and after.get('stage10_tables'))
+        if (after['revision']!=baseline or after.get('stage15_tables')
+            or (baseline!=STAGE14 and after.get('stage14_tables'))
+            or (baseline==STAGE14 and set(after.get('stage14_tables',[]))!=ORDER_TABLES)
+            or (baseline not in {STAGE13,STAGE14} and after.get('stage13_columns'))
+            or (baseline in {STAGE13,STAGE14} and set(after.get('stage13_columns',[]))!={t+'.'+c for t,cols in SPEND_COLUMNS.items() for c in cols})
+            or (baseline not in {STAGE12,STAGE13,STAGE14} and after.get('stage12_columns'))
+            or (baseline in {STAGE11,STAGE12,STAGE13,STAGE14} and set(after.get('stage11_columns',[]))!=IMPORT_COLUMNS)
+            or (baseline not in {STAGE11,STAGE12,STAGE13,STAGE14} and after.get('stage11_columns'))
+            or (baseline in {STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} and set(after.get('stage10_tables',[]))!=ATTEMPTS)
+            or (baseline not in {STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} and after.get('stage10_tables'))
             or (baseline==BASE and after['stage09_tables'])
-            or (baseline in {STAGE09,STAGE10,STAGE11,STAGE12,STAGE13} and set(after['stage09_tables'])!=TABLES)):raise RuntimeError('Downgrade incomplete')
+            or (baseline in {STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} and set(after['stage09_tables'])!=TABLES)):raise RuntimeError('Downgrade incomplete')
         return {'state':after}
     elif action=='verify':
-        if expected not in {BASE,STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14} or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
+        if expected not in {BASE,STAGE09,STAGE10,STAGE11,STAGE12,STAGE13,STAGE14,STAGE15} or before['fingerprint']!=fingerprint:raise RuntimeError('Restored database does not match backup')
     elif action!='inspect':raise RuntimeError('Unknown schema action')
     return {'state':before,**({'material':material} if material else {})}
 
