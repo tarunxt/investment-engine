@@ -2,12 +2,25 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from typing import Literal
 from pydantic import BaseModel, field_validator
 
 
 class IndMoneyUsPortfolioSnapshotCreateRequest(BaseModel):
     raw_text: str
     captured_at: datetime | None = None
+    format: Literal['paste','csv'] = 'paste'
+    currency: Literal['USD','INR','EUR','GBP'] = 'USD'
+    day_return_period: Literal['unknown','1d_same_asof'] = 'unknown'
+    supersedes_id: int | None = None
+    accepted_preview_id: int | None = None
+    acceptance_hash: str | None = None
+
+    @field_validator('captured_at')
+    @classmethod
+    def aware_time(cls,value):
+        if value is not None and value.tzinfo is None: raise ValueError('As-of time requires timezone')
+        return value
 
     @field_validator("raw_text")
     @classmethod
@@ -17,7 +30,7 @@ class IndMoneyUsPortfolioSnapshotCreateRequest(BaseModel):
             raise ValueError("raw_text is required")
         if len(cleaned) > 200_000:
             raise ValueError("raw_text is too large")
-        return cleaned
+        return value
 
 
 class IndMoneyUsMarketIndex(BaseModel):
@@ -51,9 +64,9 @@ class IndMoneyUsReconciliationItem(BaseModel):
 
 
 class IndMoneyUsDerivedAnalytics(BaseModel):
-    parsed_holdings_current_value: float = 0
-    parsed_holdings_invested_value: float = 0
-    parsed_holdings_total_pnl: float = 0
+    parsed_holdings_current_value: float | None = None
+    parsed_holdings_invested_value: float | None = None
+    parsed_holdings_total_pnl: float | None = None
     profitable_holdings_count: int = 0
     loss_making_holdings_count: int = 0
     top_allocations: list[IndMoneyUsHolding]
@@ -67,6 +80,13 @@ class IndMoneyUsPortfolioSnapshotSummaryResponse(BaseModel):
     snapshot_date: date
     captured_at: datetime
     source: str
+    acceptance_state: str = 'legacy_unverified'
+    parser_current: bool = False
+    content_hash: str | None = None
+    import_provenance: dict | None = None
+    accepted_at: datetime | None = None
+    supersedes_id: int | None = None
+    freshness: str = 'unknown'
     parse_status: str
     parse_warnings: list[str]
     holdings_count: int
@@ -142,3 +162,21 @@ class IndMoneyUsCurrentPricesResponse(BaseModel):
     quotes: list[IndMoneyUsCurrentPriceQuoteResponse]
     market_open: bool = False
     fetched_at: datetime
+
+
+class IndMoneyImportAcceptance(BaseModel):
+    content_hash: str
+    accept: Literal[True]
+
+    @field_validator('accept',mode='before')
+    @classmethod
+    def explicit_acceptance(cls,value):
+        if value is not True:raise ValueError('Explicit boolean acceptance required')
+        return value
+
+    @field_validator('content_hash')
+    @classmethod
+    def valid_hash(cls,value):
+        import re
+        if not re.fullmatch('[a-f0-9]{64}',value):raise ValueError('Exact preview hash required')
+        return value

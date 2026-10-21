@@ -1,0 +1,35 @@
+{
+  "recorded_at": "2026-10-20T19:05:05.832963+00:00",
+  "prior_candidate_preserved": "8ced2c8f20fce3c4263a84bc6f22a46e6a4efdb8",
+  "candidate": "containing commit; exact successor SHA in task-3/stage11-numeric-review-handoff.json",
+  "scope": "local only; no publication/deployment/live systems",
+  "findings": {
+    "opposite_small_signs": "Fixed: holding P&L vs exact price-minus-cost and percentage; summary and daily signs tested before tolerances.",
+    "aggregate_lost_cent": "Fixed: 400-digit Decimal-context arithmetic and exact Float/JSON cash-storage roundtrip, otherwise quarantine with exact decimal diagnostics. Tests at1e14 and1e15 plus ordinary0.1+0.2.",
+    "400_digit_paste": "Fixed: nonfinite parsed fields become null with explicit quarantine errors before digest; exact raw text/source SHA256 retained. Accepted/nonfinite content fails closed with ValidationException."
+  },
+  "acceptance": "Current validation and source provenance are rechecked, not trusted from prior error/hash fields. Parser3 old receipts remain immutable history but are excluded from current selection/analysis/acceptance/chart.",
+  "fresh_tests": {
+    "backend": 194,
+    "review_regressions": 22,
+    "ui": 10,
+    "typescript": "passed",
+    "next_build": "passed",
+    "inventory": "passed"
+  },
+  "reused_unchanged_source_checks": {
+    "native_controller_helper": 84,
+    "harness_guard_loopback": 10,
+    "source_byte_diff_from_prior": "none on native controller/helper or Stage11 Linux harness/tests"
+  },
+  "before_regression_result": "11failed/3passed before fixes; retained .runtime/stage11-review-fix/before-tests.log",
+  "not_run": {
+    "Docker": "67 collected contracts, including3 actualPostgreSQL cases; not run",
+    "Linux": "20 prepared, not run",
+    "exact_head_ci": "not triggered",
+    "independent_rereview": "pending",
+    "final_browser_visual": "pending; owner window not touched",
+    "uat2_deployment": "not authorized/performed"
+  },
+  "real_http_successor": "scheduled immediately after commit/start; runtime receipt/handoff records actual result, not assumed here"
+}

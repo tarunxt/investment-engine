@@ -1,3 +1,7 @@
+# Current Stage11 local checkpoint —20October2026
+
+Parent records Stage10 accepted at exact f30db4e4bcdb3709371213b3daa907db8887c9ea. Owner separately approved local-only Stage11 at18:06:46UTC. Stage11 canonical scope is **Repair INDmoney imports and financial data integrity**, on codex/stage11-indmoney-integrity-local-20261020. Requirement map and current gate states: STAGE11_REQUIREMENT_MAP.md / STATUS.md. No push, deployment/provider/security/AWS changes or Stage12. Earlier roadmap entries below remain historical planning/evidence, not current holds or authority for external actions.
+
 # Sequential UAT2 stages 01–20
 
 ## Current authority and sequencing
@@ -19,8 +23,8 @@ Current checkpoint: Stage08 at `61ce447ba35f4db7cd06fd550c62557450247af3` is own
 | 07 | Enforce module lifecycle across backend work | codex/uat2-stage07 (reserved) | Stage 06 accepted | Not started | server-side enable/disable semantics hold even when the UI is bypassed. Record what later execution stages must reuse. |
 | 08 | Build module Preferences and filtered navigation | codex/stage08-module-preferences-20261020 | Stage 07 accepted | Owner-accepted/live 61ce447b | visually verified UI and browser tests demonstrate module isolation without broken internal dependencies. |
 | 09 | Implement dual-mode connection storage and adapters | codex/stage09-recovery-successor-20261020-task3 | Stage 08 accepted | Local checks pass; exact CI/PostgreSQL/artifact and UAT2/owner gates pending | isolation and contract tests under both modes; no mixing of keys/tokens; no connection fallback; additive migration and rotation recovery demonstrated in test. |
-| 10 | Complete connection authorization, renewal and disconnect | codex/uat2-stage10 (reserved) | Stage 09 accepted | Not started | browser flow and backend tests pass for both modes; real integration/approval status is separately recorded, never inferred from mocks. |
-| 11 | Repair INDmoney imports and financial data integrity | codex/uat2-stage11 (reserved) | Stage 10 accepted | Not started | accepted data passes documented validation and uncertainty is visible before it feeds recommendations. |
+| 10 | Complete connection authorization, renewal and disconnect | codex/stage10-connection-authorization-local-20261020 | Stage 09 accepted | Parent-recorded accepted/live owner-only simulation f30db4e4; real providers disabled | browser flow and backend tests pass for both modes; real integration/approval status is separately recorded, never inferred from mocks. |
+| 11 | Repair INDmoney imports and financial data integrity | codex/stage11-indmoney-integrity-local-20261020 | Stage 10 accepted | Local candidate/tests/preview ready; CI and external actions not authorized | accepted data passes documented validation and uncertainty is visible before it feeds recommendations. |
 | 12 | Move rebalance orchestration to durable server workflows | codex/uat2-stage12 (reserved) | Stage 11 accepted | Not started | workflows survive browser loss and restart safely; every side effect is policy checked; completion/failure/partial state remains inspectable and owned. |
 | 13 | Add AI limits, data boundaries and private exports | codex/uat2-stage13 (reserved) | Stage 12 accepted | Not started | bounded attributable spending and private data flow; users can understand quota/partial-analysis failures. |
 | 14 | Implement durable order intents and explicit approvals | codex/uat2-stage14 (reserved) | Stage 13 accepted | Not started | no broker-submit path in release scope can execute without current payload-bound approval; use fake adapters only. |

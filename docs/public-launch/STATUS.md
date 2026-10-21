@@ -1,3 +1,21 @@
+# Stage11 local review correction — re-review pending
+
+All three independent findings on8ced2c8f are corrected locally: strict nonzero signs before tolerances; Decimal aggregate/difference arithmetic with no silent cash rounding; and JSON-safe quarantine of nonfinite parsed data. Acceptance independently revalidates and parser3 isolates historical parser2 receipts from current data without rewriting history. See STAGE11_NUMERIC_REVIEW_FIX.md and evidence/stage11-numeric-review-checks.json. Fresh194backend/10UI/TypeScript/build checks pass; native84/harness10 are reused against unchanged source. Docker67/Linux20/CI/artifact/independent re-review/final browser gates remain pending. No publication/deployment/live-provider/security/AWS change or Stage12. This checkpoint's containing commit is the local successor; external handoff records its exact SHA. Earlier candidate/evidence below remain preserved history.
+
+# Stage11 local candidate prepared — no publication or deployment
+
+Local candidate is this checkpoint's containing commit on codex/stage11-indmoney-integrity-local-20261020, exact base f30db4e4bcdb3709371213b3daa907db8887c9ea. Manual preview/acceptance/quarantine/provenance/corrections and accepted-only analysis/history are implemented. Local checks pass: 172 backend, 84 native, 10 harness and 8 UI tests; TypeScript, Next.js build, inventory and 18 actual synthetic HTTP checks. See STAGE11_PREVIEW.md, STAGE11_RECOVERY_CI.md and evidence/stage11-local-checks.json. Final rebuilt browser visual confirmation remains pending after owner switched to live UAT2.
+
+Code LOCAL CANDIDATE / local verification PASS with documented browser gap / Docker 45 and Linux 20 NOT_RUN / exact CI NOT_TRIGGERED / package NOT_BUILT11 / independent review PENDING / publication NOT_AUTHORIZED / UAT2 deployment NOT_AUTHORIZED11 / UAT2 verification NOT_RUN11 / owner acceptance PENDING11 / external provider approval unchanged and disabled. Stage12 NOT_STARTED. Current live Stage10/production/oldUAT/resources/security/credentials and budget/shutdown/retention remain unchanged.
+
+Earlier implementation and failure checkpoints follow as preserved history.
+
+# Stage11 local implementation started — accepted Stage10 baseline
+
+Parent records Stage10 acceptance before owner explicit local Stage11 approval at20October2026 18:06:46UTC. Stage10 source/deployment f30db4e4bcdb3709371213b3daa907db8887c9ea is preserved; live owner-only simulation remains unchanged. New isolated local worktree/branch and requirement mapping are in STAGE11_REQUIREMENT_MAP.md. Code IN_PROGRESS11 / local checks NOT_RUN11 / CI NOT_RUN11 / publication NOT_AUTHORIZED11 / deployment NOT_AUTHORIZED11 / UAT2 verification NOT_RUN11 / owner acceptance PENDING11 / external approval unchanged. No Stage12.
+
+Earlier pending/failure checkpoints below are preserved history and do not override parent-recorded Stage10 acceptance or this narrow local-only authorization.
+
 # Stage10 CI blocked on local-only fingerprint correction
 
 Draft PR1252 is published at diagnostic3dfa94826684176e679f37577de0d67918184860; runtime remains identical to reviewed4668e2a9. Both CI runs39460845285 and39462281660 are terminal23/26 success, three Linux groups failed. Current matrix executed20 cases:13 pass/7 fail/zero skips;29 PostgreSQL and all19 historical Stage09 cases passed. Native4668 source/offline/artifact audit passed separately. No CI/deployment acceptance claimed.

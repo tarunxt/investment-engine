@@ -3,7 +3,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import PlainTextResponse
+from app.domains.indmoney_us.import_service import ManualImportService
+from app.domains.indmoney_us.import_validation import CSV_TEMPLATE
+from app.domains.indmoney_us.schemas import IndMoneyImportAcceptance
+from app.shared.exceptions import ValidationException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -25,7 +30,11 @@ from app.shared.exceptions import NotFoundException
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/indmoney-us", tags=["indmoney-us"])
+async def private_import_headers(response: Response):
+    response.headers['Cache-Control']='private, no-store'
+
+
+router = APIRouter(prefix="/indmoney-us", tags=["indmoney-us"],dependencies=[Depends(private_import_headers)])
 service = IndMoneyUsPortfolioService()
 price_service = IndMoneyUsCurrentPriceService()
 
@@ -38,11 +47,8 @@ async def get_portfolio_overview(
 ):
     repo = IndMoneyUsPortfolioSnapshotRepository(db)
     snapshots = await repo.list_by_user(current_user.id, limit=limit)
-    latest = (
-        IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshots[0]))
-        if snapshots
-        else None
-    )
+    accepted=await repo.get_latest_by_user(current_user.id)
+    latest=IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(accepted)) if accepted is not None else None
     history = [
         IndMoneyUsPortfolioSnapshotSummaryResponse(**service.serialize_summary(snapshot))
         for snapshot in snapshots
@@ -56,25 +62,31 @@ async def create_portfolio_snapshot(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    repo = IndMoneyUsPortfolioSnapshotRepository(db)
-    snapshot_data = service.parse_snapshot(
-        request.raw_text,
-        captured_at=request.captured_at,
-    )
-    validate_holdings_snapshot(snapshot_data)
-    snapshot = await repo.create_snapshot(
-        {
-            **snapshot_data,
-            "user_id": current_user.id,
-        }
-    )
+    # Backward-compatible response shape, but immediate unreviewed ingestion is
+    # deliberately closed: existing callers must present an owned preview/hash.
+    if request.accepted_preview_id is None or request.acceptance_hash is None:
+        raise ValidationException('Preview the import and explicitly accept its hash first.')
+    snapshot=await ManualImportService(db).accept(current_user.id,request.accepted_preview_id,request.acceptance_hash)
     await db.commit()
-    logger.info(
-        "Saved INDmoney US snapshot %s for user %s with status %s",
-        snapshot.id,
-        current_user.id,
-        snapshot.parse_status,
-    )
+    return IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshot))
+
+
+@router.get('/imports/template',response_class=PlainTextResponse)
+async def import_template(current_user: User = Depends(get_current_user)):
+    return PlainTextResponse(CSV_TEMPLATE,media_type='text/csv',headers={'Content-Disposition':'attachment; filename="indmoney-us-v2.csv"'})
+
+
+@router.post('/imports/preview',response_model=IndMoneyUsPortfolioSnapshotDetailResponse)
+async def preview_import(request: IndMoneyUsPortfolioSnapshotCreateRequest,db: AsyncSession=Depends(get_async_db),current_user: User=Depends(get_current_user)):
+    snapshot=await ManualImportService(db).preview(current_user.id,request)
+    await db.commit()
+    return IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshot))
+
+
+@router.post('/imports/{snapshot_id}/accept',response_model=IndMoneyUsPortfolioSnapshotDetailResponse)
+async def accept_import(snapshot_id: int,request: IndMoneyImportAcceptance,db: AsyncSession=Depends(get_async_db),current_user: User=Depends(get_current_user)):
+    snapshot=await ManualImportService(db).accept(current_user.id,snapshot_id,request.content_hash)
+    await db.commit()
     return IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshot))
 
 

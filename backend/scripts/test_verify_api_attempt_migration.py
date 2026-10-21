@@ -101,6 +101,52 @@ class MigrationSafetyTests(unittest.TestCase):
             else: changed["outbox"]["columns"][2]=("execution_attempts","INTEGER",False,"1")
             with self.subTest(kind=kind),self.assertRaises(AssertionError): verifier.require_forward_baseline_preserved(before,changed)
 
+    def stage11_snapshots(self):
+        table='indmoney_us_portfolio_snapshots'
+        base={'columns':[('id','INTEGER',False,None),('user_id','INTEGER',False,None)],
+              'rows':[json.dumps({'id':1,'user_id':7},sort_keys=True)],'indexes':[],
+              'unique':[],'foreign_keys':[],'checks':[],'primary_key':{'name':'old_pk','constrained_columns':['id']}}
+        before={table:base};after=deepcopy(before);item=after[table]
+        item['columns'] += [('acceptance_state','VARCHAR(24)',False,"'legacy_unverified'::character varying"),
+            ('import_key','VARCHAR(64)',True,None),('content_hash','VARCHAR(64)',True,None),
+            ('import_provenance','JSON',True,None),('accepted_at','TIMESTAMP',True,None),('supersedes_id','INTEGER',True,None)]
+        item['rows']=[json.dumps({'id':1,'user_id':7,'acceptance_state':'legacy_unverified',
+            **{name:None for name in ['import_key','content_hash','import_provenance','accepted_at','supersedes_id']}},sort_keys=True)]
+        item['unique']=[{'name':'uq_indmoney_owner_import','column_names':['user_id','import_key'],'comment':None,'dialect_options':{'postgresql_include':[],'postgresql_nulls_not_distinct':False}}]
+        item['indexes']=[{'name':'uq_indmoney_owner_import','column_names':['user_id','import_key'],'unique':True,'duplicates_constraint':'uq_indmoney_owner_import','include_columns':[],'dialect_options':{'postgresql_include':[]}}]
+        item['foreign_keys']=[{'name':'fk_indmoney_correction','constrained_columns':['supersedes_id'],'referred_schema':None,'referred_table':table,'referred_columns':['id'],'options':{'ondelete':'RESTRICT'}}]
+        return before,after
+
+    def test_exact_stage11_additions_preserve_legacy_without_mutating_receipt(self):
+        before,after=self.stage11_snapshots();saved=deepcopy(after)
+        verifier.require_forward_baseline_preserved(before,after)
+        self.assertEqual(after,saved)
+        verifier.require_forward_baseline_preserved(before,before)
+
+    def test_stage11_forward_check_rejects_column_constraint_and_data_drift(self):
+        before,after=self.stage11_snapshots();table='indmoney_us_portfolio_snapshots'
+        mutations={
+            'partial':lambda x:x['columns'].pop(),
+            'extra':lambda x:x['columns'].append(('unexpected','TEXT',True,None)),
+            'old_type':lambda x:x['columns'].__setitem__(0,('id','TEXT',False,None)),
+            'new_type':lambda x:x['columns'].__setitem__(2,('acceptance_state','TEXT',False,"'legacy_unverified'")),
+            'default':lambda x:x['columns'].__setitem__(2,('acceptance_state','VARCHAR(24)',False,"'accepted'")),
+            'nullable':lambda x:x['columns'].__setitem__(3,('import_key','VARCHAR(64)',False,None)),
+            'unique_columns':lambda x:x['unique'][0].update(column_names=['import_key']),
+            'unique_nulls':lambda x:x['unique'][0]['dialect_options'].update(postgresql_nulls_not_distinct=True),
+            'index_unique':lambda x:x['indexes'][0].update(unique=False),
+            'index_extra':lambda x:x['indexes'][0].update(unknown='ignored?'),
+            'fk_delete':lambda x:x['foreign_keys'][0]['options'].update(ondelete='CASCADE'),
+            'fk_target':lambda x:x['foreign_keys'][0].update(referred_table='users'),
+            'fk_missing':lambda x:x['foreign_keys'].clear(),
+            'old_constraint':lambda x:x['checks'].append({'name':'new','sqltext':'false'}),
+            'old_row':lambda x:x['rows'].__setitem__(0,x['rows'][0].replace('"user_id": 7','"user_id": 8')),
+            'accepted_legacy':lambda x:x['rows'].__setitem__(0,x['rows'][0].replace('legacy_unverified','accepted')),
+            'invented_hash':lambda x:x['rows'].__setitem__(0,x['rows'][0].replace('"content_hash": null','"content_hash": "invented"'))}
+        for name,mutate in mutations.items():
+            changed=deepcopy(after);mutate(changed[table])
+            with self.subTest(mutation=name),self.assertRaises(AssertionError):verifier.require_forward_baseline_preserved(before,changed)
+
     def test_workflow_uses_ephemeral_containers_without_production_access(self):
         workflow_path = verifier.BACKEND.parent / ".github/workflows/api-attempt-migration.yml"
         source = workflow_path.read_text()

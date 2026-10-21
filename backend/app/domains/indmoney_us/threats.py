@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+from app.domains.indmoney_us.import_validation import require_recommendation_snapshot,utc
 from app.domains.jobs.models import Job
 from app.domains.zerodha.threats import (
     IST,
@@ -28,7 +29,8 @@ class IndMoneyUsThreatPromptMetadata:
 
 
 def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> str:
-    captured_at_ist = snapshot.captured_at.astimezone(IST)
+    require_recommendation_snapshot(snapshot)
+    captured_at_ist = utc(snapshot.captured_at).astimezone(IST)
     current_value = snapshot.current_value or 0.0
     holdings = sorted(
         list(snapshot.holdings or []),
@@ -50,7 +52,7 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         "[THREAT_METADATA_DO_NOT_REPEAT]",
         f"[INDMONEY_THREAT_SNAPSHOT_ID={snapshot.id}]",
         f"[THREAT_SNAPSHOT_DATE={snapshot.snapshot_date.isoformat()}]",
-        f"[THREAT_CAPTURED_AT={snapshot.captured_at.isoformat()}]",
+        f"[THREAT_CAPTURED_AT={utc(snapshot.captured_at).isoformat()}]",
         "",
         "Use the latest web data before answering. Search for live market data, earnings timing, news flow, sector rotation, index trend, macro conditions, and institutional flow context relevant to these holdings.",
         "Do not repeat the metadata marker lines in the final answer.",
@@ -83,6 +85,11 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         "For every table row about a single stock, always include Exchange, Stock Symbol, and Stock Name.",
         "Use the pasted stock symbol as authoritative when searching, and determine the verified primary listed exchange in a TradingView-compatible form such as NASDAQ, NYSE, or AMEX.",
         "",
+        "Manual import / analysis only; no direct US trading integration.",
+        f"[INDMONEY_ACCEPTED_CONTENT_SHA256={snapshot.content_hash}]",
+        f"[INDMONEY_SOURCE_SHA256={snapshot.import_provenance['source_hash']}]",
+        f"- Parser: {snapshot.import_provenance['parser_version']}; currency USD; no FX conversion.",
+        f"- Import uncertainty: {snapshot.import_provenance.get('warnings',[])}",
         "Current INDmoney US portfolio snapshot:",
         f"- Snapshot id: {snapshot.id}",
         f"- Snapshot date: {snapshot.snapshot_date.isoformat()}",

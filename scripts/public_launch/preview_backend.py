@@ -43,7 +43,7 @@ from scripts.public_launch.preview_streams import install
 install()
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
-from scripts.public_launch import preview_jobs, preview_stage05,preview_stage08,preview_stage09
+from scripts.public_launch import preview_jobs, preview_stage05,preview_stage08,preview_stage09,preview_stage11
 from app.domains.connections.models import ConnectionAttempt,ConnectionBindingHistory
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
@@ -133,7 +133,7 @@ async def synthetic_boundary(request: Request, call_next):
     private_read = request.method == "GET" and (request.url.path.startswith("/me/connections/") or request.url.path in {"/me/connections","/jobs", "/runs","/me/modules/safety-activity"}|preview_stage08.READS or
                    request.url.path.startswith('/me/modules/resource-access/') or any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
                        for prefix in ("/jobs/", "/runs/","/indmoney-us/portfolio/")))
-    if request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and not (request.method=='POST' and request.url.path in {'/me/connection-authorization/synthetic-setup','/me/connection-authorization/start','/me/connection-authorization/callback','/me/connection-authorization/confirm','/me/connection-authorization/disconnect'}) and request.url.path!='/me/connection-authorization/config' and (request.method, request.url.path) not in ALLOWED:
+    if not preview_stage11.allowed(request.method,request.url.path) and request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and not (request.method=='POST' and request.url.path in {'/me/connection-authorization/synthetic-setup','/me/connection-authorization/start','/me/connection-authorization/callback','/me/connection-authorization/confirm','/me/connection-authorization/disconnect'}) and request.url.path!='/me/connection-authorization/config' and (request.method, request.url.path) not in ALLOWED:
         return JSONResponse({"detail": "Unavailable in synthetic Stage01 preview; no external actions are permitted"}, status_code=503)
     response = await call_next(request)
     response.headers["X-Stage01-Synthetic-Preview"] = "true"
@@ -159,6 +159,7 @@ app.include_router(runs_ws_router)
 
 preview_stage05.install(app)
 preview_stage08.install(app)
+preview_stage11.install(app)
 
 from app.domains.modules.transports import install_route_policy
 install_route_policy(app)

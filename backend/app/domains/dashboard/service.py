@@ -27,6 +27,7 @@ from app.domains.dashboard.schemas import (
 from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+from app.domains.indmoney_us.repository import accepted_snapshot_predicate
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
 from app.infrastructure.database.session import AsyncSessionLocal
@@ -216,7 +217,7 @@ async def _load_indmoney(user_id: int) -> DashboardIndMoneySection:
                     IndMoneyUsPortfolioSnapshot.total_return_percent,
                     IndMoneyUsPortfolioSnapshot.dashboard_top_holdings,
                 )
-                .where(IndMoneyUsPortfolioSnapshot.user_id == user_id)
+                .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
                 .order_by(
                     desc(IndMoneyUsPortfolioSnapshot.captured_at),
                     desc(IndMoneyUsPortfolioSnapshot.id),
@@ -231,7 +232,7 @@ async def _load_indmoney(user_id: int) -> DashboardIndMoneySection:
                     IndMoneyUsPortfolioSnapshot.current_value,
                     IndMoneyUsPortfolioSnapshot.wallet_balance,
                 )
-                .where(IndMoneyUsPortfolioSnapshot.user_id == user_id)
+                .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
                 .order_by(
                     desc(IndMoneyUsPortfolioSnapshot.captured_at),
                     desc(IndMoneyUsPortfolioSnapshot.id),

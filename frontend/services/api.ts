@@ -1421,6 +1421,14 @@ class apiServiceClass implements IApiService {
     return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId));
   }
 
+  indmoneyUsPreviewImport(data: IndMoneyUsPortfolioSnapshotCreateRequest): Promise<IndMoneyUsPortfolioSnapshotDetail> {
+    return this.post<IndMoneyUsPortfolioSnapshotDetail>('/backend-api/indmoney-us/imports/preview',data);
+  }
+
+  indmoneyUsAcceptImport(id: number, contentHash: string): Promise<IndMoneyUsPortfolioSnapshotDetail> {
+    return this.post<IndMoneyUsPortfolioSnapshotDetail>(`/backend-api/indmoney-us/imports/${id}/accept`,{content_hash:contentHash,accept:true});
+  }
+
   indmoneyUsCreatePortfolioSnapshot(
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {

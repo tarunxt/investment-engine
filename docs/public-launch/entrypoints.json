@@ -5,7 +5,7 @@
     "background": 31,
     "export": 42,
     "frontend": 25,
-    "http": 276,
+    "http": 279,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -4090,11 +4090,41 @@
     {
       "calls": [
         "Depends",
+        "IndMoneyUsCurrentPricesResponse",
+        "any",
+        "datetime.now",
+        "price_service.fetch_quotes",
+        "quote.get",
+        "router.post"
+      ],
+      "capability": "get_current_prices",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
+        "router.post('/prices/current', response_model=IndMoneyUsCurrentPricesResponse)"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/indmoney-us/prices/current",
+      "side_effects": "private import/snapshot DB; analysis/notifications",
+      "source": "backend/app/domains/indmoney_us/router.py:107"
+    },
+    {
+      "calls": [
+        "Depends",
         "IndMoneyUsPortfolioOverviewResponse",
         "IndMoneyUsPortfolioSnapshotDetailResponse",
         "IndMoneyUsPortfolioSnapshotRepository",
         "IndMoneyUsPortfolioSnapshotSummaryResponse",
         "Query",
+        "repo.get_latest_by_user",
         "repo.list_by_user",
         "router.get",
         "service.serialize_detail",
@@ -4109,6 +4139,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
         "router.get('/portfolio', response_model=IndMoneyUsPortfolioOverviewResponse)"
       ],
       "owner_source": [
@@ -4117,30 +4148,29 @@
       "registration": "mounted",
       "route": "/indmoney-us/portfolio",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/router.py:34"
+      "source": "backend/app/domains/indmoney_us/router.py:43"
     },
     {
       "calls": [
         "Depends",
         "IndMoneyUsPortfolioSnapshotDetailResponse",
-        "IndMoneyUsPortfolioSnapshotRepository",
+        "ManualImportService",
+        "ManualImportService(db).accept",
+        "ValidationException",
         "db.commit",
-        "logger.info",
-        "repo.create_snapshot",
         "router.post",
-        "service.parse_snapshot",
-        "service.serialize_detail",
-        "validate_holdings_snapshot"
+        "service.serialize_detail"
       ],
       "capability": "create_portfolio_snapshot",
       "classification": "owner-private",
       "kind": "http",
       "method": "POST",
       "module": "indmoney_us",
-      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
+      "module_lifecycle_gate": "indmoney_us / import via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
         "router.post('/portfolio', response_model=IndMoneyUsPortfolioSnapshotDetailResponse)"
       ],
       "owner_source": [
@@ -4149,7 +4179,92 @@
       "registration": "mounted",
       "route": "/indmoney-us/portfolio",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/router.py:54"
+      "source": "backend/app/domains/indmoney_us/router.py:60"
+    },
+    {
+      "calls": [
+        "Depends",
+        "PlainTextResponse",
+        "router.get"
+      ],
+      "capability": "import_template",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
+        "router.get('/imports/template', response_class=PlainTextResponse)"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/indmoney-us/imports/template",
+      "side_effects": "private import/snapshot DB; analysis/notifications",
+      "source": "backend/app/domains/indmoney_us/router.py:75"
+    },
+    {
+      "calls": [
+        "Depends",
+        "IndMoneyUsPortfolioSnapshotDetailResponse",
+        "ManualImportService",
+        "ManualImportService(db).preview",
+        "db.commit",
+        "router.post",
+        "service.serialize_detail"
+      ],
+      "capability": "preview_import",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / import via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
+        "router.post('/imports/preview', response_model=IndMoneyUsPortfolioSnapshotDetailResponse)"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/indmoney-us/imports/preview",
+      "side_effects": "private import/snapshot DB; analysis/notifications",
+      "source": "backend/app/domains/indmoney_us/router.py:80"
+    },
+    {
+      "calls": [
+        "Depends",
+        "IndMoneyUsPortfolioSnapshotDetailResponse",
+        "ManualImportService",
+        "ManualImportService(db).accept",
+        "db.commit",
+        "router.post",
+        "service.serialize_detail"
+      ],
+      "capability": "accept_import",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "indmoney_us",
+      "module_lifecycle_gate": "indmoney_us / import via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
+        "router.post('/imports/{snapshot_id}/accept', response_model=IndMoneyUsPortfolioSnapshotDetailResponse)"
+      ],
+      "owner_source": [
+        "current_user.id"
+      ],
+      "registration": "mounted",
+      "route": "/indmoney-us/imports/{snapshot_id}/accept",
+      "side_effects": "private import/snapshot DB; analysis/notifications",
+      "source": "backend/app/domains/indmoney_us/router.py:87"
     },
     {
       "calls": [
@@ -4170,6 +4285,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "[Depends(private_import_headers)]",
         "router.get('/portfolio/{snapshot_id}', response_model=IndMoneyUsPortfolioSnapshotDetailResponse)"
       ],
       "owner_source": [
@@ -4178,35 +4294,7 @@
       "registration": "mounted",
       "route": "/indmoney-us/portfolio/{snapshot_id}",
       "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/router.py:82"
-    },
-    {
-      "calls": [
-        "Depends",
-        "IndMoneyUsCurrentPricesResponse",
-        "any",
-        "datetime.now",
-        "price_service.fetch_quotes",
-        "quote.get",
-        "router.post"
-      ],
-      "capability": "get_current_prices",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "indmoney_us",
-      "module_lifecycle_gate": "indmoney_us / analyze via modules.transports.install_route_policy",
-      "observed_guards": [
-        "Depends(get_current_user)",
-        "router.post('/prices/current', response_model=IndMoneyUsCurrentPricesResponse)"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "mounted",
-      "route": "/indmoney-us/prices/current",
-      "side_effects": "private import/snapshot DB; analysis/notifications",
-      "source": "backend/app/domains/indmoney_us/router.py:95"
+      "source": "backend/app/domains/indmoney_us/router.py:94"
     },
     {
       "calls": [
@@ -14847,7 +14935,7 @@
     "backend/app/domains/dashboard/models.py": "94888385aad300fd1ea0473527c3e6a0d94565a85e33294c020306e54b7b36fa",
     "backend/app/domains/dashboard/router.py": "698e48fd609123099385273d77478752bf5dadef970c7452073f1072a01cc5b3",
     "backend/app/domains/dashboard/schemas.py": "8eed84716c178d2fdb0d567fa5673149bdc54e6dcfb3a23b57d15aff9a5d0f47",
-    "backend/app/domains/dashboard/service.py": "e437f34c9e21f2f457a8f8601dc0d7d8852ce145442eb04140aa630cced51804",
+    "backend/app/domains/dashboard/service.py": "48168ac9499020e2adb47b4b283b6f8efb43c4006796da5d56ad4b7c589e6919",
     "backend/app/domains/dashboard/tasks.py": "5a91b4dffe8a30c02c62e4969ae71002da0c585eb5648c8c8a1c61a5ecd8c298",
     "backend/app/domains/fx_rates/__init__.py": "3f50e1de2cf5a33d4ec3e7f1f2124cde14c699dd62965ad3c75ebfbcad836eee",
     "backend/app/domains/fx_rates/models.py": "12b83795d5f44d5d392600344f5a048b88236e8a50d4223b6d429113f4594d73",
@@ -14866,17 +14954,20 @@
     "backend/app/domains/health/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/health/router.py": "a53888b3d29c4c678c55118336631fc3e5cb598a350d8e335d5884015b831543",
     "backend/app/domains/indmoney_us/__init__.py": "bf70baf7f2a22b8703238187201179d0f1b275798fb2ae7532c1b88a894da292",
-    "backend/app/domains/indmoney_us/events.py": "7d5f2285d6d6530841a726d2a14dbab0eee3a241dc45135f6be22da6cbe4d513",
+    "backend/app/domains/indmoney_us/events.py": "1dff79ea27394c644ade9b0437ca9c1a481b892952654d04e13d42baa077a7b3",
     "backend/app/domains/indmoney_us/events_router.py": "06ac7c29da9e438f814dc0b39a703fe1779d23301d3f13f7deab64bdda591433",
     "backend/app/domains/indmoney_us/events_schemas.py": "5501e8a96ad76142101b920091d64a259db162dc36fab06d7b4c665502f53a55",
-    "backend/app/domains/indmoney_us/models.py": "cc750803095ed9d323c0ee45e6e6396053c259e20fd59711a83c5f0b5a6f3009",
+    "backend/app/domains/indmoney_us/import_service.py": "ca40980e3a426fd14045953ec12c0e6e36f5f0c83e19a39270f5b7f357339ac7",
+    "backend/app/domains/indmoney_us/import_validation.py": "aa8eb94cdf3ca960e2b004f5a4fbd5dffc3fb3ad332822cf16eecac00ca1d993",
+    "backend/app/domains/indmoney_us/models.py": "8750848ebe3803c56c00a5870405c4dae08cae972cdaa3ba1231195b5d545818",
+    "backend/app/domains/indmoney_us/numeric.py": "9bebb2bfbe66feaaab78f4f2b8d914e9579ac606bad6bb279a230b4ff6794409",
     "backend/app/domains/indmoney_us/price_service.py": "bbf5cfe65525efb7b71e4ebe6e88e2507bcfbfd025eecf69709456d4e6e6e647",
-    "backend/app/domains/indmoney_us/repository.py": "33e05980f16d715776476703f180dfc800d40baa6ee4f8946cb9f497579f55ff",
-    "backend/app/domains/indmoney_us/router.py": "d83069ddb6072c47387abef95f7e2ed9c7134b829ba463f2b13ab0d42921bece",
-    "backend/app/domains/indmoney_us/schemas.py": "f0121af02ed12e4c014c09252f59a648e5c443dcda07bc9682e95f7a5a91ed16",
-    "backend/app/domains/indmoney_us/service.py": "3e3c74319633be198675e547d09c7872a8641b06828d8553c916bee38af71b15",
+    "backend/app/domains/indmoney_us/repository.py": "dadacd1d93e52fd146b64fbf1301c840876c3302d47f67c0d3526992f22aa169",
+    "backend/app/domains/indmoney_us/router.py": "7b605ed35ac583b27563000f2ae14887985b099545c75e9366cd78514d7fd6d2",
+    "backend/app/domains/indmoney_us/schemas.py": "042233eaa4443116270e0eff2c03131bdef5d1a0449eaaec44e2c490cfa232ae",
+    "backend/app/domains/indmoney_us/service.py": "9ad2af2825e2ba1da769010039f0856b2e1c7ea71cc59c9f895e0d0512b7f74e",
     "backend/app/domains/indmoney_us/snapshot_validation.py": "77cf6200281e1633324d5f687ab2f518ffa325b5abedd2c14acf3d7593348d1d",
-    "backend/app/domains/indmoney_us/threats.py": "f8d4982f17bce42821eb025b0d20d6c7bf3721fbd6187d71e6cedb806da34c71",
+    "backend/app/domains/indmoney_us/threats.py": "a9f68b25cf7d878a3512d019735d797a805aef4cb6c64303ca39ec428ba45058",
     "backend/app/domains/indmoney_us/threats_router.py": "a61c11f889de730b38ee177060e31376929bd0652aafa26e4a30903d678919ad",
     "backend/app/domains/indmoney_us/threats_schemas.py": "a2ef4417e7a59a5aec671a0b2913be2d3ad8994bd0304eca1c18c771f86da51d",
     "backend/app/domains/jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -14907,7 +14998,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "cb16c50194cbb9f333b292130e0469ba19ed3f72df97d71380969a9def622505",
+    "backend/app/domains/modules/coverage.py": "462f0fbe1d8f3ce036a657645eb21db7a5450e7e43a74d0b86279eeb2efd08b0",
     "backend/app/domains/modules/dispatch.py": "bb9e8faf27a33a947af05d569763eb91c8ba3ff6d7a90989a8288c798201fa18",
     "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
     "backend/app/domains/modules/lifecycle.py": "e05bf9a7baccc9c42bdb728bf569e4f28458099ff616eb980384b6b9eb727f2d",
@@ -15168,7 +15259,7 @@
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/indmoney-us/events/page.tsx": "797f251250268ac1d342fd7903085fb549319b3ae547068498fa87743218bde4",
     "frontend/app/console/indmoney-us/final-actionables/page.tsx": "a36427bc53a0e6a2bc77b3cf7f72fa156eff738e0ba20d55890e7610e96c648c",
-    "frontend/app/console/indmoney-us/page.tsx": "d5b54e5dfd193e7c13fbbf18fa53ac3901ab11417babaaf5935245c5facdf316",
+    "frontend/app/console/indmoney-us/page.tsx": "859c516fe7005099e1022570b3fa30bf81e261bc21aa8db5db4d2ffff62e664a",
     "frontend/app/console/indmoney-us/rebalance/page.tsx": "b4093a93673fa69a53ce3775fcc8684fd96e13d9da6948414d9a20521f89c5ac",
     "frontend/app/console/indmoney-us/swing-trade/page.tsx": "87ba0b9e6a61c6e6f39cbc178a642d9902c1fb87a8d64921b763ac17f5e77078",
     "frontend/app/console/indmoney-us/threats/page.tsx": "9abf78fb8902f397ad16693608f559de62e216d7585c7f6cf65aed04c4efa020",
