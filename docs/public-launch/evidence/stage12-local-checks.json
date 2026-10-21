@@ -42,7 +42,9 @@
     },
     "build": {
       "path": "docs/public-launch/evidence/stage12-build.log",
-      "sha256": "e38590351ddf8f231118d23ba8de575ded3f20eea3f566484e1dafdc8a71851f"
+      "sha256": "865ceceb080fb7aac9e4be82c2cfaa7e4c8f34d35539b6df82a03314e3c314cf",
+      "original_raw_sha256": "e38590351ddf8f231118d23ba8de575ded3f20eea3f566484e1dafdc8a71851f",
+      "normalization": "Trailing terminal whitespace/CR removed in repository text log; original /tmp/stage12-build-candidate.log unchanged"
     },
     "inventory": {
       "path": "docs/public-launch/evidence/stage12-inventory.log",
