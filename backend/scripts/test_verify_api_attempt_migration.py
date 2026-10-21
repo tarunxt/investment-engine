@@ -172,5 +172,75 @@ class MigrationSafetyTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
 
+
+class Stage12ForwardContractTests(unittest.TestCase):
+    def snapshots(self):
+        tables=['jobs','runs','auto_rebalance_workflows','auto_rebalance_workflow_stages','zerodha_portfolio_snapshots']
+        before={name:{'columns':[('id','INTEGER',False,None),('user_id','INTEGER',False,None)],
+                      'rows':[json.dumps({'id':1,'user_id':7},sort_keys=True)],'indexes':[],
+                      'unique':[],'foreign_keys':[],'checks':[],'primary_key':{'name':name+'_pk','constrained_columns':['id']}} for name in tables}
+        after=deepcopy(before)
+        definitions={
+            'auto_rebalance_workflows':[('orchestration_kind','VARCHAR(24)',True,None),('request_key','VARCHAR(128)',True,None),('execution_json','JSON',True,None),('control_version','INTEGER',False,'0')],
+            'auto_rebalance_workflow_stages':[('checkpoint_json','JSON',True,None),('attempt_count','INTEGER',False,'0')],
+            'zerodha_portfolio_snapshots':[('acquisition_json','JSON',True,None)]}
+        for table in tables:
+            columns=list(definitions.get(table,[]))
+            if table in {'jobs','runs','auto_rebalance_workflows'}:columns += [('module_id','VARCHAR(40)',True,None),('module_version','INTEGER',True,None),('module_cancel_requested','BOOLEAN',False,'false')]
+            after[table]['columns']+=columns
+            values={'id':1,'user_id':7}
+            for name,_,_,_ in columns:values[name]=0 if name in {'control_version','attempt_count'} else False if name=='module_cancel_requested' else None
+            after[table]['rows']=[json.dumps(values,sort_keys=True)]
+        after['auto_rebalance_workflows']['unique']=[{'name':'uq_analysis_owner_request','column_names':['user_id','request_key'],'comment':None,'dialect_options':{'postgresql_include':[],'postgresql_nulls_not_distinct':False}}]
+        after['auto_rebalance_workflows']['indexes']=[{'name':'uq_analysis_owner_request','column_names':['user_id','request_key'],'unique':True,'duplicates_constraint':'uq_analysis_owner_request','include_columns':[],'dialect_options':{'postgresql_include':[]}}]
+        return before,after
+
+    def test_exact_stage12_and_earlier_lifecycle_additions_preserve_receipts(self):
+        before,after=self.snapshots();saved=deepcopy(after)
+        verifier.require_forward_baseline_preserved(before,after)
+        self.assertEqual(saved,after)
+        verifier.require_forward_baseline_preserved(before,before)
+
+    def test_stage12_requires_complete_exact_columns_and_legacy_values(self):
+        before,after=self.snapshots()
+        fields={'auto_rebalance_workflows':['orchestration_kind','request_key','execution_json','control_version'],
+                'auto_rebalance_workflow_stages':['checkpoint_json','attempt_count'],
+                'zerodha_portfolio_snapshots':['acquisition_json']}
+        for table,names in fields.items():
+            for name in names:
+                for mutation in ['missing','type','nullable','default','invented_row','missing_row_value','unknown_column','old_column','old_row','constraint']:
+                    bad=deepcopy(after);item=bad[table];index=next(i for i,c in enumerate(item['columns']) if c[0]==name);column=item['columns'][index]
+                    if mutation=='missing':item['columns'].pop(index)
+                    elif mutation=='type':item['columns'][index]=(name,'TEXT',column[2],column[3])
+                    elif mutation=='nullable':item['columns'][index]=(name,column[1],not column[2],column[3])
+                    elif mutation=='default':item['columns'][index]=(name,column[1],column[2],'1')
+                    elif mutation in {'invented_row','missing_row_value','old_row'}:
+                        row=json.loads(item['rows'][0])
+                        if mutation=='invented_row':row[name]=True if name in {'control_version','attempt_count'} else 'invented'
+                        elif mutation=='missing_row_value':row.pop(name)
+                        else:row['user_id']=8
+                        item['rows']=[json.dumps(row,sort_keys=True)]
+                    elif mutation=='unknown_column':item['columns'].append(('unapproved','JSON',True,None))
+                    elif mutation=='old_column':item['columns'][0]=('id','TEXT',False,None)
+                    else:item['checks'].append({'name':'unapproved','sqltext':'false'})
+                    with self.subTest(table=table,column=name,mutation=mutation),self.assertRaises(AssertionError):verifier.require_forward_baseline_preserved(before,bad)
+
+    def test_stage12_owner_request_constraint_semantics_cannot_drift(self):
+        before,after=self.snapshots()
+        for mutation in ['missing_unique','missing_index','duplicate','unique_columns','index_columns','index_nonunique','nulls_not_distinct','include','unknown','comment']:
+            bad=deepcopy(after);item=bad['auto_rebalance_workflows']
+            if mutation=='missing_unique':item['unique']=[]
+            elif mutation=='missing_index':item['indexes']=[]
+            elif mutation=='duplicate':item['unique'].append(deepcopy(item['unique'][0]))
+            elif mutation=='unique_columns':item['unique'][0]['column_names']=['request_key']
+            elif mutation=='index_columns':item['indexes'][0]['column_names']=['request_key','user_id']
+            elif mutation=='index_nonunique':item['indexes'][0]['unique']=False
+            elif mutation=='nulls_not_distinct':item['unique'][0]['dialect_options']['postgresql_nulls_not_distinct']=True
+            elif mutation=='include':item['indexes'][0]['include_columns']=['id']
+            elif mutation=='unknown':item['indexes'][0]['unrecognized']=True
+            else:item['unique'][0]['comment']='changed'
+            with self.subTest(mutation=mutation),self.assertRaises(AssertionError):verifier.require_forward_baseline_preserved(before,bad)
+
+
 if __name__ == "__main__":
     unittest.main()

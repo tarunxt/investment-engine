@@ -312,7 +312,17 @@ test("email failure is visible and does not turn completed model work into a fai
 });
 
 test("actual workflow card renders pending and failed history independently of output controls", () => {
-  const source = compile(`${extract("  const renderSectionCard =", "  const zerodhaSection =")}\nreturn renderSectionCard;`);
+  const ast = ts.createSourceFile("RebalanceWorkflowSections.tsx", workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  assert.deepEqual(ast.parseDiagnostics, []);
+  const matches = [];
+  function visit(node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "renderSectionCard") matches.push(node);
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  assert.equal(matches.length, 1, "Extract exactly the actual card implementation");
+  assert.ok(ts.isArrowFunction(matches[0].initializer));
+  const source = compile(`const ${matches[0].getText(ast)};\nreturn renderSectionCard;`);
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
