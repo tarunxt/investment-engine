@@ -15,7 +15,7 @@ pwd_context = argon2.using(
 )
 
 # JWT settings
-SECRET_KEY = "your-secret-key-change-in-production"  # TODO: Will read from env 
+SECRET_KEY = "your-secret-key-change-in-production"  # Local dev/test fixture only; public use is refused
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
@@ -23,7 +23,12 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 def signing_key():
     if not uat2_mode():
-        return SECRET_KEY
+        value = os.getenv("JWT_SIGNING_KEY", "")
+        if len(value) >= 32 and value != SECRET_KEY:
+            return value
+        if settings.environment.lower() in {'development','test'}:
+            return SECRET_KEY
+        raise RuntimeError("Public service requires an independent signing key")
     value = os.getenv("UAT2_JWT_SIGNING_KEY", "")
     if len(value) < 32 or value == SECRET_KEY:
         raise RuntimeError("Independent UAT2 signing key is required")
@@ -34,6 +39,8 @@ def token_claims(payload):
     if uat2_mode():
         require_uat2_owner(payload.get("email"))
         payload.update(iss="https://uat2.cred-x.in", aud="credx-uat2")
+    else:
+        payload.update(iss="https://cred-x.in", aud="credx-api")
     return payload
 
 
@@ -109,6 +116,7 @@ class JWTUtils:
         
         token_data = {
             "sub": str(user_id),
+            "type": "access",
             "email": email,
             "role": role,
             "exp": expire,
@@ -162,9 +170,21 @@ class JWTUtils:
                                      issuer="https://uat2.cred-x.in", audience="credx-uat2")
                 require_uat2_owner(payload.get("email"))
             else:
-                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+                payload = jwt.decode(token, signing_key(), algorithms=[ALGORITHM],
+                                     issuer="https://cred-x.in", audience="credx-api")
+            import math
+            if payload.get('type') not in {'access','refresh'} or not str(payload.get('sub','')).isdigit():
+                return None
+            if int(payload['sub']) < 1:
+                return None
+            for claim in ('exp','iat','auth_time'):
+                value=payload.get(claim)
+                if isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value):
+                    return None
+            if payload['iat'] > time.time()+1 or payload['auth_time'] > time.time()+1 or payload['exp'] <= time.time():
+                return None
             return payload
-        except JWTError:
+        except (JWTError, TypeError, ValueError, OverflowError):
             return None
     
     @staticmethod
@@ -185,7 +205,7 @@ class JWTUtils:
                 options={"verify_signature": False}
             )
             return payload
-        except JWTError:
+        except (JWTError, TypeError, ValueError, OverflowError):
             return None
 
 

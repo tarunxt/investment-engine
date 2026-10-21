@@ -19,11 +19,16 @@ async def lifespan(app):
     if not uat2_mode():
         raise RuntimeError("Restricted UAT2 entrypoint requires CREDX_UAT2=1")
     validate_uat2_startup()
+    from app.domains.public_service.security import validate_public_startup
+    from app.core.config import settings
+    validate_public_startup(settings)
     yield
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(auth_router)
+from app.domains.public_service.router import router as public_service_router
+app.include_router(public_service_router)
 # Management contract only; optional domain routers remain unavailable.
 app.include_router(modules_router)
 # Masked owner connection metadata only; no setup writes or broker adapters.
@@ -70,3 +75,7 @@ async def unavailable_socket(websocket: WebSocket, path: str):
 
 from app.domains.modules.transports import install_route_policy
 install_route_policy(app)
+
+from app.core.config import settings
+from app.domains.public_service.security import PublicIngress
+app.add_middleware(PublicIngress, frontend_url=settings.frontend_url)

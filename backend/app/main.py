@@ -123,10 +123,12 @@ async def lifespan(app: FastAPI):
     from app.core.uat2 import uat2_mode
     if uat2_mode():
         raise RuntimeError("UAT2 must use the restricted app.uat2.main:app entrypoint")
+    from app.domains.public_service.security import validate_public_startup
+    validate_public_startup(settings)
     recovery_mode()  # Refuse malformed recovery configuration before startup work.
     logger.info("Starting AI Investment Platform Backend")
     logger.info("Database: %s", settings.database_url.split("@")[-1])
-    logger.info("Redis: %s", settings.redis_url)
+    logger.info("Redis configured (connection details redacted)")
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
     # Do not terminalize persisted Auto-Live runs during FastAPI startup.
@@ -283,6 +285,8 @@ async def correlation_id_middleware(request: Request, call_next):
         end_request_timing(timing_token)
 
 
+from app.domains.public_service.security import PublicIngress
+app.add_middleware(PublicIngress, frontend_url=settings.frontend_url)
 app.add_middleware(RecoveryMiddleware)
 
 app.add_middleware(
@@ -298,6 +302,8 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 
 app.include_router(health_router)
+from app.domains.public_service.router import router as public_service_router
+app.include_router(public_service_router)
 app.include_router(auth_router)
 app.include_router(modules_router)
 from app.domains.connections.router import router as connections_router

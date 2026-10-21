@@ -11,9 +11,11 @@ LOGGING_CONFIG = {
     "disable_existing_loggers": False,
     "formatters": {
         "standard": {
+            "()": "app.domains.public_service.redaction.RedactingFormatter",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         },
         "detailed": {
+            "()": "app.domains.public_service.redaction.RedactingFormatter",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s() - %(message)s"
         }
     },

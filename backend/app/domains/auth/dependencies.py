@@ -20,7 +20,10 @@ security = HTTPBearer(auto_error=False)
 
 
 def is_auth_disabled() -> bool:
-    return not uat2_mode() and (settings.auth_disabled or settings.environment.lower() == "development")
+    from urllib.parse import urlsplit
+    return (not uat2_mode() and settings.auth_disabled
+            and settings.environment.lower() in {'development','test'}
+            and urlsplit(settings.frontend_url).hostname in {'localhost','127.0.0.1','::1'})
 
 
 async def get_or_create_dev_user(db: AsyncSession) -> User:
