@@ -44,11 +44,19 @@ MODE_CHECK_FORMS = (
 )
 
 
+# PostgreSQL16 restore only moves the array varchar-to-text coercion.
+# Accept these exact observed expressions for this exact state constraint.
+ORDER_STATE_CHECK_FORMS=("state::text = ANY (ARRAY['draft'::character varying, 'validated'::character varying, 'awaiting_approval'::character varying, 'approved'::character varying, 'submitting'::character varying, 'acknowledged'::character varying, 'unknown'::character varying, 'partial'::character varying, 'filled'::character varying, 'rejected'::character varying, 'cancelled'::character varying, 'invalidated'::character varying]::text[])", "state::text = ANY (ARRAY['draft'::character varying::text, 'validated'::character varying::text, 'awaiting_approval'::character varying::text, 'approved'::character varying::text, 'submitting'::character varying::text, 'acknowledged'::character varying::text, 'unknown'::character varying::text, 'partial'::character varying::text, 'filled'::character varying::text, 'rejected'::character varying::text, 'cancelled'::character varying::text, 'invalidated'::character varying::text])")
+
+
 def canonical_checks(table, checks):
-    return [dict(check,sqltext=MODE_CHECK_FORMS[0])
-            if table=='integration_connections' and check.get('name')=='ck_connection_mode'
-            and check.get('sqltext') in MODE_CHECK_FORMS else dict(check)
-            for check in checks]
+    exact_domains={('integration_connections','ck_connection_mode'):MODE_CHECK_FORMS,
+                   ('confirmed_order_intents','ck_confirmed_order_state'):ORDER_STATE_CHECK_FORMS}
+    result=[]
+    for check in checks:
+        forms=exact_domains.get((table,check.get('name')))
+        result.append(dict(check,sqltext=forms[0]) if forms and check.get('sqltext') in forms else dict(check))
+    return result
 
 
 def validate_shape(revision,names,import_columns,workflow_columns=None,spend_columns=None,order_columns=None):

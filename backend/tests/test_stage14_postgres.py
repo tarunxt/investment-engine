@@ -110,3 +110,27 @@ def test_actual_additive_order_migration_roundtrip(database):
     for model in (OrderIntent,OrderLeg):assert set(model.__table__.columns.keys())=={c['name'] for c in inspect(engine).get_columns(model.__tablename__)}
     migrate('downgrade','ai_limits_001');assert baseline_snapshot(engine,exclude_tables=frozenset())==before
     migrate('upgrade','order_intents_001')
+
+def test_actual_pg_state_constraint_decompilation_equivalence_and_negative_drift(database):
+    """Verify exact PG16 expressions, not a general cast-stripping waiver."""
+    import importlib.util
+    from sqlalchemy import Table,MetaData,CheckConstraint,text
+    from sqlalchemy.schema import DropConstraint,AddConstraint
+    helper_path=Path(__file__).resolve().parents[2]/'deploy/uat2/native/schema_service.py'
+    spec=importlib.util.spec_from_file_location('stage14_exact_state_helper',helper_path);helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+    engine,_,_,_,_=database
+    with engine.begin() as connection:
+        table=Table('confirmed_order_intents',MetaData(),autoload_with=connection)
+        constraint=next(c for c in table.constraints if c.name=='ck_confirmed_order_state')
+        original=helper.canonical_checks('confirmed_order_intents',inspect(connection).get_check_constraints('confirmed_order_intents'))
+        for expression in helper.ORDER_STATE_CHECK_FORMS:
+            connection.execute(DropConstraint(constraint))
+            constraint=CheckConstraint(expression,name='ck_confirmed_order_state');table.append_constraint(constraint);connection.execute(AddConstraint(constraint))
+            actual=inspect(connection).get_check_constraints('confirmed_order_intents')
+            assert helper.canonical_checks('confirmed_order_intents',actual)==original
+            for state,expected in [('draft',True),('filled',True),('invalidated',True),('unapproved-new-state',False),('FILLED',False)]:
+                value=connection.scalar(text('SELECT ('+expression+') FROM (VALUES (CAST(:value AS varchar(24)))) AS candidate(state)'),{'value':state})
+                assert value is expected
+        changed=helper.ORDER_STATE_CHECK_FORMS[0].replace("'draft'","'unauthorized'::text, 'draft'")
+        connection.execute(DropConstraint(constraint));constraint=CheckConstraint(changed,name='ck_confirmed_order_state');table.append_constraint(constraint);connection.execute(AddConstraint(constraint))
+        assert helper.canonical_checks('confirmed_order_intents',inspect(connection).get_check_constraints('confirmed_order_intents'))!=original
