@@ -99,7 +99,7 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
 
 
 def require_forward_baseline_preserved(before: dict, after: dict) -> None:
-    """Permit only named Stage04/07 additive fields, never arbitrary drift.
+    """Permit only named Stage04/07/11 additive fields, never arbitrary drift.
 
     Existing columns, constraints, indexes and values retain the strict check.
     The separate Stage04 Docker gate proves its full up/down/up migration.
@@ -138,6 +138,46 @@ def require_forward_baseline_preserved(before: dict, after: dict) -> None:
             require(values.pop('module_id','missing') is None and values.pop('module_version','missing') is None and values.pop('module_cancel_requested',None) is False,'Legacy module work was attributed or changed')
             rows.append(json.dumps(values,sort_keys=True))
         checked[table]['rows']=sorted(rows)
+    table='indmoney_us_portfolio_snapshots'
+    if table in before and table in checked:
+        old_names={column[0] for column in before[table]['columns']}
+        added={column[0]:column for column in checked[table]['columns'] if column[0] not in old_names}
+        if added:
+            expected={'acceptance_state':('VARCHAR(24)',False), 'import_key':('VARCHAR(64)',True),
+                      'content_hash':('VARCHAR(64)',True), 'import_provenance':('JSON',True),
+                      'accepted_at':('TIMESTAMP',True), 'supersedes_id':('INTEGER',True)}
+            require(set(added)==set(expected),'Unexpected forward INDmoney column addition')
+            for name,(kind,nullable) in expected.items():
+                column=added[name]
+                require(column[1:3]==(kind,nullable),'Unexpected INDmoney column definition: '+name)
+                require(column[3] in ("'legacy_unverified'::character varying", "'legacy_unverified'") if name=='acceptance_state' else column[3] is None,
+                        'Unexpected INDmoney column default: '+name)
+            checked[table]['columns']=[column for column in checked[table]['columns'] if column[0] in old_names]
+            # Reflectors include the unique constraint's backing index. Check
+            # every semantic field and known reflection-only metadata before
+            # removing exactly this new object from the baseline comparison.
+            definitions={
+                'unique':('uq_indmoney_owner_import',{'column_names':['user_id','import_key']}),
+                'indexes':('uq_indmoney_owner_import',{'column_names':['user_id','import_key'],'unique':True,'duplicates_constraint':'uq_indmoney_owner_import'}),
+                'foreign_keys':('fk_indmoney_correction',{'constrained_columns':['supersedes_id'],'referred_schema':None,'referred_table':table,'referred_columns':['id'],'options':{'ondelete':'RESTRICT'}})}
+            for category,(name,fields) in definitions.items():
+                matches=[item for item in checked[table][category] if item.get('name')==name]
+                require(len(matches)==1,'Missing/duplicate INDmoney constraint/index: '+name)
+                item=matches[0]
+                require(all(item.get(key)==value for key,value in fields.items()),'Changed INDmoney constraint/index: '+name)
+                extras=set(item)-{'name',*fields}
+                require(extras<=({'comment','dialect_options'} if category=='unique' else {'include_columns','dialect_options'} if category=='indexes' else {'comment'}),'Unknown INDmoney constraint metadata')
+                require(item.get('comment') is None and item.get('include_columns',[])==[], 'Unexpected INDmoney index/comment metadata')
+                dialect=item.get('dialect_options',{})
+                require(set(dialect)<={'postgresql_include','postgresql_nulls_not_distinct'} and dialect.get('postgresql_include',[])==[] and dialect.get('postgresql_nulls_not_distinct',False) is False,'Unexpected INDmoney dialect metadata')
+                checked[table][category]=[entry for entry in checked[table][category] if entry.get('name')!=name]
+            rows=[]
+            for row in checked[table]['rows']:
+                values=json.loads(row)
+                require(values.pop('acceptance_state','missing')=='legacy_unverified','Legacy import was accepted or changed')
+                require(all(values.pop(name,'missing') is None for name in expected if name!='acceptance_state'),'Legacy import provenance was invented')
+                rows.append(json.dumps(values,sort_keys=True))
+            checked[table]['rows']=sorted(rows)
     require(checked == before, "Forward head upgrade changed existing schema/data")
 
 
