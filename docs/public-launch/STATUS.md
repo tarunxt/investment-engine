@@ -1,3 +1,11 @@
+> Current local checkpoint — 21 October 2026: Stage15 `bb128c1845c53a765083593f476cc3fefbbddb62` was owner-accepted inactive. The parent reports UAT2 deliberately stopped at21:08:05IST; this local recovery does not access or restart it. Stage16 is not complete, published or deployed. Recovery from verified `a87835c09125c77e09b0c1488d3cf9504b4f0b7f` is isolated on `codex/stage16-local-recovery-20261021`; the original checkout/preview are preserved. Fresh Google sign-in and actual billing remain unverified. Historical deployment evidence remains in task-3. Existing US$10 allowance and retention are unchanged.
+
+## Stage16 local recovery — actual browser gate pending
+
+[Scope, requirement map, preserved failures and recovery](STAGE16_LOCAL.md). Original browser attempts on a87835c0 reached a running preview but failed confirmation403 and a missing India snapshot table. Recovery fixes the exact approval middleware classification and synthetic table/owner observations; it does not disable guards or change proxy settings speculatively. 40 Stage16 backend,243 retained Stage14/15,35 module-policy,15 Stage16 frontend and5 baseline tests pass; inventory is current. Four actual PostgreSQL and twenty Linux cases remain unrun. No listener/process/browser actions occurred in this recovery; ownership of the original preview is unresolved. Code LOCAL_RECOVERY / independent recovery review PENDING / CI NOT_TRIGGERED / publication NOT_AUTHORIZED / deployment NOT_RUN / actual fresh browser acceptance PENDING / activation NOT_GRANTED. No migration/controller/production changes or Stage17 progression.
+
+Earlier checkpoints below are historical and do not supersede the qualified Stage15 acceptance above.
+
 # Current checkpoint — Stage14 accepted inactive; Stage15 local only
 
 Accepted prerequisite: exact `802790f675169bf446d1083f6d542b79d272d6a7`, owner acceptance 21 October 2026 10:04:37 UTC, with automated browser verification unavailable and missing browser/summary saves retained as limitations. Final Stage14 CI/artifact and independent installed-source/schema/backup/service/isolation checks supersede the historical pending checkpoints below. No current production-health or billing claim is made.
@@ -265,3 +273,6 @@ Stage07 successor repair (independent review of 3357): synchronous effect fences
 
 
 Stage09 native controller repair is a local-only candidate; see [repair evidence and remaining gates](STAGE09_CONTROLLER_REPAIR.md). Stage09 live acceptance and Stage10 remain pending. Historical 60f3c7b8 rehearsal receipts are preserved.
+# Stage16 isolated local recovery checkpoint — 21 October 2026
+
+Recovery from clean `a87835c09125c77e09b0c1488d3cf9504b4f0b7f` is isolated on `codex/stage16-local-recovery-20261021`; the first recorded edit checkpoint is15:52:55UTC. Exact approval HTTP classification and synthetic India snapshot initialization address the preserved403/missing-table causes without weakening service confirmation/execution guards. See [STAGE16_LOCAL.md](STAGE16_LOCAL.md). Non-server middleware-inclusive checks are separate from actual browser acceptance. Original preview/process ownership remains unresolved; no listener or process manipulation occurred. UAT2 remains deliberately stopped. No publication, deployment, activation, provider or Stage17 work is included.

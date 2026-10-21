@@ -114,7 +114,7 @@ export function ConsoleShell({
                 <button
                     type="button"
                     onClick={() => setSidebarOpen(true)}
-                    className="fixed left-4 top-4 z-10 rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
+                    className="fixed left-4 top-4 z-10 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
                     aria-label="Open navigation"
                     aria-expanded={sidebarOpen}
                     aria-controls="console-sidebar"
@@ -124,7 +124,7 @@ export function ConsoleShell({
 
                 {/* Page content */}
                 <main
-                    className="px-4 py-6 sm:px-6 lg:py-6"
+                    className="px-4 pb-6 pt-20 sm:px-6 lg:py-6"
                     data-console-shell="authenticated"
                 >
                     {error ? (

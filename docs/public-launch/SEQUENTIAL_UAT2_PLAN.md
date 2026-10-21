@@ -1,3 +1,11 @@
+> Current local checkpoint — 21 October 2026: Stage 15 exact `bb128c1845c53a765083593f476cc3fefbbddb62` is deployed and owner-accepted **inactive**, with independent source/schema/services/isolation and owner-browser verification. Fresh Google sign-in and actual billing remain unverified. Evidence: task-3 `uat2-stage15-deployment.json`, `stage15-deploy-bb128c18/`, CI/artifact handoff. Stage 16 local synthetic implementation began 13:30:38 UTC on `codex/stage16-order-safety-ux-local-20261021`; it is not published, deployed or accepted. Earlier pending-stage statements below are historical. Runtime remains disabled; today's 21:04:13 IST manual stop and existing US$10 allowance are unchanged.
+
+## Stage16 local candidate — review pending
+
+[Scope, requirement map, tests and preview limitations](STAGE16_LOCAL.md). 279 safe backend and 63 frontend regression tests pass with zero skips; TypeScript and production compilation pass. Four Stage16 PostgreSQL and twenty existing Linux/controller cases remain unrun for this candidate. Local browser preview is blocked before startup by denied loopback port binding; no retry or alternate listener. Code LOCAL_CANDIDATE / independent review PENDING / CI NOT_TRIGGERED / publication NOT_AUTHORIZED / UAT2 deployment NOT_RUN / browser acceptance NOT_RUN / activation NOT_GRANTED. No migration or recovery-controller change.
+
+Earlier checkpoints below are historical and do not supersede the qualified Stage15 acceptance above.
+
 # Current checkpoint — Stage14 accepted inactive; Stage15 local only
 
 Accepted prerequisite: exact `802790f675169bf446d1083f6d542b79d272d6a7`, owner acceptance 21 October 2026 10:04:37 UTC, with automated browser verification unavailable and missing browser/summary saves retained as limitations. Final Stage14 CI/artifact and independent installed-source/schema/backup/service/isolation checks supersede the historical pending checkpoints below. No current production-health or billing claim is made.

@@ -39,6 +39,11 @@ for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
         if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
             app.include_router(APIRouter(routes=[route]))
+# Only owner safety reads; approval and financial writes remain unmounted.
+from app.domains.order_intents.router import router as order_review_router
+for route in order_review_router.routes:
+    if route.path in {'/order-intents/reviews','/order-intents/reviews/{id}','/order-intents/positions'} and route.methods == {'GET'}:
+        app.include_router(APIRouter(routes=[route]))
 app.include_router(router)
 
 
