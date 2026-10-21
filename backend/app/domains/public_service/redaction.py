@@ -10,6 +10,9 @@ import ast
 import copy
 import json
 import logging
+from logging.handlers import RotatingFileHandler
+from decimal import Decimal
+import sys
 import re
 
 _NAMES=(
@@ -42,7 +45,7 @@ def _clean(value,depth):
     if isinstance(value,(list,tuple)):
         return [_clean(v,depth+1) for v in value]
     if isinstance(value,str):return _text(value,depth+1)
-    if value is None or isinstance(value,(bool,int,float)):return value
+    if value is None or isinstance(value,(bool,int,float,Decimal)):return value
     # Python literal sets/bytes and unsupported types do not get a potentially
     # unsafe repr. They are not operational structured log primitives.
     return _REDACTED
@@ -90,11 +93,32 @@ def redact(value):
 
 class RedactingFormatter(logging.Formatter):
     def format(self,record):
-        # Preserve the original LogRecord for other handlers. Sanitize structured
-        # arguments before the formatter adds its non-JSON prefix, then sanitize
-        # the rendered message/exception as a second boundary.
-        safe=copy.copy(record)
-        if isinstance(safe.args,tuple):safe.args=tuple(_clean(arg,0) for arg in safe.args)
-        elif isinstance(safe.args,dict):safe.args=_clean(safe.args,0)
-        if not isinstance(safe.msg,str):safe.msg=_clean(safe.msg,0)
-        return redact(super().format(safe))
+        # No exception may escape into logging.Handler.handleError(record),
+        # whose default implementation prints ORIGINAL msg/args to stderr.
+        try:
+            safe=copy.copy(record)
+            if isinstance(safe.args,tuple):safe.args=tuple(_clean(arg,0) for arg in safe.args)
+            elif isinstance(safe.args,dict):safe.args=_clean(safe.args,0)
+            if not isinstance(safe.msg,str):safe.msg=_clean(safe.msg,0)
+            return redact(super().format(safe))
+        except Exception:
+            # Never interpolate record, exception, traceback or original args.
+            return '[redacted log: formatting failed]'
+
+
+class _SafeHandlerErrors:
+    def handleError(self,record):
+        # Also cover output/rotation failures AFTER safe formatting. The
+        # configured handler must not hand the original record to logging's
+        # diagnostic fallback. No recursive logging or exception details.
+        if logging.raiseExceptions:
+            try:sys.stderr.write('[redacted logging output failure]\n')
+            except Exception:pass
+
+
+class RedactingStreamHandler(_SafeHandlerErrors,logging.StreamHandler):
+    pass
+
+
+class RedactingRotatingFileHandler(_SafeHandlerErrors,RotatingFileHandler):
+    pass

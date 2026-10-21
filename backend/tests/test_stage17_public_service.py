@@ -264,3 +264,83 @@ def test_redactor_retains_ordinary_numeric_formatting():
     from app.domains.public_service.redaction import RedactingFormatter
     record=logging.LogRecord('synthetic',logging.INFO,'synthetic.py',1,'status=%d elapsed=%.2f',(200,1.25),None)
     assert RedactingFormatter('%(message)s').format(record)=='status=200 elapsed=1.25'
+
+@pytest.mark.parametrize('message,args',[
+ ('OTP token=%(token)d',{'token':123456}),
+ ('cost=%.2f password=%s',(__import__('decimal').Decimal('1.25'),'SYNTHETIC_FORMAT_SECRET')),
+ ('password=%s count=%d',('SYNTHETIC_FORMAT_SECRET','not-a-number')),
+ ('password=%(password)s missing=%(missing)s',{'password':'SYNTHETIC_FORMAT_SECRET'}),
+ ('password=%s %s',('SYNTHETIC_FORMAT_SECRET',)),
+])
+def test_actual_stream_handler_never_dumps_original_args_on_format_error(message,args):
+    import contextlib,io,logging
+    from app.domains.public_service.redaction import RedactingFormatter
+    output=io.StringIO();stderr=io.StringIO();handler=logging.StreamHandler(output)
+    handler.setFormatter(RedactingFormatter('%(message)s'))
+    record=logging.LogRecord('synthetic',logging.ERROR,'synthetic.py',1,message,(args,) if isinstance(args,dict) else args,None)
+    original_args=record.args;previous=logging.raiseExceptions;logging.raiseExceptions=True
+    try:
+        with contextlib.redirect_stderr(stderr):handler.handle(record)
+    finally:logging.raiseExceptions=previous
+    for value in [output.getvalue(),stderr.getvalue()]:
+        assert 'SYNTHETIC_FORMAT_SECRET' not in value and '123456' not in value
+        assert 'Arguments:' not in value and '--- Logging error ---' not in value
+    assert stderr.getvalue()=='' and '[redacted' in output.getvalue()
+    assert record.args is original_args
+
+def test_decimal_nonsecret_numeric_formats_remain_valid():
+    import logging
+    from decimal import Decimal
+    from app.domains.public_service.redaction import RedactingFormatter
+    formatter=RedactingFormatter('%(message)s')
+    record=logging.LogRecord('synthetic',logging.INFO,'synthetic.py',1,'cost=%.2f status=%d',(Decimal('1.25'),200),None)
+    assert formatter.format(record)=='cost=1.25 status=200'
+    mapping=logging.LogRecord('synthetic',logging.INFO,'synthetic.py',1,'cost=%(cost).2f status=%(status)d',({'cost':Decimal('1.25'),'status':200},),None)
+    assert formatter.format(mapping)=='cost=1.25 status=200'
+
+def test_invalid_formatter_schema_fails_closed_without_stderr():
+    import contextlib,io,logging
+    from app.domains.public_service.redaction import RedactingFormatter
+    output=io.StringIO();stderr=io.StringIO();handler=logging.StreamHandler(output)
+    handler.setFormatter(RedactingFormatter('%(missing_record_attribute)s %(message)s'))
+    record=logging.LogRecord('synthetic',logging.ERROR,'synthetic.py',1,'password=%s',('SYNTHETIC_FORMAT_SECRET',),None)
+    with contextlib.redirect_stderr(stderr):handler.handle(record)
+    assert stderr.getvalue()=='' and output.getvalue()=='[redacted log: formatting failed]\n'
+
+def test_installed_safe_handlers_do_not_report_records_on_io_or_rotation_failure(tmp_path,monkeypatch):
+    import contextlib,io,logging
+    from app.domains.public_service.redaction import RedactingFormatter,RedactingStreamHandler,RedactingRotatingFileHandler
+    class BrokenStream:
+        def write(self,value):raise OSError('SYNTHETIC_OUTPUT_SECRET')
+        def flush(self):pass
+    stream=RedactingStreamHandler(BrokenStream())
+    file=RedactingRotatingFileHandler(tmp_path/'synthetic.log',maxBytes=1,backupCount=1)
+    monkeypatch.setattr(file,'shouldRollover',lambda record:True)
+    def failed_rotation():raise OSError('SYNTHETIC_OUTPUT_SECRET')
+    monkeypatch.setattr(file,'doRollover',failed_rotation)
+    record=logging.LogRecord('synthetic',logging.ERROR,'synthetic.py',1,'password=%s',('SYNTHETIC_FORMAT_SECRET',),None)
+    previous=logging.raiseExceptions;logging.raiseExceptions=True
+    try:
+        for handler in [stream,file]:
+            handler.setFormatter(RedactingFormatter('%(message)s'));stderr=io.StringIO()
+            with contextlib.redirect_stderr(stderr):handler.handle(record)
+            assert stderr.getvalue()=='[redacted logging output failure]\n'
+            assert 'SYNTHETIC' not in stderr.getvalue() and 'Arguments:' not in stderr.getvalue()
+    finally:logging.raiseExceptions=previous;file.close();stream.close()
+
+def test_logging_configuration_installs_safe_handler_classes():
+    from app.core.logging import LOGGING_CONFIG
+    assert all(h['class'].startswith('app.domains.public_service.redaction.Redacting') for h in LOGGING_CONFIG['handlers'].values())
+
+
+@pytest.mark.parametrize('failed_boundary',['_clean','redact'])
+def test_unexpected_redactor_failure_cannot_escape_to_logging_stderr(monkeypatch,failed_boundary):
+    import contextlib,io,logging
+    from app.domains.public_service import redaction
+    def fail(*args,**kwargs):raise RuntimeError('SYNTHETIC_INTERNAL_SECRET')
+    monkeypatch.setattr(redaction,failed_boundary,fail)
+    output=io.StringIO();stderr=io.StringIO();handler=logging.StreamHandler(output)
+    handler.setFormatter(redaction.RedactingFormatter('%(message)s'))
+    logger=logging.Logger('synthetic-fault',level=logging.DEBUG);logger.addHandler(handler);logger.propagate=False
+    with contextlib.redirect_stderr(stderr):logger.error('password=%s','SYNTHETIC_FORMAT_SECRET')
+    assert stderr.getvalue()=='' and output.getvalue()=='[redacted log: formatting failed]\n'

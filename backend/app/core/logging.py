@@ -21,13 +21,13 @@ LOGGING_CONFIG = {
     },
     "handlers": {
         "console": {
-            "class": "logging.StreamHandler",
+            "class": "app.domains.public_service.redaction.RedactingStreamHandler",
             "level": "DEBUG",
             "formatter": "standard",
             "stream": "ext://sys.stdout"
         },
         "file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "app.domains.public_service.redaction.RedactingRotatingFileHandler",
             "level": "INFO",
             "formatter": "detailed",
             "filename": "logs/app.log",
@@ -35,7 +35,7 @@ LOGGING_CONFIG = {
             "backupCount": 5
         },
         "worker_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "app.domains.public_service.redaction.RedactingRotatingFileHandler",
             "level": "INFO",
             "formatter": "detailed",
             "filename": "logs/worker.log",
