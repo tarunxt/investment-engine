@@ -310,6 +310,7 @@ class GeminiProviderConfigTests(unittest.TestCase):
         self.assertEqual(result.web_sources, ["https://www.uefa.com/euro2024/"])
 
 
+@__import__('pytest').mark.usefixtures('synthetic_module_unit_context')
 class ExecuteAIJobTests(unittest.TestCase):
     @patch("app.domains.jobs.tasks._refresh_run_status")
     @patch("app.domains.jobs.tasks._publish_job_update")

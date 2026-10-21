@@ -36,12 +36,37 @@ def engine():
     import importlib.util
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
-    path=Path(__file__).resolve().parents[1]/"alembic/versions/recommendation_audit_001.py"
-    spec=importlib.util.spec_from_file_location("audit_fixture_migration",path)
-    migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
+    versions=Path(__file__).resolve().parents[1]/'alembic/versions'
+    def migrate(name,conn):
+        spec=importlib.util.spec_from_file_location('audit_fixture_'+name,versions/(name+'.py'))
+        migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
+        with Operations.context(MigrationContext.configure(conn)):migration.upgrade()
     with isolated.begin() as conn:
         conn.execute(text(f'SET LOCAL search_path TO "{schema}"'))
-        with Operations.context(MigrationContext.configure(conn)): migration.upgrade()
+        migrate('recommendation_audit_001',conn)
+        # Keep the historical migration contract visible before adding the
+        # exact current fields. Never create a schema from newer ORM metadata
+        # or weaken the full columns/constraints equality test below.
+        from sqlalchemy import inspect
+        fields={'recommendation_spend_accounts':{'last_admitted_owner'},
+                'recommendation_spend_attempts':{'operation_key','module_id','module_version','request_hash','limits_json','input_tokens','output_tokens'}}
+        def capture():
+            inspector=inspect(conn)
+            return {table:{'columns':{c['name']:(str(c['type']),c['nullable'],c['default']) for c in inspector.get_columns(table,schema=schema)},
+                           'unique':inspector.get_unique_constraints(table,schema=schema),
+                           'indexes':inspector.get_indexes(table,schema=schema)} for table in fields}
+        before=capture()
+        assert before['recommendation_spend_attempts']['columns']['verification_id']==('VARCHAR(36)',False,None)
+        assert all(not (set(before[table]['columns'])&added) for table,added in fields.items())
+        migrate('ai_limits_001',conn)
+        after=capture()
+        for table,added in fields.items():
+            assert set(after[table]['columns'])==set(before[table]['columns'])|added
+            for column,definition in before[table]['columns'].items():
+                expected=('VARCHAR(36)',True,None) if table=='recommendation_spend_attempts' and column=='verification_id' else definition
+                assert after[table]['columns'][column]==expected
+            for category in ['unique','indexes']:
+                assert all(item in after[table][category] for item in before[table][category])
     yield isolated
     with base.begin() as conn: conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
     base.dispose()

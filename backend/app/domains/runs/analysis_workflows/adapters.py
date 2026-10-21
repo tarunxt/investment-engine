@@ -9,9 +9,14 @@ from .contracts import digest,PermanentAnalysisError,TransientAnalysisError,Work
 from .bindings import frozen_request,validate_job_request
 
 class QueuedAI:
+    def __init__(self,governance=None):self.governance=governance
     def __call__(self,db,row,stage,dependencies,now):
         e=row.execution_json
         if stage.stage=='sync':return {'owner_id':row.user_id,'source_hash':e['source_hash'],'plan_hash':e['plan_hash'],'data':deepcopy(e['source']),'cost_usd':'0'}
+        governed=e['plan'].get('guardrails_version')=='stage13-v1'
+        if governed:
+            from app.domains.ai_limits.jobs import SyntheticGovernance
+            if type(self.governance) is not SyntheticGovernance:raise PermanentAnalysisError('Governed composition unavailable')
         if stage.job_id is None:
             try:expected=frozen_request(row,stage,dependencies)
             except WorkflowDenied:raise PermanentAnalysisError('Approved model/prompt request required') from None
@@ -30,6 +35,10 @@ class QueuedAI:
         if job.status!=JobStatus.COMPLETED:
             error=PermanentAnalysisError('Persisted analysis job failed')
             error.cost_usd=str(job.estimated_cost) if job.estimated_cost is not None else None;error.job_id=job.id;raise error
+        if governed:
+            from app.domains.ai_limits.jobs import validate_completed_job
+            try:validate_completed_job(db,row,job,self.governance,now)
+            except (ValueError,PermissionError):raise PermanentAnalysisError('Governed output or spend receipt failed') from None
         return {'owner_id':row.user_id,'source_hash':e['source_hash'],'plan_hash':e['plan_hash'],'data':{'job_id':job.id,'response':job.response,'tokens_in':job.tokens_in,'tokens_out':job.tokens_out},'cost_usd':str(job.estimated_cost) if job.estimated_cost is not None else None}
 
 class DeterministicAnalysis:

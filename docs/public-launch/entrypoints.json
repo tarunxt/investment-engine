@@ -3,9 +3,9 @@
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
     "background": 31,
-    "export": 42,
+    "export": 44,
     "frontend": 25,
-    "http": 284,
+    "http": 286,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -13,6 +13,131 @@
     "worker": 44
   },
   "entries": [
+    {
+      "calls": [
+        "BoundaryDenied",
+        "datetime.fromisoformat",
+        "datetime.now",
+        "digest",
+        "self.fenced",
+        "utc"
+      ],
+      "capability": "download",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "ai_limits",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/ai_limits/private_effects.py:111"
+    },
+    {
+      "calls": [
+        "(await db.execute(select(SpendAccount).where(SpendAccount.user_id == user.id, SpendAccount.day == day))).scalar_one_or_none",
+        "(await db.execute(select(SpendAttempt).where(SpendAttempt.user_id == user.id, SpendAttempt.operation_key.is_not(None)).order_by(SpendAttempt.created_at.desc(), SpendAttempt.id).limit(50))).scalars",
+        "(await db.execute(select(SpendAttempt).where(SpendAttempt.user_id == user.id, SpendAttempt.operation_key.is_not(None)).order_by(SpendAttempt.created_at.desc(), SpendAttempt.id).limit(50))).scalars().all",
+        "Depends",
+        "JSONResponse",
+        "NOTICES.get",
+        "SpendAttempt.created_at.desc",
+        "SpendAttempt.operation_key.is_not",
+        "datetime.now",
+        "datetime.now(timezone.utc).date",
+        "datetime.now(timezone.utc).date().isoformat",
+        "db.execute",
+        "getattr",
+        "router.get",
+        "select",
+        "select(SpendAccount).where",
+        "select(SpendAttempt).where",
+        "select(SpendAttempt).where(SpendAttempt.user_id == user.id, SpendAttempt.operation_key.is_not(None)).order_by",
+        "select(SpendAttempt).where(SpendAttempt.user_id == user.id, SpendAttempt.operation_key.is_not(None)).order_by(SpendAttempt.created_at.desc(), SpendAttempt.id).limit",
+        "str"
+      ],
+      "capability": "quota_receipts",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "ai_limits",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/api-usage/limits",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/ai_limits/router.py:28"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "JSONResponse",
+        "PrivateEffects",
+        "PrivateEffects(session, current_policy).download",
+        "db.run_sync",
+        "router.get"
+      ],
+      "capability": "download_private_artifact",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "ai_limits",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/ai_limits/router.py:39"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "JSONResponse",
+        "PrivateEffects",
+        "PrivateEffects(session, current_policy).download",
+        "db.run_sync",
+        "router.get"
+      ],
+      "capability": "download_private_artifact",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "ai_limits",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/private-artifacts/{artifact_id}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/api-usage/limits/private-artifacts/{artifact_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/ai_limits/router.py:39"
+    },
     {
       "calls": [
         "(await db.execute(latest_model_stmt)).all",
@@ -4646,6 +4771,7 @@
         "build_failure_diagnostics",
         "celery.task",
         "configure_output_context",
+        "configured_runtime",
         "content_hash",
         "current_output_context",
         "db.close",
@@ -4656,8 +4782,10 @@
         "db.execute(sa_select(RunJob).where(RunJob.job_id == job_id)).scalar_one_or_none",
         "defer_retry",
         "execute_bullpen_llm_target",
+        "execute_governed_job",
         "failure_metadata",
         "getattr",
+        "governed_context.get",
         "isinstance",
         "job.provider.strip",
         "job.provider.strip().lower",
@@ -4720,7 +4848,7 @@
       "registration": "celery.task(name='app.domains.jobs.tasks.execute_ai_job', bind=True, max_retries=3, default_retry_delay=30, queue='ai')",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/tasks.py:1193"
+      "source": "backend/app/domains/jobs/tasks.py:1194"
     },
     {
       "calls": [
@@ -12710,7 +12838,7 @@
       "registration": "mounted",
       "route": "/",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/main.py:337"
+      "source": "backend/app/main.py:339"
     },
     {
       "calls": [
@@ -15028,6 +15156,16 @@
     "backend/app/core/seed.py": "f00e773efffc3ca505c20048fb592868dce6fd241ee8b1479ab51441d611d7a1",
     "backend/app/core/uat2.py": "bab4c74498a7db818c695bec717a31d4f2bafa55711b620bbbc28f7ede5a0894",
     "backend/app/domains/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app/domains/ai_limits/__init__.py": "a3fdc0f91df49a9da229d8c3fd647f1d102f68bec91630f361ab53ae6bc8bc23",
+    "backend/app/domains/ai_limits/budget.py": "f4a35cf571908b06712434a14da936854934136a7ff1f105ccf9de1a82e55404",
+    "backend/app/domains/ai_limits/contracts.py": "e0122ac1a388c1a085812b26eaf9066cea95863ebb5f8ad7701a23d87c2ff45a",
+    "backend/app/domains/ai_limits/jobs.py": "a5756beaa9c51b6b612eb2984a60c464e4a316b78e981fd58c4e0770c808986a",
+    "backend/app/domains/ai_limits/private_effects.py": "02d3aca7a9db21355bc560f1b0194f379aa0464b5eff900448f5af0585e9e3d6",
+    "backend/app/domains/ai_limits/projection.py": "9957fab1e749d40dcc8ba21777c1a790fc9850b5de3c79ca3099374870531a7b",
+    "backend/app/domains/ai_limits/router.py": "ac68cbc6d1fdbcc7bb5af51396b2b27bcfd58ce2289d8571601d680f1b3389b1",
+    "backend/app/domains/ai_limits/runner.py": "28d4fb797fbe0920abad6b8814a87f00e95cc9324ee1abebd809c0ddefb8e316",
+    "backend/app/domains/ai_limits/untrusted.py": "d34cb3d23092e820ca76116bd47d597c9498be06560cd4c99bc4f4c167738731",
+    "backend/app/domains/ai_limits/validation.py": "37864190a29c47ae9636d8ed898eca767253f2abb0a9c423b871a9891e14c8bc",
     "backend/app/domains/ai_providers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/ai_providers/anthropic.py": "eeffe90ad29cd1e1b2704cda99faa5a4c57c621729e31f2a2aef2a8d3b50aa96",
     "backend/app/domains/ai_providers/availability.py": "8696786f8406338b9d3419e9a8df77712bae8496df8d7aa1d3ecb8230e4c6a8d",
@@ -15164,7 +15302,7 @@
     "backend/app/domains/jobs/repository.py": "138e6543466e3fdc26f26a0219753419f87221fc343d594289da018d469661cc",
     "backend/app/domains/jobs/router.py": "fccad20a785a4109ffc56d55f183f839d653d64b5cc20ed9340c30733f7186ac",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
-    "backend/app/domains/jobs/tasks.py": "30d3ce7d3b5bcceaf3ffe51a6039a20e0182069b180db32260fc0b2c3f853cb3",
+    "backend/app/domains/jobs/tasks.py": "12e0b76dbd65ec97851c947c58d01ff564d492088f0e89428f498283959fc3c7",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
     "backend/app/domains/jobs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/jobs/use_cases/create_job.py": "adb8ba753cec97c4d399e007c5c8caa279b4b0cec92839312752a15991ee4535",
@@ -15177,7 +15315,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "4f333093bcdc22c2d83fc423a569a45192171f1c71fe72886abbfe9d22b9587e",
+    "backend/app/domains/modules/coverage.py": "d2f00a860a7dcbc7a7897cc7be10d3ea61aa93fefff912d69c6547c75f86c73d",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
@@ -15287,7 +15425,7 @@
     "backend/app/domains/recommendation_audit/evaluation.py": "945d77457d6906b0f14215752461a02550d98fec0677e7627a6ff5b3aab29a5a",
     "backend/app/domains/recommendation_audit/fundamentals.py": "e39f50d0652e8acfc2a12e0b85e49282de511e45a2c9bd259494bc3363ebd985",
     "backend/app/domains/recommendation_audit/ledger.py": "b9ae26830e716110203439471b1fb5cd4685b97798e0ca1dfea78f4735260995",
-    "backend/app/domains/recommendation_audit/models.py": "a12a49377040123d35d9e6a6d8b1b3005efc71da290cc512c9577834e5de1870",
+    "backend/app/domains/recommendation_audit/models.py": "f4114d749f7a53972ba9a6e670cb2da2149d4df1f38e658ee888967713a3c3c6",
     "backend/app/domains/recommendation_audit/outbox.py": "33a64f61af624cb938be77bf8db974ff503c4c64cf2af461d37a59af6acb6f23",
     "backend/app/domains/recommendation_audit/router.py": "505b905961b31ff139470556c57a09180d137b942cb18db9753013a31e341112",
     "backend/app/domains/recommendation_audit/schemas.py": "13a8202e4f13dca3b46c10e3c072877656a70ea7a4acdf414af37ed6cd462a5a",
@@ -15300,9 +15438,9 @@
     "backend/app/domains/runs/analysis_router.py": "dd0e5f3cf8a6a3270bc640c2084ada81cec8a68f8bf371ea277f618a88cdb1f9",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
-    "backend/app/domains/runs/analysis_workflows/adapters.py": "030896cbeb26376d1213e79d7ad7af4eaf3f46471cca8075fc70dea7518c7a59",
-    "backend/app/domains/runs/analysis_workflows/bindings.py": "fc436ee6f49bbdb39a20dd63b6356f4cbe982878121db4202f4015e6256fe563",
-    "backend/app/domains/runs/analysis_workflows/contracts.py": "6a0549dac46ae6833aa74475f7d4ab550605d4758866e8501a42f4821da5ff3d",
+    "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
+    "backend/app/domains/runs/analysis_workflows/bindings.py": "4c8813e8ce9f2f52670a6360cddfd4e9978215a525f81bca079f97340cd88c28",
+    "backend/app/domains/runs/analysis_workflows/contracts.py": "7316d7861ceab70369104a2438c199eb759b54440eae81bf62bd26a4ab8faf62",
     "backend/app/domains/runs/analysis_workflows/dispatch.py": "4afbd05e90c1834b1495dae96e30c909944a542631bb1236bb937de0cb330bb5",
     "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
     "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
@@ -15383,7 +15521,7 @@
     "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
     "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "3d84402a0edd5055db59612c33610008a5e5408cd826e0d211e2ee5e419f81e1",
+    "backend/app/main.py": "a2906855f232bc2815aa0d2419ef50b818f833e22636b7cdbafb326f0148b2d8",
     "backend/app/models/__init__.py": "e3b4b98b6ee35ace717bf639646a30a18264f3a767d325a2a20c8f6f39069e0a",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

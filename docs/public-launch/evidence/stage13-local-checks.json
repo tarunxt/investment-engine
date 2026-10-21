@@ -1,0 +1,84 @@
+{
+  "at": "2026-10-21T05:36:52.758575+00:00",
+  "base": "367173d5891ad7a8da77c7628f47915248f489c9",
+  "branch": "codex/stage13-ai-boundaries-local-20261021",
+  "backend": {
+    "passed": 547,
+    "skipped": [
+      {
+        "suite": "backend.tests.test_recommendation_audit_queue",
+        "case": "test_authenticated_api_delivers_to_isolated_celery_worker[redis-False]",
+        "reason": "Disposable Redis fixture not provided"
+      },
+      {
+        "suite": "backend.tests.test_recommendation_audit_queue",
+        "case": "test_authenticated_api_delivers_to_isolated_celery_worker[redis-True]",
+        "reason": "Disposable Redis fixture not provided"
+      }
+    ],
+    "failed": 0
+  },
+  "stage13_local": {
+    "passed": 96,
+    "skipped": 0,
+    "failed": 0
+  },
+  "native": {
+    "passed": 127,
+    "failed": 0
+  },
+  "harness": {
+    "passed": 22,
+    "failed": 0,
+    "not_run": "Two actual socket-binding readiness fixtures remain CI-only; prior denied local operations not retried"
+  },
+  "prepared_ci": {
+    "total": 103,
+    "postgres_cases": 7,
+    "linux_cases": 20,
+    "executed": false,
+    "skip_gate": "zero skips required"
+  },
+  "preview": {
+    "simulation": true,
+    "workflow_status": "completed",
+    "stages": 6,
+    "attempts": 5,
+    "settled_actual_usd": "0E-8",
+    "private_download_content_type": "application/json",
+    "foreign_download_denied": true,
+    "disabled_module_download_denied": true,
+    "sink": "local in-memory only",
+    "normal_runtime_enabled": false,
+    "live_india_acquisition_available": false,
+    "orders_authorized": false,
+    "provider_network_calls": 0,
+    "database": "ephemeral in-memory SQLite; not migration evidence",
+    "browser_verified": false
+  },
+  "native_harness_source_hashes": {
+    "deploy/uat2/native/package.py": "378b0f83428f85c9a650bcb13e6e24526c19c265462a893671e8bcce78043561",
+    "deploy/uat2/native/test_stage12_recovery.py": "d226781b31ea7ad23ade6ea74d17703d1859b85591f11fe293122946d0382854",
+    "deploy/uat2/native/schema_service.py": "bbf901a9efd0696dc83609ec931c13263dfd831c8064f6444e64d0ceb1a07575",
+    "deploy/uat2/native/initialize_database.py": "a92ea54692a0491285b7f593be368b7fa2cd00b604bc749c655dc07e5b490a57",
+    "deploy/uat2/native/ctl.py": "ac1fa16f2fb3e192f1d61518193617ae84ddb6ec1a843f329699c82a101e2e0a",
+    "deploy/uat2/native/test_recovery.py": "847988d4fc75c2d717798e7bd4f08ea7694e1057f9c33576c0d6aa090f91e17b",
+    "deploy/uat2/native/test_stage11_recovery.py": "0556650b19c116d76860a4ecb17e96ef236019d2959751f6c36ec797b3cac330",
+    "deploy/uat2/native/validate.py": "0a78da16dcc161381a4b9430c06c49e6201222188a25a87bfcbce79543087cd7",
+    "deploy/uat2/native/test_promotion_recovery.py": "65a1a921b74cc1631ee7349f620b27f29d46032004cbb8ad7324c09159c06f71",
+    "deploy/uat2/native/test_stage13_recovery.py": "a36514a18dcb565becefe5bb767259b7fb3ffcd607351c95ed76881cc5220ecb",
+    "deploy/uat2/native/runtime-preflight.py": "19b9fc38433a9e1452f86ba3740f46125dec48f599a8c73d0f799ea43dd315be",
+    "deploy/uat2/native/test_stage10_recovery.py": "ad6a50b8f8e78c51b8d372edd1839cc95cf50fac7d159fd3fbf6c4b1965345ad",
+    "deploy/uat2/native/test_native.py": "c5a317a490dd50b43465ed7903bbcf50a4fa88cae2e6c6ae180c2557f0d1ca13",
+    "backend/scripts/test_verify_stage13_controller.py": "43f8552aab85ba1351dddd281c292481f5448ed6c40eef99885806c5e99118a7",
+    "backend/scripts/verify_stage13_controller.py": "1f61c8af2247cc049b9182c36a4ef97f975e285c1f2383e45990f4eae37c43d8"
+  },
+  "publication": false,
+  "deployment": false,
+  "runtime_activation": false,
+  "provider_network_calls": 0,
+  "browser_verified": false,
+  "frontend_changed": false,
+  "frontend_build": "Not rebuilt: no frontend source change; accepted Stage12 UI evidence is not Stage13 browser acceptance",
+  "independent_review": "PENDING"
+}

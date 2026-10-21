@@ -28,6 +28,8 @@ CORE_DOMAINS={'connections','auth','modules','api_usage','cost_drivers','health'
 
 def classify_route(domain,endpoint,path,methods,source_module=''):
     methods=set(methods or ())
+    if domain=='ai_limits' and methods=={'GET'} and path in {'/api-usage/limits','/api-usage/limits/private-artifacts/{artifact_id}'}:
+        return None # Authenticated owned receipt/read paths enforce resource policy themselves.
     if domain=='ai_providers' and endpoint=='list_providers' and methods=={'GET'}:return ('__analysis_metadata__','view')
     if domain=='mails' and endpoint=='send_test_mail':return ('ai_studio','analyze')
     if domain=='runs' and path.startswith('/runs/analysis-workflows'):

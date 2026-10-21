@@ -734,7 +734,8 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Everything else retries after 30 s.
     """
 
-    if isinstance(exc, OutputPreflightError) or is_provider_capacity_error(exc):
+    from app.domains.ai_limits.contracts import BoundaryDenied
+    if isinstance(exc, (OutputPreflightError,BoundaryDenied)) or is_provider_capacity_error(exc):
         return False, 0
 
     text = str(exc).lower()
@@ -1248,6 +1249,21 @@ def execute_ai_job(self, job_id: int) -> None:
         usage_dimensions = resolve_job_usage_identity(db, job)
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
+            return
+        governed_context=getattr(job,'request_context_json',None)
+        if isinstance(governed_context,dict) and governed_context.get('guardrails_version')=='stage13-v1':
+            # Existing durable worker; only explicit synthetic composition, no
+            # provider fallback, route execution, queue or runtime activation.
+            from app.domains.runs.analysis_workflows.runtime import configured_runtime
+            from app.domains.ai_limits.jobs import execute_governed_job
+            governed_result=execute_governed_job(db,job_id,configured_runtime())
+            if governed_result['status']=='waiting_for_admission' and defer_retry(5):
+                return # Existing outbox backoff/attempt ceiling, no provider call.
+            if governed_result['status'] not in {'completed','already_completed'}:
+                _update_job_status(repo,job,JobStatus.PARTIAL,
+                                   error_message='Governed partial analysis: '+governed_result['status']+'; no automatic paid replay')
+            _publish_job_update(job)
+            _refresh_run_status(db,job_id)
             return
         output_context_token = configure_output_context(job, usage_dimensions)
         provider_usage_token = set_provider_usage_context(

@@ -34,3 +34,4 @@ class Runtime:
     plan: object
     adapter: object
     calendar: object
+    governance: object | None = None
