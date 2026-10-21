@@ -287,3 +287,5 @@ Recovery from clean `a87835c09125c77e09b0c1488d3cf9504b4f0b7f` is isolated on `c
 
 
 Stage17 local technical closure began 21 October 2026 18:43:13 UTC after review of cf2ddfd. Working local implementations now replace the queue/monitor/support/signup/producer/privacy gaps; see [STAGE17_CLOSURE.md](STAGE17_CLOSURE.md). Candidate verification/independent review and exact-head CI/artifact gates remain pending until recorded in the handoff. Public PR1259 remains separately identified; no deployment, real activation or Stage18 start is claimed. UAT2 remains deliberately stopped.
+
+Stage17 independent c2441d82 review required a stale-claimant lease fence repair; publication remains held until exact successor review. Local repair began21October2026 19:16:54UTC;48focused ordinary-pytest checks passed;618broader,180native and5baseline passed (zero skips). Current source/test/CI counts and final identity are in the lease repair handoff; no Stage18, deployment or live activation.

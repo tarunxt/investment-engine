@@ -52,3 +52,33 @@ def test_residency_revoked_after_claim_prevents_actual_provider_effect(env):
     def revoke():p.revoke(e.db,1,review.id);e.db.commit()
     result=q.work_once('analysis',now=NOW,after_claim=revoke)
     assert result['state']=='blocked' and not providers
+
+
+def test_expired_analysis_claimant_cannot_generate(env):
+    import pytest
+    from app.domains.ai_limits.contracts import BoundaryDenied
+    e=env;runtime,providers=governed(e);row,job=first_job(e,runtime)
+    for m in (IntegrationConnection,OrderIntent,OrderLeg):m.__table__.create(e.engine,checkfirst=True)
+    monitors(e.db,e.engine,1,NOW);p,_=proof(e.db,1,NOW)
+    q=OperationalQueues(e.db,SyntheticWorkBindings(e.db,residency=p,analysis=runtime));q.enqueue(1,'analysis',str(job.id),now=NOW);e.db.commit()
+    def expire():assert q.claim('analysis',now=NOW+timedelta(seconds=121))is None
+    with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):q.work_once('analysis',now=NOW,after_claim=expire)
+    assert not providers
+
+
+def test_deadline_elapsing_in_final_analysis_source_read_prevents_generate(env,monkeypatch):
+    from dataclasses import replace
+    import app.domains.public_service.dispatch as dispatch
+    e=env;runtime,providers=governed(e);row,job=first_job(e,runtime)
+    for m in (IntegrationConnection,OrderIntent,OrderLeg):m.__table__.create(e.engine,checkfirst=True)
+    monitors(e.db,e.engine,1,NOW);p,_=proof(e.db,1,NOW)
+    elapsed=[0.0];reads=[0];source=runtime.governance.source
+    def delayed_source(*args):
+        reads[0]+=1
+        if reads[0]==2:elapsed[0]=121.0
+        return source(*args)
+    runtime=replace(runtime,governance=replace(runtime.governance,source=delayed_source))
+    monkeypatch.setattr(dispatch,'monotonic',lambda:elapsed[0])
+    q=OperationalQueues(e.db,SyntheticWorkBindings(e.db,residency=p,analysis=runtime));q.enqueue(1,'analysis',str(job.id),now=NOW);e.db.commit()
+    result=q.work_once('analysis',now=NOW)
+    assert reads[0]==2 and result['state']=='uncertain' and len(providers)==1 and providers[0].calls==0

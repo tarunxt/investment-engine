@@ -106,3 +106,80 @@ def test_queue_immutable_seal_tamper_never_reaches_adapter(setup,field,value):
     item.payload={**item.payload,field:value};e.env.db.commit()
     with pytest.raises(BoundaryDenied):q.work_once('execution',now=NOW)
     assert not e.broker.calls
+
+
+def test_expired_claimant_rejected_before_any_fake_effect(setup):
+    e=setup();q,p,r=queue(e)
+    item=q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    def expire():assert q.claim('execution',now=NOW+timedelta(seconds=31))is None
+    with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):
+        q.work_once('execution',now=NOW,after_claim=expire)
+    assert not e.broker.calls
+    assert e.env.db.get(OutboxMessage,item.id).payload['state']=='uncertain'
+
+@pytest.mark.parametrize('change',['state','lease'])
+def test_invalidated_claimant_never_dispatches(setup,change):
+    e=setup();q,p,r=queue(e);item=q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    def invalidate():
+        row=e.env.db.get(OutboxMessage,item.id);row.payload={**row.payload,change:'uncertain' if change=='state' else str(uuid4())};e.env.db.commit()
+    with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):
+        q.work_once('execution',now=NOW,after_claim=invalidate)
+    assert not e.broker.calls
+
+
+def test_elapsed_preparation_rechecks_deadline_at_execution_effect(setup,monkeypatch):
+    import app.domains.public_service.dispatch as dispatch
+    e=setup();q,p,r=queue(e);item=q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    elapsed=[0.0];monkeypatch.setattr(dispatch,'monotonic',lambda:elapsed[0])
+    read=e.source.read
+    def delayed_read():elapsed[0]=31.0;return read()
+    monkeypatch.setattr(e.source,'read',delayed_read)
+    result=q.work_once('execution',now=NOW)
+    assert result['state']=='uncertain' and not e.broker.calls
+
+
+def test_deadline_elapsing_in_final_risk_read_still_prevents_broker_submit(setup,monkeypatch):
+    import app.domains.public_service.dispatch as dispatch
+    e=setup();q,p,r=queue(e);q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    elapsed=[0.0];reads=[0];monkeypatch.setattr(dispatch,'monotonic',lambda:elapsed[0]);read=e.source.read
+    def final_read():
+        reads[0]+=1
+        if reads[0]==2:elapsed[0]=31.0
+        return read()
+    monkeypatch.setattr(e.source,'read',final_read)
+    result=q.work_once('execution',now=NOW)
+    assert reads[0]==2 and result['state']=='uncertain' and not e.broker.calls
+
+
+def test_effect_row_fence_blocks_competing_expiry_until_transaction_finishes(setup):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlalchemy.orm import Session
+    from app.domains.order_intents.service import Orders
+    from app.domains.order_intents.execution import ExecutionWorker
+    e=setup();q,p,r=queue(e);item=q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    id,lease=q.claim('execution',now=NOW);q.fence(id,lease,now=NOW)
+    entered=Event()
+    def expire():
+        with Session(e.env.engine) as db:
+            worker=ExecutionWorker(Orders(db,policy=e.env.policy,risk=e.env.risk,clock=lambda:NOW),e.broker,e.source)
+            other=OperationalQueues(db,SyntheticWorkBindings(db,residency=p,execution=worker));entered.set()
+            return other.claim('execution',now=NOW+timedelta(seconds=31))
+    with ThreadPoolExecutor(1) as pool:
+        pending=pool.submit(expire);assert entered.wait(2)
+        try:assert not pending.done()
+        finally:e.env.db.commit()
+        assert pending.result(timeout=3)is None
+    with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):q.fence(id,lease,now=NOW)
+    e.env.db.rollback();assert not e.broker.calls
+
+
+def test_deadline_clock_is_evaluated_after_queue_row_lock_wait(setup,monkeypatch):
+    e=setup();q,p,r=queue(e);q.enqueue(e.row.owner_id,'execution',str(e.event.id),now=NOW);e.env.db.commit()
+    id,lease=q.claim('execution',now=NOW);elapsed=[0];scalar=e.env.db.scalar
+    def waited(*args,**kwargs):
+        row=scalar(*args,**kwargs);elapsed[0]=31;return row
+    monkeypatch.setattr(e.env.db,'scalar',waited)
+    with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):
+        q.fence(id,lease,now=lambda:NOW+timedelta(seconds=elapsed[0]))
+    e.env.db.rollback();assert not e.broker.calls

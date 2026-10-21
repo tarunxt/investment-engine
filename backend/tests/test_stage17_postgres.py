@@ -71,3 +71,32 @@ def test_pg_claim_race_one_durable_execution_lease(database,tmp_path):
             rows=list(db.scalars(select(OutboxMessage).where(OutboxMessage.topic==QUEUE_TOPIC)))
             assert len(rows)==1 and rows[0].payload['attempts']==1 and rows[0].payload['state']=='running'
     finally:broker.engine.dispose()
+
+
+def test_pg_effect_lease_row_lock_and_expired_claimant_fence(database,tmp_path):
+    from datetime import datetime,timezone,timedelta
+    from cryptography.fernet import Fernet
+    from sqlalchemy.exc import DBAPIError
+    from app.domains.connections.crypto import ConnectionKeyring
+    from app.domains.public_service.residency import SyntheticResidencyProducer
+    from app.domains.public_service.dispatch import SyntheticWorkBindings,OperationalQueues
+    from test_stage15_postgres import prepared,worker
+    engine,owner,event,intent,broker,source=prepared(database,tmp_path);now=datetime.now(timezone.utc)
+    producer=SyntheticResidencyProducer(ConnectionKeyring({1:Fernet.generate_key().decode()}))
+    try:
+        with Session(engine) as db:
+            producer.record(db,owner,country='IN',evidence_reference='synthetic:document',reviewer='synthetic:operator',now=now,expires=now+timedelta(hours=1))
+            q=OperationalQueues(db,SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source)))
+            q.enqueue(owner,'execution',str(event),now=now);db.commit();key,lease=q.claim('execution',now=now)
+            q.fence(key,lease,now=now)
+            with Session(engine) as competitor:
+                with pytest.raises(DBAPIError) as blocked:
+                    competitor.scalar(select(OutboxMessage).where(OutboxMessage.id==key).with_for_update(nowait=True))
+                assert getattr(blocked.value.orig,'pgcode',None)=='55P03';competitor.rollback()
+            db.commit() # effect transaction finished: expiry can now win
+            with Session(engine) as competitor:
+                other=OperationalQueues(competitor,SyntheticWorkBindings(competitor,residency=producer,execution=worker(competitor,broker,source)))
+                assert other.claim('execution',now=now+timedelta(seconds=31))is None
+            with pytest.raises(BoundaryDenied,match='QUEUE_LEASE_CHANGED'):q.fence(key,lease,now=now)
+            db.rollback();assert not broker.calls
+    finally:broker.engine.dispose()

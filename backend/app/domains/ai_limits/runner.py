@@ -12,7 +12,7 @@ class FakeProvider:
         return {'document':self.document,'actual_usd':'0','input_tokens':min(10,max_input_tokens),'output_tokens':min(10,max_output_tokens)}
 
 
-def run_next(budgets, provider, *, validate, now=None, expected_id=None,before_call=lambda:None):
+def run_next(budgets, provider, *, validate, now=None, expected_id=None,before_call=lambda:None,effect_fence=lambda:None):
     """Durable reservation precedes any call, even the zero-cost fake.
 
     Unknown outcomes remain reserved, not replayed. A real transport and tariff
@@ -30,6 +30,7 @@ def run_next(budgets, provider, *, validate, now=None, expected_id=None,before_c
         before_call()
         current=budgets.db.scalar(select(SpendAttempt).where(SpendAttempt.id==row.id).with_for_update().execution_options(populate_existing=True))
         if current.status!='started':raise BoundaryDenied('ATTEMPT_CANCELLED')
+        effect_fence()  # last admission check, same transaction through I/O
         result=provider.generate({'request_hash':row.request_hash},max_input_tokens=row.input_tokens,max_output_tokens=row.output_tokens,tools=[])
         budgets.db.commit()  # release module fence before platform settlement lock
         # A successful invocation is charged even if deterministic validation

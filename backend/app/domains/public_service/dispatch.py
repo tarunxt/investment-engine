@@ -6,7 +6,8 @@ A crash after claim is uncertain, never permission to repeat a paid/order effect
 from dataclasses import replace
 from datetime import datetime,timezone,timedelta
 from uuid import UUID,uuid4
-from sqlalchemy import select
+from time import monotonic
+from sqlalchemy import select,update
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.domains.auth.models import User
 from app.domains.jobs.models import Job
@@ -25,11 +26,12 @@ IMMUTABLE=('owner_id','lane','resource','binding','created_at')
 class SyntheticWorkBindings:
     def __init__(self,db,*,residency,analysis=None,execution=None):
         if type(residency)is not SyntheticResidencyProducer:raise BoundaryDenied('REVIEWED_SYNTHETIC_PRODUCER_REQUIRED')
-        self.db,self.residency=db,residency;self.analysis=analysis;self.execution=execution;self.executions={}
+        self.db,self.residency=db,residency;self.analysis=analysis;self.execution=execution;self.executions={};self.effect_fence=lambda:None
         if analysis is not None:
             if type(analysis.governance)is not SyntheticGovernance:raise BoundaryDenied('SYNTHETIC_ANALYSIS_REQUIRED')
             policy=analysis.policy
             def reviewed(session,id,portfolio,**kwargs):
+                self.effect_fence()
                 self.residency.resolve(session,id,now=self.now)
                 return policy(session,id,portfolio,**kwargs)
             self.analysis=replace(analysis,policy=reviewed)
@@ -39,6 +41,7 @@ class SyntheticWorkBindings:
                 if type(worker)is not ExecutionWorker or worker.db is not db or worker.broker.binding in self.executions:raise BoundaryDenied('SYNTHETIC_EXECUTION_REQUIRED')
                 original=worker.orders
                 def reviewed_order(session,identity,_original=original):
+                    self.effect_fence()
                     self.residency.resolve(session,identity.owner_id,now=self.now)
                     return _original.policy(session,identity)
                 orders=Orders(db,policy=reviewed_order,risk=original.risk,clock=original.clock)
@@ -68,13 +71,18 @@ class SyntheticWorkBindings:
             module=self.db.scalar(select(UserModule).where(UserModule.user_id==id,UserModule.module_id==value['module']).execution_options(populate_existing=True))
             if module is None or not module.enabled or module.version!=value['version']:raise BoundaryDenied('CURRENT_MODULE_REQUIRED')
         return digest(value)
-    def run(self,id,lane,key,now):
+    def run(self,id,lane,key,now,*,fence=lambda:None):
+        previous=self.effect_fence;self.effect_fence=fence
+        try:return self._run(id,lane,key,now,fence)
+        finally:self.effect_fence=previous
+    def _run(self,id,lane,key,now,fence):
+        fence()
         self.resource(id,lane,key,now=now)
-        if lane=='analysis':return execute_governed_job(self.db,int(key),self.analysis,now=now)
+        if lane=='analysis':return execute_governed_job(self.db,int(key),self.analysis,now=now,effect_fence=fence)
         intent=self.db.get(OutboxMessage,UUID(key)).payload['intent_id'] if lane=='execution' else key
         owned=self.db.scalar(select(OrderIntent).where(OrderIntent.id==intent,OrderIntent.owner_id==id))
         worker=self.executions[venue_binding(owned)]
-        if lane=='execution':row=worker.dispatch(key)
+        if lane=='execution':row=worker.dispatch(key,before_effect=fence,effect_fence=fence)
         else:row=worker.reconcile(id,key)
         return {'status':row.state,'intent_id':row.id}
 
@@ -122,26 +130,51 @@ class OperationalQueues:
             self.db.commit();return row.id,row.payload['lease']
         self.db.commit();return None
     def retry(self,id,owner_id,*,now=None):
-        now=utc(now or datetime.now(timezone.utc));control(self.db,'queues');row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id,OutboxMessage.topic==TOPIC).with_for_update());owner(self.db,owner_id,verified=True)
+        now=utc(now or datetime.now(timezone.utc));control(self.db,'queues');owner(self.db,owner_id,verified=True);row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id,OutboxMessage.topic==TOPIC).with_for_update())
         if row is None or row.payload.get('owner_id')!=owner_id:raise BoundaryDenied('OWNED_QUEUE_REQUIRED')
         p=self.validate(row)
         if p['state']!='uncertain' or p['lane']!='reconciliation':raise BoundaryDenied('NO_AUTOMATIC_REPLAY')
         options=admission(p['lane'],attempt=p['attempts'],outcome='uncertain')
         row.payload={**p,'state':'queued','available_at':(now+timedelta(seconds=options['retry_delay_seconds'])).isoformat()};self.db.commit()
+    def fence(self,id,lease,*,now):
+        # Lock only this queue row, never the global scheduling control. Domain
+        # workers retain this transaction through I/O and commit afterwards.
+        # Their own durable claim commits release it, so every effect policy
+        # and the execution before_effect hook must reacquire and revalidate.
+        if self.db.get_bind().dialect.name=='sqlite':
+            self.db.execute(update(OutboxMessage).where(OutboxMessage.id==id,OutboxMessage.topic==TOPIC).values(execution_attempts=OutboxMessage.execution_attempts))
+        row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id,OutboxMessage.topic==TOPIC).with_for_update().execution_options(populate_existing=True))
+        if row is None:raise BoundaryDenied('QUEUE_LEASE_CHANGED')
+        p=self.validate(row)
+        # Evaluate the clock AFTER lock acquisition; lock waits do not extend a
+        # lease. Explicit timestamps remain useful to direct synthetic callers.
+        checked_at=utc(now() if callable(now) else now)
+        if p.get('lease')!=lease or p['state']!='running' or utc(datetime.fromisoformat(p['deadline']))<=checked_at:raise BoundaryDenied('QUEUE_LEASE_CHANGED')
+        return p
     def work_once(self,lane,*,now=None,after_claim=lambda:None):
-        now=utc(now or datetime.now(timezone.utc));claim=self.claim(lane,now=now)
+        now=utc(now or datetime.now(timezone.utc));started_at=monotonic()
+        # Explicit synthetic time remains supported; elapsed real time is never
+        # frozen while waiting for admission/domain locks or doing preparation.
+        def current_time():return now+timedelta(seconds=max(0,monotonic()-started_at))
+        claim=self.claim(lane,now=now)
         if claim is None:return None
         id,lease=claim;after_claim() # a BaseException simulates process loss; lease persists
-        row=self.db.get(OutboxMessage,id,populate_existing=True);p=self.validate(row);started=False
+        def fence():
+            p=self.fence(id,lease,now=current_time);self.bindings.now=current_time();return p
+        try:p=fence()
+        except BaseException:
+            self.db.rollback();raise
+        started=False
         try:
             if self.bindings.resource(p['owner_id'],lane,p['resource'],now=now)!=p['binding']:raise BoundaryDenied('QUEUE_RESOURCE_CHANGED')
             self.db.commit();started=True
-            result=self.bindings.run(p['owner_id'],lane,p['resource'],now)
+            result=self.bindings.run(p['owner_id'],lane,p['resource'],current_time(),fence=fence)
             state='uncertain' if result['status']in {'uncertain','unknown','submitting','cancelled_uncertain'} else ('queued' if result['status']=='waiting_for_admission' else 'completed')
         except Exception:
             self.db.rollback();result={'status':'uncertain' if started else 'blocked'};state=result['status']
         control(self.db,'queues');row=self.db.scalar(select(OutboxMessage).where(OutboxMessage.id==id).with_for_update().execution_options(populate_existing=True))
-        if row.payload.get('lease')!=lease or row.payload['state']!='running':raise BoundaryDenied('QUEUE_LEASE_CHANGED')
+        if row.payload.get('lease')!=lease or row.payload['state']!='running':
+            self.db.rollback();raise BoundaryDenied('QUEUE_LEASE_CHANGED')
         if state=='queued':
             try:options=admission(lane,attempt=row.payload['attempts'],outcome='safe_failure')
             except BoundaryDenied:state='blocked';options={'retry_delay_seconds':0}
