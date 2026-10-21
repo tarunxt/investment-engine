@@ -135,7 +135,10 @@ def execute(engine, action, request, expected, fingerprint=None, material_reques
                 attempts=sa.Table('recommendation_spend_attempts',sa.MetaData(),autoload_with=db,schema='public')
                 if db.scalar(sa.select(sa.func.count()).select_from(attempts).where(attempts.c.operation_key.is_not(None),attempts.c.verification_id.is_not(None))):raise RuntimeError('Ambiguous spend attempt parent')
                 db.execute(sa.delete(attempts).where(attempts.c.operation_key.is_not(None),attempts.c.verification_id.is_(None)))
-        migrate(baseline)
+                # Cleanup and DDL share this one external transaction. Failed
+                # downgrade must not commit deletion of preserved spend rows.
+                migrate(baseline,connection=db)
+        else:migrate(baseline)
         after=capture(engine)
         if (after['revision']!=baseline or after.get('stage13_columns')
             or (baseline!=STAGE12 and after.get('stage12_columns'))
@@ -170,10 +173,18 @@ def main():
     request=env.get(PREFIX+'REQUEST','')
     engine=sa.create_engine(url.replace('postgresql+asyncpg://','postgresql+psycopg2://'),hide_parameters=True,
                             connect_args={'options':'-c statement_timeout=10000 -c lock_timeout=3000'})
+    def migrate(target,*,connection=None):
+        if connection is None:return command.downgrade(config,target)
+        previous=config.attributes.get('connection')
+        config.attributes['connection']=connection
+        try:return command.downgrade(config,target)
+        finally:
+            if previous is None:config.attributes.pop('connection',None)
+            else:config.attributes['connection']=previous
     try:
         result=execute(engine,action,request,env.get(PREFIX+'EXPECTED'),env.get(PREFIX+'FINGERPRINT'),
                        env.get(PREFIX+'MATERIAL_REQUEST'),env.get(PREFIX+'MATERIAL_SHA'),
-                       migrate=lambda target:command.downgrade(config,target),target=env.get(PREFIX+'TARGET'))
+                       migrate=migrate,target=env.get(PREFIX+'TARGET'))
         private_write(ARTIFACTS/(request+'-result.json'),{'request':request,'source':source,'action':action,**result})
     finally:engine.dispose()
 

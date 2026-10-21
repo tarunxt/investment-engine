@@ -65,12 +65,27 @@ class Stage13Helper(baseline.HelperTests):
             db.execute(table.insert(),[{'id':'legacy','verification_id':'old-verification','operation_key':None},{'id':'new','verification_id':None,'operation_key':'stage13-op'}])
         before={'revision':helper.STAGE13,'fingerprint':'a'*64}
         after={'revision':helper.STAGE12,'fingerprint':'b'*64,'stage09_tables':sorted(helper.TABLES),'stage10_tables':sorted(helper.ATTEMPTS),'stage11_columns':sorted(helper.IMPORT_COLUMNS),'stage12_columns':['execution_json'],'stage13_columns':[]}
-        def migrate(target):
+        def migrate(target,*,connection):
             self.assertEqual(target,helper.STAGE12)
-            with engine.connect() as db:self.assertEqual(list(db.execute(sa.select(table.c.id)).scalars()),['legacy'])
+            self.assertTrue(connection.in_transaction())
+            self.assertEqual(list(connection.execute(sa.select(table.c.id)).scalars()),['legacy'])
         try:
             with patch.object(helper,'capture',side_effect=[before,after]):
                 self.assertEqual(self.execute(engine=engine,expected=helper.STAGE13,target=helper.STAGE12,migrate=migrate),{'state':after})
+        finally:engine.dispose()
+
+    def test_failed_downgrade_rolls_back_stage13_row_cleanup(self):
+        import sqlalchemy as sa
+        engine=sa.create_engine('sqlite://')
+        with engine.begin() as db:db.exec_driver_sql("ATTACH DATABASE ':memory:' AS public")
+        table=sa.Table('recommendation_spend_attempts',sa.MetaData(),sa.Column('id',sa.String,primary_key=True),sa.Column('verification_id',sa.String),sa.Column('operation_key',sa.String),schema='public');table.create(engine)
+        with engine.begin() as db:db.execute(table.insert(),[{'id':'legacy','verification_id':'old','operation_key':None},{'id':'new','verification_id':None,'operation_key':'op'}])
+        def failed(target,**kwargs):raise RuntimeError('synthetic downgrade failure')
+        try:
+            with patch.object(helper,'capture',return_value={'revision':helper.STAGE13,'fingerprint':'a'*64}):
+                with self.assertRaisesRegex(RuntimeError,'synthetic downgrade failure'):
+                    self.execute(engine=engine,expected=helper.STAGE13,target=helper.STAGE12,migrate=failed)
+            with engine.connect() as db:self.assertEqual(set(db.execute(sa.select(table.c.id)).scalars()),{'legacy','new'})
         finally:engine.dispose()
 
 

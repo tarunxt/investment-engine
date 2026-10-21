@@ -330,7 +330,7 @@ def run_suite(python,group):
                 case['backup_revision']=before['revision']
                 case['real_controller_helper_postgresql_systemd_positive']=True
             elif scenario=='downgrade_failure':
-                with engine.begin() as conn:conn.execute(sa.text('CREATE VIEW ci_binding_dependency AS SELECT execution_json FROM auto_rebalance_workflows'))
+                with engine.begin() as conn:conn.execute(sa.text('CREATE VIEW ci_binding_dependency AS SELECT operation_key FROM recommendation_spend_attempts'))
                 original=helper.capture(engine)
                 try:ctl.rollback(str(saved))
                 except RuntimeError:pass

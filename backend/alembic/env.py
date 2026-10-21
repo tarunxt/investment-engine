@@ -37,6 +37,16 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    # A guarded UAT2 recovery can supply its active transaction so data cleanup
+    # and schema downgrade either commit together or roll back together. Normal
+    # CLI/deployment migrations retain the existing engine/URL path below.
+    connection=config.attributes.get('connection')
+    if connection is not None:
+        if not connection.in_transaction():
+            raise RuntimeError('Externally supplied migration connection requires an active transaction')
+        context.configure(connection=connection,target_metadata=target_metadata)
+        with context.begin_transaction():context.run_migrations()
+        return
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = get_database_url()
     connectable = engine_from_config(
