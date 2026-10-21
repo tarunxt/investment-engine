@@ -628,6 +628,8 @@ async def place_protected_market_orders(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.order_intents.contracts import require_live_financial_disabled
+    require_live_financial_disabled()
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
@@ -728,6 +730,8 @@ async def place_protected_market_orders_sequenced(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.order_intents.contracts import require_live_financial_disabled
+    require_live_financial_disabled()
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
@@ -877,6 +881,8 @@ async def place_order(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.order_intents.contracts import require_live_financial_disabled
+    require_live_financial_disabled()
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)

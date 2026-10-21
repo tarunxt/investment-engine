@@ -342,3 +342,6 @@ async def root():
 # Applied after the complete mount graph; no ADMIN/job bypass for new work.
 from app.domains.modules.transports import install_route_policy
 install_route_policy(app)
+
+from app.domains.order_intents.router import router as confirmed_order_router
+app.include_router(confirmed_order_router)

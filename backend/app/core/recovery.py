@@ -83,6 +83,8 @@ def require_zerodha_write_allowed(method, path, data=None):
 def require_financial_writes_allowed():
     if recovery_mode():
         raise RecoveryBlocked("Financial submission")
+    from app.domains.order_intents.contracts import require_live_financial_disabled
+    require_live_financial_disabled()
     # Recovery overrides are not per-user module or explicit-order authority.
     from app.domains.modules.execution import checkpoint
     from app.domains.modules.lifecycle import current_sync

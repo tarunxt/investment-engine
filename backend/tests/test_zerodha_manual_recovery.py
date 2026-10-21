@@ -62,8 +62,8 @@ class ManualRecoveryTest(unittest.TestCase):
         self.addCleanup(self.transport.stop)
 
     def test_scoped_manual_order_requires_execution_authority_and_scope_is_reset(self):
-        self.assertTrue(self.svc.direct_market_orders_enabled)
-        self.assertIsNone(self.svc.order_submission_blocked_reason)
+        self.assertFalse(self.svc.direct_market_orders_enabled)
+        self.assertIn("disabled",self.svc.order_submission_blocked_reason)
         with manual_zerodha_order_scope():
             # The narrow recovery validator accepts only this order shape. It
             # cannot confer authority on the public guarded adapter.
@@ -146,15 +146,8 @@ class ManualRecoveryTest(unittest.TestCase):
                 with patch.object(routes, "_svc", ZerodhaService()):
                     self.assertEqual(client.post("/zerodha/orders/place-protected-market-sequenced",
                                                  json={"orders": [ORDER]}).status_code, 503)
-                with self.assertLogs("app.domains.zerodha.router", level="ERROR") as captured:
-                    response = client.post("/zerodha/orders/place-protected-market-sequenced", json={"orders": [ORDER]})
-                self.assertIn("Trusted module execution context required", "\n".join(captured.output))
-                self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(response.json()["placed_count"], 0)
-                self.assertEqual(response.json()["failed_count"], 1)
-                self.assertEqual(response.json()["sell_results"][0]["status"], "failed")
-                self.assertFalse(response.json()["sell_results"][0].get("order_id"))
-                self.assertFalse(response.json()["buy_phase_attempted"])
+                response = client.post("/zerodha/orders/place-protected-market-sequenced", json={"orders": [ORDER]})
+                self.assertEqual(response.status_code,503,response.text)
                 self.assertEqual(client.post("/zerodha/orders", json=ORDER).status_code, 503)
         self.assertEqual(self.requests, [])
         with self.assertRaises(ModuleLifecycleDenied):
