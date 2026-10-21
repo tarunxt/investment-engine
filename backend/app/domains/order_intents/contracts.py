@@ -49,3 +49,15 @@ def require_live_financial_disabled():
     # can turn the Stage14 synthetic approval system into real financial access.
     from fastapi import HTTPException
     raise HTTPException(503,'Financial execution unavailable: reviewed order approval runtime is not activated')
+
+
+def receipt(value,leg,reference):
+    """No status label is quantitative proof of a fill or leg identity."""
+    fields={'state','broker_order_id','filled_quantity','client_reference','payload_digest'}
+    if not isinstance(value,dict) or set(value)!=fields:raise OrderDenied('INVALID_BROKER_RECEIPT')
+    state=value['state'];quantity=value['filled_quantity'];requested=leg['quantity']
+    if not isinstance(state,str) or state not in {'acknowledged','filled','partial','rejected'} or type(quantity)is not int or not 0<=quantity<=requested:raise OrderDenied('INVALID_BROKER_RECEIPT')
+    if (state=='filled' and quantity!=requested) or (state=='partial' and not 0<quantity<requested) or (state in {'acknowledged','rejected'} and quantity!=0):raise OrderDenied('INCOHERENT_FILL_STATE')
+    if not isinstance(value['broker_order_id'],str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}',value['broker_order_id']):raise OrderDenied('BROKER_ORDER_ID_REQUIRED')
+    if value['client_reference']!=reference or value['payload_digest']!=digest(leg):raise OrderDenied('BROKER_RECEIPT_LEG_MISMATCH')
+    return dict(value)

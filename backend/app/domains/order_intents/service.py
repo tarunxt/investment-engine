@@ -14,7 +14,7 @@ from app.domains.modules.models import UserModulePreferences
 from app.domains.modules.lifecycle import WorkIdentity,current_sync
 from app.infrastructure.database.outbox.models import OutboxMessage
 from .models import OrderIntent,OrderLeg
-from .contracts import OrderDenied,payload,digest,utc,stored_utc
+from .contracts import OrderDenied,payload,digest,utc,stored_utc,receipt as validate_receipt
 from .fake import FakeBroker
 
 TOPIC='orders.confirmed.synthetic.v1'
@@ -66,10 +66,24 @@ class Orders:
         if payload(deepcopy(row.payload_json))!=row.payload_json or digest(self.bound(row))!=row.request_digest:raise OrderDenied('IMMUTABLE_INTENT_CHANGED')
         legs=self.legs(row)
         if len(legs)!=len(row.payload_json['legs']) or any(l.position!=i or l.payload_digest!=digest(p) or l.client_reference!=digest({'intent':row.id,'leg':i}) for i,(l,p) in enumerate(zip(legs,row.payload_json['legs']))):raise OrderDenied('BASKET_LEGS_CHANGED')
-        if row.risk_json is not None:
+        # Every post-draft state requires its frozen review/risk evidence.
+        # Missing evidence can never turn a mandatory check into an optional one.
+        if row.state!='draft' or row.risk_json is not None or row.review_digest is not None:
+            if not isinstance(row.risk_json,dict) or row.risk_json.get('allowed') is not True or not row.review_digest:raise OrderDenied('FROZEN_RISK_REVIEW_REQUIRED')
             actual=self.risk(self.db,self.identity(row),deepcopy(row.payload_json),conn,now)
             if not isinstance(actual,dict) or actual.get('allowed') is not True or digest(actual)!=digest(row.risk_json):raise OrderDenied('RISK_CONDITIONS_CHANGED')
             if digest({'request':row.request_digest,'risk':actual})!=row.review_digest:raise OrderDenied('REVIEW_BINDING_CHANGED')
+        completed_ids=set()
+        for leg,p in zip(legs,row.payload_json['legs']):
+            if leg.state in {'filled','partial','acknowledged','rejected'}:
+                evidence=leg.reconciliation_json
+                if not isinstance(evidence,dict) or set(evidence)!={'simulation','receipt'} or evidence['simulation'] is not True:raise OrderDenied('STORED_FILL_EVIDENCE_REQUIRED')
+                value=evidence['receipt']
+                value=validate_receipt(value,p,leg.client_reference)
+                if (value['state'],value['filled_quantity'],value['broker_order_id'])!=(leg.state,leg.filled_quantity,leg.broker_order_id):raise OrderDenied('STORED_FILL_RECEIPT_CHANGED')
+                if leg.broker_order_id in completed_ids:raise OrderDenied('DUPLICATE_BROKER_ORDER_RECEIPT')
+                completed_ids.add(leg.broker_order_id)
+            elif leg.state in {'draft','submitting'} and (leg.broker_order_id is not None or leg.filled_quantity!=0 or leg.reconciliation_json is not None):raise OrderDenied('UNEXPECTED_FILL_EVIDENCE')
         return row,legs
 
     def create(self,identity,key,connection_id,order,*,now=None):
@@ -142,16 +156,18 @@ class Orders:
             # Mark before I/O. Crash after this commit is uncertain, never a retry.
             row,legs=self.checked(p['owner_id'],p['intent_id'],check_time());leg=legs[i]
             if row.state!='submitting' or leg.state!='draft':raise OrderDenied('ORDER_STATE_CHANGED')
-            if row.payload_json['sequencing']=='sell_then_buy' and row.payload_json['legs'][i]['side']=='BUY' and any(l.state!='filled' for l in legs[:i]):
+            if row.payload_json['sequencing']=='sell_then_buy' and row.payload_json['legs'][i]['side']=='BUY' and any(l.state!='filled' or l.filled_quantity!=row.payload_json['legs'][j]['quantity'] for j,l in enumerate(legs[:i])):
                 row.state='acknowledged';self.db.commit();return row
             leg.state='submitting';self.db.commit()
             try:
                 before_effect();row,legs=self.checked(p['owner_id'],p['intent_id'],check_time());leg=legs[i]
-                if row.state!='submitting' or leg.state!='submitting' or row.approval_digest!=self.approval_hash(row) or stored_utc(row.expires_at)<=check_time():raise OrderDenied('APPROVAL_REVOKED_OR_EXPIRED')
+                if row.state!='submitting' or leg.state!='submitting' or row.request_digest!=p['request_digest'] or row.approval_digest!=p['approval_digest'] or row.approval_digest!=self.approval_hash(row) or stored_utc(row.expires_at)<=check_time():raise OrderDenied('APPROVAL_REVOKED_OR_EXPIRED')
                 # Selection/connection/intent locks held across the bounded fake
                 # effect: disable/disconnect/revoke commits serialize here.
                 receipt=broker.submit(deepcopy(row.payload_json['legs'][i]),leg.client_reference)
-                if set(receipt)!={'state','broker_order_id','filled_quantity'} or receipt['state'] not in {'acknowledged','filled','partial','rejected'} or type(receipt['filled_quantity'])is not int or not 0<=receipt['filled_quantity']<=row.payload_json['legs'][i]['quantity']:raise OrderDenied('INVALID_BROKER_RECEIPT')
+                receipt=validate_receipt(receipt,row.payload_json['legs'][i],leg.client_reference)
+                duplicate=self.db.scalar(select(OrderLeg.id).join(OrderIntent,OrderLeg.intent_id==OrderIntent.id).where(OrderIntent.owner_id==row.owner_id,OrderIntent.account_id==row.account_id,OrderLeg.broker_order_id==receipt['broker_order_id'],OrderLeg.id!=leg.id).limit(1))
+                if duplicate is not None:raise OrderDenied('DUPLICATE_BROKER_ORDER_RECEIPT')
                 leg.state=receipt['state'];leg.broker_order_id=receipt['broker_order_id'];leg.filled_quantity=receipt['filled_quantity'];leg.reconciliation_json={'simulation':True,'receipt':deepcopy(receipt)}
                 self.db.commit()
                 if leg.state in {'partial','rejected','acknowledged'}:
@@ -159,4 +175,6 @@ class Orders:
             except BaseException:
                 self.db.rollback();row=self.owned(p['owner_id'],p['intent_id']);leg=self.legs(row)[i]
                 row.state=leg.state='unknown';self.db.commit();raise
+        row,legs=self.checked(p['owner_id'],p['intent_id'],check_time())
+        if row.state!='submitting' or row.approval_digest!=p['approval_digest'] or row.approval_digest!=self.approval_hash(row) or stored_utc(row.expires_at)<=check_time() or any(l.state!='filled' or l.filled_quantity!=request['quantity'] for l,request in zip(legs,row.payload_json['legs'])):raise OrderDenied('QUANTITATIVE_BASKET_COMPLETION_REQUIRED')
         row.state='filled';self.db.commit();return row

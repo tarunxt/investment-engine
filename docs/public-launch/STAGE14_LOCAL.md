@@ -1,3 +1,7 @@
+# Current Stage14 risk/receipt correction
+
+This document retains the original2c8cb43d candidate description and test history. The local successor fixes both independent P2 findings; [STAGE14_REVIEW_CORRECTION.md](STAGE14_REVIEW_CORRECTION.md) is the current correction and152focused/410combined result record. Required behavior is unchanged; risk evidence is mandatory and fill receipts must prove exact quantitative leg completion. Independent re-review,7PG/20Linux and external gates remain pending. No publication or activation.
+
 # Stage14 local order intent preparation
 
 Canonical title: **Implement durable order intents and explicit approvals**. Source: stages/14.md. Local work began at07:19:16UTC21October2026 (Git branch creation receipt), based on owner-accepted inactive Stage13 `31ecd3fa59a5e4ce4847170ff6b973a9e0709ddd`. Isolated branch `codex/stage14-order-approvals-local-20261021`; external candidate handoff pins the containing commit. Nothing is pushed or deployed. UAT2 remains accepted Stage13, owner-only and simulated, analysis runtime unregistered. Owner acceptance did not retroactively run the locked-Mac browser check.

@@ -1,3 +1,7 @@
+# Current Stage14 risk/receipt correction
+
+This document retains the original2c8cb43d candidate description and test history. The local successor fixes both independent P2 findings; [STAGE14_REVIEW_CORRECTION.md](STAGE14_REVIEW_CORRECTION.md) is the current correction and152focused/410combined result record. Required behavior is unchanged; risk evidence is mandatory and fill receipts must prove exact quantitative leg completion. Independent re-review,7PG/20Linux and external gates remain pending. No publication or activation.
+
 # Stage14 requirement map
 
 Canonical source: stages/14.md, same decoded Library execution specification. Base accepted31ecd3fa; source/owner acceptance reconciled in STATUS without rewriting historical receipts.

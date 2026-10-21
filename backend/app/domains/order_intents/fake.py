@@ -11,6 +11,6 @@ class FakeBroker:
         outcome=self.outcomes.pop(0) if self.outcomes else 'acknowledged'
         if outcome=='timeout':raise TimeoutError('Synthetic unknown broker outcome')
         if outcome not in {'acknowledged','filled','partial','rejected'}:raise OrderDenied('INVALID_FAKE_RECEIPT')
-        result={'state':outcome,'broker_order_id':'fake-'+reference,'filled_quantity':leg['quantity'] if outcome=='filled' else (1 if outcome=='partial' else 0)}
+        result={'state':outcome,'broker_order_id':'fake-'+reference,'filled_quantity':leg['quantity'] if outcome=='filled' else (1 if outcome=='partial' else 0),'client_reference':reference,'payload_digest':digest(leg)}
         self.receipts[reference]={'payload_digest':digest(leg),'receipt':result}
         return result

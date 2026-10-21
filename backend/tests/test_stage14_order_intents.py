@@ -215,3 +215,122 @@ def test_human_confirmation_capability_is_exact_one_use_and_not_inherited(env):
         env.service.approve(row.owner_id,row.id,review['review_digest'],action='confirm_exact_order_or_basket',now=NOW)
         with pytest.raises(OrderDenied,match='HUMAN_ACTION'):env.service.approve(row.owner_id,row.id,review['review_digest'],action='confirm_exact_order_or_basket',now=NOW)
     with pytest.raises(OrderDenied,match='HUMAN_ACTION'):env.service.approve(row.owner_id,row.id,review['review_digest'],action='confirm_exact_order_or_basket',now=NOW)
+
+@pytest.mark.parametrize('field,value',[('risk_json',None),('risk_json',{}),('risk_json',{'allowed':False}),('review_digest',None),('review_digest','forged')])
+@pytest.mark.parametrize('point',['approval','dispatch','after_claim','redelivery'])
+def test_missing_or_mutated_frozen_risk_never_skips_validation(env,field,value,point):
+    if point=='approval':
+        row,review=prepare(env);setattr(row,field,value);env.db.commit()
+        with pytest.raises(OrderDenied):confirm(env.service,row.owner_id,row.id,review['review_digest'],action='confirm_exact_order_or_basket',now=NOW)
+        return
+    row,event=approve(env);broker=FakeBroker(['filled'])
+    def corrupt():
+        setattr(row,field,value);env.db.commit();env.conditions['allowed']=False
+    if point!='after_claim':corrupt()
+    if point=='redelivery':row.state='submitting';event.execution_attempts=1;env.db.commit()
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker,before_effect=corrupt if point=='after_claim' else lambda:None)
+    assert not broker.calls
+
+
+def test_risk_and_approval_rebinding_after_claim_cannot_replace_original_dispatch(env):
+    row,event=approve(env);broker=FakeBroker(['filled'])
+    def rebind():
+        env.conditions['version']+=1
+        row.risk_json=env.risk(env.db,env.service.identity(row),deepcopy(row.payload_json),env.db.get(IntegrationConnection,'connection1'),NOW)
+        row.review_digest=digest({'request':row.request_digest,'risk':row.risk_json})
+        row.approval_digest=env.service.approval_hash(row);env.db.commit()
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker,before_effect=rebind)
+    assert not broker.calls
+
+@pytest.mark.parametrize('state,filled',[
+    ('filled',0),('filled',1),('filled',9),('filled',11),('filled',-1),('filled',True),('filled',10.0),('filled','10'),
+    ('partial',0),('partial',10),('partial',11),('acknowledged',1),('rejected',1),('bogus',0)])
+def test_incoherent_receipt_cannot_release_dependent_buy_or_complete_basket(env,state,filled):
+    o=order(2);o['sequencing']='sell_then_buy';o['legs'][0]['side']='SELL';row,event=approve(env,o=o);broker=FakeBroker(['filled','filled']);original=broker.submit
+    def malformed(leg,reference):return {**original(leg,reference),'state':state,'filled_quantity':filled}
+    broker.submit=malformed
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker)
+    assert row.state=='unknown' and len(broker.calls)==1 and env.service.legs(row)[1].state=='draft'
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker)
+    assert len(broker.calls)==1
+
+@pytest.mark.parametrize('field,value',[
+    ('broker_order_id',None),('broker_order_id',''),('broker_order_id','contains spaces'),('broker_order_id','x'*101),
+    ('client_reference','other-leg'),('payload_digest','0'*64),('state',None),('filled_quantity',None)])
+def test_invalid_receipt_identity_and_shape_fail_closed(env,field,value):
+    row,event=approve(env,o=order(2));broker=FakeBroker(['filled','filled']);original=broker.submit
+    def malformed(leg,reference):return {**original(leg,reference),field:value}
+    broker.submit=malformed
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker)
+    assert row.state=='unknown' and len(broker.calls)==1
+
+@pytest.mark.parametrize('value',[None,[],{},True,{'state':'filled','filled_quantity':10,'broker_order_id':'fake-missing-bindings'}])
+def test_non_receipt_or_missing_bindings_are_not_quantitative_evidence(env,value):
+    row,event=approve(env);broker=FakeBroker();broker.submit=lambda *args:value
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker)
+    assert row.state=='unknown'
+
+
+def test_duplicate_broker_receipt_with_fresh_leg_reference_stops_later_legs(env):
+    row,event=approve(env,o=order(3));broker=FakeBroker(['filled']*3);original=broker.submit
+    def duplicate(leg,reference):return {**original(leg,reference),'broker_order_id':'fake-duplicate-id'}
+    broker.submit=duplicate
+    with pytest.raises(OrderDenied,match='DUPLICATE_BROKER'):env.service.dispatch(event.id,broker)
+    assert row.state=='unknown' and len(broker.calls)==2 and env.service.legs(row)[2].state=='draft'
+
+@pytest.mark.parametrize('fault',['quantity','receipt','missing_receipt','state'])
+def test_persisted_sell_evidence_revalidated_before_dependent_buy(env,fault):
+    o=order(2);o['sequencing']='sell_then_buy';o['legs'][0]['side']='SELL';row,event=approve(env,o=o);broker=FakeBroker(['filled']*2);calls=[0]
+    def corrupt_prior():
+        calls[0]+=1
+        if calls[0]!=2:return
+        leg=env.service.legs(row)[0]
+        if fault=='quantity':leg.filled_quantity=0
+        elif fault=='missing_receipt':leg.reconciliation_json=None
+        elif fault=='state':leg.state='draft'
+        else:
+            evidence=deepcopy(leg.reconciliation_json);evidence['receipt']['filled_quantity']=0;leg.reconciliation_json=evidence
+        env.db.commit()
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker,before_effect=corrupt_prior)
+    assert row.state=='unknown' and len(broker.calls)==1
+
+
+def test_single_unit_cannot_have_partial_fill(env):
+    o=order();o['legs'][0]['quantity']=1;row,event=approve(env,o=o)
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,FakeBroker(['partial']))
+    assert row.state=='unknown'
+
+@pytest.mark.parametrize('field,value',[('risk_json',[]),('risk_json','cleared'),('review_digest','')])
+def test_non_dict_risk_and_empty_review_after_claim_fail_closed(env,field,value):
+    row,event=approve(env);broker=FakeBroker(['filled'])
+    def corrupt():setattr(row,field,value);env.db.commit()
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker,before_effect=corrupt)
+    assert not broker.calls
+
+
+def test_fresh_risk_failure_after_last_fill_cannot_mark_basket_completed(env):
+    row,event=approve(env);broker=FakeBroker(['filled']);original=broker.submit
+    def change_after_effect(leg,reference):
+        result=original(leg,reference);env.conditions['allowed']=False;return result
+    broker.submit=change_after_effect
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker)
+    assert len(broker.calls)==1 and row.state!='filled'
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker)
+
+
+def test_duplicate_broker_id_for_another_intent_in_same_owned_account_is_uncertain(env):
+    row,event=approve(env,key='first');broker=FakeBroker(['filled','filled']);original=broker.submit
+    broker.submit=lambda leg,reference:{**original(leg,reference),'broker_order_id':'fake-same-account-id'}
+    env.service.dispatch(event.id,broker);assert row.state=='filled'
+    other,delivery=approve(env,key='second')
+    with pytest.raises(OrderDenied,match='DUPLICATE_BROKER'):env.service.dispatch(delivery.id,broker)
+    assert other.state=='unknown' and len(broker.calls)==2
+
+@pytest.mark.parametrize('evidence',[None,[],True,{}, {'simulation':False,'receipt':{}}, {'simulation':True,'receipt':{},'extra':'untrusted'}])
+def test_stored_receipt_wrapper_mutation_blocks_later_leg(env,evidence):
+    row,event=approve(env,o=order(2));broker=FakeBroker(['filled']*2);count=[0]
+    def corrupt():
+        count[0]+=1
+        if count[0]==2:env.service.legs(row)[0].reconciliation_json=deepcopy(evidence);env.db.commit()
+    with pytest.raises(OrderDenied):env.service.dispatch(event.id,broker,before_effect=corrupt)
+    assert len(broker.calls)==1 and row.state=='unknown'
