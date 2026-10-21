@@ -134,6 +134,9 @@ async def test_private_fake_preview_two_tabs_and_partial_history(env, monkeypatc
     monkeypatch.setenv('STAGE01_PREVIEW','synthetic-only')
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
     from scripts.public_launch import preview_stage16 as preview
+    from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+    for table in (*preview.TABLES, IndMoneyUsPortfolioSnapshot.__table__):
+        table.create(env.engine, checkfirst=True)
     users=[env.db.get(User,id) for id in env.owners]
     for i,user in enumerate(users):
         user.username=('usera','userb')[i]
@@ -144,17 +147,31 @@ async def test_private_fake_preview_two_tabs_and_partial_history(env, monkeypatc
         async def run_sync(self, fn):return fn(env.db)
         async def commit(self):env.db.commit()
         async def rollback(self):env.db.rollback()
+        async def scalar(self, query):return env.db.scalar(query)
+        async def execute(self, query):return env.db.execute(query)
+        def get_bind(self):return env.db.get_bind()
     bridge=Bridge()
     await preview.seed(bridge,users)
+    await preview.seed(bridge,users)  # restart/idempotence: no duplicate snapshots or instructions
+    assert len(list(env.db.scalars(select(preview.ZerodhaPortfolioSnapshot))))==2
     app=FastAPI();app.include_router(router)
     app.dependency_overrides[get_async_db]=lambda:bridge
     app.dependency_overrides[get_current_user]=lambda:users[0]
     app.dependency_overrides[get_runtime]=lambda:preview.runtime
     app.dependency_overrides[get_read_runtime]=lambda:preview.runtime
+    from app.domains.modules.policy import DefaultFactsResolver, ModuleFacts
+    from app.domains.modules.transports import install_route_policy
+    # Match the existing synthetic preview facts, including no standing consent.
+    monkeypatch.setattr(DefaultFactsResolver, 'resolve_sync', lambda *_: ModuleFacts(
+        jurisdiction='allowed', plan='allowed', connection='ready', execution_capability=True))
+    install_route_policy(app)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://synthetic.invalid') as client:
         records=(await client.get('/order-intents/reviews')).json()
         assert {r['state'] for r in records['intents']}=={'awaiting_approval','unknown','partial'}
         assert all(r['integrity_checked'] for r in records['intents'])
+        positions=(await client.get('/order-intents/positions')).json()
+        assert positions['sources'][0]['groups'][0]['items']==[{'symbol':'SYNTHETIC_USERA','quantity':'3'}]
+        assert 'USERB' not in str(positions)
         row=next(r for r in records['intents'] if r['actions']['confirm'])
         body={'displayed_digest':row['review_digest'],'action':'confirm_exact_order_or_basket'}
         path='/order-intents/'+row['id']+'/approve'
@@ -170,6 +187,74 @@ async def test_private_fake_preview_two_tabs_and_partial_history(env, monkeypatc
         disabled=(await client.get('/order-intents/reviews')).json()
         assert len(disabled['intents'])==3 and not any(r['actions']['confirm'] for r in disabled['intents'])
         assert (await client.get('/order-intents/reviews/'+row['id'])).status_code==404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['valid', 'foreign', 'disabled', 'digest', 'connection', 'unverified', 'facts', 'runtime', 'action', 'expired', 'risk', 'old_mapping', 'noauth', 'execution_policy'])
+async def test_confirmation_through_installed_module_middleware(env, monkeypatch, case):
+    """The prior router-only tests omitted the dependency producing browser403."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    import httpx
+    from fastapi import FastAPI
+    from app.domains.auth.models import User
+    from app.domains.connections.models import IntegrationConnection
+    from app.domains.order_intents.router import router, get_runtime
+    from app.domains.auth.dependencies import get_current_user
+    from app.infrastructure.database.session import get_async_db
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    from app.domains.modules.policy import DefaultFactsResolver, ModuleFacts
+    from app.domains.modules.transports import install_route_policy
+    row, review=prepare(env)
+    user=env.db.get(User, env.owners[1] if case=='foreign' else row.owner_id)
+    connection=env.db.get(IntegrationConnection, row.connection_id)
+    connection.token_expires_at=datetime.now(timezone.utc)+timedelta(hours=1)
+    if case=='connection':connection.version+=1
+    if case=='expired':connection.token_expires_at=datetime.now(timezone.utc)-timedelta(seconds=1)
+    if case=='risk':env.conditions['allowed']=False
+    if case=='disabled':env.db.scalar(select(UserModule).where(UserModule.user_id==row.owner_id)).enabled=False
+    if case=='unverified':user.is_verified=False
+    env.db.commit()
+    class Bridge:
+        async def run_sync(self, fn):return fn(env.db)
+        async def commit(self):env.db.commit()
+        async def rollback(self):env.db.rollback()
+        async def scalar(self, query):return env.db.scalar(query)
+        async def execute(self, query):return env.db.execute(query)
+        def get_bind(self):return env.db.get_bind()
+    monkeypatch.setattr(DefaultFactsResolver, 'resolve_sync', lambda *_: ModuleFacts() if case=='facts' else ModuleFacts(
+        jurisdiction='allowed', plan='allowed', connection='ready', execution_capability=case!='execution_policy'))
+    app=FastAPI();app.include_router(router)
+    app.dependency_overrides[get_async_db]=lambda:Bridge()
+    app.dependency_overrides[get_current_user]=lambda:user
+    if case=='noauth':app.dependency_overrides.pop(get_current_user)
+    def denied_execution_policy(*args):raise PermissionError('Synthetic execution capability unavailable')
+    if case!='runtime':app.dependency_overrides[get_runtime]=lambda:SimpleNamespace(
+        policy=denied_execution_policy if case=='execution_policy' else env.policy,risk=env.risk)
+    if case=='old_mapping':
+        from app.domains.modules import transports
+        classify=transports.classify_route
+        monkeypatch.setattr(transports, 'classify_route', lambda domain, endpoint, path, methods, source='':
+            ('unknown','view') if domain=='order_intents' and endpoint=='approve' else classify(domain,endpoint,path,methods,source))
+    install_route_policy(app)
+    body={'displayed_digest':'0'*64 if case=='digest' else review['review_digest'], 'action':'confirm_exact_order_or_basket'}
+    if case=='action':body['action']='standing_consent'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://synthetic.invalid') as client:
+        response=await client.post('/order-intents/'+row.id+'/approve',json=body)
+        expected={'valid':200,'foreign':409,'disabled':403,'digest':409,'connection':409,'unverified':403,'facts':403,'runtime':503,
+                  'action':409,'expired':409,'risk':409,'old_mapping':403,'noauth':401,'execution_policy':409}[case]
+        assert response.status_code==expected, response.text
+        if case=='old_mapping':assert 'UNKNOWN_MODULE' in response.text
+        if case=='valid':assert (await client.post('/order-intents/'+row.id+'/approve',json=body)).status_code==409
+    assert len(list(env.db.scalars(select(OutboxMessage))))==(1 if case=='valid' else 0)
+
+
+def test_confirmation_classification_is_exact_not_a_financial_route_exemption():
+    from app.domains.modules.coverage import classify_route
+    assert classify_route('order_intents','approve','/order-intents/{id}/approve',{'POST'})==('zerodha_rebalance','analyze')
+    for endpoint,path,methods in [('create','/order-intents',{'POST'}),('future','/order-intents/{id}/approve',{'POST'}),
+                                  ('approve','/order-intents/{id}/approve',{'GET'}),('approve','/order-intents/{id}/submit',{'POST'})]:
+        assert classify_route('order_intents',endpoint,path,methods)==('unknown','view')
 
 
 def test_only_exact_owned_read_paths_are_core_and_uat_has_no_writes():

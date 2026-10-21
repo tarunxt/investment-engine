@@ -19,8 +19,9 @@ from app.domains.order_intents.fake import FakeBroker
 from app.domains.order_intents.contracts import digest, OrderDenied
 from app.domains.order_intents.authority import authenticated_confirmation
 from app.domains.order_intents.router import router, get_runtime, get_read_runtime
+from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
 from app.infrastructure.database.outbox.models import OutboxMessage
-TABLES = (OrderIntent.__table__, OrderLeg.__table__)
+TABLES = (OrderIntent.__table__, OrderLeg.__table__, ZerodhaPortfolioSnapshot.__table__)
 
 
 def policy(db, identity):
@@ -53,6 +54,18 @@ async def seed(db, users):
         for user in users:
             if user.username not in {'usera', 'userb'}:
                 continue
+            # Private disposable observations only. The production snapshot
+            # schema/migrations and provider acquisition remain untouched.
+            snapshot = session.scalar(select(ZerodhaPortfolioSnapshot.id).where(
+                ZerodhaPortfolioSnapshot.user_id == user.id,
+                ZerodhaPortfolioSnapshot.snapshot_date == now.date()))
+            if snapshot is None:
+                session.add(ZerodhaPortfolioSnapshot(
+                    user_id=user.id, snapshot_date=now.date(), captured_at=now,
+                    source='stage16_synthetic',
+                    holdings=[{'tradingsymbol':'SYNTHETIC_'+user.username.upper(), 'quantity':3}],
+                    net_positions=[{'tradingsymbol':'SYNTHETIC_SHORT_'+user.username.upper(), 'quantity':-1}],
+                    day_positions=[]))
             if session.scalar(select(OrderIntent.id).where(OrderIntent.owner_id == user.id).limit(1)):
                 continue
             header = session.get(UserModulePreferences, user.id)

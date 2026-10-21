@@ -28,6 +28,14 @@ CORE_DOMAINS={'connections','auth','modules','api_usage','cost_drivers','health'
 
 def classify_route(domain,endpoint,path,methods,source_module=''):
     methods=set(methods or ())
+    if (domain=='order_intents' and endpoint=='approve' and methods=={'POST'}
+            and path=='/order-intents/{id}/approve'):
+        # Recording exact consent is preparation, not a broker effect. Require
+        # the module's existing preparation entitlement here; the authenticated
+        # handler consumes request-local confirmation and Orders.approve checks
+        # the owned review/connection and fresh execute policy before persisting
+        # approval. Never manufacture action_confirmed in generic HTTP policy.
+        return ('zerodha_rebalance','analyze')
     if domain=='order_intents' and methods=={'GET'} and path in {'/order-intents/reviews','/order-intents/reviews/{id}','/order-intents/positions'}:
         return None # Authenticated owner safety observations; no execution exemption.
     if domain=='ai_limits' and methods=={'GET'} and path in {'/api-usage/limits','/api-usage/limits/private-artifacts/{artifact_id}'}:

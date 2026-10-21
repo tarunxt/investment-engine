@@ -5564,7 +5564,7 @@
       "kind": "http",
       "method": "POST",
       "module": "order_intents",
-      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "module_lifecycle_gate": "zerodha_rebalance / analyze via modules.transports.install_route_policy",
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
@@ -15565,7 +15565,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "5a4b16c8108582097beaf53254b9aa1100a0f61e9722a1258ce88afe697623be",
+    "backend/app/domains/modules/coverage.py": "04cee7861ef949b9bfc7629c8765191c5764bff13c362a5d0ef4ae1c57e5718c",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
