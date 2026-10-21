@@ -5,7 +5,7 @@
     "background": 31,
     "export": 44,
     "frontend": 25,
-    "http": 292,
+    "http": 295,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -5384,7 +5384,88 @@
       "registration": "mounted",
       "route": "/order-intents/status",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:38"
+      "source": "backend/app/domains/order_intents/router.py:43"
+    },
+    {
+      "calls": [
+        "Depends",
+        "db.run_sync",
+        "owned_positions",
+        "router.get"
+      ],
+      "capability": "positions",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "order_intents",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/positions')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/positions",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:47"
+    },
+    {
+      "calls": [
+        "Depends",
+        "db.run_sync",
+        "owned_reviews",
+        "router.get"
+      ],
+      "capability": "reviews",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "order_intents",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_read_runtime)",
+        "router.get('/reviews')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/reviews",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:53"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "db.run_sync",
+        "owned_reviews",
+        "router.get"
+      ],
+      "capability": "review_record",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "order_intents",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_read_runtime)",
+        "router.get('/reviews/{id}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/reviews/{id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:59"
     },
     {
       "calls": [
@@ -5416,7 +5497,7 @@
       "registration": "mounted",
       "route": "/order-intents",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:42"
+      "source": "backend/app/domains/order_intents/router.py:67"
     },
     {
       "calls": [
@@ -5442,7 +5523,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/validate",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:53"
+      "source": "backend/app/domains/order_intents/router.py:78"
     },
     {
       "calls": [
@@ -5468,7 +5549,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/review",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:57"
+      "source": "backend/app/domains/order_intents/router.py:82"
     },
     {
       "calls": [
@@ -5496,7 +5577,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/approve",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:61"
+      "source": "backend/app/domains/order_intents/router.py:86"
     },
     {
       "calls": [
@@ -5522,7 +5603,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/revoke",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:68"
+      "source": "backend/app/domains/order_intents/router.py:93"
     },
     {
       "calls": [
@@ -13073,7 +13154,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:52"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -13095,7 +13176,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -13117,7 +13198,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -13139,7 +13220,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -13161,7 +13242,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -13183,7 +13264,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -13205,7 +13286,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:57"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -13227,7 +13308,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:63"
+      "source": "backend/app/uat2/main.py:68"
     },
     {
       "calls": [
@@ -15484,7 +15565,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "d2f00a860a7dcbc7a7897cc7be10d3ea61aa93fefff912d69c6547c75f86c73d",
+    "backend/app/domains/modules/coverage.py": "5a4b16c8108582097beaf53254b9aa1100a0f61e9722a1258ce88afe697623be",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
@@ -15510,7 +15591,9 @@
     "backend/app/domains/order_intents/execution_risk.py": "791a45f2504de189e489777be882b501fc24b18b3fa4d8a38f835c8a501e484d",
     "backend/app/domains/order_intents/fake.py": "dccd23b6e8d23e0683963f9b2115789580fcd1a7847fdabd45c84618c463009d",
     "backend/app/domains/order_intents/models.py": "d4ff4bd2daf40df31c64d15c9a1d33624e1311c488ca36120876537cc3303c20",
-    "backend/app/domains/order_intents/router.py": "9966b4d2d67bbe60a0a49579fa031ba5d8fb2a36946d816ee1e8bfafc4564d3b",
+    "backend/app/domains/order_intents/positions_view.py": "b2f04f01344b92e1e5ca429254522069fc0b8d77b483b62385f2bdb49dbb8332",
+    "backend/app/domains/order_intents/presentation.py": "4040eca48e08c22990faf82e5074dcdfc0cf6f393c221b747682f10f078672c0",
+    "backend/app/domains/order_intents/router.py": "257f30784446147887a0924b91377d7268df8c1920a6d1f7ea3cc816e9e9d56e",
     "backend/app/domains/order_intents/service.py": "6dd28658431750e83d1acea4140f86551bf7d1d02e3f684422737e0e825b8fe0",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
     "backend/app/domains/polymarket/access.py": "8bf2536f1c66e78707f4f010798d3325ed298fdcc2cbc8f0a373d3701cc01413",
@@ -15713,7 +15796,7 @@
     "backend/app/shared/ws_relay.py": "249b615b0ad457839d530eb25f0f504bead19a5a63874adec607c4622504296b",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/main.py": "aaa6b377a57f9bc8dd3bdd504cb29fd12f7d939bcf45bfe594cb5e99b95a0358",
+    "backend/app/uat2/main.py": "892f3c6758c6b9de35a4be1af88a0b75bc29d0f969518cbf51e6949af8446bb9",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
@@ -15776,7 +15859,7 @@
     "frontend/app/console/mails/page.tsx": "bc7e518a3a65e76fc45af257c44efe0c1e16c94ac2b374406e6161c811abc5d4",
     "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
-    "frontend/app/console/profile/activity/page.tsx": "46c115394ec684f3a8e5adc616feffdc71681140e39d419a24d013c93a6c6fe6",
+    "frontend/app/console/profile/activity/page.tsx": "bc96465520af22bea350bf2698783b138a1eca2d64214cb0d980cd279154d9aa",
     "frontend/app/console/profile/connections/page.tsx": "541bdcaab4c43e254878b78da3f1003c36eedf0fe0b85c66945c5fac22feac4a",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",

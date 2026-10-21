@@ -676,6 +676,8 @@ jobs:
           node --test
           tests/stage11-import-integrity.test.mjs
           tests/stage12-server-analysis.test.mjs
+          tests/stage16-order-reviews.test.mjs
+          tests/stage16-safety-support.test.mjs
           tests/stage08-module-policy.test.mjs
           tests/stage08-module-provider-races.test.mjs
           tests/stage09-connection-bindings.test.mjs
@@ -1714,4 +1716,44 @@ jobs:
           root=ET.parse('/tmp/stage15.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage15 cannot skip checks'
           assert len(root.findall('.//testcase')) == 100
+          PY_CHECK
+
+  stage16-order-safety:
+    name: Stage16 owned order review and PostgreSQL stale-tab safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install constrained backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify exact approval, ownership, dispatch races and actual Alembic roundtrip
+        run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py
+      - name: Require all Stage16 checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/stage16.xml').getroot()
+          assert not root.findall('.//testcase/skipped'), 'Stage16 cannot skip checks'
+          assert len(root.findall('.//testcase')) == 29
           PY_CHECK

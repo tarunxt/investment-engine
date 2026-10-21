@@ -61,3 +61,15 @@ Existing synthetic read-only portfolio/status/dashboard/order-history fixtures a
 ## Stage08 presentation supplement
 
 The existing module-management response now includes a typed presentation manifest; no duplicate registry or capability grant. Authenticated GET `/me/modules/safety-activity` shows bounded owned recorded activity independently of selection; accepted-intent SQL is restricted to the existing active ADMIN role and remains explicitly incomplete reconciliation. GET `/me/modules/resource-access/{kind}/{resource_id}` reveals only owned access metadata before detail pages can mount, with identical foreign/missing404. No new optional operation/domain router or public identity is mounted. Core account, connection readiness and safety UI remain available; every optional card is unavailable in restricted UAT2. Positive module combinations use local/private synthetic facts only. No live owner module toggling is part of this implementation review.
+
+## Stage 16 local source addition (not deployed)
+
+The restricted composition prepares only these additional core safety reads. They authenticate the existing owner and filter persisted records by that user independently of optional module selection. No runtime, broker call, approval, retry, cancel or close is mounted.
+
+| Method | Path | Scope |
+| --- | --- | --- |
+| GET | /order-intents/reviews | At most 50 owner intents, unresolved first; masked exact instructions, recorded approval/fill state and warnings |
+| GET | /order-intents/reviews/{id} | Same owner projection; missing/foreign IDs return identical 404 |
+| GET | /order-intents/positions | Whitelisted historical owner holdings/net/day snapshot observations; no current-account or live completeness inference |
+
+All three return private/no-store. The ordinary app's optional read-runtime dependency is absent; only the network-denied local preview overrides it. The existing production submission runtime stays 503/unavailable. Owner/session generation resets private frontend lifetimes. Historical operator role/ownership restrictions remain unchanged.

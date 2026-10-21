@@ -28,6 +28,8 @@ CORE_DOMAINS={'connections','auth','modules','api_usage','cost_drivers','health'
 
 def classify_route(domain,endpoint,path,methods,source_module=''):
     methods=set(methods or ())
+    if domain=='order_intents' and methods=={'GET'} and path in {'/order-intents/reviews','/order-intents/reviews/{id}','/order-intents/positions'}:
+        return None # Authenticated owner safety observations; no execution exemption.
     if domain=='ai_limits' and methods=={'GET'} and path in {'/api-usage/limits','/api-usage/limits/private-artifacts/{artifact_id}'}:
         return None # Authenticated owned receipt/read paths enforce resource policy themselves.
     if domain=='ai_providers' and endpoint=='list_providers' and methods=={'GET'}:return ('__analysis_metadata__','view')

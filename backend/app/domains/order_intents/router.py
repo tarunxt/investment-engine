@@ -1,5 +1,5 @@
 """Explicit user confirmation APIs; no normal-runtime activation endpoint."""
-from fastapi import APIRouter,Depends,HTTPException
+from fastapi import APIRouter,Depends,HTTPException,Response
 from pydantic import BaseModel,ConfigDict,Field
 from app.domains.auth.dependencies import get_current_user
 from app.infrastructure.database.session import get_async_db
@@ -11,6 +11,11 @@ router=APIRouter(prefix='/order-intents',tags=['confirmed-orders'])
 def get_runtime():
     # No configuration flag or registration API installs a financial runtime.
     raise HTTPException(503,'Order preparation is unavailable; financial runtime remains disabled')
+
+def get_read_runtime():
+    # Deliberately absent in the real application. Only a separately composed,
+    # network-denied synthetic preview overrides this dependency in-process.
+    return None
 
 class Draft(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -37,6 +42,26 @@ async def invoke(db,user,runtime,method,*args,**kwargs):
 @router.get('/status')
 async def status(user=Depends(get_current_user)):
     return {'runtime_enabled':False,'real_financial_execution':False,'simulation_only':True,'approval_policy':'Exact authenticated order or basket confirmation; no standing consent'}
+
+@router.get('/positions')
+async def positions(response:Response,user=Depends(get_current_user),db=Depends(get_async_db)):
+    from .positions_view import owned_positions
+    response.headers['Cache-Control']='private, no-store'
+    return await db.run_sync(lambda session:owned_positions(session,user.id))
+
+@router.get('/reviews')
+async def reviews(response:Response,user=Depends(get_current_user),db=Depends(get_async_db),runtime=Depends(get_read_runtime)):
+    from .presentation import owned_reviews
+    response.headers['Cache-Control']='private, no-store'
+    return await db.run_sync(lambda session:owned_reviews(session,user.id,runtime=runtime))
+
+@router.get('/reviews/{id}')
+async def review_record(id:str,response:Response,user=Depends(get_current_user),db=Depends(get_async_db),runtime=Depends(get_read_runtime)):
+    from .presentation import owned_reviews
+    response.headers['Cache-Control']='private, no-store'
+    result=await db.run_sync(lambda session:owned_reviews(session,user.id,intent_id=id,runtime=runtime))
+    if not result['intents']:raise HTTPException(404,'Order record unavailable',headers={'Cache-Control':'private, no-store'})
+    return result
 
 @router.post('')
 async def create(body:Draft,user=Depends(get_current_user),db=Depends(get_async_db),runtime=Depends(get_runtime)):
