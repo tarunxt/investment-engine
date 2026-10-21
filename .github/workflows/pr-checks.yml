@@ -1789,12 +1789,12 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify public-service boundaries and actual PostgreSQL privacy races
-        run: python -m pytest -q --junitxml=/tmp/stage17.xml backend/tests/test_stage17_public_service.py backend/tests/test_stage17_closure.py backend/tests/test_stage17_dispatch.py backend/tests/test_stage17_governed_dispatch.py backend/tests/test_stage17_postgres.py
+        run: python -m pytest -q --junitxml=/tmp/stage17.xml backend/tests/test_stage17_public_service.py backend/tests/test_stage17_closure.py backend/tests/test_stage17_dispatch.py backend/tests/test_stage17_governed_dispatch.py backend/tests/test_stage17_dependency_boundaries.py backend/tests/test_stage17_postgres.py
       - name: Require all Stage17 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage17.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage17 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 165
+          assert len(root.findall('.//testcase')) == 172
           PY_CHECK
