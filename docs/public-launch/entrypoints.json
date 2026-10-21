@@ -3,9 +3,9 @@
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
     "background": 31,
-    "export": 44,
+    "export": 46,
     "frontend": 25,
-    "http": 300,
+    "http": 305,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -562,7 +562,7 @@
       "registration": "mounted",
       "route": "/auth/login",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:125"
+      "source": "backend/app/domains/auth/router.py:128"
     },
     {
       "calls": [
@@ -602,7 +602,7 @@
       "registration": "mounted",
       "route": "/auth/refresh",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:160"
+      "source": "backend/app/domains/auth/router.py:163"
     },
     {
       "calls": [
@@ -629,7 +629,7 @@
       "registration": "mounted",
       "route": "/auth/logout",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:191"
+      "source": "backend/app/domains/auth/router.py:194"
     },
     {
       "calls": [
@@ -658,7 +658,7 @@
       "registration": "mounted",
       "route": "/auth/websocket-ticket",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:201"
+      "source": "backend/app/domains/auth/router.py:204"
     },
     {
       "calls": [
@@ -682,7 +682,7 @@
       "registration": "mounted",
       "route": "/auth/me",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:215"
+      "source": "backend/app/domains/auth/router.py:218"
     },
     {
       "calls": [
@@ -716,7 +716,7 @@
       "registration": "mounted",
       "route": "/auth/forgot-password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:222"
+      "source": "backend/app/domains/auth/router.py:225"
     },
     {
       "calls": [
@@ -751,7 +751,7 @@
       "registration": "mounted",
       "route": "/auth/reset-password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:239"
+      "source": "backend/app/domains/auth/router.py:242"
     },
     {
       "calls": [
@@ -783,7 +783,7 @@
       "registration": "mounted",
       "route": "/auth/password",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:266"
+      "source": "backend/app/domains/auth/router.py:269"
     },
     {
       "calls": [
@@ -815,7 +815,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:287"
+      "source": "backend/app/domains/auth/router.py:290"
     },
     {
       "calls": [
@@ -849,7 +849,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:311"
+      "source": "backend/app/domains/auth/router.py:314"
     },
     {
       "calls": [
@@ -923,6 +923,7 @@
         "User",
         "UserProfile",
         "ValidationException",
+        "admit_signup",
         "any",
         "c.isdigit",
         "c.islower",
@@ -9587,6 +9588,37 @@
     },
     {
       "calls": [
+        "BoundaryDenied",
+        "datetime.fromisoformat",
+        "datetime.now",
+        "digest",
+        "isinstance",
+        "p.get",
+        "p.items",
+        "result.get",
+        "self.fence",
+        "self.owned",
+        "utc"
+      ],
+      "capability": "export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/privacy.py:74"
+    },
+    {
+      "calls": [
         "Depends",
         "HTTPException",
         "PrivacyRequests",
@@ -9733,6 +9765,184 @@
       "route": "/account/operations/eligibility",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/public_service/router.py:41"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "JSONResponse",
+        "PrivacyRequests",
+        "PrivacyRequests(s).export",
+        "db.run_sync",
+        "router.get"
+      ],
+      "capability": "privacy_export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:49"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "JSONResponse",
+        "PrivacyRequests",
+        "PrivacyRequests(s).export",
+        "db.run_sync",
+        "router.get"
+      ],
+      "capability": "privacy_export",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/privacy-requests/{id}/export')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/account/operations/privacy-requests/{id}/export",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:49"
+    },
+    {
+      "calls": [
+        "Depends",
+        "OperationalMonitor",
+        "OperationalMonitor(s).snapshot",
+        "db.run_sync",
+        "response",
+        "router.get"
+      ],
+      "capability": "own_diagnostics",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/diagnostics')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/account/operations/diagnostics",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:57"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "SupportAccess",
+        "SupportAccess(s).consent",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "response",
+        "router.post",
+        "str"
+      ],
+      "capability": "support_consent",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/support-consents')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/account/operations/support-consents",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:69"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "SupportAccess",
+        "SupportAccess(s).revoke",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "response",
+        "router.post"
+      ],
+      "capability": "support_revoke",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/support-consents/{id}/revoke')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/account/operations/support-consents/{id}/revoke",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:78"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "SupportAccess",
+        "SupportAccess(s).read",
+        "db.rollback",
+        "db.run_sync",
+        "response",
+        "router.get"
+      ],
+      "capability": "support_read",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/support-consents/{id}/access')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/account/operations/support-consents/{id}/access",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:86"
     },
     {
       "calls": [
@@ -15560,11 +15770,11 @@
     "backend/app/domains/ai_limits/__init__.py": "a3fdc0f91df49a9da229d8c3fd647f1d102f68bec91630f361ab53ae6bc8bc23",
     "backend/app/domains/ai_limits/budget.py": "f4a35cf571908b06712434a14da936854934136a7ff1f105ccf9de1a82e55404",
     "backend/app/domains/ai_limits/contracts.py": "e0122ac1a388c1a085812b26eaf9066cea95863ebb5f8ad7701a23d87c2ff45a",
-    "backend/app/domains/ai_limits/jobs.py": "a5756beaa9c51b6b612eb2984a60c464e4a316b78e981fd58c4e0770c808986a",
+    "backend/app/domains/ai_limits/jobs.py": "9fb005f25a80b89de7f5ebb7139941de4bc0b2bf5df72c86e98bbb211761d195",
     "backend/app/domains/ai_limits/private_effects.py": "02d3aca7a9db21355bc560f1b0194f379aa0464b5eff900448f5af0585e9e3d6",
     "backend/app/domains/ai_limits/projection.py": "9957fab1e749d40dcc8ba21777c1a790fc9850b5de3c79ca3099374870531a7b",
     "backend/app/domains/ai_limits/router.py": "ac68cbc6d1fdbcc7bb5af51396b2b27bcfd58ce2289d8571601d680f1b3389b1",
-    "backend/app/domains/ai_limits/runner.py": "28d4fb797fbe0920abad6b8814a87f00e95cc9324ee1abebd809c0ddefb8e316",
+    "backend/app/domains/ai_limits/runner.py": "1cc3e8330b414d3cc03c7bad14d11e84ca625ba7ad10aa7bf66e5f3963b9f873",
     "backend/app/domains/ai_limits/untrusted.py": "d34cb3d23092e820ca76116bd47d597c9498be06560cd4c99bc4f4c167738731",
     "backend/app/domains/ai_limits/validation.py": "37864190a29c47ae9636d8ed898eca767253f2abb0a9c423b871a9891e14c8bc",
     "backend/app/domains/ai_providers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -15591,9 +15801,9 @@
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/auth/admin_roles.py": "9e15dec15fb801e5f3c775a00d02f7be495e1d9d65b9de3e20b9a3f056b69111",
     "backend/app/domains/auth/dependencies.py": "3120533d6bf92326a014a8d22e5f67fc7980443a22339ee11874ca8cb1767abc",
-    "backend/app/domains/auth/google_signin.py": "2aded3d094678f35ba29afe5915aad64386c15aea655072298cb3b7583a6396e",
+    "backend/app/domains/auth/google_signin.py": "fa34f6685dc59837e2d083daefec4709c4cebe8f66faa882179ef1b9f5688238",
     "backend/app/domains/auth/models.py": "279ca51fd8a2c750051407bd1721c3bf2a0e83ccb1e9b33671b5bb8551e87a26",
-    "backend/app/domains/auth/router.py": "27b37c78026e524e5ab2cff8a87478e996dde3ea0290967e4a0136812f05cb1e",
+    "backend/app/domains/auth/router.py": "54c8f4d638799a3b49fef95a690ea40ff758bb37192e723cdd6817c74cd62d39",
     "backend/app/domains/auth/schemas.py": "b9ed808ca03f82e2a2ec47c655a4241cfa91532714827c28d37c740b9aaddbf3",
     "backend/app/domains/auth/session_revocation.py": "15f90b7efa30edcfc0b1a8e82ea603e3f7a03d273956642d68f97a93962a00b3",
     "backend/app/domains/auth/tasks.py": "491bcc47f793f324dabe8dd8a79c5560cdae422e688dd89981fd1b9aa7b4a7b8",
@@ -15716,7 +15926,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "420e6079c55756b5fbac27e2adb31df2468e19293d48313d1ccfddbc32c59925",
+    "backend/app/domains/modules/coverage.py": "52e967a1655cbd1cf2f4028a78796c1ce190a9ced8bb04af6a278e6990d9171a",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
@@ -15736,7 +15946,7 @@
     "backend/app/domains/order_intents/__init__.py": "17111c143fdcbb480a6b6028f4087b15a639b637900734c09bfa776f63beb6ed",
     "backend/app/domains/order_intents/authority.py": "53916718135862628a255f56a7ca29f331486bc7cd152c03c4d6dc0c886103ee",
     "backend/app/domains/order_intents/contracts.py": "6e8a0bbecd3b1b24bc8447378894b719d8c0bbeedfeda919230f5d67c9d672bb",
-    "backend/app/domains/order_intents/execution.py": "387cb036a984fe2ce4a377a454b431e9a2bbc7745ecbac099392c52c4c010981",
+    "backend/app/domains/order_intents/execution.py": "5c994428becd63ac42429767368a4516ef21813b312e3a1938238c41567759d8",
     "backend/app/domains/order_intents/execution_fake.py": "4cb950b8ce8070eb0d7627622969ab0e82440a27e595c1c45d2d81a2d47c1195",
     "backend/app/domains/order_intents/execution_models.py": "b0f77523f3266941aa91d193afda370e62d6d64f35192f432bf1422e84f5cdc2",
     "backend/app/domains/order_intents/execution_risk.py": "791a45f2504de189e489777be882b501fc24b18b3fa4d8a38f835c8a501e484d",
@@ -15832,13 +16042,20 @@
     "backend/app/domains/prompts/router.py": "bb41d59e0c85945400d6ce869e187cebd5eeb813e7d161c989ffda8c8b8e089c",
     "backend/app/domains/prompts/schemas.py": "a04ed42420332a671496b1af90faf71900b6f78f1e480a00ea31a4b3ed73bf36",
     "backend/app/domains/public_service/__init__.py": "f290a6b2cd54f19bbf468879cd8bd5aa1e15ec65c8e41f05fb2113945b16a32f",
+    "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
+    "backend/app/domains/public_service/dispatch.py": "1ea190e31b4ad949570542b38d62fa292b6f3117827ced5639490b46701974ea",
     "backend/app/domains/public_service/drills.py": "40af5e7a31ba599d030dacb1ec646abf0b4e8eb576d8444ebbae9668126331ed",
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
+    "backend/app/domains/public_service/monitoring.py": "7ff8ad4567f29a5c6901418ca2127322828c732c4cc0ea6b6c5757d688731419",
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
-    "backend/app/domains/public_service/privacy.py": "5c512281b2fdcd797610ab64c283b4f3e01b6584d46497fac0bca62dd3b95afc",
+    "backend/app/domains/public_service/privacy.py": "b445ff6d7ad9d1aae8fab7a74a5e8fcae81330fe03b2fcd6d7284be17115906d",
     "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
-    "backend/app/domains/public_service/router.py": "f148118a457abcf510c67c32747e455a8d69b3e0c1fd6b80f93aefb26bdf7169",
+    "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",
+    "backend/app/domains/public_service/router.py": "37da373e5617a55e535befcebdeeb077adc753e1e2a3b9a07ec53c0320132e70",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
+    "backend/app/domains/public_service/signup.py": "58d03e41db8946bedd1ad28fc9afb7776dd1843cd51ca3f53ee46cdb19434328",
+    "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",
+    "backend/app/domains/public_service/support.py": "b70af3e72900bcc45be4bfa6c0b33287479a0d869a5a460778a2774212a86292",
     "backend/app/domains/recommendation_audit/__init__.py": "c3139e78f64ae4d6c83bb1c4ffe47918936c4a1dc6e8d61c1903c8619b3ce195",
     "backend/app/domains/recommendation_audit/adapters.py": "a81b5cf4e206a5d9808d2f987a578c960dddb32d671221e4d824551c1e65fa53",
     "backend/app/domains/recommendation_audit/calculation_capture.py": "79ad12574eabda04c0ddc70cee8c9a53f7b362b4bb76c5c6b70b0189605b02db",
