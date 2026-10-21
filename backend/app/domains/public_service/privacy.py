@@ -61,9 +61,22 @@ class PrivacyRequests:
         if digest({k:v for k,v in p.items() if k not in {'state','result','receipt_hash'}})!=p.get('receipt_hash') or digest({k:p[k] for k in ('owner_id','kind','key')})!=p.get('binding'):raise BoundaryDenied('PRIVACY_BINDING_CHANGED')
         if p['state']!='retention_review_required':raise BoundaryDenied('PRIVACY_NOT_PENDING')
         if utc(datetime.fromisoformat(p['expires_at']))<=utc(now or datetime.now(timezone.utc)):raise BoundaryDenied('PRIVACY_REQUEST_EXPIRED')
-        if type(store)is not SyntheticPrivacyStore:raise BoundaryDenied('RETENTION_APPROVAL_AND_REAL_ADAPTER_UNAVAILABLE')
-        result=store.apply(owner,p['kind'],str(row.id));row.payload={**p,'state':'synthetic_drill_complete','result':result}
+        from .account_data import SyntheticAccountDataAdapter
+        if type(store)is SyntheticAccountDataAdapter:
+            if store.db is not self.db:raise BoundaryDenied('SAME_PRIVACY_TRANSACTION_REQUIRED')
+            result=store.apply(owner,p['kind'],str(row.id),now=now)
+        elif type(store)is SyntheticPrivacyStore:result=store.apply(owner,p['kind'],str(row.id))
+        else:raise BoundaryDenied('RETENTION_APPROVAL_AND_REAL_ADAPTER_UNAVAILABLE')
+        row.payload={**p,'state':'synthetic_drill_complete','result':result,'result_hash':digest(result)}
         self.db.add(ActivityLog(user_id=owner,action='privacy_synthetic_drill',details=str(row.id)));return result
+
+
+    def export(self,owner,id,*,now=None):
+        self.fence(owner);row=self.owned(owner,id,True);p=row.payload
+        if digest({k:v for k,v in p.items() if k not in {'state','result','result_hash','receipt_hash'}})!=p.get('receipt_hash'):raise BoundaryDenied('PRIVACY_BINDING_CHANGED')
+        result=p.get('result')
+        if p['state']!='synthetic_drill_complete' or p['kind']!='export' or utc(datetime.fromisoformat(p['expires_at']))<=utc(now or datetime.now(timezone.utc)) or not isinstance(result,dict) or result.get('owner_id')!=owner or result.get('synthetic')is not True or digest(result)!=p.get('result_hash'):raise BoundaryDenied('OWNED_EXPORT_UNAVAILABLE')
+        return result
 
 
 def public_receipt(row):

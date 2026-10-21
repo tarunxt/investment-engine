@@ -29,3 +29,6 @@ Native rollback remains existing guarded controller: stopped applications, verif
 ## Auth rollout and dependencies
 
 Public startup now requires independent JWT_SIGNING_KEY(not source placeholder), authentication enabled,debugfalse and HTTPS frontend; restricted UAT2 keeps its separate key/audience. Missing keys fail closed; the change must not be deployed until existing operator-managed configuration is reviewed without reading secret values. Existing access sessions without explicit new type/audience are rejected; plan controlled reauthentication, never mint compatible unsigned/legacy fallback tokens. Preserve Google authoritative email/disabled users/standard-role defaults and independent Sheets config. Signup/abuse controls are a distinct readiness gate from module budgets; ingress limits alone are not abuse protection. Dependency locks are unchanged; no installation, upgrade or vulnerability-feed claim was made. Pin an approved dependency audit before public release.
+
+
+Local closure update (21 October 2026): working implementations and the distinction between local controls, disabled external bindings and real-world approvals are recorded in [STAGE17_CLOSURE.md](STAGE17_CLOSURE.md). Earlier contract-only descriptions above are historical for cf2ddfd and do not describe the new successor. No external approval, activation or deployment has occurred.

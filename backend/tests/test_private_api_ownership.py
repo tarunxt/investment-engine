@@ -95,7 +95,7 @@ def private_api(monkeypatch):
     db = SimpleNamespace(get=AsyncMock(side_effect=session.get), get_bind=session.get_bind, begin_nested=nested, add=session.add, execute=AsyncMock(side_effect=session.execute),
         scalar=AsyncMock(side_effect=session.scalar), flush=AsyncMock(side_effect=session.flush),
         refresh=AsyncMock(side_effect=session.refresh), commit=AsyncMock(side_effect=session.commit),
-        rollback=AsyncMock(side_effect=session.rollback))
+        rollback=AsyncMock(side_effect=session.rollback),run_sync=AsyncMock(side_effect=lambda fn:fn(session)))
     async def database():
         yield db
     app = FastAPI()

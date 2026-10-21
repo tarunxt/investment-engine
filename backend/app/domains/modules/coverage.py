@@ -48,8 +48,10 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         return None
     if domain=='public_service' and len(methods)==1 and (next(iter(methods),''),path) in {
         ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests/{id}'),
-        ('POST','/account/operations/privacy-requests/{id}/cancel'),
-        ('GET','/account/operations/eligibility'),('POST','/account/operations/eligibility')}:
+        ('POST','/account/operations/privacy-requests/{id}/cancel'),('GET','/account/operations/privacy-requests/{id}/export'),
+        ('GET','/account/operations/eligibility'),('POST','/account/operations/eligibility'),
+        ('GET','/account/operations/diagnostics'),('POST','/account/operations/support-consents'),
+        ('POST','/account/operations/support-consents/{id}/revoke'),('GET','/account/operations/support-consents/{id}/access')}:
         return None # Authenticated owned account requests; no approval/effect endpoint.
     if domain in CORE_DOMAINS:return None
     if domain=='runs' and methods=={'GET'} and endpoint in {'list_runs','get_run','list_auto_rebalance_history','get_auto_rebalance_history_detail','get_final_actionable_history'}:return None

@@ -36,3 +36,38 @@ def test_pg_inactive_owner_fails_without_request(database):
     with Session(engine) as s:
         with pytest.raises(BoundaryDenied):PrivacyRequests(s).request(owner,'same','delete',confirmed=True)
         s.rollback();assert not list(s.scalars(select(OutboxMessage).where(OutboxMessage.topic==TOPIC)))
+
+
+def test_pg_signup_global_quota_serializes_different_identities(database):
+    from app.domains.public_service.signup import admit,SignupLimits
+    engine=database[0]
+    def signup(i):
+        with Session(engine) as db:
+            try:admit(db,f'synthetic{i}@invalid.test',limits=SignupLimits(1,1));db.commit();return True
+            except BoundaryDenied:db.rollback();return False
+    with ThreadPoolExecutor(2) as pool:assert sum(pool.map(signup,(1,2)))==1
+
+
+def test_pg_claim_race_one_durable_execution_lease(database,tmp_path):
+    from datetime import datetime,timezone,timedelta
+    from cryptography.fernet import Fernet
+    from app.domains.connections.crypto import ConnectionKeyring
+    from app.domains.public_service.residency import SyntheticResidencyProducer
+    from app.domains.public_service.dispatch import SyntheticWorkBindings,OperationalQueues,TOPIC as QUEUE_TOPIC
+    from test_stage15_postgres import prepared,worker
+    engine,owner,event,intent,broker,source=prepared(database,tmp_path)
+    producer=SyntheticResidencyProducer(ConnectionKeyring({1:Fernet.generate_key().decode()}));now=datetime.now(timezone.utc)
+    try:
+        with Session(engine) as db:
+            db.get(User,owner).is_verified=True
+            producer.record(db,owner,country='IN',evidence_reference='synthetic:document',reviewer='synthetic:operator',now=now,expires=now+timedelta(hours=1))
+            q=OperationalQueues(db,SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source)))
+            q.enqueue(owner,'execution',str(event),now=now);db.commit()
+        def claim(_):
+            with Session(engine) as db:return OperationalQueues(db,SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source))).claim('execution',now=now)
+        with ThreadPoolExecutor(2) as pool:results=list(pool.map(claim,(1,2)))
+        assert sum(r is not None for r in results)==1 and not broker.calls
+        with Session(engine) as db:
+            rows=list(db.scalars(select(OutboxMessage).where(OutboxMessage.topic==QUEUE_TOPIC)))
+            assert len(rows)==1 and rows[0].payload['attempts']==1 and rows[0].payload['state']=='running'
+    finally:broker.engine.dispose()

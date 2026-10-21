@@ -284,3 +284,6 @@ Stage09 native controller repair is a local-only candidate; see [repair evidence
 # Stage16 isolated local recovery checkpoint — 21 October 2026
 
 Recovery from clean `a87835c09125c77e09b0c1488d3cf9504b4f0b7f` is isolated on `codex/stage16-local-recovery-20261021`; the first recorded edit checkpoint is15:52:55UTC. Exact approval HTTP classification and synthetic India snapshot initialization address the preserved403/missing-table causes without weakening service confirmation/execution guards. See [STAGE16_LOCAL.md](STAGE16_LOCAL.md). Non-server middleware-inclusive checks are separate from actual browser acceptance. Original preview/process ownership remains unresolved; no listener or process manipulation occurred. UAT2 remains deliberately stopped. No publication, deployment, activation, provider or Stage17 work is included.
+
+
+Stage17 local technical closure began 21 October 2026 18:43:13 UTC after review of cf2ddfd. Working local implementations now replace the queue/monitor/support/signup/producer/privacy gaps; see [STAGE17_CLOSURE.md](STAGE17_CLOSURE.md). Candidate verification/independent review and exact-head CI/artifact gates remain pending until recorded in the handoff. Public PR1259 remains separately identified; no deployment, real activation or Stage18 start is claimed. UAT2 remains deliberately stopped.
