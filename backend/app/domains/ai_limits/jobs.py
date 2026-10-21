@@ -17,6 +17,7 @@ from .budget import Budgets,request_binding
 from .contracts import BoundaryDenied,Limits,digest
 from .runner import FakeProvider,run_next
 from .validation import validate_recommendations,validate_source
+from .projection import frozen_projection,projection
 
 
 @dataclass(frozen=True)
@@ -32,11 +33,16 @@ def job_request(row,job):
 
 
 def recommendation_source(db,row,job,governance,now):
+    frozen=frozen_projection(row)
     source=governance.source(db,row,job,now)
     validate_source(source,owner_id=job.user_id,module_id=job.module_id,now=now)
     if source['content_hash']!=row.execution_json['source_hash'] or source['provenance']!={'provider':job.provider,'model':job.model,'prompt_hash':digest(job.prompt),'input_hash':row.execution_json['source_hash'],'prompt_version':job.request_context_json['prompt_version']}:
         raise BoundaryDenied('GOVERNED_PROVENANCE_MISMATCH')
-    return source
+    if set(source)!={'owner_id','module_id','currency','captured_at','holdings','content_hash','provenance'} or projection(source,owner=job.user_id,module=job.module_id)!=frozen:
+        raise BoundaryDenied('GOVERNED_SOURCE_PROJECTION_MISMATCH')
+    # Return only facts derived from the frozen bytes. A correct hash label
+    # never licenses a resolver's substituted or additional context.
+    return {**frozen,'content_hash':row.execution_json['source_hash'],'provenance':dict(source['provenance'])}
 
 
 def validate_completed_job(db,row,job,governance,now):
@@ -77,7 +83,9 @@ def execute_governed_job(db,job_id,runtime,*,now=None):
         validate_job_request(row,stage,job,dependency_results(workflows.stages(row),stage))
         return job,row
     job,row=bound()
-    if job.status==JobStatus.COMPLETED:return {'status':'already_completed','job_id':job.id}
+    if job.status==JobStatus.COMPLETED:
+        validate_completed_job(db,row,job,governance,now)
+        return {'status':'already_completed','job_id':job.id}
     if job.status not in JobStatus.active():raise BoundaryDenied('GOVERNED_JOB_NOT_ACTIVE')
     request=job_request(row,job)
     # Bound source/plan facts were read under the existing owner lock. Release
@@ -100,8 +108,11 @@ def execute_governed_job(db,job_id,runtime,*,now=None):
     if attempt.status not in {'queued'}:return {'status':attempt.status,'partial_analysis':True,'job_id':job.id}
     def validate(document):
         bound()
-        return validate_recommendations(document,source=source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job))
-    result=run_next(budget,provider,validate=validate,now=now,expected_id=attempt.id,before_call=bound)
+        current_source=recommendation_source(db,row,job,governance,now)
+        return validate_recommendations(document,source=current_source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job))
+    def before_call():
+        bound();recommendation_source(db,row,job,governance,now)
+    result=run_next(budget,provider,validate=validate,now=now,expected_id=attempt.id,before_call=before_call)
     if result['status']=='quota_or_concurrency_or_no_work':
         result={**result,'status':'waiting_for_admission' if attempt.status=='queued' else attempt.status}
     if result['status']=='completed':

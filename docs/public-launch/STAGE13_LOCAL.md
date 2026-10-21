@@ -2,6 +2,8 @@
 
 Branch `codex/stage13-ai-boundaries-local-20261021`, isolated from accepted Stage 12 `367173d5891ad7a8da77c7628f47915248f489c9`. This document's containing commit is the local review candidate; the external handoff records its exact SHA, test logs and source inventory. No publication, CI run, deployment, runtime activation or Stage 14 is authorized here.
 
+Independent review of original candidate `a6a5887e` found that a resolver's hash assertion did not bind its actual holdings to the frozen source. The local successor derives/verifies that projection at generation and consumption; see [correction and regressions](STAGE13_PROJECTION_CORRECTION.md). The original candidate and evidence remain preserved. Fresh independent re-review is pending.
+
 ## Runnable backend preview
 
 Use the repository's existing Python environment with backend requirements, SQLAlchemy and the already installed test tooling. No installation is required in this task. From this worktree:

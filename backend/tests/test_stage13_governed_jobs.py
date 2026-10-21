@@ -20,6 +20,12 @@ from test_stage12_durable_analysis import env,NOW,STAGES,TOPIC,create,message,se
 def governed(e,*,source_change=None,document_change=None,limits=Limits()):
     Base.metadata.create_all(e.engine,tables=[m.__table__ for m in [SpendAccount,SpendAttempt]])
     e.plan['guardrails_version']='stage13-v1'
+    for source_owner in e.states:
+        # Governed fixtures must supply actual frozen facts, not let a later
+        # callback invent them. Stage12's older ungoverned fixtures are intact.
+        e.states[source_owner].setdefault('holdings',{'US:TEST':'10'})
+        e.states[source_owner].setdefault('currency','USD')
+        e.states[source_owner].setdefault('captured_at',NOW.isoformat())
     def source(db,row,job,now):
         s={'owner_id':row.user_id,'module_id':row.module_id,'captured_at':NOW,'content_hash':row.execution_json['source_hash'],'currency':'USD','holdings':{'US:TEST':'10'},'provenance':{'provider':job.provider,'model':job.model,'prompt_hash':digest(job.prompt),'input_hash':row.execution_json['source_hash'],'prompt_version':job.request_context_json['prompt_version']}}
         s.update(source_change or {});return s

@@ -65,7 +65,7 @@ def preview():
                 return FakeProvider({'schema_version':1,'currency':'USD','recommendations':[{'instrument':'US:SYNTHETIC','action':'hold','current_units':'10','final_units':'10','allocation':'.1'}],'provenance':deepcopy(source['provenance'])})
             governance=SyntheticGovernance(Limits(),recommendation_source,lambda db,row,job:{'US:SYNTHETIC'},provider)
             plan={'version':'synthetic-preview-v1','guardrails_version':'stage13-v1','stages':{s:{'provider':'fake','model':'offline','prompt_version':'v1','template':'Synthetic advisory analysis only. No tools.'} for s in STAGES[1:]}}
-            runtime=Runtime(lambda db,o,p,**kw:policy(db,o,p,facts=facts,**kw),lambda db,o,p,id=None:{'owner_id':o,'snapshot_id':1,'captured_at':captured.isoformat(),'holdings':{'US:SYNTHETIC':'10'}},lambda p:plan,QueuedAI(governance),lambda p,d,n:{'timezone':'UTC','calendar_version':'synthetic','market_open':True,'max_lateness_seconds':60,'missed_policy':'skip'},governance)
+            runtime=Runtime(lambda db,o,p,**kw:policy(db,o,p,facts=facts,**kw),lambda db,o,p,id=None:{'owner_id':o,'snapshot_id':1,'currency':'USD','captured_at':captured.isoformat(),'holdings':{'US:SYNTHETIC':'10'}},lambda p:plan,QueuedAI(governance),lambda p,d,n:{'timezone':'UTC','calendar_version':'synthetic','market_open':True,'max_lateness_seconds':60,'missed_policy':'skip'},governance)
             service=Workflows(db,runtime);workflow=service.create(1,'indmoney_us','stage13-preview',now=now);db.commit()
             for _ in range(20):
                 message=db.scalar(select(OutboxMessage).where(OutboxMessage.topic==TOPIC,OutboxMessage.execution_attempts==0,OutboxMessage.available_at<=naive(now)).order_by(OutboxMessage.created_at,OutboxMessage.id))
