@@ -83,13 +83,16 @@ class SpendAccount(Base):
     cap_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=0)
     spent_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=0)
     reserved_usd: Mapped[Decimal] = mapped_column(Numeric(18, 8), default=0)
+    # user_id=0 is the Stage13 platform admission mutex/cursor, never a user.
+    last_admitted_owner: Mapped[int | None] = mapped_column(Integer)
 
 
 class SpendAttempt(Base):
     __tablename__ = "recommendation_spend_attempts"
-    __table_args__ = (UniqueConstraint("verification_id", "attempt_key", name="uq_recommendation_attempt"),)
+    __table_args__ = (UniqueConstraint("verification_id", "attempt_key", name="uq_recommendation_attempt"),
+                      UniqueConstraint("user_id", "operation_key", "attempt_key", name="uq_analysis_spend_attempt"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    verification_id: Mapped[str] = mapped_column(String(36), index=True)
+    verification_id: Mapped[str | None] = mapped_column(String(36), index=True)
     user_id: Mapped[int] = mapped_column(Integer)
     account_id: Mapped[str] = mapped_column(String(36))
     attempt_key: Mapped[str] = mapped_column(String(128))
@@ -100,6 +103,13 @@ class SpendAttempt(Base):
     status: Mapped[str] = mapped_column(String(32), default="reserved")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    operation_key: Mapped[str | None] = mapped_column(String(128), index=True)
+    module_id: Mapped[str | None] = mapped_column(String(64))
+    module_version: Mapped[int | None] = mapped_column(Integer)
+    request_hash: Mapped[str | None] = mapped_column(String(64))
+    limits_json: Mapped[dict | None] = mapped_column(JSON)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
 
 
 def immutable(mapper, connection, target):

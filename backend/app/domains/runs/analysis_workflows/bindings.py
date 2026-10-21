@@ -17,6 +17,8 @@ def frozen_request(row,stage,dependencies):
                  'source_hash':e['source_hash'],'plan_hash':e['plan_hash'],
                  'prompt_version':target['prompt_version'],'plan_version':e['plan']['version'],
                  'analysis_only':True,'orders_authorized':False}
+        if e['plan'].get('guardrails_version')=='stage13-v1':
+            context['guardrails_version']='stage13-v1'
         return {'provider':target['provider'],'model':target['model'],'prompt':prompt,'context':context}
     except (KeyError,TypeError,ValueError):
         raise WorkflowDenied('Incomplete frozen analysis request') from None
