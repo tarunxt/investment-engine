@@ -176,3 +176,6 @@ __all__ += ['ConnectionAttempt']
 
 from app.domains.connections.models import ConnectionBindingHistory  # noqa: F401
 __all__ += ['ConnectionBindingHistory']
+
+from app.domains.order_intents.models import OrderIntent,OrderLeg  # noqa: F401
+__all__ += ['OrderIntent','OrderLeg']

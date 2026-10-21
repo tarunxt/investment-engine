@@ -42,10 +42,10 @@ class TradingAvailabilityTest(unittest.TestCase):
                 self.assertFalse(response.model_dump()["direct_market_orders_enabled"])
                 self.assertIn("recovery", response.model_dump()["order_submission_blocked_reason"])
 
-    def test_normal_mode_preserves_explicit_trading_configuration(self):
+    def test_normal_mode_cannot_activate_unreviewed_financial_runtime(self):
         with patch.dict(os.environ, {"CREDX_RECOVERY_MODE": "0"}):
-            self.assertTrue(self.svc.direct_market_orders_enabled)
-            self.assertIsNone(self.svc.order_submission_blocked_reason)
+            self.assertFalse(self.svc.direct_market_orders_enabled)
+            self.assertIn("disabled",self.svc.order_submission_blocked_reason)
             service.settings.zerodha_enable_direct_market_orders = False
             self.assertFalse(self.svc.direct_market_orders_enabled)
 

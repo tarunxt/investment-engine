@@ -5,7 +5,7 @@
     "background": 31,
     "export": 44,
     "frontend": 25,
-    "http": 286,
+    "http": 292,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -5145,6 +5145,7 @@
         "db.get_bind",
         "func.set_config",
         "require_bullpen_context",
+        "require_live_financial_disabled",
         "select",
         "select(User.role, User.is_active).where",
         "select(User.role, User.is_active).where(User.id == owner).with_for_update",
@@ -5157,7 +5158,8 @@
       "module": "modules",
       "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
       "observed_guards": [
-        "require_bullpen_context"
+        "require_bullpen_context",
+        "require_live_financial_disabled"
       ],
       "owner_source": [
         "not established in local function; inspect callers/repository"
@@ -5360,6 +5362,167 @@
       "route": "/me/modules/resource-access/{kind}/{resource_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/modules/router.py:47"
+    },
+    {
+      "calls": [
+        "Depends",
+        "router.get"
+      ],
+      "capability": "status",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "order_intents",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_current_user)",
+        "router.get('/status')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/status",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:38"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Orders",
+        "Orders(session, policy=runtime.policy, risk=runtime.risk).create",
+        "WorkIdentity",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "router.post"
+      ],
+      "capability": "create",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "order_intents",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_runtime)",
+        "router.post('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:42"
+    },
+    {
+      "calls": [
+        "Depends",
+        "invoke",
+        "router.post"
+      ],
+      "capability": "validate",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "order_intents",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_runtime)",
+        "router.post('/{id}/validate')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/{id}/validate",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:53"
+    },
+    {
+      "calls": [
+        "Depends",
+        "invoke",
+        "router.post"
+      ],
+      "capability": "review",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "order_intents",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_runtime)",
+        "router.post('/{id}/review')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/{id}/review",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:57"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "authenticated_confirmation",
+        "invoke",
+        "router.post"
+      ],
+      "capability": "approve",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "order_intents",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_runtime)",
+        "router.post('/{id}/approve')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/{id}/approve",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:61"
+    },
+    {
+      "calls": [
+        "Depends",
+        "invoke",
+        "router.post"
+      ],
+      "capability": "revoke",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "order_intents",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_runtime)",
+        "router.post('/{id}/revoke')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/{id}/revoke",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:68"
     },
     {
       "calls": [
@@ -11844,6 +12007,7 @@
         "order.tradingsymbol.upper",
         "order.transaction_type.upper",
         "repo.get_plaintext_token",
+        "require_live_financial_disabled",
         "result.get",
         "results.append",
         "router.post",
@@ -11860,6 +12024,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "require_live_financial_disabled",
         "router.post('/orders/place-protected-market', response_model=ZerodhaProtectedMarketResponse)"
       ],
       "owner_source": [
@@ -11907,6 +12072,7 @@
         "order.transaction_type.upper",
         "quotes.get",
         "repo.get_plaintext_token",
+        "require_live_financial_disabled",
         "result.get",
         "router.post",
         "sell_order_ids.add",
@@ -11926,6 +12092,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "require_live_financial_disabled",
         "router.post('/orders/place-protected-market-sequenced', response_model=ZerodhaSequencedProtectedMarketResponse)"
       ],
       "owner_source": [
@@ -11934,7 +12101,7 @@
       "registration": "mounted",
       "route": "/zerodha/orders/place-protected-market-sequenced",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/router.py:725"
+      "source": "backend/app/domains/zerodha/router.py:727"
     },
     {
       "calls": [
@@ -11954,6 +12121,7 @@
         "logger.exception",
         "logger.info",
         "repo.get_plaintext_token",
+        "require_live_financial_disabled",
         "result.get",
         "router.post",
         "str"
@@ -11967,6 +12135,7 @@
       "observed_guards": [
         "Depends(get_async_db)",
         "Depends(get_current_user)",
+        "require_live_financial_disabled",
         "router.post('/orders', response_model=ZerodhaPlaceOrderResponse)"
       ],
       "owner_source": [
@@ -11975,7 +12144,7 @@
       "registration": "mounted",
       "route": "/zerodha/orders",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/router.py:874"
+      "source": "backend/app/domains/zerodha/router.py:878"
     },
     {
       "calls": [
@@ -12008,7 +12177,7 @@
       "registration": "mounted",
       "route": "/zerodha/disconnect",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/router.py:972"
+      "source": "backend/app/domains/zerodha/router.py:978"
     },
     {
       "calls": [
@@ -12036,7 +12205,7 @@
       "registration": "mounted",
       "route": "/zerodha/audit-logs",
       "side_effects": "private broker data; Kite authorization/order I/O; DB; queues",
-      "source": "backend/app/domains/zerodha/router.py:993"
+      "source": "backend/app/domains/zerodha/router.py:999"
     },
     {
       "calls": [
@@ -15150,7 +15319,7 @@
     "backend/app/core/__init__.py": "691e5ed6014a69a3200d83084b8cdaa37cf9430b57d33b0584ca6a7b707f3b06",
     "backend/app/core/config.py": "508f335a0cb5fcaad21ede0207bf9dae7199b97d8d51f15ff419933655fbc576",
     "backend/app/core/logging.py": "34ec5aec553941e669ca8c256b7e43bdedb37d7784da70e52d198d30e048799e",
-    "backend/app/core/recovery.py": "af003514eb40361bb832e42397bd309cdaa7a28ebd38762df0c1a1c1369cb29c",
+    "backend/app/core/recovery.py": "3a4ae9d126dbb74968406265d08bf2d6f6a90a56a5b8ed30f36c68e154406532",
     "backend/app/core/request_timing.py": "ac30e9e77498d78c16e72cb72cf1821bf808b680c22b3c36c62e1a612fbe4ec4",
     "backend/app/core/security.py": "ef02ce03628c92e029bb66bb0c61ca65f175858ddfac9ac98e34baa99ef97c66",
     "backend/app/core/seed.py": "f00e773efffc3ca505c20048fb592868dce6fd241ee8b1479ab51441d611d7a1",
@@ -15317,7 +15486,7 @@
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
     "backend/app/domains/modules/coverage.py": "d2f00a860a7dcbc7a7897cc7be10d3ea61aa93fefff912d69c6547c75f86c73d",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
-    "backend/app/domains/modules/execution.py": "1b10ea412380982dd6a9a3c84df3e865d6b9b453931aa9139893f5dd2554db3e",
+    "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
@@ -15332,6 +15501,13 @@
     "backend/app/domains/modules/tasks.py": "0025bc5b8ac1ae1ba1d5f53d580c3a2075f50cbb1285902c22603fef9208f34d",
     "backend/app/domains/modules/transports.py": "76a61a9f1b4b8cca2ba6349c5a53c316c584ebd9dc3313ff3eed486ce650886e",
     "backend/app/domains/modules/visibility.py": "7dd7b86df04922dcdf7df1d81ad85d99c59c00c78b81c000ca81b7a9feb8a0fb",
+    "backend/app/domains/order_intents/__init__.py": "17111c143fdcbb480a6b6028f4087b15a639b637900734c09bfa776f63beb6ed",
+    "backend/app/domains/order_intents/authority.py": "53916718135862628a255f56a7ca29f331486bc7cd152c03c4d6dc0c886103ee",
+    "backend/app/domains/order_intents/contracts.py": "6e8a0bbecd3b1b24bc8447378894b719d8c0bbeedfeda919230f5d67c9d672bb",
+    "backend/app/domains/order_intents/fake.py": "dccd23b6e8d23e0683963f9b2115789580fcd1a7847fdabd45c84618c463009d",
+    "backend/app/domains/order_intents/models.py": "d4ff4bd2daf40df31c64d15c9a1d33624e1311c488ca36120876537cc3303c20",
+    "backend/app/domains/order_intents/router.py": "9966b4d2d67bbe60a0a49579fa031ba5d8fb2a36946d816ee1e8bfafc4564d3b",
+    "backend/app/domains/order_intents/service.py": "6dd28658431750e83d1acea4140f86551bf7d1d02e3f684422737e0e825b8fe0",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
     "backend/app/domains/polymarket/access.py": "8bf2536f1c66e78707f4f010798d3325ed298fdcc2cbc8f0a373d3701cc01413",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
@@ -15400,7 +15576,7 @@
     "backend/app/domains/polymarket_direct/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
     "backend/app/domains/polymarket_direct/bot.py": "d576d1a7cf3aeeb38835aa08fa48cbeda29b456d38754d1fe5663ddaca750a78",
     "backend/app/domains/polymarket_direct/config.py": "eefd9e61259a75fc569e5faf17c49bdf80a6f8a2e872eca6afe5a155a089f2af",
-    "backend/app/domains/polymarket_direct/direct_polymarket.py": "6a1b3e8ac5e5e90f9f9582b406500e9859aa7ae807a5345f22cb6310d93535c5",
+    "backend/app/domains/polymarket_direct/direct_polymarket.py": "fa20466bb9ae22ba7c056ba9f82a9518e88a1cfb790565715668a174e5148734",
     "backend/app/domains/polymarket_direct/logger.py": "53e6befece01e0e9c98094acf5e834090b26cfacd921165e89ae23778528b7ad",
     "backend/app/domains/polymarket_direct/providers.py": "a38d077a1825b6ed431a6fec95bb4f3e7cb5eacab59a2f5e9de7a9a1f0657136",
     "backend/app/domains/polymarket_direct/router.py": "d6f595920048b81013e8c13c0bd230db373b580dcb65c1ed36714a4915d98f8b",
@@ -15494,16 +15670,16 @@
     "backend/app/domains/zerodha/order_validation.py": "979bfb228e9f6b7a431f269dcf92ffdb8d7d65cd25032978c1dc27cd063ae284",
     "backend/app/domains/zerodha/portfolio.py": "504831439117570d44043630009ba53ecc22c9fa18e31523bf87ff9147279567",
     "backend/app/domains/zerodha/repository.py": "41a025df1c45adf8c77a90d6670e217f95b126c2d8c16bd558e7c3b38d2b9729",
-    "backend/app/domains/zerodha/router.py": "e5d4e1e29a2d8e712ad4b3fa25debe93e7268570b68347a008229a37b6af8628",
+    "backend/app/domains/zerodha/router.py": "7a022c07323935a2aca918c955b2abdecf58d10aca49109ba7e1449e56f1c204",
     "backend/app/domains/zerodha/schemas.py": "d4a93c5f2bba2e12dbc4112286125bc030c957e9ab3d0139cf5e4768adf3667e",
-    "backend/app/domains/zerodha/service.py": "f0bd4f1993e978447cbe674169220b597883a241e5614d155714d8905a00c178",
+    "backend/app/domains/zerodha/service.py": "23bd39529fdb9be80a8b68584f95dd2fd83b592ac2bbd64a1e74d860b97414bb",
     "backend/app/domains/zerodha/tasks.py": "7dbd93a59aebbcb0182a4ab53a41b6aad1f01e051faca9f1bccf1d210c9cf1fd",
     "backend/app/domains/zerodha/threats.py": "56d5bb802a3423b6b4ae2cd620f088d790e9d99c2e4167e1cbdc103fa323d4af",
     "backend/app/domains/zerodha/threats_router.py": "80368e13fba08e91c3a27e0128592bc96b98f41b29c9e77df69d9f7aacce041d",
     "backend/app/domains/zerodha/threats_schemas.py": "e56577a914fe5bea3f3f558fceb71c03f0f1767ffda3612da77445dc1f7dc75a",
     "backend/app/infrastructure/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/all_models.py": "ada71e35fef9154bd355649db6799cdc602d965d684d5dca2873db1d8b656a96",
+    "backend/app/infrastructure/database/all_models.py": "b6c1f9f8ce8678476901dfb5ca5696d6babd81cd9d17a8eee03c391d7110f9f8",
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -15521,8 +15697,8 @@
     "backend/app/infrastructure/messaging/operation_models.py": "ac28eb54c010eef2b02cf329f0ae343ea33b7507ae51ed67726935f0e49ef306",
     "backend/app/infrastructure/messaging/recovery_celery.py": "a836f8ab5dc7ef4984210e0f1dfefd4274a08f93e35ca7e7f0cb61e7ddcf676c",
     "backend/app/infrastructure/messaging/task_registry.py": "a213719805f9ee463862073d465ce85939be31078f9b566d3409c53d11b2fd52",
-    "backend/app/main.py": "a2906855f232bc2815aa0d2419ef50b818f833e22636b7cdbafb326f0148b2d8",
-    "backend/app/models/__init__.py": "e3b4b98b6ee35ace717bf639646a30a18264f3a767d325a2a20c8f6f39069e0a",
+    "backend/app/main.py": "08e3c6ca0de1cab81d417b5cc17cb16aab0df81c023412a1a8a5808fade8339c",
+    "backend/app/models/__init__.py": "92d529f029b2ad9535c5cdd3bd54377d69301c723b7e5dc874830af3ab01a74c",
     "backend/app/services/email.py": "3ab397a6ac44c17760fb566ee1310abc03d2f0ae4d63117afaa3c59023556c0c",
     "backend/app/shared/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/shared/exceptions.py": "dd29c1e904f326b553b44e9ddf4b79364274fb6ec1dd3399bb70cca0c80b70f9",

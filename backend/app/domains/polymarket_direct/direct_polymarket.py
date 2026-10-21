@@ -135,7 +135,7 @@ def _build_clob_client(settings: DirectPolymarketSettings) -> Any:
 def _rpc_call(
     settings: DirectPolymarketSettings, method: str, params: list[Any]
 ) -> Any:
-    if recovery_mode() and method != "eth_call":
+    if method != "eth_call":
         require_financial_writes_allowed()
     response = requests.post(
         settings.polygon_rpc_url,

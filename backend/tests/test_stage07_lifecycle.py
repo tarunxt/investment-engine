@@ -125,10 +125,16 @@ def test_reenable_does_not_resume_schedules_but_explicit_resume_dispatches_nothi
 def test_global_financial_override_cannot_turn_analysis_context_into_order_permission(eligible,monkeypatch):
     a=eligible;monkeypatch.setenv('CREDX_RECOVERY_MODE','0')
     from app.core.recovery import require_financial_writes_allowed
-    with pytest.raises(ModuleLifecycleDenied):require_financial_writes_allowed()
+    from fastapi import HTTPException
+    # Stage14 now denies all unactivated financial transports before consulting
+    # a module context. Neither missing context nor an eligible analysis context
+    # can turn the global recovery override into exact human order approval.
+    with pytest.raises(HTTPException) as denied:require_financial_writes_allowed()
+    assert denied.value.status_code==503 and 'not activated' in denied.value.detail
     factory=sessionmaker(a.session.get_bind(),expire_on_commit=False)
     with execution_scope(WorkIdentity(a.users[0].id,'ai_studio',1),factory):
-        with pytest.raises(ModuleLifecycleDenied):require_financial_writes_allowed()
+        with pytest.raises(HTTPException) as denied:require_financial_writes_allowed()
+        assert denied.value.status_code==503 and 'not activated' in denied.value.detail
 
 
 def test_actual_optional_route_matrix_only_narrow_stops_reconciliation_are_safety():

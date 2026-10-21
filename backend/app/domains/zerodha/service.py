@@ -40,11 +40,8 @@ class ZerodhaService:
 
     @property
     def direct_market_orders_enabled(self) -> bool:
-        return bool(
-            (not recovery_mode() or manual_zerodha_orders_enabled())
-            and self.is_configured
-            and settings.zerodha_enable_direct_market_orders
-        )
+        recovery_mode()  # malformed recovery configuration still fails closed
+        return False  # Stage14 has no activated financial transport
 
     @property
     def order_submission_blocked_reason(self) -> str | None:
@@ -54,7 +51,7 @@ class ZerodhaService:
                 "No orders will be sent to Kite. Trading must be explicitly restored "
                 "by the operator before placing orders from Cred-X."
             )
-        return None
+        return 'Financial execution is disabled pending separately reviewed payload-bound order activation.'
 
     def get_login_url(self) -> str:
         if self._app_binding is None:raise ConnectionFault("CONNECTION_APP_BINDING_REQUIRED")
@@ -135,6 +132,9 @@ class ZerodhaService:
             method.upper() == "POST" and path == "/session/token"
         ):
             require_zerodha_write_allowed(method.upper(), path, data)
+        if method.upper() not in {'GET','HEAD'} and not (path == '/session/token' and method.upper() in {'POST','DELETE'}):
+            from app.domains.order_intents.contracts import require_live_financial_disabled
+            require_live_financial_disabled()
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
@@ -170,6 +170,9 @@ class ZerodhaService:
             method.upper() == "POST" and path == "/session/token"
         ):
             require_zerodha_write_allowed(method.upper(), path, data)
+        if method.upper() not in {'GET','HEAD'} and not (path == '/session/token' and method.upper() in {'POST','DELETE'}):
+            from app.domains.order_intents.contracts import require_live_financial_disabled
+            require_live_financial_disabled()
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))

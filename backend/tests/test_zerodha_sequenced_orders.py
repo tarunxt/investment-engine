@@ -90,63 +90,63 @@ def patch_repos(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_sequenced_sell_complete_places_affordable_buys(monkeypatch):
+async def test_legacy_sell_complete_cannot_bypass_explicit_approval(monkeypatch):
     svc = FakeSvc(margin=1_000, quote=100)
     monkeypatch.setattr(zerodha_router, "_svc", svc)
 
-    response = await zerodha_router.place_protected_market_orders_sequenced(
-        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
-    )
-
-    assert response.sell_phase_complete is True
-    assert response.placed_count == 2
-    assert [placed["transaction_type"] for placed in svc.placed] == ["SELL", "BUY"]
+    # Stage14 supersedes automatic legacy quantity adjustment/submission.
+    with pytest.raises(HTTPException) as exc:
+        await zerodha_router.place_protected_market_orders_sequenced(
+            FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
+        )
+    assert exc.value.status_code==503
+    assert svc.placed==[]
 
 
 @pytest.mark.anyio
-async def test_sequenced_uses_completed_sell_proceeds_when_margin_is_stale(monkeypatch):
+async def test_legacy_stale_margin_cannot_substitute_sale_proceeds(monkeypatch):
     svc = FakeSvc(margin=0, quote=100)
     monkeypatch.setattr(zerodha_router, "_svc", svc)
 
-    response = await zerodha_router.place_protected_market_orders_sequenced(
-        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
-    )
-
-    assert response.sell_phase_complete is True
-    assert response.placed_count == 2
-    assert response.skipped_count == 0
-    assert [placed["transaction_type"] for placed in svc.placed] == ["SELL", "BUY"]
-    assert "Using detected completed sell proceeds" in "; ".join(response.messages)
+    # Stage14 supersedes automatic legacy quantity adjustment/submission.
+    with pytest.raises(HTTPException) as exc:
+        await zerodha_router.place_protected_market_orders_sequenced(
+            FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
+        )
+    assert exc.value.status_code==503
+    assert svc.placed==[]
 
 
 @pytest.mark.anyio
-async def test_sequenced_sell_rejected_skips_unaffordable_buys(monkeypatch):
+async def test_legacy_sell_rejection_does_not_place_orders(monkeypatch):
     svc = FakeSvc(sell_status="REJECTED", margin=0, quote=100)
     monkeypatch.setattr(zerodha_router, "_svc", svc)
 
-    response = await zerodha_router.place_protected_market_orders_sequenced(
-        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5)), FakeDb(), SimpleNamespace(id=1)
-    )
-
-    assert response.skipped_count == 1
-    assert [placed["transaction_type"] for placed in svc.placed] == ["SELL"]
+    # Stage14 supersedes automatic legacy quantity adjustment/submission.
+    with pytest.raises(HTTPException) as exc:
+        await zerodha_router.place_protected_market_orders_sequenced(
+            FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5)), FakeDb(), SimpleNamespace(id=1)
+        )
+    assert exc.value.status_code==503
+    assert svc.placed==[]
 
 
 @pytest.mark.anyio
-async def test_sequenced_partial_margin_clamps_buy_quantity(monkeypatch):
+async def test_legacy_margin_cannot_clamp_approved_quantity(monkeypatch):
     svc = FakeSvc(margin=350, quote=100)
     monkeypatch.setattr(zerodha_router, "_svc", svc)
 
-    response = await zerodha_router.place_protected_market_orders_sequenced(
-        FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50, wait_for_sell_completion=False), FakeDb(), SimpleNamespace(id=1)
-    )
-
-    assert response.buy_results[0].quantity == 3
-    assert response.skipped_count == 1
+    # Stage14 supersedes automatic legacy quantity adjustment/submission.
+    with pytest.raises(HTTPException) as exc:
+        await zerodha_router.place_protected_market_orders_sequenced(
+            FakeRequest(), req(order("SELLME", "SELL"), order("BUYME", "BUY", 5), safety_buffer_amount=50, wait_for_sell_completion=False), FakeDb(), SimpleNamespace(id=1)
+        )
+    assert exc.value.status_code==503
+    assert svc.placed==[]
 
 
 @pytest.mark.anyio
-async def test_sequenced_uses_client_price_when_buy_quote_refresh_fails(monkeypatch):
+async def test_legacy_quote_failure_cannot_substitute_client_price(monkeypatch):
     class QuoteFailSvc(FakeSvc):
         async def get_quotes(self, token, instruments):
             raise RuntimeError("quote permission denied")
@@ -155,14 +155,13 @@ async def test_sequenced_uses_client_price_when_buy_quote_refresh_fails(monkeypa
     monkeypatch.setattr(zerodha_router, "_svc", svc)
 
     buy_order = order("BUYME", "BUY", 5).model_copy(update={"estimated_price": 100, "last_price": 100})
-    response = await zerodha_router.place_protected_market_orders_sequenced(
-        FakeRequest(), req(order("SELLME", "SELL"), buy_order, safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
-    )
-
-    assert response.placed_count == 2
-    assert response.skipped_count == 0
-    assert [placed["transaction_type"] for placed in svc.placed] == ["SELL", "BUY"]
-    assert "using client basket price" in "; ".join(response.messages)
+    # Stage14 supersedes automatic legacy quantity adjustment/submission.
+    with pytest.raises(HTTPException) as exc:
+        await zerodha_router.place_protected_market_orders_sequenced(
+            FakeRequest(), req(order("SELLME", "SELL"), buy_order, safety_buffer_amount=50), FakeDb(), SimpleNamespace(id=1)
+        )
+    assert exc.value.status_code==503
+    assert svc.placed==[]
 
 
 @pytest.mark.anyio

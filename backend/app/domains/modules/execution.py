@@ -84,6 +84,11 @@ def require_bullpen_context(args):
 
 @asynccontextmanager
 async def bullpen_process_fence(args):
+    from app.domains.polymarket.runtime_broker import _parse_command_category
+    _,write,_=_parse_command_category(args)
+    if write:
+        from app.domains.order_intents.contracts import require_live_financial_disabled
+        require_live_financial_disabled()
     require_bullpen_context(args)
     from .tasks import _reconciliation_read
     if _reconciliation_read.get():

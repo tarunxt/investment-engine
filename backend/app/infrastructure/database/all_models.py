@@ -86,3 +86,5 @@ from app.domains.recommendation_audit.models import (  # noqa: F401
 )
 from app.infrastructure.messaging.operation_models import IdempotencyOperation  # noqa: F401
 from app.domains.auth.admin_roles import AdministrativeRoleGrant  # noqa: F401
+
+from app.domains.order_intents.models import OrderIntent,OrderLeg  # noqa: F401
