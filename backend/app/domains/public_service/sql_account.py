@@ -12,7 +12,7 @@ import hashlib
 import math
 import re
 from uuid import UUID
-from sqlalchemy import JSON, LargeBinary, Text, and_, case, cast, exists, func, inspect, select
+from sqlalchemy import MetaData, JSON, LargeBinary, Text, and_, case, cast, exists, func, inspect, select
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.sql import visitors
 from sqlalchemy.sql.elements import BindParameter
@@ -36,6 +36,7 @@ class AccountTableRule:
     path: tuple[OwnerHop, ...] = ()
     owner_column: str = 'user_id'
     excluded_reason: str = ''
+    owner_semantics: str = ''
 
 
 @dataclass(frozen=True)
@@ -60,9 +61,36 @@ def schema_digest(metadata):
                    for name, table in sorted(metadata.tables.items())})
 
 
+APPLICATION_OWNER_SEMANTICS = 'recommendation_audit.user_id.v1'
+
+
+def _application_owner_table(table):
+    # These deliberately non-cascading records use an application tenant key,
+    # not a physical user FK. Never generalize that exception by column name.
+    from app.domains.recommendation_audit.models import EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt
+    allowed = {model.__table__.name: model.__table__ for model in
+               (EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt)}
+    expected = allowed.get(table.name)
+    if expected is None: return False
+    actual_meta, expected_meta = MetaData(), MetaData()
+    table.to_metadata(actual_meta); expected.to_metadata(expected_meta)
+    return schema_digest(actual_meta) == schema_digest(expected_meta)
+
+
 def _credential_column(name):
-    return bool(re.search(r'password|passhash|token|secret|credential|cipher|privatekey|signingkey|keyhash|cookie|session',
-                          re.sub('[^a-z0-9]', '', name.lower())))
+    normalized = re.sub('[^a-z0-9]', '', name.lower())
+    return normalized in {'key', 'apikey', 'accesskey', 'authorization', 'bearer'} or bool(re.search(
+        r'password|passhash|token|secret|credential|cipher|privatekey|signingkey|keyhash|cookie|session', normalized))
+
+
+def _private_value(value):
+    # Complete bounded decoding happens first. Apply conservative key-based
+    # exclusion at every JSON depth, including generic APIKey.key spellings.
+    if isinstance(value, dict):
+        return {key: '[withheld credential]' if _credential_column(key) else _private_value(item)
+                for key, item in value.items()}
+    if isinstance(value, list): return [_private_value(item) for item in value]
+    return value
 
 
 def _value(value, *, max_bytes=65536, depth=0, nodes=None):
@@ -220,8 +248,9 @@ class SQLAccountReader:
             if type(rule) is not AccountTableRule or type(rule.excluded_reason) is not str or len(rule.excluded_reason) > 256:
                 raise BoundaryDenied('ACCOUNT_INVENTORY_REVIEW_REQUIRED')
             table = self.metadata.tables[rule.table]
+            if type(rule.owner_semantics) is not str: raise BoundaryDenied('ACCOUNT_OWNER_PATH_INVALID')
             if rule.excluded_reason:
-                if rule.table == 'users' or rule.export_columns or rule.withheld_columns or rule.path:
+                if rule.table == 'users' or rule.export_columns or rule.withheld_columns or rule.path or rule.owner_semantics:
                     raise BoundaryDenied('ACCOUNT_EXCLUSION_INVALID')
                 continue
             exported, withheld = set(rule.export_columns), set(rule.withheld_columns)
@@ -243,6 +272,11 @@ class SQLAccountReader:
                     raise BoundaryDenied('ACCOUNT_OWNER_PATH_INVALID')
                 visited.add(parent.name); current = parent
             if rule.owner_column not in current.c: raise BoundaryDenied('ACCOUNT_OWNER_PATH_INVALID')
+            if rule.owner_semantics:
+                if (rule.owner_semantics != APPLICATION_OWNER_SEMANTICS or rule.path
+                    or rule.owner_column != 'user_id' or not _application_owner_table(current)):
+                    raise BoundaryDenied('ACCOUNT_APPLICATION_OWNER_BINDING_INVALID')
+                continue
             if current.name == 'users' and rule.owner_column == 'id': continue
             if not any(f.column.table.name == 'users' and f.column.name == 'id'
                        for f in current.c[rule.owner_column].foreign_keys):
@@ -301,7 +335,7 @@ class SQLAccountReader:
                     converted = {}; row_bytes = 2
                     for index, column in enumerate(columns):
                         value = _json_value(raw[index], cap) if isinstance(column.type, JSON) else raw[index]
-                        value = filtered(_value(value, max_bytes=cap))
+                        value = _private_value(filtered(_value(value, max_bytes=cap)))
                         row_bytes += len(_encode(column.name)) + 1 + len(_encode(value)) + (1 if converted else 0)
                         if used + row_bytes + (1 if rows else 0) > self.MAX_BYTES:
                             raise BoundaryDenied('ACCOUNT_EXPORT_SIZE_LIMIT')

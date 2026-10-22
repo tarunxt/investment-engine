@@ -107,7 +107,9 @@ def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,
         connection,simple,message=receive(app,'financial_execution')
         try:
             assert message.headers['id']==sent.id and message.headers['task']==task.name
-            assert task.run()['state']=='filled'
+            outcome=task.run()
+            assert outcome['state']=='completed'
+            assert outcome['result']['status']=='filled'
             message.reject(requeue=True)
             duplicate=simple.get(block=True,timeout=3)
             assert duplicate.headers['id']==sent.id

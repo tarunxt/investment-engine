@@ -1796,7 +1796,7 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify public-service boundaries and actual PostgreSQL privacy races
-        run: python -m pytest -q --junitxml=/tmp/stage17.xml backend/tests/test_stage17_public_service.py backend/tests/test_stage17_closure.py backend/tests/test_stage17_dispatch.py backend/tests/test_stage17_governed_dispatch.py backend/tests/test_stage17_dependency_boundaries.py backend/tests/test_stage17_postgres.py backend/tests/test_stage17_reviewed_residency.py backend/tests/test_stage17_sql_account.py backend/tests/test_stage17_sql_account_postgres.py backend/tests/test_stage17_sql_privacy_plan.py backend/tests/test_stage17_composition.py backend/tests/test_stage17_monitor_dispatch.py backend/tests/test_stage17_signup_perimeter.py backend/tests/test_stage17_real_services.py
+        run: python -m pytest -q --junitxml=/tmp/stage17.xml backend/tests/test_stage17_public_service.py backend/tests/test_stage17_closure.py backend/tests/test_stage17_dispatch.py backend/tests/test_stage17_governed_dispatch.py backend/tests/test_stage17_dependency_boundaries.py backend/tests/test_stage17_postgres.py backend/tests/test_stage17_reviewed_residency.py backend/tests/test_stage17_sql_account.py backend/tests/test_stage17_sql_account_postgres.py backend/tests/test_stage17_sql_privacy_plan.py backend/tests/test_stage17_composition.py backend/tests/test_stage17_monitor_dispatch.py backend/tests/test_stage17_signup_perimeter.py backend/tests/test_stage17_real_services.py backend/tests/test_stage17_canonical_owner_mapping.py
       - name: Require all Stage17 checks to execute
         run: |
           python - <<'PY_CHECK'
@@ -1804,7 +1804,7 @@ jobs:
           root=ET.parse('/tmp/stage17.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage17 cannot skip checks'
           cases=root.findall('.//testcase')
-          assert len(cases) == 271
+          assert len(cases) == 279
           for module,count in {'test_stage17_postgres':7, 'test_stage17_sql_account_postgres':2, 'test_stage17_real_services':4}.items():
               assert sum(case.attrib.get('classname','').split('.')[-1] == module for case in cases) == count, module
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')

@@ -9949,6 +9949,7 @@
         "BoundaryDenied",
         "_encode",
         "_json_value",
+        "_private_value",
         "_value",
         "any",
         "case",
@@ -10003,7 +10004,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/sql_account.py:259"
+      "source": "backend/app/domains/public_service/sql_account.py:293"
     },
     {
       "calls": [
@@ -16119,7 +16120,7 @@
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
     "backend/app/domains/public_service/signup.py": "58d03e41db8946bedd1ad28fc9afb7776dd1843cd51ca3f53ee46cdb19434328",
     "backend/app/domains/public_service/signup_perimeter.py": "b8165624bde31f50f33e526f5240f9f876896c81fdc90b7ff84283497d7b2f00",
-    "backend/app/domains/public_service/sql_account.py": "1910372068e9c1c4562b717a5b4751293e1007641d5167b46b66437ab2119524",
+    "backend/app/domains/public_service/sql_account.py": "907a6bbdb13eca06458d071015763124e9e86d283823fed1a12437083563c89c",
     "backend/app/domains/public_service/sql_privacy_plan.py": "1065cb357c32a830677d128c5b783407a90a0160322b83a5ae1761a59d33c513",
     "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",
     "backend/app/domains/public_service/support.py": "b70af3e72900bcc45be4bfa6c0b33287479a0d869a5a460778a2774212a86292",
