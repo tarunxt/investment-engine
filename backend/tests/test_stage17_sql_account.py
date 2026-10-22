@@ -245,3 +245,38 @@ def test_postgresql_float_storage_aliases_preserve_real_schema_distinctions():
     assert _physical_type(Float(0), pg) == 'DOUBLE PRECISION'
     assert _physical_type(Float(), sqlite.dialect()) == 'FLOAT'
     assert _physical_type(REAL(), sqlite.dialect()) == 'REAL'
+
+
+def test_postgresql_redundant_unique_requires_identical_nonnullable_verified_primary():
+    from sqlalchemy import UniqueConstraint
+    from sqlalchemy.dialects import postgresql,sqlite
+    from app.domains.public_service.sql_account import _physical_uniques_match
+    pg=postgresql.dialect();sq=sqlite.dialect()
+    def matches(table,observed,primary,dialect,timing=(False,False)):
+        return _physical_uniques_match(table,observed,primary,dialect,physical_timing=timing)
+    def table(*columns,**options):
+        m=MetaData();t=Table('fixture',m,Column('a',Integer,primary_key=True,nullable=options.get('nullable',False)),
+            Column('b',Integer,primary_key=options.get('composite',False)),Column('other',Integer))
+        t.append_constraint(UniqueConstraint(*columns,deferrable=options.get('deferrable'),initially=options.get('initially')))
+        return t
+    t=table('a')
+    assert matches(t,[],('a',),pg)
+    assert matches(t,[('a',)],('a',),pg)
+    assert not matches(t,[],('b',),pg)
+    assert not matches(t,[],('a',),sq)
+    assert not matches(table('a',nullable=True),[],('a',),pg)
+    assert not matches(table('a',deferrable=True),[],('a',),pg)
+    assert not matches(table('a',initially='DEFERRED',deferrable=True),[],('a',),pg)
+    assert matches(table('a','b',composite=True),[],('a','b'),pg)
+    assert not matches(table('a',composite=True),[],('a','b'),pg)
+    assert not matches(table('b','a',composite=True),[],('a','b'),pg)
+    assert not matches(table('other'),[],('a',),pg)
+    for actual in [[('other',)],[('a',),('other',)],[('a',),('a',)]]:
+        assert not matches(t,actual,('a',),pg)
+    t.append_constraint(UniqueConstraint('other'))
+    assert matches(t,[('other',)],('a',),pg)
+    assert not matches(t,[],('a',),pg)
+
+    assert not _physical_uniques_match(table('a'),[],('a',),pg) # Missing catalog proof denies.
+    for timing in [(True,False),(True,True),(False,True),('false',False)]:
+        assert not matches(table('a'),[],('a',),pg,timing)

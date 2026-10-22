@@ -12,7 +12,7 @@ import hashlib
 import math
 import re
 from uuid import UUID
-from sqlalchemy import MetaData, JSON, LargeBinary, Text, and_, case, cast, exists, func, inspect, select
+from sqlalchemy import MetaData, JSON, LargeBinary, Text, and_, case, cast, exists, func, inspect, select, text
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.sql import visitors
 from sqlalchemy.sql.elements import BindParameter
@@ -92,6 +92,49 @@ def _physical_type(column_type, dialect):
             if 1 <= precision <= 53:
                 return 'REAL' if precision <= 24 else 'DOUBLE PRECISION'
     return rendered
+
+
+def _physical_uniques_match(table, observed, physical_primary, dialect, *, physical_timing=None):
+    """Allow only PG's omitted redundant UNIQUE on an identical verified PK.
+
+    PostgreSQL parse_utilcmd removes identical primary/unique index specs at
+    CREATE TABLE. Do not normalize column sets, non-PK uniqueness, extra actual
+    constraints, nullable keys or different constraint timing/options.
+    """
+    primary=tuple(c.name for c in table.primary_key)
+    if primary!=tuple(physical_primary):return False
+    constraints=[c for c in table.constraints if c.__class__.__name__=='UniqueConstraint']
+    expected=sorted(tuple(c.name for c in constraint.columns) for constraint in constraints)
+    actual=sorted(tuple(columns) for columns in observed)
+    if expected==actual:return True
+    if dialect.name!='postgresql' or not primary or any(c.nullable for c in table.primary_key):return False
+    expected_timing=(bool(table.primary_key.deferrable),(table.primary_key.initially or 'IMMEDIATE')=='DEFERRED')
+    if (type(physical_timing) is not tuple or len(physical_timing)!=2
+        or any(type(value) is not bool for value in physical_timing)
+        or physical_timing!=expected_timing):return False
+    for constraint in constraints:
+        if (tuple(c.name for c in constraint.columns)==primary
+            and bool(constraint.deferrable)==bool(table.primary_key.deferrable)
+            and (constraint.initially or 'IMMEDIATE')==(table.primary_key.initially or 'IMMEDIATE')
+            and not constraint.dialect_options['postgresql'].get('nulls_not_distinct')
+            and not constraint.dialect_options['postgresql'].get('include')):
+            reduced=list(expected);reduced.remove(primary)
+            if reduced==actual:return True
+    return False
+
+
+def _physical_primary_timing(connection, name):
+    # The Inspector PK API omits timing. Read actual schema metadata; never
+    # infer immediate enforcement from matching column names or source flags.
+    if connection.dialect.name!='postgresql':return None
+    row=connection.execute(text("""SELECT c.condeferrable,c.condeferred
+        FROM pg_catalog.pg_constraint c
+        JOIN pg_catalog.pg_class r ON r.oid=c.conrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid=r.relnamespace
+        WHERE c.contype='p' AND n.nspname=current_schema() AND r.relname=:name"""),{'name':name}).one_or_none()
+    if row is None:return None
+    values=tuple(row)
+    return values if len(values)==2 and all(type(value) is bool for value in values) else None
 
 
 def _credential_column(name):
@@ -250,10 +293,13 @@ class SQLAccountReader:
             if expected_fk != observed_fk: raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
             if tuple(c.name for c in table.primary_key) != tuple(inspector.get_pk_constraint(name)['constrained_columns']):
                 raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
-            expected_unique = sorted(tuple(c.name for c in constraint.columns) for constraint in table.constraints
-                                     if constraint.__class__.__name__ == 'UniqueConstraint')
-            if expected_unique != sorted(tuple(c['column_names']) for c in inspector.get_unique_constraints(name)):
-                raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
+            physical_unique=[tuple(c['column_names']) for c in inspector.get_unique_constraints(name)]
+            physical_primary=inspector.get_pk_constraint(name)['constrained_columns']
+            matches=_physical_uniques_match(table,physical_unique,physical_primary,connection.dialect)
+            if not matches and connection.dialect.name=='postgresql':
+                matches=_physical_uniques_match(table,physical_unique,physical_primary,connection.dialect,
+                    physical_timing=_physical_primary_timing(connection,name))
+            if not matches:raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
             expected_indexes = sorted((tuple(c.name for c in index.columns),
                 _where(index.dialect_options[connection.dialect.name].get('where'), connection.dialect))
                 for index in table.indexes if index.unique)

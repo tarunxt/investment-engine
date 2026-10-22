@@ -111,3 +111,53 @@ def test_actual_pg_float_precision_or_numeric_drift_rejects_before_export(pg_rea
     with Session(engine) as db:
         with pytest.raises(BoundaryDenied, match='SCHEMA_CHANGED'):
             SQLAccountReader(db, metadata, inventory).export(1)
+
+
+@pytest.mark.parametrize('composite',[False,True])
+def test_actual_pg_pk_backed_unique_preserved_but_missing_other_unique_rejected(pg_reader,composite):
+    from sqlalchemy import UniqueConstraint,inspect,text
+    engine,metadata,inventory=pg_reader
+    columns=[Column('id',Integer,primary_key=True),Column('part',Integer,primary_key=composite,nullable=False),
+        Column('user_id',ForeignKey('users.id'),nullable=False),Column('label',String,nullable=False)]
+    primary=('id','part') if composite else ('id',)
+    table=Table('redundant_primary_owned',metadata,*columns,
+        UniqueConstraint(*primary,name='redundant_same_primary'),UniqueConstraint('label',name='required_distinct_label'))
+    table.create(engine)
+    with engine.begin() as connection:
+        connection.execute(table.insert(),[dict(id=i,part=i,user_id=i,label=f'synthetic-{i}') for i in (1,2)])
+        inspector=inspect(connection)
+        assert inspector.get_pk_constraint(table.name)['constrained_columns']==list(primary)
+        assert [tuple(item['column_names']) for item in inspector.get_unique_constraints(table.name)]==[('label',)]
+    policy=replace(inventory,schema_digest=schema_digest(metadata),rules=inventory.rules+
+        (AccountTableRule(table.name,tuple(table.c.keys())),))
+    with Session(engine) as db:
+        result=SQLAccountReader(db,metadata,policy).export(1)
+        assert result['datasets'][table.name]==[{'id':1,'part':1,'user_id':1,'label':'synthetic-1'}]
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE redundant_primary_owned DROP CONSTRAINT required_distinct_label'))
+    with Session(engine) as db:
+        with pytest.raises(BoundaryDenied,match='SCHEMA_CHANGED'):
+            SQLAccountReader(db,metadata,policy).export(1)
+
+
+@pytest.mark.parametrize('initially',['IMMEDIATE','DEFERRED'])
+def test_actual_pg_changed_primary_deferrability_cannot_replace_immediate_unique(pg_reader,initially):
+    from sqlalchemy import UniqueConstraint,inspect,text
+    engine,metadata,inventory=pg_reader
+    table=Table('primary_timing_owned',metadata,Column('id',Integer,primary_key=True),
+        Column('user_id',ForeignKey('users.id'),nullable=False),UniqueConstraint('id',name='same_primary'))
+    table.create(engine)
+    with engine.begin() as connection:
+        connection.execute(table.insert().values(id=1,user_id=1))
+        inspector=inspect(connection);pk=inspector.get_pk_constraint(table.name)
+        assert pk['constrained_columns']==['id'] and inspector.get_unique_constraints(table.name)==[]
+        preparer=connection.dialect.identifier_preparer
+        connection.execute(text('ALTER TABLE primary_timing_owned DROP CONSTRAINT '+preparer.quote(pk['name'])))
+        connection.execute(text('ALTER TABLE primary_timing_owned ADD PRIMARY KEY (id) DEFERRABLE INITIALLY '+initially))
+        from app.domains.public_service.sql_account import _physical_primary_timing
+        assert _physical_primary_timing(connection,table.name)==(True,initially=='DEFERRED')
+    policy=replace(inventory,schema_digest=schema_digest(metadata),rules=inventory.rules+
+        (AccountTableRule(table.name,tuple(table.c.keys())),))
+    with Session(engine) as db:
+        with pytest.raises(BoundaryDenied,match='SCHEMA_CHANGED'):
+            SQLAccountReader(db,metadata,policy).export(1)

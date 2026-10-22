@@ -1804,8 +1804,8 @@ jobs:
           root=ET.parse('/tmp/stage17.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage17 cannot skip checks'
           cases=root.findall('.//testcase')
-          assert len(cases) == 335
-          for module,count in {'test_stage17_postgres':7, 'test_stage17_sql_account_postgres':8, 'test_stage17_real_services':5, 'test_stage17_redis_recovery_contract':3, 'test_stage17_sql_privacy_workflow':17, 'test_stage17_privacy_relations':12, 'test_stage17_sql_privacy_workflow_postgres':9}.items():
+          assert len(cases) == 340
+          for module,count in {'test_stage17_postgres':7, 'test_stage17_sql_account_postgres':12, 'test_stage17_real_services':5, 'test_stage17_redis_recovery_contract':3, 'test_stage17_sql_privacy_workflow':17, 'test_stage17_privacy_relations':12, 'test_stage17_sql_privacy_workflow_postgres':9}.items():
               assert sum(case.attrib.get('classname','').split('.')[-1] == module for case in cases) == count, module
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK

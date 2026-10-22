@@ -11,7 +11,7 @@ from app.infrastructure.database.outbox.models import OutboxMessage
 from app.domains.auth.models import User,UserProfile,APIKey,ActivityLog
 from app.domains.ai_limits.contracts import BoundaryDenied
 from app.domains.public_service.privacy import PrivacyRequests
-from app.domains.public_service.sql_account import SQLAccountReader,AccountInventory,AccountTableRule,schema_digest,_credential_column
+from app.domains.public_service.sql_account import SQLAccountReader,AccountInventory,AccountTableRule,schema_digest,_credential_column,_physical_uniques_match,_physical_primary_timing
 from app.domains.public_service.sql_privacy_plan import RetentionSchedule
 from app.domains.public_service.sql_privacy_workflow import DisposablePrivacyScope,DisposableSQLPrivacyWorkflow,TOPIC
 from test_stage09_connections_postgres import database
@@ -25,11 +25,13 @@ def schema_only_unique_diagnostics(connection, metadata):
             if constraint.__class__.__name__=='UniqueConstraint')
         observed=inspector.get_unique_constraints(name)
         actual=sorted(tuple(item['column_names']) for item in observed)
-        if expected!=actual:
+        if not _physical_uniques_match(table,actual,inspector.get_pk_constraint(name)['constrained_columns'],connection.dialect,
+            physical_timing=_physical_primary_timing(connection,name)):
             differences.append({'table':name,'expected_unique_columns':expected,
                 'actual_unique_columns':actual,
                 'expected_primary_columns':tuple(c.name for c in table.primary_key),
                 'actual_primary_columns':inspector.get_pk_constraint(name)['constrained_columns'],
+                'actual_primary_timing':_physical_primary_timing(connection,name),
                 'unique_constraint_names':[item['name'] for item in observed],
                 'indexes':[{'name':item['name'],'columns':item['column_names'],
                     'unique':item.get('unique'), 'duplicates_constraint':item.get('duplicates_constraint')}
