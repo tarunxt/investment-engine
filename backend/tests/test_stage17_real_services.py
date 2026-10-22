@@ -157,6 +157,10 @@ def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,
 
 
 def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(database,tmp_path,redis_app):
+    """Child crash + explicit expired-reservation recovery + real replacement.
+
+    This does not certify the default unattended transport polling deadline.
+    """
     import multiprocessing
     from celery import signals
     from sqlalchemy import select,func
@@ -168,7 +172,8 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
     assert Path('/.dockerenv').is_file()
     engine,owner,event,intent,broker,source=prepared(database,tmp_path)
     now=datetime.now(timezone.utc);producer=SyntheticResidencyProducer(database[4]);ctx=multiprocessing.get_context('fork')
-    accepted=ctx.Event();calls=ctx.Value('i',0);processes=[]
+    accepted=ctx.Event();redelivered=ctx.Event();finished=ctx.Event();calls=ctx.Value('i',0);processes=[]
+    expected_id=str(uuid4())
     def bindings(db):return SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source))
     app=redis_app;app.conf.worker_enable_remote_control=False
     app.conf.broker_transport_options={**app.conf.broker_transport_options,'visibility_timeout':2,'polling_interval':.2}
@@ -187,6 +192,14 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
         broker.submit=submit
         def signal_ready(**kwargs):ready.set()
         signals.worker_ready.connect(signal_ready,weak=False)
+        def saw_task(sender=None,task_id=None,**kwargs):
+            if not crash and task_id==expected_id and sender.request.delivery_info.get('redelivered') is True:
+                redelivered.set()
+        def completed_task(task_id=None,retval=None,state=None,**kwargs):
+            if not crash and task_id==expected_id and state=='SUCCESS' and isinstance(retval,dict) and retval.get('state')=='idle':
+                finished.set()
+        signals.task_prerun.connect(saw_task,weak=False)
+        signals.task_postrun.connect(completed_task,weak=False)
         app.Worker(pool='solo',concurrency=1,queues=['financial_execution'],
             hostname='stage17-'+uuid4().hex,loglevel='WARNING',without_gossip=True,
             without_mingle=True,without_heartbeat=True).start()
@@ -196,19 +209,48 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
             key=OperationalQueues(db,bindings(db)).enqueue(owner,'execution',str(event),now=now).id;db.commit()
         ready=ctx.Event();first=ctx.Process(target=start_worker,args=(True,now,ready));processes.append(first);first.start()
         assert ready.wait(10),'First owned worker did not become ready'
-        task.apply_async();assert accepted.wait(10),'Fake acceptance/crash boundary not reached'
+        task.apply_async(task_id=expected_id);assert accepted.wait(10),'Fake acceptance/crash boundary not reached'
         first.join(5);assert first.exitcode==73
         with Session(broker.engine) as venue:assert venue.scalar(select(func.count()).select_from(FakeVenueOrder))==1
+        # SQL uses the explicit fixture clock; Redis visibility uses wall time.
+        # Do not conflate visibility_timeout with Kombu's amortized poll cadence.
+        # Observe the actual reservation and expiry, then invoke the normal
+        # expired-reservation restoration API, never republish or edit a score.
+        import json
+        with app.connection_for_read() as recovery:
+            channel=recovery.channel()
+            with channel.conn_or_acquire() as client:
+                reservations=client.zrange(channel.unacked_index_key,0,-1,withscores=True)
+                assert len(reservations)==1
+                tag,score=reservations[0]
+                body=json.loads(client.hget(channel.unacked_key,tag))
+                assert body[0]['headers']['id']==expected_id
+                deadline=time.monotonic()+5
+                while True:
+                    seconds,micros=client.time();server_time=seconds+micros/1_000_000
+                    if server_time>score+channel.visibility_timeout+.05:break
+                    assert time.monotonic()<deadline,'Redis reservation did not expire in bounded time'
+                    time.sleep(.05)
+                assert abs(server_time-time.time())<1,'Redis/container wall clocks disagree'
+                assert client.hexists(channel.unacked_key,tag)
+            channel.qos.restore_visible(interval=1)
+            with channel.conn_or_acquire() as client:assert not client.hexists(channel.unacked_key,tag)
+            channel.close()
         ready=ctx.Event();second=ctx.Process(target=start_worker,args=(False,now+timedelta(seconds=31),ready));processes.append(second);second.start()
         assert ready.wait(10),'Replacement owned worker did not become ready'
-        deadline=time.monotonic()+20;state=None
+        assert redelivered.wait(10),'Replacement did not receive original restored delivery'
+        assert finished.wait(10),'Replacement did not complete safely without a new effect'
+        deadline=time.monotonic()+5;state=None
         while time.monotonic()<deadline:
             with Session(engine) as db:
                 row=db.scalar(select(OutboxMessage).where(OutboxMessage.id==key,OutboxMessage.topic==TOPIC));state=row.payload['state']
             if state=='uncertain':break
             time.sleep(.1)
-        assert state=='uncertain' and calls.value==1
+        # These assertions are separate so state failure cannot hide the final
+        # post-replacement effect count as it did in the preserved original run.
+        assert calls.value==1
         with Session(broker.engine) as venue:assert venue.scalar(select(func.count()).select_from(FakeVenueOrder))==1
+        assert state=='uncertain'
     finally:
         # Stop only worker processes created and recorded by this disposable test.
         for process in processes:
