@@ -144,3 +144,16 @@ def test_sqlite_writer_fence_does_not_mutate_retained_user_snapshot(setup):
     assert person.updated_at==before
     assert w.result(1,key,now=NOW)['owner_id']==1
     db.commit();db.refresh(person);assert person.updated_at==before
+
+
+def test_nested_engine_option_isolation_requires_effective_connection_override():
+    from sqlalchemy import create_engine
+    root=create_engine('sqlite://')
+    try:
+        nested=root.execution_options(isolation_level='SERIALIZABLE').execution_options(isolation_level='READ UNCOMMITTED')
+        with nested.connect() as connection:
+            # Requested option is not proof of effective driver state.
+            assert connection.get_execution_options()['isolation_level']=='READ UNCOMMITTED'
+            effective=connection.execution_options(isolation_level='READ UNCOMMITTED')
+            assert effective.get_isolation_level()=='READ UNCOMMITTED'
+    finally:root.dispose()

@@ -15989,7 +15989,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "45d4ddb99e75148b32e1c065c6382179717ef95415c5ec00da64a6b6165ba0f8",
+    "backend/app/domains/modules/coverage.py": "52e967a1655cbd1cf2f4028a78796c1ce190a9ced8bb04af6a278e6990d9171a",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",

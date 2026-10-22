@@ -91,7 +91,8 @@ def test_actual_pg_audit_failure_rolls_back_data_receipt_and_request(pg_workflow
         assert PrivacyRequests(db).owned(owner,key).payload['state']=='retention_review_required'
         assert db.scalar(select(func.count()).select_from(OutboxMessage).where(OutboxMessage.topic==TOPIC))==0
 
-def test_actual_pg_cancel_waits_on_execution_owner_fence_without_partial_erasure(pg_workflow):
+@pytest.mark.parametrize('isolation',['READ COMMITTED','SERIALIZABLE'])
+def test_actual_pg_cancel_waits_on_execution_owner_fence_without_partial_erasure(pg_workflow,isolation):
     engine,owner,other,key,now,service=pg_workflow;first_done=threading.Event();second_waiting=threading.Event();pids=[]
     roles=threading.local()
     def before(conn,cursor,statement,parameters,context,executemany):
@@ -110,15 +111,42 @@ def test_actual_pg_cancel_waits_on_execution_owner_fence_without_partial_erasure
             assert blocked,'Actual PostgreSQL owner lock overlap not observed';db.commit();return result
     def cancel():
         roles.value='cancel'
-        # Existing authenticated cancellation uses READ COMMITTED; execution
-        # retains the reader's stronger repeatable snapshot.
-        with Session(engine.execution_options(isolation_level='READ COMMITTED')) as db:
-            row=PrivacyRequests(db).cancel(owner,key);db.commit();return row.payload['state']
+        from sqlalchemy.exc import DBAPIError
+        retries=0
+        # Nested OptionEngine listeners can overwrite a requested isolation.
+        # Set it on the actual connection and prove effective driver isolation.
+        with engine.connect() as connection:
+            connection=connection.execution_options(isolation_level=isolation)
+            assert connection.get_isolation_level()==isolation
+            with Session(bind=connection) as db:
+                try:
+                    row=PrivacyRequests(db).cancel(owner,key);db.commit()
+                    return row.payload['state'],retries
+                except DBAPIError as exc:
+                    assert isolation=='SERIALIZABLE'
+                    assert getattr(exc.orig,'pgcode',None)=='40001'
+                    db.rollback();assert not db.in_transaction();retries+=1
+        # Retry only cancellation, once, after full rollback in a NEW transaction.
+        # Never execute the SQL disposal/effect again or reuse an aborted snapshot.
+        with engine.connect() as connection:
+            connection=connection.execution_options(isolation_level='READ COMMITTED')
+            assert connection.get_isolation_level()=='READ COMMITTED'
+            with Session(bind=connection) as db:
+                row=PrivacyRequests(db).cancel(owner,key);db.commit()
+                return row.payload['state'],retries
     try:
         with ThreadPoolExecutor(2) as pool:
             first=pool.submit(execute);assert first_done.wait(10)
             second=pool.submit(cancel);assert first.result(timeout=8)['removed_counts']=={'api_keys':1,'user_profiles':1}
-            assert second.result(timeout=8)=='synthetic_sql_complete'
+            state,retries=second.result(timeout=8)
+            assert state=='synthetic_sql_complete'
+            assert retries==(1 if isolation=='SERIALIZABLE' else 0)
+        with Session(engine) as db:
+            assert db.scalar(select(func.count()).select_from(APIKey).where(APIKey.user_id==owner))==0
+            assert db.scalar(select(func.count()).select_from(APIKey).where(APIKey.user_id==other))==1
+            assert db.get(UserProfile,owner) is None and db.get(UserProfile,other) is not None
+            assert db.scalar(select(func.count()).select_from(OutboxMessage).where(OutboxMessage.topic==TOPIC))==1
+            assert db.scalar(select(func.count()).select_from(ActivityLog).where(ActivityLog.user_id==owner,ActivityLog.action=='privacy_sql_fixture_complete'))==1
     finally:event.remove(engine,'before_cursor_execute',before)
 
 
