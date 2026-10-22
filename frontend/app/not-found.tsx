@@ -1,7 +1,6 @@
-"use client";
-
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/buttonVariants";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
 
@@ -29,16 +28,12 @@ export default function NotFound() {
                     </div>
 
                     <div className="space-y-2">
-                        <Link href="/">
-                            <Button className="w-full bg-purple-600 hover:bg-purple-700">
-                                Go to Home
-                            </Button>
+                        <Link href="/" className={cn(buttonVariants({ className: "w-full bg-purple-600 hover:bg-purple-700" }))}>
+                            Go to Home
                         </Link>
 
-                        <Link href="/login">
-                            <Button variant="outline" className="w-full">
-                                Sign In
-                            </Button>
+                        <Link href="/login" className={cn(buttonVariants({ variant: "outline", className: "w-full" }))}>
+                            Sign In
                         </Link>
                     </div>
 

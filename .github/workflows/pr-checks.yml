@@ -680,6 +680,7 @@ jobs:
           tests/stage16-safety-support.test.mjs
           tests/stage16-mobile-shell.test.mjs
           tests/stage17-dependency-boundaries.test.mjs
+          tests/public-auth-lazy-client.test.mjs
           tests/stage08-module-policy.test.mjs
           tests/stage08-module-provider-races.test.mjs
           tests/stage09-connection-bindings.test.mjs
