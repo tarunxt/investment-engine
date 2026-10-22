@@ -5,7 +5,7 @@
     "background": 31,
     "export": 47,
     "frontend": 25,
-    "http": 308,
+    "http": 309,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -9590,6 +9590,41 @@
       "calls": [
         "Depends",
         "HTTPException",
+        "binding.consumer_factory.now",
+        "binding.queues",
+        "binding.queues(s).enqueue",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "response",
+        "router.post",
+        "serialization_conflict",
+        "str"
+      ],
+      "capability": "enqueue_operation",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.post('/operational-queue')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/disposable/operational-queue",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/application_router.py:29"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
         "binding.scope.validate",
         "binding.server.onboarding",
         "db.run_sync",
@@ -9614,7 +9649,7 @@
       "registration": "unmounted",
       "route": "/disposable/reviewed-eligibility",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/application_router.py:22"
+      "source": "backend/app/domains/public_service/application_router.py:51"
     },
     {
       "calls": [
@@ -9647,7 +9682,7 @@
       "registration": "unmounted",
       "route": "/disposable/privacy-requests/{id}/execute",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/application_router.py:30"
+      "source": "backend/app/domains/public_service/application_router.py:59"
     },
     {
       "calls": [
@@ -9677,7 +9712,7 @@
       "registration": "unmounted",
       "route": "/disposable/privacy-requests/{id}/result",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/application_router.py:45"
+      "source": "backend/app/domains/public_service/application_router.py:74"
     },
     {
       "calls": [
@@ -16083,7 +16118,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "45d4ddb99e75148b32e1c065c6382179717ef95415c5ec00da64a6b6165ba0f8",
+    "backend/app/domains/modules/coverage.py": "a2412e78488ac3e6e3f5c07c89e836589d8acbc610b80b11b7e94f99dc396536",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
@@ -16200,12 +16235,13 @@
     "backend/app/domains/prompts/schemas.py": "a04ed42420332a671496b1af90faf71900b6f78f1e480a00ea31a4b3ed73bf36",
     "backend/app/domains/public_service/__init__.py": "f290a6b2cd54f19bbf468879cd8bd5aa1e15ec65c8e41f05fb2113945b16a32f",
     "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
-    "backend/app/domains/public_service/application_bindings.py": "3421a11113fcd93f0f141599aef37c9d6799348f7bf12e3f19bda5ad6d9e4702",
-    "backend/app/domains/public_service/application_router.py": "57d991dcae98e9dd31cd81aef7efd171151f01bc01b74e013811535049751222",
+    "backend/app/domains/public_service/application_bindings.py": "6a98bfd9a48f9b6ebdc5ddd27a91f75db0709176f09f8091659007f9fbba5d43",
+    "backend/app/domains/public_service/application_router.py": "13f042d5cd51a04f1fb950821f29a3bc7112c761bd5633aa1c0e3ea6be217bc0",
     "backend/app/domains/public_service/canonical_privacy_inventory.py": "cca88bd86b5f6237d4559ce230c7ce61923374db71abc2e11149445d1ad44d01",
     "backend/app/domains/public_service/canonical_privacy_resolvers.py": "c4310d2756eae62de7bed349e6c8718c4b2de382773b070f8a2ada9fa29b40ae",
     "backend/app/domains/public_service/composition.py": "dee5e25cce70739cfbd0c5c7651303f5e24f2231dfc040007a588775776c4380",
     "backend/app/domains/public_service/dispatch.py": "1ea190e31b4ad949570542b38d62fa292b6f3117827ced5639490b46701974ea",
+    "backend/app/domains/public_service/disposable_consumers.py": "bfd2a5a4b3bcca9de0b4e2b46fecac3a7c8f5f8111f2eab9d066f3a45f7a2a48",
     "backend/app/domains/public_service/drills.py": "40af5e7a31ba599d030dacb1ec646abf0b4e8eb576d8444ebbae9668126331ed",
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
     "backend/app/domains/public_service/monitor_dispatch.py": "e13550d77d7f2c154a8fa21249997be6014e6f43f2ac9dd409c46eddf379e0f5",

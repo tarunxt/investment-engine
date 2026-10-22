@@ -48,6 +48,7 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         return None
     if domain=='public_service' and source_module=='app.domains.public_service.application_router' and len(methods)==1 and (next(iter(methods)),path,endpoint) in {
         ('GET','/account/operations/disposable/reviewed-eligibility','reviewed_eligibility'),
+        ('POST','/account/operations/disposable/operational-queue','enqueue_operation'),
         ('POST','/account/operations/disposable/privacy-requests/{id}/execute','execute_privacy'),
         ('GET','/account/operations/disposable/privacy-requests/{id}/result','privacy_result')}:
         return None # Authenticated exact owner; test-only binding plus disposable DB fences remain mandatory.

@@ -26,6 +26,7 @@ class DisposableApplicationBindings:
     scope:DisposablePrivacyScope
     consumers:IsolatedConsumerComposition|None=None
     signup_perimeter:object=None
+    consumer_factory:object=None
 
     def validate(self):
         if (os.getenv('ENVIRONMENT')!='test' or type(self.reference) is not str
@@ -41,6 +42,11 @@ class DisposableApplicationBindings:
             raise BoundaryDenied('DISPOSABLE_APPLICATION_BINDING_REQUIRED')
         if self.consumers is not None and (self.consumers.session_factory is not None or self.consumers.bindings_factory is not None):
             raise BoundaryDenied('DISPOSABLE_CONSUMER_FACTORY_UNAVAILABLE')
+        if self.consumer_factory is not None:
+            from .disposable_consumers import DisposableConsumerFactory
+            if type(self.consumer_factory) is not DisposableConsumerFactory or self.consumers is not None:
+                raise BoundaryDenied('DISPOSABLE_CONSUMER_FACTORY_REQUIRED')
+            self.consumer_factory.validate(self.reference)
         from app.infrastructure.database.base import Base
         inventory=self.server.bindings.account_inventory
         from .sql_account import AccountInventory
@@ -76,8 +82,27 @@ class DisposableApplicationBindings:
 
     def register_consumers(self,app):
         self.validate()
-        composition=self.consumers or IsolatedConsumerComposition()
+        # Keep the composition attached to the caller-owned Celery app so
+        # repeated registration cannot replace already registered handlers.
+        if self.consumer_factory is not None:
+            self.consumer_factory.check_transport(app)
+            composition=getattr(app,'_credx_disposable_composition',None)
+            if composition is None:
+                composition=self.consumer_factory.composition()
+                app._credx_disposable_composition=(self.consumer_factory,composition)
+            else:
+                factory,composition=composition
+                if factory is not self.consumer_factory:
+                    raise BoundaryDenied('APPLICATION_BINDING_ALREADY_INSTALLED')
+        else:composition=self.consumers or IsolatedConsumerComposition()
         return composition.register(app)  # Explicit local app only; no send/Beat registration.
+
+    def queues(self,db):
+        self.validate()
+        if self.consumer_factory is None:
+            raise BoundaryDenied('DISPOSABLE_CONSUMER_FACTORY_UNAVAILABLE')
+        from .dispatch import OperationalQueues
+        return OperationalQueues(db,self.consumer_factory.bindings(db))
 
 
 def install_disposable_bindings(app,bindings):

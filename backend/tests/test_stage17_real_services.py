@@ -126,7 +126,7 @@ def test_actual_pg_concurrent_monitor_dispatch_one_local_effect(database):
     assert set(states)<={'recorded','dispatching'} and 'recorded' in states
     assert len(calls)==len(sink.receipts)==1
 
-def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,redis_app):
+def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,redis_app,monkeypatch):
     from app.domains.public_service.residency import SyntheticResidencyProducer
     from app.domains.public_service.dispatch import SyntheticWorkBindings,OperationalQueues
     from test_stage15_postgres import prepared,worker
@@ -136,9 +136,13 @@ def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,
     try:
         with Session(engine) as db:
             producer.record(db,owner,country='IN',evidence_reference='synthetic:document',reviewer='synthetic:operator',now=now,expires=now+timedelta(hours=1))
-            OperationalQueues(db,bindings(db)).enqueue(owner,'execution',str(event),now=now);db.commit()
-        app=redis_app;composition=IsolatedConsumerComposition(session_factory=lambda:Session(engine),bindings_factory=bindings,clock=lambda:now)
-        task=composition.register(app)['public_service.consume.execution'];sent=task.apply_async()
+            db.commit()
+        import asyncio
+        from stage17_disposable_worker_fixture import configured_worker
+        app=redis_app;binding,composition,tasks,admit=configured_worker(database,bindings,app,monkeypatch,now)
+        response=asyncio.run(admit(owner,event));assert response.status_code==200,response.text
+        assert response.json()['state']=='queued' and not broker.calls
+        task=tasks['public_service.consume.execution'];sent=task.apply_async()
         connection,simple,message=receive(app,'financial_execution')
         try:
             assert message.headers['id']==sent.id and message.headers['task']==task.name
@@ -156,7 +160,7 @@ def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,
 
 
 
-def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(database,tmp_path,redis_app):
+def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(database,tmp_path,redis_app,monkeypatch):
     """Child crash + explicit expired-reservation recovery + real replacement.
 
     This does not certify the default unattended transport polling deadline.
@@ -177,8 +181,9 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
     def bindings(db):return SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source))
     app=redis_app;app.conf.worker_enable_remote_control=False
     app.conf.broker_transport_options={**app.conf.broker_transport_options,'visibility_timeout':2,'polling_interval':.2}
-    composition=IsolatedConsumerComposition(session_factory=lambda:Session(engine),bindings_factory=bindings,clock=lambda:now)
-    task=composition.register(app)['public_service.consume.execution']
+    from stage17_disposable_worker_fixture import configured_worker
+    binding,composition,tasks,admit=configured_worker(database,bindings,app,monkeypatch,now)
+    task=tasks['public_service.consume.execution']
     def start_worker(crash,clock,ready):
         # Only child-owned engines/connections; never share a PostgreSQL socket
         # across fork. No module runtime registration or real adapter is used.
@@ -206,7 +211,12 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
     try:
         with Session(engine) as db:
             producer.record(db,owner,country='IN',evidence_reference='synthetic:document',reviewer='synthetic:operator',now=now,expires=now+timedelta(hours=1))
-            key=OperationalQueues(db,bindings(db)).enqueue(owner,'execution',str(event),now=now).id;db.commit()
+            db.commit()
+        import asyncio
+        from uuid import UUID
+        response=asyncio.run(admit(owner,event));assert response.status_code==200,response.text
+        assert response.json()['state']=='queued' and not broker.calls
+        key=UUID(response.json()['id'])
         ready=ctx.Event();first=ctx.Process(target=start_worker,args=(True,now,ready));processes.append(first);first.start()
         assert ready.wait(10),'First owned worker did not become ready'
         task.apply_async(task_id=expected_id);assert accepted.wait(10),'Fake acceptance/crash boundary not reached'
