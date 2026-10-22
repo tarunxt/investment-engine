@@ -14,20 +14,24 @@ from test_stage17_reviewed_residency import setup as residency_setup,NOW
 
 MODELS=(EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)
 
+def seed_mapping_rows(db):
+    for owner in (1,3):
+        payload={'label':'safe','list':[{'api-key':'SYNTHETIC_API_SECRET','key':'SYNTHETIC_KEY','safe':'keep'}]}
+        db.execute(EvidenceRecord.__table__.insert().values(id=f'e-{owner}',user_id=owner,kind='fixture',source_key=f's-{owner}',content_hash='a'*64,payload=payload))
+        db.execute(DecisionRecord.__table__.insert().values(id=f'd-{owner}',user_id=owner,run_id=7,market='fixture',symbol='FAKE',exchange='FAKE',decision_at=NOW,provenance='fixture',content_hash='b'*64,payload={}))
+        db.execute(VerificationRecord.__table__.insert().values(id=f'v-{owner}',user_id=owner,current_id=f'd-{owner}',request_hash='c'*64,idempotency_key='fixture',request={}))
+        db.execute(SpendAccount.__table__.insert().values(id=f'sa-{owner}',user_id=owner,day='2026-10-22',cap_usd=Decimal(1)))
+        db.execute(SpendAttempt.__table__.insert().values(id=f'at-{owner}',user_id=owner,account_id=f'sa-{owner}',attempt_key='fixture',adapter='fake',tariff_version='fixture',upper_bound_usd=Decimal(0)))
+    db.execute(SpendAccount.__table__.insert().values(id='platform-sentinel',user_id=0,day='2026-10-22'))
+    db.execute(APIKey.__table__.insert().values(id=1,user_id=1,key='SYNTHETIC_NEVER_EXPORT_API_KEY',key_hash='SYNTHETIC_HASH_NOT_A_REAL_KEY',name='fixture'))
+
+
 @pytest.fixture
 def mapping(residency_setup):
     db,_=residency_setup;engine=db.get_bind()
     for model in MODELS:model.__table__.create(engine)
     APIKey.__table__.create(engine)
-    for owner in (1,3):
-        payload={'label':'safe','list':[{'api-key':'SYNTHETIC_API_SECRET','key':'SYNTHETIC_KEY','safe':'keep'}]}
-        db.execute(EvidenceRecord.__table__.insert().values(id=f'e-{owner}',user_id=owner,kind='fixture',source_key=f's-{owner}',content_hash='a'*64,payload=payload))
-        db.execute(DecisionRecord.__table__.insert().values(id=f'd-{owner}',user_id=owner,run_id=7,market='fixture',symbol='FAKE',exchange='FAKE',decision_at=NOW,provenance='fixture',content_hash='b'*64,payload={}))
-        db.execute(VerificationRecord.__table__.insert().values(id=f'v-{owner}',user_id=owner,current_id=f'e-{owner}',request_hash='c'*64,idempotency_key='fixture',request={}))
-        db.execute(SpendAccount.__table__.insert().values(id=f'sa-{owner}',user_id=owner,day='2026-10-22',cap_usd=Decimal(1)))
-        db.execute(SpendAttempt.__table__.insert().values(id=f'at-{owner}',user_id=owner,account_id=f'sa-{owner}',attempt_key='fixture',adapter='fake',tariff_version='fixture',upper_bound_usd=Decimal(0)))
-    db.execute(SpendAccount.__table__.insert().values(id='platform-sentinel',user_id=0,day='2026-10-22'))
-    db.execute(APIKey.__table__.insert().values(id=1,user_id=1,key='SYNTHETIC_NEVER_EXPORT_API_KEY',key_hash='SYNTHETIC_HASH_NOT_A_REAL_KEY',name='fixture'))
+    seed_mapping_rows(db)
     db.commit();metadata=MetaData();metadata.reflect(engine)
     names={model.__tablename__ for model in MODELS};rules=[]
     for name,table in metadata.tables.items():
@@ -81,3 +85,30 @@ def test_even_explicit_inventory_cannot_export_api_key_key(mapping):
     rules=tuple(replace(rule,export_columns=rule.export_columns+('key',),withheld_columns=tuple(c for c in rule.withheld_columns if c!='key')) if rule.table=='api_keys' else rule for rule in reader.inventory.rules)
     reader.inventory=replace(reader.inventory,rules=rules)
     with pytest.raises(BoundaryDenied,match='CREDENTIAL_FIELD'):reader.export(1)
+
+
+@pytest.mark.parametrize('table,column,target', [
+    ('recommendation_verifications','current_id','d-3'),
+    ('recommendation_verifications','previous_id','d-3'),
+    ('recommendation_spend_attempts','account_id','sa-3'),
+    ('recommendation_spend_attempts','account_id','platform-sentinel'),
+    ('recommendation_spend_attempts','verification_id','v-3'),
+    ('recommendation_spend_attempts','verification_id','missing'),
+])
+def test_cross_owner_platform_or_missing_application_reference_rejects(mapping,table,column,target):
+    db,reader=mapping;t=reader.metadata.tables[table]
+    db.execute(t.update().where(t.c.user_id==1).values({column:target}));db.commit()
+    with pytest.raises(BoundaryDenied,match='REFERENCE_OWNER_MISMATCH'):reader.export(1)
+    # The unrelated owner remains independently exportable.
+    assert reader.export(3)['datasets'][table][0]['user_id']==3
+
+
+def test_valid_same_owner_optional_application_references_are_exportable(mapping):
+    db,reader=mapping
+    verification=reader.metadata.tables['recommendation_verifications']
+    attempt=reader.metadata.tables['recommendation_spend_attempts']
+    db.execute(verification.update().where(verification.c.user_id==1).values(previous_id='d-1'))
+    db.execute(attempt.update().where(attempt.c.user_id==1).values(verification_id='v-1'));db.commit()
+    data=reader.export(1)['datasets']
+    assert data[verification.name][0]['previous_id']=='d-1'
+    assert data[attempt.name][0]['verification_id']=='v-1'

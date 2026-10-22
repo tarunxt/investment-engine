@@ -61,3 +61,42 @@ def test_actual_pg_changed_partial_predicate_rejects_before_export(pg_reader):
     with Session(engine) as db:
         with pytest.raises(BoundaryDenied, match='SCHEMA_CHANGED'):
             SQLAccountReader(db, metadata, inventory).export(1)
+
+
+@pytest.fixture
+def pg_canonical_mapping(pg_reader):
+    from app.domains.auth.models import APIKey
+    from app.domains.public_service.sql_account import _credential_column, APPLICATION_OWNER_SEMANTICS
+    from test_stage17_canonical_owner_mapping import MODELS,seed_mapping_rows
+    engine,metadata,_=pg_reader
+    for model in (*MODELS,APIKey): model.__table__.to_metadata(metadata).create(engine)
+    with Session(engine) as db:
+        db.execute(metadata.tables['users'].insert().values(id=3,email='foreign@example.invalid',is_active=True,is_verified=True))
+        seed_mapping_rows(db);db.commit()
+    names={model.__tablename__ for model in MODELS};rules=[]
+    for name,table in metadata.tables.items():
+        rules.append(AccountTableRule(name,tuple(c for c in table.c.keys() if not _credential_column(c)),
+            tuple(c for c in table.c.keys() if _credential_column(c)),owner_column='id' if name=='users' else 'user_id',
+            owner_semantics=APPLICATION_OWNER_SEMANTICS if name in names else ''))
+    return engine,metadata,AccountInventory('fixture-canonical-pg-not-legal-review',schema_digest(metadata),tuple(rules))
+
+
+def test_actual_pg_five_canonical_mappings_and_credential_exclusions(pg_canonical_mapping):
+    from test_stage17_canonical_owner_mapping import MODELS
+    engine,metadata,inventory=pg_canonical_mapping
+    with Session(engine) as db:
+        data=SQLAccountReader(db,metadata,inventory).export(1)['datasets']
+        for model in MODELS:assert len(data[model.__tablename__])==1 and data[model.__tablename__][0]['user_id']==1
+        assert 'SYNTHETIC_' not in str(data) and 'platform-sentinel' not in str(data)
+
+
+@pytest.mark.parametrize('table,column,value',[
+    ('recommendation_verifications','current_id','d-3'),
+    ('recommendation_spend_attempts','account_id','sa-3'),
+    ('recommendation_spend_attempts','verification_id','v-3'),
+])
+def test_actual_pg_cross_owner_application_reference_rejects(pg_canonical_mapping,table,column,value):
+    engine,metadata,inventory=pg_canonical_mapping;t=metadata.tables[table]
+    with Session(engine) as db:
+        db.execute(t.update().where(t.c.user_id==1).values({column:value}));db.commit()
+        with pytest.raises(BoundaryDenied,match='REFERENCE_OWNER_MISMATCH'):SQLAccountReader(db,metadata,inventory).export(1)

@@ -1,7 +1,8 @@
 """Prepared disposable CI-only PG/Redis gates; collection is not execution.
 
 Redis exercises actual Celery/Kombu publication, acknowledgement and redelivery,
-not a running worker process or real provider. PostgreSQL owns financial dedup.
+not by themselves a worker restart. A separate disposable child-worker crash
+case is prepared below. PostgreSQL owns financial dedup; no real provider.
 """
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ from uuid import uuid4
 import pytest
 from celery import Celery
 from sqlalchemy.orm import Session
+from sqlalchemy import event as sql_event, text
+import threading,time
 from app.domains.ai_limits.contracts import BoundaryDenied
 from app.domains.ai_limits.private_effects import LocalSink
 from app.domains.public_service.monitor_dispatch import MonitorDispatch,MonitorDispatchPolicy
@@ -62,32 +65,64 @@ def test_actual_redis_disabled_consumer_redelivery_stays_disabled(redis_app):
         duplicate.ack()
     finally:simple.close();connection.release()
 
+def overlap_probe(engine):
+    second=threading.Event();pids=[];roles=threading.local()
+    def before(conn,cursor,statement,parameters,context,executemany):
+        if getattr(roles,'value',None)=='second' and statement.lstrip().startswith('INSERT INTO outbox'):
+            pids.append(conn.connection.driver_connection.get_backend_pid());second.set()
+    def require_lock():
+        assert second.wait(2),'Competitor never attempted the held control row'
+        deadline=time.monotonic()+2
+        while time.monotonic()<deadline:
+            with Session(engine) as observer:
+                waiting=observer.scalar(text("SELECT wait_event_type FROM pg_stat_activity WHERE pid=:pid"),{'pid':pids[0]})
+            if waiting=='Lock':return
+            time.sleep(.02)
+        raise AssertionError('PostgreSQL did not observe actual coordinated lock overlap')
+    sql_event.listen(engine,'before_cursor_execute',before)
+    return roles,require_lock,lambda:sql_event.remove(engine,'before_cursor_execute',before)
+
+
 def test_actual_pg_concurrent_challenge_consumption_one_admission(database):
     from test_stage17_signup_perimeter import FixtureVerifier,NOW
     engine=database[0]
     policy=SignupPerimeterPolicy('synthetic-pg-policy','signup.example.invalid',2,120,b'x'*32)
+    roles,require_lock,remove_probe=overlap_probe(engine);first_ready=threading.Event()
     def attempt(index):
+        roles.value='first' if index==1 else 'second'
         with Session(engine) as db:
             try:
                 SignupPerimeter(policy=policy,verifier=FixtureVerifier()).admit(db,
                     f'fixture{index}@example.invalid','fixture-same-proof',peer='192.0.2.1',now=NOW)
+                if index==1:first_ready.set();require_lock()
                 db.commit();return True
             except BoundaryDenied:db.rollback();return False
-    with ThreadPoolExecutor(2) as pool:assert sum(pool.map(attempt,(1,2)))==1
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            first=pool.submit(attempt,1);assert first_ready.wait(2)
+            second=pool.submit(attempt,2);assert sum((first.result(timeout=5),second.result(timeout=5)))==1
+    finally:remove_probe()
 
 def test_actual_pg_concurrent_monitor_dispatch_one_local_effect(database):
     engine,_,owner,_,_=database;now=datetime.now(timezone.utc);sink=LocalSink()
     policy=MonitorDispatchPolicy('synthetic-pg-monitor',frozenset({owner}))
+    roles,require_lock,remove_probe=overlap_probe(engine);first_ready=threading.Event()
     calls=[];original=sink.deliver
-    def counted(*args):calls.append(args[0]);return original(*args)
+    def counted(*args):
+        calls.append(args[0]);first_ready.set();require_lock();return original(*args)
     sink.deliver=counted
     report=dict(owner_id=owner,correlation_id=str(uuid4()),stale_data=True,unknown_orders=False,
         cost_spike=False,action='pause_and_review',source_unavailable=True,scope='owned_database_observation')
     with Session(engine) as db:
         key=MonitorDispatch(db,policy=policy,sink=sink).enqueue(owner,report,now=now).id;db.commit()
-    def attempt(_):
+    def attempt(index):
+        roles.value='first' if index==1 else 'second'
         with Session(engine) as db:return MonitorDispatch(db,policy=policy,sink=sink).dispatch(owner,key,now=now)
-    with ThreadPoolExecutor(2) as pool:states=list(pool.map(attempt,(1,2)))
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            first=pool.submit(attempt,1);assert first_ready.wait(2)
+            second=pool.submit(attempt,2);states=[first.result(timeout=5),second.result(timeout=5)]
+    finally:remove_probe()
     assert set(states)<={'recorded','dispatching'} and 'recorded' in states
     assert len(calls)==len(sink.receipts)==1
 
@@ -118,3 +153,66 @@ def test_actual_redis_pg_financial_redelivery_one_fake_effect(database,tmp_path,
             assert len(broker.calls)==1
         finally:simple.close();connection.release()
     finally:broker.engine.dispose()
+
+
+
+def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(database,tmp_path,redis_app):
+    import multiprocessing
+    from celery import signals
+    from sqlalchemy import select,func
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    from app.domains.public_service.residency import SyntheticResidencyProducer
+    from app.domains.public_service.dispatch import SyntheticWorkBindings,OperationalQueues,TOPIC
+    from app.domains.order_intents.execution_fake import FakeVenueOrder
+    from test_stage15_postgres import prepared,worker
+    assert Path('/.dockerenv').is_file()
+    engine,owner,event,intent,broker,source=prepared(database,tmp_path)
+    now=datetime.now(timezone.utc);producer=SyntheticResidencyProducer(database[4]);ctx=multiprocessing.get_context('fork')
+    accepted=ctx.Event();calls=ctx.Value('i',0);processes=[]
+    def bindings(db):return SyntheticWorkBindings(db,residency=producer,execution=worker(db,broker,source))
+    app=redis_app;app.conf.worker_enable_remote_control=False
+    app.conf.broker_transport_options={**app.conf.broker_transport_options,'visibility_timeout':2,'polling_interval':.2}
+    composition=IsolatedConsumerComposition(session_factory=lambda:Session(engine),bindings_factory=bindings,clock=lambda:now)
+    task=composition.register(app)['public_service.consume.execution']
+    def start_worker(crash,clock,ready):
+        # Only child-owned engines/connections; never share a PostgreSQL socket
+        # across fork. No module runtime registration or real adapter is used.
+        engine.dispose(close=False);broker.engine.dispose(close=False);composition.clock=lambda:clock
+        original=broker.submit
+        def submit(*args,**kwargs):
+            with calls.get_lock():calls.value+=1
+            result=original(*args,**kwargs)
+            if crash:accepted.set();os._exit(73)
+            return result
+        broker.submit=submit
+        def signal_ready(**kwargs):ready.set()
+        signals.worker_ready.connect(signal_ready,weak=False)
+        app.Worker(pool='solo',concurrency=1,queues=['financial_execution'],
+            hostname='stage17-'+uuid4().hex,loglevel='WARNING',without_gossip=True,
+            without_mingle=True,without_heartbeat=True).start()
+    try:
+        with Session(engine) as db:
+            producer.record(db,owner,country='IN',evidence_reference='synthetic:document',reviewer='synthetic:operator',now=now,expires=now+timedelta(hours=1))
+            key=OperationalQueues(db,bindings(db)).enqueue(owner,'execution',str(event),now=now).id;db.commit()
+        ready=ctx.Event();first=ctx.Process(target=start_worker,args=(True,now,ready));processes.append(first);first.start()
+        assert ready.wait(10),'First owned worker did not become ready'
+        task.apply_async();assert accepted.wait(10),'Fake acceptance/crash boundary not reached'
+        first.join(5);assert first.exitcode==73
+        with Session(broker.engine) as venue:assert venue.scalar(select(func.count()).select_from(FakeVenueOrder))==1
+        ready=ctx.Event();second=ctx.Process(target=start_worker,args=(False,now+timedelta(seconds=31),ready));processes.append(second);second.start()
+        assert ready.wait(10),'Replacement owned worker did not become ready'
+        deadline=time.monotonic()+20;state=None
+        while time.monotonic()<deadline:
+            with Session(engine) as db:
+                row=db.scalar(select(OutboxMessage).where(OutboxMessage.id==key,OutboxMessage.topic==TOPIC));state=row.payload['state']
+            if state=='uncertain':break
+            time.sleep(.1)
+        assert state=='uncertain' and calls.value==1
+        with Session(broker.engine) as venue:assert venue.scalar(select(func.count()).select_from(FakeVenueOrder))==1
+    finally:
+        # Stop only worker processes created and recorded by this disposable test.
+        for process in processes:
+            if process.is_alive():process.terminate()
+            process.join(5)
+            if process.is_alive():process.kill();process.join(5)
+        broker.engine.dispose()

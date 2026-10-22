@@ -85,7 +85,7 @@ def _credential_column(name):
 
 def _private_value(value):
     # Complete bounded decoding happens first. Apply conservative key-based
-    # exclusion at every JSON depth, including generic APIKey.key spellings.
+    # exclusion at every JSON depth; arbitrary unlabeled secret text is NOT detected.
     if isinstance(value, dict):
         return {key: '[withheld credential]' if _credential_column(key) else _private_value(item)
                 for key, item in value.items()}
@@ -290,6 +290,34 @@ class SQLAccountReader:
             and_(*(table.c[a] == parent.c[b] for a, b in zip(hop.local_columns, hop.parent_columns))),
             self._predicate(parent, rule, owner_id, depth + 1)))
 
+    def _application_references(self, owner_id):
+        # Deliberately non-FK audit references still carry tenant semantics.
+        # Reject inconsistent owned rows rather than export another tenant's
+        # identifiers or silently conceal an integrity violation.
+        selected = {rule.table for rule in self.inventory.rules if not rule.excluded_reason
+                    and rule.owner_semantics == APPLICATION_OWNER_SEMANTICS}
+        links = {
+            'recommendation_verifications': (
+                ('current_id', 'recommendation_decisions', False),
+                ('previous_id', 'recommendation_decisions', True)),
+            'recommendation_spend_attempts': (
+                ('account_id', 'recommendation_spend_accounts', False),
+                ('verification_id', 'recommendation_verifications', True)),
+        }
+        for name in sorted(selected & links.keys()):
+            table = self.metadata.tables[name]
+            for column, target, optional in links[name]:
+                parent = self.metadata.tables.get(target)
+                if parent is None or not _application_owner_table(parent):
+                    raise BoundaryDenied('ACCOUNT_APPLICATION_REFERENCE_SCHEMA_REQUIRED')
+                owned_parent = exists(select(1).select_from(parent).where(
+                    parent.c.id == table.c[column], parent.c.user_id == owner_id, parent.c.user_id > 0))
+                invalid = ~owned_parent
+                if optional: invalid = and_(table.c[column].is_not(None), invalid)
+                if self.db.execute(select(1).select_from(table).where(
+                    table.c.user_id == owner_id, invalid).limit(1)).first() is not None:
+                    raise BoundaryDenied('ACCOUNT_APPLICATION_REFERENCE_OWNER_MISMATCH')
+
     def export(self, owner_id):
         if type(owner_id) is not int or owner_id <= 0: raise BoundaryDenied('ACTIVE_OWNER_REQUIRED')
         self.validate()
@@ -303,6 +331,7 @@ class SQLAccountReader:
         identity = self.db.execute(select(users.c.id).where(users.c.id == owner_id,
             users.c.is_active.is_(True), users.c.is_verified.is_(True)).with_for_update()).first()
         if identity is None: raise BoundaryDenied('ACTIVE_OWNER_REQUIRED')
+        self._application_references(owner_id)
         datasets = {}
         omitted = {r.table: r.excluded_reason for r in self.inventory.rules if r.excluded_reason}
         payload = {'owner_id': owner_id, 'inventory_reference': self.inventory.reference,

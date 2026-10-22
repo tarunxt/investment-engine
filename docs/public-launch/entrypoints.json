@@ -9972,6 +9972,7 @@
         "select(*projections, *flags).where(self._predicate(table, rule, owner_id)).limit",
         "select(users.c.id).where",
         "select(users.c.id).where(users.c.id == owner_id, users.c.is_active.is_(True), users.c.is_verified.is_(True)).with_for_update",
+        "self._application_references",
         "self._predicate",
         "self.db.connection",
         "self.db.execute",
@@ -10004,7 +10005,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/sql_account.py:293"
+      "source": "backend/app/domains/public_service/sql_account.py:321"
     },
     {
       "calls": [
@@ -16120,7 +16121,7 @@
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
     "backend/app/domains/public_service/signup.py": "58d03e41db8946bedd1ad28fc9afb7776dd1843cd51ca3f53ee46cdb19434328",
     "backend/app/domains/public_service/signup_perimeter.py": "b8165624bde31f50f33e526f5240f9f876896c81fdc90b7ff84283497d7b2f00",
-    "backend/app/domains/public_service/sql_account.py": "907a6bbdb13eca06458d071015763124e9e86d283823fed1a12437083563c89c",
+    "backend/app/domains/public_service/sql_account.py": "40072005dd530556c790f80e8d6783bef3d97984889fc677f22874654c11d230",
     "backend/app/domains/public_service/sql_privacy_plan.py": "1065cb357c32a830677d128c5b783407a90a0160322b83a5ae1761a59d33c513",
     "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",
     "backend/app/domains/public_service/support.py": "b70af3e72900bcc45be4bfa6c0b33287479a0d869a5a460778a2774212a86292",
