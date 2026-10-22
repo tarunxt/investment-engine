@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 from time import monotonic
 
+from fastapi import Request,HTTPException
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -51,6 +52,16 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_async_db(request: Request = None) -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
-        yield session
+        from app.domains.public_service.application_bindings import attach_request_facts
+        bindings=attach_request_facts(request,session)
+        try:
+            if bindings is not None:
+                from app.domains.ai_limits.contracts import BoundaryDenied
+                try:await session.run_sync(lambda db:bindings.scope.validate(db))
+                except BoundaryDenied:raise HTTPException(503,'Disposable database binding unavailable') from None
+            yield session
+        finally:
+            from app.domains.public_service.application_bindings import SESSION,SIGNUP
+            session.info.pop(SESSION,None);session.info.pop(SIGNUP,None)

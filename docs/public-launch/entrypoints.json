@@ -5,7 +5,7 @@
     "background": 31,
     "export": 47,
     "frontend": 25,
-    "http": 305,
+    "http": 308,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
@@ -9588,6 +9588,99 @@
     },
     {
       "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.scope.validate",
+        "binding.server.onboarding",
+        "db.run_sync",
+        "response",
+        "router.get"
+      ],
+      "capability": "reviewed_eligibility",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.get('/reviewed-eligibility')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/disposable/reviewed-eligibility",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/application_router.py:22"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.privacy",
+        "binding.privacy(s, user.id).execute",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "response",
+        "router.post",
+        "serialization_conflict"
+      ],
+      "capability": "execute_privacy",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.post('/privacy-requests/{id}/execute')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/disposable/privacy-requests/{id}/execute",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/application_router.py:30"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.privacy",
+        "binding.privacy(s, user.id).result",
+        "db.run_sync",
+        "response",
+        "router.get"
+      ],
+      "capability": "privacy_result",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.get('/privacy-requests/{id}/result')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/disposable/privacy-requests/{id}/result",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/application_router.py:45"
+    },
+    {
+      "calls": [
         "BoundaryDenied",
         "datetime.fromisoformat",
         "datetime.now",
@@ -9647,7 +9740,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:21"
+      "source": "backend/app/domains/public_service/router.py:23"
     },
     {
       "calls": [
@@ -9677,7 +9770,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests/{id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:28"
+      "source": "backend/app/domains/public_service/router.py:30"
     },
     {
       "calls": [
@@ -9690,7 +9783,8 @@
         "db.run_sync",
         "public_receipt",
         "response",
-        "router.post"
+        "router.post",
+        "serialization_conflict"
       ],
       "capability": "privacy_cancel",
       "classification": "owner-private",
@@ -9709,7 +9803,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests/{id}/cancel",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:32"
+      "source": "backend/app/domains/public_service/router.py:34"
     },
     {
       "calls": [
@@ -9735,7 +9829,7 @@
       "registration": "mounted",
       "route": "/account/operations/eligibility",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:38"
+      "source": "backend/app/domains/public_service/router.py:44"
     },
     {
       "calls": [
@@ -9764,7 +9858,7 @@
       "registration": "mounted",
       "route": "/account/operations/eligibility",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:41"
+      "source": "backend/app/domains/public_service/router.py:47"
     },
     {
       "calls": [
@@ -9792,7 +9886,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:49"
+      "source": "backend/app/domains/public_service/router.py:55"
     },
     {
       "calls": [
@@ -9821,7 +9915,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests/{id}/export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:49"
+      "source": "backend/app/domains/public_service/router.py:55"
     },
     {
       "calls": [
@@ -9849,7 +9943,7 @@
       "registration": "mounted",
       "route": "/account/operations/diagnostics",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:57"
+      "source": "backend/app/domains/public_service/router.py:63"
     },
     {
       "calls": [
@@ -9881,7 +9975,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:69"
+      "source": "backend/app/domains/public_service/router.py:75"
     },
     {
       "calls": [
@@ -9912,7 +10006,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents/{id}/revoke",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:78"
+      "source": "backend/app/domains/public_service/router.py:84"
     },
     {
       "calls": [
@@ -9942,7 +10036,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents/{id}/access",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:86"
+      "source": "backend/app/domains/public_service/router.py:92"
     },
     {
       "calls": [
@@ -15989,19 +16083,19 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "52e967a1655cbd1cf2f4028a78796c1ce190a9ced8bb04af6a278e6990d9171a",
+    "backend/app/domains/modules/coverage.py": "45d4ddb99e75148b32e1c065c6382179717ef95415c5ec00da64a6b6165ba0f8",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
-    "backend/app/domains/modules/policy.py": "5a9340b3abb61d28fc7f5c34e0e88fc059027ac84745e5fa32f151e98799d626",
+    "backend/app/domains/modules/policy.py": "bee958920de30e075b855181361ef9c55870bcf0043ab9ae29c4cf2208547338",
     "backend/app/domains/modules/presentation.py": "46e1fa59088519d61d5ca227e4f4239cfc8eb386f3ee4f563afe194912f5bbe3",
     "backend/app/domains/modules/registry.py": "d053888dc602a6330e5cdd6447895aedc40bc62abbe9fb347a9b36fdf58b049f",
     "backend/app/domains/modules/router.py": "6c5c7e366ea709307498f3f2201ddd0869918ef80a7b53b95ec0e540c8b7e888",
     "backend/app/domains/modules/safety.py": "319c7ef40e7027347a8df5ad4b4425ceb73ce009574184a63b328a24f02d9df7",
     "backend/app/domains/modules/schemas.py": "7cc900780b66cd7a61c6c943c016df38215003c5d423b33b93d5aaade0475360",
-    "backend/app/domains/modules/service.py": "cc2c0439dd751d2eb57b7c9bb662e4f0c6f5eb6b25b50254cd1d0ba8585c6664",
+    "backend/app/domains/modules/service.py": "c3cca6be7d8e00dea4eac45a9c15c17f500941cb94884df7fffdb28b81ddba10",
     "backend/app/domains/modules/store.py": "1c99c65203a74e0d7566575947e7e0c6a08c130a8a7a6bc6263e157e508672fd",
     "backend/app/domains/modules/tasks.py": "0025bc5b8ac1ae1ba1d5f53d580c3a2075f50cbb1285902c22603fef9208f34d",
     "backend/app/domains/modules/transports.py": "76a61a9f1b4b8cca2ba6349c5a53c316c584ebd9dc3313ff3eed486ce650886e",
@@ -16106,6 +16200,10 @@
     "backend/app/domains/prompts/schemas.py": "a04ed42420332a671496b1af90faf71900b6f78f1e480a00ea31a4b3ed73bf36",
     "backend/app/domains/public_service/__init__.py": "f290a6b2cd54f19bbf468879cd8bd5aa1e15ec65c8e41f05fb2113945b16a32f",
     "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
+    "backend/app/domains/public_service/application_bindings.py": "3421a11113fcd93f0f141599aef37c9d6799348f7bf12e3f19bda5ad6d9e4702",
+    "backend/app/domains/public_service/application_router.py": "57d991dcae98e9dd31cd81aef7efd171151f01bc01b74e013811535049751222",
+    "backend/app/domains/public_service/canonical_privacy_inventory.py": "cca88bd86b5f6237d4559ce230c7ce61923374db71abc2e11149445d1ad44d01",
+    "backend/app/domains/public_service/canonical_privacy_resolvers.py": "c4310d2756eae62de7bed349e6c8718c4b2de382773b070f8a2ada9fa29b40ae",
     "backend/app/domains/public_service/composition.py": "dee5e25cce70739cfbd0c5c7651303f5e24f2231dfc040007a588775776c4380",
     "backend/app/domains/public_service/dispatch.py": "1ea190e31b4ad949570542b38d62fa292b6f3117827ced5639490b46701974ea",
     "backend/app/domains/public_service/drills.py": "40af5e7a31ba599d030dacb1ec646abf0b4e8eb576d8444ebbae9668126331ed",
@@ -16118,15 +16216,17 @@
     "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
     "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",
     "backend/app/domains/public_service/reviewed_residency.py": "e953df72a39d0c2430f7f548c25f9fdf4951d017d595a5d0c7a502f92bd32d50",
-    "backend/app/domains/public_service/router.py": "37da373e5617a55e535befcebdeeb077adc753e1e2a3b9a07ec53c0320132e70",
+    "backend/app/domains/public_service/router.py": "df39adbfb14b1ae668f688e886d85e09957f5fb72df7ecf87c30dd7a562145e6",
+    "backend/app/domains/public_service/safe_privacy_projection.py": "117d4680e4a301d22e9555e248707472f6090f93538b8ed7d731a82024e98d29",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
-    "backend/app/domains/public_service/signup.py": "58d03e41db8946bedd1ad28fc9afb7776dd1843cd51ca3f53ee46cdb19434328",
+    "backend/app/domains/public_service/signup.py": "76554717e70cc5a3ff4534b1efcbf242cfe059806cfaf34aa2a3faffb67eff8b",
     "backend/app/domains/public_service/signup_perimeter.py": "b8165624bde31f50f33e526f5240f9f876896c81fdc90b7ff84283497d7b2f00",
     "backend/app/domains/public_service/sql_account.py": "2fde37d94d0ecd4e56de4789675375bcc832d2a52f356a943240be9e6019fe56",
     "backend/app/domains/public_service/sql_privacy_plan.py": "752e4cde5d639ac454e501412ff8e13a5f17b1f8f655d4d2bcd2b62d5103545b",
     "backend/app/domains/public_service/sql_privacy_workflow.py": "e10e055ce118927ca2eff398225d8df704a7454f0867bbe4052c91d1c00ae505",
     "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",
     "backend/app/domains/public_service/support.py": "b70af3e72900bcc45be4bfa6c0b33287479a0d869a5a460778a2774212a86292",
+    "backend/app/domains/public_service/transaction_outcomes.py": "f9119b21e7fc1c5fe59efecd189bf39b7e67af06fc7be6c52cabb2b3012b8490",
     "backend/app/domains/recommendation_audit/__init__.py": "c3139e78f64ae4d6c83bb1c4ffe47918936c4a1dc6e8d61c1903c8619b3ce195",
     "backend/app/domains/recommendation_audit/adapters.py": "a81b5cf4e206a5d9808d2f987a578c960dddb32d671221e4d824551c1e65fa53",
     "backend/app/domains/recommendation_audit/calculation_capture.py": "79ad12574eabda04c0ddc70cee8c9a53f7b362b4bb76c5c6b70b0189605b02db",
@@ -16219,7 +16319,7 @@
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/outbox/job_dispatch.py": "021b44031560a9321214be3543faac030e530acbcf04074b9c4211916f99b694",
     "backend/app/infrastructure/database/outbox/models.py": "a331a3011182c6a6f7d959db71615c6622419d51f2d6d52a83750f5a5b0c703d",
-    "backend/app/infrastructure/database/session.py": "a9677b6bab386476db0493aa2f849a66c5f63312810aafa99a5e0be54947c2e9",
+    "backend/app/infrastructure/database/session.py": "b60efa4fb814548bc5701254273812999967d62d0d3dcc5993153939f47d9518",
     "backend/app/infrastructure/database/sync_session.py": "f974fe13644cf266ef6b1eba8e4280b5412475ce6a47b5f62be90dfd857cd29e",
     "backend/app/infrastructure/locks/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/locks/redis_lock.py": "31b04789da00e370d88d48300e19d38b825a3ee2fccca0b7337e3ac356305195",

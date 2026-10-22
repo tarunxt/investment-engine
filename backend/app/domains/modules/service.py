@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from app.core.uat2 import uat2_mode
 from app.domains.auth.models import ActivityLog
 from .models import UserModule
-from .policy import DefaultFactsResolver, ModuleFacts, decide
+from .policy import DefaultFactsResolver, ModuleFacts, decide, session_facts_resolver
 from .registry import ModuleConfigV1, REGISTRY, platform_available
 from .store import claim_version, conflict, read_snapshot
 from .schemas import ModuleCollection
@@ -12,7 +12,7 @@ from .schemas import ModuleCollection
 
 async def describe(db, owner_id: int, *, snapshot=None) -> dict:
     snapshot = snapshot or await read_snapshot(db, owner_id)
-    resolver = DefaultFactsResolver()
+    resolver = session_facts_resolver(db)
     modules = []
     for id, spec in REGISTRY.items():
         row = snapshot.rows.get(id)

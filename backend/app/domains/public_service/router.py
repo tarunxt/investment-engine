@@ -1,6 +1,8 @@
 """Owner-only request receipts. No external export, erasure or approval route."""
 from fastapi import APIRouter,Depends,HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
+from .transaction_outcomes import serialization_conflict
 from pydantic import BaseModel,Field,ConfigDict,StrictBool
 from app.domains.auth.dependencies import get_current_user
 from app.infrastructure.database.session import get_async_db
@@ -34,6 +36,10 @@ async def privacy_cancel(id:str,user=Depends(get_current_user),db=Depends(get_as
         value=await db.run_sync(lambda s:public_receipt(PrivacyRequests(s).cancel(user.id,id)));await db.commit();return response(value)
     except BoundaryDenied:
         await db.rollback();raise HTTPException(404,'Owned pending request required') from None
+    except DBAPIError as exc:
+        await db.rollback()
+        if serialization_conflict(exc):raise HTTPException(409,'Concurrent privacy change; retry in a fresh request',headers={'Retry-After':'1'}) from None
+        raise
 @router.get('/eligibility')
 async def eligibility(user=Depends(get_current_user),db=Depends(get_async_db)):
     return response(await eligibility_status(db,user.id))
@@ -88,3 +94,9 @@ async def support_read(id:str,scope:str,user=Depends(get_current_user),db=Depend
     try:return response(await db.run_sync(lambda s:SupportAccess(s).read(user.id,id,scope)))
     except BoundaryDenied:
         await db.rollback();raise HTTPException(403,'Support access denied') from None
+
+
+# No default binding: these authenticated routes return unavailable until an
+# explicit disposable application configuration is independently installed.
+from .application_router import router as disposable_router
+router.include_router(disposable_router)

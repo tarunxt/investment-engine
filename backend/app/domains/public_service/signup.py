@@ -34,5 +34,8 @@ def admit(db,email,*,now=None,limits=SignupLimits()):
     db.flush();return identity
 
 async def admit_signup(db,email):
+    from .application_bindings import configured_signup
+    configured=await configured_signup(db,email)
+    if configured is not None:return configured
     try:return await db.run_sync(lambda s:admit(s,email))
     except BoundaryDenied:raise HTTPException(429,'Account creation temporarily unavailable; retry later') from None

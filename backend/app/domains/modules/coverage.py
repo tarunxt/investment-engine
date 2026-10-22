@@ -46,6 +46,11 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         # Own read/control paths enforce owner + fresh dynamic module policy in
         # the service; cancellation/history remain available after disable.
         return None
+    if domain=='public_service' and source_module=='app.domains.public_service.application_router' and len(methods)==1 and (next(iter(methods)),path,endpoint) in {
+        ('GET','/account/operations/disposable/reviewed-eligibility','reviewed_eligibility'),
+        ('POST','/account/operations/disposable/privacy-requests/{id}/execute','execute_privacy'),
+        ('GET','/account/operations/disposable/privacy-requests/{id}/result','privacy_result')}:
+        return None # Authenticated exact owner; test-only binding plus disposable DB fences remain mandatory.
     if domain=='public_service' and len(methods)==1 and (next(iter(methods),''),path) in {
         ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests/{id}'),
         ('POST','/account/operations/privacy-requests/{id}/cancel'),('GET','/account/operations/privacy-requests/{id}/export'),
