@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 
 const root = new URL('../', import.meta.url);
 const lock = JSON.parse(readFileSync(new URL('package-lock.json', root), 'utf8'));
@@ -52,4 +53,21 @@ test('upgraded sharp performs a synthetic native image roundtrip', async () => {
   assert.equal(metadata.width, 2);
   assert.equal(metadata.height, 2);
   assert.equal(metadata.format, 'png');
+});
+test('shadcn stylesheet is preserved byte-for-byte with its MIT notice', () => {
+  const stylesheet = readFileSync(new URL('app/vendor/shadcn-tailwind.css', root), 'utf8');
+  assert.match(stylesheet, /Copyright \(c\) 2023 shadcn/);
+  assert.match(stylesheet, /Permission is hereby granted/);
+  const body = stylesheet.slice(stylesheet.indexOf('*/\n') + 3);
+  assert.equal(createHash('sha256').update(body).digest('hex'),
+    '146941ac3ff65496fdf1cb306e697255328e4dadc7c105d66e36bb031b00f6d6');
+  assert.match(readFileSync(new URL('app/globals.css', root), 'utf8'),
+    /@import "\.\/vendor\/shadcn-tailwind\.css"/);
+});
+test('unused shadcn CLI is absent and remaining unpatched braces is development-only', () => {
+  assert.ok(!lock.packages['node_modules/shadcn']);
+  const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith('node_modules/braces'));
+  // This is a placement guard, not a claim that the upstream vulnerability is fixed.
+  assert.ok(entries.length);
+  for (const [, entry] of entries) assert.equal(entry.dev, true);
 });
