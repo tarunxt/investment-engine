@@ -28,3 +28,16 @@ def test_real_kombu_visibility_timeout_is_not_restore_poll_interval(monkeypatch)
     qos.restore_visible();clock[0]=31
     qos.restore_visible(interval=1)  # Normal explicit recovery path, no timestamp mutation.
     assert restored==['owned-tag'] and len(queries)==2
+
+
+import pytest
+
+@pytest.mark.parametrize('command,args',[
+    ('ZREVRANGEBYSCORE',('private-index','+inf','-inf')),
+    ('HGET',('private-unacked','owned-tag')),
+])
+def test_recovery_inspection_commands_use_real_kombu_global_prefix(command,args):
+    class PrefixProbe(transport.GlobalKeyPrefixMixin):global_keyprefix='private-fixture:'
+    rewritten=PrefixProbe()._prefix_args((command,*args))
+    assert rewritten[1]=='private-fixture:'+args[0]
+    assert rewritten[2:]==list(args[1:])

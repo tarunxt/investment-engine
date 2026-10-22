@@ -220,7 +220,7 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
         with app.connection_for_read() as recovery:
             channel=recovery.channel()
             with channel.conn_or_acquire() as client:
-                reservations=client.zrange(channel.unacked_index_key,0,-1,withscores=True)
+                reservations=client.zrevrangebyscore(channel.unacked_index_key,'+inf','-inf',withscores=True)
                 assert len(reservations)==1
                 tag,score=reservations[0]
                 body=json.loads(client.hget(channel.unacked_key,tag))
@@ -232,9 +232,9 @@ def test_actual_worker_crash_after_fake_acceptance_restart_never_resubmits(datab
                     assert time.monotonic()<deadline,'Redis reservation did not expire in bounded time'
                     time.sleep(.05)
                 assert abs(server_time-time.time())<1,'Redis/container wall clocks disagree'
-                assert client.hexists(channel.unacked_key,tag)
+                assert client.hget(channel.unacked_key,tag) is not None
             channel.qos.restore_visible(interval=1)
-            with channel.conn_or_acquire() as client:assert not client.hexists(channel.unacked_key,tag)
+            with channel.conn_or_acquire() as client:assert client.hget(channel.unacked_key,tag) is None
             channel.close()
         ready=ctx.Event();second=ctx.Process(target=start_worker,args=(False,now+timedelta(seconds=31),ready));processes.append(second);second.start()
         assert ready.wait(10),'Replacement owned worker did not become ready'
