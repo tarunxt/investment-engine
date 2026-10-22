@@ -1774,6 +1774,9 @@ jobs:
           POSTGRES_PASSWORD: stage09
           POSTGRES_DB: credx_stage09_test
         options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       PYTHONPATH: backend
       ENVIRONMENT: test
@@ -1781,6 +1784,8 @@ jobs:
       DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
       REDIS_URL: redis://127.0.0.1:1/15
       CREDX_STAGE09_DATABASE_ACK: disposable-docker-only
+      CREDX_STAGE17_REDIS_URL: redis://redis:6379/14
+      CREDX_STAGE17_REDIS_ACK: disposable-ci-only
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1791,12 +1796,16 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify public-service boundaries and actual PostgreSQL privacy races
-        run: python -m pytest -q --junitxml=/tmp/stage17.xml backend/tests/test_stage17_public_service.py backend/tests/test_stage17_closure.py backend/tests/test_stage17_dispatch.py backend/tests/test_stage17_governed_dispatch.py backend/tests/test_stage17_dependency_boundaries.py backend/tests/test_stage17_postgres.py
+        run: python -m pytest -q --junitxml=/tmp/stage17.xml backend/tests/test_stage17_public_service.py backend/tests/test_stage17_closure.py backend/tests/test_stage17_dispatch.py backend/tests/test_stage17_governed_dispatch.py backend/tests/test_stage17_dependency_boundaries.py backend/tests/test_stage17_postgres.py backend/tests/test_stage17_reviewed_residency.py backend/tests/test_stage17_sql_account.py backend/tests/test_stage17_sql_account_postgres.py backend/tests/test_stage17_sql_privacy_plan.py backend/tests/test_stage17_composition.py backend/tests/test_stage17_monitor_dispatch.py backend/tests/test_stage17_signup_perimeter.py backend/tests/test_stage17_real_services.py
       - name: Require all Stage17 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage17.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage17 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 172
+          cases=root.findall('.//testcase')
+          assert len(cases) == 271
+          for module,count in {'test_stage17_postgres':7, 'test_stage17_sql_account_postgres':2, 'test_stage17_real_services':4}.items():
+              assert sum(case.attrib.get('classname','').split('.')[-1] == module for case in cases) == count, module
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
