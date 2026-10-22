@@ -296,14 +296,7 @@ class SQLAccountReader:
         # identifiers or silently conceal an integrity violation.
         selected = {rule.table for rule in self.inventory.rules if not rule.excluded_reason
                     and rule.owner_semantics == APPLICATION_OWNER_SEMANTICS}
-        links = {
-            'recommendation_verifications': (
-                ('current_id', 'recommendation_decisions', False),
-                ('previous_id', 'recommendation_decisions', True)),
-            'recommendation_spend_attempts': (
-                ('account_id', 'recommendation_spend_accounts', False),
-                ('verification_id', 'recommendation_verifications', True)),
-        }
+        from .privacy_relations import APPLICATION_LINKS as links
         for name in sorted(selected & links.keys()):
             table = self.metadata.tables[name]
             for column, target, optional in links[name]:

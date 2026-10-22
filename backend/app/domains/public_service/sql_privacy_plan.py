@@ -13,6 +13,7 @@ from app.domains.auth.models import ActivityLog
 from app.domains.connections.crypto import ConnectionKeyring, ConnectionFault
 from app.infrastructure.database.outbox.models import OutboxMessage
 from .privacy import PrivacyRequests
+from .privacy_relations import relationships,relationship_hash
 from .sql_account import SQLAccountReader, AccountTableRule
 
 TOPIC = 'public_service.privacy.sql_plan.v1'
@@ -73,6 +74,7 @@ class SQLPrivacyPlanner:
             if rule.table in {'activity_logs', 'outbox'} else rule for rule in inventory.rules))
         export = SQLAccountReader(self.db, self.reader.metadata, projection).export(owner)
         metadata = self.reader.metadata; names = set(metadata.tables)
+        edges = relationships(metadata)
         retention_hash = self.retention.fingerprint(names, now)
         until = dict(self.retention.retain_until)
         rules = {r.table: r for r in self.reader.inventory.rules}
@@ -87,19 +89,14 @@ class SQLPrivacyPlanner:
         changed = True
         while changed:
             changed = False
-            for name in tuple(reasons):
-                for fk in metadata.tables[name].foreign_key_constraints:
-                    for edge in fk.elements:
-                        parent = edge.column.table.name
-                        if parent in names and parent not in reasons:
-                            reasons[parent] = 'HELD_DEPENDENT_RELATIONSHIP'; changed = True
+            for edge in edges:
+                if edge.child in reasons and edge.parent not in reasons:
+                    reasons[edge.parent] = 'HELD_DEPENDENT_RELATIONSHIP'; changed = True
         candidates = names - set(reasons)
         children = {name: set() for name in candidates}
-        for name in candidates:
-            for fk in metadata.tables[name].foreign_key_constraints:
-                for edge in fk.elements:
-                    parent = edge.column.table.name
-                    if parent in candidates: children[parent].add(name)
+        for edge in edges:
+            if edge.child in candidates and edge.parent in candidates:
+                children[edge.parent].add(edge.child)
         order, remaining = [], set(candidates)
         while remaining:
             ready = sorted(name for name in remaining if not (children[name] & remaining))
@@ -112,6 +109,7 @@ class SQLPrivacyPlanner:
                 'request_hash': request.payload['receipt_hash'], 'account_hash': export['content_hash'],
                 'inventory_hash': self.reader.inventory.schema_digest, 'retention_hash': retention_hash,
                 'inventory_policy_hash': digest(asdict(inventory)),
+                'relationship_hash': relationship_hash(edges),
                 'retained_operational_boundary': sorted(names & {'activity_logs', 'outbox'}),
                 'actions': actions, 'child_first_order': order, 'blocked_relationships': sorted(remaining),
                 'expires_at': request.payload['expires_at'], 'deletion_executable': False,
