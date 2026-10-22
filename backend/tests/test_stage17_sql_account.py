@@ -223,3 +223,25 @@ def test_partial_predicate_literal_changes_change_review_fingerprint():
               postgresql_where=table.c.user_id == value)
         return schema_digest(metadata)
     assert fingerprint(1) != fingerprint(2)
+
+
+def test_postgresql_float_storage_aliases_preserve_real_schema_distinctions():
+    from sqlalchemy import Float, REAL, DOUBLE_PRECISION, Numeric, DateTime
+    from sqlalchemy.dialects import postgresql, sqlite
+    from app.domains.public_service.sql_account import _physical_type
+    pg = postgresql.dialect()
+    for value in (Float(), Float(25), Float(53), DOUBLE_PRECISION()):
+        assert _physical_type(value, pg) == 'DOUBLE PRECISION'
+    for value in (Float(1), Float(24), REAL()):
+        assert _physical_type(value, pg) == 'REAL'
+    assert _physical_type(Float(24), pg) != _physical_type(Float(25), pg)
+    for left, right in ((Numeric(12, 2), Numeric(12, 3)), (String(12), String(13)),
+                        (DateTime(timezone=True), DateTime(timezone=False)),
+                        (Integer(), Float()), (Numeric(12, 2), Float())):
+        assert _physical_type(left, pg) != _physical_type(right, pg)
+    assert _physical_type(Float(54), pg) == 'FLOAT(54)'
+    # SQLAlchemy compiles precision zero as unqualified FLOAT, so compare its actual DDL.
+    assert Float(0).compile(dialect=pg) == 'FLOAT'
+    assert _physical_type(Float(0), pg) == 'DOUBLE PRECISION'
+    assert _physical_type(Float(), sqlite.dialect()) == 'FLOAT'
+    assert _physical_type(REAL(), sqlite.dialect()) == 'REAL'

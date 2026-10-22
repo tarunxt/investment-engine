@@ -77,6 +77,23 @@ def _application_owner_table(table):
     return schema_digest(actual_meta) == schema_digest(expected_meta)
 
 
+def _physical_type(column_type, dialect):
+    """Compare PostgreSQL float aliases by storage precision, never affinity.
+
+    PostgreSQL 16 numeric types: FLOAT without precision is DOUBLE PRECISION;
+    FLOAT(1..24) is REAL and FLOAT(25..53) is DOUBLE PRECISION. Other types,
+    dialects and invalid precisions retain their exact compiled spelling.
+    """
+    rendered = column_type.compile(dialect=dialect)
+    if dialect.name == 'postgresql':
+        match = re.fullmatch(r'FLOAT(?:\((\d+)\))?', rendered)
+        if match:
+            precision = int(match.group(1)) if match.group(1) else 53
+            if 1 <= precision <= 53:
+                return 'REAL' if precision <= 24 else 'DOUBLE PRECISION'
+    return rendered
+
+
 def _credential_column(name):
     normalized = re.sub('[^a-z0-9]', '', name.lower())
     return normalized in {'key', 'apikey', 'accesskey', 'authorization', 'bearer'} or bool(re.search(
@@ -215,8 +232,8 @@ class SQLAccountReader:
         if actual != set(self.metadata.tables): raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
         for name, table in self.metadata.tables.items():
             if table.schema is not None: raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
-            expected = {(c.name, c.type.compile(dialect=connection.dialect), c.nullable) for c in table.columns}
-            observed = {(c['name'], c['type'].compile(dialect=connection.dialect), c['nullable']) for c in inspector.get_columns(name)}
+            expected = {(c.name, _physical_type(c.type, connection.dialect), c.nullable) for c in table.columns}
+            observed = {(c['name'], _physical_type(c['type'], connection.dialect), c['nullable']) for c in inspector.get_columns(name)}
             if expected != observed: raise BoundaryDenied('ACCOUNT_DATABASE_SCHEMA_CHANGED')
             # Columns alone do not prove ownership semantics: compare the real
             # FK targets/options and owner-critical referenced key structures.

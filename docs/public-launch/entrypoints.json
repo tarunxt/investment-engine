@@ -10005,7 +10005,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/sql_account.py:314"
+      "source": "backend/app/domains/public_service/sql_account.py:331"
     },
     {
       "calls": [
@@ -16122,7 +16122,7 @@
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
     "backend/app/domains/public_service/signup.py": "58d03e41db8946bedd1ad28fc9afb7776dd1843cd51ca3f53ee46cdb19434328",
     "backend/app/domains/public_service/signup_perimeter.py": "b8165624bde31f50f33e526f5240f9f876896c81fdc90b7ff84283497d7b2f00",
-    "backend/app/domains/public_service/sql_account.py": "9f200ef4120c0e7a98fb45d724c426cd8467e6220620cc97b0ce0e294ab8b185",
+    "backend/app/domains/public_service/sql_account.py": "00b6ab0367c2eba69a27692c529ebc1d3117eeb9376dd6e59b9c1c51463ab85b",
     "backend/app/domains/public_service/sql_privacy_plan.py": "752e4cde5d639ac454e501412ff8e13a5f17b1f8f655d4d2bcd2b62d5103545b",
     "backend/app/domains/public_service/sql_privacy_workflow.py": "e10e055ce118927ca2eff398225d8df704a7454f0867bbe4052c91d1c00ae505",
     "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",

@@ -8,7 +8,7 @@ from pathlib import Path
 from dataclasses import replace
 from uuid import uuid4
 import pytest
-from sqlalchemy import MetaData, Table, Column, Integer, String, Boolean, ForeignKey, Index, create_engine
+from sqlalchemy import MetaData, Table, Column, Integer, String, Boolean, ForeignKey, Index, Float, create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateSchema, DropSchema
@@ -31,13 +31,13 @@ def pg_reader():
     Table('users', metadata, Column('id', Integer, primary_key=True), Column('email', String),
         Column('is_active', Boolean, nullable=False), Column('is_verified', Boolean, nullable=False))
     table = Table('portfolios', metadata, Column('id', Integer, primary_key=True),
-        Column('user_id', ForeignKey('users.id'), nullable=False), Column('name', String))
+        Column('user_id', ForeignKey('users.id'), nullable=False), Column('name', String), Column('measurement', Float))
     Index('reviewed_owner_name', table.c.name, unique=True, postgresql_where=table.c.user_id == 1)
     try:
         metadata.create_all(engine)
         with engine.begin() as db:
             db.execute(metadata.tables['users'].insert(), [dict(id=i, email=f'fixture{i}@example.invalid', is_active=True, is_verified=True) for i in (1, 2)])
-            db.execute(table.insert(), [dict(id=i, user_id=i, name=f'private-{i}') for i in (1, 2)])
+            db.execute(table.insert(), [dict(id=i, user_id=i, name=f'private-{i}', measurement=1.25) for i in (1, 2)])
         inventory = AccountInventory('fixture-pg-review', schema_digest(metadata), (
             AccountTableRule('users', tuple(metadata.tables['users'].c.keys()), owner_column='id'),
             AccountTableRule('portfolios', tuple(table.c.keys()))))
@@ -51,7 +51,7 @@ def test_actual_pg_matching_partial_expression_index_preserves_owned_export(pg_r
     engine, metadata, inventory = pg_reader
     with Session(engine) as db:
         result = SQLAccountReader(db, metadata, inventory).export(1)
-        assert result['datasets']['portfolios'] == [{'id': 1, 'user_id': 1, 'name': 'private-1'}]
+        assert result['datasets']['portfolios'] == [{'id': 1, 'user_id': 1, 'name': 'private-1', 'measurement': 1.25}]
 
 def test_actual_pg_changed_partial_predicate_rejects_before_export(pg_reader):
     engine, metadata, inventory = pg_reader; physical = MetaData(); physical.reflect(engine)
@@ -100,3 +100,14 @@ def test_actual_pg_cross_owner_application_reference_rejects(pg_canonical_mappin
     with Session(engine) as db:
         db.execute(t.update().where(t.c.user_id==1).values({column:value}));db.commit()
         with pytest.raises(BoundaryDenied,match='REFERENCE_OWNER_MISMATCH'):SQLAccountReader(db,metadata,inventory).export(1)
+
+
+@pytest.mark.parametrize('alter_type', ['REAL', 'NUMERIC(12, 2)'])
+def test_actual_pg_float_precision_or_numeric_drift_rejects_before_export(pg_reader, alter_type):
+    from sqlalchemy import text
+    engine, metadata, inventory = pg_reader
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE portfolios ALTER COLUMN measurement TYPE ' + alter_type))
+    with Session(engine) as db:
+        with pytest.raises(BoundaryDenied, match='SCHEMA_CHANGED'):
+            SQLAccountReader(db, metadata, inventory).export(1)
