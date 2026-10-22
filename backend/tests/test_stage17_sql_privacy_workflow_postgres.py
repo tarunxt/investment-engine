@@ -1,10 +1,10 @@
 """Prepared real PostgreSQL SQL-erasure gates; not local acceptance evidence."""
-import os
+import os,json
 from datetime import datetime,timezone,timedelta
 from concurrent.futures import ThreadPoolExecutor
 import threading,time
 import pytest
-from sqlalchemy import select,func,event,text
+from sqlalchemy import select,func,event,text,inspect
 from sqlalchemy.orm import Session
 from app.infrastructure.database.base import Base
 from app.infrastructure.database.outbox.models import OutboxMessage
@@ -17,9 +17,32 @@ from app.domains.public_service.sql_privacy_workflow import DisposablePrivacySco
 from test_stage09_connections_postgres import database
 pytestmark=pytest.mark.skipif(os.getenv('CREDX_STAGE09_DATABASE_ACK')!='disposable-docker-only',reason='Acknowledged disposable real PostgreSQL required; CI must reject skips')
 
+def schema_only_unique_diagnostics(connection, metadata):
+    """Read schema names/definitions only, never row values, URLs or keys."""
+    inspector=inspect(connection);differences=[]
+    for name,table in sorted(metadata.tables.items()):
+        expected=sorted(tuple(c.name for c in constraint.columns) for constraint in table.constraints
+            if constraint.__class__.__name__=='UniqueConstraint')
+        observed=inspector.get_unique_constraints(name)
+        actual=sorted(tuple(item['column_names']) for item in observed)
+        if expected!=actual:
+            differences.append({'table':name,'expected_unique_columns':expected,
+                'actual_unique_columns':actual,
+                'expected_primary_columns':tuple(c.name for c in table.primary_key),
+                'actual_primary_columns':inspector.get_pk_constraint(name)['constrained_columns'],
+                'unique_constraint_names':[item['name'] for item in observed],
+                'indexes':[{'name':item['name'],'columns':item['column_names'],
+                    'unique':item.get('unique'), 'duplicates_constraint':item.get('duplicates_constraint')}
+                    for item in inspector.get_indexes(name)]})
+    return differences
+
+
 @pytest.fixture
 def pg_workflow(database):
     original,_,owner,_,ring=database;engine=original.execution_options(isolation_level='SERIALIZABLE');now=datetime.now(timezone.utc)
+    with engine.connect() as connection:
+        differences=schema_only_unique_diagnostics(connection,Base.metadata)
+    assert not differences,'Disposable PostgreSQL uniqueness diagnostic: '+json.dumps(differences,sort_keys=True)
     with Session(engine) as db:
         foreign=User(email='foreign-privacy@example.invalid',username='foreign_privacy',password_hash='synthetic-unusable',is_active=True,is_verified=True,profile=UserProfile())
         db.add(foreign);db.flush();other=foreign.id
