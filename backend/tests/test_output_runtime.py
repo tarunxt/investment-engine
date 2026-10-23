@@ -254,3 +254,13 @@ def test_failed_cancellation_read_preserves_original_failure(monkeypatch):
     failed.assert_called_once()
     assert failed.call_args.args[3]=='p/m returned invalid output contract (synthetic)'
     assert current_output_context() is None
+
+
+def test_rebalance_repair_keeps_existing_holding_overlap_explicit(scoped):
+    job = scoped(make_job('rebalance'))
+    prompt = tasks._build_rebalance_table_repair_prompt(job.prompt, 'Original invalid output', 'row_width')
+    assert job.prompt in prompt
+    assert 'never label it Buy New or add a second row' in prompt
+    assert 'Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot' in prompt
+    assert 'snapshot labeled US, a matching symbol at a known US venue is the same existing holding' in prompt
+    assert prompt.endswith('Original invalid output')
