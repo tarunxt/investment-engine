@@ -1,0 +1,158 @@
+#!/usr/bin/env node
+/** CI-only real rendered UI + guarded synthetic backend. Never a deploy command. */
+import assert from 'node:assert/strict';
+import {execFileSync,spawn} from 'node:child_process';
+import {readFileSync,writeFileSync,existsSync,mkdirSync} from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+import {chromium} from 'playwright';
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const runtime=path.join(root,'.runtime/stage01-preview');
+const evidence=path.resolve(process.env.LINKED_BROWSER_EVIDENCE || '/tmp/linked-browser-evidence');
+const python=process.env.LINKED_BROWSER_PYTHON || 'python';
+const sourceSha=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
+assert.match(sourceSha,/^[a-f0-9]{40}$/);
+mkdirSync(evidence,{recursive:true});
+const receipt={kind:'real_ui_guarded_fake_preview',source_sha:sourceSha,passed:false,checks:[],screenshots:[],
+ real_provider_certification:false,deployed_uat2_verified:false,public_runtime_verified:false,
+ scope:'Real login, selection, governed India analysis and exact UI approval; synthetic current-version source, fake venue, SQLite. Unknown transition is durable-store evidence, not guaranteed visible UI.',
+ launcher_deviation:'Outside-repository copy with fixed ROOT and explicit existing STAGE01_EXECUTION_FAULT only; original guards unchanged.'};
+const receiptPath=path.join(evidence,'receipt.json');
+function save(){writeFileSync(receiptPath,JSON.stringify(receipt,null,2)+'\n');}
+save();
+// Never reuse a prior preview, imported user database or inherited app environment.
+assert(!existsSync(runtime),'Fresh checkout required: existing preview runtime is not disposable by assumption');
+for(const folder of [root,path.join(root,'frontend')])for(const name of ['.env','.env.local','.env.production','.env.production.local'])assert(!existsSync(path.join(folder,name)),'Inherited app environment refused');
+const launcherSource=readFileSync(path.join(root,'scripts/public_launch/preview.py'),'utf8');
+const rootLine='ROOT = Path(__file__).resolve().parents[2]';
+const faultAnchor='"STAGE01_PREVIEW": "synthetic-only",';
+assert.equal(launcherSource.split(rootLine).length,2);assert.equal(launcherSource.split(faultAnchor).length,2);
+let launcher,started=false,browser,launcherChild,launcherClosed;
+function makeLauncher(fault){
+ assert(['partial','after_acceptance'].includes(fault));
+ const text=launcherSource.replace(rootLine,`ROOT = Path(${JSON.stringify(root)})`).replace(faultAnchor,`${faultAnchor} "STAGE01_EXECUTION_FAULT": "${fault}",`);
+ launcher=path.join(evidence,`preview-${fault}.py`);writeFileSync(launcher,text);
+ receipt.launchers??={};receipt.launchers[fault]=createHash('sha256').update(text).digest('hex');
+}
+function command(args,timeout=120000){return execFileSync(python,[launcher,...args],{cwd:root,encoding:'utf8',timeout,maxBuffer:4*1024*1024});}
+async function start(fault){
+ makeLauncher(fault);started=true;
+ launcherChild=spawn(python,['-u',launcher,'start','--foreground'],{cwd:root,stdio:['ignore','pipe','pipe']});
+ let output='';launcherClosed=false;let launchError;
+ launcherChild.once('error',e=>{launchError=e;launcherClosed=true;});launcherChild.once('close',()=>{launcherClosed=true;});
+ const collect=chunk=>{output+=chunk;writeFileSync(path.join(evidence,`startup-${fault}.log`),output);};
+ launcherChild.stdout.on('data',collect);launcherChild.stderr.on('data',collect);
+ await until(()=>{if(launchError)throw launchError;if(launcherClosed)throw Error('Preview exited before readiness: '+output);return output.includes('Foreground preview: Ctrl-C stops only these owned children');},90000);
+ return JSON.parse(readFileSync(path.join(runtime,'state.json'),'utf8'));
+}
+async function stop(){
+ if(!started)return;
+ if(!launcherClosed){launcherChild.kill('SIGINT');await until(()=>launcherClosed,20000);}
+ // Foreground launcher owns and waits for both children before deleting state.
+ assert(!existsSync(path.join(runtime,'state.json')),'Preview cleanup incomplete; retain state and do not start another preview');started=false;
+}
+function sql(query,params=[],{venue=false}={}){
+ const file=path.join(runtime,venue?'execution-venue.sqlite3':'preview.sqlite3');
+ return JSON.parse(execFileSync(python,['-c',`import sqlite3,json,sys\nc=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True);c.row_factory=sqlite3.Row\nprint(json.dumps([dict(r) for r in c.execute(sys.argv[2],json.loads(sys.argv[3]))]))`,file,query,JSON.stringify(params)],{encoding:'utf8'}));
+}
+async function until(fn,timeout=30000){const end=Date.now()+timeout;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,100));}throw Error('Bounded linked preview condition timed out');}
+async function shot(page,name){const file=path.join(evidence,`${name}.png`);await page.screenshot({path:file,fullPage:true});receipt.screenshots.push(path.basename(file));save();}
+async function login(base,name){
+ const context=await browser.newContext({serviceWorkers:'block'});
+ await context.route('**/*',route=>new URL(route.request().url()).origin===base?route.continue():route.abort('blockedbyclient'));
+ await context.routeWebSocket('**/*',socket=>socket.close());
+ const page=await context.newPage();page.setDefaultTimeout(30000);
+ await page.goto(base+'/login?redirectTo=/console/profile/preferences');
+ await page.getByLabel('Email Address',{exact:true}).fill(name+'@stage01.example.com');
+ await page.getByLabel('Password',{exact:true}).fill('SyntheticPreview123!');
+ await page.getByRole('button',{name:'Sign In',exact:true}).click();
+ await page.waitForURL(base+'/console/profile/preferences');
+ await page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).waitFor();
+ return {context,page};
+}
+async function enable(page){const box=page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true});assert.equal(await box.isChecked(),false);await box.click();await until(()=>box.isChecked());}
+async function analyze(page,base,owner){
+ await page.goto(base+'/console/automated-rebalance');
+ const region=page.getByRole('region',{name:'Server analysis'});
+ await region.getByLabel('Portfolio',{exact:true}).selectOption('india');
+ await region.getByRole('button',{name:'Start server analysis',exact:true}).click();
+ await region.getByRole('heading',{name:/Workflow \d+ · india · completed/}).waitFor({timeout:90000});
+ const flow=sql("SELECT id FROM auto_rebalance_workflows WHERE user_id=? AND portfolio='india' AND status='completed' ORDER BY id DESC LIMIT 1",[owner])[0];assert(flow);
+ const stages=sql('SELECT stage,status FROM auto_rebalance_workflow_stages WHERE workflow_id=?',[flow.id]);
+ assert.equal(stages.length,6);assert(stages.every(s=>s.status==='completed'));
+ const spend=sql('SELECT status,actual_usd,request_hash FROM recommendation_spend_attempts WHERE user_id=?',[owner]);
+ assert.equal(spend.length,5);assert(spend.every(s=>s.status==='settled'&&s.actual_usd!==null&&Number(s.actual_usd)===0&&/^[a-f0-9]{64}$/.test(s.request_hash)));
+ await shot(page,`owner-${owner}-six-stage-analysis`);
+ const row=await until(()=>sql("SELECT id,state,review_digest,approved_at,account_id,app_mode,connection_version,payload_json FROM confirmed_order_intents WHERE owner_id=? ORDER BY created_at DESC LIMIT 1",[owner])[0]);
+ assert.equal(row.state,'awaiting_approval');assert.equal(row.approved_at,null);assert.match(row.review_digest,/^[a-f0-9]{64}$/);
+ assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[row.id])[0].n,0);
+ await page.goto(base+'/console/profile/activity');
+ const card=page.getByRole('article',{name:'Order '+row.id});await card.getByText('awaiting approval',{exact:true}).waitFor();
+ const payload=JSON.parse(row.payload_json);
+ assert.deepEqual(payload,{sequencing:'listed',legs:[{exchange:'NSE',symbol:'SYNTHETIC0',side:'SELL',quantity:2,limit_price:'10.01',product:'CNC',order_type:'LIMIT'}]});
+ const legs=card.getByRole('list',{name:'Exact persisted basket instructions'}).getByRole('listitem');
+ assert.equal(await legs.count(),1);await legs.first().getByText(/SELL 2 NSE:SYNTHETIC0 · LIMIT ₹10.01 · CNC/).waitFor();
+ const mode=row.app_mode==='user_owned'?'Your Kite app':'CredX-managed Kite app';
+ await card.getByText(`Intent ${row.id} · Account ••••${row.account_id.slice(-2)} · ${mode} · connection version ${row.connection_version}`,{exact:true}).waitFor();
+ await shot(page,`owner-${owner}-exact-unapproved-review`);
+ return {row,card,flow};
+}
+async function approve(page,row,card){
+ const request=page.waitForRequest(r=>r.url().endsWith(`/order-intents/${row.id}/approve`)&&r.method()==='POST');
+ await card.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).click();
+ assert.deepEqual((await request).postDataJSON(),{displayed_digest:row.review_digest,action:'confirm_exact_order_or_basket'});
+}
+function venueCount(){return sql('SELECT count(*) n FROM synthetic_venue_orders',[],{venue:true})[0].n;}
+try{
+ makeLauncher('partial');writeFileSync(path.join(evidence,'build.log'),command(['build'],600000));
+ let state=await start('partial');const base=new URL(state.url).origin;
+ const fingerprint=await (await fetch(base+'/api/runtime-fingerprint')).json();assert.equal(fingerprint.build_sha,sourceSha);receipt.served_fingerprint=fingerprint;
+ browser=await chromium.launch({headless:true,env:{PATH:process.env.PATH,HOME:'/tmp'}});
+ const a=await login(base,'usera'),b=await login(base,'userb');
+ const owners=Object.fromEntries(sql("SELECT username,id FROM users WHERE username IN ('usera','userb')").map(r=>[r.username,r.id]));
+ await enable(a.page);await enable(b.page);
+ const first=await analyze(a.page,base,owners.usera);
+ await b.page.goto(base+'/console/profile/activity');
+ await b.page.getByText('No persisted order intents in these account records.',{exact:false}).waitFor();
+ assert.equal(await b.page.getByRole('article',{name:'Order '+first.row.id}).count(),0);
+ receipt.checks.push('real_login_two_owners_no_foreign_review','unapproved_analysis_creates_no_execution');save();
+ await approve(a.page,first.row,first.card);
+ await until(()=>sql('SELECT state FROM confirmed_order_intents WHERE id=?',[first.row.id])[0].state==='partial');
+ await a.page.getByRole('button',{name:'Refresh recorded order status',exact:true}).click();
+ await first.card.getByRole('heading',{name:'Unresolved: partial',exact:true}).waitFor();
+ await first.card.getByText(/filled 1 of 2/).waitFor();assert.equal(venueCount(),1);
+ await shot(a.page,'partial-ui-before-restart');await stop();state=await start('partial');
+ await a.page.reload();const again=a.page.getByRole('article',{name:'Order '+first.row.id});
+ await again.getByRole('heading',{name:'Unresolved: partial',exact:true}).waitFor();assert.equal(venueCount(),1);
+ assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[first.row.id])[0].n,1);
+ await shot(a.page,'partial-ui-after-restart');receipt.checks.push('exact_http_approval_partial_ui_restart_no_replay');save();
+ // Cancel a disable first, then actually disable. Neither action may resubmit.
+ await a.page.goto(base+'/console/profile/preferences');const selection=a.page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true});
+ await selection.click();await a.page.getByRole('button',{name:'Keep selected',exact:true}).click();assert(await selection.isChecked());
+ await selection.click();await a.page.getByRole('button',{name:'Confirm disable',exact:true}).click();await until(async()=>!await selection.isChecked());
+ await a.page.goto(base+'/console/profile/activity');await a.page.getByRole('article',{name:'Order '+first.row.id}).waitFor();assert.equal(venueCount(),1);
+ receipt.checks.push('cancelled_disable_preserves_selection_actual_disable_preserves_order_history');save();
+ await stop();state=await start('after_acceptance');
+ const second=await analyze(b.page,base,owners.userb);
+ await approve(b.page,second.row,second.card);
+ // Catch and persist the real durable unknown transition before restart; do not
+ // pretend a browser screenshot necessarily caught this short-lived state.
+ const unknown=await until(()=>{const r=sql('SELECT state,approved_at FROM confirmed_order_intents WHERE id=?',[second.row.id])[0];return r.state==='unknown'?r:null;});
+ receipt.unknown_transition={intent:second.row.id,...unknown,observed_by:'read-only SQLite query',observed_at:new Date().toISOString()};save();
+ await stop();assert.equal(sql('SELECT state FROM confirmed_order_intents WHERE id=?',[second.row.id])[0].state,'unknown','Unknown must remain durable after quiescent shutdown, not reconcile before restart');const countBefore=venueCount();assert.equal(countBefore,2);state=await start('after_acceptance');
+ await until(()=>sql('SELECT state FROM confirmed_order_intents WHERE id=?',[second.row.id])[0].state==='filled');
+ await b.page.reload();const reconciled=b.page.getByRole('article',{name:'Order '+second.row.id});
+ await reconciled.getByRole('heading',{name:'filled',exact:true}).waitFor();await reconciled.getByText(/filled 2 of 2/).waitFor();
+ assert.equal(venueCount(),countBefore);assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[second.row.id])[0].n,1);
+ assert.equal(await reconciled.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).count(),0);
+ await shot(b.page,'unknown-restart-reconciled-ui');receipt.checks.push('accepted_unknown_durable_evidence_restart_filled_ui_one_venue_submission');
+ receipt.passed=true;
+}catch(error){receipt.error=String(error?.stack||error);throw error;}
+finally{
+ try{await browser?.close();}catch(error){receipt.passed=false;receipt.browser_cleanup_error=String(error);process.exitCode=1;}
+ try{await stop();receipt.cleanup='Owned preview stop succeeded; synthetic databases retained';}catch(error){receipt.passed=false;receipt.cleanup_error=String(error);process.exitCode=1;}
+ for(const name of ['backend.log','frontend.log']){const file=path.join(runtime,name);if(existsSync(file))writeFileSync(path.join(evidence,name),readFileSync(file));}
+ save();
+}

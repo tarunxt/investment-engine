@@ -735,7 +735,7 @@ jobs:
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.bundler == 'webpack' && 40 || 25 }}
     continue-on-error: ${{ matrix.bundler == 'turbopack' }}
     strategy:
       fail-fast: false
@@ -880,6 +880,36 @@ jobs:
           node scripts/verify-frontend-artifact-runtime.mjs \
             "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime" \
             "${SOURCE_SHA}"
+
+      - name: Set up Python for linked fake browser acceptance
+        if: matrix.bundler == 'webpack'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install existing synthetic backend dependencies
+        if: matrix.bundler == 'webpack'
+        timeout-minutes: 5
+        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt aiosqlite
+
+      - name: Verify real UI with isolated linked fake backend
+        if: matrix.bundler == 'webpack'
+        timeout-minutes: 15
+        working-directory: frontend
+        env:
+          LINKED_BROWSER_EVIDENCE: ${{ runner.temp }}/linked-browser-evidence
+        run: node scripts/linked-preview-playwright.mjs
+
+      - name: Retain linked fake browser evidence
+        if: always() && matrix.bundler == 'webpack'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linked-fake-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/linked-browser-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Record benchmark result
         if: always()
