@@ -99,3 +99,30 @@ and new owner acceptance. SQLite full-model canonical export correctly rejects
 its physical-schema mismatch; the prepared PostgreSQL composition check remains
 unrun on this executor. No production/UAT2 server operation or remote write took
 place. Existing checkpoints ad6790f, 4b6ede0 and 6537ae4 remain unchanged.
+
+## Selected spend-ledger successor (started 2026-10-23 22:56:03 UTC)
+
+HeldSpendFixturePrivacy now adds exact disposable recovery for recommendation
+spend accounts, attempts and verifications. It preserves spent/reserved/cap and
+quantitative receipt values; no refund or settlement is invented. Queued attempts
+become cancelled; started/reserved/uncertain attempts become cancelled_uncertain.
+Verification dispatch is disabled, leases cleared and claim fences advanced;
+queued/processing verifications are cancelled. Module versions rise above old
+attempt versions and stay disabled. Platform sentinel and other-owner balances
+remain unchanged. Foreign account references and invalid amounts are held before
+deletion; the existing source application-reference validator remains mandatory.
+
+Four focused new tests pass (actual source models, SQLite only), including final
+audit rollback after outer commit. The affected budget/governed-job/recovery and
+ownership regression run passed 142 cases, zero skips
+(`credx-held-spend-regression.xml`). Independent review found no verified authority
+revival or financial inconsistency and ran 25 overlapping focused tests. These
+counts must not be added together or treated as PostgreSQL concurrency evidence.
+The native privacy CI gate now contains 35 tests; no remote run was triggered.
+
+This closes selected internal spend recovery implementation, superseding the
+older blanket statement that all spend reservations have no adapter. Actual
+uncertain costs still require authoritative settlement evidence. Legacy live
+broker positions/orders and operator state remain unsupported by generic
+restoration. Full account export/erasure, runtime binding, deployment, and owner
+acceptance remain incomplete. Three exact policy decisions above remain gates.

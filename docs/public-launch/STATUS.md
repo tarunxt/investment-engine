@@ -1,3 +1,12 @@
+## Local held-spend recovery successor (2026-10-23)
+
+Selected spend account/attempt/verification recovery preserves balances and
+uncertain reservations while retiring old dispatch authority. Four new fixture
+checks and 142 affected regressions pass, zero skips; independent review found
+no additional verified defect. This adds to the immutable local financial/export
+checkpoint `1032da6fe50d7c2dd8f6779900c0399252015a24` and does not confer full
+privacy or hosted qualification. [Exact scope and remaining decisions](PRIVACY_DECISIONS_AND_STORE_MAP.md).
+
 ## Local financial/privacy successor (2026-10-23)
 
 Selected confirmed-order recovery, seven additional typed public/worker topic
