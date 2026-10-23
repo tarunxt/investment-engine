@@ -132,7 +132,147 @@ def seed_legacy(engine):
             connection.execute(legacy.insert().values(**values(legacy,user_id=identity,
                 access_token='opaque-synthetic-cipher-'+name, login_time=now, expires_at=now+timedelta(hours=1),
                 created_at=now,updated_at=now)))
+        # Nonempty private histories, plus unresolved nullable ownership. These
+        # are not dangling FK rows and no migration may invent their owner.
+        for owner in [*identities, None]:
+            job = connection.execute(metadata.tables['jobs'].insert().values(**values(
+                metadata.tables['jobs'], user_id=owner, prompt='synthetic historical job',
+                response='synthetic result', provider='synthetic', model='offline',
+                status='completed', created_at=now, updated_at=now)).returning(metadata.tables['jobs'].c.id)).scalar_one()
+            run = connection.execute(metadata.tables['runs'].insert().values(**values(
+                metadata.tables['runs'], user_id=owner, prompt='synthetic historical run',
+                prompt_preview='synthetic historical run', status='completed', current_stage=1,
+                auto_export_enabled=True,
+                created_at=now, updated_at=now)).returning(metadata.tables['runs'].c.id)).scalar_one()
+            connection.execute(metadata.tables['run_jobs'].insert().values(**values(
+                metadata.tables['run_jobs'], run_id=run, job_id=job, stage=1,
+                created_at=now, updated_at=now)))
     return identities
+
+
+def assert_legacy_preserved(before, after):
+    # New nullable lifecycle columns are allowed, but every original column and
+    # complete row multiplicity must remain byte-for-byte equal.
+    for table, encoded in before.items():
+        original = [json.loads(row) for row in encoded]
+        if not original:
+            assert not after[table], table
+            continue
+        columns = set(original[0])
+        projected = sorted(json.dumps({key: value for key, value in json.loads(row).items()
+                                      if key in columns}, sort_keys=True) for row in after[table])
+        assert projected == encoded, table
+    for table in ('jobs', 'runs'):
+        for encoded in after[table]:
+            row = json.loads(encoded)
+            assert row['module_id'] is None and row['module_version'] is None
+            assert row['module_cancel_requested'] is False
+
+
+def seed_populated_controls(engine, identities):
+    """Explicit synthetic choices at order_intents_001, never migration defaults."""
+    from datetime import datetime, timezone
+    from hashlib import sha256
+    now = datetime.now(timezone.utc)
+    metadata = MetaData(); metadata.reflect(engine)
+    with engine.begin() as connection:
+        for index, owner in enumerate(identities):
+            connection.execute(metadata.tables['user_module_preferences'].insert().values(
+                user_id=owner, version=1, updated_at=now))
+            connection.execute(metadata.tables['user_modules'].insert().values(user_id=owner,
+                module_id='ai_studio', enabled=index != 3, config={'schema_version': 1},
+                version=1, schedules_paused=True))
+            integration = connection.execute(select(metadata.tables['integration_connections']).where(
+                metadata.tables['integration_connections'].c.owner_id == owner)).mappings().one()
+            assert integration['status'] == 'legacy_review'
+            connection.execute(metadata.tables['connection_credentials'].insert().values(
+                id=str(uuid4()), connection_id=integration['id'], owner_id=owner,
+                ciphertext='synthetic-not-decryptable-'+str(owner), key_version=1))
+            intent = str(uuid4())
+            digest = sha256(('synthetic-'+str(owner)).encode()).hexdigest()
+            connection.execute(metadata.tables['confirmed_order_intents'].insert().values(
+                id=intent, owner_id=owner, operation_key_digest=digest, request_digest=digest,
+                connection_id=integration['id'], connection_version=1,
+                account_id='synthetic-unverified-'+str(owner), app_mode='platform_managed',
+                module_id='ai_studio', module_version=1, payload_json={'synthetic': True},
+                state='draft', created_at=now))
+            connection.execute(metadata.tables['confirmed_order_legs'].insert().values(
+                id=str(uuid4()), intent_id=intent, position=0, payload_digest=digest,
+                client_reference='synthetic-'+str(owner), state='draft', filled_quantity=0))
+
+
+def assert_populated_ownership(engine, identities):
+    from app.domains.runs.repository import PostgresRunRepository
+    from app.domains.modules.lifecycle import (ModuleLifecycleDenied, WorkIdentity,
+                                               current_sync, sync_owner_fence)
+    metadata = MetaData(); metadata.reflect(engine)
+    with Session(engine) as session:
+        for owner in identities:
+            for name, key in [('jobs', 'user_id'), ('runs', 'user_id'),
+                              ('integration_connections', 'owner_id'), ('connection_credentials', 'owner_id'),
+                              ('user_modules', 'user_id'), ('confirmed_order_intents', 'owner_id')]:
+                table = metadata.tables[name]
+                assert session.scalar(select(func.count()).select_from(table).where(table.c[key] == owner)) == 1
+            visible = session.scalars(PostgresRunRepository(session)._owned_query(owner)).all()
+            assert len(visible) == 1 and visible[0].user_id == owner
+        # Real repository filtering must hide corrupt cross-owner AND null-owner
+        # links, not just correctly owned histories. Roll back each probe.
+        from datetime import datetime
+        links, jobs, runs = (metadata.tables[name] for name in ('run_jobs', 'jobs', 'runs'))
+        own_run = session.scalar(select(runs.c.id).where(runs.c.user_id == identities[0]))
+        for other_owner in (identities[1], None):
+            foreign_job = session.scalar(select(jobs.c.id).where(jobs.c.user_id == other_owner))
+            probe = session.begin_nested()
+            try:
+                session.execute(links.insert().values(run_id=own_run, job_id=foreign_job,
+                    stage=2, created_at=datetime.utcnow(), updated_at=datetime.utcnow()))
+                assert not session.scalars(PostgresRunRepository(session)._owned_query(identities[0])).all()
+            finally:
+                probe.rollback()
+        # Nullable ownership is distinct from dangling relational references.
+        for source, column, target in [(links, 'job_id', jobs), (links, 'run_id', runs)]:
+            assert session.scalar(select(func.count()).select_from(source.outerjoin(
+                target, source.c[column] == target.c.id)).where(target.c.id.is_(None))) == 0
+        for name in ('jobs', 'runs'):
+            table = metadata.tables[name]
+            assert session.scalar(select(func.count()).select_from(table).where(table.c.user_id.is_(None))) == 1
+        with pytest.raises(ModuleLifecycleDenied, match='Current account required'):
+            sync_owner_fence(session, None)
+        with pytest.raises(ModuleLifecycleDenied, match='ACTIVE_IDENTITY_REQUIRED'):
+            current_sync(session, WorkIdentity(identities[-1], 'ai_studio', 1))
+        # Existing composite ownership FK rejects forged cross-owner credentials.
+        credentials = metadata.tables['connection_credentials']
+        with pytest.raises(IntegrityError) as rejected:
+            with session.begin_nested():
+                session.execute(credentials.update().where(credentials.c.owner_id == identities[0]).values(owner_id=identities[1]))
+        assert rejected.value.orig.pgcode == '23503'  # FK, not a uniqueness failure
+
+
+def exercise_explicit_queue_disposition(engine, identities):
+    """Existing disable lifecycle, not automatic migration drain or quarantine."""
+    from app.domains.modules.lifecycle import disable_owned_work
+    metadata = MetaData(); metadata.reflect(engine)
+    jobs = metadata.tables['jobs']
+    with engine.begin() as connection:
+        for owner in identities[:2]:
+            for name in ('jobs', 'runs'):
+                table = metadata.tables[name]
+                connection.execute(table.update().where(table.c.user_id == owner).values(
+                    status='pending', module_id='ai_studio', module_version=1))
+        connection.execute(metadata.tables['user_modules'].update().where(
+            metadata.tables['user_modules'].c.user_id == identities[0]).values(enabled=False))
+    with Session(engine) as session:
+        disable_owned_work(session, identities[0], ['ai_studio'])
+        session.commit()
+    with engine.connect() as connection:
+        for name in ('jobs', 'runs'):
+            for row in connection.execute(select(metadata.tables[name])).mappings():
+                if row['user_id'] == identities[0]:
+                    assert row['status'] == 'failed' and row['module_cancel_requested'] is True
+                elif row['user_id'] == identities[1]:
+                    assert row['status'] == 'pending' and row['module_cancel_requested'] is False
+                else:
+                    assert row['status'] == 'completed' and row['module_id'] is None
 
 
 def test_actual_multiuser_migration_idempotence_and_connection_ownership(rehearsal):
@@ -152,22 +292,38 @@ def test_actual_multiuser_migration_idempotence_and_connection_ownership(rehears
         assert all(row['status'] == 'legacy_review' and row['provider_account_id'] is None for row in migrated)
         assert all(row['app_ownership_mode'] == 'platform_managed' for row in migrated)
     after = rows(engine, exclude={'alembic_version'})
-    for table, values in before.items():
-        assert after[table] == values, table
+    assert_legacy_preserved(before, after)
     migrate(engine, 'head')
     assert rows(engine, exclude={'alembic_version'}) == after
     migrate(engine, 'admin_roles_001', direction='downgrade')
     assert rows(engine, exclude={'alembic_version'}) == before
     migrate(engine, 'head')
     repeated = rows(engine, exclude={'alembic_version'})
-    for table, values in before.items():
-        assert repeated[table] == values, table
+    assert_legacy_preserved(before, repeated)
     # Recreated metadata timestamps may change; private identities may not.
     with engine.connect() as connection:
         connections = metadata.tables['integration_connections']
         assert sorted((r['id'], r['owner_id'], r['credential_ref'], r['status']) for r in
             connection.execute(select(connections)).mappings()) == sorted(
             (r['id'], r['owner_id'], r['credential_ref'], r['status']) for r in migrated)
+
+    # Newer records predate the execution migration, not the legacy tables.
+    migrate(engine, 'order_intents_001', direction='downgrade')
+    seed_populated_controls(engine, identities)
+    populated = rows(engine, exclude={'alembic_version'})
+    migrate(engine, 'head')
+    for table, records in populated.items():
+        assert rows(engine, exclude={'alembic_version'})[table] == records, table
+    assert_populated_ownership(engine, identities)
+    replay = rows(engine)
+    migrate(engine, 'head')
+    assert rows(engine) == replay
+    contract = schema_contract(engine)
+    with pytest.raises(RuntimeError, match='guarded backup/restore; downgrade refused'):
+        migrate(engine, 'ai_limits_001', direction='downgrade')
+    assert rows(engine) == replay
+    assert schema_contract(engine) == contract
+    exercise_explicit_queue_disposition(engine, identities)
 
 
 def test_actual_failed_migration_transaction_restores_schema_rows_and_revision(rehearsal):
@@ -191,7 +347,10 @@ def test_actual_pg_dump_restore_preserves_every_fixture_row_and_sequence(rehears
     dump_version = subprocess.run([PG_DUMP, '--version'], check=True, capture_output=True, text=True, timeout=5).stdout
     restore_version = subprocess.run([PG_RESTORE, '--version'], check=True, capture_output=True, text=True, timeout=5).stdout
     assert require_compatible_clients(server_major, dump_version, restore_version)['server_major'] == 16
-    migrate(engine, 'admin_roles_001'); identities = seed_legacy(engine); migrate(engine, 'head')
+    migrate(engine, 'admin_roles_001'); identities = seed_legacy(engine)
+    migrate(engine, 'order_intents_001'); seed_populated_controls(engine, identities)
+    migrate(engine, 'head'); assert_populated_ownership(engine, identities)
+    exercise_explicit_queue_disposition(engine, identities)
     before = rows(engine)
     before_schema = schema_contract(engine)
     archive = tmp_path/'stage18-synthetic.dump'
@@ -207,6 +366,7 @@ def test_actual_pg_dump_restore_preserves_every_fixture_row_and_sequence(rehears
                    capture_output=True, text=True, timeout=90)
     assert rows(engine) == before
     assert schema_contract(engine) == before_schema
+    assert_populated_ownership(engine, identities)
     metadata = MetaData(); metadata.reflect(engine); users = metadata.tables['users']
     with engine.begin() as connection:
         from datetime import datetime
