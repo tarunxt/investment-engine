@@ -72,7 +72,11 @@ async function login(base,name){
  await page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).waitFor();
  return {context,page};
 }
-async function enable(page){const box=page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true});assert.equal(await box.isChecked(),false);await box.click();await until(()=>box.isChecked());}
+async function enable(page){
+ const box=page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true});assert.equal(await box.isChecked(),false);
+ const saved=page.waitForResponse(response=>response.request().method()==='PATCH'&&new URL(response.url()).pathname.endsWith('/me/modules'));
+ await box.click();assert.equal((await saved).status(),200);await until(()=>box.isChecked());
+}
 async function analyze(page,base,owner){
  await page.goto(base+'/console/automated-rebalance');
  const region=page.getByRole('region',{name:'Server analysis'});
@@ -81,6 +85,14 @@ async function analyze(page,base,owner){
  await portfolio.waitFor();assert.equal(await portfolio.count(),1);
  assert.deepEqual(await portfolio.locator('option').evaluateAll(options=>options.map(o=>({value:o.value,text:o.textContent}))),[{value:'indmoney_us',text:'US portfolio'},{value:'india',text:'India portfolio'}]);
  await portfolio.selectOption('india');assert.equal(await portfolio.inputValue(),'india');
+ const source=await page.evaluate(async()=>{
+  const response=await fetch('/backend-api/runs/analysis-workflows/synthetic-source',{
+   method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({portfolio:'india'})});
+  return {status:response.status,body:await response.json()};
+ });
+ assert.equal(source.status,200);assert.equal(source.body.owner_id,owner);
+ assert.equal(source.body.simulation_only,true);assert.match(source.body.source_hash,/^[a-f0-9]{64}$/);
+ receipt.checks.push('explicit_owned_synthetic_source_after_module_selection');save();
  await region.getByRole('button',{name:'Start server analysis',exact:true}).click();
  await region.getByRole('heading',{name:/Workflow \d+ · india · completed/}).waitFor({timeout:90000});
  const flow=sql("SELECT id FROM auto_rebalance_workflows WHERE user_id=? AND portfolio='india' AND status='completed' ORDER BY id DESC LIMIT 1",[owner])[0];assert(flow);

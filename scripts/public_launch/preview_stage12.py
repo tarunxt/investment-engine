@@ -14,7 +14,30 @@ if os.environ.get('STAGE01_PREVIEW') != 'synthetic-only':
 
 TABLES = (SpendAccount.__table__, SpendAttempt.__table__, ZerodhaPortfolioSnapshot.__table__)
 FACTS = ModuleFacts(jurisdiction='allowed', plan='allowed', connection='not_required')
-scope = SimulationSourceScope('preview')
+def fixture_material(db, connection):
+    """Verify exact existing disposable material, never a real-secret fallback."""
+    from uuid import UUID
+    from app.domains.auth.models import User
+    from app.domains.connections.models import ConnectionCredential
+    from app.domains.connections.service import validate_claims
+    from app.domains.connections.crypto import ConnectionFault
+    try:
+        if str(UUID(connection.credential_ref)) != connection.credential_ref: return False
+        from scripts.public_launch.preview_stage09 import ring
+        user = db.get(User, connection.owner_id)
+        if user.username not in {'usera', 'userb'}: return False
+        secret = db.get(ConnectionCredential, connection.credential_ref)
+        if secret is None or secret.owner_id != connection.owner_id or secret.connection_id != connection.id: return False
+        value = ring.open(secret.ciphertext, secret.key_version)
+        validate_claims(connection, value)
+        if value.get('token') != 'synthetic-token-' + user.username: return False
+        if connection.app_ownership_mode == 'user_owned':
+            return (value.get('app_key') == 'synthetic-key-' + user.username
+                and value.get('app_secret') == 'synthetic-secret-' + user.username)
+        return value.get('platform_ref') == 'synthetic-approved-platform'
+    except (ValueError, TypeError, ConnectionFault): return False
+
+scope = SimulationSourceScope('preview', fixture_material=fixture_material)
 analysis = SyntheticAnalysis(scope=scope,
     policy=lambda db, owner, portfolio, **kwargs: policy(db, owner, portfolio, facts=FACTS, **kwargs))
 runtime, governance = analysis.runtime, analysis.governance
@@ -28,7 +51,8 @@ def synthetic_acquire(db, owner, *, now=None):
 
 
 def allowed(method, path):
-    return (method == 'GET' and re.fullmatch(r'/runs/analysis-workflows(?:/config|/[1-9][0-9]*)?', path) is not None
+    return (method == 'POST' and path == '/runs/analysis-workflows/synthetic-source'
+            or method == 'GET' and re.fullmatch(r'/runs/analysis-workflows(?:/config|/[1-9][0-9]*)?', path) is not None
             or method == 'POST' and re.fullmatch(r'/runs/analysis-workflows(?:/[1-9][0-9]*/controls)?', path) is not None)
 
 

@@ -24,6 +24,14 @@ from .contracts import WorkflowDenied, digest, utc
 @dataclass(frozen=True)
 class SimulationSourceScope:
     mode: str
+    fixture_material: object = None
+
+    def credentials_allowed(self, db, connection):
+        if connection.credential_ref is None: return True
+        if self.mode != 'preview' or not callable(self.fixture_material): return False
+        # This callback is installed only by the existing disposable harness.
+        # Hosted scopes cannot carry any credential material or verifier.
+        return self.fixture_material(db, connection) is True
 
     def validate(self, db, owner):
         if type(owner) is not int or owner < 1:
@@ -41,7 +49,8 @@ class SimulationSourceScope:
                 raise WorkflowDenied('Disposable synthetic source scope required')
         elif self.mode == 'hosted':
             from app.core.uat2 import uat2_mode, validate_uat2_startup
-            if not uat2_mode() or os.getenv('ENVIRONMENT') != 'uat2' or url.get_backend_name() != 'postgresql':
+            if (self.fixture_material is not None or not uat2_mode()
+                    or os.getenv('ENVIRONMENT') != 'uat2' or url.get_backend_name() != 'postgresql'):
                 raise WorkflowDenied('Dedicated owner-only UAT2 scope required')
             try: validate_uat2_startup()
             except RuntimeError: raise WorkflowDenied('Dedicated owner-only UAT2 scope required') from None
@@ -83,7 +92,7 @@ def acquire(db, owner, *, scope, authorize, now=None):
         IntegrationConnection.owner_id == owner, IntegrationConnection.provider == 'zerodha',
         IntegrationConnection.is_current.is_(True)).execution_options(populate_existing=True))
     if (connection is None or connection.status != 'active' or not connection.token_expires_at
-            or utc(connection.token_expires_at) <= now or connection.credential_ref is not None
+            or utc(connection.token_expires_at) <= now or not scope.credentials_allowed(db, connection)
             or connection.app_ownership_mode not in {'user_owned', 'platform_managed'}
             or not (connection.provider_account_id or '').startswith('FAKE')):
         raise WorkflowDenied('Current credential-free synthetic connection required')

@@ -1848,6 +1848,17 @@ jobs:
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify owned review, PostgreSQL safety and linked SQLite ASGI fake acceptance
         run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py backend/tests/test_linked_preview_execution.py backend/tests/test_stage18_linked_analysis_preview.py
+      - name: Verify explicit synthetic acquisition scope and HTTP action
+        run: python -m pytest -q --junitxml=/tmp/synthetic-source.xml backend/tests/test_simulation_source_scope.py backend/tests/test_synthetic_source_http.py
+      - name: Require all synthetic source checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/synthetic-source.xml').getroot()
+          assert len(root.findall('.//testcase')) == 20
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY_CHECK
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'

@@ -57,7 +57,7 @@ class SyntheticAnalysis:
         if portfolio == 'india':
             receipt = result['acquisition']
             connection = db.get(IntegrationConnection, result['connection']['id'], populate_existing=True)
-            if (connection is None or connection.credential_ref is not None
+            if (connection is None or not self.scope.credentials_allowed(db, connection)
                     or receipt.get('simulation') is not True or not result['connection']['account'].startswith('FAKE')):
                 raise WorkflowDenied('Explicit synthetic acquisition required')
         module = 'indmoney_us' if portfolio == 'indmoney_us' else 'zerodha_rebalance'
@@ -162,4 +162,3 @@ class SyntheticAnalysis:
             OutboxMessage.topic == TOPIC, OutboxMessage.execution_attempts == 0,
             OutboxMessage.available_at <= naive(now)).order_by(OutboxMessage.created_at, OutboxMessage.id).limit(1))
         return Workflows(session, self.runtime).consume(row.id, now=now) if row else None
-
