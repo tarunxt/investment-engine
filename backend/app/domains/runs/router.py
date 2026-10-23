@@ -1029,9 +1029,14 @@ async def cancel_run(
     if run.user_id != current_user.id:
         raise HTTPException(403, detail="Not allowed")
 
+    from app.domains.modules.lifecycle import lock_owner
+    if run.module_id:
+        await lock_owner(db, current_user.id)
+    await db.refresh(run, with_for_update=True)
     if run.status in {JobStatus.COMPLETED, JobStatus.FAILED}:
         return run
 
+    run.module_cancel_requested = True
     run.status = JobStatus.FAILED
     run.export_status = "failed"
     run.export_error = "Cancelled by user"
@@ -1043,10 +1048,12 @@ async def cancel_run(
     jobs: list[Job] = []
     if run_jobs:
         job_ids = [rj.job_id for rj in run_jobs]
-        jobs_rows = await db.execute(select(Job).where(Job.id.in_(job_ids), Job.user_id == current_user.id))
+        jobs_rows = await db.execute(select(Job).where(Job.id.in_(job_ids), Job.user_id == current_user.id)
+            .order_by(Job.id).with_for_update().execution_options(populate_existing=True))
         jobs = jobs_rows.scalars().all()
         for job in jobs:
             if job.status in {JobStatus.SCHEDULED, JobStatus.PENDING, JobStatus.PROCESSING}:
+                job.module_cancel_requested = True
                 job.status = JobStatus.FAILED
                 job.error_message = "Cancelled by user"
                 if run.auto_export_enabled:

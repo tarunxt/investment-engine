@@ -174,7 +174,7 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py backend/tests/test_stage09_connections.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py backend/tests/test_stage09_connections.py backend/tests/test_stage19_stream_admission.py backend/tests/test_stage19_manual_cancel.py
 
   stage09-connection-bindings:
     name: Stage09 connection isolation, rotation races and additive migration
@@ -735,7 +735,7 @@ jobs:
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: ${{ matrix.bundler == 'webpack' && 40 || 25 }}
     continue-on-error: ${{ matrix.bundler == 'turbopack' }}
     strategy:
       fail-fast: false
@@ -745,6 +745,7 @@ jobs:
           - turbopack
 
     env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_STANDALONE_BUILD: "true"
@@ -763,6 +764,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up Node.js with npm cache
         uses: actions/setup-node@v7
@@ -785,6 +789,10 @@ jobs:
           appendFileSync(process.env.GITHUB_ENV, `NEXTAUTH_SECRET=${value}\n`);
           JS
 
+      - name: Verify Stage18 browser receipt contracts
+        working-directory: frontend
+        run: node --test scripts/stage18-browser-evidence.test.mjs
+
       - name: Log cold-build runner resources
         run: |
           echo "==> CPU"
@@ -800,7 +808,7 @@ jobs:
         run: |
           node scripts/stamp-frontend-build.mjs \
             frontend/lib/generatedBuildInfo.ts \
-            "${GITHUB_SHA}" \
+            "${SOURCE_SHA}" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Run isolated cold production build
@@ -836,7 +844,7 @@ jobs:
           deploy/no-docker/package-frontend-artifact.sh \
             frontend/.next \
             "${RUNNER_TEMP}/frontend-${BUNDLER}.tar.gz" \
-            "${GITHUB_SHA}" \
+            "${SOURCE_SHA}" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             "${BUNDLER}"
           mkdir "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime"
@@ -851,7 +859,18 @@ jobs:
       - name: Verify authenticated render and lazy route behavior
         if: matrix.bundler == 'webpack'
         working-directory: frontend
+        env:
+          STAGE18_BROWSER_RECEIPT: ${{ runner.temp }}/stage18-browser-receipt.json
         run: npm run test:playwright-hardening
+
+      - name: Retain exact-source Stage18 browser result
+        if: always() && matrix.bundler == 'webpack'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage18-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stage18-browser-receipt.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify fingerprint, auth, routes, assets, and backend proxy
         id: runtime
@@ -860,7 +879,37 @@ jobs:
         run: |
           node scripts/verify-frontend-artifact-runtime.mjs \
             "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime" \
-            "${GITHUB_SHA}"
+            "${SOURCE_SHA}"
+
+      - name: Set up Python for linked fake browser acceptance
+        if: matrix.bundler == 'webpack'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install existing synthetic backend dependencies
+        if: matrix.bundler == 'webpack'
+        timeout-minutes: 5
+        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt aiosqlite
+
+      - name: Verify real UI with isolated linked fake backend
+        if: matrix.bundler == 'webpack'
+        timeout-minutes: 15
+        working-directory: frontend
+        env:
+          LINKED_BROWSER_EVIDENCE: ${{ runner.temp }}/linked-browser-evidence
+        run: node scripts/linked-preview-playwright.mjs
+
+      - name: Retain linked fake browser evidence
+        if: always() && matrix.bundler == 'webpack'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linked-fake-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/linked-browser-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Record benchmark result
         if: always()
@@ -1750,15 +1799,15 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
-      - name: Verify exact approval, ownership, dispatch races and actual Alembic roundtrip
-        run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py
+      - name: Verify owned review, PostgreSQL safety and linked SQLite ASGI fake acceptance
+        run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py backend/tests/test_linked_preview_execution.py backend/tests/test_stage18_linked_analysis_preview.py
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage16.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage16 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 44
+          assert len(root.findall('.//testcase')) == 68
           PY_CHECK
 
   stage17-public-service:

@@ -3,7 +3,10 @@
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import path from "node:path";
-import {readFileSync} from "node:fs";
+import {readFileSync, writeFileSync} from "node:fs";
+import {createHash} from "node:crypto";
+import {execFileSync} from "node:child_process";
+import {isolatedEnvironment, browserReceipt, buildContentDigest} from "./stage18-browser-evidence.mjs";
 import { fileURLToPath } from "node:url";
 
 import { encode } from "next-auth/jwt";
@@ -93,16 +96,28 @@ async function sessionCookie(baseUrl, { expired = false,owner=71 } = {}) {
 }
 
 async function authenticatedContext(browser, baseUrl, options) {
-  return browser.newContext({
+  const context = await browser.newContext({
+    serviceWorkers: "block",
     storageState: {
       cookies: [await sessionCookie(baseUrl, options)],
       origins: [],
     },
   });
+  await context.route("**/*",route=>new URL(route.request().url()).origin===baseUrl?route.continue():route.abort("blockedbyclient"));
+  await context.routeWebSocket("**/*",socket=>socket.close());
+  return context;
 }
 
-async function installSyntheticModulePolicy(page,{none=false,fail=false}={}){
+async function guardedContext(browser, baseUrl, options={}) {
+ const context=await browser.newContext({...options,serviceWorkers:"block"});
+ await context.route('**/*',route=>new URL(route.request().url()).origin===baseUrl?route.continue():route.abort('blockedbyclient'));
+ await context.routeWebSocket("**/*",socket=>socket.close());
+ return context;
+}
+
+async function installSyntheticModulePolicy(page,{none=false,fail=false,owner=71}={}){
   const fixture=JSON.parse(readFileSync(path.join(frontendRoot,'tests/fixtures/stage08-ready-manifest.json'),'utf8'));
+  fixture.owner_id=owner;for(const module of fixture.modules)for(const decision of Object.values(module.capabilities))decision.owner_id=owner;
   if(none)for(const module of fixture.modules){module.selection.enabled=false;for(const decision of Object.values(module.capabilities))decision.allowed=false;}
   await page.route('**/backend-api/me/modules',route=>route.fulfill({status:fail?503:200,contentType:'application/json',body:JSON.stringify(fail?{detail:'Synthetic policy outage'}:fixture)}));
 }
@@ -112,7 +127,7 @@ async function assertDelayedBootstrapDoesNotGateContent(browser, baseUrl) {
   const page = await context.newPage();
   await installSyntheticModulePolicy(page);
   let sessionRequestCompleted = false;
-  await page.route("**/api/auth/session", async (route) => {
+  await page.route(`${baseUrl}/api/auth/session`, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     await route.continue();
     sessionRequestCompleted = true;
@@ -143,7 +158,7 @@ async function assertDelayedBootstrapDoesNotGateContent(browser, baseUrl) {
 }
 
 async function assertAuthFailureStates(browser, baseUrl) {
-  const anonymous = await browser.newContext();
+  const anonymous = await guardedContext(browser,baseUrl);
   const anonymousPage = await anonymous.newPage();
   await anonymousPage.goto(`${baseUrl}/console/dashboard`);
   if (!new URL(anonymousPage.url()).pathname.startsWith("/login")) {
@@ -161,7 +176,7 @@ async function assertAuthFailureStates(browser, baseUrl) {
 
   const failed = await authenticatedContext(browser, baseUrl);
   const failedPage = await failed.newPage();
-  await failedPage.route("**/api/auth/session", (route) =>
+  await failedPage.route(`${baseUrl}/api/auth/session`, (route) =>
     route.fulfill({
       status: 503,
       contentType: "application/json",
@@ -328,24 +343,36 @@ async function assertStage08PreferenceFlows(browser,baseUrl){
  await context.close();
 }
 
+async function assertBoundedBrowserLoad(browser,baseUrl) {
+ const durations=[];let active=0,peak=0;
+ const started=performance.now();
+ // Three actual isolated contexts, each with four sequential navigations.
+ await Promise.all([71,72,73].map(async owner=>{
+  const context=await authenticatedContext(browser,baseUrl,{owner});
+  try {const page=await context.newPage();await installSyntheticModulePolicy(page,{none:true,owner});
+   for(let n=0;n<4;n++) {const start=performance.now();active++;peak=Math.max(peak,active);
+    try {await page.goto(`${baseUrl}/console/dashboard`,{waitUntil:'domcontentloaded',timeout:10000});await page.getByRole('heading',{name:'Choose your modules'}).waitFor({timeout:10000});}
+    finally {active--;}
+    durations.push((performance.now()-start)/1000);
+   }
+  } finally {await context.close();}
+ }));
+ durations.sort((a,b)=>a-b);
+ return {completed:durations.length,errors:0,configured_concurrency:3,observed_peak_concurrency:peak,duration_seconds:(performance.now()-started)/1000,p95_seconds:durations[Math.ceil(.95*durations.length)-1],threshold_seconds:10,scope:'Actual Chromium navigation against loopback Next.js with synthetic module policy, not backend/proxy capacity'};
+}
+
 async function main() {
+  const receiptPath=process.env.STAGE18_BROWSER_RECEIPT || '/tmp/stage18-browser-receipt.json';
+  writeFileSync(receiptPath,JSON.stringify({kind:'synthetic_loopback_browser_subset',passed:false,reason:'Run not completed',full_release_verified:false,browser_load_verified:false,real_provider_certification:false})+'\n');
+  const sourceSha=execFileSync('git',['rev-parse','HEAD'],{cwd:frontendRoot,encoding:'utf8'}).trim();
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(
     process.execPath,
-    [path.join(frontendRoot, "node_modules/next/dist/bin/next"), "start", "-p", String(port)],
+    [path.join(frontendRoot, "node_modules/next/dist/bin/next"), "start", "--hostname", "127.0.0.1", "-p", String(port)],
     {
       cwd: frontendRoot,
-      env: {
-        ...process.env,
-        NODE_ENV: "production",
-        NEXTAUTH_SECRET: authSecret,
-        AUTH_SECRET: authSecret,
-        NEXTAUTH_URL: baseUrl,
-        INTERNAL_API_URL: "http://127.0.0.1:1",
-        NEXT_PUBLIC_API_URL: "http://127.0.0.1:1",
-        NEXT_PUBLIC_DISABLE_AUTH: "false",
-      },
+      env: isolatedEnvironment(baseUrl, process.env.PATH, path.resolve(frontendRoot,'../scripts/public_launch/preview_network.cjs'),port),
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -360,11 +387,20 @@ async function main() {
   let browser;
   try {
     await waitForServer(baseUrl, child);
-    browser = await chromium.launch({ headless: true });
-    await assertDelayedBootstrapDoesNotGateContent(browser, baseUrl);
-    await assertAuthFailureStates(browser, baseUrl);
-    await assertInteractiveRoutesLoadByDefault(browser, baseUrl);
-    await assertStage08PreferenceFlows(browser,baseUrl);
+    const fingerprintResponse=await fetch(`${baseUrl}/api/runtime-fingerprint`);
+    const fingerprint=await fingerprintResponse.json();
+    if(!fingerprintResponse.ok || fingerprint.build_sha!==sourceSha)throw new Error('Served build fingerprint does not match exact source HEAD; stamp and rebuild first');
+    browser = await chromium.launch({ headless: true, env:{PATH:process.env.PATH,HOME:"/tmp"}, ...(process.env.STAGE18_CHROMIUM_PATH ? {executablePath:process.env.STAGE18_CHROMIUM_PATH} : {}) });
+    const checks=[];
+    const check=async(name,fn)=>{const start=performance.now();await fn(browser,baseUrl);checks.push({name,passed:true,duration_seconds:(performance.now()-start)/1000});};
+    await check('delayed_bootstrap',assertDelayedBootstrapDoesNotGateContent);
+    await check('auth_failure_states',assertAuthFailureStates);
+    await check('module_routes',assertInteractiveRoutesLoadByDefault);
+    await check('preference_races_account_switch_mobile',assertStage08PreferenceFlows);
+    const load=await assertBoundedBrowserLoad(browser,baseUrl);
+    const files=['scripts/auth-rendering-playwright.mjs','scripts/stage18-browser-evidence.mjs','tests/fixtures/stage08-ready-manifest.json','.next/BUILD_ID','.next/build-manifest.json','.next/server/app-paths-manifest.json'].map(f=>path.join(frontendRoot,f));
+    const receipt=browserReceipt({sourceSha,files,checks,load});
+    writeFileSync(receiptPath,JSON.stringify({...receipt,served_fingerprint:fingerprint,working_tree_diff_sha256:createHash('sha256').update(execFileSync('git',['diff','HEAD','--binary'],{cwd:frontendRoot})).digest('hex'),served_build_content:buildContentDigest(path.join(frontendRoot,'.next'))},null,2)+'\n');
     console.log("Stage08 policy, cross-tab, conflict, cancelled-disable, mobile and synthetic-account-switch checks passed");
     console.log("Auth rendering and lazy-route Playwright checks passed");
   } catch (error) {

@@ -60,7 +60,7 @@ async def lifespan(app):
         for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__,
                       UserSession.__table__, APIKey.__table__, Prompt.__table__,
                       Job.__table__, Run.__table__, RunJob.__table__,AutoRebalanceWorkflow.__table__,AutoRebalanceWorkflowStage.__table__,
-                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES,*preview_stage09.TABLES,*preview_stage16.TABLES, ConnectionAttempt.__table__, ConnectionBindingHistory.__table__, UserModulePreferences.__table__, UserModule.__table__):
+                      OutboxMessage.__table__, IdempotencyOperation.__table__, *preview_stage05.TABLES,*preview_stage08.TABLES,*preview_stage09.TABLES,*preview_stage16.TABLES,*preview_stage12.TABLES, ConnectionAttempt.__table__, ConnectionBindingHistory.__table__, UserModulePreferences.__table__, UserModule.__table__):
             await connection.run_sync(table.create, checkfirst=True)
     async with AsyncSessionLocal() as db:
         for name, role in (("usera", UserRole.USER), ("userb", UserRole.USER), ("admin", UserRole.ADMIN)):
@@ -104,6 +104,7 @@ async def lifespan(app):
     finally:
         consumer.cancel()
         await asyncio.gather(consumer,return_exceptions=True)
+        preview_stage16.preview_execution.close()
         preview_jobs.engine.dispose()
         await async_engine.dispose()
 

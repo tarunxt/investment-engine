@@ -1,27 +1,26 @@
 """Network-denied disposable composition; never imported by the real app.
 
-Public fixture approvals/history are synthetic, not live acceptance. Actual
-Orders guards and HTTP confirmation handlers are reused without a broker SDK.
+Completed synthetic analysis prepares reviews but never approves them. Actual
+Orders guards, HTTP confirmation and Stage15 durable fake execution are reused.
 """
 import os
+import logging
 if os.environ.get('STAGE01_PREVIEW') != 'synthetic-only':
     raise RuntimeError('Local synthetic preview only')
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from sqlalchemy import select
-from app.domains.connections.models import IntegrationConnection
-from app.domains.modules.models import UserModule, UserModulePreferences
+from app.domains.ai_limits.contracts import BoundaryDenied
 from app.domains.modules.lifecycle import current_sync, WorkIdentity
 from app.domains.modules.policy import ModuleFacts
 from app.domains.order_intents.models import OrderIntent, OrderLeg
 from app.domains.order_intents.service import Orders, MODULE, TOPIC
-from app.domains.order_intents.fake import FakeBroker
+from scripts.public_launch import preview_execution
 from app.domains.order_intents.contracts import digest, OrderDenied
-from app.domains.order_intents.authority import authenticated_confirmation
 from app.domains.order_intents.router import router, get_runtime, get_read_runtime
 from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
 from app.infrastructure.database.outbox.models import OutboxMessage
-TABLES = (OrderIntent.__table__, OrderLeg.__table__, ZerodhaPortfolioSnapshot.__table__)
+TABLES = (OrderIntent.__table__, OrderLeg.__table__, ZerodhaPortfolioSnapshot.__table__, *preview_execution.TABLES)
 
 
 def policy(db, identity):
@@ -54,59 +53,138 @@ async def seed(db, users):
         for user in users:
             if user.username not in {'usera', 'userb'}:
                 continue
-            # Private disposable observations only. The production snapshot
-            # schema/migrations and provider acquisition remain untouched.
-            snapshot = session.scalar(select(ZerodhaPortfolioSnapshot.id).where(
-                ZerodhaPortfolioSnapshot.user_id == user.id,
-                ZerodhaPortfolioSnapshot.snapshot_date == now.date()))
-            if snapshot is None:
-                session.add(ZerodhaPortfolioSnapshot(
-                    user_id=user.id, snapshot_date=now.date(), captured_at=now,
-                    source='stage16_synthetic',
-                    holdings=[{'tradingsymbol':'SYNTHETIC_'+user.username.upper(), 'quantity':3}],
-                    net_positions=[{'tradingsymbol':'SYNTHETIC_SHORT_'+user.username.upper(), 'quantity':-1}],
-                    day_positions=[]))
-            if session.scalar(select(OrderIntent.id).where(OrderIntent.owner_id == user.id).limit(1)):
-                continue
-            header = session.get(UserModulePreferences, user.id)
-            if not header:
-                header = UserModulePreferences(user_id=user.id, version=1)
-                session.add(header)
-            header.version = max(1, header.version)
-            session.flush()
-            module = session.scalar(select(UserModule).where(UserModule.user_id == user.id, UserModule.module_id == MODULE))
-            if not module:
-                module = UserModule(user_id=user.id, module_id=MODULE, enabled=True, version=header.version, config={})
-                session.add(module)
-            module.enabled = True
-            module.version = header.version
-            session.flush()
-            connection = session.scalar(select(IntegrationConnection).where(IntegrationConnection.owner_id == user.id, IntegrationConnection.is_current.is_(True)))
-            service = Orders(session, policy=policy, risk=risk)
-            for state in ('review', 'unknown', 'partial'):
-                order = {'sequencing': 'listed', 'legs': [dict(exchange='NSE', symbol='SYNTHETIC'+str(i), side='BUY' if i else 'SELL', quantity=3, limit_price='10.01', product='CNC', order_type='LIMIT') for i in range(2)]}
-                row = service.create(WorkIdentity(user.id, MODULE, module.version), 'stage16-'+state, connection.id, order, now=now)
-                service.validate(user.id, row.id, now=now)
-                review = service.review(user.id, row.id, now=now)
-                if state != 'review':
-                    with authenticated_confirmation(user, row.id, review['review_digest']):
-                        service.approve(user.id, row.id, review['review_digest'], action='confirm_exact_order_or_basket', now=now)
-                    session.commit()
-                    event = session.scalar(select(OutboxMessage).where(OutboxMessage.topic == TOPIC, OutboxMessage.payload['intent_id'].as_string() == row.id))
-                    try:service.dispatch(event.id, FakeBroker(['timeout' if state == 'unknown' else 'partial']), now=now)
-                    except TimeoutError:pass
-            if user.username == 'userb':module.enabled = False
+            from scripts.public_launch.preview_stage12 import synthetic_acquire
+            try:
+                synthetic_acquire(session, user.id, now=now)
+                session.commit()
+            except PermissionError:
+                session.rollback()
+                logging.getLogger(__name__).warning('Synthetic acquisition unavailable for owner %s; existing evidence preserved', user.id)
+            # No instructions or outcomes are seeded. Completed, governed
+            # analysis may prepare a review below; only HTTP exact confirmation
+            # can approve it. Existing selections are never enabled here.
         session.commit()
     await db.run_sync(work)
     await db.commit()
 
 
+def prepare_analysis(session, owner, workflow_id, *, now=None):
+    """Completed advisory analysis prepares an immutable review, never consent.
+
+    Only the explicit synthetic cash-equity trim subset is convertible. A model
+    cannot choose a venue, mode, account, market order, price or execution time.
+    """
+    from decimal import Decimal
+    from scripts.public_launch.preview_stage12 import completed_analysis
+    evidence = completed_analysis(session, owner, workflow_id, now=now)
+    if evidence['module_id'] != MODULE or evidence['orders_authorized'] is not False:
+        raise OrderDenied('SYNTHETIC_INDIA_ANALYSIS_REQUIRED')
+    source = evidence['source']
+    connection = source['connection']
+    legs = []
+    for item in evidence['recommendations']:
+        if item['action'] == 'hold':
+            continue
+        if item['instrument'] != 'NSE:SYNTHETIC0' or item['action'] != 'trim':
+            raise OrderDenied('SYNTHETIC_TRIM_SUBSET_REQUIRED')
+        quantity = Decimal(item['current_units']) - Decimal(item['final_units'])
+        if not quantity.is_finite() or quantity <= 0 or quantity != quantity.to_integral_value():
+            raise OrderDenied('EXACT_SYNTHETIC_QUANTITY_REQUIRED')
+        # This fixed synthetic catalogue price is not a provider quote or a
+        # model-supplied instruction. Stage15 independently reads fake risk.
+        legs.append(dict(exchange='NSE', symbol='SYNTHETIC0', side='SELL',
+                         quantity=int(quantity), limit_price='10.01', product='CNC', order_type='LIMIT'))
+    if not legs:
+        return None
+    provenance = {key: evidence[key] for key in ('workflow_id', 'owner_id', 'module_version', 'source_hash', 'plan_hash', 'actionables_result_hash')}
+    key = 'linked-analysis:' + digest(provenance)
+    service = Orders(session, policy=policy, risk=risk)
+    old = session.scalar(select(OrderIntent).where(OrderIntent.owner_id == owner,
+        OrderIntent.operation_key_digest == digest({'operation': 'confirmed_order', 'key': key})))
+    if old is not None:
+        return old  # terminal/canceled records are never recreated or reopened
+    row = service.create(WorkIdentity(owner, MODULE, evidence['module_version']), key,
+                         connection['id'], {'sequencing': 'listed', 'legs': legs}, now=now)
+    if (row.connection_version, row.account_id, row.app_mode) != (connection['version'], connection['account'], connection['mode']):
+        raise OrderDenied('ANALYSIS_CONNECTION_CHANGED')
+    service.validate(owner, row.id, now=now)
+    service.review(owner, row.id, now=now)
+    return row
+
+
+def prepare_completed(session):
+    from app.domains.runs.models import AutoRebalanceWorkflow
+    for flow in session.scalars(select(AutoRebalanceWorkflow).where(
+            AutoRebalanceWorkflow.status == 'completed',
+            AutoRebalanceWorkflow.portfolio == 'india',
+            AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1')):
+        try:
+            prepare_analysis(session, flow.user_id, flow.id)
+            session.commit()
+        except (OrderDenied, BoundaryDenied, PermissionError):
+            session.rollback()
+            logging.getLogger(__name__).warning('Completed synthetic analysis cannot prepare a review: %s', flow.id)
+
+
+def reconcile_one(session, *, engine=None, now=None):
+    """Bounded read-only recovery; never resumes remaining basket legs."""
+    from app.domains.order_intents.execution_models import ExecutionRun, ExecutionAttempt
+    now = now or datetime.now(timezone.utc)
+    ids = list(session.scalars(select(OrderIntent.id).join(ExecutionRun).join(ExecutionAttempt,
+        ExecutionAttempt.intent_id == OrderIntent.id).where(
+        OrderIntent.state.in_(['submitting', 'unknown', 'partial', 'acknowledged']),
+        ExecutionAttempt.polls < 5, ExecutionAttempt.next_poll_at <= now,
+        ExecutionAttempt.claimed_at >= now - timedelta(minutes=10)
+    ).order_by(ExecutionAttempt.next_poll_at)))
+    for intent_id in dict.fromkeys(ids):
+        row = session.get(OrderIntent, intent_id, populate_existing=True)
+        runner = preview_execution.worker(session, row, policy=policy, risk=risk, engine=engine, now=now)
+        try:
+            return runner.reconcile(row.owner_id, row.id)
+        except (OrderDenied, PermissionError):
+            session.rollback()
+            logging.getLogger(__name__).warning('Synthetic reconciliation is blocked: %s', intent_id)
+    return None
+
+
+def advance(session, *, engine=None, now=None, outcomes=None):
+    # A stale approval is not running work and must not starve another owner.
+    # Do not rewrite it as cancelled or refresh its approval behind the user.
+    candidates = list(session.scalars(select(OrderIntent.id).where(
+        OrderIntent.state == 'approved').order_by(OrderIntent.created_at, OrderIntent.id)))
+    for intent_id in candidates:
+        row = session.get(OrderIntent, intent_id, populate_existing=True)
+        event = session.scalar(select(OutboxMessage).where(OutboxMessage.topic == TOPIC,
+            OutboxMessage.payload['intent_id'].as_string() == row.id))
+        if event is None:
+            logging.getLogger(__name__).warning('Synthetic approval has no dispatch receipt: %s', intent_id)
+            continue
+        selected_outcomes = outcomes
+        if selected_outcomes is None:
+            fault = os.environ.get('STAGE01_EXECUTION_FAULT', 'filled')
+            if fault not in {'filled', 'partial', 'after_acceptance'}:
+                raise OrderDenied('INVALID_SYNTHETIC_OUTCOME')
+            selected_outcomes = [fault]
+        runner = preview_execution.worker(session, row, policy=policy, risk=risk,
+                                          outcomes=selected_outcomes, engine=engine, now=now)
+        try:
+            runner.dispatch(event.id)
+        except TimeoutError:
+            # Stage15 committed unknown evidence; never retry submission here.
+            pass
+        except (OrderDenied, PermissionError):
+            session.rollback()
+            logging.getLogger(__name__).info('Synthetic approved intent is currently blocked: %s', intent_id)
+            continue
+        return intent_id
+    return None
+
+
 async def tick(db):
-    def advance(session):
-        row = session.scalar(select(OrderIntent).where(OrderIntent.state == 'approved').order_by(OrderIntent.created_at).limit(1))
-        if row:
-            event = session.scalar(select(OutboxMessage).where(OutboxMessage.topic == TOPIC, OutboxMessage.payload['intent_id'].as_string() == row.id))
-            try:Orders(session, policy=policy, risk=risk).dispatch(event.id, FakeBroker(['filled', 'rejected']))
-            except (OrderDenied, PermissionError):session.rollback()
-    await db.run_sync(advance)
-    await db.commit()
+    try:
+        await db.run_sync(prepare_completed)
+        await db.run_sync(reconcile_one)
+        await db.run_sync(advance)
+        await db.commit()
+    except (OrderDenied, PermissionError):
+        await db.rollback()

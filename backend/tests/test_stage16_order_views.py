@@ -121,72 +121,31 @@ async def test_authenticated_http_owner_scope_and_no_store(env):
 
 
 @pytest.mark.asyncio
-async def test_private_fake_preview_two_tabs_and_partial_history(env, monkeypatch):
+async def test_private_preview_seed_never_approves_or_changes_selection(env, monkeypatch):
     from pathlib import Path
     from datetime import datetime, timezone
-    import httpx
-    from fastapi import FastAPI
     from app.domains.auth.models import User
     from app.domains.connections.models import IntegrationConnection
-    from app.domains.order_intents.router import router, get_runtime, get_read_runtime
-    from app.domains.auth.dependencies import get_current_user
-    from app.infrastructure.database.session import get_async_db
-    monkeypatch.setenv('STAGE01_PREVIEW','synthetic-only')
+    from app.domains.order_intents.models import OrderIntent
+    monkeypatch.setenv('STAGE01_PREVIEW', 'synthetic-only')
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
     from scripts.public_launch import preview_stage16 as preview
-    from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
-    for table in (*preview.TABLES, IndMoneyUsPortfolioSnapshot.__table__):
-        table.create(env.engine, checkfirst=True)
-    users=[env.db.get(User,id) for id in env.owners]
-    for i,user in enumerate(users):
-        user.username=('usera','userb')[i]
-        connection=env.db.get(IntegrationConnection,'connection'+str(i+1))
-        connection.token_expires_at=datetime.now(timezone.utc)+timedelta(hours=1)
+    for table in preview.TABLES: table.create(env.engine, checkfirst=True)
+    users = [env.db.get(User, id) for id in env.owners]
+    for i, user in enumerate(users):
+        user.username = ('usera', 'userb')[i]
+        env.db.get(IntegrationConnection, 'connection'+str(i+1)).token_expires_at = datetime.now(timezone.utc)+timedelta(hours=1)
+    disabled = env.db.scalar(select(UserModule).where(UserModule.user_id == users[1].id))
+    disabled.enabled = False
     env.db.commit()
     class Bridge:
-        async def run_sync(self, fn):return fn(env.db)
-        async def commit(self):env.db.commit()
-        async def rollback(self):env.db.rollback()
-        async def scalar(self, query):return env.db.scalar(query)
-        async def execute(self, query):return env.db.execute(query)
-        def get_bind(self):return env.db.get_bind()
-    bridge=Bridge()
-    await preview.seed(bridge,users)
-    await preview.seed(bridge,users)  # restart/idempotence: no duplicate snapshots or instructions
-    assert len(list(env.db.scalars(select(preview.ZerodhaPortfolioSnapshot))))==2
-    app=FastAPI();app.include_router(router)
-    app.dependency_overrides[get_async_db]=lambda:bridge
-    app.dependency_overrides[get_current_user]=lambda:users[0]
-    app.dependency_overrides[get_runtime]=lambda:preview.runtime
-    app.dependency_overrides[get_read_runtime]=lambda:preview.runtime
-    from app.domains.modules.policy import DefaultFactsResolver, ModuleFacts
-    from app.domains.modules.transports import install_route_policy
-    # Match the existing synthetic preview facts, including no standing consent.
-    monkeypatch.setattr(DefaultFactsResolver, 'resolve_sync', lambda *_: ModuleFacts(
-        jurisdiction='allowed', plan='allowed', connection='ready', execution_capability=True))
-    install_route_policy(app)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://synthetic.invalid') as client:
-        records=(await client.get('/order-intents/reviews')).json()
-        assert {r['state'] for r in records['intents']}=={'awaiting_approval','unknown','partial'}
-        assert all(r['integrity_checked'] for r in records['intents'])
-        positions=(await client.get('/order-intents/positions')).json()
-        assert positions['sources'][0]['groups'][0]['items']==[{'symbol':'SYNTHETIC_USERA','quantity':'3'}]
-        assert 'USERB' not in str(positions)
-        row=next(r for r in records['intents'] if r['actions']['confirm'])
-        body={'displayed_digest':row['review_digest'],'action':'confirm_exact_order_or_basket'}
-        path='/order-intents/'+row['id']+'/approve'
-        assert (await client.post(path,json=body)).status_code==200
-        assert (await client.post(path,json=body)).status_code==409
-        recovered=(await client.get('/order-intents/reviews/'+row['id'])).json()['intents'][0]
-        assert recovered['state']=='approved' and not recovered['actions']['confirm']
-        await preview.tick(bridge)
-        recovered=(await client.get('/order-intents/reviews/'+row['id'])).json()['intents'][0]
-        assert recovered['state']=='rejected' and [l['state'] for l in recovered['legs']]==['filled','rejected']
-        assert recovered['integrity_checked']
-        app.dependency_overrides[get_current_user]=lambda:users[1]
-        disabled=(await client.get('/order-intents/reviews')).json()
-        assert len(disabled['intents'])==3 and not any(r['actions']['confirm'] for r in disabled['intents'])
-        assert (await client.get('/order-intents/reviews/'+row['id'])).status_code==404
+        async def run_sync(self, fn): return fn(env.db)
+        async def commit(self): env.db.commit()
+    await preview.seed(Bridge(), users)
+    await preview.seed(Bridge(), users)
+    assert len(list(env.db.scalars(select(preview.ZerodhaPortfolioSnapshot)))) == 2
+    assert list(env.db.scalars(select(OrderIntent))) == []
+    assert disabled.enabled is False
 
 
 @pytest.mark.asyncio

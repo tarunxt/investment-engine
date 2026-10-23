@@ -172,6 +172,8 @@ class SyncRunRepository:
         return [(rj, job) for rj, job in rows]
 
     def update_status(self, run: Run, status: JobStatus) -> None:
+        from app.domains.modules.lifecycle import guard_work_transition
+        guard_work_transition(self._session, run)
         run.status = status
         self._session.commit()
 

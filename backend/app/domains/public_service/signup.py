@@ -18,10 +18,14 @@ class SignupLimits:
         return self
 
 def admit(db,email,*,now=None,limits=SignupLimits()):
-    now=utc(now or datetime.now(timezone.utc));limits.validate()
+    limits.validate()
     if not isinstance(email,str) or not 3<=len(email)<=320 or '@' not in email:raise BoundaryDenied('SIGNUP_IDENTITY_REQUIRED')
     identity=hashlib.sha256(email.strip().lower().encode()).hexdigest()
-    row=control(db,'signup');events=row.payload.get('events',[])
+    row=control(db,'signup')
+    # Default wall-clock time belongs to the serialized admission, not the
+    # request's pre-lock arrival. A concurrent winner may commit a later event
+    # while this request waits. Explicit caller clocks still fail closed below.
+    now=utc(now or datetime.now(timezone.utc));events=row.payload.get('events',[])
     if not isinstance(events,list) or len(events)>128:raise BoundaryDenied('SIGNUP_LEDGER_INVALID')
     retained=[]
     for event in events:

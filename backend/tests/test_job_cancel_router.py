@@ -21,6 +21,9 @@ class _FakeDbSession:
     def __init__(self) -> None:
         self.committed = False
 
+    async def refresh(self, job, *, with_for_update=False) -> None:
+        assert with_for_update is True
+
     async def commit(self) -> None:
         self.committed = True
 
@@ -29,6 +32,8 @@ def _build_job(status: JobStatus = JobStatus.PROCESSING):
     timestamp = datetime(2026, 6, 25, 12, 0, tzinfo=UTC)
     return SimpleNamespace(
         id=17,
+        module_id=None,
+        module_cancel_requested=False,
         prompt="Threats scan",
         provider="openai",
         model="gpt-4o-mini",
@@ -107,6 +112,7 @@ async def test_cancel_job_marks_failed_and_revokes_worker(monkeypatch):
 
     assert response.status_code == 200
     assert fake_db.committed is True
+    assert fake_job.module_cancel_requested is True
     assert fake_job.status == JobStatus.FAILED
     assert fake_job.error_message == "Cancelled by user"
     assert fake_job.export_status == "failed"

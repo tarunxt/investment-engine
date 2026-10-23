@@ -77,20 +77,34 @@ async def stream_is_current(access: StreamAccess, *, job_id=None, run_id=None, m
             version=await db.scalar(select(UserModulePreferences.version).where(UserModulePreferences.user_id==access.user_id))
             if version!=access.module_epoch:return False
         from app.domains.modules.policy import ModulePolicy
-        from app.domains.modules.lifecycle import analysis_module
+        from app.domains.modules.registry import INTERNAL_ANALYSIS_CONSUMERS
         from app.domains.runs.models import Run
-        binding_module='ai_studio'
-        if job_id is not None:
-            item=await db.get(Job,job_id,populate_existing=True)
-            if item is None or item.module_cancel_requested or not item.module_id:return False
-            binding_module=item.module_id
-        elif run_id is not None:
-            item=await db.get(Run,run_id,populate_existing=True)
-            if item is None or item.module_cancel_requested or not item.module_id:return False
-            binding_module=item.module_id
-        result=await ModulePolicy(db).authorize(owner_id=access.user_id,resource_owner_id=access.user_id,
-            module_id=binding_module,capability='view',boundary='stream')
-        if not result.allowed:return False
+        if job_id is None and run_id is None:
+            # The handshake/idle aggregate check has no resource yet. Internal
+            # consumers do not depend on the standalone AI Studio selection.
+            # Admission grants no event access: each event is checked below
+            # against its persisted resource module and owner.
+            policy = ModulePolicy(db)
+            for consumer in sorted(INTERNAL_ANALYSIS_CONSUMERS, key=lambda item: item.value):
+                result = await policy.authorize(
+                    owner_id=access.user_id, resource_owner_id=access.user_id,
+                    module_id=consumer.value, capability='view', boundary='stream')
+                if result.allowed:
+                    return True
+            return False
+        for model, resource_id in ((Job, job_id), (Run, run_id)):
+            if resource_id is None:
+                continue
+            if type(resource_id) is not int:
+                return False
+            item = await db.get(model, resource_id, populate_existing=True)
+            if item is None or item.module_cancel_requested or not item.module_id:
+                return False
+            result = await ModulePolicy(db).authorize(
+                owner_id=access.user_id, resource_owner_id=item.user_id,
+                module_id=item.module_id, capability='view', boundary='stream')
+            if not result.allowed:
+                return False
         if job_id is not None:
             if type(job_id) is not int or (await db.execute(select(Job.id).where(
                     Job.id == job_id, Job.user_id == access.user_id))).scalar_one_or_none() is None:
