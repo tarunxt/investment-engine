@@ -2,7 +2,7 @@
 from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
-from sqlalchemy import select,func,or_
+from sqlalchemy import and_, select,func,or_
 from app.domains.auth.models import User
 from app.domains.runs.models import AutoRebalanceWorkflow
 from app.domains.order_intents.contracts import OrderDenied
@@ -107,11 +107,12 @@ class SimulationOrderWorker:
                 OrderIntent.expires_at > now, OutboxMessage.execution_attempts == 0,
                 or_(OutboxMessage.available_at.is_(None), OutboxMessage.available_at <= naive(now))).order_by(OutboxMessage.created_at).limit(2)
                 .with_for_update(skip_locked=True)))
-            recovering = list(db.scalars(select(OrderIntent.id).join(ExecutionRun).join(ExecutionAttempt,
+            recovering = list(db.scalars(select(OrderIntent.id).join(ExecutionRun).outerjoin(ExecutionAttempt,
                 ExecutionAttempt.intent_id == OrderIntent.id).where(OrderIntent.owner_id.in_(owners),
                 OrderIntent.state.in_(['unknown', 'partial', 'submitting', 'acknowledged']),
-                ExecutionAttempt.polls < 5, ExecutionAttempt.next_poll_at <= now,
-                ExecutionAttempt.claimed_at >= now - timedelta(minutes=10))
+                or_(ExecutionAttempt.leg_id.is_(None),
+                    and_(ExecutionAttempt.polls < 5, ExecutionAttempt.next_poll_at <= now,
+                         ExecutionAttempt.claimed_at >= now - timedelta(minutes=10))))
                 .group_by(OrderIntent.id).order_by(func.min(ExecutionAttempt.next_poll_at)).limit(2)))
             for flow in flows: self.tasks[PREPARE].apply_async(args=[flow], queue=QUEUE, retry=False)
             for event in events:

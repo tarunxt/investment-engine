@@ -96,3 +96,47 @@ def test_quarantine_remains_unavailable_outside_its_explicit_fixture_scope(quara
     else:monkeypatch.setenv('ENVIRONMENT','production')
     with pytest.raises(BoundaryDenied):workflow.execute(1,request,now=NOW)
     db.commit();db.expire_all();assert db.get(Job,1).status==JobStatus.PENDING
+
+
+def test_restored_run_workflow_and_stage_are_quarantined(quarantined):
+    from app.domains.runs.models import Run,RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage
+    from app.domains.prompts.models import Prompt
+    db,old,request=quarantined
+    for model in (Prompt,Run,RunJob,AutoRebalanceWorkflow,AutoRebalanceWorkflowStage):
+        model.__table__.create(db.get_bind())
+    for subject in (1,2):
+        db.add(Run(id=subject,user_id=subject,prompt='synthetic',prompt_preview='synthetic',
+            module_id='indmoney_us',module_version=7,status=JobStatus.PENDING,auto_export_enabled=True))
+        db.add(AutoRebalanceWorkflow(id=subject,user_id=subject,portfolio='us',sequence=1,
+            label='synthetic',module_id='indmoney_us',module_version=9,status='queued'))
+    db.flush()
+    for subject in (1,2):
+        db.add(AutoRebalanceWorkflowStage(id=subject,workflow_id=subject,stage='parse',status='queued'))
+        db.add(RunJob(id=subject,run_id=subject,job_id=subject,stage=1))
+    db.commit()
+    metadata=MetaData();metadata.reflect(db.get_bind())
+    rules=list(old.reader.inventory.rules)
+    for name in ('prompts','runs','run_jobs','auto_rebalance_workflows','auto_rebalance_workflow_stages'):
+        table=metadata.tables[name];path=()
+        if name=='prompts':
+            rules.append(AccountTableRule(name,(),excluded_reason='fixture retained prompt anchors'));continue
+        if name=='run_jobs':path=(OwnerHop('runs',('run_id',),('id',)),)
+        if name=='auto_rebalance_workflow_stages':path=(OwnerHop('auto_rebalance_workflows',('workflow_id',),('id',)),)
+        fields=tuple(c for c in table.c.keys() if not _credential_column(c))
+        rules.append(AccountTableRule(name,fields,tuple(c for c in table.c.keys() if _credential_column(c)),path=path))
+    inventory=AccountInventory('synthetic:work-graph',schema_digest(metadata),tuple(rules))
+    retention=RetentionSchedule('synthetic:retention-review',NOW+timedelta(days=1),
+        retain_until=tuple((name,None) for name in metadata.tables))
+    workflow=QuarantinedFixturePrivacy(db,SQLAccountReader(db,metadata,inventory),old.keyring,
+        retention=retention,scope=old.scope)
+    workflow.execute(1,request,now=NOW);db.commit()
+    workflow.restore(1,request,now=NOW);db.commit();db.expire_all()
+    assert db.get(Run,1).status==JobStatus.FAILED
+    assert db.get(Run,1).module_cancel_requested and not db.get(Run,1).auto_export_enabled
+    assert db.get(AutoRebalanceWorkflow,1).status=='failed'
+    assert db.get(AutoRebalanceWorkflow,1).control_version==1
+    assert db.get(AutoRebalanceWorkflowStage,1).status=='failed'
+    assert db.get(RunJob,1).job_id==1
+    assert db.scalar(select(UserModulePreferences.version).where(UserModulePreferences.user_id==1))>9
+    assert db.get(Run,2).status==JobStatus.PENDING
+    assert db.get(AutoRebalanceWorkflowStage,2).status=='queued'

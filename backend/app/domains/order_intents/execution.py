@@ -293,6 +293,14 @@ class ExecutionWorker:
     def reconcile(self, owner, intent):
         row, legs, run = self.snapshot(owner, intent)
         now = self.now()
+        if row.state == 'submitting' and all(leg.state == 'draft' for leg in legs) and not any(
+                self.db.get(ExecutionAttempt, leg.id) is not None for leg in legs):
+            # Dispatch committed its one-use claim before any effect claim.
+            # The account/intent locks from snapshot serialize this against
+            # _advance. Invalidate rather than revive the consumed approval.
+            row.state = 'invalidated'
+            self.db.commit()
+            return row
         for i, leg in enumerate(legs):
             attempt = self.db.get(ExecutionAttempt, leg.id, populate_existing=True)
             if attempt is None or leg.state in {'filled', 'rejected'}:

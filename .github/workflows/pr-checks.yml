@@ -1909,13 +1909,13 @@ jobs:
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
       - name: Verify typed native evidence export and quarantined fixture recovery
-        run: python -m pytest -q --junitxml=/tmp/native-privacy.xml backend/tests/test_native_outbox_export.py backend/tests/test_quarantined_privacy.py
+        run: python -m pytest -q --junitxml=/tmp/native-privacy.xml backend/tests/test_native_outbox_export.py backend/tests/test_quarantined_privacy.py backend/tests/test_canonical_blob_projection.py backend/tests/test_task_registry_privacy_export.py backend/tests/test_native_dispatch_claim_recovery.py backend/tests/test_base_privacy_key_authority.py
       - name: Require all native privacy checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/native-privacy.xml').getroot()
-          assert len(root.findall('.//testcase')) == 12
+          assert len(root.findall('.//testcase')) == 17
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
@@ -1971,8 +1971,8 @@ jobs:
           root=ET.parse('/tmp/stage17.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage17 cannot skip checks'
           cases=root.findall('.//testcase')
-          assert len(cases) == 417
-          for module,count in {'test_stage17_postgres':7, 'test_stage17_sql_account_postgres':12, 'test_stage17_real_services':5, 'test_stage17_redis_recovery_contract':3, 'test_stage17_sql_privacy_workflow':18, 'test_stage17_privacy_relations':12, 'test_stage17_sql_privacy_workflow_postgres':10, 'test_stage17_canonical_privacy_inventory':10, 'test_stage17_canonical_privacy_inventory_postgres':5, 'test_stage17_application_composition':13, 'test_stage17_application_composition_postgres':3, 'test_stage17_disposable_consumers':28, 'test_stage17_disposable_consumer_services':4, 'test_stage17_monitor_application':9, 'test_stage17_monitor_application_services':3}.items():
+          assert len(cases) == 418
+          for module,count in {'test_stage17_postgres':7, 'test_stage17_sql_account_postgres':12, 'test_stage17_real_services':5, 'test_stage17_redis_recovery_contract':3, 'test_stage17_sql_privacy_workflow':18, 'test_stage17_privacy_relations':12, 'test_stage17_sql_privacy_workflow_postgres':10, 'test_stage17_canonical_privacy_inventory':10, 'test_stage17_canonical_privacy_inventory_postgres':6, 'test_stage17_application_composition':13, 'test_stage17_application_composition_postgres':3, 'test_stage17_disposable_consumers':28, 'test_stage17_disposable_consumer_services':4, 'test_stage17_monitor_application':9, 'test_stage17_monitor_application_services':3}.items():
               assert sum(case.attrib.get('classname','').split('.')[-1] == module for case in cases) == count, module
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK

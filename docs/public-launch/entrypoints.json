@@ -3,7 +3,7 @@
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
     "background": 31,
-    "export": 50,
+    "export": 52,
     "frontend": 25,
     "http": 317,
     "lifecycle": 9,
@@ -9719,6 +9719,34 @@
     },
     {
       "calls": [
+        "BoundaryDenied",
+        "_encode",
+        "assert_owned_relationships",
+        "audit_blob_references",
+        "digest",
+        "len",
+        "owned_execution_fences",
+        "reader.export"
+      ],
+      "capability": "export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/canonical_account_export.py:56"
+    },
+    {
+      "calls": [
         "app.task",
         "self.consume"
       ],
@@ -10334,6 +10362,45 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/public_service/sql_account.py:377"
+    },
+    {
+      "calls": [
+        "BoundaryDenied",
+        "UUID",
+        "any",
+        "client.mget",
+        "db.connection",
+        "db.connection().get_isolation_level",
+        "db.get_bind",
+        "db.scalars",
+        "items.append",
+        "len",
+        "list",
+        "owner",
+        "select",
+        "select(Job.id).where",
+        "select(Job.id).where(Job.user_id == subject).order_by",
+        "select(Job.id).where(Job.user_id == subject).order_by(Job.id).limit",
+        "str",
+        "type",
+        "zip"
+      ],
+      "capability": "export_job_registry",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/task_registry_export.py:13"
     },
     {
       "calls": [
@@ -14252,7 +14319,7 @@
       "registration": "app.task(name='uat2.orders.prepare.v1', **options)",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:134"
+      "source": "backend/app/uat2/order_worker.py:135"
     },
     {
       "calls": [
@@ -14275,7 +14342,7 @@
       "registration": "app.task(name='uat2.orders.dispatch.v1', **{**options, 'queue': EXECUTION_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:136"
+      "source": "backend/app/uat2/order_worker.py:137"
     },
     {
       "calls": [
@@ -14298,7 +14365,7 @@
       "registration": "app.task(name='uat2.orders.reconcile.v1', **{**options, 'queue': RECONCILIATION_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:138"
+      "source": "backend/app/uat2/order_worker.py:139"
     },
     {
       "calls": [
@@ -14321,7 +14388,7 @@
       "registration": "app.task(name='uat2.orders.relay.v1', **{**options, 'queue': CONTROL_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:140"
+      "source": "backend/app/uat2/order_worker.py:141"
     },
     {
       "calls": [],
@@ -14341,7 +14408,7 @@
       "registration": "{'task': 'uat2.orders.relay.v1', 'schedule': 5.0, 'options': {'queue': CONTROL_QUEUE, 'expires': 5}}",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:149"
+      "source": "backend/app/uat2/order_worker.py:150"
     },
     {
       "calls": [
@@ -16781,7 +16848,7 @@
     "backend/app/domains/order_intents/__init__.py": "17111c143fdcbb480a6b6028f4087b15a639b637900734c09bfa776f63beb6ed",
     "backend/app/domains/order_intents/authority.py": "53916718135862628a255f56a7ca29f331486bc7cd152c03c4d6dc0c886103ee",
     "backend/app/domains/order_intents/contracts.py": "6e8a0bbecd3b1b24bc8447378894b719d8c0bbeedfeda919230f5d67c9d672bb",
-    "backend/app/domains/order_intents/execution.py": "fbe4b8431308b9ccc74eaa666489d579ff432109f9bc71b0ad482db3d092864e",
+    "backend/app/domains/order_intents/execution.py": "55b9e437863d737f8a932396b46cfb4c1e546e56f996ed8514f5dc604a7c7114",
     "backend/app/domains/order_intents/execution_fake.py": "4cb950b8ce8070eb0d7627622969ab0e82440a27e595c1c45d2d81a2d47c1195",
     "backend/app/domains/order_intents/execution_models.py": "b0f77523f3266941aa91d193afda370e62d6d64f35192f432bf1422e84f5cdc2",
     "backend/app/domains/order_intents/execution_risk.py": "791a45f2504de189e489777be882b501fc24b18b3fa4d8a38f835c8a501e484d",
@@ -16881,6 +16948,7 @@
     "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
     "backend/app/domains/public_service/application_bindings.py": "1dd230158bac591c84055fdc6276e4345adc0a28e7dcb5e55cce3ead0240e97d",
     "backend/app/domains/public_service/application_router.py": "f79cf2cb8e9a17b03cd0ace89b40ac646ebaddee2a21aa1061ee1535947a2429",
+    "backend/app/domains/public_service/canonical_account_export.py": "37368ddb4c4510cf9603ce30f211abb6e56d21ee9d347249bd93bf8107c6b423",
     "backend/app/domains/public_service/canonical_privacy_inventory.py": "cca88bd86b5f6237d4559ce230c7ce61923374db71abc2e11149445d1ad44d01",
     "backend/app/domains/public_service/canonical_privacy_resolvers.py": "c4310d2756eae62de7bed349e6c8718c4b2de382773b070f8a2ada9fa29b40ae",
     "backend/app/domains/public_service/composition.py": "dee5e25cce70739cfbd0c5c7651303f5e24f2231dfc040007a588775776c4380",
@@ -16896,8 +16964,8 @@
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "b445ff6d7ad9d1aae8fab7a74a5e8fcae81330fe03b2fcd6d7284be17115906d",
     "backend/app/domains/public_service/privacy_relations.py": "3fcbb7650f7a85e5e82d0a1811653dbbc838dcf66a2e7e5e7d783269177971a0",
-    "backend/app/domains/public_service/quarantined_privacy.py": "ec95bb1059065b2929b7b6e55cdf1a3dd7b27d064025f1c3c432e894d5ab1c08",
-    "backend/app/domains/public_service/recoverable_privacy.py": "5a23fcffc2747f6d4486a2e0a708b36776ad0b146f747e7345a5a16f2cb31081",
+    "backend/app/domains/public_service/quarantined_privacy.py": "b2189afc86c0b91753f58a9e845ea1595a19d2cbe01ca0465de2ef4f8081de49",
+    "backend/app/domains/public_service/recoverable_privacy.py": "6276844f7d67572fc047cd7b126619be8a57e893f562588e16edd52b95e49ba3",
     "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
     "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",
     "backend/app/domains/public_service/reviewed_residency.py": "e953df72a39d0c2430f7f548c25f9fdf4951d017d595a5d0c7a502f92bd32d50",
@@ -16911,6 +16979,7 @@
     "backend/app/domains/public_service/sql_privacy_workflow.py": "e10e055ce118927ca2eff398225d8df704a7454f0867bbe4052c91d1c00ae505",
     "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",
     "backend/app/domains/public_service/support.py": "5a8ca5db4e0f496ba3c165e542618d4255bf1e3c084be6c7e20e71d142afd587",
+    "backend/app/domains/public_service/task_registry_export.py": "2fcc773a10a6ab95bb9e4f0174748480ac329cdf2fefb8a383252f286cc542d0",
     "backend/app/domains/public_service/transaction_outcomes.py": "f9119b21e7fc1c5fe59efecd189bf39b7e67af06fc7be6c52cabb2b3012b8490",
     "backend/app/domains/recommendation_audit/__init__.py": "c3139e78f64ae4d6c83bb1c4ffe47918936c4a1dc6e8d61c1903c8619b3ce195",
     "backend/app/domains/recommendation_audit/adapters.py": "a81b5cf4e206a5d9808d2f987a578c960dddb32d671221e4d824551c1e65fa53",
@@ -17035,7 +17104,7 @@
     "backend/app/uat2/http_bindings.py": "0c4e8502eb31db87715726db22566007e20a121908e237e523a14aadca2797f2",
     "backend/app/uat2/main.py": "55ec862112db5168a595d5015e1d08e30555f5d17b7bfd561d995eedce1e9e54",
     "backend/app/uat2/operations.py": "bd613e122f26911ce3ab3f5e7c0c181a94e83b42e248add14a9ca08bacef0618",
-    "backend/app/uat2/order_worker.py": "73cec403dc71f420f02cee24dd273c4170e679d03fe4c53cec4291ca91f85391",
+    "backend/app/uat2/order_worker.py": "3a270628c8855d4a497bca4970397d8644d0ec24ac2e774de90ccbcb737ddb59",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
     "backend/app/uat2/private_exports.py": "59ffc52b91623cd7c4644b6dd19a06dc07a6ebffb1156be5720ba477272b754a",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",

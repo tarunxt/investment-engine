@@ -68,3 +68,15 @@ def test_actual_pg_read_committed_cannot_claim_stable_canonical_integrity(databa
     with Session(engine.execution_options(isolation_level='READ COMMITTED')) as db:
         with pytest.raises(BoundaryDenied,match='SNAPSHOT_REQUIRED'):
             assert_owned_relationships(db,Base.metadata,owner)
+
+
+def test_actual_pg_canonical_export_keeps_uncovered_store_dispositions(canonical_db):
+    from app.domains.public_service.canonical_account_export import CanonicalAccountExport
+    db,owner,other=canonical_db
+    result=CanonicalAccountExport(db,Base.metadata).export(owner)
+    assert result['sql']['datasets']['users'][0]['id']==owner
+    assert all(row['user_id']==owner for row in result['sql']['datasets']['jobs'])
+    assert result['audit_blobs']['items']==[]
+    assert result['complete_account_export'] is False
+    assert result['complete_account_erasure'] is False
+    assert {'files','cache','backups','identity','retention','outbox'}==set(result['dispositions'])

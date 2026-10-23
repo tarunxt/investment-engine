@@ -26,7 +26,7 @@ TOPIC = 'public_service.privacy.recovery_fixture.v1'
 MAX_BYTES = 8 * 1024 * 1024
 # Restoring executable records could replay old work. Such stores need a
 # separate drain/quarantine adapter; a generic row restore cannot approve it.
-DATA_ONLY_TABLES = frozenset({'user_profiles', 'api_keys', 'indmoney_us_portfolio_snapshots',
+DATA_ONLY_TABLES = frozenset({'user_profiles', 'indmoney_us_portfolio_snapshots',
     'zerodha_portfolio_snapshots', 'dashboard_portfolio_daily_snapshots'})
 
 

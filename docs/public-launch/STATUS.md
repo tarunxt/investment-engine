@@ -1,3 +1,13 @@
+## Local review successor (2026-10-23 22:41 UTC)
+
+The uninstalled successor to `4b6ede01a616d1d7ee919341f3595c5ee1205e0b`
+fixes two independently reproduced recovery defects and extends read-only
+canonical export, exact owned-job cache projection and disposable work-graph
+quarantine. See [scope, evidence and remaining gates](PRIVACY_REVIEW_SUCCESSOR.md).
+81 focused/retained tests pass locally, zero skips. H2 remains incomplete;
+publication, PostgreSQL/Redis/native browser evidence and new owner acceptance
+are pending. No remote or server changes were made.
+
 # Latest remaining-priority implementation checkpoint — 23 October 2026
 
 This entry supersedes earlier pending-publication statements only for their later resolved operations; historical evidence below is preserved. The approved public PR1262 candidate remains 6f3214c until a separately approved push is verified. The five-commit batch ending ad6790fa691d77378a7b75c4a518f7369f55e143 is preserved on its own local branch; no approval for that batch has been received in this worker. Later local composition/security/operations commits are 2d5345b0e55cdad2c91aea2d7df98712c53f22a0, 8a57f1ab1875e5f0782ea8f0d70730af8147ed96 and 391872ace445bda6b9a1a7495354a5f80912bc9b. This checkpoint accompanies their privacy-adapter successor; its exact SHA is recorded in Git/task evidence.
