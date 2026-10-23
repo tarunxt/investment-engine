@@ -76,7 +76,11 @@ async function enable(page){const box=page.getByRole('checkbox',{name:'Select Ze
 async function analyze(page,base,owner){
  await page.goto(base+'/console/automated-rebalance');
  const region=page.getByRole('region',{name:'Server analysis'});
- await region.getByLabel('Portfolio',{exact:true}).selectOption('india');
+ // The wrapping label includes option text; exact text-label matching is not stable.
+ const portfolio=region.getByRole('combobox');
+ await portfolio.waitFor();assert.equal(await portfolio.count(),1);
+ assert.deepEqual(await portfolio.locator('option').evaluateAll(options=>options.map(o=>({value:o.value,text:o.textContent}))),[{value:'indmoney_us',text:'US portfolio'},{value:'india',text:'India portfolio'}]);
+ await portfolio.selectOption('india');assert.equal(await portfolio.inputValue(),'india');
  await region.getByRole('button',{name:'Start server analysis',exact:true}).click();
  await region.getByRole('heading',{name:/Workflow \d+ · india · completed/}).waitFor({timeout:90000});
  const flow=sql("SELECT id FROM auto_rebalance_workflows WHERE user_id=? AND portfolio='india' AND status='completed' ORDER BY id DESC LIMIT 1",[owner])[0];assert(flow);
@@ -149,7 +153,18 @@ try{
  assert.equal(await reconciled.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).count(),0);
  await shot(b.page,'unknown-restart-reconciled-ui');receipt.checks.push('accepted_unknown_durable_evidence_restart_filled_ui_one_venue_submission');
  receipt.passed=true;
-}catch(error){receipt.error=String(error?.stack||error);throw error;}
+}catch(error){
+ receipt.error=String(error?.stack||error);
+ // Capture only this disposable synthetic preview, before owned browser cleanup.
+ for(const [ci,context] of (browser?.contexts()||[]).entries())for(const [pi,page] of context.pages().entries()){
+  const name=`failure-context-${ci}-page-${pi}`;
+  try{await page.screenshot({path:path.join(evidence,`${name}.png`),fullPage:true,timeout:5000});receipt.screenshots.push(`${name}.png`);}
+  catch(diagnosticError){(receipt.diagnostic_errors??=[]).push(String(diagnosticError));}
+  try{writeFileSync(path.join(evidence,`${name}.aria.txt`),await page.locator('body').ariaSnapshot({timeout:5000}));}
+  catch(diagnosticError){(receipt.diagnostic_errors??=[]).push(String(diagnosticError));}
+ }
+ throw error;
+}
 finally{
  try{await browser?.close();}catch(error){receipt.passed=false;receipt.browser_cleanup_error=String(error);process.exitCode=1;}
  try{await stop();receipt.cleanup='Owned preview stop succeeded; synthetic databases retained';}catch(error){receipt.passed=false;receipt.cleanup_error=String(error);process.exitCode=1;}
