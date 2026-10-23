@@ -27,6 +27,7 @@ class DisposableApplicationBindings:
     consumers:IsolatedConsumerComposition|None=None
     signup_perimeter:object=None
     consumer_factory:object=None
+    monitor_factory:object=None
 
     def validate(self):
         if (os.getenv('ENVIRONMENT')!='test' or type(self.reference) is not str
@@ -47,6 +48,11 @@ class DisposableApplicationBindings:
             if type(self.consumer_factory) is not DisposableConsumerFactory or self.consumers is not None:
                 raise BoundaryDenied('DISPOSABLE_CONSUMER_FACTORY_REQUIRED')
             self.consumer_factory.validate(self.reference)
+        if self.monitor_factory is not None:
+            from .disposable_monitoring import DisposableMonitoringFactory
+            if type(self.monitor_factory)is not DisposableMonitoringFactory:
+                raise BoundaryDenied('DISPOSABLE_MONITOR_BINDING_REQUIRED')
+            self.monitor_factory.validate(self.reference)
         from app.infrastructure.database.base import Base
         inventory=self.server.bindings.account_inventory
         from .sql_account import AccountInventory
@@ -68,7 +74,13 @@ class DisposableApplicationBindings:
     def monitor(self,db):
         self.validate()
         from .monitor_dispatch import MonitorDispatch
+        if self.monitor_factory is not None:return self.monitor_factory.service(db)
         return MonitorDispatch(db) # No sink/roster: dispatch fails before any DB/effect.
+
+    def monitoring(self):
+        self.validate()
+        if self.monitor_factory is None:raise BoundaryDenied('DISPOSABLE_MONITOR_BINDING_UNAVAILABLE')
+        return self.monitor_factory
 
     def privacy(self,db,owner_id):
         self.validate();self.scope.validate(db)

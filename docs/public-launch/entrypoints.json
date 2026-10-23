@@ -5,12 +5,12 @@
     "background": 31,
     "export": 47,
     "frontend": 25,
-    "http": 309,
+    "http": 313,
     "lifecycle": 9,
     "page": 68,
     "scheduler": 16,
     "websocket": 5,
-    "worker": 44
+    "worker": 45
   },
   "entries": [
     {
@@ -9716,6 +9716,145 @@
     },
     {
       "calls": [
+        "app.task",
+        "self.consume"
+      ],
+      "capability": "consume_monitor",
+      "classification": "administrator-only",
+      "kind": "worker",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "app.task(name=TASK, shared=False, queue=QUEUE, acks_late=True, reject_on_worker_lost=True, max_retries=0, autoretry_for=(), soft_time_limit=30, time_limit=35)",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/disposable_monitoring.py:123"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.monitoring",
+        "binding.monitoring().observe",
+        "router.post",
+        "transact"
+      ],
+      "capability": "observe_monitor",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.post('/observations')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/monitor/observations",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/monitor_application_router.py:26"
+    },
+    {
+      "calls": [
+        "Depends",
+        "binding.monitoring",
+        "binding.monitoring().status",
+        "router.get",
+        "transact"
+      ],
+      "capability": "monitor_status",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.get('/alerts/{id}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/monitor/alerts/{id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/monitor_application_router.py:31"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.monitoring",
+        "binding.monitoring().acknowledge",
+        "router.post",
+        "transact"
+      ],
+      "capability": "acknowledge_monitor",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.post('/owners/{owner_id}/alerts/{id}/acknowledge')"
+      ],
+      "owner_source": [
+        "user.id",
+        "owner_id (input; authority unverified)"
+      ],
+      "registration": "unmounted",
+      "route": "/monitor/owners/{owner_id}/alerts/{id}/acknowledge",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/monitor_application_router.py:35"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.monitoring",
+        "binding.monitoring().escalate",
+        "router.post",
+        "transact"
+      ],
+      "capability": "escalate_monitor",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(request_bindings)",
+        "router.post('/owners/{owner_id}/alerts/{id}/escalate')"
+      ],
+      "owner_source": [
+        "user.id",
+        "owner_id (input; authority unverified)"
+      ],
+      "registration": "unmounted",
+      "route": "/monitor/owners/{owner_id}/alerts/{id}/escalate",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/monitor_application_router.py:40"
+    },
+    {
+      "calls": [
         "BoundaryDenied",
         "datetime.fromisoformat",
         "datetime.now",
@@ -16118,7 +16257,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "a2412e78488ac3e6e3f5c07c89e836589d8acbc610b80b11b7e94f99dc396536",
+    "backend/app/domains/modules/coverage.py": "86899afc3b54335164632eaea4cd3798dbbb38f1aa9fa6b352af9f7ccbf7ba5f",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
@@ -16235,15 +16374,17 @@
     "backend/app/domains/prompts/schemas.py": "a04ed42420332a671496b1af90faf71900b6f78f1e480a00ea31a4b3ed73bf36",
     "backend/app/domains/public_service/__init__.py": "f290a6b2cd54f19bbf468879cd8bd5aa1e15ec65c8e41f05fb2113945b16a32f",
     "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
-    "backend/app/domains/public_service/application_bindings.py": "6a98bfd9a48f9b6ebdc5ddd27a91f75db0709176f09f8091659007f9fbba5d43",
-    "backend/app/domains/public_service/application_router.py": "13f042d5cd51a04f1fb950821f29a3bc7112c761bd5633aa1c0e3ea6be217bc0",
+    "backend/app/domains/public_service/application_bindings.py": "1dd230158bac591c84055fdc6276e4345adc0a28e7dcb5e55cce3ead0240e97d",
+    "backend/app/domains/public_service/application_router.py": "f79cf2cb8e9a17b03cd0ace89b40ac646ebaddee2a21aa1061ee1535947a2429",
     "backend/app/domains/public_service/canonical_privacy_inventory.py": "cca88bd86b5f6237d4559ce230c7ce61923374db71abc2e11149445d1ad44d01",
     "backend/app/domains/public_service/canonical_privacy_resolvers.py": "c4310d2756eae62de7bed349e6c8718c4b2de382773b070f8a2ada9fa29b40ae",
     "backend/app/domains/public_service/composition.py": "dee5e25cce70739cfbd0c5c7651303f5e24f2231dfc040007a588775776c4380",
     "backend/app/domains/public_service/dispatch.py": "1ea190e31b4ad949570542b38d62fa292b6f3117827ced5639490b46701974ea",
-    "backend/app/domains/public_service/disposable_consumers.py": "bfd2a5a4b3bcca9de0b4e2b46fecac3a7c8f5f8111f2eab9d066f3a45f7a2a48",
+    "backend/app/domains/public_service/disposable_consumers.py": "a887e21e977d7ef0e9c8d710740c7c95ce0d38b09e69cf614cb019a9a0c1e545",
+    "backend/app/domains/public_service/disposable_monitoring.py": "0496c04c535b8cd475426e932fc2179fbc0271c998484d760dacc4d354e9efca",
     "backend/app/domains/public_service/drills.py": "40af5e7a31ba599d030dacb1ec646abf0b4e8eb576d8444ebbae9668126331ed",
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
+    "backend/app/domains/public_service/monitor_application_router.py": "56d5cdbf12586edbb74e3a4e795c300692c0f3a72a54ae34d05f15bbda24c6f3",
     "backend/app/domains/public_service/monitor_dispatch.py": "e13550d77d7f2c154a8fa21249997be6014e6f43f2ac9dd409c46eddf379e0f5",
     "backend/app/domains/public_service/monitoring.py": "7ff8ad4567f29a5c6901418ca2127322828c732c4cc0ea6b6c5757d688731419",
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",

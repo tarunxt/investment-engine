@@ -83,44 +83,48 @@ class DisposableConsumerFactory:
             bindings_factory=self.bindings, clock=clock or self.now)
 
     def check_transport(self, app):
-        """Validate Celery's effective endpoints before task registration.
-
-        Read/write URL properties can override broker_url (including via
-        Celery's environment settings). Do not instantiate a connection or a
-        transport plugin to inspect them: validation itself has no I/O.
-        """
-        from pathlib import Path
-        import os,re,math
         self.validate(self.scope.reference)
-        conf=app.conf
-        url=conf.broker_url
-        if (type(url) is not str or url not in {'memory://','redis://redis:6379/14'}
-            or conf.broker_read_url != url or conf.broker_write_url != url
-            or conf.result_backend not in (None,'cache+memory://')
-            or conf.broker_transport is not None
-            or any(getattr(conf,key) is not None for key in (
-                'broker_user','broker_password','broker_vhost','broker_port','broker_login_method'))
-            or conf.broker_use_ssl is not None and conf.broker_use_ssl is not False
-            or conf.broker_failover_strategy not in (None,'round-robin')):
-            raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
-        options=conf.broker_transport_options
-        if type(options) is not dict:
-            raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
-        if url == 'memory://':
-            if options:raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
-            return
-        if (not Path('/.dockerenv').is_file()
-            or os.getenv('CREDX_STAGE17_REDIS_ACK') != 'disposable-ci-only'
-            or os.getenv('CREDX_STAGE17_REDIS_URL') != url
-            or set(options)-{'global_keyprefix','visibility_timeout','polling_interval'}
-            or type(options.get('global_keyprefix')) is not str
-            or not re.fullmatch(r'stage17_[0-9a-f]{32}:',options['global_keyprefix'])
-            or type(options.get('visibility_timeout',5)) is not int
-            or not 1<=options.get('visibility_timeout',5)<=300
-            or type(options.get('polling_interval',.2)) not in (int,float)
-            or not math.isfinite(options.get('polling_interval',.2))
-            or not .01<=options.get('polling_interval',.2)<=1):
-            raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
+        check_disposable_transport(app)
 
     def now(self):
         return utc(self.clock() if self.clock else datetime.now(timezone.utc))
+
+
+def check_disposable_transport(app):
+    """Validate Celery's effective endpoints before task registration.
+
+    Read/write URL properties can override broker_url (including via
+    Celery's environment settings). Do not instantiate a connection or a
+    transport plugin to inspect them: validation itself has no I/O.
+    """
+    from pathlib import Path
+    import os,re,math
+    conf=app.conf
+    url=conf.broker_url
+    if (type(url) is not str or url not in {'memory://','redis://redis:6379/14'}
+        or conf.broker_read_url != url or conf.broker_write_url != url
+        or conf.result_backend not in (None,'cache+memory://')
+        or conf.broker_transport is not None
+        or any(getattr(conf,key) is not None for key in (
+            'broker_user','broker_password','broker_vhost','broker_port','broker_login_method'))
+        or conf.broker_use_ssl is not None and conf.broker_use_ssl is not False
+        or conf.broker_failover_strategy not in (None,'round-robin')):
+        raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
+    options=conf.broker_transport_options
+    if type(options) is not dict:
+        raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
+    if url == 'memory://':
+        if options:raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')
+        return
+    if (not Path('/.dockerenv').is_file()
+        or os.getenv('CREDX_STAGE17_REDIS_ACK') != 'disposable-ci-only'
+        or os.getenv('CREDX_STAGE17_REDIS_URL') != url
+        or set(options)-{'global_keyprefix','visibility_timeout','polling_interval'}
+        or type(options.get('global_keyprefix')) is not str
+        or not re.fullmatch(r'stage17_[0-9a-f]{32}:',options['global_keyprefix'])
+        or type(options.get('visibility_timeout',5)) is not int
+        or not 1<=options.get('visibility_timeout',5)<=300
+        or type(options.get('polling_interval',.2)) not in (int,float)
+        or not math.isfinite(options.get('polling_interval',.2))
+        or not .01<=options.get('polling_interval',.2)<=1):
+        raise BoundaryDenied('DISPOSABLE_CONSUMER_TRANSPORT_REQUIRED')

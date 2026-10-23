@@ -74,3 +74,6 @@ async def execute_privacy(id:str,body:ExecuteBody,user=Depends(get_current_user)
 async def privacy_result(id:str,user=Depends(get_current_user),binding=Depends(request_bindings),db=Depends(get_async_db)):
     try:return response(await db.run_sync(lambda s:binding.privacy(s,user.id).result(user.id,id)))
     except BoundaryDenied:raise HTTPException(404,'Owned completed disposable result required') from None
+
+from .monitor_application_router import router as monitor_router
+router.include_router(monitor_router)
