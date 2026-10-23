@@ -1,3 +1,13 @@
+# Current Stage17 scoped candidate verification — 23 October 2026
+
+Exact tested source `85f2595d032df717d36c5290bb911614f685e50b`:55/55CIjobs,417actualStage17checks with zero failures/skips,20exact-head Linux controller cases. Independent source/package audit verifies127payloads,829Gitblobs,125wheel ZIPs,140frontend metadata records and matching offline-install receipt. The latest [STATUS](STATUS.md) binds exact workflow/artifact IDs, hashes and the saved independent report; no documentation successor inherits a fresh CI claim.
+
+This closes the verified synthetic local/CI monitoring-composition milestone, including actual disposable PostgreSQL/Redis and child-worker recovery. Normal runtime and real effects remain disabled. Complete privacy erasure, identity/backups/shared-content treatment, trusted real evidence/perimeter/consumer/monitor bindings and nine public/live gates remain partial or blocked; they are not waived or relabeled as mere missing paperwork. UAT2 is stopped and deployment/owner/public acceptance remain unclaimed.
+
+Stage18 local rehearsal is now separately in progress on [draft PR1260](https://github.com/tarunxt/investment-engine/pull/1260), based on this source. Its own database/restore, matrix, browser/load and exact-head acceptance gates remain separate. The first rehearsal's114executed/4failed result is preserved; Stage17 success is not evidence those failures passed. Historical closure records below remain as provenance.
+
+---
+
 # Stage17 current closure — exact `470a82bfe3b9699a16ab38d5f01018e08113ef9a`
 
 Recorded 2026-10-22 10:50:32 UTC. This is the verified **synthetic local/CI** implementation boundary. Full public-service readiness, UAT2 deployment and owner deployment acceptance are not claimed. Earlier closure rows below are historical and are superseded by this section for the current implementation.
