@@ -27,12 +27,12 @@ RELAY = 'uat2.analysis.relay.v1'
 
 
 class SimulationAnalysisWorker:
-    def __init__(self, session_factory, *, scope, clock=None):
+    def __init__(self, session_factory, *, scope, clock=None, source_storage=None):
         if not callable(session_factory) or type(scope) is not SimulationSourceScope:
             raise WorkflowDenied('Explicit scoped simulation worker binding required')
         self.factory, self.scope = session_factory, scope
         self.clock = clock or (lambda: datetime.now(timezone.utc))
-        self.analysis = SyntheticAnalysis(scope=scope, policy=policy)
+        self.analysis = SyntheticAnalysis(scope=scope, policy=policy, source_storage=source_storage)
         self.app, self.tasks = None, {}
 
     @contextmanager

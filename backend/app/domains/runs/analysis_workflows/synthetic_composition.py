@@ -30,9 +30,12 @@ CATALOGUE = frozenset({'US:UATA', 'US:UATB', 'NSE:SYNTHETIC0'})
 
 
 class SyntheticAnalysis:
-    def __init__(self, *, scope, policy):
+    def __init__(self, *, scope, policy, source_storage=None):
         if type(scope) is not SimulationSourceScope or not callable(policy):
             raise WorkflowDenied('Explicit synthetic source scope and canonical policy required')
+        self.source_storage = source_storage or ('journal' if scope.mode == 'hosted' else 'snapshot')
+        if self.source_storage not in {'snapshot', 'journal'} or scope.mode == 'hosted' and self.source_storage != 'journal':
+            raise WorkflowDenied('Hosted synthetic acquisition journal required')
         self.scope, self.policy = scope, policy
         self.governance = SyntheticGovernance(
             Limits(version='synthetic-linked-preview-v1', max_input_tokens=32768),
@@ -53,8 +56,12 @@ class SyntheticAnalysis:
     def source(self, db, owner, portfolio, snapshot_id=None):
         """Actual accepted/imported bytes and current version, never a fixed source."""
         self.scope.validate(db, owner)
-        result = owned_source(db, owner, portfolio, snapshot_id)
-        if portfolio == 'india':
+        if portfolio == 'india' and self.source_storage == 'journal':
+            from .synthetic_journal import latest
+            result = latest(db, owner, scope=self.scope, snapshot_id=snapshot_id)
+        else:
+            result = owned_source(db, owner, portfolio, snapshot_id)
+        if portfolio == 'india' and self.source_storage == 'snapshot':
             receipt = result['acquisition']
             connection = db.get(IntegrationConnection, result['connection']['id'], populate_existing=True)
             if (connection is None or not self.scope.credentials_allowed(db, connection)
@@ -65,6 +72,19 @@ class SyntheticAnalysis:
         if not facts['holdings'] or not set(facts['holdings']) <= CATALOGUE:
             raise WorkflowDenied('Only the documented synthetic instruments are allowed')
         return result
+
+    def acquire(self, db, owner, *, key=None):
+        if self.source_storage == 'journal':
+            from .synthetic_journal import acquire
+            source = acquire(db, owner, scope=self.scope, authorize=self.authorize, key=key)
+            return {'owner_id': owner, 'snapshot_id': None, 'simulation_only': True,
+                'source_receipt_id': source['source_receipt_id'], 'source_hash': source['content_hash'],
+                'connection_version': source['connection']['version']}
+        from .synthetic_sources import acquire
+        row = acquire(db, owner, scope=self.scope, authorize=self.authorize)
+        return {'owner_id': owner, 'snapshot_id': row.id, 'simulation_only': True,
+            'source_hash': row.acquisition_json['content_hash'],
+            'connection_version': row.acquisition_json['connection_version']}
 
     def recommendation_source(self, db, row, job, now):
         facts = frozen_projection(row)

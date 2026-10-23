@@ -34,6 +34,7 @@ class Control(BaseModel):
 class SyntheticSource(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     portfolio:Literal['india']
+    key:str|None=Field(default=None,min_length=8,max_length=96)
 
 def optional_analysis_runtime():
     return configured_runtime()
@@ -71,14 +72,11 @@ async def create_analysis_workflow(body:Create,db=Depends(get_async_db),user=Dep
 @router.post('/synthetic-source')
 async def acquire_synthetic_source(body:SyntheticSource,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
     from app.domains.runs.analysis_workflows.synthetic_composition import SyntheticAnalysis
-    from app.domains.runs.analysis_workflows.synthetic_sources import acquire
     composition=getattr(runtime.policy,'__self__',None)
     if type(composition) is not SyntheticAnalysis:
         raise HTTPException(503,'Explicit synthetic acquisition binding unavailable')
     try:
-        row=await db.run_sync(lambda session:acquire(session,user.id,scope=composition.scope,authorize=runtime.policy))
-        result={'owner_id':user.id,'snapshot_id':row.id,'simulation_only':True,
-            'source_hash':row.acquisition_json['content_hash'],'connection_version':row.acquisition_json['connection_version']}
+        result=await db.run_sync(lambda session:composition.acquire(session,user.id,key=body.key))
         await db.commit();return result
     except WorkflowDenied:
         await db.rollback();raise HTTPException(403,'Current owned synthetic source policy required') from None

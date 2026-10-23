@@ -10560,7 +10560,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/config",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:50"
+      "source": "backend/app/domains/runs/analysis_router.py:51"
     },
     {
       "calls": [
@@ -10595,7 +10595,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:54"
+      "source": "backend/app/domains/runs/analysis_router.py:55"
     },
     {
       "calls": [
@@ -10623,7 +10623,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:61"
+      "source": "backend/app/domains/runs/analysis_router.py:62"
     },
     {
       "calls": [
@@ -10656,13 +10656,13 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:65"
+      "source": "backend/app/domains/runs/analysis_router.py:66"
     },
     {
       "calls": [
         "Depends",
         "HTTPException",
-        "acquire",
+        "composition.acquire",
         "db.commit",
         "db.rollback",
         "db.run_sync",
@@ -10688,7 +10688,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/synthetic-source",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:72"
+      "source": "backend/app/domains/runs/analysis_router.py:73"
     },
     {
       "calls": [
@@ -10720,7 +10720,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/controls",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:87"
+      "source": "backend/app/domains/runs/analysis_router.py:85"
     },
     {
       "calls": [
@@ -16552,7 +16552,7 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/analysis_router.py": "cf4a0122b080bae96911352bcd9c904176a4fa763bfb5fe2b4ea46eb296c1f18",
+    "backend/app/domains/runs/analysis_router.py": "5c5296e7d8d433948331b34d6eb506590bd48d65eb841a815f4175504fe9166d",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
     "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
@@ -16562,7 +16562,8 @@
     "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
     "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
     "backend/app/domains/runs/analysis_workflows/service.py": "4d25f2f20bd81353707945c127202b4ec9f806c5dd4621e05c87c68514ff0653",
-    "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "a9a45e5da62865c842c591dbbd42e93a4fae5bc3a43f0fe209f12a6554fe888b",
+    "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "5b084cb1c497aed09583646c6d6334d2fc1b8ab3d0543faef1df57b1b6c7f591",
+    "backend/app/domains/runs/analysis_workflows/synthetic_journal.py": "faddec2ce90f4946a61d8cee8cb82c7ae491ca71fad54918b1fb5b634975b830",
     "backend/app/domains/runs/analysis_workflows/synthetic_sources.py": "eddcfcc54903469e63a99d68e3d4929807563b7c98aeb29fc0f90183f02cbd0e",
     "backend/app/domains/runs/auto_rebalance_audit.py": "32e04c7bf212bcf7e989252f6877bf205ecfef13942babec807441efac0dbcab",
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
@@ -16651,9 +16652,9 @@
     "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
     "backend/app/shared/ws_relay.py": "ea0a0b2a84fe570df06bec7ffc13d12bdf2af2672909d5890bdca3b47fe73423",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
-    "backend/app/uat2/analysis_worker.py": "161c03a37884bc1d3d9aefaba774cd039f0d86e5bddf8138502fbb436b61df49",
+    "backend/app/uat2/analysis_worker.py": "b259a61f9921cf0f7c189a9a1fac12bab3584a6a9317d467966dbc2b8d231e08",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/http_bindings.py": "a2ba87ecb444cd7ec1cc679ea6563fcb61be9b8cd4548438f1895bd7594e7126",
+    "backend/app/uat2/http_bindings.py": "aa2e9f5c88b5a721c6ab7677f3341786b8e01a622e69131d4b10346dc7e4b053",
     "backend/app/uat2/main.py": "c4ca690ee6438e867d9c9c2816cbf1e02231533038a845144726b360dd86fc54",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",

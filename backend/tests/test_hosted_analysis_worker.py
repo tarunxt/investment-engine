@@ -18,13 +18,13 @@ from app.uat2.analysis_worker import SimulationAnalysisWorker, STAGE, JOB, RELAY
 
 
 @pytest.fixture
-def worker_env(linked_env, monkeypatch):
+def worker_env(linked_env, monkeypatch, request):
     e = linked_env; monkeypatch.setenv('CREDX_UAT2', '1')
     factory = lambda: Session(e.engine, expire_on_commit=False)
     clock = [e.now]
-    worker = SimulationAnalysisWorker(factory, scope=SimulationSourceScope('preview'), clock=lambda: clock[0])
+    worker = SimulationAnalysisWorker(factory, scope=SimulationSourceScope('preview'), clock=lambda: clock[0], source_storage=getattr(request, 'param', 'snapshot'))
     install_session_binding(e.db, worker.scope)
-    acquire(e.db, 1, scope=worker.scope, authorize=worker.analysis.runtime.policy, now=e.now)
+    worker.analysis.acquire(e.db, 1, key='worker-acquisition-key')
     flow = Workflows(e.db, worker.analysis.runtime).create(1, 'india', 'worker-persisted-flow', now=e.now)
     e.db.commit()
     app = Celery('isolated-test', broker='memory://', backend='cache+memory://', set_as_current=False)
@@ -132,3 +132,8 @@ def test_stage_process_loss_rolls_back_claim_then_new_worker_recovers(worker_env
     restarted = SimulationAnalysisWorker(factory, scope=worker.scope, clock=lambda: clock[0])
     assert restarted.stage(message) == 'completed'
     assert restarted.stage(message) == 'duplicate'
+
+
+@pytest.mark.parametrize('worker_env', ['journal'], indirect=True)
+def test_journal_worker_complete_persisted_six_stage_pipeline(worker_env):
+    test_worker_relay_complete_six_stages_and_five_governed_jobs_without_global_runtime(worker_env)

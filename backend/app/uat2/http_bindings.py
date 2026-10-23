@@ -15,11 +15,11 @@ from app.uat2.policy_bindings import SESSION, install_session_binding
 
 
 class SimulationHTTPBinding:
-    def __init__(self, *, scope):
+    def __init__(self, *, scope, source_storage=None):
         if type(scope) is not SimulationSourceScope:
             raise WorkflowDenied('Explicit simulation HTTP scope required')
         self.scope = scope
-        self.analysis = SyntheticAnalysis(scope=scope, policy=policy)
+        self.analysis = SyntheticAnalysis(scope=scope, policy=policy, source_storage=source_storage)
         self._app = None
 
     def install(self, app):

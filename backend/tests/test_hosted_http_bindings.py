@@ -16,8 +16,8 @@ from app.uat2.policy_bindings import SESSION
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('owner', [1, 2, 999])
-async def test_installed_http_binding_uses_owned_session_and_clears_it(linked_env, monkeypatch, owner):
+@pytest.mark.parametrize('storage,owner', [('snapshot', 1), ('snapshot', 2), ('snapshot', 999), ('journal', 1), ('journal', 2)])
+async def test_installed_http_binding_uses_owned_session_and_clears_it(linked_env, monkeypatch, storage, owner):
     import app.infrastructure.database.session as module
     e = linked_env
     engine = create_async_engine('sqlite+aiosqlite:///' + str(e.path))
@@ -28,12 +28,12 @@ async def test_installed_http_binding_uses_owned_session_and_clears_it(linked_en
     monkeypatch.setattr(module, 'AsyncSessionLocal', session_factory)
     app = FastAPI(); app.include_router(router)
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=owner)
-    binding = SimulationHTTPBinding(scope=SimulationSourceScope('preview')).install(app)
+    binding = SimulationHTTPBinding(scope=SimulationSourceScope('preview'), source_storage=storage).install(app)
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
             response = await client.get('/runs/analysis-workflows/config')
             if owner in (1, 2):
-                source = await client.post('/runs/analysis-workflows/synthetic-source', json={'portfolio': 'india'})
+                source = await client.post('/runs/analysis-workflows/synthetic-source', json={'portfolio': 'india', 'key': 'http-acquisition-key'})
                 assert source.status_code == 200 and source.json()['owner_id'] == owner
                 workflow = await client.post('/runs/analysis-workflows', json={
                     'portfolio': 'india', 'key': 'scoped-http-analysis-key'})

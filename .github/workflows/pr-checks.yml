@@ -1866,7 +1866,7 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/scoped-worker.xml').getroot()
-          assert len(root.findall('.//testcase')) == 15
+          assert len(root.findall('.//testcase')) == 16
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
@@ -1877,7 +1877,18 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/scoped-http.xml').getroot()
-          assert len(root.findall('.//testcase')) == 14
+          assert len(root.findall('.//testcase')) == 16
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY_CHECK
+      - name: Verify immutable synthetic acquisition journal
+        run: python -m pytest -q --junitxml=/tmp/synthetic-acquisition.xml backend/tests/test_synthetic_acquisition_journal.py
+      - name: Require all acquisition journal checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/synthetic-acquisition.xml').getroot()
+          assert len(root.findall('.//testcase')) == 11
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
