@@ -67,7 +67,7 @@ def connect(db, owner, *, mode, key, expected_id=None, expected_version=None, no
         current.is_current = False
         db.flush()  # release the existing one-current index before replacement
     row = IntegrationConnection(id=str(uuid4()), owner_id=owner, provider='zerodha',
-        app_ownership_mode=mode, provider_account_id='FAKE_UAT2_OWNER_' + str(owner), credential_ref=None,
+        app_ownership_mode=mode, provider_account_id='FAKE_UAT2_' + str(uuid4()).replace('-','')[:24], credential_ref=None,
         token_expires_at=now + timedelta(hours=1), status='active', version=1, is_current=True)
     db.add(row); db.flush()
     db.add(OutboxMessage(id=identifier, topic=TOPIC, payload={'schema_version': 1, 'simulation_only': True,

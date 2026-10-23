@@ -1,7 +1,7 @@
 """Authenticated controls for server-owned analysis. Default composition is off."""
 from datetime import datetime
 from typing import Literal
-from fastapi import APIRouter,Depends,HTTPException,Response
+from fastapi import APIRouter,Depends,HTTPException,Response,Request
 from pydantic import BaseModel,ConfigDict,Field,field_validator
 from sqlalchemy import select
 from app.domains.auth.dependencies import get_current_user
@@ -36,7 +36,10 @@ class SyntheticSource(BaseModel):
     portfolio:Literal['india']
     key:str|None=Field(default=None,min_length=8,max_length=96)
 
-def optional_analysis_runtime():
+async def optional_analysis_runtime(request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
+    from app.uat2.http_bindings import request_binding, analysis_runtime as scoped_runtime
+    if request_binding(request) is not None:
+        return await scoped_runtime(request,db,user.id)
     return configured_runtime()
 
 def analysis_runtime(value=Depends(optional_analysis_runtime)):

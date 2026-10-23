@@ -5,12 +5,12 @@
     "background": 31,
     "export": 47,
     "frontend": 25,
-    "http": 314,
+    "http": 316,
     "lifecycle": 9,
     "page": 68,
-    "scheduler": 17,
+    "scheduler": 18,
     "websocket": 5,
-    "worker": 48
+    "worker": 52
   },
   "entries": [
     {
@@ -5369,6 +5369,33 @@
     {
       "calls": [
         "Depends",
+        "invoke",
+        "router.post"
+      ],
+      "capability": "revoke",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "order_intents",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "Depends(get_runtime)",
+        "router.post('/{id}/revoke')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/order-intents/{id}/revoke",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/order_intents/router.py:101"
+    },
+    {
+      "calls": [
+        "Depends",
+        "request_binding",
         "router.get"
       ],
       "capability": "status",
@@ -5387,7 +5414,7 @@
       "registration": "mounted",
       "route": "/order-intents/status",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:43"
+      "source": "backend/app/domains/order_intents/router.py:49"
     },
     {
       "calls": [
@@ -5413,7 +5440,7 @@
       "registration": "mounted",
       "route": "/order-intents/positions",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:47"
+      "source": "backend/app/domains/order_intents/router.py:55"
     },
     {
       "calls": [
@@ -5440,7 +5467,7 @@
       "registration": "mounted",
       "route": "/order-intents/reviews",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:53"
+      "source": "backend/app/domains/order_intents/router.py:61"
     },
     {
       "calls": [
@@ -5468,18 +5495,18 @@
       "registration": "mounted",
       "route": "/order-intents/reviews/{id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:59"
+      "source": "backend/app/domains/order_intents/router.py:67"
     },
     {
       "calls": [
         "Depends",
         "HTTPException",
-        "Orders",
-        "Orders(session, policy=runtime.policy, risk=runtime.risk).create",
         "WorkIdentity",
         "db.commit",
         "db.rollback",
         "db.run_sync",
+        "orders_for_runtime",
+        "orders_for_runtime(session, runtime).create",
         "router.post"
       ],
       "capability": "create",
@@ -5500,7 +5527,7 @@
       "registration": "mounted",
       "route": "/order-intents",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:67"
+      "source": "backend/app/domains/order_intents/router.py:75"
     },
     {
       "calls": [
@@ -5526,7 +5553,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/validate",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:78"
+      "source": "backend/app/domains/order_intents/router.py:86"
     },
     {
       "calls": [
@@ -5552,7 +5579,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/review",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:82"
+      "source": "backend/app/domains/order_intents/router.py:90"
     },
     {
       "calls": [
@@ -5580,33 +5607,7 @@
       "registration": "mounted",
       "route": "/order-intents/{id}/approve",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:86"
-    },
-    {
-      "calls": [
-        "Depends",
-        "invoke",
-        "router.post"
-      ],
-      "capability": "revoke",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "order_intents",
-      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
-      "observed_guards": [
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "Depends(get_runtime)",
-        "router.post('/{id}/revoke')"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "mounted",
-      "route": "/order-intents/{id}/revoke",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/order_intents/router.py:93"
+      "source": "backend/app/domains/order_intents/router.py:94"
     },
     {
       "calls": [
@@ -10560,7 +10561,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/config",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:51"
+      "source": "backend/app/domains/runs/analysis_router.py:54"
     },
     {
       "calls": [
@@ -10595,7 +10596,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:55"
+      "source": "backend/app/domains/runs/analysis_router.py:58"
     },
     {
       "calls": [
@@ -10623,7 +10624,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:62"
+      "source": "backend/app/domains/runs/analysis_router.py:65"
     },
     {
       "calls": [
@@ -10656,7 +10657,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:66"
+      "source": "backend/app/domains/runs/analysis_router.py:69"
     },
     {
       "calls": [
@@ -10688,7 +10689,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/synthetic-source",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:73"
+      "source": "backend/app/domains/runs/analysis_router.py:76"
     },
     {
       "calls": [
@@ -10720,7 +10721,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/controls",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:85"
+      "source": "backend/app/domains/runs/analysis_router.py:88"
     },
     {
       "calls": [
@@ -13852,7 +13853,7 @@
       "kind": "worker",
       "method": "",
       "module": "platform",
-      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
       "observed_guards": [
         "source-audited delegation: SimulationSourceScope.validate",
         "session-bound SimulationPolicyBinding and canonical current_sync fences"
@@ -13875,7 +13876,7 @@
       "kind": "worker",
       "method": "",
       "module": "platform",
-      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
       "observed_guards": [
         "source-audited delegation: SimulationSourceScope.validate",
         "session-bound SimulationPolicyBinding and canonical current_sync fences"
@@ -13898,7 +13899,7 @@
       "kind": "worker",
       "method": "",
       "module": "platform",
-      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
       "observed_guards": [
         "source-audited delegation: SimulationSourceScope.validate",
         "session-bound SimulationPolicyBinding and canonical current_sync fences"
@@ -13918,7 +13919,7 @@
       "kind": "scheduler",
       "method": "",
       "module": "platform",
-      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
       "observed_guards": [
         "source-audited delegation: SimulationSourceScope.validate",
         "session-bound SimulationPolicyBinding and canonical current_sync fences"
@@ -13953,7 +13954,7 @@
       "registration": "asynccontextmanager",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:18"
+      "source": "backend/app/uat2/main.py:17"
     },
     {
       "calls": [
@@ -13974,7 +13975,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:62"
+      "source": "backend/app/uat2/main.py:54"
     },
     {
       "calls": [
@@ -13996,7 +13997,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:67"
+      "source": "backend/app/uat2/main.py:59"
     },
     {
       "calls": [
@@ -14018,7 +14019,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:67"
+      "source": "backend/app/uat2/main.py:59"
     },
     {
       "calls": [
@@ -14040,7 +14041,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:67"
+      "source": "backend/app/uat2/main.py:59"
     },
     {
       "calls": [
@@ -14062,7 +14063,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:67"
+      "source": "backend/app/uat2/main.py:59"
     },
     {
       "calls": [
@@ -14084,7 +14085,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:67"
+      "source": "backend/app/uat2/main.py:59"
     },
     {
       "calls": [
@@ -14106,7 +14107,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:67"
+      "source": "backend/app/uat2/main.py:59"
     },
     {
       "calls": [
@@ -14128,7 +14129,119 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:73"
+      "source": "backend/app/uat2/main.py:65"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.prepare"
+      ],
+      "capability": "prepare_order",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "SimulationSourceScope.validate; exact analysis/basket provenance",
+        "Orders exact authenticated approval; current module/account fences; reconciliation cannot submit"
+      ],
+      "owner_source": [
+        "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.orders.prepare.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
+      "source": "backend/app/uat2/order_worker.py:131"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.dispatch"
+      ],
+      "capability": "dispatch_order",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "SimulationSourceScope.validate; exact analysis/basket provenance",
+        "Orders exact authenticated approval; current module/account fences; reconciliation cannot submit"
+      ],
+      "owner_source": [
+        "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.orders.dispatch.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
+      "source": "backend/app/uat2/order_worker.py:133"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.reconcile"
+      ],
+      "capability": "reconcile_order",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "SimulationSourceScope.validate; exact analysis/basket provenance",
+        "Orders exact authenticated approval; current module/account fences; reconciliation cannot submit"
+      ],
+      "owner_source": [
+        "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.orders.reconcile.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
+      "source": "backend/app/uat2/order_worker.py:135"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.relay"
+      ],
+      "capability": "relay_orders",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "SimulationSourceScope.validate; exact analysis/basket provenance",
+        "Orders exact authenticated approval; current module/account fences; reconciliation cannot submit"
+      ],
+      "owner_source": [
+        "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.orders.relay.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
+      "source": "backend/app/uat2/order_worker.py:137"
+    },
+    {
+      "calls": [],
+      "capability": "uat2.orders.relay.v1",
+      "classification": "owner-private",
+      "kind": "scheduler",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "SimulationSourceScope.validate; exact analysis/basket provenance",
+        "Orders exact authenticated approval; current module/account fences; reconciliation cannot submit"
+      ],
+      "owner_source": [
+        "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
+      ],
+      "registration": "{'task': 'uat2.orders.relay.v1', 'schedule': 5.0, 'options': {'queue': QUEUE, 'expires': 5}}",
+      "route": "",
+      "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
+      "source": "backend/app/uat2/order_worker.py:145"
     },
     {
       "calls": [
@@ -14153,7 +14266,7 @@
       "registration": "unmounted",
       "route": "/uat2/email",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:100"
+      "source": "backend/app/uat2/router.py:101"
     },
     {
       "calls": [
@@ -14175,7 +14288,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:107"
+      "source": "backend/app/uat2/router.py:108"
     },
     {
       "calls": [
@@ -14198,7 +14311,7 @@
       "registration": "unmounted",
       "route": "/uat2/export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:107"
+      "source": "backend/app/uat2/router.py:108"
     },
     {
       "calls": [
@@ -14245,7 +14358,7 @@
       "registration": "unmounted",
       "route": "/zerodha/portfolio",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:24"
+      "source": "backend/app/uat2/router.py:25"
     },
     {
       "calls": [
@@ -14267,7 +14380,7 @@
       "registration": "unmounted",
       "route": "/zerodha/status",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:29"
+      "source": "backend/app/uat2/router.py:30"
     },
     {
       "calls": [
@@ -14289,7 +14402,7 @@
       "registration": "unmounted",
       "route": "/zerodha/login-url",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:37"
+      "source": "backend/app/uat2/router.py:38"
     },
     {
       "calls": [
@@ -14311,7 +14424,7 @@
       "registration": "unmounted",
       "route": "/zerodha/orders",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:45"
+      "source": "backend/app/uat2/router.py:46"
     },
     {
       "calls": [
@@ -14335,7 +14448,7 @@
       "registration": "unmounted",
       "route": "/zerodha/orders",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:50"
+      "source": "backend/app/uat2/router.py:51"
     },
     {
       "calls": [
@@ -14361,7 +14474,7 @@
       "registration": "unmounted",
       "route": "/dashboard/summary",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:55"
+      "source": "backend/app/uat2/router.py:56"
     },
     {
       "calls": [
@@ -14384,7 +14497,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:78"
+      "source": "backend/app/uat2/router.py:79"
     },
     {
       "calls": [
@@ -14410,7 +14523,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai/{task_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:85"
+      "source": "backend/app/uat2/router.py:86"
     },
     {
       "calls": [
@@ -14437,6 +14550,68 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/uat2/worker.py:15"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "body.model_dump",
+        "connect",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "describe",
+        "request_binding",
+        "router.post"
+      ],
+      "capability": "simulate_connection",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/connections')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/connections",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:28"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "binding.orders.prepare",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "request_binding",
+        "router.post"
+      ],
+      "capability": "prepare_basket",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/analysis/{workflow_id}/prepare-basket')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/analysis/{workflow_id}/prepare-basket",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:42"
     },
     {
       "calls": [],
@@ -16385,7 +16560,7 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "86899afc3b54335164632eaea4cd3798dbbb38f1aa9fa6b352af9f7ccbf7ba5f",
+    "backend/app/domains/modules/coverage.py": "9d5c481fedcd311a5b368d62e16109a29aed2b2de3ffba079a95812dc81b9050",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "bd59851bde8f50f981324ea15635b2c51cda6d3a3766c94f9ee084551e359d85",
@@ -16413,9 +16588,9 @@
     "backend/app/domains/order_intents/journal_fake.py": "3a0fe166b0626d51fa09b34825ac15a38d41d4dd9caf0f4b7f76289836fa639b",
     "backend/app/domains/order_intents/models.py": "d4ff4bd2daf40df31c64d15c9a1d33624e1311c488ca36120876537cc3303c20",
     "backend/app/domains/order_intents/positions_view.py": "b2f04f01344b92e1e5ca429254522069fc0b8d77b483b62385f2bdb49dbb8332",
-    "backend/app/domains/order_intents/presentation.py": "4040eca48e08c22990faf82e5074dcdfc0cf6f393c221b747682f10f078672c0",
-    "backend/app/domains/order_intents/router.py": "257f30784446147887a0924b91377d7268df8c1920a6d1f7ea3cc816e9e9d56e",
-    "backend/app/domains/order_intents/service.py": "6dd28658431750e83d1acea4140f86551bf7d1d02e3f684422737e0e825b8fe0",
+    "backend/app/domains/order_intents/presentation.py": "22f0ae443a47d4f63f25e0e9228e914600c103bfd38193ec8a5827af7408152b",
+    "backend/app/domains/order_intents/router.py": "5087424f5383f64355599760e6978a13cb809e1337125323dbfe8d3c2101e644",
+    "backend/app/domains/order_intents/service.py": "70301c773a3ce004c4b8505291301a9365d9e7cd794afdab8eb98610d8d7af58",
     "backend/app/domains/polymarket/__init__.py": "da70fc8ef6b3b9887b49ef4e97f05e83995a4dab7748646799a3bf52672a4e4d",
     "backend/app/domains/polymarket/access.py": "8bf2536f1c66e78707f4f010798d3325ed298fdcc2cbc8f0a373d3701cc01413",
     "backend/app/domains/polymarket/bot.py": "a6e89039fb906792c51da9c2aaa648e2d0f76794c149d16ae0210b9ff5b2c921",
@@ -16552,7 +16727,7 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/analysis_router.py": "5c5296e7d8d433948331b34d6eb506590bd48d65eb841a815f4175504fe9166d",
+    "backend/app/domains/runs/analysis_router.py": "3c185813e59cc924a06646d411c914318a1168713c2c92d1965117f3aaa6c631",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
     "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
@@ -16629,7 +16804,7 @@
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/database/outbox/job_dispatch.py": "7042c83647a6884eb8e4d3467dcaed947042cf43c9ec1516a76711b431d2d6b6",
     "backend/app/infrastructure/database/outbox/models.py": "a331a3011182c6a6f7d959db71615c6622419d51f2d6d52a83750f5a5b0c703d",
-    "backend/app/infrastructure/database/session.py": "b60efa4fb814548bc5701254273812999967d62d0d3dcc5993153939f47d9518",
+    "backend/app/infrastructure/database/session.py": "470f7ace00a5ae0f75a12419e472cd513f32eb8d8e114c615d9fc554a357e4fa",
     "backend/app/infrastructure/database/sync_session.py": "f974fe13644cf266ef6b1eba8e4280b5412475ce6a47b5f62be90dfd857cd29e",
     "backend/app/infrastructure/locks/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/infrastructure/locks/redis_lock.py": "31b04789da00e370d88d48300e19d38b825a3ee2fccca0b7337e3ac356305195",
@@ -16654,15 +16829,19 @@
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/analysis_worker.py": "b259a61f9921cf0f7c189a9a1fac12bab3584a6a9317d467966dbc2b8d231e08",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/http_bindings.py": "aa2e9f5c88b5a721c6ab7677f3341786b8e01a622e69131d4b10346dc7e4b053",
-    "backend/app/uat2/main.py": "c4ca690ee6438e867d9c9c2816cbf1e02231533038a845144726b360dd86fc54",
+    "backend/app/uat2/http_bindings.py": "efe83777a414d57d155c36e8677e0aa343e91ad9be55949d5d04598d5a69b113",
+    "backend/app/uat2/main.py": "55ec862112db5168a595d5015e1d08e30555f5d17b7bfd561d995eedce1e9e54",
+    "backend/app/uat2/order_worker.py": "bc0e20fc53049e444b0f94fd3592a66de41627d10986d870614e7d6c34580260",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
-    "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
+    "backend/app/uat2/router.py": "d7d48ec1e0cac89265f1059c9cde0d6c023707e2a9f4bfefd6253f45197638c8",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
     "backend/app/uat2/stage07_lifecycle_smoke.py": "31f8d111818f63437b7a3fe893cce9052719d61f9d85004ce9e715688f001b40",
-    "backend/app/uat2/synthetic_connections.py": "b9850db4bb8f0f7cb552551a410c5c8038fe33221598d8d6a853a24a1d926992",
-    "backend/app/uat2/worker.py": "64ece6aa3a3cf5b165d1d7ab3be46f39188fac9718b57a2124ae208df746f2df",
+    "backend/app/uat2/synthetic_connections.py": "ccb6f15bd14d200927cf753451486b0219cd8fd721f023e36b731125e29baee8",
+    "backend/app/uat2/synthetic_orders.py": "8e6547c8f8a10352e3e3151ae77f3999ba0fae958eb8b26924751e8b08df2654",
+    "backend/app/uat2/worker.py": "33f03cdefddb54d0f8cf99e41dfc403c0afc68c154b218695121a45ebba3f884",
+    "backend/app/uat2/workflow.py": "390fcf4f216b781648d6c388c8808ea87e667a5d468e4551ae085d3aade0647e",
+    "backend/app/uat2/workflow_router.py": "ace781f7aa47a87dc247e14db114900134554226d21d0f0ac99d521d7a552090",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
     "frontend/app/(auth)/register/page.tsx": "025d5a3992465a4c2fc39f9066d3a25b619214af0a0c96a302efbfc0074ace97",
@@ -16721,7 +16900,7 @@
     "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
     "frontend/app/console/profile/activity/page.tsx": "bc96465520af22bea350bf2698783b138a1eca2d64214cb0d980cd279154d9aa",
-    "frontend/app/console/profile/connections/page.tsx": "541bdcaab4c43e254878b78da3f1003c36eedf0fe0b85c66945c5fac22feac4a",
+    "frontend/app/console/profile/connections/page.tsx": "3c95b14f97444dd5e9371ba1b6f934890a50146519af589292fa5a09ed04d69d",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
     "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",
@@ -16733,7 +16912,7 @@
     "frontend/app/console/technical-setups/page.tsx": "8b4dd8e5b9d693eadcea9178199fd0d5af2a2c4f267a4598972d35c709fd9bcc",
     "frontend/app/console/trading-bots/bullpen-ai-auto-live/page.tsx": "9defcad1af48185e15277051e253f6694a5006b3112b5fe1b48d93e77c59d6fe",
     "frontend/app/console/trading-bots/page.tsx": "dabeb1735a79f799cdab8ad8d17cd4fa4d5eabe514b69d7b560997672123410b",
-    "frontend/app/console/uat2/page.tsx": "1f13ea0b1fc396a5f140b8fb1b5bdaf07e2c6ab76432d4ce9d010e75e923d8cb",
+    "frontend/app/console/uat2/page.tsx": "e062e8065d87ccafe2e3b9eb70de9a49dc8cba7a579749fb57c9c1e294dd0dbf",
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
     "frontend/app/console/zerodha/final-actionables/page.tsx": "054a42b3efcfd5b740e28fab42407c8c2ffb7f5c3dff18867acd0f7adc206e01",

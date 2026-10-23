@@ -4,7 +4,7 @@ import {useSession} from 'next-auth/react';
 import {apiService} from '@/services/api';
 
 type Leg={position:number;symbol:string;exchange:string;side:string;quantity:number;limit_price:string;product:string;order_type:string;state:string;filled_quantity:number};
-type Intent={id:string;state:string;module_id:string;account_label:string;connection_mode:string;connection_version:number;created_at:string;approved_at:string|null;approval_expires_at:string|null;approval_stale:boolean;integrity_checked:boolean;legs:Leg[];estimated_gross_notional:string|null;notional_notice:string;warnings:string[];unresolved:boolean;review_digest:string|null;actions:Record<string,boolean>};
+type Intent={simulation_scenario?:string|null;id:string;state:string;module_id:string;account_label:string;connection_mode:string;connection_version:number;created_at:string;approved_at:string|null;approval_expires_at:string|null;approval_stale:boolean;integrity_checked:boolean;legs:Leg[];estimated_gross_notional:string|null;notional_notice:string;warnings:string[];unresolved:boolean;review_digest:string|null;actions:Record<string,boolean>};
 type Reviews={schema_version:1;owner_id:number;runtime_enabled:boolean;simulation_only:true;observed_at:string;has_more:boolean;complete_positions_reconciliation:false;intents:Intent[]};
 
 export function OrderReviews(){
@@ -17,12 +17,12 @@ export function OrderReviewsSession({owner}:{owner:number}){
  const generation=useRef(0),inflight=useRef(false);
  const [pending,setPending]=useState<string|null>(null),[outcomes,setOutcomes]=useState<Record<string,string>>({});
  useEffect(()=>{
-  const ticket=++generation.current,controller=new AbortController();setError(false);
+  const ticket=++generation.current,controller=new AbortController();
   void apiService.fetch<Reviews>('/backend-api/order-intents/reviews',{cache:'no-store',signal:controller.signal,timeoutMs:8000}).then(value=>{
    if(value.schema_version!==1||value.owner_id!==owner||typeof value.runtime_enabled!=='boolean'||value.simulation_only!==true||!Array.isArray(value.intents)||value.intents.length>50||value.intents.some(row=>!row||typeof row.id!=='string'||!Array.isArray(row.legs)||!Array.isArray(row.warnings)||!row.actions||Object.entries(row.actions).some(([key,allowed])=>typeof allowed!=='boolean'||(key!=='confirm'&&allowed))||(row.actions.confirm&&(!value.runtime_enabled||row.state!=='awaiting_approval'||!row.integrity_checked||!row.review_digest||!/^[a-f0-9]{64}$/.test(row.review_digest)))))throw new Error('Invalid private order view');
-   if(!controller.signal.aborted&&ticket===generation.current)setData(value);
+   if(!controller.signal.aborted&&ticket===generation.current){setData(value);setError(false);}
   }).catch(()=>{if(!controller.signal.aborted&&ticket===generation.current){setData(null);setError(true);}});
-  return()=>{controller.abort();generation.current++;};
+  return()=>{controller.abort();generation.current=ticket+1;};
  },[owner,refresh]);
  async function confirm(row:Intent){
   if(inflight.current||outcomes[row.id]||!row.actions.confirm||!row.review_digest)return;
@@ -36,7 +36,7 @@ export function OrderReviewsSession({owner}:{owner:number}){
  }
  return <section aria-labelledby="order-review-heading" className="space-y-4 min-w-0 rounded-xl border p-5">
   <h2 id="order-review-heading" className="text-lg font-semibold">Order review and unresolved activity</h2>
-  <p>Recorded instructions stay visible when a product module is disabled. Normal execution is disabled. Only the isolated fake-broker preview can offer exact synthetic confirmation. Status refresh never grants consent.</p>
+  <p>Recorded instructions stay visible when a product module is disabled. Live execution is disabled. An explicitly installed owner simulation can offer exact fake-order confirmation. Status refresh never grants consent.</p>
   <p className="text-sm text-muted-foreground">Disable stops new module work; disconnect revokes a connection. Neither cancels broker orders nor liquidates holdings. Positions require separate authoritative reconciliation.</p>
   <button type="button" className="underline focus-visible:ring-2" disabled={pending!==null} onClick={()=>{if(!inflight.current)setRefresh(v=>v+1);}}>Refresh recorded order status</button>
 
@@ -47,6 +47,7 @@ export function OrderReviewsSession({owner}:{owner:number}){
    {!data.intents.length&&<p>No persisted order intents in these account records. This does not establish that your broker has no orders or positions.</p>}
    {data.intents.map(row=><article key={row.id} className="space-y-3 rounded-lg border p-4 break-words" aria-label={`Order ${row.id}`}>
     {outcomes[row.id]&&<p role="status">{outcomes[row.id]}</p>}
+    {row.simulation_scenario&&<p>Server simulation scenario: {row.simulation_scenario.replaceAll('_',' ')}. No live provider effect.</p>}
     <h3 className="font-semibold">{row.unresolved?'Unresolved: ':''}{row.state.replaceAll('_',' ')}</h3>
     <p>Intent {row.id} · Account {row.account_label} · {row.connection_mode==='user_owned'?'Your Kite app':'CredX-managed Kite app'} · connection version {row.connection_version}</p>
     <p>Created <time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString()}</time>. Recorded data may be stale; refresh before relying on status.</p>

@@ -25,7 +25,6 @@ export function ServerAnalysisSession() {
   const [portfolio,setPortfolio]=useState<"india"|"indmoney_us">("indmoney_us");
   useEffect(()=>{
     const generation=++epoch.current;let timer:ReturnType<typeof setTimeout>;
-    setItems([]);setEnabled(false);setError(null);
     async function poll(){
       try {
         const config=await apiService.get<{enabled:boolean}>(endpoint()+"/config");
@@ -37,8 +36,16 @@ export function ServerAnalysisSession() {
       if(epoch.current===generation)timer=setTimeout(poll,2000);
     }
     if(owner)void poll();
-    return()=>{epoch.current++;clearTimeout(timer);};
+    return()=>{epoch.current=generation+1;clearTimeout(timer);};
   },[owner]);
+  async function prepare(row:Workflow){
+    if(busy.current)return;busy.current=true;setPending(true);const generation=epoch.current;
+    try{
+      await apiService.post(`/backend-api/uat2/simulation/analysis/${row.id}/prepare-basket`,{});
+      if(epoch.current===generation)setError('Synthetic review prepared. Open recorded order activity to inspect every leg and confirm separately. No approval was recorded by preparation.');
+    }catch{if(epoch.current===generation)setError('Current analysis could not prepare a review. Refresh source, connection and module state before starting a new analysis.');}
+    finally{busy.current=false;if(epoch.current===generation)setPending(false);}
+  }
   async function submit(row?:Workflow,action?:string){
     if(busy.current)return;busy.current=true;setPending(true);const generation=epoch.current;
     try {
@@ -59,6 +66,7 @@ export function ServerAnalysisSession() {
         <h3>Workflow {row.id} · {row.portfolio} · {row.status}</h3>
         {row.error&&<p>{row.error}</p>}
         <ol>{row.stages.map(stage=><li key={stage.stage}>{stage.stage}: {stage.status}; attempts {stage.attempts}; cost USD {stage.checkpoint.attempts?.map(a=>a.cost_usd??"unavailable").join(" + ")||"not recorded"}{stage.error?`; ${stage.error}`:""}</li>)}</ol>
+        {process.env.NEXT_PUBLIC_UAT2==='true'&&row.portfolio==='india'&&row.status==='completed'&&<button className="rounded border px-3 py-1" disabled={pending} onClick={()=>void prepare(row)}>Prepare exact fake basket review</button>}
         <details><summary>Input versions</summary><p className="break-all">Source {row.inputs.source_hash}<br/>Plan {row.inputs.plan_hash}<br/>Automatic orders: disabled</p></details>
         {(["queued","processing"].includes(row.status)?["pause","cancel"]:row.status==="paused"?["resume","cancel"]:["failed","partial"].includes(row.status)?["retry","cancel"]:[]).map(action=><button key={action} disabled={pending} className="rounded border px-3 py-1 mr-2" onClick={()=>void submit(row,action)}>{action}</button>)}
       </article>)}

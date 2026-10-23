@@ -27,8 +27,9 @@ def current_policy(db,identity):
 def unavailable_risk(*args):raise OrderDenied('REVIEWED_RISK_PROVIDER_UNAVAILABLE')
 
 class Orders:
-    def __init__(self,db,*,policy=current_policy,risk=unavailable_risk,clock=lambda:datetime.now(timezone.utc)):
+    def __init__(self,db,*,policy=current_policy,risk=unavailable_risk,clock=lambda:datetime.now(timezone.utc),provenance=None):
         self.db,self.policy,self.risk,self.clock=db,policy,risk,clock
+        self.provenance=provenance
 
     def fence(self,identity):
         if type(identity.owner_id)is not int or identity.module_id!=MODULE or type(identity.version)is not int or identity.version<1:raise OrderDenied('INVALID_IDENTITY')
@@ -66,11 +67,12 @@ class Orders:
         if payload(deepcopy(row.payload_json))!=row.payload_json or digest(self.bound(row))!=row.request_digest:raise OrderDenied('IMMUTABLE_INTENT_CHANGED')
         legs=self.legs(row)
         if len(legs)!=len(row.payload_json['legs']) or any(l.position!=i or l.payload_digest!=digest(p) or l.client_reference!=digest({'intent':row.id,'leg':i}) for i,(l,p) in enumerate(zip(legs,row.payload_json['legs']))):raise OrderDenied('BASKET_LEGS_CHANGED')
+        proof=self.provenance(self.db,row,now) if self.provenance is not None else None
         # Every post-draft state requires its frozen review/risk evidence.
         # Missing evidence can never turn a mandatory check into an optional one.
         if row.state!='draft' or row.risk_json is not None or row.review_digest is not None:
             if not isinstance(row.risk_json,dict) or row.risk_json.get('allowed') is not True or not row.review_digest:raise OrderDenied('FROZEN_RISK_REVIEW_REQUIRED')
-            actual=self.risk(self.db,self.identity(row),deepcopy(row.payload_json),conn,now)
+            actual=self.risk_for(row,conn,now,proof=proof)
             if not isinstance(actual,dict) or actual.get('allowed') is not True or digest(actual)!=digest(row.risk_json):raise OrderDenied('RISK_CONDITIONS_CHANGED')
             if digest({'request':row.request_digest,'risk':actual})!=row.review_digest:raise OrderDenied('REVIEW_BINDING_CHANGED')
         completed_ids=set()
@@ -85,6 +87,14 @@ class Orders:
                 completed_ids.add(leg.broker_order_id)
             elif leg.state in {'draft','submitting'} and (leg.broker_order_id is not None or leg.filled_quantity!=0 or leg.reconciliation_json is not None):raise OrderDenied('UNEXPECTED_FILL_EVIDENCE')
         return row,legs
+
+    def risk_for(self,row,connection,now,*,proof=None):
+        value=self.risk(self.db,self.identity(row),deepcopy(row.payload_json),connection,now)
+        if self.provenance is not None:
+            proof=self.provenance(self.db,row,now) if proof is None else proof
+            if type(proof) is not dict or type(value) is not dict:raise OrderDenied('TYPED_APPLICATION_PROVENANCE_REQUIRED')
+            value={**value,'application_provenance_hash':digest(proof)}
+        return value
 
     def create(self,identity,key,connection_id,order,*,now=None):
         now=utc(now or datetime.now(timezone.utc));self.fence(identity)
@@ -104,7 +114,7 @@ class Orders:
     def validate(self,owner,id,*,now=None):
         now=utc(now or datetime.now(timezone.utc));row,_=self.checked(owner,id,now)
         if row.state!='draft':raise OrderDenied('DRAFT_REQUIRED')
-        risk=self.risk(self.db,self.identity(row),deepcopy(row.payload_json),self.connection(owner,row.connection_id,now),now)
+        risk=self.risk_for(row,self.connection(owner,row.connection_id,now),now)
         if not isinstance(risk,dict) or risk.get('allowed') is not True:raise OrderDenied('RISK_DENIED')
         row.risk_json=deepcopy(risk);row.review_digest=digest({'request':row.request_digest,'risk':risk});row.state='validated';self.db.flush();return row
 
@@ -178,3 +188,8 @@ class Orders:
         row,legs=self.checked(p['owner_id'],p['intent_id'],check_time())
         if row.state!='submitting' or row.approval_digest!=p['approval_digest'] or row.approval_digest!=self.approval_hash(row) or stored_utc(row.expires_at)<=check_time() or any(l.state!='filled' or l.filled_quantity!=request['quantity'] for l,request in zip(legs,row.payload_json['legs'])):raise OrderDenied('QUANTITATIVE_BASKET_COMPLETION_REQUIRED')
         row.state='filled';self.db.commit();return row
+
+
+def orders_for_runtime(db,runtime,**kwargs):
+    return Orders(db,policy=runtime.policy,risk=runtime.risk,
+        provenance=getattr(runtime,'provenance',None),**kwargs)

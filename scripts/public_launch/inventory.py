@@ -151,6 +151,14 @@ def scan(root=ROOT):
                     observed_guards=['source-audited delegation: SimulationSourceScope.validate',
                         'session-bound SimulationPolicyBinding and canonical current_sync fences'],
                     side_effects='Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export')
+            if (rel == Path('backend/app/uat2/order_worker.py') and
+                (kind == 'worker' and capability in {'prepare_order','dispatch_order','reconcile_order','relay_orders'}
+                 or kind == 'scheduler' and capability == 'uat2.orders.relay.v1')):
+                rows[-1].update(classification='owner-private',
+                    owner_source=['Persisted SQL workflow/approval/intent owner; task arguments never grant authority'],
+                    observed_guards=['SimulationSourceScope.validate; exact analysis/basket provenance',
+                        'Orders exact authenticated approval; current module/account fences; reconciliation cannot submit'],
+                    side_effects='Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects')
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for dec in n.decorator_list:
@@ -224,8 +232,8 @@ def scan(root=ROOT):
         if row['kind']=='http' and row['source'].startswith('backend/app/domains/'):
             binding=coverage['classify_route'](row['module'],row['capability'],row['route'],{row['method']})
             row['module_lifecycle_gate']='core/safety; existing auth/owner/role checks' if binding is None else ' / '.join(binding)+' via modules.transports.install_route_policy'
-        elif row['kind'] in {'worker','scheduler'} and row['source'].startswith('backend/app/uat2/analysis_worker.py:'):
-            row['module_lifecycle_gate']='Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default'
+        elif row['kind'] in {'worker','scheduler'} and row['source'].startswith(('backend/app/uat2/analysis_worker.py:','backend/app/uat2/order_worker.py:')):
+            row['module_lifecycle_gate']='Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission'
         elif row['kind'] in {'worker','scheduler'}:
             row['module_lifecycle_gate']='RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard'
         elif row['kind'] in {'background','export','websocket','lifecycle'}:

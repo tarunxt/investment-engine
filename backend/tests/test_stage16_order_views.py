@@ -218,7 +218,7 @@ def test_confirmation_classification_is_exact_not_a_financial_route_exemption():
         assert classify_route('order_intents',endpoint,path,methods)==('unknown','view')
 
 
-def test_only_exact_owned_read_paths_are_core_and_uat_has_no_writes():
+def test_exact_owned_reads_and_only_guarded_approval_and_revoke_writes_are_mounted():
     from app.domains.modules.coverage import classify_route
     from app.uat2.main import app
     for path in ('/order-intents/reviews','/order-intents/reviews/{id}','/order-intents/positions'):
@@ -226,7 +226,9 @@ def test_only_exact_owned_read_paths_are_core_and_uat_has_no_writes():
         assert any(getattr(r,'path',None)==path and getattr(r,'methods',None)=={'GET'} for r in app.routes)
     assert classify_route('order_intents','approve','/order-intents/{id}/approve',{'POST'}) is not None
     assert classify_route('order_intents','future','/order-intents/other',{'GET'}) is not None
-    assert not any(getattr(r,'path','').startswith('/order-intents') and 'POST' in (getattr(r,'methods',None) or set()) for r in app.routes)
+    writes={r.path for r in app.routes if getattr(r,'path','').startswith('/order-intents') and 'POST' in (getattr(r,'methods',None) or set())}
+    assert writes == {'/order-intents/{id}/approve','/order-intents/{id}/revoke'}
+    assert classify_route('order_intents','revoke','/order-intents/{id}/revoke',{'POST'}) is None
 
 
 def test_positions_are_owner_scoped_whitelisted_and_not_live(env):

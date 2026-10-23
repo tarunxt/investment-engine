@@ -15,9 +15,10 @@ broker = FakeBroker()
 async def status():
     return {'simulation': True, 'commit': os.getenv('UAT2_SOURCE_COMMIT', 'unbuilt'),
             'available': ['dashboard', 'profile/preferences', 'synthetic India portfolio',
-                          'synthetic US portfolio', 'fake order', 'deterministic AI', 'email sink'],
-            'unavailable': ['live brokers', 'live AI', 'Sheets', 'scheduled jobs',
-                            'sports/Bullpen workflows', 'Stage01 module controls (not integrated)']}
+                          'accepted US imports', 'six-stage durable fake analysis',
+                          'exact fake basket approval', 'durable fake execution and reconciliation'],
+            'unavailable': ['live brokers', 'live AI', 'Sheets', 'external sends',
+                            'sports/Bullpen workflows', 'public activation']}
 
 
 @router.get('/zerodha/portfolio', response_model=ZerodhaPortfolioOverviewResponse)

@@ -45,6 +45,7 @@ async def test_installed_http_binding_uses_owned_session_and_clears_it(linked_en
         assert sessions and all(SESSION not in db.info for db in sessions)
         assert configured_runtime() is None
         assert binding._app is app
+        assert set(app.dependency_overrides) == {get_current_user}
     finally: await engine.dispose()
 
 

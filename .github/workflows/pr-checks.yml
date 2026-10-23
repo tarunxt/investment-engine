@@ -1892,6 +1892,17 @@ jobs:
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
+      - name: Verify native simulation order composition and dedicated worker bootstrap
+        run: python -m pytest -q --junitxml=/tmp/native-orders.xml backend/tests/test_hosted_order_composition.py
+      - name: Require all native order checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/native-orders.xml').getroot()
+          assert len(root.findall('.//testcase')) == 10
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY_CHECK
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'

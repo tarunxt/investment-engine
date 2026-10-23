@@ -66,6 +66,7 @@ def project(row, legs, now):
     warnings.append('Execution is disabled. This is recorded activity, not a live broker or positions reconciliation.')
     return {
         'id': row.id, 'state': row.state if integrity else 'unverified', 'module_id': row.module_id,
+        'simulation_scenario': row.risk_json.get('simulation_scenario') if isinstance(row.risk_json,dict) and row.risk_json.get('simulation_scenario') in {'filled','partial','after_acceptance','before_acceptance'} else None,
         'account_label': '••••' + str(row.account_id)[-2:] if row.account_id and len(str(row.account_id)) >= 4 else '••••',
         'connection_mode': row.app_mode, 'connection_version': row.connection_version,
         'created_at': stored_utc(row.created_at).isoformat(),
@@ -98,9 +99,9 @@ def owned_reviews(db, owner, *, intent_id=None, now=None, runtime=None):
         view = project(row, by_id[row.id], now)
         view['review_digest'] = None
         if runtime is not None and view['integrity_checked'] and row.state == 'awaiting_approval':
-            from .service import Orders
+            from .service import orders_for_runtime
             try:
-                Orders(db, policy=runtime.policy, risk=runtime.risk).checked(owner, row.id, now)
+                orders_for_runtime(db,runtime).checked(owner, row.id, now)
                 view['actions']['confirm'] = True
                 view['review_digest'] = row.review_digest
                 view['warnings'] = [w for w in view['warnings'] if not w.startswith('Execution is disabled.')]
