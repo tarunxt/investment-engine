@@ -7,6 +7,19 @@ its successor CI must be read independently. Neither is UAT2 deployment or
 complete public-launch approval. The user's conditional sequencing permits
 independent local Stage18 work while minor Stage17 work remains separate.
 
+The first real-service run at `fb28ec83` executed114checks:110passed and4failed.
+Three failures were incomplete reflected legacy-profile fixtures: required
+timezone/preferences/theme and timestamp values must be supplied explicitly.
+The concurrent signup case also failed closed with429. Source inspection and
+an exact-function synthetic fence probe reproduce a pre-lock clock-ordering
+defect: a request may sample its default time, wait for a concurrent admission,
+then mistake that winner's later timestamp for clock rollback. The correction
+samples only the default clock after acquiring the durable signup control row;
+explicit past times, quotas and invalid ledgers still deny. Dedicated runtime
+regressions and the original actual PostgreSQL race are required on the successor;
+the isolated function probe is not actual database execution or final diagnosis
+of every possible cause of the original429.
+
 No new product registry, migration, authority, ownership backfill or provider
 adapter is introduced here. The rehearsal invokes existing Alembic revisions
 inside the existing explicitly acknowledged disposable container, using a

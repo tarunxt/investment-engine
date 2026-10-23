@@ -16396,7 +16396,7 @@
     "backend/app/domains/public_service/router.py": "df39adbfb14b1ae668f688e886d85e09957f5fb72df7ecf87c30dd7a562145e6",
     "backend/app/domains/public_service/safe_privacy_projection.py": "117d4680e4a301d22e9555e248707472f6090f93538b8ed7d731a82024e98d29",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
-    "backend/app/domains/public_service/signup.py": "76554717e70cc5a3ff4534b1efcbf242cfe059806cfaf34aa2a3faffb67eff8b",
+    "backend/app/domains/public_service/signup.py": "1d5f9aea97e4a6aac5fdfa51a3d2e7fd52eb16c2faa1eee5c27e0c9f01bd412f",
     "backend/app/domains/public_service/signup_perimeter.py": "b8165624bde31f50f33e526f5240f9f876896c81fdc90b7ff84283497d7b2f00",
     "backend/app/domains/public_service/sql_account.py": "2fde37d94d0ecd4e56de4789675375bcc832d2a52f356a943240be9e6019fe56",
     "backend/app/domains/public_service/sql_privacy_plan.py": "752e4cde5d639ac454e501412ff8e13a5f17b1f8f655d4d2bcd2b62d5103545b",

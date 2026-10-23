@@ -109,7 +109,12 @@ def seed_legacy(engine):
             identity = connection.execute(users.insert().values(email=f'{name}@stage18.example.invalid',
                 username='stage18_'+name, password_hash='synthetic-unusable', role=role,
                 is_active=active, is_verified=True, created_at=now, updated_at=now).returning(users.c.id)).scalar_one()
-            connection.execute(profiles.insert().values(user_id=identity))
+            # Reflection intentionally has no ORM Python defaults. Supply the
+            # legacy NOT NULL profile fields explicitly rather than changing
+            # the migrated schema or relying on create_all fixtures.
+            connection.execute(profiles.insert().values(user_id=identity,
+                timezone='UTC',notification_preferences='all',theme_preference='light',
+                created_at=now,updated_at=now))
             identities.append(identity)
             connection.execute(legacy.insert().values(user_id=identity,
                 access_token='opaque-synthetic-cipher-'+name, login_time=now, expires_at=now+timedelta(hours=1)))
