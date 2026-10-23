@@ -8,9 +8,9 @@
     "http": 314,
     "lifecycle": 9,
     "page": 68,
-    "scheduler": 16,
+    "scheduler": 17,
     "websocket": 5,
-    "worker": 45
+    "worker": 48
   },
   "entries": [
     {
@@ -5206,7 +5206,7 @@
       "registration": "asynccontextmanager",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/modules/lifecycle.py:172"
+      "source": "backend/app/domains/modules/lifecycle.py:179"
     },
     {
       "calls": [
@@ -13234,7 +13234,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:110"
+      "source": "backend/app/infrastructure/database/outbox/job_dispatch.py:117"
     },
     {
       "calls": [
@@ -13841,6 +13841,95 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/shared/ws_relay.py:201"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.stage"
+      ],
+      "capability": "consume_stage",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "observed_guards": [
+        "source-audited delegation: SimulationSourceScope.validate",
+        "session-bound SimulationPolicyBinding and canonical current_sync fences"
+      ],
+      "owner_source": [
+        "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.analysis.stage.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
+      "source": "backend/app/uat2/analysis_worker.py:124"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.job"
+      ],
+      "capability": "consume_job",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "observed_guards": [
+        "source-audited delegation: SimulationSourceScope.validate",
+        "session-bound SimulationPolicyBinding and canonical current_sync fences"
+      ],
+      "owner_source": [
+        "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.analysis.job.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
+      "source": "backend/app/uat2/analysis_worker.py:127"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.relay"
+      ],
+      "capability": "relay_analysis",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "observed_guards": [
+        "source-audited delegation: SimulationSourceScope.validate",
+        "session-bound SimulationPolicyBinding and canonical current_sync fences"
+      ],
+      "owner_source": [
+        "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.analysis.relay.v1', **options)",
+      "route": "",
+      "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
+      "source": "backend/app/uat2/analysis_worker.py:130"
+    },
+    {
+      "calls": [],
+      "capability": "uat2.analysis.relay.v1",
+      "classification": "owner-private",
+      "kind": "scheduler",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Explicit caller-owned simulation worker; persisted owner, current scoped module policy, immutable workflow/job binding; unregistered by default",
+      "observed_guards": [
+        "source-audited delegation: SimulationSourceScope.validate",
+        "session-bound SimulationPolicyBinding and canonical current_sync fences"
+      ],
+      "owner_source": [
+        "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
+      ],
+      "registration": "{'task': 'uat2.analysis.relay.v1', 'schedule': 5.0, 'options': {'queue': QUEUE, 'expires': 5}}",
+      "route": "",
+      "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
+      "source": "backend/app/uat2/analysis_worker.py:140"
     },
     {
       "calls": [
@@ -16299,16 +16388,16 @@
     "backend/app/domains/modules/coverage.py": "86899afc3b54335164632eaea4cd3798dbbb38f1aa9fa6b352af9f7ccbf7ba5f",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
-    "backend/app/domains/modules/lifecycle.py": "938349b8d360a60f3fcce50c82da56fe3b95d82847e84077af6e8bf63a0dda83",
+    "backend/app/domains/modules/lifecycle.py": "bd59851bde8f50f981324ea15635b2c51cda6d3a3766c94f9ee084551e359d85",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
-    "backend/app/domains/modules/policy.py": "bee958920de30e075b855181361ef9c55870bcf0043ab9ae29c4cf2208547338",
+    "backend/app/domains/modules/policy.py": "3235a6c514a49928516f6bbf32b38686e1b3be7b4d2d306e1204277661c0f08b",
     "backend/app/domains/modules/presentation.py": "46e1fa59088519d61d5ca227e4f4239cfc8eb386f3ee4f563afe194912f5bbe3",
-    "backend/app/domains/modules/registry.py": "d053888dc602a6330e5cdd6447895aedc40bc62abbe9fb347a9b36fdf58b049f",
+    "backend/app/domains/modules/registry.py": "0f3cbf09be1bca388e9e0dbfdd02399d6482e71b4912dc1ea370e3acc3f6df9f",
     "backend/app/domains/modules/router.py": "6c5c7e366ea709307498f3f2201ddd0869918ef80a7b53b95ec0e540c8b7e888",
     "backend/app/domains/modules/safety.py": "319c7ef40e7027347a8df5ad4b4425ceb73ce009574184a63b328a24f02d9df7",
     "backend/app/domains/modules/schemas.py": "7cc900780b66cd7a61c6c943c016df38215003c5d423b33b93d5aaade0475360",
-    "backend/app/domains/modules/service.py": "c3cca6be7d8e00dea4eac45a9c15c17f500941cb94884df7fffdb28b81ddba10",
+    "backend/app/domains/modules/service.py": "2ff3df1c2dbf707fc85782b9ac57d4703157f280a97f35a652f665d980acbddd",
     "backend/app/domains/modules/store.py": "1c99c65203a74e0d7566575947e7e0c6a08c130a8a7a6bc6263e157e508672fd",
     "backend/app/domains/modules/tasks.py": "0025bc5b8ac1ae1ba1d5f53d580c3a2075f50cbb1285902c22603fef9208f34d",
     "backend/app/domains/modules/transports.py": "76a61a9f1b4b8cca2ba6349c5a53c316c584ebd9dc3313ff3eed486ce650886e",
@@ -16469,7 +16558,7 @@
     "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
     "backend/app/domains/runs/analysis_workflows/bindings.py": "4c8813e8ce9f2f52670a6360cddfd4e9978215a525f81bca079f97340cd88c28",
     "backend/app/domains/runs/analysis_workflows/contracts.py": "7316d7861ceab70369104a2438c199eb759b54440eae81bf62bd26a4ab8faf62",
-    "backend/app/domains/runs/analysis_workflows/dispatch.py": "4afbd05e90c1834b1495dae96e30c909944a542631bb1236bb937de0cb330bb5",
+    "backend/app/domains/runs/analysis_workflows/dispatch.py": "ad1ab3b3e82a78da6ee0eb3fe5cabfa3d3015f318434685146defb5ce42aab39",
     "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
     "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
     "backend/app/domains/runs/analysis_workflows/service.py": "4d25f2f20bd81353707945c127202b4ec9f806c5dd4621e05c87c68514ff0653",
@@ -16537,7 +16626,7 @@
     "backend/app/infrastructure/database/base.py": "5658c6f7f41aae2ee0f1331b5bf6dbacac0214b76f932829406f7c0b441dc390",
     "backend/app/infrastructure/database/errors.py": "92984a2adef494f061849ae430655d60fad544ba141ab10d86c6ca565ab908b6",
     "backend/app/infrastructure/database/outbox/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/infrastructure/database/outbox/job_dispatch.py": "021b44031560a9321214be3543faac030e530acbcf04074b9c4211916f99b694",
+    "backend/app/infrastructure/database/outbox/job_dispatch.py": "7042c83647a6884eb8e4d3467dcaed947042cf43c9ec1516a76711b431d2d6b6",
     "backend/app/infrastructure/database/outbox/models.py": "a331a3011182c6a6f7d959db71615c6622419d51f2d6d52a83750f5a5b0c703d",
     "backend/app/infrastructure/database/session.py": "b60efa4fb814548bc5701254273812999967d62d0d3dcc5993153939f47d9518",
     "backend/app/infrastructure/database/sync_session.py": "f974fe13644cf266ef6b1eba8e4280b5412475ce6a47b5f62be90dfd857cd29e",
@@ -16562,8 +16651,10 @@
     "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
     "backend/app/shared/ws_relay.py": "ea0a0b2a84fe570df06bec7ffc13d12bdf2af2672909d5890bdca3b47fe73423",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
+    "backend/app/uat2/analysis_worker.py": "161c03a37884bc1d3d9aefaba774cd039f0d86e5bddf8138502fbb436b61df49",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/main.py": "c4ca690ee6438e867d9c9c2816cbf1e02231533038a845144726b360dd86fc54",
+    "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "b300b9f943381683725a9656a7e18422adf197f7e28276d4653682d89615a953",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",

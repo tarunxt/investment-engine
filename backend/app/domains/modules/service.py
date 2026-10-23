@@ -11,13 +11,15 @@ from .schemas import ModuleCollection
 
 
 async def describe(db, owner_id: int, *, snapshot=None) -> dict:
+    from app.uat2.policy_bindings import async_availability
+    simulation = await async_availability(db, owner_id)
     snapshot = snapshot or await read_snapshot(db, owner_id)
     resolver = session_facts_resolver(db)
     modules = []
     for id, spec in REGISTRY.items():
         row = snapshot.rows.get(id)
         facts = await resolver.resolve(owner_id, id)
-        available, reason = platform_available(spec, uat2=uat2_mode())
+        available, reason = platform_available(spec, uat2=uat2_mode(), simulation=simulation, owner_id=owner_id)
         modules.append({'module_id': id.value, 'label': spec.label, 'category': spec.category,
             'selection': {'schedules_paused': row.schedules_paused if row else True, 'enabled': snapshot.selected(id), 'version': row.version if row else 0,
                 'config': ModuleConfigV1.model_validate(row.config if row else {}).model_dump()},
@@ -28,18 +30,18 @@ async def describe(db, owner_id: int, *, snapshot=None) -> dict:
             'requires': [dependency.value for dependency in spec.requires],
             'capabilities': {capability: decide(owner_id=owner_id, resource_owner_id=owner_id,
                 active=True, module_id=id.value, capability=capability, boundary='http',
-                snapshot=snapshot, facts=facts, uat2=uat2_mode()).model_dump()
+                snapshot=snapshot, facts=facts, uat2=uat2_mode(), simulation=simulation).model_dump()
                 for capability in sorted(spec.capabilities)}})
     from .presentation import presentation_manifest
     return {'schema_version': 1, 'owner_id': owner_id, 'version': snapshot.version,
         'presentation': presentation_manifest(), 'modules': modules, 'operational_enforcement_complete': False}
 
 
-def validate_selection(snapshot, patch):
+def validate_selection(snapshot, patch, *, simulation=None):
     enabled = {id for id in REGISTRY if snapshot.selected(id)}
     for update in patch.updates:
         if update.enabled:
-            if not platform_available(REGISTRY[update.module_id], uat2=uat2_mode())[0]:
+            if not platform_available(REGISTRY[update.module_id], uat2=uat2_mode(), simulation=simulation, owner_id=snapshot.owner_id)[0]:
                 raise HTTPException(409, {'code': 'MODULE_UNAVAILABLE', 'module_id': update.module_id.value})
             enabled.add(update.module_id)
         else:
@@ -53,7 +55,8 @@ async def patch_modules(db, owner_id: int, patch) -> dict:
     snapshot = await read_snapshot(db, owner_id)
     if snapshot.version != patch.expected_version:
         raise conflict()
-    validate_selection(snapshot, patch)
+    from app.uat2.policy_bindings import async_availability
+    validate_selection(snapshot, patch, simulation=await async_availability(db, owner_id))
     try:
         from .lifecycle import lock_owner
         await lock_owner(db,owner_id)

@@ -1859,6 +1859,17 @@ jobs:
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
+      - name: Verify session-scoped simulation policy and persistent worker composition
+        run: python -m pytest -q --junitxml=/tmp/scoped-worker.xml backend/tests/test_hosted_simulation_policy.py backend/tests/test_hosted_analysis_worker.py
+      - name: Require all scoped worker checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/scoped-worker.xml').getroot()
+          assert len(root.findall('.//testcase')) == 15
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY_CHECK
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'

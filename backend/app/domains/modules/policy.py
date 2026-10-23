@@ -45,6 +45,9 @@ class DefaultFactsResolver:
 
 
 def session_facts_resolver(db):
+    from app.uat2.policy_bindings import SESSION, SimulationFactsResolver
+    info = getattr(db, 'info', None)
+    if type(info) is dict and SESSION in info: return SimulationFactsResolver(db)
     from app.domains.public_service.application_bindings import facts_for_session
     return facts_for_session(db) or DefaultFactsResolver()
 
@@ -52,7 +55,7 @@ def session_facts_resolver(db):
 def decide(*, owner_id: int, resource_owner_id: int | None, active: bool,
            module_id: str | None, capability: str, boundary: Boundary,
            snapshot, facts: ModuleFacts, uat2: bool,
-           expected_version: int | None = None) -> ModuleDecision:
+           expected_version: int | None = None, simulation=None) -> ModuleDecision:
     reasons = []
     if not active:
         reasons.append('ACTIVE_IDENTITY_REQUIRED')
@@ -76,7 +79,7 @@ def decide(*, owner_id: int, resource_owner_id: int | None, active: bool,
                 reasons.append('UNKNOWN_CAPABILITY')
             if not snapshot.selected(id):
                 reasons.append('MODULE_NOT_SELECTED')
-            if not platform_available(spec, uat2=uat2)[0]:
+            if not platform_available(spec, uat2=uat2, simulation=simulation, owner_id=owner_id)[0]:
                 reasons.append('MODULE_UNAVAILABLE')
             if facts.jurisdiction != 'allowed':
                 reasons.append('JURISDICTION_NOT_ENTITLED')
@@ -104,6 +107,8 @@ class ModulePolicy:
     async def authorize(self, *, owner_id: int, resource_owner_id: int | None,
                         module_id: str | None, capability: str, boundary: Boundary,
                         expected_version: int | None = None) -> ModuleDecision:
+        from app.uat2.policy_bindings import async_availability
+        simulation = await async_availability(self.db, owner_id)
         active = bool(await self.db.scalar(select(User.is_active).where(User.id == owner_id)))
         # Core account access is independent even of corrupt optional state.
         snapshot = (await read_snapshot(self.db, owner_id)) if module_id is not None else SelectionSnapshot(owner_id, 0, {})
@@ -114,7 +119,7 @@ class ModulePolicy:
             id = None
         preliminary = decide(owner_id=owner_id, resource_owner_id=resource_owner_id,
             active=active, module_id=module_id, capability=capability, boundary=boundary,
-            snapshot=snapshot, facts=facts, uat2=uat2_mode(), expected_version=expected_version)
+            snapshot=snapshot, facts=facts, uat2=uat2_mode(), expected_version=expected_version, simulation=simulation)
         structural_denials = {'ACTIVE_IDENTITY_REQUIRED', 'OWNER_MISMATCH', 'MODULE_VERSION_CHANGED',
             'UNKNOWN_MODULE', 'UNKNOWN_CAPABILITY', 'MODULE_NOT_SELECTED', 'MODULE_UNAVAILABLE', 'DEPENDENCY_NOT_SELECTED'}
         if id is not None and not structural_denials.intersection(preliminary.reasons):
@@ -126,7 +131,7 @@ class ModulePolicy:
                 facts = ModuleFacts()
         decision = decide(owner_id=owner_id, resource_owner_id=resource_owner_id,
             active=active, module_id=module_id, capability=capability, boundary=boundary,
-            snapshot=snapshot, facts=facts, uat2=uat2_mode(), expected_version=expected_version)
+            snapshot=snapshot, facts=facts, uat2=uat2_mode(), expected_version=expected_version, simulation=simulation)
         logger.info('module_policy actor=%s module=%s capability=%s boundary=%s version=%s decision=%s reasons=%s',
             owner_id, module_id, capability, boundary, snapshot.version,
             'allow' if decision.allowed else 'deny', ','.join(decision.reasons))
