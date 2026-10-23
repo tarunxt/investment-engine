@@ -20,6 +20,14 @@ regressions and the original actual PostgreSQL race are required on the successo
 the isolated function probe is not actual database execution or final diagnosis
 of every possible cause of the original429.
 
+A further prepared load sample sends24authenticated/anonymous ASGI requests with
+at most3inflight to the real disposable PostgreSQL composition, checking owner,
+other-user and administrator identity isolation plus anonymous401. It records
+duration/p50/p95/max latency and exact source without provider effects. This is
+not browser/proxy/network load or production capacity certification; the wider
+capacity target remains unresolved. Its actual execution and retained metric
+artifact are required before reporting measured results.
+
 No new product registry, migration, authority, ownership backfill or provider
 adapter is introduced here. The rehearsal invokes existing Alembic revisions
 inside the existing explicitly acknowledged disposable container, using a

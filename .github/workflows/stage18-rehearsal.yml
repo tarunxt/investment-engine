@@ -38,6 +38,7 @@ jobs:
       CREDX_STAGE18_ACK: synthetic-disposable-only
       CREDX_STAGE17_REDIS_URL: redis://redis:6379/14
       CREDX_STAGE17_REDIS_ACK: disposable-ci-only
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,6 +64,7 @@ jobs:
           backend/tests/test_stage18_junit_gate.py
           backend/tests/test_stage18_postgres_tools.py
           backend/tests/test_stage18_signup_clock.py
+          backend/tests/test_stage18_asgi_load.py
           backend/tests/test_stage18_migrations_postgres.py
           backend/tests/test_stage18_queue_redis.py
           backend/tests/test_google_signin.py
@@ -83,4 +85,5 @@ jobs:
           path: |
             /tmp/stage18.xml
             /tmp/stage18-receipt.json
+            /tmp/stage18-asgi-load.json
           if-no-files-found: error

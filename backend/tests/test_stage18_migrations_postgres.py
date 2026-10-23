@@ -103,21 +103,31 @@ def seed_legacy(engine):
     from datetime import datetime, timedelta
     now = datetime.utcnow()
     identities = []
+    def values(table, **provided):
+        # Reflected Core inserts intentionally do not inherit ORM defaults.
+        # Reject any other incomplete fixture before attempting partial seeds.
+        missing = [column.name for column in table.c if not column.nullable
+            and column is not table.autoincrement_column
+            and ((column.name in provided and provided[column.name] is None)
+                 or (column.name not in provided and column.default is None and column.server_default is None))]
+        assert not missing, 'Incomplete synthetic fixture '+table.name+': '+','.join(missing)
+        return provided
     with engine.begin() as connection:
         for name, role, active in [('owner', 'ADMIN', True), ('google_a', 'USER', True),
                                    ('google_b', 'USER', True), ('disabled', 'USER', False)]:
-            identity = connection.execute(users.insert().values(email=f'{name}@stage18.example.invalid',
+            identity = connection.execute(users.insert().values(**values(users,email=f'{name}@stage18.example.invalid',
                 username='stage18_'+name, password_hash='synthetic-unusable', role=role,
-                is_active=active, is_verified=True, created_at=now, updated_at=now).returning(users.c.id)).scalar_one()
+                is_active=active, is_verified=True, created_at=now, updated_at=now)).returning(users.c.id)).scalar_one()
             # Reflection intentionally has no ORM Python defaults. Supply the
             # legacy NOT NULL profile fields explicitly rather than changing
             # the migrated schema or relying on create_all fixtures.
-            connection.execute(profiles.insert().values(user_id=identity,
+            connection.execute(profiles.insert().values(**values(profiles,user_id=identity,
                 timezone='UTC',notification_preferences='all',theme_preference='light',
-                created_at=now,updated_at=now))
+                created_at=now,updated_at=now)))
             identities.append(identity)
-            connection.execute(legacy.insert().values(user_id=identity,
-                access_token='opaque-synthetic-cipher-'+name, login_time=now, expires_at=now+timedelta(hours=1)))
+            connection.execute(legacy.insert().values(**values(legacy,user_id=identity,
+                access_token='opaque-synthetic-cipher-'+name, login_time=now, expires_at=now+timedelta(hours=1),
+                created_at=now,updated_at=now)))
     return identities
 
 

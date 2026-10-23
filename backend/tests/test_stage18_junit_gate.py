@@ -17,14 +17,14 @@ class JunitGate(unittest.TestCase):
 
     def test_complete_execution_receipt_is_not_full_acceptance(self):
         report = self.run_report(self.report())
-        self.assertEqual(report['executed'], 17)
+        self.assertEqual(report['executed'], 18)
         self.assertFalse(report['full_release_verified'])
         self.assertFalse(report['browser_load_verified'])
 
     def test_actual_pytest_unittest_classnames_keep_module_identity(self):
         data = self.report().replace('test_stage18_migration_invariants"',
             'backend.tests.test_stage18_migration_invariants.MigrationInvariants"')
-        self.assertEqual(self.run_report(data)['executed'], 17)
+        self.assertEqual(self.run_report(data)['executed'], 18)
 
     def test_skips_xfail_failures_and_collection_errors_rejected(self):
         for child in ('skipped', 'failure', 'error'):
