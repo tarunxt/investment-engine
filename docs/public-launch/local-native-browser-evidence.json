@@ -1,0 +1,24 @@
+{
+  "source_sha": "43fa4995a556be53b4275728d6ac0b4bcae1b5c6",
+  "kind": "local_native_composition_ui",
+  "passed": true,
+  "sqlite": true,
+  "postgresql": false,
+  "redis": false,
+  "hosted": false,
+  "google_signin_verified": false,
+  "checks": [
+    "managed_keyless_connection_and_explicit_source",
+    "user-owned_keyless_connection_and_explicit_source",
+    "native_ui_governed_analysis_exact_confirmation_and_fake_fill",
+    "us_rendered_import_exact_acceptance_and_native_analysis"
+  ],
+  "screenshots": [
+    "both-modes-source.png",
+    "completed-analysis-exact-confirmation-filled.png",
+    "exact-us-source-accepted.png",
+    "us-six-stage-completed.png"
+  ],
+  "worker_errors": [],
+  "external_google_script_blocked": true
+}

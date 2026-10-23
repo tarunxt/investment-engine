@@ -56,3 +56,61 @@ backup inventory; the three retention/identity/backup decisions (not legal
 compliance approval); publication approval, exact-source CI, actual PG/Redis,
 safe UAT2 deployment and new owner acceptance. No real erasure or provider effect.
 Full account export/erasure and full hosted High/Medium completion remain false.
+
+## Recovered execution and rendered qualification
+
+The first verified resumed write was saved at 2026-10-23 23:10:28 UTC as
+704960e6dbd9af86c3ab6e91e0a4799b0e313341 (20 files). The bounded read-only
+recovery occurred after 23:09:33 and before that write; its exact first-read
+second was not recorded. The interrupted report/stage/commit had not executed.
+
+Local browser repairs were isolated in d4cde43, a5256cf, 1ba263c, 74e0444 and
+43fa499. They address one frontend origin, full disposable model schema, initial
+connection readiness, accessible portfolio selection, the actual US option,
+independent fake delivery handling, and exact returned basket identity. A stale
+review approval in the intermediate browser attempt was rejected by the server;
+the test now waits for the exact newly prepared intent instead of any button.
+No application guard was weakened. Independent review found the delivery-batch
+reliability issue, now fixed, and no further verified application isolation bug.
+
+Exact tested source: 43fa4995a556be53b4275728d6ac0b4bcae1b5c6. Its cold frontend
+build passed (53 pages). The actual rendered browser test passed in 73.28 seconds,
+with four screenshots: both simulated Kite modes/source acquisition; completed
+India analysis and exact fake fill; accepted exact US source; completed six-stage
+US analysis. Worker error record was empty. A sanitized receipt is saved beside
+this report in local-native-browser-evidence.json. Full local receipts/screenshots
+remain outside Git; they were not published. The Google script was blocked.
+
+The focused supported-store suite also passed 25 tests, zero skips, at
+74e044475f8f44defd891dcf03a4878edea22b19; only browser test code changed afterward.
+This overlaps the previous 100-case affected regression and is not additive.
+The exact-source native order-composition matrix passed 13 tests, zero skips
+(credx-native-order-matrix-43fa499.xml), covering filled, partial and both unknown
+scenarios, worker-instance recreation, reconciliation and blocked redispatch.
+Instance recreation is not a real process/Redis restart.
+
+The prior paragraph calling the browser gate prepared is superseded by this
+local result only. Full hosted completion remains false. The runtime is SQLite
+with explicit in-memory delivery and actual installed service/worker classes;
+there are no FastAPI dependency overrides or preview routes. This is not native
+hosted entrypoint startup, real Celery/Redis, PostgreSQL, Google login or owner
+acceptance. No Docker, psql or redis-server executable is available here, so the
+prepared disposable PostgreSQL/Redis probe remains unrun.
+
+## Final local implementation boundary
+
+Supported typed task/consent contracts, bounded canonical metadata/file/cache
+projections, stopped confirmed-order and held-spend recovery, and explicit legacy
+live/operator exclusions are locally implemented and tested. Historical packets
+without original task arguments cannot be reconstructed from a digest. Old
+unindexed/unlinked consent needs original keys or an owned reference. Unsupported
+opaque payloads need reviewed ownership/content contracts; a shared pack/blob
+reference does not establish exclusive whole-object ownership or deletion rights.
+Those dependent parts remain held, not silently counted complete.
+
+The remaining release sequence requires publication permission for the exact
+candidate, independent review and exact-source CI including PostgreSQL/Redis,
+then the existing deployment owner's safe UAT2 gate and new owner walkthrough.
+The earlier five-commit publication request remains pending and does not cover
+these successors. No remote/server/security action, actual erasure or provider
+call occurred during this continuation. Existing candidate refs remain intact.

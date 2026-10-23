@@ -126,3 +126,13 @@ uncertain costs still require authoritative settlement evidence. Legacy live
 broker positions/orders and operator state remain unsupported by generic
 restoration. Full account export/erasure, runtime binding, deployment, and owner
 acceptance remain incomplete. Three exact policy decisions above remain gates.
+
+
+## Store-closure and rendered-browser successor
+
+STORE_CLOSURE_AND_LOCAL_BROWSER.md supersedes the earlier local-incomplete list
+for supported new task locators, indexed new unlinked consent, owned scan/page
+metadata, canonical bundle metadata, selected held-spend recovery and the local
+rendered walkthrough. Historical lost arguments, old unindexed/unlinked consent,
+unsupported opaque payloads, actual deployed inventory and the three policy
+choices remain held. Full export/erasure and hosted qualification remain false.
