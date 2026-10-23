@@ -1,0 +1,599 @@
+{
+  "schema_version": 1,
+  "reference_source_sha": "ae15428776d54e0abbc379c8fe63be4e17a5797d",
+  "reference_junit_sha256": "24b1cf37822b1b27eb2ef0e1ccfe92a926251334e83dceb0c37d990f7123b870",
+  "cases": [
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_closed_projection_rejects_credentials_boolean_ids_and_orphans"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_failed_transaction_snapshot_must_roll_back_all_partial_changes"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_foreign_connection_copy_history_move_or_order_approval_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_legacy_and_google_account_ids_roles_disabled_status_preserved"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_new_account_optional_module_or_admin_grant_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_pending_incompatible_work_or_rebinding_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_preservation_new_defaults_quarantine_and_counts"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_repeated_initialization_snapshot_has_stable_per_owner_counts"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_unknown_roles_and_connection_modes_reject"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.MigrationInvariants",
+      "name": "test_unresolved_ownership_never_assigned_to_logged_in_owner"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.CheckRenderingInvariants",
+      "name": "test_changed_constraint_semantics_remain_different"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.CheckRenderingInvariants",
+      "name": "test_only_known_lossless_array_cast_rendering_is_equivalent"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migration_invariants.CheckRenderingInvariants",
+      "name": "test_unsupported_sql_is_preserved_exactly"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_actual_pytest_unittest_classnames_keep_module_identity"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_complete_execution_receipt_is_not_full_acceptance"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_missing_and_extra_required_cases_rejected_for_every_module"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_missing_or_duplicate_cases_and_wrong_source_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_previous_four_and_ten_case_inventory_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_receipt_binds_exact_payload_and_source_without_acceptance_claim"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_required_counts_match_independent_executed_case_inventory"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_required_module_cannot_be_replaced_by_other_checks"
+    },
+    {
+      "classname": "backend.tests.test_stage18_junit_gate.JunitGate",
+      "name": "test_skips_xfail_failures_and_collection_errors_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_postgres_tools.PostgresTools",
+      "name": "test_bookworm_default_pg15_client_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_postgres_tools.PostgresTools",
+      "name": "test_mixed_client_versions_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_postgres_tools.PostgresTools",
+      "name": "test_official_debian_pg16_clients_match_server16"
+    },
+    {
+      "classname": "backend.tests.test_stage18_postgres_tools.PostgresTools",
+      "name": "test_unreviewed_server_and_boolean_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_postgres_tools.PostgresTools",
+      "name": "test_wrong_tool_multiline_or_malformed_identity_rejected"
+    },
+    {
+      "classname": "backend.tests.test_stage18_signup_clock",
+      "name": "test_default_clock_is_sampled_after_control_acquisition"
+    },
+    {
+      "classname": "backend.tests.test_stage18_signup_clock",
+      "name": "test_explicit_rollback_time_is_not_overridden_after_control"
+    },
+    {
+      "classname": "backend.tests.test_stage18_asgi_load",
+      "name": "test_bounded_signed_owner_other_admin_and_anonymous_asgi_load"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migrations_postgres",
+      "name": "test_actual_multiuser_migration_idempotence_and_connection_ownership"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migrations_postgres",
+      "name": "test_actual_failed_migration_transaction_restores_schema_rows_and_revision"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migrations_postgres",
+      "name": "test_actual_pg_dump_restore_preserves_every_fixture_row_and_sequence"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migrations_postgres",
+      "name": "test_actual_concurrent_google_signup_preserves_independent_defaults"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migrations_postgres",
+      "name": "test_actual_check_cast_forms_preserve_constraint_semantics[value::text = ANY (ARRAY['user_owned'::character varying, 'platform_managed'::character varying]::text[])]"
+    },
+    {
+      "classname": "backend.tests.test_stage18_migrations_postgres",
+      "name": "test_actual_check_cast_forms_preserve_constraint_semantics[value::text = ANY (ARRAY['user_owned'::character varying::text, 'platform_managed'::character varying::text])]"
+    },
+    {
+      "classname": "backend.tests.test_stage18_queue_redis",
+      "name": "test_actual_redis_redelivery_preserves_bound_owner_version_and_task_id"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_verified_google_identity"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override0]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override1]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override2]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override3]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override4]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override5]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override6]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_untrusted_claims[override7]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_forged_token_and_missing_configuration"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_unknown_inactive_and_ambiguous_accounts[matches0]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_unknown_inactive_and_ambiguous_accounts[matches1]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_rejects_unknown_inactive_and_ambiguous_accounts[matches2]"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_preserves_existing_account_and_role"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_client_id_override_does_not_read_database"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_default_client_is_independent_of_sheets"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_recovery_allows_only_required_google_routes"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_new_google_profiles_are_independent_and_reused"
+    },
+    {
+      "classname": "backend.tests.test_google_signin",
+      "name": "test_concurrent_signup_reuses_winner"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_signup_limits_are_durable_independent_of_ai_budget"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_signup_rollback_does_not_consume_account_creation_slot"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_two_signup_writers_one_global_admission"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_signup_preserves_clock_and_boundaries"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_reviewed_residency_is_synthetic_only_owner_bound_and_revocable"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_residency_adversarial_evidence[owner]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_residency_adversarial_evidence[ciphertext]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_residency_adversarial_evidence[expiry]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_residency_adversarial_evidence[nonindia]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_full_synthetic_export_covers_all_declared_datasets_without_credentials"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_deletion_retention_hold_and_owned_counts_are_durable"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_full_account_contract_fails_closed[missing_category]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_full_account_contract_fails_closed[foreign_owner]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_full_account_contract_fails_closed[unreviewed]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_support_exact_consent_role_revocation_and_audit"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_support_cannot_expand_authority[expiry]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_support_cannot_expand_authority[wrong_scope]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_support_cannot_expand_authority[lost_role]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_support_cannot_expand_authority[cost_reader]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_support_audit_failure_returns_no_data"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_monitor_reads_owned_actual_state_and_records_deduplicated_local_alert"
+    },
+    {
+      "classname": "backend.tests.test_stage17_closure",
+      "name": "test_private_routes_enforce_completed_owned_export_and_audited_support"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_exact_registry_and_dependency_graph_validation"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_config_schema_is_typed_and_cannot_confer_authority[bad0]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_config_schema_is_typed_and_cannot_confer_authority[bad1]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_config_schema_is_typed_and_cannot_confer_authority[bad2]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_module_contract_requires_current_active_owner[GET-/me/modules-None]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_module_contract_requires_current_active_owner[PATCH-/me/modules-body1]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_module_contract_requires_current_active_owner[POST-/me/modules/disable-impact-body2]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_new_and_existing_accounts_default_to_no_modules_without_get_writes"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_atomic_multi_update_stale_conflict_and_owner_separation"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_body_identity_and_authority_overrides_are_rejected[extra0]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_body_identity_and_authority_overrides_are_rejected[extra1]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_body_identity_and_authority_overrides_are_rejected[extra2]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_body_identity_and_authority_overrides_are_rejected[extra3]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unknown_invalid_duplicate_updates_never_partially_commit[updates0]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unknown_invalid_duplicate_updates_never_partially_commit[updates1]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unknown_invalid_duplicate_updates_never_partially_commit[updates2]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unknown_invalid_duplicate_updates_never_partially_commit[updates3]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unavailable_module_rejects_entire_patch_and_uat2_stays_closed"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_dependency_validation_and_disable_preview_are_atomic_and_read_only"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_existing_empty_version_zero_header_can_be_updated"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_corrupt_module_state_is_closed_without_secret_details[unknown_module]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_corrupt_module_state_is_closed_without_secret_details[invalid_config]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_corrupt_module_state_is_closed_without_secret_details[future_version]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_shared_policy_is_owner_bound_current_and_never_entitles_selection[http]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_shared_policy_is_owner_bound_current_and_never_entitles_selection[stream]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_shared_policy_is_owner_bound_current_and_never_entitles_selection[worker]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_shared_policy_is_owner_bound_current_and_never_entitles_selection[side_effect]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_internal_analysis_does_not_require_standalone_ui_and_core_stays_available"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unknown_or_malformed_server_facts_fail_closed"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_core_account_access_survives_corrupt_optional_state"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_response_or_audit_failure_rolls_back_complete_selection_transaction"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_google_first_and_repeat_login_leave_optional_modules_default_denied"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_failed_first_google_transaction_cannot_leave_optional_records"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_entitlement_and_connection_axes_remain_independent[facts0-JURISDICTION_NOT_ENTITLED]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_entitlement_and_connection_axes_remain_independent[facts1-PLAN_NOT_ENTITLED]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_entitlement_and_connection_axes_remain_independent[facts2-CONNECTION_NOT_READY]"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_disable_preview_includes_transitive_dependencies_without_changes"
+    },
+    {
+      "classname": "backend.tests.test_stage06_modules",
+      "name": "test_unknown_catalogue_capability_cannot_be_registered"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_disable_atomic_outbox_cancel_running_and_foreign_owner"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_fresh_checkpoints_stop_running_fake_work_and_never_reenable_old_work"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_missed_event_and_reordered_duplicate_events_use_current_state"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_unrelated_module_toggle_does_not_invalidate_current_analysis"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_no_context_recovery_override_or_stale_payload_can_authorize_effect"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_routes_have_explicit_core_history_and_new_work_classification"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_reenable_does_not_resume_schedules_but_explicit_resume_dispatches_nothing"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_global_financial_override_cannot_turn_analysis_context_into_order_permission"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_actual_optional_route_matrix_only_narrow_stops_reconciliation_are_safety"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_real_provider_and_sheet_adapters_deny_unbound_calls_before_clients"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_accepted_order_reconciliation_marker_never_allows_submit_or_liquidation"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_disable_cancels_owned_parent_workflow_without_rewriting_completed_history"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_generic_dispatch_locator_is_persisted_versioned_and_not_payload_authority"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_disable_cancels_queued_generic_binding_and_reenable_does_not_rebind"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_malformed_consumer_cannot_select_a_module[portfolio0]"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_malformed_consumer_cannot_select_a_module[portfolio1]"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_malformed_consumer_cannot_select_a_module[True]"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_malformed_consumer_cannot_select_a_module[7]"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_financial_order_routes_require_execution_not_analysis"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_actual_cli_spawn_waits_for_fresh_fence_and_holds_it_through_start"
+    },
+    {
+      "classname": "backend.tests.test_stage07_lifecycle",
+      "name": "test_actual_cli_spawn_denied_by_final_fence_never_creates_process"
+    },
+    {
+      "classname": "backend.tests.test_stage09_connections_postgres",
+      "name": "test_two_writers_one_current_connection"
+    },
+    {
+      "classname": "backend.tests.test_stage09_connections_postgres",
+      "name": "test_rotation_cas_one_winner_preserves_bound_token"
+    },
+    {
+      "classname": "backend.tests.test_stage09_connections_postgres",
+      "name": "test_disable_and_rotation_serialize_without_resurrecting_token"
+    },
+    {
+      "classname": "backend.tests.test_stage09_connections_postgres",
+      "name": "test_actual_additive_migration_roundtrip_preserves_legacy_ciphertext"
+    },
+    {
+      "classname": "backend.tests.test_stage17_disposable_consumer_services",
+      "name": "test_actual_authenticated_admission_and_child_worker_reject_changed_authority[foreign]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_disposable_consumer_services",
+      "name": "test_actual_authenticated_admission_and_child_worker_reject_changed_authority[module]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_disposable_consumer_services",
+      "name": "test_actual_authenticated_admission_and_child_worker_reject_changed_authority[connection]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_disposable_consumer_services",
+      "name": "test_actual_authenticated_admission_and_child_worker_reject_changed_authority[approval]"
+    },
+    {
+      "classname": "backend.tests.test_stage17_application_composition_postgres",
+      "name": "test_actual_pg_authenticated_export_replay_and_foreign_result_denial"
+    },
+    {
+      "classname": "backend.tests.test_stage17_application_composition_postgres",
+      "name": "test_actual_pg_authenticated_cancellation_partial_disposal_and_foreign_preservation"
+    },
+    {
+      "classname": "backend.tests.test_stage17_application_composition_postgres",
+      "name": "test_actual_pg_reviewed_residency_changes_only_jurisdiction_and_revocation_denies"
+    }
+  ]
+}

@@ -259,3 +259,13 @@ def test_failed_cancellation_read_preserves_original_failure(monkeypatch):
 # Detached domain unit tests use fake sessions/providers; actual module admission
 # is covered separately by test_stage07_lifecycle and its PostgreSQL suite.
 pytestmark = __import__("pytest").mark.usefixtures("synthetic_module_unit_context")
+
+
+def test_rebalance_repair_keeps_existing_holding_overlap_explicit():
+    job = make_job('rebalance')
+    prompt = tasks._build_rebalance_table_repair_prompt(job.prompt, 'Original invalid output', 'row_width')
+    assert job.prompt in prompt
+    assert 'never label it Buy New or add a second row' in prompt
+    assert 'Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot' in prompt
+    assert 'snapshot labeled US, a matching symbol at a known US venue is the same existing holding' in prompt
+    assert prompt.endswith('Original invalid output')

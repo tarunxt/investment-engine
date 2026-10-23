@@ -745,6 +745,7 @@ jobs:
           - turbopack
 
     env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_STANDALONE_BUILD: "true"
@@ -763,6 +764,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Set up Node.js with npm cache
         uses: actions/setup-node@v7
@@ -785,6 +789,10 @@ jobs:
           appendFileSync(process.env.GITHUB_ENV, `NEXTAUTH_SECRET=${value}\n`);
           JS
 
+      - name: Verify Stage18 browser receipt contracts
+        working-directory: frontend
+        run: node --test scripts/stage18-browser-evidence.test.mjs
+
       - name: Log cold-build runner resources
         run: |
           echo "==> CPU"
@@ -800,7 +808,7 @@ jobs:
         run: |
           node scripts/stamp-frontend-build.mjs \
             frontend/lib/generatedBuildInfo.ts \
-            "${GITHUB_SHA}" \
+            "${SOURCE_SHA}" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Run isolated cold production build
@@ -836,7 +844,7 @@ jobs:
           deploy/no-docker/package-frontend-artifact.sh \
             frontend/.next \
             "${RUNNER_TEMP}/frontend-${BUNDLER}.tar.gz" \
-            "${GITHUB_SHA}" \
+            "${SOURCE_SHA}" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             "${BUNDLER}"
           mkdir "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime"
@@ -851,7 +859,18 @@ jobs:
       - name: Verify authenticated render and lazy route behavior
         if: matrix.bundler == 'webpack'
         working-directory: frontend
+        env:
+          STAGE18_BROWSER_RECEIPT: ${{ runner.temp }}/stage18-browser-receipt.json
         run: npm run test:playwright-hardening
+
+      - name: Retain exact-source Stage18 browser result
+        if: always() && matrix.bundler == 'webpack'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage18-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/stage18-browser-receipt.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify fingerprint, auth, routes, assets, and backend proxy
         id: runtime
@@ -860,7 +879,7 @@ jobs:
         run: |
           node scripts/verify-frontend-artifact-runtime.mjs \
             "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime" \
-            "${GITHUB_SHA}"
+            "${SOURCE_SHA}"
 
       - name: Record benchmark result
         if: always()

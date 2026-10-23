@@ -1,4 +1,18 @@
-# Stage18 local recovery candidate
+# Stage18 recovery and acceptance candidate
+
+## Current cloud acceptance work — 23 October 2026
+
+This entry supersedes older “Stage18 not started/unpublished” and “UAT2 remains stopped” status sentences below; those entries are historical, not current runtime observations.
+
+- Published Stage18 source `ae15428776d54e0abbc379c8fe63be4e17a5797d`: retained native CI reports four successful workflows, PR Checks 53/53 jobs, and rehearsal 148 passed cases plus 57 passed subtests. XML digest `24b1cf37822b1b27eb2ef0e1ccfe92a926251334e83dceb0c37d990f7123b870` was revalidated. This is the selected rehearsal, not full release acceptance.
+- Unpublished cloud successor: narrow production rebalance-source hotfix carried forward without replacing Stage18 ownership/worker guards; complete selected-cohort JUnit identity/count gate; synthetic browser evidence isolation, fail-closed receipts and bounded load measurement. No GitHub write, merge, CI trigger or deployment occurred in this work.
+- Executed cloud checks: Final Stage09–16 plus output/runtime synthetic backend rerun 674 passed; carried hotfix frontend 15 passed; artifact unit checks 20 passed; browser receipt helper 16 passed; gate nine unittest methods passed. The actual Chromium attempt failed before pages with process socket `Operation not permitted`; no browser or browser-load pass is claimed.
+- Base-only artifact audit: built/stamped/packaged actual ae154 standalone frontend using loopback-only public URLs, unpacked and passed native structural validator plus HTTP runtime/fingerprint/auth/proxy/assets/budget checks. This is a disposable synthetic bundle, not the CI deployment bundle, not UAT2-ready configuration, and not evidence for the later hotfix successor.
+- UAT2 status: latest supplied host evidence is Stage15 restored/running on 23 October at approximately 04:58 UTC. This work did not inspect the host. Stages17/18 remain not deployed and owner acceptance is not claimed. Current host state cannot be inferred from historical evidence.
+- Full release, real providers, browser acceptance, wider capacity, complete privacy/integration bindings and UAT2 verification remain open. See [acceptance matrix](STAGE18_ACCEPTANCE_MATRIX.md). Review and exact successor CI are still required before publication/deployment decisions.
+
+## Historical preparation record
+
 
 Base: `3bcd3e4e9022cc04b0319b84963457684d60e1a4`, the independently verified
 Stage17 disposable financial-consumer milestone. The separately reviewed
