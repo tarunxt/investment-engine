@@ -31,6 +31,9 @@ def publish_fake_in_session(session,job_id,dispatch_id):
     from app.domains.modules.lifecycle import WorkIdentity,current_sync
     job=session.get(Job,job_id,populate_existing=True)
     if job is None or job.status in JobStatus.terminal():return
+    if (job.request_context_json or {}).get('guardrails_version') == 'stage13-v1':
+        from scripts.public_launch.preview_stage12 import publish_governed_job
+        return publish_governed_job(session, job_id, dispatch_id)
     if job.provider!='synthetic' or job.model!='offline':
         raise RuntimeError('Only synthetic/offline preview execution permitted')
     current_sync(session,WorkIdentity(job.user_id,job.module_id,job.module_version))

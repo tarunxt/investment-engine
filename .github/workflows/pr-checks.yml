@@ -1769,15 +1769,15 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
-      - name: Verify exact approval, ownership, dispatch races and actual Alembic roundtrip
-        run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py
+      - name: Verify owned review, PostgreSQL safety and linked SQLite ASGI fake acceptance
+        run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py backend/tests/test_linked_preview_execution.py backend/tests/test_stage18_linked_analysis_preview.py
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage16.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage16 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 44
+          assert len(root.findall('.//testcase')) == 68
           PY_CHECK
 
   stage17-public-service:
