@@ -3,7 +3,7 @@
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
     "background": 31,
-    "export": 52,
+    "export": 55,
     "frontend": 25,
     "http": 317,
     "lifecycle": 9,
@@ -9720,12 +9720,20 @@
     {
       "calls": [
         "BoundaryDenied",
+        "EncryptedPrivacyExport",
+        "EncryptedPrivacyExport(self.db, self.keyring).export",
+        "NativeOutboxExport",
+        "NativeOutboxExport(self.db, scope=self.native_scope).export",
+        "PublicOutboxExport",
+        "PublicOutboxExport(self.db).export",
         "_encode",
         "assert_owned_relationships",
         "audit_blob_references",
         "digest",
+        "export_job_registry",
         "len",
         "owned_execution_fences",
+        "owned_export_files",
         "reader.export"
       ],
       "capability": "export",
@@ -9743,7 +9751,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/canonical_account_export.py:56"
+      "source": "backend/app/domains/public_service/canonical_account_export.py:58"
     },
     {
       "calls": [
@@ -9766,6 +9774,93 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/public_service/disposable_monitoring.py:123"
+    },
+    {
+      "calls": [
+        "BoundaryDenied",
+        "OutboxMessage.payload['owner_id'].as_integer",
+        "OutboxMessage.topic.in_",
+        "_json_value",
+        "case",
+        "cast",
+        "func.length",
+        "func.octet_length",
+        "items.append",
+        "len",
+        "owner",
+        "select",
+        "select(OutboxMessage.id, OutboxMessage.topic, case((length > 65536, None), else_=cast(OutboxMessage.payload, Text))).where",
+        "select(OutboxMessage.id, OutboxMessage.topic, case((length > 65536, None), else_=cast(OutboxMessage.payload, Text))).where(OutboxMessage.topic.in_(TOPICS), OutboxMessage.payload['owner_id'].as_integer() == subject).order_by",
+        "select(OutboxMessage.id, OutboxMessage.topic, case((length > 65536, None), else_=cast(OutboxMessage.payload, Text))).where(OutboxMessage.topic.in_(TOPICS), OutboxMessage.payload['owner_id'].as_integer() == subject).order_by(OutboxMessage.id).limit",
+        "self.db.connection",
+        "self.db.connection().get_isolation_level",
+        "self.db.execute",
+        "self.db.get_bind",
+        "self.project",
+        "sorted"
+      ],
+      "capability": "export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/encrypted_privacy_export.py:65"
+    },
+    {
+      "calls": [
+        "BoundaryDenied",
+        "checksum.hexdigest",
+        "checksum.update",
+        "db.connection",
+        "db.connection().get_isolation_level",
+        "db.get_bind",
+        "db.scalars",
+        "hashlib.sha256",
+        "job_key",
+        "job_key(subject, identifier, scope).rsplit",
+        "len",
+        "list",
+        "min",
+        "os.close",
+        "os.fstat",
+        "os.open",
+        "os.read",
+        "owner",
+        "result.append",
+        "select",
+        "select(PolymarketAutoLiveRunRecord.id).where",
+        "select(PolymarketAutoLiveRunRecord.id).where(PolymarketAutoLiveRunRecord.user_id == subject).order_by",
+        "select(PolymarketAutoLiveRunRecord.id).where(PolymarketAutoLiveRunRecord.user_id == subject).order_by(PolymarketAutoLiveRunRecord.id).limit",
+        "stat.S_ISDIR",
+        "stat.S_ISREG",
+        "type"
+      ],
+      "capability": "owned_export_files",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/export_file_inventory.py:14"
     },
     {
       "calls": [
@@ -9968,6 +10063,54 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/domains/public_service/privacy.py:74"
+    },
+    {
+      "calls": [
+        "BoundaryDenied",
+        "OutboxMessage.payload['owner_id'].as_integer",
+        "OutboxMessage.payload['user_id'].as_integer",
+        "OutboxMessage.topic.in_",
+        "_encode",
+        "_json_value",
+        "case",
+        "cast",
+        "func.length",
+        "func.octet_length",
+        "items.append",
+        "len",
+        "or_",
+        "owner",
+        "require",
+        "select",
+        "select(OutboxMessage.id, OutboxMessage.topic, case((size > 65536, None), else_=cast(OutboxMessage.payload, Text))).where",
+        "self.db.connection",
+        "self.db.connection().get_isolation_level",
+        "self.db.execute",
+        "self.db.execute(statement.order_by(OutboxMessage.id).limit(1001).execution_options(stream_results=True, yield_per=1)).yield_per",
+        "self.db.get_bind",
+        "self.project",
+        "sorted",
+        "statement.order_by",
+        "statement.order_by(OutboxMessage.id).limit",
+        "statement.order_by(OutboxMessage.id).limit(1001).execution_options",
+        "str"
+      ],
+      "capability": "export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "public_service",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "require"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/public_outbox_export.py:132"
     },
     {
       "calls": [
@@ -16948,7 +17091,7 @@
     "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
     "backend/app/domains/public_service/application_bindings.py": "1dd230158bac591c84055fdc6276e4345adc0a28e7dcb5e55cce3ead0240e97d",
     "backend/app/domains/public_service/application_router.py": "f79cf2cb8e9a17b03cd0ace89b40ac646ebaddee2a21aa1061ee1535947a2429",
-    "backend/app/domains/public_service/canonical_account_export.py": "37368ddb4c4510cf9603ce30f211abb6e56d21ee9d347249bd93bf8107c6b423",
+    "backend/app/domains/public_service/canonical_account_export.py": "d7d5ad18660da7f41524e1328dc60492a098beaeac238027ca34d13b75a08827",
     "backend/app/domains/public_service/canonical_privacy_inventory.py": "cca88bd86b5f6237d4559ce230c7ce61923374db71abc2e11149445d1ad44d01",
     "backend/app/domains/public_service/canonical_privacy_resolvers.py": "c4310d2756eae62de7bed349e6c8718c4b2de382773b070f8a2ada9fa29b40ae",
     "backend/app/domains/public_service/composition.py": "dee5e25cce70739cfbd0c5c7651303f5e24f2231dfc040007a588775776c4380",
@@ -16957,6 +17100,9 @@
     "backend/app/domains/public_service/disposable_monitoring.py": "0496c04c535b8cd475426e932fc2179fbc0271c998484d760dacc4d354e9efca",
     "backend/app/domains/public_service/drills.py": "40af5e7a31ba599d030dacb1ec646abf0b4e8eb576d8444ebbae9668126331ed",
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
+    "backend/app/domains/public_service/encrypted_privacy_export.py": "c2d27e4e9078f6999651485d13e79134d472bca1ea43d0504778233803522dd6",
+    "backend/app/domains/public_service/export_file_inventory.py": "3392e942c1619e07134c51e0583b05f0a5a0a538bb0470cb888e4c905c7dfcda",
+    "backend/app/domains/public_service/financial_privacy_recovery.py": "877cf3a7206d525eb0fba64a3c2d6bbc7fbeee22dd053ad5729c63514de928bb",
     "backend/app/domains/public_service/monitor_application_router.py": "56d5cdbf12586edbb74e3a4e795c300692c0f3a72a54ae34d05f15bbda24c6f3",
     "backend/app/domains/public_service/monitor_dispatch.py": "e13550d77d7f2c154a8fa21249997be6014e6f43f2ac9dd409c46eddf379e0f5",
     "backend/app/domains/public_service/monitoring.py": "209c576cb5b61b0c982aae6766c06efe434ab2e89ee537e1d2af373b14cba5b3",
@@ -16964,7 +17110,8 @@
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "b445ff6d7ad9d1aae8fab7a74a5e8fcae81330fe03b2fcd6d7284be17115906d",
     "backend/app/domains/public_service/privacy_relations.py": "3fcbb7650f7a85e5e82d0a1811653dbbc838dcf66a2e7e5e7d783269177971a0",
-    "backend/app/domains/public_service/quarantined_privacy.py": "b2189afc86c0b91753f58a9e845ea1595a19d2cbe01ca0465de2ef4f8081de49",
+    "backend/app/domains/public_service/public_outbox_export.py": "9e0246fc1633ef350b8b48db9680703e6359e4d9289d349a451557e38c1766bb",
+    "backend/app/domains/public_service/quarantined_privacy.py": "d7a2c8ab9db7cace31f3854fc49537c4ce9795826676ff45febe7e2f85303e8a",
     "backend/app/domains/public_service/recoverable_privacy.py": "6276844f7d67572fc047cd7b126619be8a57e893f562588e16edd52b95e49ba3",
     "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
     "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",

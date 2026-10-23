@@ -34,3 +34,18 @@ def test_shared_blob_never_releases_foreign_metadata_or_opaque_content():
         with pytest.raises(BoundaryDenied,match='UNCLASSIFIED'):
             audit_blob_references(db,metadata,reader,1)
 
+
+
+def test_sqlite_physical_schema_mismatch_does_not_qualify_canonical_export():
+    # SQLite DDL compatibility is test-only; this is not PostgreSQL evidence.
+    from test_stage17_reviewed_residency import setup
+    import app.models
+    from app.infrastructure.database.base import Base
+    from app.domains.auth.models import User
+    from app.domains.public_service.canonical_account_export import CanonicalAccountExport
+    engine=create_engine('sqlite://');Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(User(id=1,email='synthetic@example.test',username='synthetic',password_hash='unusable',
+            is_active=True,is_verified=True));db.commit()
+        with pytest.raises(BoundaryDenied,match='ACCOUNT_DATABASE_SCHEMA_CHANGED'):
+            CanonicalAccountExport(db,Base.metadata).export(1)

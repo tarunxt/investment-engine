@@ -17,8 +17,10 @@ CONTRACTS={model.__tablename__:model.__table__ for model in (Job,Run,RunJob,Auto
 
 
 class QuarantinedFixturePrivacy(RecoverableFixturePrivacy):
+    contracts=CONTRACTS
+    reference=REFERENCE
     def _contract(self,name):
-        table=self.reader.metadata.tables.get(name);expected=CONTRACTS[name]
+        table=self.reader.metadata.tables.get(name);expected=self.contracts[name]
         if table is None:raise BoundaryDenied('RECOVERY_QUARANTINE_SCHEMA_REQUIRED')
         shape=lambda value:sorted((column.name,str(column.type),column.nullable) for column in value.c)
         links=lambda value:sorted((element.parent.name,element.target_fullname,constraint.ondelete or '',constraint.onupdate or '',
@@ -28,10 +30,10 @@ class QuarantinedFixturePrivacy(RecoverableFixturePrivacy):
         return table
 
     def _restorable(self,name):
-        if name not in CONTRACTS:return super()._restorable(name)
-        if self.scope.reference!=REFERENCE:raise BoundaryDenied('EXPLICIT_QUARANTINED_RECOVERY_SCOPE_REQUIRED')
+        if name not in self.contracts:return super()._restorable(name)
+        if self.scope.reference!=self.reference:raise BoundaryDenied('EXPLICIT_QUARANTINED_RECOVERY_SCOPE_REQUIRED')
         self._contract(name)
-        for other in CONTRACTS:
+        for other in self.contracts:
             if other in self.reader.metadata.tables:self._contract(other)
         if name in {'jobs','runs','run_jobs','auto_rebalance_workflows','auto_rebalance_workflow_stages','user_modules','user_module_preferences'}:
             self._contract('user_modules');self._contract('user_module_preferences')
@@ -40,10 +42,10 @@ class QuarantinedFixturePrivacy(RecoverableFixturePrivacy):
         return True
 
     def _after_restore(self,owner,counts,now):
-        if not any(name in CONTRACTS and count for name,count in counts.items()):return {}
+        if not any(name in self.contracts and count for name,count in counts.items()):return {}
         # This only runs inside the inherited restore savepoint, after all
         # parents/children are inserted and before the restored audit commits.
-        if self.scope.reference!=REFERENCE:raise BoundaryDenied('EXPLICIT_QUARANTINED_RECOVERY_SCOPE_REQUIRED')
+        if self.scope.reference!=self.reference:raise BoundaryDenied('EXPLICIT_QUARANTINED_RECOVERY_SCOPE_REQUIRED')
         controls={'schema':1,'owner_id':owner,'authority_restored':False,'quarantined_tables':[],
             'module_version_floor':None,'prior_sessions_revoked':True}
         tables=self.reader.metadata.tables

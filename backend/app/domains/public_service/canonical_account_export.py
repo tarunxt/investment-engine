@@ -50,8 +50,10 @@ def audit_blob_references(db, metadata, reader, subject):
 
 
 class CanonicalAccountExport:
-    def __init__(self, db, metadata):
+    def __init__(self, db, metadata, *, keyring=None, native_scope=None, cache_client=None, export_directory_fd=None):
         self.db, self.metadata = db, metadata
+        self.keyring,self.native_scope=keyring,native_scope
+        self.cache_client,self.export_directory_fd=cache_client,export_directory_fd
 
     def export(self, subject):
         reader = assert_owned_relationships(self.db, self.metadata, subject)
@@ -68,6 +70,22 @@ class CanonicalAccountExport:
                 'identity': 'export excludes credentials; identity revocation/erasure requires policy',
                 'backups': 'inventory and expiry/restore suppression policy required',
                 'retention': 'no periods or legal holds inferred from source classification'}}
+        from .public_outbox_export import PublicOutboxExport
+        result['public_outbox']=PublicOutboxExport(self.db).export(subject)
+        if self.keyring is not None:
+            from .encrypted_privacy_export import EncryptedPrivacyExport
+            result['encrypted_ledger_metadata']=EncryptedPrivacyExport(self.db,self.keyring).export(subject)
+        else:result['dispositions']['encrypted_ledger']='held: explicit caller-owned keyring required'
+        if self.native_scope is not None:
+            from .native_outbox_export import NativeOutboxExport
+            result['native_outbox']=NativeOutboxExport(self.db,scope=self.native_scope).export(subject)
+        else:result['dispositions']['native_outbox']='held: explicit simulation owner/environment scope required'
+        if self.cache_client is not None:
+            from .task_registry_export import export_job_registry
+            result['job_task_registry']=export_job_registry(self.db,subject,self.cache_client)
+        if self.export_directory_fd is not None:
+            from .export_file_inventory import owned_export_files
+            result['generated_file_metadata']=owned_export_files(self.db,subject,self.export_directory_fd)
         if len(_encode(result)) > 8 * 1024 * 1024 - 100:
             raise BoundaryDenied('ACCOUNT_EXPORT_SIZE_LIMIT')
         result['content_hash'] = digest(result)

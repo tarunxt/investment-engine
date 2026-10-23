@@ -79,4 +79,4 @@ def test_actual_pg_canonical_export_keeps_uncovered_store_dispositions(canonical
     assert result['audit_blobs']['items']==[]
     assert result['complete_account_export'] is False
     assert result['complete_account_erasure'] is False
-    assert {'files','cache','backups','identity','retention','outbox'}==set(result['dispositions'])
+    assert {'files','cache','backups','identity','retention','outbox'}<=set(result['dispositions'])

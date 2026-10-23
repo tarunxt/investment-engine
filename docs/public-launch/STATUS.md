@@ -1,3 +1,12 @@
+## Local financial/privacy successor (2026-10-23)
+
+Selected confirmed-order recovery, seven additional typed public/worker topic
+projections, five encrypted topic metadata contracts and owned generated-file
+metadata are implemented locally. Independent review defects were fixed and
+95 focused/retained tests pass with zero skips. Complete privacy and hosted
+qualification remain pending; see [decisions, source ownership and exact gaps](PRIVACY_DECISIONS_AND_STORE_MAP.md).
+No remote publication or server operation occurred.
+
 ## Local review successor (2026-10-23 22:41 UTC)
 
 The uninstalled successor to `4b6ede01a616d1d7ee919341f3595c5ee1205e0b`

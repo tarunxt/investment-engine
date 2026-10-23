@@ -1909,13 +1909,13 @@ jobs:
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
       - name: Verify typed native evidence export and quarantined fixture recovery
-        run: python -m pytest -q --junitxml=/tmp/native-privacy.xml backend/tests/test_native_outbox_export.py backend/tests/test_quarantined_privacy.py backend/tests/test_canonical_blob_projection.py backend/tests/test_task_registry_privacy_export.py backend/tests/test_native_dispatch_claim_recovery.py backend/tests/test_base_privacy_key_authority.py
+        run: python -m pytest -q --junitxml=/tmp/native-privacy.xml backend/tests/test_native_outbox_export.py backend/tests/test_quarantined_privacy.py backend/tests/test_canonical_blob_projection.py backend/tests/test_task_registry_privacy_export.py backend/tests/test_native_dispatch_claim_recovery.py backend/tests/test_base_privacy_key_authority.py backend/tests/test_stopped_financial_recovery.py backend/tests/test_public_outbox_privacy.py backend/tests/test_encrypted_privacy_metadata.py backend/tests/test_owned_export_file_inventory.py
       - name: Require all native privacy checks to execute
         run: |
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/native-privacy.xml').getroot()
-          assert len(root.findall('.//testcase')) == 17
+          assert len(root.findall('.//testcase')) == 31
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
