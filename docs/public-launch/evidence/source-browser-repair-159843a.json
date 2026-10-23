@@ -1,0 +1,43 @@
+{
+  "checks": [
+    "explicit_owned_synthetic_source_after_module_selection",
+    "real_login_two_owners_no_foreign_review",
+    "unapproved_analysis_creates_no_execution",
+    "exact_http_approval_partial_ui_restart_no_replay",
+    "cancelled_disable_preserves_selection_actual_disable_preserves_order_history",
+    "explicit_owned_synthetic_source_after_module_selection",
+    "accepted_unknown_durable_evidence_restart_filled_ui_one_venue_submission"
+  ],
+  "cleanup": "Owned preview stop succeeded; synthetic databases retained",
+  "deployed_uat2_verified": false,
+  "earlier_local_attempt": {
+    "cleanup_confirmed": true,
+    "passed": false,
+    "reason": "canonical CI fingerprint was not stamped; served development"
+  },
+  "kind": "real_ui_guarded_fake_preview",
+  "passed": true,
+  "public_runtime_verified": false,
+  "real_provider_certification": false,
+  "recorded_at_utc": "2026-10-23T21:11:14.164852+00:00",
+  "scope": "Real login, selection, governed India analysis and exact UI approval; synthetic current-version source, fake venue, SQLite. Unknown transition is durable-store evidence, not guaranteed visible UI.",
+  "screenshot_sha256": {
+    "owner-1-exact-unapproved-review.png": "466cc3f245d80583cc4afb39ea0db16b2e78412a761ae384885193674401c6b9",
+    "owner-1-six-stage-analysis.png": "a1cd3a85fe52b5cb0bb4fd82ed6a5490ed2cb7f10841c695587b19eb08b94b92",
+    "owner-2-exact-unapproved-review.png": "7d1af4f8da01af90333df4936984eba944d12b8275853688af1ab28de7d0759c",
+    "owner-2-six-stage-analysis.png": "f9e1146363c1247c37e5084777698aaf936df4b221bdcafc46c6db3a3b2fb150",
+    "partial-ui-after-restart.png": "b139e222cf9be488fe0fb009d78749e6cec54a5715ac30ee37f3ba63b7396c2c",
+    "partial-ui-before-restart.png": "18d1f32ca08b6b535cfb71625d6ba3e877aeeb2234823c804016dae9888a55d7",
+    "unknown-restart-reconciled-ui.png": "e67028c0eb640590ca76273f22a047aef8d00e859d1ae5b35d54c9dabe1d7512"
+  },
+  "served_fingerprint": {
+    "build_sha": "159843af20c9ad362d8e307665a8a8601ec7f7a5",
+    "build_timestamp": "2026-10-23T21:07:01Z"
+  },
+  "source_sha": "159843af20c9ad362d8e307665a8a8601ec7f7a5",
+  "visually_inspected": [
+    "owner-1-six-stage-analysis.png",
+    "partial-ui-after-restart.png",
+    "unknown-restart-reconciled-ui.png"
+  ]
+}

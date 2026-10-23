@@ -37,8 +37,27 @@ skips; the 20 source-scope/HTTP cases are added to the existing Stage16 CI job
 with an exact zero-skip gate. Sixteen browser-evidence contract tests and Node
 syntax validation passed. Generated source inventory and route matrix are
 updated, including the new route; inventory `--check` passes. No model, migration,
-dependency version or deployment change is included. A fresh full disposable
-browser receipt remains to be recorded for the exact repair source.
+dependency version or deployment change is included.
+
+The fresh local full browser run passed on exact source `159843af20c9ad362d8e307665a8a8601ec7f7a5`,
+with served fingerprint bound to that SHA using the unchanged canonical CI
+stamp tool. Seven screenshots were retained; six-stage completion,
+partial-after-restart and reconciled-filled pages were visually inspected.
+The receipt proves explicit authenticated BFF source acquisition after selection,
+six governed stages, five settled zero-cost jobs, exact approval, no submission
+before approval, two-owner review separation, cancel/disable preservation,
+partial restart without replay and durable unknown-to-filled reconciliation
+with one fake venue submission. Unknown transition remains durable-store
+evidence, not a guaranteed transient-unknown screenshot. Both existing fake
+connection modes were exercised; no real provider was contacted.
+The source-bound non-sensitive projection and screenshot digests are in
+`evidence/source-browser-repair-159843a.json`. Owned preview cleanup succeeded.
+An earlier local attempt failed because it omitted the canonical CI fingerprint
+stamp and served `development`; its failed receipt and synthetic database were
+preserved separately before the fresh stamped run. That attempt is not a pass.
+This is local SQLite/real-browser evidence, not PostgreSQL/Redis hosted UAT2
+acceptance or public release approval. This documentation successor inherits
+no unrun exact-head CI result from the tested code SHA.
 
 The separate local session-policy/worker continuation is excluded from this
 repair. No new code was pushed, no UAT2/production action occurred, and no full
