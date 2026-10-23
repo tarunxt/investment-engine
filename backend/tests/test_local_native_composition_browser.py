@@ -58,7 +58,10 @@ def test_installed_composition_ui_with_actual_login_and_no_dependency_overrides(
                 analysis.relay();worker.relay()
                 batch=list(deliveries);deliveries.clear()
                 for kind,args in batch:
-                    task=(analysis.tasks|worker.tasks)[kind];task.run(*args)
+                    try:
+                        task=(analysis.tasks|worker.tasks)[kind];task.run(*args)
+                    except Exception as error:
+                        errors.append(type(error).__name__)
             except Exception as error:
                 errors.append(type(error).__name__)
     backend_port=int(os.environ['LOCAL_NATIVE_BACKEND_PORT']);frontend_port=int(os.environ['LOCAL_NATIVE_FRONTEND_PORT'])
@@ -88,5 +91,6 @@ def test_installed_composition_ui_with_actual_login_and_no_dependency_overrides(
             frontend.terminate()
             try:frontend.wait(timeout=10)
             except subprocess.TimeoutExpired:frontend.kill();frontend.wait(timeout=5)
+        Path('/tmp/credx-local-native-worker-errors.json').write_text(json.dumps(list(errors)))
         log.close()
         asyncio.run(engine.dispose())
