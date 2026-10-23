@@ -8,6 +8,53 @@ permissions:
   contents: read
 
 jobs:
+  priority-adapters-postgres:
+    name: Synthetic venue journal and recoverable privacy PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stage09
+          POSTGRES_PASSWORD: stage09
+          POSTGRES_DB: credx_stage09_test
+        options: --health-cmd "pg_isready -U stage09 -d credx_stage09_test" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: backend
+      ENVIRONMENT: test
+      AUTH_DISABLED: 'false'
+      DATABASE_URL: postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test
+      REDIS_URL: redis://127.0.0.1:1/15
+      CREDX_STAGE09_DATABASE_ACK: disposable-docker-only
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install constrained test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
+      - name: Verify SQLite adapters and actual PostgreSQL races separately
+        run: >-
+          python -m pytest -q --junitxml=/tmp/priority-adapters.xml
+          backend/tests/test_synthetic_venue_journal.py
+          backend/tests/test_recoverable_privacy.py
+          backend/tests/test_priority_adapters_postgres.py
+      - name: Require complete execution without skips
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/priority-adapters.xml').getroot()
+          cases=root.findall('.//testcase')
+          assert len(cases) == 42
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          assert sum(c.attrib.get('classname','').split('.')[-1]=='test_priority_adapters_postgres' for c in cases)==5
+          PY_CHECK
+
   backend-syntax:
     name: Backend Python syntax checks
     runs-on: ubuntu-latest

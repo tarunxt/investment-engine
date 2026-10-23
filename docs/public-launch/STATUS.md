@@ -1,3 +1,17 @@
+# Remaining-priority implementation started — 23 October 2026
+
+New isolated branch `codex/credx-priority-completion-20261024` starts from verified
+integration documentation head `a5658773cd4687b2ecae7f7efc43c3173822032d`.
+The [priority chart and bounded outcomes](PRIORITY_COMPLETION.md) distinguish
+new implementation from the existing qualified c493 deployment below. Durable
+SQL fake-venue and recoverable disposable erasure adapters are locally tested;
+full hosted composition, complete privacy coverage, runtime/operations bindings,
+both-mode/US linked browser acceptance and the remaining release matrix are
+still incomplete. Exact-candidate CI and PostgreSQL evidence remain pending.
+No new deployment, actual user-data deletion, provider approval, owner acceptance
+or production action is claimed. The previous restricted owner acceptance and
+all existing evidence remain preserved.
+
 # Qualified release closure: owner-only simulated UAT2
 
 Recorded 24 October 2026, following deployment at 01:11:41–01:12:51 IST (23 October 19:41:41–19:42:51 UTC). Tested and installed source: `c493e95acb82345d54288f4996c89b6931c26bcd`, [PR #1260](https://github.com/tarunxt/investment-engine/pull/1260). Any later documentation commit is not the installed source and inherits no unrun CI claim.
