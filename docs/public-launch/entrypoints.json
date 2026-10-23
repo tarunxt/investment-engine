@@ -4849,7 +4849,7 @@
       "registration": "celery.task(name='app.domains.jobs.tasks.execute_ai_job', bind=True, max_retries=3, default_retry_delay=30, queue='ai')",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/tasks.py:1194"
+      "source": "backend/app/domains/jobs/tasks.py:1195"
     },
     {
       "calls": [
@@ -16244,7 +16244,7 @@
     "backend/app/domains/jobs/repository.py": "138e6543466e3fdc26f26a0219753419f87221fc343d594289da018d469661cc",
     "backend/app/domains/jobs/router.py": "fccad20a785a4109ffc56d55f183f839d653d64b5cc20ed9340c30733f7186ac",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
-    "backend/app/domains/jobs/tasks.py": "12e0b76dbd65ec97851c947c58d01ff564d492088f0e89428f498283959fc3c7",
+    "backend/app/domains/jobs/tasks.py": "581d90992757a971217bdae0c6c927b5cf555a7868a6a229450af924d9084b8e",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
     "backend/app/domains/jobs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/jobs/use_cases/create_job.py": "adb8ba753cec97c4d399e007c5c8caa279b4b0cec92839312752a15991ee4535",
