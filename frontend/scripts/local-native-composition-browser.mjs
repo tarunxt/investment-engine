@@ -3,18 +3,18 @@ import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {mkdirSync,writeFileSync} from 'node:fs';
 const base=process.env.LOCAL_NATIVE_BROWSER_URL,sha=process.env.LOCAL_NATIVE_BROWSER_SHA;
-assert(base&&/^http:\/\/127\.0\.0\.1:\d+$/.test(base));assert.match(sha,/^[a-f0-9]{40}$/);
+assert(base&&/^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/.test(base));assert.match(sha,/^[a-f0-9]{40}$/);
 const output=process.env.LOCAL_NATIVE_BROWSER_EVIDENCE;assert(output?.startsWith('/tmp/'));
 mkdirSync(output,{recursive:true});
 const receipt={source_sha:sha,kind:'local_native_composition_ui',passed:false,sqlite:true,
  postgresql:false,redis:false,hosted:false,google_signin_verified:false,checks:[],screenshots:[]};
-const browser=await chromium.launch({headless:true});let context;
+const browser=await chromium.launch({headless:true});let context,page;
 async function shot(page,name){await page.screenshot({path:output+'/'+name+'.png',fullPage:true});receipt.screenshots.push(name+'.png');}
 try{
  context=await browser.newContext({serviceWorkers:'block'});
- await context.route('**/*',route=>new URL(route.request().url()).origin===base?route.continue():route.abort('blockedbyclient'));
+ await context.route('**/*',route=>{const u=new URL(route.request().url());if(u.origin===base)return route.continue();(receipt.blocked_urls??=[]).push(u.origin+u.pathname);return route.abort('blockedbyclient');});
  await context.routeWebSocket('**/*',socket=>socket.close());
- const page=await context.newPage();page.setDefaultTimeout(45000);
+ page=await context.newPage();page.setDefaultTimeout(45000);page.on('requestfailed',request=>{const u=new URL(request.url());(receipt.failed_requests??=[]).push({url:u.origin+u.pathname,error:request.failure()?.errorText});});
  await page.goto(base+'/login?redirectTo=/console/uat2');
  await page.getByLabel('Email Address',{exact:true}).fill('usera@stage01.example.com');
  await page.getByLabel('Password',{exact:true}).fill('SyntheticPreview123!');
@@ -65,6 +65,8 @@ try{
  await shot(page,'us-six-stage-completed');
  receipt.checks.push('us_rendered_import_exact_acceptance_and_native_analysis');
  receipt.passed=true;
+}catch(error){
+ receipt.error=String(error);if(page){receipt.failure_url=page.url();receipt.failure_text=(await page.locator('body').innerText()).slice(0,16000);await shot(page,'failure');}throw error;
 }finally{
  writeFileSync(output+'/receipt.json',JSON.stringify(receipt,null,2)+'\n');
  if(context)await context.close();await browser.close();

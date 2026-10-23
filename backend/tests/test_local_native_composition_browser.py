@@ -16,6 +16,7 @@ from test_hosted_order_composition import order_env,worker_env,linked_env
 pytestmark=pytest.mark.skipif(os.getenv('CREDX_LOCAL_NATIVE_BROWSER')!='disposable-loopback-only',reason='Explicit disposable local browser runtime required')
 
 
+@pytest.mark.parametrize('worker_env',['journal'],indirect=True)
 def test_installed_composition_ui_with_actual_login_and_no_dependency_overrides(order_env,monkeypatch,tmp_path):
     import uvicorn
     import app.infrastructure.database.session as sessions
@@ -69,10 +70,10 @@ def test_installed_composition_ui_with_actual_login_and_no_dependency_overrides(
         deadline=time.monotonic()+15
         while not server.started and time.monotonic()<deadline:time.sleep(.05)
         assert server.started
-        env={**os.environ,'NEXT_DIST_DIR':os.environ['LOCAL_NATIVE_NEXT_DIR'],'NEXTAUTH_URL':f'http://127.0.0.1:{frontend_port}',
-            'AUTH_URL':f'http://127.0.0.1:{frontend_port}','NEXTAUTH_SECRET':'local-native-synthetic-only','AUTH_SECRET':'local-native-synthetic-only',
-            'AUTH_TRUST_HOST':'true','BACKEND_API_URL':f'http://127.0.0.1:{backend_port}','API_URL':f'http://127.0.0.1:{backend_port}',
-            'LOCAL_NATIVE_BROWSER_URL':f'http://127.0.0.1:{frontend_port}','LOCAL_NATIVE_BROWSER_SHA':sha,
+        env={**os.environ,'NEXT_DIST_DIR':os.environ['LOCAL_NATIVE_NEXT_DIR'],'NEXTAUTH_URL':f'http://localhost:{frontend_port}',
+            'AUTH_URL':f'http://localhost:{frontend_port}','NEXTAUTH_SECRET':'local-native-synthetic-only','AUTH_SECRET':'local-native-synthetic-only',
+            'AUTH_TRUST_HOST':'true','NEXT_PUBLIC_UAT2':'true','NEXT_PUBLIC_UAT2_COMMIT':sha,'BACKEND_API_URL':f'http://127.0.0.1:{backend_port}','API_URL':f'http://127.0.0.1:{backend_port}',
+            'LOCAL_NATIVE_BROWSER_URL':f'http://localhost:{frontend_port}','LOCAL_NATIVE_BROWSER_SHA':sha,
             'LOCAL_NATIVE_BROWSER_EVIDENCE':'/tmp/credx-local-native-browser'}
         frontend=subprocess.Popen([node,'node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',str(frontend_port)],cwd=root/'frontend',env=env,stdout=log,stderr=log)
         time.sleep(3)
