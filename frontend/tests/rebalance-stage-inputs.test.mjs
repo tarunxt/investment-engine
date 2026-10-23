@@ -175,6 +175,48 @@ test('INDmoney rejects Explore, missing, incomplete and ambiguous holdings befor
     threats: null, previousClose: new Date(), swingRuns: [] }));
 });
 
+
+test('rebalance retains each Swing schema and exact evidence instead of a shared positional legend', () => {
+  const current = run(50, [501]);
+  const legacy = run(51, [502]);
+  const headers = [
+    'LLM Name + Model', 'Exchange Symbol', 'Stock Symbol', 'Stock Name',
+    'Technical Setup', 'Entry Range', 'Stop Loss', 'Target', 'Analyst Source',
+    'Units to Buy', 'Price per Unit', 'Total Buy Amount', 'Upside Horizon (%)',
+    'Weeks', 'Confidence Score (0-100)', 'Rationale Cruxx', 'Score Rationale Cruxx',
+    'Rationale - Technical Setup (Medium Term)', 'Score Rationale - Technical Setup (Medium Term)',
+    'Rationale - Technical Setup (Long Term)', 'Score Rationale - Technical Setup (Long Term)',
+    'Rationale - Fundamentals Short Term', 'Score Rationale - Fundamentals Short Term',
+    'Rationale - Fundamentals Medium/Long Term', 'Score Rationale - Fundamentals Medium/Long Term',
+    'Rationale Technical Setup Short Term 1–3 Months', 'Score Rationale Technical Setup Short Term 1–3 Months',
+    'Run #', 'Run Date', 'Run Time', 'LLM',
+  ];
+  assert.equal(headers.length, 31);
+  const row = '| ' + headers.map((_, index) => index === 16 ? '-3' : `supplied-${index}`).join(' | ') + ' |';
+  const response = '## Original source\n\n| ' + headers.join(' | ') + ' |\n| ' +
+    headers.map(() => '---').join(' | ') + ' |\n' + row + '\n' + row +
+    '\n\nDissent: preserve  double spaces and supplied context.\n';
+  const historical = '| Stock Symbol | Rationale Cruxx |\n| --- | --- |\n| ABC | Historical evidence |\n';
+  current.run_jobs[0].job.response = response;
+  legacy.run_jobs[0].job.response = historical;
+  const before = structuredClone([current, legacy]);
+  const result = rebalance.buildRebalanceInputBundle({ market: 'us', portfolio: portfolioSnapshot,
+    threats: null, previousClose: new Date('2026-10-02T20:00:00Z'), swingRuns: [current, legacy] });
+  assert.ok(result.includes(response), 'all 31 headers, scores, repeated rows and source whitespace survive');
+  assert.ok(result.includes(historical), 'historical schemas retain their own headers');
+  assert.ok(!result.includes('Columns for all compacted swing rows:'));
+  assert.deepEqual([current, legacy], before);
+});
+
+test('rebalance prompts distinguish existing holdings from overlapping Swing candidates', () => {
+  for (const market of ['india', 'us']) {
+    const prompt = rebalance.buildRebalancePrompt(market);
+    assert.match(prompt, /never label it Buy New or add a second row/);
+    assert.match(prompt, /Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot/);
+    assert.match(prompt, /snapshot labeled US, a matching symbol at a known US venue is the same existing holding/);
+  }
+});
+
 const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');
 const ast = ts.createSourceFile('workflow.tsx', workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = new Map();
