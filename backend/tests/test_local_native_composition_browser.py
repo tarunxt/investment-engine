@@ -32,13 +32,15 @@ def test_installed_composition_ui_with_actual_login_and_no_dependency_overrides(
     root=Path(__file__).resolve().parents[2]
     monkeypatch.setenv('CREDX_UAT2','0')
     monkeypatch.setenv('JWT_SIGNING_KEY','local-native-browser-synthetic-'+('x'*40))
-    for model in (UserProfile,ActivityLog,UserSession,APIKey):model.__table__.create(e.engine,checkfirst=True)
+    from app.infrastructure.database.base import Base
+    Base.metadata.create_all(e.engine)
     for subject in (1,2):e.db.get(User,subject).password_hash=PasswordUtils.hash_password('SyntheticPreview123!')
     e.db.commit()
     engine=create_async_engine('sqlite+aiosqlite:///'+str(e.path))
     monkeypatch.setattr(sessions,'AsyncSessionLocal',async_sessionmaker(engine,expire_on_commit=False))
     app=FastAPI();
-    for router in (auth,modules,connections):app.include_router(router)
+    from app.domains.public_service.router import router as public_service
+    for router in (auth,modules,connections,public_service):app.include_router(router)
     install_workflow(app,scope=analysis.scope,source_storage=analysis.analysis.source_storage)
     install_route_policy(app)
     @app.exception_handler(AppException)

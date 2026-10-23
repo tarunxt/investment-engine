@@ -23,6 +23,7 @@ try{
  await page.getByRole('heading',{name:'UAT2 owner simulation walkthrough',exact:true}).waitFor();
  await page.getByText('Build '+sha.slice(0,12),{exact:false}).waitFor();
  const area=page.locator('section').filter({has:page.getByRole('heading',{name:'Fake Kite connection and source',exact:true})}).last();
+ await area.getByText('Only fake connections are available.',{exact:false}).waitFor();
  for(const label of ['managed','user-owned']){
   await area.getByRole('button',{name:`Review ${label} Kite mode (fake)`,exact:true}).click();
   await area.getByRole('button',{name:'Confirm this simulated connection mode',exact:true}).click();
