@@ -85,4 +85,49 @@ class MigrationInvariants(unittest.TestCase):
         partial=deepcopy(before);partial['connections'][0]['mode']='changed'
         with self.assertRaises(RehearsalViolation):verify_rollback(before,partial)
 
+class CheckRenderingInvariants(unittest.TestCase):
+    ORIGINAL = "state::text = ANY (ARRAY['ready'::character varying, 'done'::character varying]::text[])"
+    RESTORED = "state::text = ANY (ARRAY['ready'::character varying::text, 'done'::character varying::text])"
+
+    def test_only_known_lossless_array_cast_rendering_is_equivalent(self):
+        from scripts.public_launch.stage18_schema_contract import canonical_check_sql
+        self.assertEqual(canonical_check_sql(self.ORIGINAL), self.RESTORED)
+        self.assertEqual(canonical_check_sql(self.RESTORED), self.RESTORED)
+        self.assertEqual(canonical_check_sql(canonical_check_sql(self.ORIGINAL)), self.RESTORED)
+
+    def test_changed_constraint_semantics_remain_different(self):
+        from scripts.public_launch.stage18_schema_contract import canonical_check_sql
+        mutations = [
+            self.ORIGINAL.replace("'done'", "'cancelled'"),
+            self.ORIGINAL.replace(", 'done'::character varying", ""),
+            self.ORIGINAL.replace("'done'::character varying", "'done'::character varying, 'extra'::character varying"),
+            self.ORIGINAL.replace('state::text', 'other_state::text'),
+            self.ORIGINAL.replace(' = ANY ', ' <> ALL '),
+            self.ORIGINAL.replace('character varying', 'character varying(2)'),
+            self.ORIGINAL.replace('character varying', 'character'),
+            self.ORIGINAL.replace('::text[]', '::citext[]'),
+            self.ORIGINAL + ' OR true',
+            self.ORIGINAL + ' AND state IS NOT NULL',
+            'true',
+        ]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                self.assertNotEqual(canonical_check_sql(mutation), canonical_check_sql(self.ORIGINAL))
+
+    def test_unsupported_sql_is_preserved_exactly(self):
+        from scripts.public_launch.stage18_schema_contract import canonical_check_sql
+        for expression in (
+            "connection_version > 0 AND module_version > 0",
+            self.ORIGINAL.replace("'ready'", "'a,b'"),
+            self.ORIGINAL.replace("'ready'", "'it''s'"),
+            self.ORIGINAL.replace("'ready'", "NULL"),
+            self.ORIGINAL.replace("'ready'", "lower('READY')"),
+            self.ORIGINAL.replace("'ready'", "'é'"),
+            self.ORIGINAL.replace('state::text', '"state"::text'),
+            self.ORIGINAL.replace('character varying', 'character varying(2)'),
+        ):
+            with self.subTest(expression=expression):
+                self.assertEqual(canonical_check_sql(expression), expression)
+
 if __name__=='__main__':unittest.main()
+

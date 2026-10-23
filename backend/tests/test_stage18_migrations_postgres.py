@@ -14,12 +14,15 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import MetaData, create_engine, func, inspect, select
+from sqlalchemy import CheckConstraint, Column, MetaData, String, Table, create_engine, func, inspect, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateSchema, DropSchema
 from scripts.public_launch.stage18_postgres_tools import PG_DUMP, PG_RESTORE, require_compatible_clients
+
+from scripts.public_launch.stage18_schema_contract import canonical_check_sql
 
 URL = 'postgresql+psycopg2://stage09:stage09@postgres:5432/credx_stage09_test'
 DSN = URL.replace('postgresql+psycopg2:', 'postgresql:', 1)
@@ -87,7 +90,8 @@ def schema_contract(engine):
             'primary': inspector.get_pk_constraint(name),
             'unique': canonical(inspector.get_unique_constraints(name)),
             'foreign': canonical(inspector.get_foreign_keys(name)),
-            'checks': canonical(inspector.get_check_constraints(name)),
+            'checks': canonical([{**check, 'sqltext': canonical_check_sql(check['sqltext'])}
+                                 for check in inspector.get_check_constraints(name)]),
             'indexes': canonical(inspector.get_indexes(name)),
         }
     # Sort reflected unordered collections without discarding their semantics.
@@ -241,3 +245,26 @@ async def test_actual_concurrent_google_signup_preserves_independent_defaults(re
             assert session.scalar(select(func.count()).select_from(UserModulePreferences)) == 0
     finally:
         await async_engine.dispose()
+
+
+
+@pytest.mark.parametrize('expression', [
+    "value::text = ANY (ARRAY['user_owned'::character varying, 'platform_managed'::character varying]::text[])",
+    "value::text = ANY (ARRAY['user_owned'::character varying::text, 'platform_managed'::character varying::text])",
+])
+def test_actual_check_cast_forms_preserve_constraint_semantics(rehearsal, expression):
+    """Execute both cast forms in PostgreSQL, including SQL CHECK's NULL rule."""
+    engine, _ = rehearsal
+    table = Table('cast_contract_probe', MetaData(), Column('value', String(24)),
+                  CheckConstraint(expression, name='ck_cast_contract_probe'))
+    table.create(engine)
+    with engine.begin() as connection:
+        for value in ('user_owned', 'platform_managed', None):
+            connection.execute(table.insert().values(value=value))
+        for value in ('shared_fallback', '', 'USER_OWNED', 'user_owned '):
+            with pytest.raises(IntegrityError) as error:
+                with connection.begin_nested():
+                    connection.execute(table.insert().values(value=value))
+            assert error.value.orig.pgcode == '23514'
+            assert error.value.orig.diag.constraint_name == 'ck_cast_contract_probe'
+        assert connection.scalar(select(func.count()).select_from(table)) == 3
