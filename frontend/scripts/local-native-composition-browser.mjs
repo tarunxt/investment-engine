@@ -34,7 +34,7 @@ try{
  }
  await shot(page,'both-modes-source');
  async function start(portfolio){
-  await page.getByLabel('Portfolio',{exact:true}).selectOption(portfolio);
+  await page.getByRole('combobox',{name:/^Portfolio/}).selectOption(portfolio);
   const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows');
   await page.getByRole('button',{name:'Start server analysis',exact:true}).click();
   const r=await response;assert.equal(r.status(),200);const flow=await r.json();
@@ -62,7 +62,7 @@ try{
  await page.getByRole('button',{name:'Accept this exact snapshot',exact:true}).click();
  await page.getByText('Validated snapshot accepted.',{exact:false}).waitFor();
  await shot(page,'exact-us-source-accepted');
- await page.goto(base+'/console/uat2');await start('us');
+ await page.goto(base+'/console/uat2');await start('indmoney_us');
  await shot(page,'us-six-stage-completed');
  receipt.checks.push('us_rendered_import_exact_acceptance_and_native_analysis');
  receipt.passed=true;
