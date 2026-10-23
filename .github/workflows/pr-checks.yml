@@ -1870,6 +1870,17 @@ jobs:
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
+      - name: Verify scoped HTTP sessions and keyless synthetic connections
+        run: python -m pytest -q --junitxml=/tmp/scoped-http.xml backend/tests/test_hosted_http_bindings.py backend/tests/test_synthetic_connections.py
+      - name: Require all scoped HTTP checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/scoped-http.xml').getroot()
+          assert len(root.findall('.//testcase')) == 14
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY_CHECK
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'
