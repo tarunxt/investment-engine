@@ -42,16 +42,19 @@ try{
   await article.waitFor({timeout:90000});return article;
  }
  const india=await start('india');
+ const preparedResponse=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname.endsWith('/prepare-basket'));
  await india.getByRole('button',{name:'Prepare exact fake basket review',exact:true}).click();
+ const prepared=await preparedResponse;assert.equal(prepared.status(),200);const intent=await prepared.json();
+ const order=page.getByRole('article',{name:`Order ${intent.id}`,exact:true});
  await page.getByText('Synthetic review prepared.',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Refresh recorded order status',exact:true}).click();
- await page.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).click();
+ await order.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).click();
  for(let i=0;i<30;i++){
   await page.getByRole('button',{name:'Refresh recorded order status',exact:true}).click();
-  if(await page.getByRole('heading',{name:'filled',exact:true}).count())break;
+  if(await order.getByRole('heading',{name:'filled',exact:true}).count())break;
   await page.waitForTimeout(1000);
  }
- await page.getByRole('heading',{name:'filled',exact:true}).waitFor();
+ await order.getByRole('heading',{name:'filled',exact:true}).waitFor();
  await shot(page,'completed-analysis-exact-confirmation-filled');
  receipt.checks.push('native_ui_governed_analysis_exact_confirmation_and_fake_fill');
  await page.goto(base+'/console/indmoney-us');
