@@ -17,7 +17,7 @@ from .reviewed_residency import EVIDENCE,CONSENT
 from .store import owner
 from .sql_account import _json_value
 
-TOPICS=frozenset({PLAN,EFFECT,RECOVERY,SYNTHETIC,EVIDENCE})
+TOPICS=frozenset({PLAN,EFFECT,RECOVERY,SYNTHETIC,EVIDENCE,CONSENT})
 PREFIX={PLAN:'credx:sql-privacy-plan:',EFFECT:'credx:disposable-sql-privacy:',RECOVERY:'credx:privacy-fixture-recovery:'}
 
 
@@ -29,12 +29,19 @@ class EncryptedPrivacyExport:
     def project(self,subject,identifier,topic,p):
         try:
             common={'owner_id','ciphertext','key_version'}
-            required=common|({'claims_hash'} if topic==EFFECT else {'archive_hash','state'} if topic==RECOVERY else {'revoked'} if topic in {SYNTHETIC,EVIDENCE} else set())
+            required=common|({'claims_hash'} if topic==EFFECT else {'archive_hash','state'} if topic==RECOVERY else {'revoked'} if topic in {SYNTHETIC,EVIDENCE} else {'consumed'} if topic==CONSENT else set())
             allowed=required|({'restored_at','restore_controls','restore_controls_hash'} if topic==RECOVERY else set())
             if set(p)-allowed or not required<=set(p) or type(p.get('owner_id')) is not int or p['owner_id']!=subject:raise ValueError
             claims=self.keyring.open(p['ciphertext'],p['key_version'])
-            principal='owner' if topic==EVIDENCE else 'owner_id'
+            principal='owner' if topic in {EVIDENCE,CONSENT} else 'owner_id'
             if type(claims) is not dict or type(claims.get(principal)) is not int or claims[principal]!=subject:raise ValueError
+            if topic==CONSENT:
+                from .public_outbox_export import timestamp
+                if set(claims)!={'owner','policy','evidence_type','consumed','created_at','expires_at'} or type(p.get('consumed')) is not bool or p['consumed']!=claims.get('consumed'):raise ValueError
+                timestamp(claims['created_at']);timestamp(claims['expires_at'])
+                return {'id':str(identifier),'topic':topic,'kind':'authenticated_review_consent_history',
+                    'consumed':p['consumed'],'created_at':claims['created_at'],'expires_at':claims['expires_at'],
+                    'eligibility_granted':False,'contents_withheld':True}
             if topic in {SYNTHETIC,EVIDENCE}:
                 from .public_outbox_export import timestamp
                 if claims.get('country')!='IN' or type(p.get('revoked')) is not bool:raise ValueError

@@ -41,7 +41,9 @@ def audit_blob_references(db, metadata, reader, subject):
         shared = any(db.scalar(select(1).select_from(table).where(column == identifier,
             ~func.coalesce(reader._predicate(table, rule, subject), False)).limit(1)) is not None
             for table, column, rule in references)
-        result.append({'id': identifier, 'payload_disposition': 'withheld_opaque_content',
+        from .audit_blob_projection import canonical_blob_metadata
+        projection=None if shared else canonical_blob_metadata(db,metadata,subject,identifier)
+        result.append({'id': identifier,'supported_projection':projection, 'payload_disposition': 'withheld_opaque_content',
             'shared_reference': shared,
             # Shared metadata can describe another principal's material.
             'content_type': None if shared else content_type,

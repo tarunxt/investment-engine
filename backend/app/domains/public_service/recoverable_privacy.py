@@ -19,6 +19,7 @@ from app.domains.ai_limits.contracts import BoundaryDenied, digest, utc
 from app.domains.connections.crypto import ConnectionFault
 from app.domains.auth.models import ActivityLog
 from app.infrastructure.database.outbox.models import OutboxMessage
+from .recovery_exclusions import EXCLUDED
 from .sql_privacy_plan import SQLPrivacyPlanner
 from .sql_privacy_workflow import DisposableSQLPrivacyWorkflow
 
@@ -31,7 +32,7 @@ DATA_ONLY_TABLES = frozenset({'user_profiles', 'indmoney_us_portfolio_snapshots'
 
 
 def restorable(name):
-    return name in DATA_ONLY_TABLES or name.startswith('fixture_')
+    return name not in EXCLUDED and (name in DATA_ONLY_TABLES or name.startswith('fixture_'))
 
 
 def encode(value, *, depth=0):

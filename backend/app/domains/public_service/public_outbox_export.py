@@ -7,6 +7,9 @@ from datetime import datetime
 from sqlalchemy import select,case,cast,Text,LargeBinary,func,or_
 from app.domains.ai_limits.contracts import BoundaryDenied,digest,utc
 from app.domains.auth.models import User
+from app.domains.runs.models import Run
+from app.domains.modules.dispatch import TOPIC as TASK,resource_locator
+from app.domains.modules.lifecycle import ModuleLifecycleDenied
 from app.domains.jobs.models import Job
 from app.domains.order_intents.models import OrderIntent
 from app.domains.order_intents.service import TOPIC as APPROVAL
@@ -24,7 +27,7 @@ from .sql_account import _json_value,_encode
 
 JOB='job.created.v2'
 RESUME='modules.schedules.resumed.v1'
-USER_TOPICS=frozenset({JOB,SELECTION,RESUME})
+USER_TOPICS=frozenset({JOB,SELECTION,RESUME,TASK})
 TOPICS=frozenset({SUPPORT,PRIVACY,MONITOR,QUEUE})|USER_TOPICS
 
 
@@ -46,6 +49,23 @@ class PublicOutboxExport:
     def project(self,topic,p,subject,identifier):
         principal='user_id' if topic in USER_TOPICS else 'owner_id'
         require(type(p) is dict and type(p.get(principal)) is int and p[principal]==subject)
+        if topic==TASK:
+            import re
+            fields={'schema_version','task','request_digest','user_id','module_id','module_version','state','cancel_requested'}
+            require(fields<=set(p) and set(p)<=fields|{'resource'} and p['schema_version']==1)
+            require(type(p['module_version']) is int and p['module_version']>0 and type(p['cancel_requested']) is bool)
+            require(type(p['task']) is str and type(p['request_digest']) is str and re.fullmatch('[0-9a-f]{64}',p['request_digest']) is not None)
+            require(p['state'] in {'queued','running','failed','completed','cancelled'} and p['module_id'] in {module.value for module in ModuleId})
+            if 'resource' not in p:
+                return {'kind':'historical_task_locator','state':p['state'],
+                    'resource_status':'held: original arguments were not persisted; digest cannot reconstruct them',
+                    'authority_granted':False}
+            resource=p['resource']
+            require(type(resource) is dict and set(resource)=={'kind','id'} and type(resource['id']) is int and resource['id']>0)
+            require(resource==resource_locator(p['task'],[subject,resource['id']],{}))
+            model,column={'job':(Job,Job.user_id),'run':(Run,Run.user_id),'user':(User,User.id)}[resource['kind']]
+            require(self.db.scalar(select(model.id).where(model.id==resource['id'],column==subject)) is not None)
+            return {'kind':'typed_task_locator','resource':resource,'state':p['state'],'authority_granted':False}
         if topic==JOB:
             require(set(p) in ({'job_id','user_id'},{'job_id','user_id','operation'}))
             require(type(p['job_id']) is int and p['job_id']>0 and self.db.scalar(
@@ -147,7 +167,7 @@ class PublicOutboxExport:
                 require(raw is not None and len(items)<1000)
                 p=_json_value(raw,65536)
                 try:data=self.project(topic,p,subject,identifier)
-                except (TypeError,KeyError,ValueError,AttributeError):
+                except (TypeError,KeyError,ValueError,AttributeError,ModuleLifecycleDenied):
                     raise BoundaryDenied('PUBLIC_ACCOUNT_EVIDENCE_INVALID') from None
                 items.append({'id':str(identifier),'topic':topic,'data':data})
                 require(len(_encode(items))<=8*1024*1024)

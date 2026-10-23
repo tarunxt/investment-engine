@@ -9751,7 +9751,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/canonical_account_export.py:58"
+      "source": "backend/app/domains/public_service/canonical_account_export.py:60"
     },
     {
       "calls": [
@@ -9814,7 +9814,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/encrypted_privacy_export.py:65"
+      "source": "backend/app/domains/public_service/encrypted_privacy_export.py:72"
     },
     {
       "calls": [
@@ -10110,7 +10110,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/public_outbox_export.py:132"
+      "source": "backend/app/domains/public_service/public_outbox_export.py:152"
     },
     {
       "calls": [
@@ -16972,7 +16972,7 @@
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
     "backend/app/domains/modules/coverage.py": "9d5c481fedcd311a5b368d62e16109a29aed2b2de3ffba079a95812dc81b9050",
-    "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
+    "backend/app/domains/modules/dispatch.py": "5b2f0125cf5922786d1ac301608d8189b84551ab697a3ba47fa4a7349d791352",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "bd59851bde8f50f981324ea15635b2c51cda6d3a3766c94f9ee084551e359d85",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
@@ -17091,7 +17091,8 @@
     "backend/app/domains/public_service/account_data.py": "16be50884d78202a3555b577efc36ba8f5c9319f11ad0d240eaa29a83fe2df5c",
     "backend/app/domains/public_service/application_bindings.py": "1dd230158bac591c84055fdc6276e4345adc0a28e7dcb5e55cce3ead0240e97d",
     "backend/app/domains/public_service/application_router.py": "f79cf2cb8e9a17b03cd0ace89b40ac646ebaddee2a21aa1061ee1535947a2429",
-    "backend/app/domains/public_service/canonical_account_export.py": "d7d5ad18660da7f41524e1328dc60492a098beaeac238027ca34d13b75a08827",
+    "backend/app/domains/public_service/audit_blob_projection.py": "dc0ee8a1ff6edd39f8aae9543f20e83c131cd82fd3b49c65b86ecf75269eb4aa",
+    "backend/app/domains/public_service/canonical_account_export.py": "f94b6b54c8eba9ed6323d95cfbed1ee61c841e1d2bcbd79c7df289c53afa5ea2",
     "backend/app/domains/public_service/canonical_privacy_inventory.py": "cca88bd86b5f6237d4559ce230c7ce61923374db71abc2e11149445d1ad44d01",
     "backend/app/domains/public_service/canonical_privacy_resolvers.py": "c4310d2756eae62de7bed349e6c8718c4b2de382773b070f8a2ada9fa29b40ae",
     "backend/app/domains/public_service/composition.py": "dee5e25cce70739cfbd0c5c7651303f5e24f2231dfc040007a588775776c4380",
@@ -17100,7 +17101,7 @@
     "backend/app/domains/public_service/disposable_monitoring.py": "0496c04c535b8cd475426e932fc2179fbc0271c998484d760dacc4d354e9efca",
     "backend/app/domains/public_service/drills.py": "40af5e7a31ba599d030dacb1ec646abf0b4e8eb576d8444ebbae9668126331ed",
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
-    "backend/app/domains/public_service/encrypted_privacy_export.py": "c2d27e4e9078f6999651485d13e79134d472bca1ea43d0504778233803522dd6",
+    "backend/app/domains/public_service/encrypted_privacy_export.py": "dce5979fd56fa13cc1ac21e17b57e16a3780033b4d93875482dbe9af6fb28cb9",
     "backend/app/domains/public_service/export_file_inventory.py": "3392e942c1619e07134c51e0583b05f0a5a0a538bb0470cb888e4c905c7dfcda",
     "backend/app/domains/public_service/financial_privacy_recovery.py": "877cf3a7206d525eb0fba64a3c2d6bbc7fbeee22dd053ad5729c63514de928bb",
     "backend/app/domains/public_service/monitor_application_router.py": "56d5cdbf12586edbb74e3a4e795c300692c0f3a72a54ae34d05f15bbda24c6f3",
@@ -17110,14 +17111,16 @@
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "b445ff6d7ad9d1aae8fab7a74a5e8fcae81330fe03b2fcd6d7284be17115906d",
     "backend/app/domains/public_service/privacy_relations.py": "3fcbb7650f7a85e5e82d0a1811653dbbc838dcf66a2e7e5e7d783269177971a0",
-    "backend/app/domains/public_service/public_outbox_export.py": "9e0246fc1633ef350b8b48db9680703e6359e4d9289d349a451557e38c1766bb",
+    "backend/app/domains/public_service/public_outbox_export.py": "8d78edcdd2051abfe91f27c25ceeced9b5cd67d9d0a4b397973e9580b473d84f",
     "backend/app/domains/public_service/quarantined_privacy.py": "d7a2c8ab9db7cace31f3854fc49537c4ce9795826676ff45febe7e2f85303e8a",
-    "backend/app/domains/public_service/recoverable_privacy.py": "6276844f7d67572fc047cd7b126619be8a57e893f562588e16edd52b95e49ba3",
+    "backend/app/domains/public_service/recoverable_privacy.py": "16f288b3dc253af708a42a19630127d5d46330faea3e77c17f53acddf9826fd2",
+    "backend/app/domains/public_service/recovery_exclusions.py": "8bc16997003a9541e0be28a83c6a9a54b968294b2e01235e23183cfed5d1ab2d",
     "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
     "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",
-    "backend/app/domains/public_service/reviewed_residency.py": "e953df72a39d0c2430f7f548c25f9fdf4951d017d595a5d0c7a502f92bd32d50",
+    "backend/app/domains/public_service/reviewed_residency.py": "d8384f5146108a40388798a2400394d940858814da103ae981e527734462c124",
     "backend/app/domains/public_service/router.py": "5f884563e3bba637e687a70d9fa868e9628236bd2a51ec78387aa39ab85cf09e",
     "backend/app/domains/public_service/safe_privacy_projection.py": "117d4680e4a301d22e9555e248707472f6090f93538b8ed7d731a82024e98d29",
+    "backend/app/domains/public_service/scan_store_inventory.py": "28b1ba0f40cb6bd66a9727f77d872fc35223d0a328ba6a08007fb39ff81eefa0",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
     "backend/app/domains/public_service/signup.py": "1d5f9aea97e4a6aac5fdfa51a3d2e7fd52eb16c2faa1eee5c27e0c9f01bd412f",
     "backend/app/domains/public_service/signup_perimeter.py": "b8165624bde31f50f33e526f5240f9f876896c81fdc90b7ff84283497d7b2f00",
