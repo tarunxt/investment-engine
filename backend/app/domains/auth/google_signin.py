@@ -92,6 +92,9 @@ async def resolve_google_user(db: AsyncSession, email: str) -> User:
     if matches:
         return require_existing_google_user(matches)
 
+    from app.domains.public_service.signup import admit_signup
+    await admit_signup(db,email)
+
     # No shared/default password: only Google or the normal password reset flow
     # can give this new user access. Hash outside the event loop.
     password_hash = await run_in_threadpool(PasswordUtils.hash_password, secrets.token_urlsafe(48))

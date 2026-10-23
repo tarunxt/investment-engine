@@ -59,7 +59,8 @@ async def test_google_repeat_preserves_ids_roles_profiles_and_distinct_aliases(i
     from app.domains.auth.models import User
     db = SimpleNamespace(execute=AsyncMock(side_effect=isolated_db.execute),
                          flush=AsyncMock(side_effect=isolated_db.flush),
-                         rollback=AsyncMock(side_effect=isolated_db.rollback), add=isolated_db.add)
+                         rollback=AsyncMock(side_effect=isolated_db.rollback), add=isolated_db.add,
+                         run_sync=AsyncMock(side_effect=lambda fn:fn(isolated_db)))
     for user in synthetic_users.values():
         before = (user.id, user.role, user.profile.user_id, user.profile.bio)
         again = await google_signin.resolve_google_user(db, user.email)

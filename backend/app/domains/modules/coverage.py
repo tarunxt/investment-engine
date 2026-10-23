@@ -46,6 +46,25 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         # Own read/control paths enforce owner + fresh dynamic module policy in
         # the service; cancellation/history remain available after disable.
         return None
+    if domain=='public_service' and source_module=='app.domains.public_service.application_router' and len(methods)==1 and (next(iter(methods)),path,endpoint) in {
+        ('GET','/account/operations/disposable/reviewed-eligibility','reviewed_eligibility'),
+        ('POST','/account/operations/disposable/operational-queue','enqueue_operation'),
+        ('POST','/account/operations/disposable/privacy-requests/{id}/execute','execute_privacy'),
+        ('GET','/account/operations/disposable/privacy-requests/{id}/result','privacy_result')}:
+        return None # Authenticated exact owner; test-only binding plus disposable DB fences remain mandatory.
+    if domain=='public_service' and source_module=='app.domains.public_service.monitor_application_router' and len(methods)==1 and (next(iter(methods)),path,endpoint) in {
+        ('POST','/account/operations/disposable/monitor/observations','observe_monitor'),
+        ('GET','/account/operations/disposable/monitor/alerts/{id}','monitor_status'),
+        ('POST','/account/operations/disposable/monitor/owners/{owner_id}/alerts/{id}/acknowledge','acknowledge_monitor'),
+        ('POST','/account/operations/disposable/monitor/owners/{owner_id}/alerts/{id}/escalate','escalate_monitor')}:
+        return None # Current owner or appointed active operator, explicit disposable DB/sink only.
+    if domain=='public_service' and len(methods)==1 and (next(iter(methods),''),path) in {
+        ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests/{id}'),
+        ('POST','/account/operations/privacy-requests/{id}/cancel'),('GET','/account/operations/privacy-requests/{id}/export'),
+        ('GET','/account/operations/eligibility'),('POST','/account/operations/eligibility'),
+        ('GET','/account/operations/diagnostics'),('POST','/account/operations/support-consents'),
+        ('POST','/account/operations/support-consents/{id}/revoke'),('GET','/account/operations/support-consents/{id}/access')}:
+        return None # Authenticated owned account requests; no approval/effect endpoint.
     if domain in CORE_DOMAINS:return None
     if domain=='runs' and methods=={'GET'} and endpoint in {'list_runs','get_run','list_auto_rebalance_history','get_auto_rebalance_history_detail','get_final_actionable_history'}:return None
     if domain=='zerodha' and endpoint in {'get_login_url','callback','get_status','disconnect'}:return None

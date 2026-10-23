@@ -44,6 +44,11 @@ class DefaultFactsResolver:
         return ModuleFacts(connection='not_required' if spec.connection in {'none', 'manual_import'} else 'unknown')
 
 
+def session_facts_resolver(db):
+    from app.domains.public_service.application_bindings import facts_for_session
+    return facts_for_session(db) or DefaultFactsResolver()
+
+
 def decide(*, owner_id: int, resource_owner_id: int | None, active: bool,
            module_id: str | None, capability: str, boundary: Boundary,
            snapshot, facts: ModuleFacts, uat2: bool,
@@ -94,7 +99,7 @@ def decide(*, owner_id: int, resource_owner_id: int | None, active: bool,
 class ModulePolicy:
     def __init__(self, db, resolver: FactsResolver | None = None):
         self.db = db
-        self.resolver = resolver or DefaultFactsResolver()
+        self.resolver = resolver or session_facts_resolver(db)
 
     async def authorize(self, *, owner_id: int, resource_owner_id: int | None,
                         module_id: str | None, capability: str, boundary: Boundary,

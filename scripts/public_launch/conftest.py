@@ -25,8 +25,13 @@ def isolated_db():
     from app.domains.jobs.models import Job  # noqa: F401
     from app.domains.prompts.models import Prompt  # noqa: F401
     from app.domains.auth.models import User, UserProfile, ActivityLog
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.dialects.postgresql import JSONB
+    @compiles(JSONB,'sqlite')
+    def sqlite_json(*args,**kwargs):return 'JSON'
     engine = create_engine("sqlite://", poolclass=StaticPool)
-    for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__):
+    for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__, OutboxMessage.__table__):
         table.create(engine)
     with Session(engine, expire_on_commit=False) as session:
         yield session

@@ -11,21 +11,23 @@ LOGGING_CONFIG = {
     "disable_existing_loggers": False,
     "formatters": {
         "standard": {
+            "()": "app.domains.public_service.redaction.RedactingFormatter",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         },
         "detailed": {
+            "()": "app.domains.public_service.redaction.RedactingFormatter",
             "format": "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s() - %(message)s"
         }
     },
     "handlers": {
         "console": {
-            "class": "logging.StreamHandler",
+            "class": "app.domains.public_service.redaction.RedactingStreamHandler",
             "level": "DEBUG",
             "formatter": "standard",
             "stream": "ext://sys.stdout"
         },
         "file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "app.domains.public_service.redaction.RedactingRotatingFileHandler",
             "level": "INFO",
             "formatter": "detailed",
             "filename": "logs/app.log",
@@ -33,7 +35,7 @@ LOGGING_CONFIG = {
             "backupCount": 5
         },
         "worker_file": {
-            "class": "logging.handlers.RotatingFileHandler",
+            "class": "app.domains.public_service.redaction.RedactingRotatingFileHandler",
             "level": "INFO",
             "formatter": "detailed",
             "filename": "logs/worker.log",

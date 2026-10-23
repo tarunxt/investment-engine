@@ -95,6 +95,9 @@ async def register(request: UserRegisterRequest, db: AsyncSession = Depends(get_
     if not any(c.isdigit() for c in request.password):
         raise ValidationException("Password must contain digit")
 
+    from app.domains.public_service.signup import admit_signup
+    await admit_signup(db,request.email)
+
     try:
         password_hash = PasswordUtils.hash_password(request.password)
     except ValueError as e:

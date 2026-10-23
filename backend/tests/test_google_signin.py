@@ -105,13 +105,19 @@ async def test_new_google_profiles_are_independent_and_reused():
     from app.domains.prompts.models import Prompt  # noqa: F401
     from app.domains.auth.models import User, UserProfile, ActivityLog, UserRole
 
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.dialects.postgresql import JSONB
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    @compiles(JSONB,'sqlite')
+    def sqlite_json(*args,**kwargs):return 'JSON'
     engine = create_engine('sqlite://')
-    for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__):
+    for table in (User.__table__, UserProfile.__table__, ActivityLog.__table__, OutboxMessage.__table__):
         table.create(engine)
     with Session(engine, expire_on_commit=False) as session:
         db = SimpleNamespace(execute=AsyncMock(side_effect=session.execute),
                              flush=AsyncMock(side_effect=session.flush),
-                             rollback=AsyncMock(side_effect=session.rollback), add=session.add)
+                             rollback=AsyncMock(side_effect=session.rollback), add=session.add,
+                             run_sync=AsyncMock(side_effect=lambda fn:fn(session)))
         first = await service.resolve_google_user(db, 'first@gmail.com')
         session.commit()
         second = await service.resolve_google_user(db, 'second@gmail.com')
@@ -155,6 +161,6 @@ async def test_concurrent_signup_reuses_winner():
     found.scalars.return_value.all.return_value = [winner]
     db = SimpleNamespace(execute=AsyncMock(side_effect=[empty, found]), add=Mock(),
                          flush=AsyncMock(side_effect=IntegrityError('insert', {}, Exception())),
-                         rollback=AsyncMock())
+                         rollback=AsyncMock(),run_sync=AsyncMock(return_value="synthetic-admission"))
     assert await service.resolve_google_user(db, 'winner@gmail.com') is winner
     db.rollback.assert_awaited_once()

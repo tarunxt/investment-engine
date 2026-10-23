@@ -65,7 +65,7 @@ def validate_completed_job(db,row,job,governance,now):
     return verdict
 
 
-def execute_governed_job(db,job_id,runtime,*,now=None):
+def execute_governed_job(db,job_id,runtime,*,now=None,effect_fence=lambda:None):
     now=now or datetime.now(timezone.utc)
     if runtime is None or type(runtime.governance) is not SyntheticGovernance:
         raise BoundaryDenied('GOVERNED_RUNTIME_UNAVAILABLE')
@@ -112,7 +112,7 @@ def execute_governed_job(db,job_id,runtime,*,now=None):
         return validate_recommendations(document,source=current_source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job))
     def before_call():
         bound();recommendation_source(db,row,job,governance,now)
-    result=run_next(budget,provider,validate=validate,now=now,expected_id=attempt.id,before_call=before_call)
+    result=run_next(budget,provider,validate=validate,now=now,expected_id=attempt.id,before_call=before_call,effect_fence=effect_fence)
     if result['status']=='quota_or_concurrency_or_no_work':
         result={**result,'status':'waiting_for_admission' if attempt.status=='queued' else attempt.status}
     if result['status']=='completed':

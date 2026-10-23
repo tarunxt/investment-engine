@@ -125,7 +125,7 @@ class ExecutionWorker:
                 raise OrderDenied('ATTEMPT_BINDING_CHANGED')
         return row, legs, run
 
-    def dispatch(self, outbox_id, *, before_effect=lambda: None):
+    def dispatch(self, outbox_id, *, before_effect=lambda: None, effect_fence=lambda: None):
         """One claimed run. Re-delivery can reconcile, never re-submit a leg."""
         try:
             oid = UUID(str(outbox_id))
@@ -149,7 +149,7 @@ class ExecutionWorker:
         event.execution_attempts = 1
         row.state = 'submitting'
         self.db.commit()
-        return self._advance(row.owner_id, row.id, before_effect=before_effect)
+        return self._advance(row.owner_id, row.id, before_effect=before_effect, effect_fence=effect_fence)
 
     def _approval_current(self, row, run):
         if run.limits_json != self.limits.values() or stored_utc(row.expires_at) <= self.now():
@@ -157,7 +157,7 @@ class ExecutionWorker:
         if row.state not in {'submitting', 'acknowledged', 'partial', 'unknown'}:
             raise OrderDenied('ORDER_STATE_CHANGED')
 
-    def _advance(self, owner, intent, *, before_effect=lambda: None):
+    def _advance(self, owner, intent, *, before_effect=lambda: None, effect_fence=lambda: None):
         row, legs, run = self.snapshot(owner, intent)
         for i in range(len(legs)):
             row, legs, run = self.snapshot(owner, intent)
@@ -210,6 +210,7 @@ class ExecutionWorker:
                     raise OrderDenied('NEW_ACCOUNT_OBSERVATION_REQUIRED')
                 attempt=self.db.get(ExecutionAttempt,leg.id,populate_existing=True)
                 attempt.evidence_json={**attempt.evidence_json,'effect_risk_hash':effect_risk}
+                effect_fence()  # current orchestration lease, held through I/O
                 value = self.broker.submit(deepcopy(row.payload_json['legs'][i]), leg.client_reference, venue_binding(row))
                 observation = self.broker.reconcile(leg.client_reference, venue_binding(row))
                 verified, trades = self._observation(row, leg, i, observation)
