@@ -7,9 +7,9 @@ import re
 import xml.etree.ElementTree as ET
 
 REQUIRED_MODULES = {
-    'test_stage18_migrations_postgres': 4,
+    'test_stage18_migrations_postgres': 6,
     'test_stage18_queue_redis': 1,
-    'test_stage18_migration_invariants': 10,
+    'test_stage18_migration_invariants': 13,
     'test_stage18_signup_clock': 2,
     'test_stage18_asgi_load': 1,
 }
