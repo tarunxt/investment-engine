@@ -27,11 +27,17 @@ from app.domains.public_service.router import router
 from app.domains.modules.router import router as module_router
 from app.domains.modules.transports import install_route_policy
 from app.domains.modules.coverage import classify_route
-from test_stage17_reviewed_residency import setup as residency_setup,consent,issue,NOW
+from test_stage17_reviewed_residency import setup as residency_setup,consent,issue
 
 @pytest.fixture
 def application(residency_setup,monkeypatch):
     db,producer=residency_setup
+    # HTTP composition deliberately uses the runtime wall clock. Do not issue
+    # fixed-date evidence which becomes expired when this suite runs later.
+    # Change only this request fixture's issuance clock; runtime checks remain
+    # real and the dedicated expiry regression below must still reject.
+    import test_stage17_reviewed_residency as residency_fixture
+    monkeypatch.setattr(residency_fixture,'NOW',datetime.now(timezone.utc))
     UserProfile.__table__.create(db.get_bind())
     UserModulePreferences.__table__.create(db.get_bind());UserModule.__table__.create(db.get_bind())
     db.add(UserModulePreferences(user_id=1,version=1));db.flush()
@@ -58,6 +64,24 @@ async def test_anonymous_and_unconfigured_requests_never_release_account_data(ap
         response=await client.get('/account/operations/disposable/reviewed-eligibility')
         assert response.status_code==503
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_expired_reviewed_evidence_remains_denied_at_http_and_module_boundaries(application,monkeypatch):
+    app,bindings,db,producer,engine=application
+    import test_stage17_reviewed_residency as residency_fixture
+    monkeypatch.setattr(residency_fixture,'NOW',datetime.now(timezone.utc)-timedelta(days=2))
+    issue(db,producer,consent(db,producer));db.commit();install_disposable_bindings(app,bindings)
+    app.dependency_overrides[get_current_user]=lambda:SimpleNamespace(id=1)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app),base_url='http://synthetic.invalid') as client:
+            response=await client.get('/account/operations/disposable/reviewed-eligibility')
+            assert response.status_code==200 and response.json()['eligible'] is False
+            modules=(await client.get('/me/modules')).json()['modules']
+            scanner=next(row for row in modules if row['module_id']=='market_scanner')
+            assert scanner['entitlement']['jurisdiction']=='denied'
+            assert not scanner['capabilities']['analyze']['allowed']
+    finally:
+        await engine.dispose()
 
 @pytest.mark.asyncio
 async def test_reviewed_onboarding_module_facts_and_revocation_are_request_scoped(application):
