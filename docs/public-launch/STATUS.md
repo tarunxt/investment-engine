@@ -12,6 +12,13 @@ No new deployment, actual user-data deletion, provider approval, owner acceptanc
 or production action is claimed. The previous restricted owner acceptance and
 all existing evidence remain preserved.
 
+Local milestone commits: `18d8f00` and `d7250e4`. Final combined local validation:
+171 tests passed, zero skips; subsequent archive-bounds check:15 passed.
+Automatic approval review denied the task-branch push before execution because
+this exact external publication requires explicit approval. No remote write or
+PR creation occurred. Five new actual PostgreSQL cases and their zero-skip CI
+gate remain prepared/unrun. No workaround or retry was attempted.
+
 # Qualified release closure: owner-only simulated UAT2
 
 Recorded 24 October 2026, following deployment at 01:11:41–01:12:51 IST (23 October 19:41:41–19:42:51 UTC). Tested and installed source: `c493e95acb82345d54288f4996c89b6931c26bcd`, [PR #1260](https://github.com/tarunxt/investment-engine/pull/1260). Any later documentation commit is not the installed source and inherits no unrun CI claim.

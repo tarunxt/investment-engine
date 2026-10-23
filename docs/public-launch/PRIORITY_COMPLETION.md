@@ -72,6 +72,17 @@ or security setting change was performed. Complete erasure remains false.
 
 ## Exact open gates
 
+Publication gate: pushing the reviewed local task branch to origin was rejected
+by automatic approval review before process execution. Its stated reason was
+that this exact remote push requires explicit publication approval. No remote
+write occurred; no alternate publication route was attempted. Commits
+`18d8f00` (durable venue) and `d7250e4` (recoverable privacy and CI gate) remain
+local and reviewable. The requested action is only a push of
+`codex/credx-priority-completion-20261024` to the same repository followed by a
+draft PR targeting the existing integration branch. It does not merge or deploy.
+Exact-source PostgreSQL CI is pending that approval; none of its five cases is
+claimed as executed. No action has been denied or attempted against UAT2.
+
 H1/H2 milestones are partial, not completed high-priority requirements. Complete
 the remaining implementation before any hosted deployment. Then require exact
 CI/artifact review, current UAT2 READY/authorization limits and coordination with
