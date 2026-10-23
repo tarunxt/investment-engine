@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import select, and_
 from app.domains.auth.models import User
 from app.domains.jobs.models import Job
+from app.domains.prompts.models import Prompt  # noqa: F401: User.prompts mapper relationship
 from app.domains.runs.analysis_workflows.contracts import WorkflowDenied, naive
 from app.domains.runs.analysis_workflows.runtime import policy
 from app.domains.runs.analysis_workflows.synthetic_sources import SimulationSourceScope
@@ -20,10 +21,12 @@ from app.infrastructure.database.outbox.job_dispatch import dispatch_jobs_due
 from app.infrastructure.database.outbox.models import OutboxMessage
 from .policy_bindings import SESSION, install_session_binding
 
-QUEUE = 'uat2_simulation'
+QUEUE = 'uat2_analysis'
+CONTROL_QUEUE = 'uat2_simulation'
 STAGE = 'uat2.analysis.stage.v1'
 JOB = 'uat2.analysis.job.v1'
 RELAY = 'uat2.analysis.relay.v1'
+OBSERVE = 'uat2.operations.observe.v1'
 
 
 class SimulationAnalysisWorker:
@@ -86,6 +89,19 @@ class SimulationAnalysisWorker:
             db.commit()
             return {'simulation': True, 'workflows': workflow, 'jobs': jobs}
 
+    def observe_operations(self):
+        from .operations import SimulationOperations
+        with self.session() as db:
+            from app.core.uat2 import OWNER_EMAIL
+            emails={OWNER_EMAIL} if self.scope.mode=='hosted' else {'usera@stage01.example.com','userb@stage01.example.com'}
+            owners=list(db.scalars(select(User.id).where(User.email.in_(emails),User.is_active.is_(True),User.is_verified.is_(True)).limit(3)))
+        results=[]
+        for owner in owners:
+            with self.session() as db:
+                value=SimulationOperations(self.analysis).observe(db,owner,now=self.clock())
+                db.commit();results.append({'owner_id':owner,'state':value['state'],'external_delivery':False})
+        return {'simulation_only':True,'items':results}
+
     def check_transport(self, app):
         if self.scope.mode == 'hosted':
             from app.core.uat2 import uat2_mode, validate_uat2_startup
@@ -113,7 +129,7 @@ class SimulationAnalysisWorker:
         self.check_transport(app)
         if self.app is not None and self.app is not app:
             raise WorkflowDenied('Single simulation worker app required')
-        if any(name in app.tasks and self.tasks.get(name) is not app.tasks[name] for name in (STAGE, JOB, RELAY)):
+        if any(name in app.tasks and self.tasks.get(name) is not app.tasks[name] for name in (STAGE, JOB, RELAY, OBSERVE)):
             raise WorkflowDenied('Simulation task name collision')
         routes = app.conf.task_routes or {}
         if type(routes) is not dict: raise WorkflowDenied('Explicit simulation route map required')
@@ -126,21 +142,28 @@ class SimulationAnalysisWorker:
             @app.task(name='uat2.analysis.job.v1', **options)
             def consume_job(job_id, dispatch_id):
                 return self.job(job_id, dispatch_id)
-            @app.task(name='uat2.analysis.relay.v1', **options)
+            @app.task(name='uat2.analysis.relay.v1', **{**options,'queue':CONTROL_QUEUE})
             def relay_analysis():
                 return self.relay()
-            self.tasks = {STAGE: consume_stage, JOB: consume_job, RELAY: relay_analysis}
-        app.conf.task_routes = {**routes, **{name: {'queue': QUEUE} for name in self.tasks}}
+            @app.task(name='uat2.operations.observe.v1', **{**options,'queue':CONTROL_QUEUE})
+            def observe_operations():
+                return self.observe_operations()
+            self.tasks = {STAGE: consume_stage, JOB: consume_job, RELAY: relay_analysis, OBSERVE: observe_operations}
+        app.conf.task_routes = {**routes, **{name: {'queue': CONTROL_QUEUE if name in {RELAY,OBSERVE} else QUEUE} for name in self.tasks}}
         self.app = app
         return dict(self.tasks)
 
     def schedule(self, app):
         self.register(app)
         schedule = dict(app.conf.beat_schedule or {})
-        value = {'task': 'uat2.analysis.relay.v1', 'schedule': 5.0, 'options': {'queue': QUEUE, 'expires': 5}}
+        value = {'task': 'uat2.analysis.relay.v1', 'schedule': 5.0, 'options': {'queue': CONTROL_QUEUE, 'expires': 5}}
         key = 'uat2-scoped-analysis-relay'
         if key in schedule and schedule[key] != value:
             raise WorkflowDenied('Simulation relay schedule collision')
         schedule[key] = value
+        monitoring={'task':'uat2.operations.observe.v1','schedule':60.0,'options':{'queue':CONTROL_QUEUE,'expires':30}}
+        monitor_key='uat2-scoped-operational-observation'
+        if monitor_key in schedule and schedule[monitor_key]!=monitoring:raise WorkflowDenied('Operational observation schedule collision')
+        schedule[monitor_key]=monitoring
         app.conf.beat_schedule = schedule
         return value

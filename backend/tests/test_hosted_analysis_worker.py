@@ -14,7 +14,7 @@ from app.domains.jobs.models import Job
 from app.shared.types import JobStatus
 from app.domains.recommendation_audit.models import SpendAttempt
 from app.uat2.policy_bindings import install_session_binding
-from app.uat2.analysis_worker import SimulationAnalysisWorker, STAGE, JOB, RELAY, QUEUE
+from app.uat2.analysis_worker import SimulationAnalysisWorker, STAGE, JOB, RELAY, QUEUE, CONTROL_QUEUE, OBSERVE
 
 
 @pytest.fixture
@@ -83,11 +83,11 @@ def test_disable_between_relay_and_delivery_never_runs_fake_provider(worker_env)
 
 def test_explicit_registration_and_bounded_schedule_do_not_import_production_tasks(worker_env):
     e, worker, factory, app, deliveries, clock, flow_id = worker_env
-    assert set(worker.tasks) == {STAGE, JOB, RELAY}
+    assert set(worker.tasks) == {STAGE, JOB, RELAY, OBSERVE}
     assert app.conf.beat_schedule == {}
-    assert worker.schedule(app)['options'] == {'queue': QUEUE, 'expires': 5}
+    assert worker.schedule(app)['options'] == {'queue': CONTROL_QUEUE, 'expires': 5}
     assert worker.schedule(app)['schedule'] == 5
-    assert len(app.conf.beat_schedule) == 1
+    assert len(app.conf.beat_schedule) == 2
     for task in worker.tasks.values():
         assert task.max_retries == 0 and task.acks_late and task.reject_on_worker_lost
         assert task.soft_time_limit == 10 and task.time_limit == 15

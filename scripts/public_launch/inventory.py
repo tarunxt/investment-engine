@@ -144,8 +144,8 @@ def scan(root=ROOT):
                              side_effects=SIDE_EFFECTS.get(module, "inspect calls; DB/network/filesystem effects possible"),
                              calls=calls, registration=registration))
             if (rel == Path('backend/app/uat2/analysis_worker.py') and
-                (kind == 'worker' and capability in {'consume_stage','consume_job','relay_analysis'}
-                 or kind == 'scheduler' and capability == 'uat2.analysis.relay.v1')):
+                (kind == 'worker' and capability in {'consume_stage','consume_job','relay_analysis','observe_operations'}
+                 or kind == 'scheduler' and capability in {'uat2.analysis.relay.v1','uat2.operations.observe.v1'})):
                 rows[-1].update(classification='owner-private',
                     owner_source=['Persisted SQL OutboxMessage/Job owner; task arguments never grant authority'],
                     observed_guards=['source-audited delegation: SimulationSourceScope.validate',
@@ -194,7 +194,8 @@ def scan(root=ROOT):
                     add("background", n, expr(n))
     # Next App Router route handlers, pages, proxy and NextConfig rewrites.
     for file in sorted((root / "frontend").rglob("*")):
-        if not file.is_file() or any(p in {"node_modules", ".next", ".runtime"} for p in file.parts):
+        if (not file.is_file() or any(p in {"node_modules", ".runtime"} for p in file.parts)
+                or file.relative_to(root / "frontend").parts[0].startswith(".next")):
             continue
         if file.name not in {"route.ts", "route.js", "page.tsx", "page.jsx", "proxy.ts", "next.config.ts"}:
             continue

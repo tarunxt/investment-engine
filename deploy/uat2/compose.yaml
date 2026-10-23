@@ -54,7 +54,7 @@ services:
   simulation-worker:
     <<: *runtime
     image: ${UAT2_BACKEND_IMAGE:?supply immutable backend image digest}
-    command: celery -A app.uat2.worker worker -Q uat2_simulation --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=25 --loglevel=warning
+    command: celery -A app.uat2.worker worker -Q uat2_simulation,uat2_analysis,uat2_orders,uat2_reconcile --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=25 --loglevel=warning
     env_file: [{path: ./backend.env, format: raw}]
     environment: {CREDX_UAT2: '1', ENVIRONMENT: uat2, AUTH_DISABLED: 'false'}
     networks: [private]

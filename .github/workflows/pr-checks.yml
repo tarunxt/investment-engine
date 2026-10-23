@@ -1105,6 +1105,11 @@ jobs:
         run: |
           python -m unittest discover -s deploy/uat2/native -p 'test_*.py' -v
           pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py
+      - name: Verify actual dedicated PostgreSQL Redis HTTP workflow and worker restart
+        run: |
+          candidate=$(git rev-parse HEAD)
+          docker build --build-arg "UAT2_SOURCE_COMMIT=$candidate" -f deploy/uat2/backend.Dockerfile -t "credx-uat2-backend:$candidate" .
+          python deploy/uat2/smoke.py "$candidate" --backend-only
       - name: Build and validate native release without credentials or deployment
         env:
           PIP_DISABLE_PIP_VERSION_CHECK: '1'
@@ -1888,7 +1893,7 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/synthetic-acquisition.xml').getroot()
-          assert len(root.findall('.//testcase')) == 11
+          assert len(root.findall('.//testcase')) == 13
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
@@ -1899,7 +1904,7 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/native-orders.xml').getroot()
-          assert len(root.findall('.//testcase')) == 10
+          assert len(root.findall('.//testcase')) == 13
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK

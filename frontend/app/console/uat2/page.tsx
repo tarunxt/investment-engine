@@ -3,6 +3,7 @@ import Link from 'next/link';
 import {SimulationConnections} from '@/components/uat2/SimulationConnections';
 import {ServerAnalysis} from '@/app/console/automated-rebalance/_components/ServerAnalysis';
 import {OrderReviews} from '@/components/modules/OrderReviews';
+import {SimulationDiagnostics} from '@/components/uat2/SimulationDiagnostics';
 import {AccountSupport} from '@/components/modules/AccountSupport';
 export default function Uat2Page(){
  if(process.env.NEXT_PUBLIC_UAT2!=='true')return null;
@@ -14,6 +15,7 @@ export default function Uat2Page(){
   <SimulationConnections/>
   <ServerAnalysis/>
   <OrderReviews/>
+  <SimulationDiagnostics/>
   <AccountSupport/>
  </section>;
 }

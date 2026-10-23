@@ -3,14 +3,14 @@
   "classification_semantics": "intended launch access; observed guards do not prove enforcement",
   "counts": {
     "background": 31,
-    "export": 47,
+    "export": 49,
     "frontend": 25,
-    "http": 316,
+    "http": 317,
     "lifecycle": 9,
     "page": 68,
-    "scheduler": 18,
+    "scheduler": 19,
     "websocket": 5,
-    "worker": 52
+    "worker": 53
   },
   "entries": [
     {
@@ -10099,7 +10099,9 @@
         "Depends",
         "OperationalMonitor",
         "OperationalMonitor(s).snapshot",
+        "binding.operations.snapshot",
         "db.run_sync",
+        "request_binding",
         "response",
         "router.get"
       ],
@@ -10152,7 +10154,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:75"
+      "source": "backend/app/domains/public_service/router.py:77"
     },
     {
       "calls": [
@@ -10183,16 +10185,17 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents/{id}/revoke",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:84"
+      "source": "backend/app/domains/public_service/router.py:86"
     },
     {
       "calls": [
         "Depends",
         "HTTPException",
         "SupportAccess",
-        "SupportAccess(s).read",
+        "SupportAccess(s, diagnostics=diagnostics).read",
         "db.rollback",
         "db.run_sync",
+        "request_binding",
         "response",
         "router.get"
       ],
@@ -10213,7 +10216,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents/{id}/access",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:92"
+      "source": "backend/app/domains/public_service/router.py:94"
     },
     {
       "calls": [
@@ -13864,7 +13867,7 @@
       "registration": "app.task(name='uat2.analysis.stage.v1', **options)",
       "route": "",
       "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
-      "source": "backend/app/uat2/analysis_worker.py:124"
+      "source": "backend/app/uat2/analysis_worker.py:140"
     },
     {
       "calls": [
@@ -13887,7 +13890,7 @@
       "registration": "app.task(name='uat2.analysis.job.v1', **options)",
       "route": "",
       "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
-      "source": "backend/app/uat2/analysis_worker.py:127"
+      "source": "backend/app/uat2/analysis_worker.py:143"
     },
     {
       "calls": [
@@ -13907,10 +13910,33 @@
       "owner_source": [
         "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
       ],
-      "registration": "app.task(name='uat2.analysis.relay.v1', **options)",
+      "registration": "app.task(name='uat2.analysis.relay.v1', **{**options, 'queue': CONTROL_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
-      "source": "backend/app/uat2/analysis_worker.py:130"
+      "source": "backend/app/uat2/analysis_worker.py:146"
+    },
+    {
+      "calls": [
+        "app.task",
+        "self.observe_operations"
+      ],
+      "capability": "observe_operations",
+      "classification": "owner-private",
+      "kind": "worker",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "source-audited delegation: SimulationSourceScope.validate",
+        "session-bound SimulationPolicyBinding and canonical current_sync fences"
+      ],
+      "owner_source": [
+        "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
+      ],
+      "registration": "app.task(name='uat2.operations.observe.v1', **{**options, 'queue': CONTROL_QUEUE})",
+      "route": "",
+      "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
+      "source": "backend/app/uat2/analysis_worker.py:149"
     },
     {
       "calls": [],
@@ -13927,10 +13953,30 @@
       "owner_source": [
         "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
       ],
-      "registration": "{'task': 'uat2.analysis.relay.v1', 'schedule': 5.0, 'options': {'queue': QUEUE, 'expires': 5}}",
+      "registration": "{'task': 'uat2.analysis.relay.v1', 'schedule': 5.0, 'options': {'queue': CONTROL_QUEUE, 'expires': 5}}",
       "route": "",
       "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
-      "source": "backend/app/uat2/analysis_worker.py:140"
+      "source": "backend/app/uat2/analysis_worker.py:159"
+    },
+    {
+      "calls": [],
+      "capability": "uat2.operations.observe.v1",
+      "classification": "owner-private",
+      "kind": "scheduler",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "Dedicated UAT2 worker installation; persisted owner, scoped current module policy and exact immutable workflow/approval bindings; reconciliation never grants submission",
+      "observed_guards": [
+        "source-audited delegation: SimulationSourceScope.validate",
+        "session-bound SimulationPolicyBinding and canonical current_sync fences"
+      ],
+      "owner_source": [
+        "Persisted SQL OutboxMessage/Job owner; task arguments never grant authority"
+      ],
+      "registration": "{'task': 'uat2.operations.observe.v1', 'schedule': 60.0, 'options': {'queue': CONTROL_QUEUE, 'expires': 30}}",
+      "route": "",
+      "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
+      "source": "backend/app/uat2/analysis_worker.py:164"
     },
     {
       "calls": [
@@ -14152,7 +14198,7 @@
       "registration": "app.task(name='uat2.orders.prepare.v1', **options)",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:131"
+      "source": "backend/app/uat2/order_worker.py:134"
     },
     {
       "calls": [
@@ -14172,10 +14218,10 @@
       "owner_source": [
         "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
       ],
-      "registration": "app.task(name='uat2.orders.dispatch.v1', **options)",
+      "registration": "app.task(name='uat2.orders.dispatch.v1', **{**options, 'queue': EXECUTION_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:133"
+      "source": "backend/app/uat2/order_worker.py:136"
     },
     {
       "calls": [
@@ -14195,10 +14241,10 @@
       "owner_source": [
         "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
       ],
-      "registration": "app.task(name='uat2.orders.reconcile.v1', **options)",
+      "registration": "app.task(name='uat2.orders.reconcile.v1', **{**options, 'queue': RECONCILIATION_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:135"
+      "source": "backend/app/uat2/order_worker.py:138"
     },
     {
       "calls": [
@@ -14218,10 +14264,10 @@
       "owner_source": [
         "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
       ],
-      "registration": "app.task(name='uat2.orders.relay.v1', **options)",
+      "registration": "app.task(name='uat2.orders.relay.v1', **{**options, 'queue': CONTROL_QUEUE})",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:137"
+      "source": "backend/app/uat2/order_worker.py:140"
     },
     {
       "calls": [],
@@ -14238,10 +14284,52 @@
       "owner_source": [
         "Persisted SQL workflow/approval/intent owner; task arguments never grant authority"
       ],
-      "registration": "{'task': 'uat2.orders.relay.v1', 'schedule': 5.0, 'options': {'queue': QUEUE, 'expires': 5}}",
+      "registration": "{'task': 'uat2.orders.relay.v1', 'schedule': 5.0, 'options': {'queue': CONTROL_QUEUE, 'expires': 5}}",
       "route": "",
       "side_effects": "Dedicated simulation SQL/Redis and durable fake venue journal; no real provider effects",
-      "source": "backend/app/uat2/order_worker.py:145"
+      "source": "backend/app/uat2/order_worker.py:149"
+    },
+    {
+      "calls": [
+        "BoundaryDenied",
+        "Destination",
+        "LocalSink",
+        "OutboxMessage.payload['owner_id'].as_integer",
+        "OutboxMessage.payload['request_key'].as_string",
+        "PrivateEffects",
+        "analysis.authorize",
+        "analysis.completed_analysis",
+        "datetime.now",
+        "db.scalar",
+        "func.count",
+        "naive",
+        "select",
+        "select(OutboxMessage.id).where",
+        "select(OutboxMessage.id).where(OutboxMessage.topic == TOPIC, OutboxMessage.payload['owner_id'].as_integer() == owner, OutboxMessage.payload['request_key'].as_string() == key).limit",
+        "select(func.count()).select_from",
+        "select(func.count()).select_from(OutboxMessage).where",
+        "service.dispatch",
+        "service.download",
+        "service.enqueue",
+        "str",
+        "timedelta"
+      ],
+      "capability": "prepare_export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "analysis.authorize"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/private_exports.py:9"
     },
     {
       "calls": [
@@ -14612,6 +14700,65 @@
       "route": "/uat2/simulation/analysis/{workflow_id}/prepare-basket",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/uat2/workflow_router.py:42"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "prepare_export",
+        "request_binding",
+        "router.post"
+      ],
+      "capability": "private_analysis_export",
+      "classification": "owner-private",
+      "kind": "export",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "originating route/task policy and direct adapter/current-stream guards; see STAGE07_COVERAGE.md for transitive audit and closed legacy paths",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:60"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "prepare_export",
+        "request_binding",
+        "router.post"
+      ],
+      "capability": "private_analysis_export",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/analysis/{workflow_id}/private-export')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/analysis/{workflow_id}/private-export",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:60"
     },
     {
       "calls": [],
@@ -16690,7 +16837,7 @@
     "backend/app/domains/public_service/eligibility.py": "087122f32426391124a36161e2e558e2d83b5e8027ee211c2cfc6756a08f5bf3",
     "backend/app/domains/public_service/monitor_application_router.py": "56d5cdbf12586edbb74e3a4e795c300692c0f3a72a54ae34d05f15bbda24c6f3",
     "backend/app/domains/public_service/monitor_dispatch.py": "e13550d77d7f2c154a8fa21249997be6014e6f43f2ac9dd409c46eddf379e0f5",
-    "backend/app/domains/public_service/monitoring.py": "7ff8ad4567f29a5c6901418ca2127322828c732c4cc0ea6b6c5757d688731419",
+    "backend/app/domains/public_service/monitoring.py": "209c576cb5b61b0c982aae6766c06efe434ab2e89ee537e1d2af373b14cba5b3",
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "b445ff6d7ad9d1aae8fab7a74a5e8fcae81330fe03b2fcd6d7284be17115906d",
     "backend/app/domains/public_service/privacy_relations.py": "3fcbb7650f7a85e5e82d0a1811653dbbc838dcf66a2e7e5e7d783269177971a0",
@@ -16698,7 +16845,7 @@
     "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
     "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",
     "backend/app/domains/public_service/reviewed_residency.py": "e953df72a39d0c2430f7f548c25f9fdf4951d017d595a5d0c7a502f92bd32d50",
-    "backend/app/domains/public_service/router.py": "df39adbfb14b1ae668f688e886d85e09957f5fb72df7ecf87c30dd7a562145e6",
+    "backend/app/domains/public_service/router.py": "5f884563e3bba637e687a70d9fa868e9628236bd2a51ec78387aa39ab85cf09e",
     "backend/app/domains/public_service/safe_privacy_projection.py": "117d4680e4a301d22e9555e248707472f6090f93538b8ed7d731a82024e98d29",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
     "backend/app/domains/public_service/signup.py": "1d5f9aea97e4a6aac5fdfa51a3d2e7fd52eb16c2faa1eee5c27e0c9f01bd412f",
@@ -16707,7 +16854,7 @@
     "backend/app/domains/public_service/sql_privacy_plan.py": "752e4cde5d639ac454e501412ff8e13a5f17b1f8f655d4d2bcd2b62d5103545b",
     "backend/app/domains/public_service/sql_privacy_workflow.py": "e10e055ce118927ca2eff398225d8df704a7454f0867bbe4052c91d1c00ae505",
     "backend/app/domains/public_service/store.py": "3c7bdbd95c373e96bce5fed973838c299416f9e1e1baf066d4f1cfefe7e256e5",
-    "backend/app/domains/public_service/support.py": "b70af3e72900bcc45be4bfa6c0b33287479a0d869a5a460778a2774212a86292",
+    "backend/app/domains/public_service/support.py": "5a8ca5db4e0f496ba3c165e542618d4255bf1e3c084be6c7e20e71d142afd587",
     "backend/app/domains/public_service/transaction_outcomes.py": "f9119b21e7fc1c5fe59efecd189bf39b7e67af06fc7be6c52cabb2b3012b8490",
     "backend/app/domains/recommendation_audit/__init__.py": "c3139e78f64ae4d6c83bb1c4ffe47918936c4a1dc6e8d61c1903c8619b3ce195",
     "backend/app/domains/recommendation_audit/adapters.py": "a81b5cf4e206a5d9808d2f987a578c960dddb32d671221e4d824551c1e65fa53",
@@ -16827,12 +16974,14 @@
     "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
     "backend/app/shared/ws_relay.py": "ea0a0b2a84fe570df06bec7ffc13d12bdf2af2672909d5890bdca3b47fe73423",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
-    "backend/app/uat2/analysis_worker.py": "b259a61f9921cf0f7c189a9a1fac12bab3584a6a9317d467966dbc2b8d231e08",
+    "backend/app/uat2/analysis_worker.py": "4b6a3ed3d38c218769c03ede728354ce1f48fd66408b414cd0978118405be1af",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
-    "backend/app/uat2/http_bindings.py": "efe83777a414d57d155c36e8677e0aa343e91ad9be55949d5d04598d5a69b113",
+    "backend/app/uat2/http_bindings.py": "0c4e8502eb31db87715726db22566007e20a121908e237e523a14aadca2797f2",
     "backend/app/uat2/main.py": "55ec862112db5168a595d5015e1d08e30555f5d17b7bfd561d995eedce1e9e54",
-    "backend/app/uat2/order_worker.py": "bc0e20fc53049e444b0f94fd3592a66de41627d10986d870614e7d6c34580260",
+    "backend/app/uat2/operations.py": "bd613e122f26911ce3ab3f5e7c0c181a94e83b42e248add14a9ca08bacef0618",
+    "backend/app/uat2/order_worker.py": "73cec403dc71f420f02cee24dd273c4170e679d03fe4c53cec4291ca91f85391",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
+    "backend/app/uat2/private_exports.py": "59ffc52b91623cd7c4644b6dd19a06dc07a6ebffb1156be5720ba477272b754a",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "d7d48ec1e0cac89265f1059c9cde0d6c023707e2a9f4bfefd6253f45197638c8",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
@@ -16840,8 +16989,8 @@
     "backend/app/uat2/synthetic_connections.py": "ccb6f15bd14d200927cf753451486b0219cd8fd721f023e36b731125e29baee8",
     "backend/app/uat2/synthetic_orders.py": "8e6547c8f8a10352e3e3151ae77f3999ba0fae958eb8b26924751e8b08df2654",
     "backend/app/uat2/worker.py": "33f03cdefddb54d0f8cf99e41dfc403c0afc68c154b218695121a45ebba3f884",
-    "backend/app/uat2/workflow.py": "390fcf4f216b781648d6c388c8808ea87e667a5d468e4551ae085d3aade0647e",
-    "backend/app/uat2/workflow_router.py": "ace781f7aa47a87dc247e14db114900134554226d21d0f0ac99d521d7a552090",
+    "backend/app/uat2/workflow.py": "afb2a82131ab95b5cb8f4fafe6ade112a8ae87561c1ac95b7a5e994f98c2db44",
+    "backend/app/uat2/workflow_router.py": "fd689946e830be8df6e6cfd527bb5e87efec26607e62ac58b49cc27499f9d9d3",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
     "frontend/app/(auth)/register/page.tsx": "025d5a3992465a4c2fc39f9066d3a25b619214af0a0c96a302efbfc0074ace97",
@@ -16912,7 +17061,7 @@
     "frontend/app/console/technical-setups/page.tsx": "8b4dd8e5b9d693eadcea9178199fd0d5af2a2c4f267a4598972d35c709fd9bcc",
     "frontend/app/console/trading-bots/bullpen-ai-auto-live/page.tsx": "9defcad1af48185e15277051e253f6694a5006b3112b5fe1b48d93e77c59d6fe",
     "frontend/app/console/trading-bots/page.tsx": "dabeb1735a79f799cdab8ad8d17cd4fa4d5eabe514b69d7b560997672123410b",
-    "frontend/app/console/uat2/page.tsx": "e062e8065d87ccafe2e3b9eb70de9a49dc8cba7a579749fb57c9c1e294dd0dbf",
+    "frontend/app/console/uat2/page.tsx": "275e49f5394cb07234a68791d5afb540d6317c610775d60653820d709b97e37b",
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
     "frontend/app/console/zerodha/final-actionables/page.tsx": "054a42b3efcfd5b740e28fab42407c8c2ffb7f5c3dff18867acd0f7adc206e01",

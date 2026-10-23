@@ -15,7 +15,9 @@ TOPIC='public_service.support_consent.v1'
 SCOPES=frozenset({'profile_summary','diagnostics'})
 
 class SupportAccess:
-    def __init__(self,db):self.db=db
+    def __init__(self,db,*,diagnostics=None):
+        if diagnostics is not None and not callable(diagnostics):raise BoundaryDenied('SUPPORT_DIAGNOSTICS_BINDING_REQUIRED')
+        self.db,self.diagnostics=db,diagnostics
     def people(self,*ids):
         if any(type(id)is not int or id<1 for id in ids):raise BoundaryDenied('ACTIVE_OWNER_REQUIRED')
         rows=list(self.db.scalars(select(User).where(User.id.in_(set(ids))).order_by(User.id).with_for_update().execution_options(populate_existing=True)))
@@ -46,6 +48,6 @@ class SupportAccess:
             self.db.add(ActivityLog(user_id=actor_id,action='support_denied',resource_type='support',details=digest({'subject':subject,'consent':str(key)})));self.db.commit();raise BoundaryDenied('SUPPORT_ACCESS_DENIED')
         self.db.add(ActivityLog(user_id=actor_id,action='support_read',resource_type=scope,resource_id=subject,details=str(key)))
         self.db.flush() # fail before even querying protected diagnostic rows
-        result={'owner_id':subject,'user_id':user.id,'profile_present':self.db.scalar(select(UserProfile.user_id).where(UserProfile.user_id==subject)) is not None} if scope=='profile_summary' else OperationalMonitor(self.db).snapshot(subject,correlation_id=str(key),now=now)
+        result={'owner_id':subject,'user_id':user.id,'profile_present':self.db.scalar(select(UserProfile.user_id).where(UserProfile.user_id==subject)) is not None} if scope=='profile_summary' else self.diagnostics(self.db,subject,now=now) if self.diagnostics is not None else OperationalMonitor(self.db).snapshot(subject,correlation_id=str(key),now=now)
         self.db.commit() # commit before delivery; failure never returns data
         return result

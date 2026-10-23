@@ -13,6 +13,8 @@ def install_workflow(app, *, scope=None, source_storage=None):
     # replace this binding or add an external adapter.
     binding = SimulationHTTPBinding(scope=scope or SimulationSourceScope('hosted'),
         source_storage=source_storage).install(app)
+    from app.domains.ai_limits.router import router as limits_router
+    app.include_router(limits_router)
     app.include_router(analysis_router)
     app.include_router(controls_router)
     allowed_imports = {('GET', '/indmoney-us/portfolio'), ('GET', '/indmoney-us/portfolio/{snapshot_id}'),

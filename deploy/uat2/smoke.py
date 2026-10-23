@@ -49,7 +49,9 @@ config = {
     'AUTH_DISABLED': 'false', 'UAT2_ADAPTERS': 'simulation',
     'UAT2_JWT_SIGNING_KEY': 'unit-test-only-jwt-material-never-deployed',
     'GOOGLE_SIGNIN_CLIENT_ID': 'independent-synthetic-test-client',
-    'UAT2_SOURCE_COMMIT': revision,
+    'UAT2_SOURCE_COMMIT': revision, 'FRONTEND_URL':'https://uat2.example.invalid',
+    'DEBUG':'false', 'UAT2_SIMULATION_SCENARIO':'after_acceptance',
+    'CREDX_UAT2_SMOKE_CONTAINER':prefix+'-backend',
 }
 env_args = [arg for key,value in config.items() for arg in ('-e', f'{key}={value}')]
 try:
@@ -69,12 +71,12 @@ try:
     wait_db()
     docker('run', '--rm', '--network', private, *env_args, backend, 'alembic', 'upgrade', 'head', timeout=180)
     print('PASS migrations in disposable UAT2 backend container', flush=True)
-    start(prefix+'-backend', backend, '--network', private, '--network-alias', 'backend', '--memory', '1g', *env_args)
+    start(prefix+'-backend', backend, '--hostname',prefix+'-backend','--network', private, '--network-alias', 'backend', '--memory', '1g', *env_args)
     worker_name = prefix+'-worker'
     containers.append(worker_name)
     docker('run', '-d', '--name', worker_name, '--network', private, '--memory', '512m',
            *env_args, backend, 'celery', '-A', 'app.uat2.worker', 'worker', '-Q',
-           'uat2_simulation', '--concurrency=1', '--prefetch-multiplier=1', '--loglevel=warning')
+           'uat2_simulation,uat2_analysis,uat2_orders,uat2_reconcile', '--concurrency=1', '--prefetch-multiplier=1', '--loglevel=warning')
     check = '''import json, urllib.request, urllib.error, time
 for _ in range(30):
  try:
@@ -93,7 +95,7 @@ print('PASS backend readiness, API auth, no direct egress, bounded certificate-o
 '''
     print(docker('exec', prefix+'-backend', 'python', '-c', check, timeout=90), flush=True)
     print(docker('exec', prefix+'-backend', 'python', '-c',
-                 "from app.uat2.worker import fake_ai; r=fake_ai.delay('synthetic queue check').get(timeout=30); assert r['cost']==0 and r['provider']=='uat2_fake'; print('PASS bounded fake AI through dedicated Redis/Celery queue')", timeout=45), flush=True)
+                 "from app.uat2.worker import celery; r=celery.control.inspect(timeout=5).registered(); names={name for tasks in (r or {}).values() for name in tasks}; assert {'uat2.analysis.stage.v1','uat2.analysis.job.v1','uat2.orders.dispatch.v1','uat2.orders.reconcile.v1'} <= names; print('PASS dedicated simulation task registration; no job or approval created')", timeout=45), flush=True)
     # Exercise existing auth/portfolio DB models without manufacturing a live login.
     fixture_check = '''import asyncio
 from sqlalchemy import select
@@ -119,6 +121,11 @@ asyncio.run(run())
 print('PASS synthetic SQLAlchemy fixture populated/empty reset and real response schema')
 '''
     print(docker('exec', prefix+'-backend', 'python', '-c', fixture_check), flush=True)
+    workflow_probe=Path(__file__).with_name('workflow_probe.py').read_text()
+    print(docker('exec',prefix+'-backend','python','-c',workflow_probe,'start',timeout=300),flush=True)
+    docker('restart',worker_name)
+    # The same PostgreSQL/Redis volumes and immutable venue receipts survive.
+    print(docker('exec',prefix+'-backend','python','-c',workflow_probe,'recover',timeout=90),flush=True)
     if '--backend-only' not in sys.argv:
         start(prefix+'-frontend', frontend, '--network', private, '-e', 'CREDX_UAT2=1',
               '-e', 'NEXTAUTH_URL=https://uat2.cred-x.in', '-e', 'BACKEND_API_URL=http://backend:8000',

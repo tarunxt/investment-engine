@@ -131,6 +131,8 @@ def test_dedicated_worker_bootstrap_registers_only_bounded_simulation_tasks():
     source = """
 import json
 from app.uat2.worker import celery, venue_engine
+from sqlalchemy.orm import configure_mappers
+configure_mappers()
 names=sorted(name for name in celery.tasks if not name.startswith('celery.'))
 print(json.dumps({'tasks':names,'schedules':sorted(celery.conf.beat_schedule),'queue':celery.conf.task_default_queue}))
 venue_engine.dispose()
@@ -139,8 +141,8 @@ venue_engine.dispose()
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout.strip().splitlines()[-1])
     assert value['tasks'] == sorted(['uat2.fake_ai', 'uat2.analysis.stage.v1', 'uat2.analysis.job.v1',
-        'uat2.analysis.relay.v1', PREPARE, DISPATCH, RECONCILE, RELAY])
-    assert value['schedules'] == ['uat2-scoped-analysis-relay', 'uat2-scoped-orders-relay']
+        'uat2.analysis.relay.v1', 'uat2.operations.observe.v1', PREPARE, DISPATCH, RECONCILE, RELAY])
+    assert value['schedules'] == ['uat2-scoped-analysis-relay', 'uat2-scoped-operational-observation', 'uat2-scoped-orders-relay']
     assert value['queue'] == 'uat2_simulation'
 
 
@@ -209,3 +211,88 @@ async def test_installed_controls_both_modes_and_digest_accepted_us_import(order
             assert not list(db.scalars(select(OutboxMessage).where(OutboxMessage.topic == TOPIC)))
         assert set(app.dependency_overrides) == {get_current_user}
     finally: await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_private_completed_analysis_export_uses_native_owner_binding_and_no_destination(order_env, monkeypatch):
+    import app.infrastructure.database.session as session_module
+    from app.uat2.workflow import install_workflow
+    from app.domains.modules.transports import install_route_policy
+    from app.domains.ai_limits.private_effects import TOPIC as EXPORT_TOPIC
+    e, analysis, worker, factory, celery, deliveries, clock, flow_id, intent = order_env
+    engine = create_async_engine('sqlite+aiosqlite:///' + str(e.path))
+    monkeypatch.setattr(session_module, 'AsyncSessionLocal', async_sessionmaker(engine, expire_on_commit=False))
+    app=FastAPI();install_workflow(app,scope=analysis.scope,source_storage=analysis.analysis.source_storage);install_route_policy(app)
+    owner=[1];app.dependency_overrides[get_current_user]=lambda:e.db.get(User,owner[0])
+    path=f'/uat2/simulation/analysis/{flow_id}/private-export'
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+            assert (await client.post(path,json={'key':'private-export-key','destination':'https://outside.invalid'})).status_code == 422
+            first=await client.post(path,json={'key':'private-export-key'})
+            assert first.status_code == 200
+            receipt=first.json();assert receipt['external_delivery'] is False and receipt['complete_account_export'] is False
+            assert (await client.post(path,json={'key':'private-export-key'})).json()==receipt
+            content=await client.get(receipt['download_path'])
+            assert content.status_code == 200 and content.json()['owner_id']==1
+            assert content.json()['orders_authorized'] is False and content.json()['workflow_id']==flow_id
+            assert 'prompt' not in content.json() and 'source' not in content.json()
+            assert content.headers['cache-control']=='no-store' and 'attachment' in content.headers['content-disposition']
+            owner[0]=2
+            assert (await client.get(receipt['download_path'])).status_code==404
+            owner[0]=1
+            with factory() as db:
+                assert db.scalar(select(func.count()).select_from(OutboxMessage).where(OutboxMessage.topic==EXPORT_TOPIC))==1
+                db.scalar(select(UserModule).where(UserModule.user_id==1,UserModule.module_id=='zerodha_rebalance')).enabled=False;db.commit()
+            assert (await client.get(receipt['download_path'])).status_code==404
+        assert set(app.dependency_overrides)=={get_current_user}
+    finally:await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('worker_env',['journal'],indirect=True)
+async def test_native_diagnostics_bind_journal_source_and_keep_external_alerts_disabled(order_env,monkeypatch):
+    import app.infrastructure.database.session as session_module
+    from app.domains.public_service.router import router as operations_router
+    from app.domains.public_service.monitoring import TOPIC as MONITOR_TOPIC
+    e,analysis,worker,factory,celery,deliveries,clock,flow_id,intent=order_env
+    with factory() as db:
+        db.scalar(select(UserModule).where(UserModule.user_id==1,UserModule.module_id=='indmoney_us')).enabled=False
+        db.commit()
+    engine=create_async_engine('sqlite+aiosqlite:///'+str(e.path))
+    monkeypatch.setattr(session_module,'AsyncSessionLocal',async_sessionmaker(engine,expire_on_commit=False))
+    app=FastAPI();app.include_router(operations_router)
+    binding=SimulationHTTPBinding(scope=analysis.scope,source_storage='journal').install(app)
+    app.dependency_overrides[get_current_user]=lambda:e.db.get(User,1)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+            result=await client.get('/account/operations/diagnostics')
+            assert result.status_code==200
+            report=result.json()
+            assert report['owner_id']==1 and report['external_delivery'] is False
+            assert report['source_unavailable'] is False and report['stale_data'] is False
+            assert len(report['provenance']['source_versions']['zerodha_rebalance'])==64
+            assert result.headers['cache-control']=='private, no-store'
+        with analysis.session() as db:
+            first=binding.operations.observe(db,1)
+            second=binding.operations.observe(db,1)
+            assert first==second and first['external_delivery'] is False and first['state']=='recorded'
+            assert db.scalar(select(func.count()).select_from(OutboxMessage).where(OutboxMessage.topic==MONITOR_TOPIC))==1
+            assert db.scalar(select(OutboxMessage).where(OutboxMessage.topic==MONITOR_TOPIC)).execution_attempts==1
+    finally:await engine.dispose()
+
+
+def test_scheduled_observation_reads_only_scope_owners_and_never_submits_or_sends(order_env):
+    from app.uat2.analysis_worker import OBSERVE,CONTROL_QUEUE
+    from app.domains.public_service.monitoring import TOPIC as MONITOR_TOPIC
+    e,analysis,worker,factory,celery,deliveries,clock,flow_id,intent=order_env
+    analysis.schedule(celery)
+    assert celery.conf.beat_schedule['uat2-scoped-operational-observation']['options']=={'queue':CONTROL_QUEUE,'expires':30}
+    result=analysis.tasks[OBSERVE].run()
+    assert {item['owner_id'] for item in result['items']}=={1,2}
+    assert all(item['external_delivery'] is False for item in result['items'])
+    with factory() as db:
+        assert db.get(OrderIntent,intent).state=='awaiting_approval'
+        assert not list(db.scalars(select(OutboxMessage).where(OutboxMessage.topic==TOPIC)))
+        rows=list(db.scalars(select(OutboxMessage).where(OutboxMessage.topic==MONITOR_TOPIC)))
+        assert {row.payload['owner_id'] for row in rows}=={1,2}
+        assert all(row.payload['synthetic_sink'] is True and row.payload['provenance']['binding']=='uat2-native-source-observation-v1' for row in rows)

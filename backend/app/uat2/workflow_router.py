@@ -49,3 +49,23 @@ async def prepare_basket(workflow_id: int, request: Request, user=Depends(get_cu
         result = await db.run_sync(work); await db.commit(); return result
     except (PermissionError, OrderDenied):
         await db.rollback(); raise HTTPException(409, 'Completed owned current analysis required; no approval recorded') from None
+
+
+class ExportRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid',strict=True)
+    key: str = Field(min_length=8,max_length=96)
+
+
+@router.post('/analysis/{workflow_id}/private-export')
+async def private_analysis_export(workflow_id:int,body:ExportRequest,request:Request,
+        user=Depends(get_current_user),db=Depends(get_async_db)):
+    from .private_exports import prepare_export
+    from app.domains.ai_limits.contracts import BoundaryDenied
+    binding=request_binding(request)
+    if binding is None: raise HTTPException(503,'Private analysis export unavailable')
+    try:
+        value=await db.run_sync(lambda session:prepare_export(session,user.id,workflow_id,
+            analysis=binding.analysis,key=body.key))
+        await db.commit();return value
+    except (BoundaryDenied,PermissionError,OrderDenied):
+        await db.rollback();raise HTTPException(409,'Current completed owned analysis and local download required') from None

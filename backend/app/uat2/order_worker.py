@@ -13,8 +13,11 @@ from app.domains.order_intents.execution import ExecutionWorker, venue_binding
 from app.domains.order_intents.journal_fake import JournalBrokerFake
 from app.domains.runs.analysis_workflows.contracts import naive, WorkflowDenied
 from app.infrastructure.database.outbox.models import OutboxMessage
-from .analysis_worker import SimulationAnalysisWorker, QUEUE
+from .analysis_worker import SimulationAnalysisWorker, QUEUE, CONTROL_QUEUE
 from .synthetic_orders import SyntheticOrders, TOPIC as PREPARATION_TOPIC
+
+EXECUTION_QUEUE = 'uat2_orders'
+RECONCILIATION_QUEUE = 'uat2_reconcile'
 
 PREPARE = 'uat2.orders.prepare.v1'
 DISPATCH = 'uat2.orders.dispatch.v1'
@@ -112,10 +115,10 @@ class SimulationOrderWorker:
                 .group_by(OrderIntent.id).order_by(func.min(ExecutionAttempt.next_poll_at)).limit(2)))
             for flow in flows: self.tasks[PREPARE].apply_async(args=[flow], queue=QUEUE, retry=False)
             for event in events:
-                self.tasks[DISPATCH].apply_async(args=[str(event.id)], queue=QUEUE, retry=False)
+                self.tasks[DISPATCH].apply_async(args=[str(event.id)], queue=EXECUTION_QUEUE, retry=False)
                 event.published_at = naive(now)
                 event.available_at = naive(now + timedelta(seconds=30))
-            for intent in recovering: self.tasks[RECONCILE].apply_async(args=[intent], queue=QUEUE, retry=False)
+            for intent in recovering: self.tasks[RECONCILE].apply_async(args=[intent], queue=RECONCILIATION_QUEUE, retry=False)
             db.commit()
             return {'simulation_only': True, 'prepare': len(flows), 'dispatch': len(events), 'reconcile': len(recovering)}
 
@@ -129,20 +132,21 @@ class SimulationOrderWorker:
             max_retries=0, autoretry_for=(), soft_time_limit=10, time_limit=15)
         @app.task(name='uat2.orders.prepare.v1', **options)
         def prepare_order(workflow_id): return self.prepare(workflow_id)
-        @app.task(name='uat2.orders.dispatch.v1', **options)
+        @app.task(name='uat2.orders.dispatch.v1', **{**options,'queue':EXECUTION_QUEUE})
         def dispatch_order(message_id): return self.dispatch(message_id)
-        @app.task(name='uat2.orders.reconcile.v1', **options)
+        @app.task(name='uat2.orders.reconcile.v1', **{**options,'queue':RECONCILIATION_QUEUE})
         def reconcile_order(intent_id): return self.reconcile(intent_id)
-        @app.task(name='uat2.orders.relay.v1', **options)
+        @app.task(name='uat2.orders.relay.v1', **{**options,'queue':CONTROL_QUEUE})
         def relay_orders(): return self.relay()
         self.tasks = {PREPARE: prepare_order, DISPATCH: dispatch_order, RECONCILE: reconcile_order, RELAY: relay_orders}
-        app.conf.task_routes = {**(app.conf.task_routes or {}), **{name: {'queue': QUEUE} for name in self.tasks}}
+        queues={PREPARE:QUEUE,DISPATCH:EXECUTION_QUEUE,RECONCILE:RECONCILIATION_QUEUE,RELAY:CONTROL_QUEUE}
+        app.conf.task_routes = {**(app.conf.task_routes or {}), **{name: {'queue': queue} for name,queue in queues.items()}}
         self.app = app
         return dict(self.tasks)
 
     def schedule(self, app):
         self.register(app)
-        value = {'task': 'uat2.orders.relay.v1', 'schedule': 5.0, 'options': {'queue': QUEUE, 'expires': 5}}
+        value = {'task': 'uat2.orders.relay.v1', 'schedule': 5.0, 'options': {'queue': CONTROL_QUEUE, 'expires': 5}}
         previous = dict(app.conf.beat_schedule or {})
         key = 'uat2-scoped-orders-relay'
         if key in previous and previous[key] != value: raise OrderDenied('ORDER_SCHEDULE_COLLISION')

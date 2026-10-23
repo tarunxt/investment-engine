@@ -37,6 +37,9 @@ test('in-flight optional and aggregate reads abort on disable, failure and accou
   const next=gate.moduleRequestSignal('/backend-api/indmoney-us/portfolio');gate.clearModulePolicy();assert.equal(next.aborted,true);
   assert.throws(()=>gate.moduleRequestSignal('/backend-api/indmoney-us/portfolio'),{name:'AbortError'});
   assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/me/modules'));
+  assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/account/operations/diagnostics'));
+  assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/account/operations/privacy-requests'));
+
   assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/me/modules/safety-activity'));
   gate.installModulePolicy(policy([],2));assert.throws(()=>gate.moduleRequestSignal('/backend-api/indmoney-us/portfolio'),{name:'AbortError'});
  }finally{globalThis.window=previous;}

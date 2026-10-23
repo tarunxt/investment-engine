@@ -22,6 +22,8 @@ export function ServerAnalysisSession() {
   const [items,setItems]=useState<Workflow[]>([]);
   const [error,setError]=useState<string|null>(null);
   const [pending,setPending]=useState(false);
+  const exportKeys=useRef(new Map<number,string>());
+  const [downloads,setDownloads]=useState<Record<number,string>>({});
   const [portfolio,setPortfolio]=useState<"india"|"indmoney_us">("indmoney_us");
   useEffect(()=>{
     const generation=++epoch.current;let timer:ReturnType<typeof setTimeout>;
@@ -38,6 +40,16 @@ export function ServerAnalysisSession() {
     if(owner)void poll();
     return()=>{epoch.current=generation+1;clearTimeout(timer);};
   },[owner]);
+  async function exportAnalysis(row:Workflow){
+    if(busy.current)return;busy.current=true;setPending(true);const generation=epoch.current;
+    const key=exportKeys.current.get(row.id)??crypto.randomUUID();exportKeys.current.set(row.id,key);
+    try{
+      const result=await apiService.post<{owner_id:number;download_path:string;external_delivery:boolean}>(`/backend-api/uat2/simulation/analysis/${row.id}/private-export`,{key});
+      if(result.owner_id!==Number(owner)||result.external_delivery!==false||!/^\/api-usage\/limits\/private-artifacts\/[a-f0-9-]{36}$/.test(result.download_path))throw new Error('Invalid private download');
+      if(epoch.current===generation){setDownloads(previous=>({...previous,[row.id]:result.download_path}));setError(null);}
+    }catch{if(epoch.current===generation)setError('Private analysis export unavailable. It requires current completed analysis and module access. No external delivery was requested.');}
+    finally{busy.current=false;if(epoch.current===generation)setPending(false);}
+  }
   async function prepare(row:Workflow){
     if(busy.current)return;busy.current=true;setPending(true);const generation=epoch.current;
     try{
@@ -66,6 +78,7 @@ export function ServerAnalysisSession() {
         <h3>Workflow {row.id} · {row.portfolio} · {row.status}</h3>
         {row.error&&<p>{row.error}</p>}
         <ol>{row.stages.map(stage=><li key={stage.stage}>{stage.stage}: {stage.status}; attempts {stage.attempts}; cost USD {stage.checkpoint.attempts?.map(a=>a.cost_usd??"unavailable").join(" + ")||"not recorded"}{stage.error?`; ${stage.error}`:""}</li>)}</ol>
+        {process.env.NEXT_PUBLIC_UAT2==='true'&&row.status==='completed'&&<div className="space-x-3"><button disabled={pending} className="underline" onClick={()=>void exportAnalysis(row)}>Prepare private analysis JSON</button>{downloads[row.id]&&<a className="underline" href={'/backend-api'+downloads[row.id]}>Download private analysis JSON</a>}</div>}
         {process.env.NEXT_PUBLIC_UAT2==='true'&&row.portfolio==='india'&&row.status==='completed'&&<button className="rounded border px-3 py-1" disabled={pending} onClick={()=>void prepare(row)}>Prepare exact fake basket review</button>}
         <details><summary>Input versions</summary><p className="break-all">Source {row.inputs.source_hash}<br/>Plan {row.inputs.plan_hash}<br/>Automatic orders: disabled</p></details>
         {(["queued","processing"].includes(row.status)?["pause","cancel"]:row.status==="paused"?["resume","cancel"]:["failed","partial"].includes(row.status)?["retry","cancel"]:[]).map(action=><button key={action} disabled={pending} className="rounded border px-3 py-1 mr-2" onClick={()=>void submit(row,action)}>{action}</button>)}

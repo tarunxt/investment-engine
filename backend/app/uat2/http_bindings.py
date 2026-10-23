@@ -21,6 +21,8 @@ class SimulationHTTPBinding:
         self.analysis = SyntheticAnalysis(scope=scope, policy=policy, source_storage=source_storage)
         from .synthetic_orders import SyntheticOrders
         self.orders = SyntheticOrders(self.analysis)
+        from .operations import SimulationOperations
+        self.operations = SimulationOperations(self.analysis)
         self._app = None
 
     def install(self, app):
