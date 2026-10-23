@@ -17,6 +17,7 @@ from .models import OrderIntent, OrderLeg
 from .service import TOPIC
 from .execution_models import ExecutionFence, ExecutionRun, ExecutionAttempt
 from .execution_fake import ExecutionBrokerFake
+from .journal_fake import JournalBrokerFake
 from .execution_risk import ExecutionLimits, fresh_risk
 
 
@@ -31,7 +32,7 @@ class ExecutionWorker:
     RECONCILE_WINDOW = timedelta(minutes=10)
 
     def __init__(self, orders, broker, market, *, limits=None):
-        if type(broker) is not ExecutionBrokerFake:
+        if type(broker) not in {ExecutionBrokerFake, JournalBrokerFake}:
             raise OrderDenied('EXACT_SYNTHETIC_EXECUTION_BROKER_REQUIRED')
         if orders.db.get_bind() is broker.engine:
             raise OrderDenied('SEPARATE_SYNTHETIC_VENUE_REQUIRED')
