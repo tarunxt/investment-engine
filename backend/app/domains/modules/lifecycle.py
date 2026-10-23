@@ -217,12 +217,32 @@ def relay_selection_events(session,limit=10):
     return len(rows)
 
 
+def guard_work_transition(session, work, *, allow_cancelled_failure=False):
+    """Serialize manual cancellation and worker writes in the same transaction.
+
+    Selection header precedes work-row locks, matching cancellation/disable.
+    Read the persisted flag, not the worker's potentially stale ORM instance.
+    """
+    if work.module_id:
+        session.execute(select(UserModulePreferences.user_id).where(
+            UserModulePreferences.user_id == work.user_id).with_for_update())
+    model = type(work)
+    state = session.execute(select(model.module_cancel_requested, model.status).where(
+        model.id == work.id, model.user_id == work.user_id).with_for_update()).one_or_none()
+    if state is None:
+        raise ModuleLifecycleDenied('Work no longer exists')
+    if state[0]:
+        # Module disable marks active work for worker cleanup. Manual cancel is
+        # already terminal; never overwrite its status, result or cancel reason.
+        if allow_cancelled_failure and state[1] in JobStatus.active():
+            return
+        raise ModuleLifecycleDenied('Work cancellation requested')
+
+
 def guard_job_transition(session,job):
     """Hold the selection fence in the SAME transaction as the state write."""
     if not job.module_id or job.module_version is None:raise ModuleLifecycleDenied('Unbound worker transition')
-    session.execute(select(UserModulePreferences.user_id).where(UserModulePreferences.user_id==job.user_id).with_for_update())
-    cancelled=session.scalar(select(Job.module_cancel_requested).where(Job.id==job.id))
-    if cancelled:raise ModuleLifecycleDenied('Module cancellation requested')
+    guard_work_transition(session, job)
     current_sync(session,WorkIdentity(job.user_id,job.module_id,job.module_version))
 
 

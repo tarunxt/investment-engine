@@ -170,6 +170,9 @@ class SyncJobRepository:
         if status != JobStatus.FAILED and job.module_id:
             from app.domains.modules.lifecycle import guard_job_transition
             guard_job_transition(self._session, job)
+        else:
+            from app.domains.modules.lifecycle import guard_work_transition
+            guard_work_transition(self._session, job, allow_cancelled_failure=status == JobStatus.FAILED)
         job.status = status
         if response is not None:
             job.response = response

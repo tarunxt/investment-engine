@@ -4596,7 +4596,7 @@
       "registration": "",
       "route": "",
       "side_effects": "job DB; Redis; queued AI; export destinations",
-      "source": "backend/app/domains/jobs/repository.py:210"
+      "source": "backend/app/domains/jobs/repository.py:213"
     },
     {
       "calls": [
@@ -4637,6 +4637,8 @@
         "PostgresJobRepository",
         "_publish_job_update",
         "db.commit",
+        "db.refresh",
+        "lock_owner",
         "repo.get",
         "revoke_registered_job_task",
         "router.post"
@@ -10707,7 +10709,7 @@
       "registration": "",
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/repository.py:178"
+      "source": "backend/app/domains/runs/repository.py:180"
     },
     {
       "calls": [
@@ -10748,8 +10750,10 @@
         "_publish_run_update",
         "db.commit",
         "db.execute",
+        "db.refresh",
         "jobs_rows.scalars",
         "jobs_rows.scalars().all",
+        "lock_owner",
         "repo.get",
         "revoke_registered_job_task",
         "router.post",
@@ -10758,6 +10762,9 @@
         "run_job_rows.scalars().all",
         "select",
         "select(Job).where",
+        "select(Job).where(Job.id.in_(job_ids), Job.user_id == current_user.id).order_by",
+        "select(Job).where(Job.id.in_(job_ids), Job.user_id == current_user.id).order_by(Job.id).with_for_update",
+        "select(Job).where(Job.id.in_(job_ids), Job.user_id == current_user.id).order_by(Job.id).with_for_update().execution_options",
         "select(RunJob).where"
       ],
       "capability": "cancel_run",
@@ -13801,7 +13808,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/shared/ws_relay.py:187"
+      "source": "backend/app/shared/ws_relay.py:201"
     },
     {
       "calls": [
@@ -16241,8 +16248,8 @@
     "backend/app/domains/jobs/output_contracts/validation.py": "e26e01f2e1e3cc693805db5eeea49dbc344dc3cecc03590286ffabc3e68decf5",
     "backend/app/domains/jobs/output_runtime.py": "95773ac85373141a83886d0e6641d14124621b2cf856b831d3ad544033a9ebd3",
     "backend/app/domains/jobs/output_sources.py": "c8f788994e78be1bdba2c56450660581a7e4c7992a2bf8cc3635d6eb130a26fb",
-    "backend/app/domains/jobs/repository.py": "138e6543466e3fdc26f26a0219753419f87221fc343d594289da018d469661cc",
-    "backend/app/domains/jobs/router.py": "fccad20a785a4109ffc56d55f183f839d653d64b5cc20ed9340c30733f7186ac",
+    "backend/app/domains/jobs/repository.py": "7d72fa2115b448e820e825663ccc767f52cd1d050b30dd80c814f33d73f0c13d",
+    "backend/app/domains/jobs/router.py": "2d0fa10fd1626534855a68941c846d520545ab3f0dad86d80070db0e892c2deb",
     "backend/app/domains/jobs/schemas.py": "91228217208a04a5e6049732bd66d504d7a439bdae38a98c1603aaf99a2ddfde",
     "backend/app/domains/jobs/tasks.py": "581d90992757a971217bdae0c6c927b5cf555a7868a6a229450af924d9084b8e",
     "backend/app/domains/jobs/usage_identity.py": "4dfbaac630d5b99cb50af9eca8791d7e7db6cefd04bcb1eced15980cdffa376b",
@@ -16260,7 +16267,7 @@
     "backend/app/domains/modules/coverage.py": "86899afc3b54335164632eaea4cd3798dbbb38f1aa9fa6b352af9f7ccbf7ba5f",
     "backend/app/domains/modules/dispatch.py": "3cbd1dd73ae3f852e29d1943801f5f2a6e6a40ea2e7f2ff54b52fef9f9ffc757",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
-    "backend/app/domains/modules/lifecycle.py": "50dda814217ad32c9636c9c7f4d5f095bb52be368e6fd1a5ee1c56235eae0d06",
+    "backend/app/domains/modules/lifecycle.py": "938349b8d360a60f3fcce50c82da56fe3b95d82847e84077af6e8bf63a0dda83",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
     "backend/app/domains/modules/policy.py": "bee958920de30e075b855181361ef9c55870bcf0043ab9ae29c4cf2208547338",
@@ -16436,8 +16443,8 @@
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "0676320045948635562975a39d85e7a590578d1dbad85bc98464563bdb7ae21b",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
-    "backend/app/domains/runs/repository.py": "6451ef66d1130960bd4ff3b20b4869feb2b00081c6982724459d5c74179d72c4",
-    "backend/app/domains/runs/router.py": "d9a316d520575bbc274e92e8f91567d7779c112e6692cfe02a6b70f2e13e9df8",
+    "backend/app/domains/runs/repository.py": "19867e37b290858e22d6fa99aae79a24522a9012a4c76d4125c26aad3c0d5ce7",
+    "backend/app/domains/runs/router.py": "d9225badfc916db762295110c270a78dd8e14a353e1b6a04f46d43640d57894a",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "0618d24488224f4d67a0224cc6f89208c7368cce2b885b5642bf2fc03062cdaa",
@@ -16517,7 +16524,7 @@
     "backend/app/shared/portfolio_summary.py": "20bccb9fafbeb7d8ebca0b1da793bc935d873103c581b530da801559ba1c851e",
     "backend/app/shared/types.py": "d2ecdcbf27e937c869e1bfd0b508681eb2a3b40b0ca8070dec39561bb8ca900b",
     "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
-    "backend/app/shared/ws_relay.py": "249b615b0ad457839d530eb25f0f504bead19a5a63874adec607c4622504296b",
+    "backend/app/shared/ws_relay.py": "ea0a0b2a84fe570df06bec7ffc13d12bdf2af2672909d5890bdca3b47fe73423",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/main.py": "c4ca690ee6438e867d9c9c2816cbf1e02231533038a845144726b360dd86fc54",

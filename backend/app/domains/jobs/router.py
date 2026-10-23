@@ -122,9 +122,14 @@ async def cancel_job(
     if not job:
         raise HTTPException(404, detail="Job not found")
 
+    from app.domains.modules.lifecycle import lock_owner
+    if job.module_id:
+        await lock_owner(db, current_user.id)
+    await db.refresh(job, with_for_update=True)
     if job.status not in JobStatus.active():
         return job
 
+    job.module_cancel_requested = True
     job.status = JobStatus.FAILED
     job.error_message = "Cancelled by user"
     if (job.export_status or "").lower() in {"", "pending", "queued", "processing"}:
