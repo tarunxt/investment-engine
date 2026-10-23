@@ -134,6 +134,7 @@ async def test_private_preview_seed_never_approves_or_changes_selection(env, mon
     users = [env.db.get(User, id) for id in env.owners]
     for i, user in enumerate(users):
         user.username = ('usera', 'userb')[i]
+        user.email = user.username + '@stage01.example.com'
         env.db.get(IntegrationConnection, 'connection'+str(i+1)).token_expires_at = datetime.now(timezone.utc)+timedelta(hours=1)
     disabled = env.db.scalar(select(UserModule).where(UserModule.user_id == users[1].id))
     disabled.enabled = False
@@ -143,7 +144,8 @@ async def test_private_preview_seed_never_approves_or_changes_selection(env, mon
         async def commit(self): env.db.commit()
     await preview.seed(Bridge(), users)
     await preview.seed(Bridge(), users)
-    assert len(list(env.db.scalars(select(preview.ZerodhaPortfolioSnapshot)))) == 2
+    snapshots = list(env.db.scalars(select(preview.ZerodhaPortfolioSnapshot)))
+    assert len(snapshots) == 1 and snapshots[0].user_id == users[0].id
     assert list(env.db.scalars(select(OrderIntent))) == []
     assert disabled.enabled is False
 

@@ -16441,6 +16441,8 @@
     "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
     "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
     "backend/app/domains/runs/analysis_workflows/service.py": "4d25f2f20bd81353707945c127202b4ec9f806c5dd4621e05c87c68514ff0653",
+    "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "3e24137a74426a69cfac6fb99ba5241570886c6d5755f92716604f23c63dda04",
+    "backend/app/domains/runs/analysis_workflows/synthetic_sources.py": "44b96b50142fd77b48d63370ea0bc5e93eb9b3f535ab6aab1c03276ab002d199",
     "backend/app/domains/runs/auto_rebalance_audit.py": "32e04c7bf212bcf7e989252f6877bf205ecfef13942babec807441efac0dbcab",
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "0676320045948635562975a39d85e7a590578d1dbad85bc98464563bdb7ae21b",
