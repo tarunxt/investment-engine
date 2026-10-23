@@ -137,8 +137,19 @@ def main(phase):
         with SyncSessionLocal() as db:
             assert db.scalar(select(func.count()).select_from(ExecutionAttempt).where(ExecutionAttempt.intent_id==intent))==1
             assert db.scalar(select(func.count()).select_from(OutboxMessage).where(OutboxMessage.topic==VENUE_TOPIC))==1
+        # Same dedicated PostgreSQL store, stable owned read snapshot. This is
+        # a typed native evidence export, never a full-account/erasure claim.
+        from sqlalchemy.orm import Session
+        from app.infrastructure.database.sync_session import sync_engine
+        from app.domains.runs.analysis_workflows.synthetic_sources import SimulationSourceScope
+        from app.domains.public_service.native_outbox_export import NativeOutboxExport
+        with Session(sync_engine.execution_options(isolation_level='REPEATABLE READ')) as db:
+            evidence=NativeOutboxExport(db,scope=SimulationSourceScope('hosted')).export(owner_id)
+            assert evidence['complete_account_export'] is False and evidence['complete_account_erasure'] is False
+            assert any(item['data']['kind']=='synthetic_venue_evidence' for item in evidence['items'])
         print(json.dumps({'phase':'recover','actual_worker_restart':True,'original_account_reconciled':True,
-            'state':'filled','submission_attempts':1,'venue_receipts':1,'owner_acceptance':False}))
+            'state':'filled','submission_attempts':1,'venue_receipts':1,'typed_native_evidence_export':True,
+            'full_account_export':False,'owner_acceptance':False}))
     else:raise SystemExit('Expected start or recover phase')
 
 

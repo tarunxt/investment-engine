@@ -1908,6 +1908,17 @@ jobs:
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
+      - name: Verify typed native evidence export and quarantined fixture recovery
+        run: python -m pytest -q --junitxml=/tmp/native-privacy.xml backend/tests/test_native_outbox_export.py backend/tests/test_quarantined_privacy.py
+      - name: Require all native privacy checks to execute
+        run: |
+          python - <<'PY_CHECK'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/native-privacy.xml').getroot()
+          assert len(root.findall('.//testcase')) == 12
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY_CHECK
       - name: Require all Stage16 checks to execute
         run: |
           python - <<'PY_CHECK'

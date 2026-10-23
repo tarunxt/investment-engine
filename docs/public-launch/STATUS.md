@@ -1,3 +1,21 @@
+# Latest remaining-priority implementation checkpoint — 23 October 2026
+
+This entry supersedes earlier pending-publication statements only for their later resolved operations; historical evidence below is preserved. The approved public PR1262 candidate remains 6f3214c until a separately approved push is verified. The five-commit batch ending ad6790fa691d77378a7b75c4a518f7369f55e143 is preserved on its own local branch; no approval for that batch has been received in this worker. Later local composition/security/operations commits are 2d5345b0e55cdad2c91aea2d7df98712c53f22a0, 8a57f1ab1875e5f0782ea8f0d70730af8147ed96 and 391872ace445bda6b9a1a7495354a5f80912bc9b. This checkpoint accompanies their privacy-adapter successor; its exact SHA is recorded in Git/task evidence.
+
+| Priority | Current code outcome | Remaining verification/completion |
+| --- | --- | --- |
+| H1 guarded hosted workflow | Native owner-only fake app/worker composition, keyless both-mode connections, immutable acquisitions, six-stage analysis, exact provenance/review/approval and durable fake dispatch/reconciliation implemented locally. | Actual full PostgreSQL/Redis probe, new exact-source browser/UI acceptance, review and safe deployment gate. |
+| H2 scoped account privacy | Typed projections cover eight native evidence topics; selected queued-job/module/session/key fixtures recover in quarantine using existing encrypted/atomic workflow. | Full canonical account runtime, remaining shared/opaque/outbox/file/cache/operator stores and reviewed identity/backup/retention dispositions. Full export/erasure remains false; no hosted erasure installed. |
+| H3 runtime/evidence/operations | Separate bounded queues in the same prepared worker; source-aware local monitoring and audited support binding; external sinks remain disabled. | Actual runtime verification and real operator/destination evidence; no external delivery claimed. |
+| H4 both-mode/US acceptance | Installed-route ASGI tests cover both modes/reacquisition and digest-accepted US six-stage analysis; earlier exact-source 159843a browser evidence retained. | New native composition browser/hosted receipt and new owner acceptance. |
+| M1 AI/private export | Explicit completed-analysis private JSON download with provenance, ownership, expiry/disable checks and no destination injection. | External destination integrations remain disabled; full account export is a separate H2 gate. |
+| M2 release matrix | 702-case local runtime regression, 82-case overlapping privacy regression, 17 frontend races/policy cases, six baseline cases and prepared zero-skip CI gates. | Exact-source remote CI and actual PostgreSQL/Redis concurrency remain distinct; no transfer of old evidence. |
+| M3 operational UX/release | Owner walkthrough, keyless connection/source flow, exact review/private download and recovery observations are implemented; Next.js/Zod repaired and fresh npm audit is zero. | New visual/browser acceptance, complete release dossier/cutover preparation and external gates. Stage20 is preparation only; no cutover GO. |
+
+Source reports: NATIVE_SIMULATION_COMPOSITION.md, DEPENDENCY_SECURITY_REPAIR.md, NATIVE_OPERATIONS_EXPORT.md and NATIVE_PRIVACY_ADAPTERS.md. Builds/type/lint passed locally; there is no new hosted acceptance claim. Existing UAT2/production/controller/security settings and actual user data were untouched. The earlier verified c493 deployment evidence is preserved, not transferred to this candidate. Full High/Medium completion remains open.
+
+---
+
 # Remaining-priority implementation started — 23 October 2026
 
 New isolated branch `codex/credx-priority-completion-20261024` starts from verified

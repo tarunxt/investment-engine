@@ -80,6 +80,12 @@ def decode(value, *, depth=0):
 
 class RecoverableFixturePrivacy(DisposableSQLPrivacyWorkflow):
     """Explicit local/CI adapter; inherited scope denies every live database."""
+    def _restorable(self,name):return restorable(name)
+
+    def _after_restore(self,owner,counts,now):return {}
+
+    def _restore_metadata(self,row):return {}
+
     def _archive_id(self, request_id):
         return uuid5(NAMESPACE_URL, 'credx:privacy-fixture-recovery:' + str(request_id))
 
@@ -135,7 +141,7 @@ class RecoverableFixturePrivacy(DisposableSQLPrivacyWorkflow):
                     .limit(self.reader.MAX_ROWS_PER_TABLE + 1).with_for_update()).mappings().all()
                 if len(rows) != plan['actions'][name]['owned_rows']:
                     raise BoundaryDenied('PRIVACY_SQL_SNAPSHOT_CHANGED')
-                if rows and not restorable(name):
+                if rows and not self._restorable(name):
                     raise BoundaryDenied('PRIVACY_RECOVERY_STORE_ADAPTER_UNAVAILABLE')
                 datasets[str(name)] = encode([{str(k): v for k, v in row.items()} for row in rows])
                 used += len(json.dumps(datasets[str(name)], allow_nan=False).encode())
@@ -168,7 +174,7 @@ class RecoverableFixturePrivacy(DisposableSQLPrivacyWorkflow):
             raise BoundaryDenied('PRIVACY_RECOVERY_DATASET_CHANGED')
         if row.payload.get('state') == 'restored':
             return dict(state='already_restored', restored_counts=result['removed_counts'], synthetic=True,
-                        complete_account_erasure=False)
+                        complete_account_erasure=False,**self._restore_metadata(row))
         if row.payload.get('state') != 'recoverable': raise BoundaryDenied('PRIVACY_RECOVERY_ARCHIVE_INVALID')
         rules = {rule.table: rule for rule in self.reader.inventory.rules}
         try:
@@ -178,7 +184,7 @@ class RecoverableFixturePrivacy(DisposableSQLPrivacyWorkflow):
                     rows = decode(value['datasets'][name])
                     if type(rows) is not list or len(rows) != result['removed_counts'][name]:
                         raise BoundaryDenied('PRIVACY_RECOVERY_DATASET_CHANGED')
-                    if rows and not restorable(name):
+                    if rows and not self._restorable(name):
                         raise BoundaryDenied('PRIVACY_RECOVERY_STORE_ADAPTER_UNAVAILABLE')
                     for item in rows:
                         if type(item) is not dict or set(item) != set(table.c.keys()):
@@ -190,11 +196,13 @@ class RecoverableFixturePrivacy(DisposableSQLPrivacyWorkflow):
                         if self.db.execute(select(1).select_from(table).where(primary,
                                 self.reader._predicate(table, rules[name], owner))).first() is None:
                             raise BoundaryDenied('PRIVACY_RECOVERY_OWNER_CHANGED')
-                row.payload = {**row.payload, 'state': 'restored', 'restored_at': now.isoformat()}
+                controls=self._after_restore(owner,result['removed_counts'],now)
+                row.payload = {**row.payload, 'state': 'restored', 'restored_at': now.isoformat(),
+                    **({'restore_controls':controls,'restore_controls_hash':digest(controls)} if controls else {})}
                 self.db.add(ActivityLog(user_id=owner, action='privacy_fixture_restored',
                     resource_type='delete', details=str(request.id)))
                 self.db.flush()
         except IntegrityError:
             raise BoundaryDenied('PRIVACY_RECOVERY_CONFLICT') from None
         return dict(state='restored', restored_counts=result['removed_counts'], synthetic=True,
-                    complete_account_erasure=False)
+                    complete_account_erasure=False,**self._restore_metadata(row))
