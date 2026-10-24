@@ -180,18 +180,52 @@ async def get_analysis_workflow(workflow_id:int,db=Depends(get_async_db),user=De
     return await db.run_sync(read)
 
 @router.get('/{workflow_id}/action-plan')
-async def get_action_plan(workflow_id:int,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+async def get_action_plan(workflow_id:int,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime),version:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None):
     from .analysis_workflows.synthetic_composition import SyntheticAnalysis
     from .analysis_workflows.action_plan import project
     from app.domains.ai_limits.contracts import BoundaryDenied
     composition=getattr(runtime.source,'__self__',None)
     if type(composition) is not SyntheticAnalysis:raise HTTPException(503,'Verified advisory plan projection unavailable')
     def read(session):
+        from app.domains.modules.lifecycle import sync_owner_fence
+        from .analysis_workflows.plan_revisions import select_plan
+        sync_owner_fence(session,user.id)
         service=Workflows(session,runtime);row=service.owned(user.id,workflow_id)
         receipt=composition.completed_analysis(session,user.id,workflow_id)
-        return project(receipt,workflow=row,source=row.execution_json['source'])
+        original=project(receipt,workflow=row,source=row.execution_json['source'])
+        return select_plan(service.stages(row)[-1],original,version)
     try:return await db.run_sync(read)
     except (WorkflowDenied,PermissionError,BoundaryDenied):raise HTTPException(409,'Current owned governed result could not be verified; retained research evidence remains available, no new review authorized') from None
+
+class AdvisoryTarget(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    instrument:str=Field(min_length=3,max_length=80)
+    final_units:str=Field(min_length=1,max_length=40)
+
+class AdvisoryRevision(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    expected_version:str=Field(pattern=r'^[a-f0-9]{64}$')
+    targets:list[AdvisoryTarget]=Field(min_length=1,max_length=200)
+
+@router.post('/{workflow_id}/action-plan/revisions')
+async def revise_action_plan(workflow_id:int,body:AdvisoryRevision,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+    from .analysis_workflows.synthetic_composition import SyntheticAnalysis
+    from .analysis_workflows.action_plan import project
+    from .analysis_workflows.plan_revisions import revise
+    from app.domains.ai_limits.contracts import BoundaryDenied
+    from app.domains.order_intents.contracts import OrderDenied
+    from app.domains.modules.lifecycle import sync_owner_fence
+    composition=getattr(runtime.source,'__self__',None)
+    if type(composition) is not SyntheticAnalysis:raise HTTPException(503,'Explicit synthetic advisory revisions unavailable')
+    def work(session):
+        sync_owner_fence(session,user.id)
+        service=Workflows(session,runtime);row=service.owned(user.id,workflow_id)
+        receipt=composition.completed_analysis(session,user.id,workflow_id)
+        original=project(receipt,workflow=row,source=row.execution_json['source'])
+        return revise(service.stages(row)[-1],original,body.expected_version,[item.model_dump() for item in body.targets])
+    try:result=await db.run_sync(work);await db.commit();return result
+    except (WorkflowDenied,PermissionError,BoundaryDenied,OrderDenied):
+        await db.rollback();raise HTTPException(409,'Advisory revision rejected: current owned evidence and exact finite targets required; no approval or execution available') from None
 
 @router.post('')
 async def create_analysis_workflow(body:Create,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):

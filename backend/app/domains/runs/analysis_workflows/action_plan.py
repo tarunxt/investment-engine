@@ -51,5 +51,5 @@ def project(receipt,*,workflow,source):
         'cash_before':None,'cash_after':None,'estimated_charges':None,'tax_estimate':None,
         'valuation_notice':'Frozen source indications only; no current quote, funds, charges or tax inference',
         'coverage':{'recommendations':len(rows),'candidate_universe_accepted':setup is not None,'accepted_candidates':len(setup['accepted_instruments']) if setup else 0,'raw_rows':setup['raw_rows'] if setup else 0,'analysed_candidates':len(setup['accepted_instruments']) if setup else 0,'rejected_candidates':0,'deferred_candidates':0,'notice':'Verified synthetic shortlist coverage; discovery suppressed; all six stages completed. Counts are not investment success.' if setup else 'Holdings-only analysis; candidate drafts are excluded. Counts are not investment success.'},
-        'amendment':{'available':False,'reason':'No validated revised-plan/funds contract is installed; changing quantities or selection is blocked'},
+        'amendment':{'available':True,'reason':'Advisory quantity/source-value revisions are supported. Funds, complete exposure and amended execution remain unavailable; revised proposals cannot reuse approval.','max_saved_revisions':20},
         'review_available':workflow.portfolio=='india' and any(row['side']!='none' for row in rows)}

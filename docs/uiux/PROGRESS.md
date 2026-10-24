@@ -485,3 +485,33 @@ and prior history retained. A further owner-scoped SQL lookup regression passes
 mode styling is now explicit via aria-pressed background/weight; final packaged
 visual verification will include this small follow-up. Native/PG/Redis/hosted and
 full-live-catalogue claims remain excluded.
+
+## UX-08 closure: versioned advisory target revisions, no amended execution
+
+The remaining safe amendment seam is now implemented: exact finite targets for
+every original instrument, including keep-holding-unchanged selection, are
+recalculated on the server and saved as new advisory versions. Original model
+results/jobs/source/execution JSON remain untouched. Compact target/reference and
+math-hash receipts live in the existing owner-linked stage checkpoint, bounded to
+20 revisions without silent deletion. Owner fence → workflow lock, exact-parent
+CAS and derived version identity support duplicate/uncertain-response recovery;
+original and saved versions remain accessible, including retained private records.
+
+Source-price before/after holdings values, gross change and net cash impact use
+bounded exact decimal arithmetic. Missing prices remain unknown. Cash available,
+complete exposure, charges/tax and current quotes are not established. The default
+gross reference bound is diagnostic, not a claim of actual account risk approval.
+Every revised proposal has orders_authorized=false, review_available=false and
+execution_eligible=false. Editing and revised versions cannot use original review
+or manual-execution controls; earlier approvals/orders are not silently cancelled.
+No existing exact financial provenance, approval, execution or reconciliation
+contract changes. Full amended-order execution therefore remains unsupported.
+
+20 initial backend and 8 frontend checks passed; the broader 33-test revision/
+shortlist/action-plan set also passed. Additional tests cover bounded history,
+injected approval/price fields, precise preview-route scope and blocked original
+controls. TypeScript/lint pass. Independent review found no concrete owner, CAS,
+retry or approval defect. Storage was tightened before qualification to persist
+compact targets rather than duplicate full plan projections. Packaged browser
+qualification is pending. This is advisory validation, not fabricated funds or
+turnover-policy validation; configurable strategy constraints remain unavailable.

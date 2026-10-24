@@ -18,7 +18,7 @@ def test_actual_governed_result_is_owned_and_projection_has_no_side_effects(link
     assert result['owner_id']==owner and result['workflow_id']==row.id
     assert result['orders_authorized'] is False and result['simulation'] is True
     assert result['cash_after'] is result['cash_before'] is result['estimated_charges'] is None
-    assert result['amendment']['available'] is False and result['coverage']['candidate_universe_accepted'] is False
+    assert result['amendment']['available'] is True and result['coverage']['candidate_universe_accepted'] is False
     assert not e.db.new and not e.db.dirty
     if portfolio=='india':assert result['connection']['account_label'].startswith('***') and 'FAKE_OWNER' not in result['connection']['account_label']
     else:assert result['connection'] is None and result['no_changes'] is True
