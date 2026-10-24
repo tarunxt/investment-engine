@@ -26,7 +26,7 @@ from app.domains.runs.analysis_workflows.synthetic_sources import SimulationSour
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.shared.types import JobStatus
 
-CATALOGUE = frozenset({'US:UATA', 'US:UATB', 'NSE:SYNTHETIC0'})
+from .candidate_catalogue import CATALOGUE
 
 
 class SyntheticAnalysis:
@@ -39,7 +39,7 @@ class SyntheticAnalysis:
         self.scope, self.policy = scope, policy
         self.governance = SyntheticGovernance(
             Limits(version='synthetic-linked-preview-v1', max_input_tokens=32768),
-            self.recommendation_source, lambda db, row, job: set(CATALOGUE), self.fake_provider)
+            self.recommendation_source, self.allowed_instruments, self.fake_provider)
         self.runtime = Runtime(self.authorize, self.source, self.plan, QueuedAI(self.governance),
             lambda portfolio, due, now: {'timezone': 'Asia/Kolkata', 'calendar_version': 'synthetic-all-open-1',
                 'market_open': True, 'max_lateness_seconds': 60, 'missed_policy': 'skip'}, self.governance)
@@ -85,6 +85,10 @@ class SyntheticAnalysis:
         return {'owner_id': owner, 'snapshot_id': row.id, 'simulation_only': True,
             'source_hash': row.acquisition_json['content_hash'],
             'connection_version': row.acquisition_json['connection_version']}
+
+    def allowed_instruments(self, db, row, job):
+        if 'research_setup' in row.execution_json:return set(frozen_projection(row)['holdings'])
+        return set(CATALOGUE)
 
     def recommendation_source(self, db, row, job, now):
         facts = frozen_projection(row)

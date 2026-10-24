@@ -81,4 +81,9 @@ def frozen_projection(row):
     expected={'indmoney_us':'indmoney_us','zerodha_rebalance':'india'}.get(row.module_id)
     if row.portfolio!=expected or e['source'].get('portfolio',expected)!=expected:
         raise BoundaryDenied('FROZEN_PORTFOLIO_REQUIRED')
-    return projection(e['source'],owner=row.user_id,module=row.module_id)
+    result=projection(e['source'],owner=row.user_id,module=row.module_id)
+    from app.domains.runs.analysis_workflows.shortlist import verified
+    setup=verified(row)
+    if setup:
+        result['holdings']={**result['holdings'],**{instrument:result['holdings'].get(instrument,'0') for instrument in setup['accepted_instruments']}}
+    return result

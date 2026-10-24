@@ -12,6 +12,13 @@ from app.domains.runs.analysis_workflows.service import Workflows
 from app.domains.runs.analysis_workflows.contracts import WorkflowDenied
 
 router=APIRouter(prefix='/runs/analysis-workflows',tags=['analysis-workflows'])
+class ShortlistInput(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    raw_text:str=Field(min_length=1,max_length=100000)
+    format:Literal['paste','csv']
+    preview_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
+    setup_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
+
 class Create(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     portfolio:Literal['indmoney_us','india']
@@ -21,10 +28,12 @@ class Create(BaseModel):
     expected_plan_hash:str|None=Field(default=None,pattern=r'^[a-f0-9]{64}$')
     expected_module_version:int|None=Field(default=None,gt=0)
     setup_schema_version:Literal[1,2]|None=None
+    research_setup:ShortlistInput|None=None
     @model_validator(mode='after')
     def reviewed_pair(self):
         if (self.expected_source_hash is None)!=(self.expected_plan_hash is None) or self.setup_schema_version is not None and self.expected_source_hash is None:raise ValueError('Both reviewed hashes required')
         if self.setup_schema_version==2 and self.expected_module_version is None:raise ValueError('Reviewed module version required')
+        if self.research_setup is not None and (self.setup_schema_version!=2 or self.expected_module_version is None or self.expected_source_hash is None):raise ValueError('Shortlist needs reviewed versioned source, plan and module')
         return self
     scheduled_at:datetime|None=None
     schedule_id:str|None=Field(default=None,min_length=1,max_length=80)
@@ -68,7 +77,7 @@ async def analysis_config(user=Depends(get_current_user),runtime=Depends(optiona
     return {'enabled':runtime is not None,'analysis_only':True,'orders_authorized':False,
         'candidate_preview_available':synthetic_setup(runtime),'candidate_modes':{
             'llm_discovery':{'available':False,'reason':'No approved candidate-discovery contract is installed'},
-            'shortlist_only':{'available':False,'reason':'Candidate preview is not an accepted analysis universe'},
+            'shortlist_only':{'available':synthetic_setup(runtime),'reason':'Explicit reviewed synthetic shortlist only; holdings remain required'},
             'combined':{'available':False,'reason':'No approved combined-universe/batch contract is installed'}}}
 
 @router.get('/setup-context')
@@ -89,7 +98,7 @@ async def setup_context(portfolio:Literal['india','indmoney_us'],db=Depends(get_
             'snapshot_id':source.get('snapshot_id'),'captured_at':source.get('captured_at'),'connection':{'id':connection['id'],'version':connection['version'],'mode':connection['mode'],'account_label':('***'+str(connection['account'])[-4:]) if connection.get('account') else None} if connection else None,
             'usage':{'estimated_cost_usd':'0' if synthetic_setup(runtime) else None,'simulation_only':synthetic_setup(runtime),'notice':'Zero-cost fake analysis' if synthetic_setup(runtime) else 'No cost estimate is available; configured server limits remain authoritative'},
             'constraints':{key:{'editable':False,'value':None,'reason':'No approved configurable constraint contract is installed'} for key in ['horizon','cash','exposure','turnover']},
-            'candidate_preview_available':synthetic_setup(runtime),'orders_authorized':False}
+            'candidate_preview_available':synthetic_setup(runtime),'shortlist_analysis_available':synthetic_setup(runtime),'orders_authorized':False}
     try:return await db.run_sync(read)
     except WorkflowDenied:raise HTTPException(409,'Current owned source, connection and approved plan required; no work started') from None
 
@@ -111,13 +120,17 @@ async def preview_candidates(body:CandidatePreview,db=Depends(get_async_db),user
         runtime.policy(session,user.id,body.portfolio,version=None,scheduled=False)
         source=runtime.source(session,user.id,body.portfolio,body.snapshot_id)
         facts=projection(source,owner=user.id,module='zerodha_rebalance' if body.portfolio=='india' else 'indmoney_us')
-        return preview(body.raw_text,body.format,body.portfolio,catalogue=CATALOGUE,holdings=facts['holdings'],owner=user.id,source_hash=digest(source))
+        document=preview(body.raw_text,body.format,body.portfolio,catalogue=CATALOGUE,holdings=facts['holdings'],owner=user.id,source_hash=digest(source))
+        from .analysis_workflows.shortlist import from_preview,MAX_UNIVERSE
+        try:_,hash=from_preview(document,holdings=facts['holdings']);reason=None
+        except WorkflowDenied as error:hash=None;reason=str(error)
+        return {**document,'shortlist_contract_hash':hash,'shortlist_unavailable_reason':reason,'max_analysis_universe':MAX_UNIVERSE}
     try:return await db.run_sync(read)
     except CandidateInputError as exc:raise HTTPException(422,str(exc)) from None
     except WorkflowDenied:raise HTTPException(409,'Candidate preview rejected: current owned source and bounded canonical input required; nothing was accepted or truncated') from None
 
 @router.get('')
-async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['india','indmoney_us']|None=None,include_readiness:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime),request_key:Annotated[str|None,Query(min_length=8,max_length=128)]=None,source_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,plan_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,module_version:Annotated[int|None,Query(gt=0)]=None,manual_only:bool=False):
+async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['india','indmoney_us']|None=None,include_readiness:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime),request_key:Annotated[str|None,Query(min_length=8,max_length=128)]=None,source_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,plan_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,module_version:Annotated[int|None,Query(gt=0)]=None,manual_only:bool=False,research_setup_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,holdings_only:bool=False):
     # Dashboard requests exclude disabled/unavailable modules before the SQL read.
     # Core historical activity keeps its existing explicit all-owned semantics.
     portfolios=None
@@ -135,6 +148,8 @@ async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['in
         if source_hash is not None:query=query.where(AutoRebalanceWorkflow.execution_json['source_hash'].as_string()==source_hash)
         if plan_hash is not None:query=query.where(AutoRebalanceWorkflow.execution_json['plan_hash'].as_string()==plan_hash)
         if module_version is not None:query=query.where(AutoRebalanceWorkflow.module_version==module_version)
+        if research_setup_hash is not None:query=query.where(AutoRebalanceWorkflow.execution_json['research_setup_hash'].as_string()==research_setup_hash)
+        if holdings_only:query=query.where(AutoRebalanceWorkflow.execution_json['research_setup_hash'].as_string().is_(None))
         if manual_only:query=query.where(AutoRebalanceWorkflow.execution_json['scheduled'].as_boolean().is_(False))
         rows=s.scalars(query.order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all()
         service=Workflows(s,runtime)

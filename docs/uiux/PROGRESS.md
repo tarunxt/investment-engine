@@ -436,3 +436,36 @@ found no concrete owner/session or accessibility regression. The owned preview
 was stopped. Actual VoiceOver, real browser zoom and unassisted pilot remain
 unmeasured. Before UX-11 final evidence, remaining supported candidate-analysis
 contracts and amendment/constraint limitations are being revisited explicitly.
+
+## UX-06 closure: atomic frozen synthetic shortlist analysis
+
+A reviewed synthetic paste/CSV shortlist can now be accepted atomically with
+manual research creation. Server reparsing binds exact owner/source/module,
+preview, parser/catalogue and setup hashes; unresolved/changed/oversized universes
+are rejected without truncation or enqueue. The 200-instrument union bound is the
+existing governed source/output limit, distinct from 1,000 provenance rows. Raw
+source/row provenance is retained privately in existing immutable workflow JSON;
+only normalized canonical IDs and a setup hash enter the approved prompt context.
+Holdings remain separate and required. Shortlist-only performs no discovery and
+keeps all six durable stages. Every accepted candidate must appear in validated
+output; missing coverage stops as nonretryable invalid input. No new store,
+provider, task queue, financial approval or live authority is introduced.
+
+The UI requires exact shortlist acceptance plus separate source/usage review.
+Setup hashes distinguish candidate runs from holdings-only and other universes
+in request keys, SQL lookup, replay checks and returned records. Lost-response
+recovery retains the same payload. Progress/Plans distinguish accepted shortlist
+coverage from excluded drafts, with verified completed counts and no success odds.
+Find/combined discovery, URL ingestion, strategy constraints and validated plan
+amendments remain unavailable; they are not silently emulated or claimed complete.
+
+97 compatibility checks passed before final additions. 154 affected backend checks
+now pass, including both owners, both fake Kite modes, actual accepted US imports,
+all six stages across SQL session restarts, raw-text exclusion, exact replay,
+missing candidate coverage, governance/budget/unknown outcomes and action plans.
+The first missing-candidate fixture stopped after Sync and had no queued AI job;
+it was corrected to advance to the actual worker boundary, without weakening code.
+Independent review found no concrete owner/hash/raw-prompt/retry defect after
+coverage-label correction. Frontend/type/lint and packaged browser qualification
+are recorded separately. This remains local SQLite/fake evidence, never hosted or
+PostgreSQL/Redis qualification.

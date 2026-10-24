@@ -12,11 +12,16 @@ def frozen_request(row,stage,dependencies):
             raise WorkflowDenied('Approved model/prompt plan required')
         if not isinstance(e['plan']['version'],str) or not e['plan']['version']:
             raise WorkflowDenied('Versioned approved plan required')
-        prompt=target['template']+'\n'+json.dumps({'immutable_source':e['source'],'dependencies':dependencies},sort_keys=True,allow_nan=False)
+        from .shortlist import prompt_context
+        setup=prompt_context(row)
+        facts={'immutable_source':e['source'],'dependencies':dependencies}
+        if setup is not None:facts['research_setup']=setup
+        prompt=target['template']+'\n'+json.dumps(facts,sort_keys=True,allow_nan=False)
         context={'kind':'durable_analysis_v1','workflow_id':row.id,'stage':stage.stage,
                  'source_hash':e['source_hash'],'plan_hash':e['plan_hash'],
                  'prompt_version':target['prompt_version'],'plan_version':e['plan']['version'],
                  'analysis_only':True,'orders_authorized':False}
+        if setup is not None:context['research_setup_hash']=e['research_setup_hash']
         if e['plan'].get('guardrails_version')=='stage13-v1':
             context['guardrails_version']='stage13-v1'
         return {'provider':target['provider'],'model':target['model'],'prompt':prompt,'context':context}

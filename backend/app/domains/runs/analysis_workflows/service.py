@@ -33,13 +33,15 @@ class Workflows:
     def validate_current(self,row):
         e=row.execution_json
         if not isinstance(e,dict) or digest(e['source'])!=e['source_hash'] or digest(e['plan'])!=e['plan_hash']:raise WorkflowDenied('Input receipt integrity failed')
+        from .shortlist import verified
+        verified(row)
         self.runtime.policy(self.db,row.user_id,row.portfolio,version=row.module_version,scheduled=e['scheduled'])
         source=self.runtime.source(self.db,row.user_id,row.portfolio,e['snapshot_id'])
         if source.get('owner_id')!=row.user_id or digest(source)!=e['source_hash']:raise WorkflowDenied('Portfolio or connection input version changed; start a new workflow')
         if digest(self.runtime.plan(row.portfolio))!=e['plan_hash']:raise WorkflowDenied('Prompt/model version changed; start a new workflow')
         if row.module_cancel_requested:raise WorkflowDenied('Module cancellation requested')
 
-    def create(self,owner,portfolio,key,*,snapshot_id=None,scheduled_at=None,schedule_id=None,expected_source_hash=None,expected_plan_hash=None,expected_module_version=None,now=None):
+    def create(self,owner,portfolio,key,*,snapshot_id=None,scheduled_at=None,schedule_id=None,expected_source_hash=None,expected_plan_hash=None,expected_module_version=None,research_setup=None,now=None):
         now=utc(now or now_utc())
         if portfolio not in {'indmoney_us','india'} or not isinstance(key,str) or not 8<=len(key)<=96:raise ValidationException('Known portfolio and scoped request key required')
         scheduled=scheduled_at is not None
@@ -51,10 +53,18 @@ class Workflows:
         if source.get('owner_id')!=owner:raise WorkflowDenied('Source owner mismatch')
         source_hash,plan_hash=digest(source),digest(plan)
         if (expected_source_hash is None)!=(expected_plan_hash is None) or expected_source_hash is not None and (expected_source_hash!=source_hash or expected_plan_hash!=plan_hash):raise ConflictException('Reviewed source or plan changed; reload setup before starting')
+        setup=None;setup_hash=None
+        if research_setup is not None:
+            if expected_source_hash is None or expected_plan_hash is None or expected_module_version is None:raise WorkflowDenied('Reviewed source, plan and module version required for shortlist')
+            from .synthetic_composition import SyntheticAnalysis
+            from .shortlist import prepare
+            if type(getattr(self.runtime.source,'__self__',None)) is not SyntheticAnalysis or scheduled:raise WorkflowDenied('Shortlist acceptance requires explicit manual synthetic composition')
+            setup,setup_hash=prepare(owner,portfolio,source,research_setup)
         calendar=deepcopy(self.runtime.calendar(portfolio,due,now));ZoneInfo(calendar['timezone'])
         if calendar.get('missed_policy')!='skip' or not 0<=calendar['max_lateness_seconds']<=3600 or not calendar.get('calendar_version'):raise ValidationException('Bounded calendar/missed-run policy required')
         request_key=('tick:'+digest([str(schedule_id),due.isoformat()])) if scheduled else key
         intent=digest([portfolio,source_hash,plan_hash,snapshot_id,scheduled,due.isoformat() if scheduled else None,calendar])
+        if setup is not None:intent=digest([intent,setup_hash])
         prior=self.db.scalar(select(Workflow).where(Workflow.user_id==owner,Workflow.request_key==request_key))
         if prior:
             if prior.orchestration_kind!='analysis_v1' or prior.execution_json['intent_hash']!=intent:raise ConflictException('Request key already binds different immutable inputs')
@@ -63,6 +73,7 @@ class Workflows:
         if active>=2:raise ConflictException('At most two active analysis workflows per owner')
         seq=self.db.scalar(select(func.max(Workflow.sequence)).where(Workflow.user_id==owner,Workflow.portfolio==portfolio)) or 0
         row=Workflow(user_id=owner,portfolio=portfolio,sequence=seq+1,label='Server analysis '+str(seq+1),status='queued',current_stage='sync',module_id=identity.module_id,module_version=identity.version,module_cancel_requested=False,orchestration_kind='analysis_v1',request_key=request_key,control_version=0,execution_json={'source':source,'source_hash':source_hash,'plan':plan,'plan_hash':plan_hash,'intent_hash':intent,'snapshot_id':snapshot_id,'scheduled':scheduled,'scheduled_at':due.isoformat() if scheduled else None,'calendar':calendar,'approvals_valid':False,'orders_authorized':False})
+        if setup is not None:row.execution_json={**row.execution_json,'research_setup':setup,'research_setup_hash':setup_hash}
         self.db.add(row);self.db.flush()
         for i,name in enumerate(STAGES):self.db.add(Stage(workflow_id=row.id,stage=name,status='queued' if i==0 else 'pending',attempt_count=0,checkpoint_json={'dependencies':list(STAGES[:i]),'attempts':[]}))
         self.db.flush()

@@ -37,6 +37,8 @@ def project(receipt,*,workflow,source):
     complete=all(row['source_price'] is not None for row in rows)
     def total(key):return str(sum((Decimal(row[key]) for row in rows),Decimal(0))) if complete else None
     version=digest({'source':receipt['source_hash'],'plan':receipt['plan_hash'],'result':receipt['actionables_result_hash']})
+    from .shortlist import verified
+    setup=verified(workflow)
     binding=source.get('connection')
     connection={'mode':binding['mode'],'version':binding['version'],'account_label':'***'+binding['account'][-4:]} if binding else None
     return {'schema_version':1,'owner_id':workflow.user_id,'workflow_id':workflow.id,'portfolio':workflow.portfolio,
@@ -48,6 +50,6 @@ def project(receipt,*,workflow,source):
         'before_source_value':total('before_source_value'),'after_source_value':total('after_source_value'),
         'cash_before':None,'cash_after':None,'estimated_charges':None,'tax_estimate':None,
         'valuation_notice':'Frozen source indications only; no current quote, funds, charges or tax inference',
-        'coverage':{'recommendations':len(rows),'candidate_universe_accepted':False,'notice':'Holdings-only analysis; candidate drafts are excluded. Counts are not investment success.'},
+        'coverage':{'recommendations':len(rows),'candidate_universe_accepted':setup is not None,'accepted_candidates':len(setup['accepted_instruments']) if setup else 0,'raw_rows':setup['raw_rows'] if setup else 0,'analysed_candidates':len(setup['accepted_instruments']) if setup else 0,'rejected_candidates':0,'deferred_candidates':0,'notice':'Verified synthetic shortlist coverage; discovery suppressed; all six stages completed. Counts are not investment success.' if setup else 'Holdings-only analysis; candidate drafts are excluded. Counts are not investment success.'},
         'amendment':{'available':False,'reason':'No validated revised-plan/funds contract is installed; changing quantities or selection is blocked'},
         'review_available':workflow.portfolio=='india' and any(row['side']!='none' for row in rows)}

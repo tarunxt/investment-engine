@@ -30,7 +30,7 @@ def validate_source(source, *, owner_id,module_id,now):
 
 
 def validate_recommendations(document, *, source, owner_id, module_id, now,
-                             allowed_instruments, max_allocation=Decimal('.25')):
+                             allowed_instruments, max_allocation=Decimal('.25'), required_instruments=frozenset()):
     """All policy/source inputs are trusted server values, never model fields."""
     if not isinstance(document, dict) or set(document) != {'schema_version','currency','recommendations','provenance'} or type(document['schema_version']) is not int or document['schema_version'] != 1:
         raise BoundaryDenied('RECOMMENDATION_SCHEMA')
@@ -72,5 +72,6 @@ def validate_recommendations(document, *, source, owner_id, module_id, now,
         raise BoundaryDenied('TOTAL_ALLOCATION_LIMIT')
     if not {k for k,v in holdings.items() if number(v)>0}<=seen:
         raise BoundaryDenied('HOLDINGS_COVERAGE_REQUIRED')
+    if not set(required_instruments)<=seen:raise BoundaryDenied('CANDIDATE_COVERAGE_REQUIRED')
     return {'schema_version':1,'valid':True,'advisory_only':True,'orders_authorized':False,
             'source_hash':source['content_hash'],'output_hash':output_hash,'provenance':dict(expected)}
