@@ -1,0 +1,9 @@
+{
+    admin off
+}
+uat2.cred-x.in {
+    basic_auth {
+        {$UAT2_BARRIER_USER} {$UAT2_BARRIER_HASH}
+    }
+    reverse_proxy 127.0.0.1:3002
+}

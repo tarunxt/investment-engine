@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.uat2 import require_password_auth_allowed, require_uat2_owner
 from app.core.logging import get_logger
 from app.core.recovery import recovery_mode
 from app.core.security import AuthUtils, JWTUtils, PasswordUtils
@@ -57,9 +58,14 @@ async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(
     client_id = await google_signin_client_id(db)
     email = await run_in_threadpool(verify_google_identity, request.credential, client_id)
     user = await resolve_google_user(db, email)
+    from app.core.uat2 import uat2_mode
+    if uat2_mode():
+        from app.uat2.fixtures import seed_portfolio
+        await seed_portfolio(db, user.id)
     user.last_login = datetime.utcnow()
     db.add(ActivityLog(user_id=user.id, action="login", details="User logged in with Google"))
     await db.commit()
+    require_uat2_owner(user.email)
     tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
     return LoginResponse(
         access_token=tokens["access_token"], refresh_token=tokens["refresh_token"],
@@ -69,6 +75,7 @@ async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: UserRegisterRequest, db: AsyncSession = Depends(get_async_db)):
+    require_password_auth_allowed()
     result = await db.execute(
         select(User).where((User.email == request.email) | (User.username == request.username))
     )
@@ -114,6 +121,7 @@ async def register(request: UserRegisterRequest, db: AsyncSession = Depends(get_
 
 @router.post("/login", response_model=LoginResponse)
 async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_async_db)):
+    require_password_auth_allowed()
     if request.email:
         result = await db.execute(
             select(User).where(User.email == request.email).options(selectinload(User.profile))
@@ -135,6 +143,7 @@ async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_async_
     db.add(ActivityLog(user_id=user.id, action="login", details="User logged in"))
     await db.commit()
 
+    require_uat2_owner(user.email)
     tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
     return LoginResponse(
         access_token=tokens["access_token"],
@@ -162,6 +171,7 @@ async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
+    require_uat2_owner(user.email)
     tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
     return LoginResponse(
         access_token=tokens["access_token"],
@@ -203,6 +213,7 @@ async def get_current_user_info(
 async def forgot_password(
     request: ForgotPasswordRequest, db: AsyncSession = Depends(get_async_db)
 ):
+    require_password_auth_allowed()
     result = await db.execute(select(User).where(User.email == request.email))
     user = result.scalar_one_or_none()
     if user:
@@ -219,6 +230,7 @@ async def forgot_password(
 async def reset_password(
     request: ResetPasswordRequest, db: AsyncSession = Depends(get_async_db)
 ):
+    require_password_auth_allowed()
     if request.new_password != request.confirm_password:
         raise ValidationException("Passwords do not match")
 
@@ -249,6 +261,7 @@ async def update_password(
 ):
     if not PasswordUtils.verify_password(request.current_password, current_user.password_hash):
         raise ValidationException("Current password is incorrect")
+    require_password_auth_allowed()
     if request.new_password != request.confirm_password:
         raise ValidationException("Passwords do not match")
     if request.new_password == request.current_password:

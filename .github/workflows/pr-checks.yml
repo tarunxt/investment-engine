@@ -20,6 +20,12 @@ jobs:
       - name: Compile backend Python sources
         run: python3 -m compileall -q backend/app
 
+      - name: Validate UAT2 lifecycle and configuration contracts
+        run: |
+          bash -n deploy/uat2/uat2ctl deploy/uat2/build.sh deploy/uat2/native/build.sh deploy/uat2/native/prepare-host.sh deploy/uat2/native/network-apply.sh
+          python3 -m unittest discover -s deploy/uat2 -p 'test_*.py' -v
+          python3 -m unittest discover -s deploy/uat2/native -p 'test_*.py' -v
+
   backend-performance-regressions:
     name: Backend dashboard performance contracts
     runs-on: ubuntu-latest
@@ -564,3 +570,68 @@ jobs:
             echo
             echo "Webpack remains mandatory for production artifacts. A successful Turbopack benchmark is compatibility evidence only."
           } >>"${GITHUB_STEP_SUMMARY}"
+
+  uat2-native-package:
+    name: UAT2 native isolated contracts and Linux package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install isolated test dependencies
+        run: python -m pip install -r backend/requirements.txt pytest-asyncio aiosqlite
+      - name: Test UAT2 native configuration and application contracts
+        env:
+          PYTHONPATH: backend
+          DATABASE_URL: postgresql+psycopg2://synthetic_test:unused@127.0.0.1:1/uat2_unit_only
+          REDIS_URL: redis://127.0.0.1:1/15
+          ENVIRONMENT: test
+          AUTH_DISABLED: 'false'
+        run: |
+          python -m unittest discover -s deploy/uat2/native -p 'test_*.py' -v
+          pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py
+      - name: Build and validate native release without credentials or deployment
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: '1'
+        run: |
+          deploy/uat2/native/build.sh "$RUNNER_TEMP/uat2-native-package"
+          python deploy/uat2/native/ctl.py inspect-bundle "$RUNNER_TEMP/uat2-native-package"
+      - name: Audit complete native bundle before retention
+        run: python deploy/uat2/native/package.py audit "$RUNNER_TEMP/uat2-native-package"
+      - name: Retain complete deployable native bundle
+        id: native-bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: uat2-native-bundle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/uat2-native-package
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Download retained bundle for integrity round trip
+        uses: actions/download-artifact@v8
+        with:
+          name: uat2-native-bundle-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/uat2-native-roundtrip
+      - name: Verify retained content and offline dependency installation
+        run: |
+          python deploy/uat2/native/package.py offline-check "$RUNNER_TEMP/uat2-native-roundtrip" | tee "$RUNNER_TEMP/uat2-native-retention-verification.json"
+      - name: Retain verification receipt
+        uses: actions/upload-artifact@v7
+        with:
+          name: uat2-native-verification-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/uat2-native-retention-verification.json
+          retention-days: 1
+          if-no-files-found: error

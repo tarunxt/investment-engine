@@ -1,8 +1,10 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.hash import argon2
 from app.core.config import settings
+from app.core.uat2 import uat2_mode, require_uat2_owner
 
 # Password hashing
 pwd_context = argon2.using(
@@ -16,6 +18,22 @@ SECRET_KEY = "your-secret-key-change-in-production"  # TODO: Will read from env
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+
+def signing_key():
+    if not uat2_mode():
+        return SECRET_KEY
+    value = os.getenv("UAT2_JWT_SIGNING_KEY", "")
+    if len(value) < 32 or value == SECRET_KEY:
+        raise RuntimeError("Independent UAT2 signing key is required")
+    return value
+
+
+def token_claims(payload):
+    if uat2_mode():
+        require_uat2_owner(payload.get("email"))
+        payload.update(iss="https://uat2.cred-x.in", aud="credx-uat2")
+    return payload
 
 
 class PasswordUtils:
@@ -95,7 +113,7 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(token_claims(token_data), signing_key(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
@@ -120,7 +138,7 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(token_claims(token_data), signing_key(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
@@ -135,7 +153,12 @@ class JWTUtils:
             Token payload if valid, None otherwise
         """
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if uat2_mode():
+                payload = jwt.decode(token, signing_key(), algorithms=[ALGORITHM],
+                                     issuer="https://uat2.cred-x.in", audience="credx-uat2")
+                require_uat2_owner(payload.get("email"))
+            else:
+                payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             return payload
         except JWTError:
             return None
@@ -154,7 +177,7 @@ class JWTUtils:
         try:
             payload = jwt.decode(
                 token,
-                key=SECRET_KEY,
+                key=signing_key(),
                 options={"verify_signature": False}
             )
             return payload

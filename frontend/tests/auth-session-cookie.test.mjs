@@ -67,3 +67,21 @@ test("cookie headers expose secure and chunked Auth.js cookie names to server ro
     ],
   );
 });
+
+test("UAT2 uses an independent host-only cookie family and requires runtime signing configuration", async () => {
+  const { uat2SessionCookieName, requireUat2AuthSecret } = await import("../lib/authSessionCookie.ts");
+  const prior = process.env.CREDX_UAT2;
+  try {
+    process.env.CREDX_UAT2 = "1";
+    assert.equal(uat2SessionCookieName(), "__Host-credx-uat2.session-token");
+    assert.throws(() => requireUat2AuthSecret(undefined));
+    assert.throws(() => requireUat2AuthSecret("short"));
+    assert.equal(requireUat2AuthSecret("unit-test-only-signing-material-never-deployed"), "unit-test-only-signing-material-never-deployed");
+    process.env.CREDX_UAT2 = "0";
+    assert.equal(uat2SessionCookieName(), undefined);
+    assert.equal(requireUat2AuthSecret(undefined), undefined);
+  } finally {
+    if (prior === undefined) delete process.env.CREDX_UAT2;
+    else process.env.CREDX_UAT2 = prior;
+  }
+});

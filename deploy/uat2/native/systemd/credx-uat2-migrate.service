@@ -1,0 +1,46 @@
+[Unit]
+Description=CredX UAT2 schema migration
+Requires=credx-uat2-postgres.service credx-uat2-redis.service credx-uat2-certs.service
+After=network-online.target credx-uat2-postgres.service credx-uat2-redis.service credx-uat2-certs.service
+Requires=credx-uat2-network.service
+After=credx-uat2-network.service
+[Service]
+Type=oneshot
+User=credx-uat2-app
+Group=credx-uat2-app
+WorkingDirectory=/opt/credx-uat2/current/backend
+EnvironmentFile=/etc/credx-uat2/backend.env
+EnvironmentFile=/etc/credx-uat2/release.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/credx-uat2/current/backend
+ExecStartPre=/usr/bin/python3 /opt/credx-uat2/current/deploy/uat2/native/runtime-preflight.py
+ExecStart=/opt/credx-uat2/current/.venv/bin/alembic upgrade head
+MemoryMax=1536M
+TasksMax=128
+ReadWritePaths=/var/lib/credx-uat2/artifacts
+Restart=no
+RestartSec=3
+TimeoutStartSec=120
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitNOFILE=4096
+LogNamespace=credx-uat2
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+IPAddressDeny=any
+IPAddressAllow=localhost
+[Install]
+WantedBy=multi-user.target

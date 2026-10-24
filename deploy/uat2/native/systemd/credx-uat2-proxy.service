@@ -1,0 +1,39 @@
+[Unit]
+Description=CredX UAT2 proxy
+After=network-online.target
+[Service]
+Type=simple
+User=credx-uat2-proxy
+Group=credx-uat2-proxy
+ExecStart=/usr/bin/caddy run --config /etc/credx-uat2/Caddyfile --adapter caddyfile
+MemoryMax=256M
+TasksMax=128
+EnvironmentFile=/etc/credx-uat2/barrier.env
+Environment=XDG_DATA_HOME=/var/lib/credx-uat2/proxy
+Environment=XDG_CONFIG_HOME=/var/lib/credx-uat2/proxy
+ReadWritePaths=/var/lib/credx-uat2/proxy
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitNOFILE=4096
+LogNamespace=credx-uat2
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+[Install]
+WantedBy=multi-user.target

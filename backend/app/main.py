@@ -119,6 +119,9 @@ cors_allowed_origins = _build_cors_allowed_origins()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.uat2 import uat2_mode
+    if uat2_mode():
+        raise RuntimeError("UAT2 must use the restricted app.uat2.main:app entrypoint")
     recovery_mode()  # Refuse malformed recovery configuration before startup work.
     logger.info("Starting AI Investment Platform Backend")
     logger.info("Database: %s", settings.database_url.split("@")[-1])

@@ -1,0 +1,50 @@
+[Unit]
+Description=CredX UAT2 frontend
+Requires=credx-uat2-postgres.service credx-uat2-redis.service credx-uat2-certs.service
+After=network-online.target credx-uat2-postgres.service credx-uat2-redis.service credx-uat2-certs.service
+Requires=credx-uat2-network.service
+After=credx-uat2-network.service
+[Service]
+Type=simple
+User=credx-uat2-web
+Group=credx-uat2-web
+WorkingDirectory=/opt/credx-uat2/current/frontend-runtime
+EnvironmentFile=/etc/credx-uat2/frontend.env
+EnvironmentFile=/etc/credx-uat2/release.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/usr/bin/python3 /opt/credx-uat2/current/deploy/uat2/native/runtime-preflight.py
+ExecStart=/usr/bin/node /opt/credx-uat2/current/frontend-runtime/server.js
+MemoryMax=1536M
+TasksMax=128
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3002
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+CacheDirectory=credx-uat2-next
+ReadWritePaths=/var/cache/credx-uat2-next
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_UNIX
+LimitNOFILE=4096
+LogNamespace=credx-uat2
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+IPAddressDeny=any
+IPAddressAllow=localhost
+[Install]
+WantedBy=multi-user.target
