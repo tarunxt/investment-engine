@@ -19,7 +19,7 @@ function OwnedGettingStarted({owner}:{owner:string}){
  const selected=manifest?.owner_id===Number(owner)?manifest.modules.filter(m=>m.selection.enabled):[];
  const chosen=selected.find(m=>m.module_id===choice)??selected[0];
  function navigate(next:OnboardingStep){try{localStorage.setItem(progressKey(owner),progressValue(owner,next));window.dispatchEvent(new Event('credx-onboarding'));}catch{setStorageError(true);}}
- const destination=chosen&&(process.env.NEXT_PUBLIC_UAT2==='true'&&['research','plan'].includes(step)?'/console/uat2':onboardingDestination(chosen.module_id,step));
+ const destination=chosen&&onboardingDestination(chosen.module_id,step);
  return <section className="mx-auto max-w-3xl space-y-6"><header><h1 className="text-3xl font-semibold">Get started at your pace</h1><p className="mt-2">Set up one selected module first. Your other selections, accounts and existing history stay available.</p></header>
  <p className="rounded-xl border p-4">Setup never starts research or submits orders. Research needs a deliberate start after reviewing inputs and usage; a completed plan still needs separate exact order review.</p>
  <nav aria-label="Setup steps" className="flex flex-wrap gap-2">{onboardingSteps.map(value=><button key={value} type="button" disabled={!loaded} aria-current={step===value?'step':undefined} onClick={()=>navigate(value)} className="min-h-11 rounded-lg border px-3 py-2 aria-[current=step]:bg-muted">{labels[value]}</button>)}</nav>

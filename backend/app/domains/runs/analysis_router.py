@@ -55,20 +55,34 @@ async def analysis_config(user=Depends(get_current_user),runtime=Depends(optiona
     return {'enabled':runtime is not None,'analysis_only':True,'orders_authorized':False}
 
 @router.get('')
-async def list_analysis_workflows(selected_only:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['india','indmoney_us']|None=None,include_readiness:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
     # Dashboard requests exclude disabled/unavailable modules before the SQL read.
     # Core historical activity keeps its existing explicit all-owned semantics.
     portfolios=None
     if selected_only:
         from app.domains.modules.visibility import visible_module_ids
         selected=set(await visible_module_ids(db,user.id))
-        portfolios=[portfolio for module,portfolio in [('zerodha_rebalance','india'),('indmoney_us','indmoney_us')] if module in selected]
+        portfolios=[market for module,market in [('zerodha_rebalance','india'),('indmoney_us','indmoney_us')] if module in selected]
+        if portfolio is not None:portfolios=[value for value in portfolios if value==portfolio]
         if not portfolios:return {'owner_id':user.id,'items':[]}
     def read(s):
         query=select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id==user.id,AutoRebalanceWorkflow.orchestration_kind=='analysis_v1')
         if portfolios is not None:query=query.where(AutoRebalanceWorkflow.portfolio.in_(portfolios))
+        elif portfolio is not None:query=query.where(AutoRebalanceWorkflow.portfolio==portfolio)
         rows=s.scalars(query.order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all()
-        return [Workflows(s,runtime).detail(user.id,row.id) for row in rows]
+        service=Workflows(s,runtime)
+        items=[]
+        for row in rows:
+            item=service.detail(user.id,row.id)
+            if include_readiness:
+                current=True
+                try:service.validate_current(row)
+                except WorkflowDenied:current=False
+                item['input_readiness']={'current':current,'version':item['version'],
+                    'source_hash':item['inputs']['source_hash'],'plan_hash':item['inputs']['plan_hash'],
+                    'checked_at':datetime.now().astimezone().isoformat(),'orders_authorized':False}
+            items.append(item)
+        return items
     return {'owner_id':user.id,'items':await db.run_sync(read)}
 
 @router.get('/{workflow_id}')

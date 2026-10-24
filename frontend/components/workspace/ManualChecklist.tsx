@@ -1,0 +1,10 @@
+'use client';
+import {useCallback,useState,useSyncExternalStore} from 'react';
+import {checklistKey,checklistState,manualSteps,type ChecklistBinding,type ManualStep} from '@/lib/manualChecklist';
+const subscribe=(notify:()=>void)=>{window.addEventListener('storage',notify);window.addEventListener('credx-manual-checklist',notify);return()=>{window.removeEventListener('storage',notify);window.removeEventListener('credx-manual-checklist',notify);};};
+const labels={review_plan:'I reviewed this exact plan and source version',check_account:'I checked the intended account and current funds separately',record_outcome:'I recorded my manual outcome separately'};
+export function ManualChecklist({binding,current}:{binding:ChecklistBinding;current:boolean}){
+ const key=checklistKey(binding),[error,setError]=useState(false);const snapshot=useCallback(()=>{try{return localStorage.getItem(key);}catch{return null;}},[key]);const raw=useSyncExternalStore(subscribe,snapshot,()=>null);const state=checklistState(raw,binding);
+ function update(step:ManualStep,value:boolean){if(!current)return;try{localStorage.setItem(key,JSON.stringify({schema:1,binding,steps:{...state,[step]:value}}));window.dispatchEvent(new Event('credx-manual-checklist'));setError(false);}catch{setError(true);}}
+ return <fieldset className="mt-4 space-y-3 rounded border p-4"><legend>Manual execution checklist · self-reported</legend><p>This saves checklist progress in this browser for this owner and exact source/plan. It sends no order and is not a broker-verified fill, approval or reconciliation receipt.</p>{!current&&<p role="status">Historical or unverified inputs: retained checklist is read-only. Review a current accepted source and plan before using a new checklist.</p>}{manualSteps.map(step=><label key={step} className="flex min-h-11 items-start gap-3"><input className="mt-1 size-5" type="checkbox" checked={state[step]} disabled={!current} onChange={event=>update(step,event.target.checked)}/><span>{labels[step]}</span></label>)}{error&&<p role="alert">Checklist could not be saved. No broker action was requested.</p>}</fieldset>;
+}

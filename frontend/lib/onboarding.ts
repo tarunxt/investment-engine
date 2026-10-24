@@ -9,7 +9,7 @@ export function progressValue(owner:string,step:OnboardingStep){return JSON.stri
 export function onboardingDestination(module:string,step:OnboardingStep){
  if(step==='modules')return '/console/profile/preferences#modules';
  if(step==='connection')return '/console/profile/connections';
- if(module==='indmoney_us')return '/console/indmoney-us'+(step==='snapshot'?'':step==='research'?'/rebalance':'/final-actionables');
- if(module==='zerodha_rebalance')return step==='snapshot'?'/console/profile/connections':step==='research'?'/console/zerodha/rebalance':'/console/zerodha/final-actionables';
+ if(module==='indmoney_us')return '/console/indmoney-us'+(step==='snapshot'?'/portfolio':step==='research'?'/research':'/plans');
+ if(module==='zerodha_rebalance')return step==='snapshot'?'/console/zerodha/portfolio':step==='research'?'/console/zerodha/research':'/console/zerodha/plans';
  return null;
 }

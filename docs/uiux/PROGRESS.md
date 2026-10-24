@@ -152,3 +152,45 @@ harness compilation failed due to an injected JSX binding collision, then passed
 with proper module imports. Earlier build successes bind to earlier source;
 latest candidate still requires its own build/browser receipt. These corrections
 do not change any backend grant, owner filter, provider or order effect.
+
+UX-04 browser qualification at facbec1b8869ce5ca00a11ea62a4a08936fc4776:
+actual local API returned a retained research result; an initial test incorrectly
+assumed this fixture would have unavailable activity and timed out. That failed
+receipt is preserved privately. Explicitly injected 503 and UI-only synthetic
+summary/truncation fixtures then passed failure/next-task, native currency,
+missing-cash, off-Bullpen, read-only refresh and 390px checks. Actual local API
+coverage and intercepted UI fixtures are distinct in the private receipt. Desktop
+and settled mobile captures were inspected. Bounds confirm 310px cards fit inside
+the 390px viewport; an apparent clipped rendering was an image MIME display issue,
+not altered screenshot bytes. No hosted/PG/Redis or all-state acceptance claim.
+
+## UX-05: canonical module workspaces; browser qualification pending
+
+Both modules now have a shared persistent header and Overview, Portfolio,
+Research, Plans and Activity tabs. Existing holdings/import screens moved to
+explicit Portfolio paths with source/history retained. Additional detailed
+research views and result histories remain accessible. The old global and module
+rebalance launch entry points now navigate to the canonical module research UI;
+durable global hash links first verify owner/module access and preserve run
+context. No alternate mount starts another workflow. Read lists can explicitly
+filter the selected portfolio before SQL. The existing server analysis component
+binds its module start and validates owner/portfolio on reads.
+
+US headers say Last import / Manual execution. Its optional resumable checklist
+stores only owner/run/source/plan-scoped self-report and never a broker fill or
+consent. Historical/unknown input bindings remain read-only. Existing current
+input validation is exposed as an optional read-only list projection containing
+version/hashes/checked time and orders_authorized=false; it creates no new adapter
+or authorization. Actual synthetic SQL tests verify frozen work/status and outbox
+counts remain unchanged through current and stale-source readiness reads.
+
+Independent review found stale context surviving tab transitions and older
+completed research hiding newer work. Pathname-scoped lifetime replacement,
+newest-run priority, settled successful context and matching current server
+readiness now gate checklist use. Re-review found no further concrete issue.
+35 frontend and 82 backend affected checks pass; TypeScript and targeted lint
+pass. Lint initially rejected a local variable named module; it was renamed.
+Several commands initially used incorrect frontend-relative paths and performed
+no intended writes; corrected commands/checks are retained. Exact-source build,
+browser route/Back/account-switch and visual qualification follow separately.
+No publication, hosted change, provider effect, actual order or deletion occurred.

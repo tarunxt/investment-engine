@@ -7,7 +7,7 @@
     "frontend": 25,
     "http": 318,
     "lifecycle": 9,
-    "page": 72,
+    "page": 80,
     "scheduler": 20,
     "websocket": 5,
     "worker": 53
@@ -10832,6 +10832,70 @@
     {
       "calls": [
         "Depends",
+        "HTTPException",
+        "composition.acquire",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "getattr",
+        "router.post",
+        "type"
+      ],
+      "capability": "acquire_synthetic_source",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/synthetic-source')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/synthetic-source",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:100"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Workflows",
+        "Workflows(s, runtime).control",
+        "Workflows(s, runtime).detail",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "router.post"
+      ],
+      "capability": "control_analysis_workflow",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/{workflow_id}/controls')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/{workflow_id}/controls",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:112"
+    },
+    {
+      "calls": [
+        "Depends",
         "router.get"
       ],
       "capability": "analysis_config",
@@ -10856,17 +10920,26 @@
     {
       "calls": [
         "AutoRebalanceWorkflow.id.desc",
+        "AutoRebalanceWorkflow.portfolio.in_",
         "Depends",
         "Workflows",
-        "Workflows(s, runtime).detail",
+        "datetime.now",
+        "datetime.now().astimezone",
+        "datetime.now().astimezone().isoformat",
         "db.run_sync",
+        "items.append",
+        "query.order_by",
+        "query.order_by(AutoRebalanceWorkflow.id.desc()).limit",
+        "query.where",
         "router.get",
         "s.scalars",
-        "s.scalars(select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id == user.id, AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1').order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all",
+        "s.scalars(query.order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all",
         "select",
         "select(AutoRebalanceWorkflow).where",
-        "select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id == user.id, AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1').order_by",
-        "select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id == user.id, AutoRebalanceWorkflow.orchestration_kind == 'analysis_v1').order_by(AutoRebalanceWorkflow.id.desc()).limit"
+        "service.detail",
+        "service.validate_current",
+        "set",
+        "visible_module_ids"
       ],
       "capability": "list_analysis_workflows",
       "classification": "owner-private",
@@ -10914,7 +10987,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:65"
+      "source": "backend/app/domains/runs/analysis_router.py:89"
     },
     {
       "calls": [
@@ -10947,71 +11020,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:69"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
-        "composition.acquire",
-        "db.commit",
-        "db.rollback",
-        "db.run_sync",
-        "getattr",
-        "router.post",
-        "type"
-      ],
-      "capability": "acquire_synthetic_source",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "runs",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(analysis_runtime)",
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "router.post('/synthetic-source')"
-      ],
-      "owner_source": [
-        "user.id"
-      ],
-      "registration": "mounted",
-      "route": "/runs/analysis-workflows/synthetic-source",
-      "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:76"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
-        "Workflows",
-        "Workflows(s, runtime).control",
-        "Workflows(s, runtime).detail",
-        "db.commit",
-        "db.rollback",
-        "db.run_sync",
-        "router.post"
-      ],
-      "capability": "control_analysis_workflow",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "runs",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(analysis_runtime)",
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "router.post('/{workflow_id}/controls')"
-      ],
-      "owner_source": [
-        "user.id"
-      ],
-      "registration": "mounted",
-      "route": "/runs/analysis-workflows/{workflow_id}/controls",
-      "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:88"
+      "source": "backend/app/domains/runs/analysis_router.py:93"
     },
     {
       "calls": [
@@ -16127,6 +16136,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/indmoney-us/activity",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/activity",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/activity/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/indmoney-us/events",
       "classification": "owner-private",
       "kind": "page",
@@ -16184,6 +16212,44 @@
     },
     {
       "calls": [],
+      "capability": "/console/indmoney-us/plans",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/plans",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/plans/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/indmoney-us/portfolio",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/portfolio",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/portfolio/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/indmoney-us/rebalance",
       "classification": "owner-private",
       "kind": "page",
@@ -16200,6 +16266,25 @@
       "route": "/console/indmoney-us/rebalance",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/indmoney-us/rebalance/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/indmoney-us/research",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/research",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/research/page.tsx:1"
     },
     {
       "calls": [],
@@ -16678,6 +16763,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/zerodha/activity",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/activity",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/activity/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/zerodha/events",
       "classification": "owner-private",
       "kind": "page",
@@ -16735,6 +16839,44 @@
     },
     {
       "calls": [],
+      "capability": "/console/zerodha/plans",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/plans",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/plans/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/zerodha/portfolio",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/portfolio",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/portfolio/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/zerodha/rebalance",
       "classification": "owner-private",
       "kind": "page",
@@ -16751,6 +16893,25 @@
       "route": "/console/zerodha/rebalance",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/zerodha/rebalance/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/zerodha/research",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/research",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/research/page.tsx:1"
     },
     {
       "calls": [],
@@ -17279,7 +17440,7 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/analysis_router.py": "3c185813e59cc924a06646d411c914318a1168713c2c92d1965117f3aaa6c631",
+    "backend/app/domains/runs/analysis_router.py": "9479a2d4d6c2086a45d1fe0a44b366e414a89e690bb45dd7f7f1a6a73ad63090",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
     "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
@@ -17421,7 +17582,7 @@
     "frontend/app/console/apis/page.tsx": "43b77c7bfb2893a9375ab5364715f6dfd08112ca032fdb4e644d33ba9d0916a4",
     "frontend/app/console/auto-rebalance-runs/[portfolio]/[sequence]/page.tsx": "f5b9d76b220d2d43eefdc338b6f2aebd1f80a3ba791ebeee00541f41a80d8ff8",
     "frontend/app/console/auto-rebalance-runs/[portfolio]/page.tsx": "538bab4699132cabd73168e3a64f354b7302749a20d208d1718ff5563d60eb9f",
-    "frontend/app/console/automated-rebalance/page.tsx": "06561bf8c7f9faf2b4f500887bffb15b439855e6b34541c95bdd6be3d78e772d",
+    "frontend/app/console/automated-rebalance/page.tsx": "17dc9277546885f92b9b6df2a5356b63c0fd1ce68e291f493a11f3f04b55295f",
     "frontend/app/console/bullpen-ai-auto-live/page.tsx": "efdc176476975fba031e7a72e879b453f6ea38ac955ba076c1d1a2922b9f1b2d",
     "frontend/app/console/bullpen-ai/008history/page.tsx": "e7a562e9f917edffd1cf742fb1d3a4a83a6d65ca9a19ea48a5a2bb8e3a8977f3",
     "frontend/app/console/bullpen-ai/analyse-events/[tradeId]/page.tsx": "c8d6e00826fe033fb182019ea0e553d571a278fca68e23dd66f612b75ed685c7",
@@ -17445,10 +17606,14 @@
     "frontend/app/console/google-sheets/page.tsx": "47ccecf7cbf94700513b444c5927a95893404eeb00cfb730e34909ce807f2e43",
     "frontend/app/console/help/page.tsx": "019371f92e1813d1153277a042bf4d48a12a18140a8d1c733b3c5c845ce3d86b",
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
+    "frontend/app/console/indmoney-us/activity/page.tsx": "6d5978ee151e393363e223afad13c00d47676b87834c56a344b5169cae443550",
     "frontend/app/console/indmoney-us/events/page.tsx": "797f251250268ac1d342fd7903085fb549319b3ae547068498fa87743218bde4",
     "frontend/app/console/indmoney-us/final-actionables/page.tsx": "a36427bc53a0e6a2bc77b3cf7f72fa156eff738e0ba20d55890e7610e96c648c",
-    "frontend/app/console/indmoney-us/page.tsx": "859c516fe7005099e1022570b3fa30bf81e261bc21aa8db5db4d2ffff62e664a",
-    "frontend/app/console/indmoney-us/rebalance/page.tsx": "b4093a93673fa69a53ce3775fcc8684fd96e13d9da6948414d9a20521f89c5ac",
+    "frontend/app/console/indmoney-us/page.tsx": "10300aa829ed847027328bfad4ee32734460382238c015daaa467bc8e8927995",
+    "frontend/app/console/indmoney-us/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
+    "frontend/app/console/indmoney-us/portfolio/page.tsx": "a93366c77c55c940cdaf4844923f59ac21891fd54fcc0e6753963f05a73a8211",
+    "frontend/app/console/indmoney-us/rebalance/page.tsx": "911d6a66bcc7e5344584ae975b55f3b666f6a417353a62c65dab91730fd0c8cb",
+    "frontend/app/console/indmoney-us/research/page.tsx": "f0c7e92f5923b449edb9807629b1a871abd45f85fff03a315a65f2973d00aa8b",
     "frontend/app/console/indmoney-us/swing-trade/page.tsx": "87ba0b9e6a61c6e6f39cbc178a642d9902c1fb87a8d64921b763ac17f5e77078",
     "frontend/app/console/indmoney-us/threats/page.tsx": "9abf78fb8902f397ad16693608f559de62e216d7585c7f6cf65aed04c4efa020",
     "frontend/app/console/jobs/[id]/page.tsx": "b77a6915c1d3a8b34c68d794e7ca190d6cc1ca763d9b84c935136c725ef04a3e",
@@ -17474,10 +17639,14 @@
     "frontend/app/console/trading-bots/page.tsx": "dabeb1735a79f799cdab8ad8d17cd4fa4d5eabe514b69d7b560997672123410b",
     "frontend/app/console/uat2/page.tsx": "275e49f5394cb07234a68791d5afb540d6317c610775d60653820d709b97e37b",
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
+    "frontend/app/console/zerodha/activity/page.tsx": "6d5978ee151e393363e223afad13c00d47676b87834c56a344b5169cae443550",
     "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
     "frontend/app/console/zerodha/final-actionables/page.tsx": "054a42b3efcfd5b740e28fab42407c8c2ffb7f5c3dff18867acd0f7adc206e01",
-    "frontend/app/console/zerodha/page.tsx": "850dcc33741c316b53922f13df71c93738768766cac875072e018301db1f4112",
-    "frontend/app/console/zerodha/rebalance/page.tsx": "54ef0bf3714f0dc5d1a1aceae9e937fce06c4b726a20588aefb0d945b748b03d",
+    "frontend/app/console/zerodha/page.tsx": "10300aa829ed847027328bfad4ee32734460382238c015daaa467bc8e8927995",
+    "frontend/app/console/zerodha/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
+    "frontend/app/console/zerodha/portfolio/page.tsx": "9f8fd337e4211cdcb25801922a46db146b7d0758027dc687cb0a67cce4c62f6e",
+    "frontend/app/console/zerodha/rebalance/page.tsx": "71b1341f864e17d0ce9b595865562818522968594e7e96bc5feac62ff0818338",
+    "frontend/app/console/zerodha/research/page.tsx": "fe58f73d924a1208a2095c7efad43b3d2b021680fc6cd5fbaa39dd2d63415f5d",
     "frontend/app/console/zerodha/swing-trade/page.tsx": "9fac9e718e9aaae148aae3294e59a843c0953b720c47194e48be021a764dcf7c",
     "frontend/app/console/zerodha/threats/page.tsx": "252b68e29530d742f8802dca1f4d46c92757a115d3a25c709711ec29ac7b3e45",
     "frontend/app/database/page.tsx": "0d09f24b8bd2947fad39f124617596c55a9b24e51d8e0dabcad742f18307553c",

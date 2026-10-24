@@ -342,3 +342,21 @@ def test_missing_cost_is_visible_as_unknown_not_free(env):
     service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
     receipt=service(e).detail(1,row.id)['stages'][0]['checkpoint']['attempts'][0]
     assert receipt['cost_usd'] is None
+
+@pytest.mark.asyncio
+async def test_workspace_readiness_read_never_dispatches_or_changes_frozen_work(env,monkeypatch):
+    from app.domains.runs.analysis_router import list_analysis_workflows
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr('app.domains.modules.visibility.visible_module_ids',AsyncMock(return_value=['indmoney_us']))
+    row=create(env,'readonly-workspace-readiness')
+    original=deepcopy(row.execution_json)
+    before=len(list(env.db.scalars(select(OutboxMessage))))
+    async def run_sync(fn):return fn(env.db)
+    result=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',include_readiness=True,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert result['items'][0]['input_readiness']['current'] is True
+    env.states[1]['version']=2
+    stale=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',include_readiness=True,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert stale['items'][0]['input_readiness']['current'] is False
+    assert len(list(env.db.scalars(select(OutboxMessage))))==before
+    assert row.execution_json==original and row.status=='queued'
+    assert not env.db.new and not env.db.dirty

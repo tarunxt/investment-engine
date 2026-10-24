@@ -10,7 +10,7 @@ test('personal dashboard replaces legacy duplicate overview without raw Bullpen 
 
 test('manual import readiness and incomplete history remain explicit',()=>{const source=read('../app/console/dashboard/PersonalDashboard.tsx');assert.match(source,/\['ready','not_required'\]\.includes/);assert.match(source,/value\.has_more===false/);assert.match(source,/results\[1\]\.value===true/);assert.match(source,/available&&financial&&<dl/);assert.doesNotMatch(source,/summary\?\.bullpen/);});
 
-test('existing durable workflow links retain anchors outside UAT2',()=>{assert.match(read('../app/console/dashboard/PersonalDashboard.tsx'),/task\.href\.replace\('\/console\/uat2','\/console\/automated-rebalance'\)/);assert.match(read('../app/console/automated-rebalance/_components/ServerAnalysis.tsx'),/id=\{`analysis-workflow-\$\{row.id\}`\}/);});
+test('existing durable workflow links retain anchors outside UAT2',()=>{assert.match(read('../app/console/dashboard/PersonalDashboard.tsx'),/root\+'\/research'\+\(run\?`#analysis-workflow-/);assert.match(read('../app/console/automated-rebalance/_components/ServerAnalysis.tsx'),/id=\{`analysis-workflow-\$\{row.id\}`\}/);});
 function dashboardHarness(manifest){
  const text=read('../app/console/dashboard/PersonalDashboard.tsx');const tree=ts.createSourceFile('dashboard.tsx',text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);const fn=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='OwnedDashboard');const js=ts.transpileModule(fn.getText(tree),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
  const effects=[],calls=[],updates=[];const create=(type,props)=>({type,props});const runtime={jsx:create,jsxs:create};
