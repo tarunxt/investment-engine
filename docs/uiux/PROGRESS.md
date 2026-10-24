@@ -298,3 +298,13 @@ checks passing. The initial seven permission-exception regressions and ref-rende
 lint errors were corrected, not hidden. Local packaged build/browser qualification
 is pending; no PostgreSQL/Redis, hosted acceptance or accessibility-user claim.
 UX-06 full candidate modes/constraints remain open implementation work.
+
+UX-07 packaged local build at 45fa31852dae45b91630550e06e4eb8b13ead592 passed.
+Eight browser checks passed against the actual local Next/Auth/BFF and synthetic
+SQLite services: restored prior run 3; explicitly accepted fresh synthetic import;
+created only workflow 4; dropped its real creation acknowledgement; recovered that
+saved identity without a second POST; reloaded to all six stages completed; checked
+390/320px root reflow; no order/send/preferences mutation. Private desktop/mobile
+captures and receipt are under .runtime/uiux-ux07; mobile capture inspected. This
+is not hosted, PostgreSQL/Redis or unassisted accessibility acceptance. The owned
+preview was stopped with existing synthetic source and research history retained.
