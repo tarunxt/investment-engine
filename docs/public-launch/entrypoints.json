@@ -7,7 +7,7 @@
     "frontend": 25,
     "http": 318,
     "lifecycle": 9,
-    "page": 71,
+    "page": 72,
     "scheduler": 20,
     "websocket": 5,
     "worker": 53
@@ -16412,6 +16412,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/profile/get-started",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/get-started",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/get-started/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/profile",
       "classification": "owner-private",
       "kind": "page",
@@ -17441,6 +17460,7 @@
     "frontend/app/console/profile/activity/page.tsx": "bc96465520af22bea350bf2698783b138a1eca2d64214cb0d980cd279154d9aa",
     "frontend/app/console/profile/connections/page.tsx": "3c95b14f97444dd5e9371ba1b6f934890a50146519af589292fa5a09ed04d69d",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
+    "frontend/app/console/profile/get-started/page.tsx": "1436f51f3084654a58ddb960be2113684b0b4f58771537cd906e56fb379b474a",
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
     "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",
     "frontend/app/console/profile/security/page.tsx": "c39f32aae2cf5f63b12d6e0fec9ef1dd64e81288eb92e01b7d2fd77beaad98e3",
@@ -17466,7 +17486,7 @@
     "frontend/app/preview-kite/page.tsx": "1c8764cf476c79e6ce88bd7a324b687fe87d890482fcefae1f55e76b74a68585",
     "frontend/app/zerodha/callback/page.tsx": "ed762a6e9d76483ac37d9835ee1ef74111cc24a88fe4c2b139719aa2a8419ebd",
     "frontend/next.config.ts": "cbcb5b2aab2df208fc53ce3677d2e5541a07cd827e67b8de0179f63ca1b87879",
-    "frontend/proxy.ts": "a914550fae7f556dbff456e4841bcbdbfacf0b3d87b143ff533f5e47b18f75d1"
+    "frontend/proxy.ts": "2ffda918c18b66d6ff7e2e1c1acd0f82f475f151da63cd6a994cfd88fcdaa0cd"
   },
   "unresolved": []
 }

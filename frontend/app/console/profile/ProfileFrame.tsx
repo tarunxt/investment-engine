@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const sidebarNavItems = [
+  {title: "Get started",href: "/console/profile/get-started"},
   {
     title: "Profile",
     href: URLs.routes.profile.root(),

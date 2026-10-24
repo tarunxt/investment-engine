@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+const read=p=>readFileSync(new URL(p,import.meta.url),'utf8');
+const model={};new Function('exports',ts.transpileModule(read('../lib/onboarding.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(model);
+test('progress restores only for its exact owner, including after session changes',()=>{const value=model.progressValue('7101','snapshot');assert.equal(model.readProgress(value,'7101'),'snapshot');assert.equal(model.readProgress(value,'7102'),'modules');assert.notEqual(model.progressKey('7101'),model.progressKey('7102'));});
+test('malformed, old and unknown progress fail safely',()=>{for(const raw of ['broken','null','{"schema":0,"owner":"7101","step":"plan"}','{"schema":1,"owner":"7101","step":"approved"}'])assert.equal(model.readProgress(raw,'7101'),'modules');});
+test('persisted guide contains navigation only, no financial readiness or input data',()=>{assert.deepEqual(JSON.parse(model.progressValue('7101','research')),{schema:1,owner:'7101',step:'research'});});
+test('supported destinations exist and unknown modules have no invented integration',()=>{for(const id of ['zerodha_rebalance','indmoney_us'])for(const step of model.onboardingSteps){const path=model.onboardingDestination(id,step).split('#')[0];assert.ok(readFileSync(new URL('../app'+path+'/page.tsx',import.meta.url),'utf8'));}assert.equal(model.onboardingDestination('bullpen_ai','research'),null);});
+test('guide keeps connection distinct from snapshot and deliberate research start',()=>{const source=read('../components/onboarding/GettingStarted.tsx');assert.match(source,/successful connection does not prove valid holdings/);assert.match(source,/preview and explicit acceptance/);assert.match(source,/does not launch paid work/);assert.match(source,/does not claim that a plan exists/);assert.doesNotMatch(source,/method:\s*['"]POST|\.save\(|\.fetch\(/);});
+test('guide scopes current policy and remounts on owner/session change',()=>{const source=read('../components/onboarding/GettingStarted.tsx');assert.match(source,/manifest\?\.owner_id===Number\(owner\)/);assert.match(source,/session.user.id.*session.generation/);assert.match(source,/Skip for now/);assert.match(source,/NEXT_PUBLIC_UAT2==='true'/);});

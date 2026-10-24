@@ -89,3 +89,26 @@ and hosted verification were not performed. No PostgreSQL/Redis inference.
 
 UX-01 and UX-02 source/interaction gates accepted for proceeding to UX-03;
 remaining broad release/accessibility matrix stays explicit for UX-10/11.
+
+## UX-03: resumable guide; qualification in progress
+
+Added a short, optional guide under Profile / Get started. It preserves all
+selections and existing workspace/history, lets one selected module lead, and
+links to the supported connection/import, snapshot, research and result screens.
+Unavailable selections remain visibly unavailable. UAT2 research/plan navigation
+uses the existing confined simulation walkthrough. No grants or effect adapters
+were added. Own-app configuration remains in its existing supported setup screen.
+Only owner-keyed browser navigation position is saved; refreshing or returning
+after session expiry restores that position. It is deliberately not evidence of
+connected accounts, accepted holdings, completed research or order consent.
+
+Six focused model/source regressions pass, including foreign/malformed progress,
+no financial data in storage, existing destinations and no automatic effects.
+Combined shell/guide suite: 16 pass. Existing import integrity tests were also run
+for invalid previews, changed inputs, stale parser receipts and owner/session
+replacement. TypeScript passed; initial lint caught synchronous effect state,
+corrected with the React external-store contract. Final targeted lint passes.
+A command initially used incorrect frontend-relative paths and executed no edits;
+the corrected command and actual checks are retained separately. Independent
+boundary review found no concrete issue. Browser/build and first-use outcome
+qualification are still pending; no conversion or unassisted completion claimed.
