@@ -23,10 +23,10 @@ try{
  let output='';child=spawn(python,['-u',launcher,'start','--foreground'],{cwd:root,stdio:['ignore','pipe','pipe']});child.once('close',()=>closed=true);
  const collect=data=>{output+=data;writeFileSync(path.join(evidence,'startup.log'),output);};child.stdout.on('data',collect);child.stderr.on('data',collect);
  await until(()=>{if(closed)throw Error('Owned preview exited before readiness');return output.includes('Foreground preview: Ctrl-C stops only these owned children');});
- const state=JSON.parse(readFileSync(path.join(runtime,'state.json'),'utf8'));const base=`http://127.0.0.1:${state.frontend_port}`;
+ const state=JSON.parse(readFileSync(path.join(runtime,'state.json'),'utf8'));const base=new URL(state.url).origin;
  const fingerprint=await(await fetch(base+'/api/runtime-fingerprint')).json();assert.equal(fingerprint.build_sha,receipt.source_sha);receipt.served_fingerprint=fingerprint;
  browser=await chromium.launch({headless:true,env:{PATH:process.env.PATH,HOME:'/tmp'},...(process.env.STAGE18_CHROMIUM_PATH?{executablePath:process.env.STAGE18_CHROMIUM_PATH}:{})});
- const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
+ const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce',serviceWorkers:'block'});
  await context.route('**/*',route=>{const url=route.request().url();return url.startsWith(base+'/')?route.continue():route.abort();});await context.routeWebSocket('**/*',socket=>socket.close());
  const page=await context.newPage();page.setDefaultTimeout(15000);
  await page.goto(base+'/login?redirectTo=/console/profile/preferences');await page.getByLabel('Email Address',{exact:true}).fill('usera@stage01.example.com');await page.getByLabel('Password',{exact:true}).fill('SyntheticPreview123!');await page.getByRole('button',{name:'Sign In',exact:true}).click();await page.waitForURL(base+'/console/profile/preferences');
