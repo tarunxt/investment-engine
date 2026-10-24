@@ -344,3 +344,13 @@ business POST occurred. Only that finite numeric read path is added; POST,
 DELETE, foreign/non-numeric and nested approval variants remain denied in a new
 regression. This changes the local preview boundary, not native activation or
 application runtime overrides. The failed receipt/log remain private.
+
+UX-08 packaged build at 24b7142 passed; backend-only preview repair 98d3530
+passed 10 focused tests. Seven read-only actual-browser checks at 98d3530 passed:
+verified current no-change plan/source values/missing cash, manual checklist,
+saved/no-execution choices, stale source history, 390/320px root bounds and seven
+material table columns, with zero business POSTs. Mobile screenshot inspection
+caught excessively narrow wrapped table columns causing tall rows; a minimum
+horizontal table width and explicit scroll instruction are being applied for
+follow-up visual qualification. Passing root bounds alone did not qualify that
+layout. The owned preview is stopped, and failed first-attempt evidence remains.
