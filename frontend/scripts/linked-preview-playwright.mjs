@@ -91,7 +91,11 @@ async function analyze(page,base,owner){
  assert.equal(source.status,200);assert.equal(source.body.owner_id,owner);
  assert.equal(source.body.simulation_only,true);assert.match(source.body.source_hash,/^[a-f0-9]{64}$/);
  receipt.checks.push('explicit_owned_synthetic_source_after_module_selection');save();
+ const setupResponse=page.waitForResponse(r=>r.request().method()==='GET'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows/setup-context'&&new URL(r.url()).searchParams.get('portfolio')==='india');
  await page.getByRole('link',{name:'Open Zerodha Rebalance research',exact:true}).click();
+ const setupHTTP=await setupResponse;assert.equal(setupHTTP.status(),200);const setup=await setupHTTP.json();
+ assert.equal(setup.owner_id,owner);assert.equal(setup.portfolio,'india');assert.equal(setup.orders_authorized,false);
+ assert.match(setup.source_hash,/^[a-f0-9]{64}$/);assert.match(setup.plan_hash,/^[a-f0-9]{64}$/);
  await page.waitForURL(base+'/console/zerodha/research');
  await page.getByRole('heading',{name:'Research setup',exact:true}).waitFor();
  const region=page.getByRole('region',{name:'Server analysis'});
@@ -103,7 +107,7 @@ async function analyze(page,base,owner){
  assert.equal(count(),before,'Source acquisition and setup consent must not start research');
  const posted=page.waitForRequest(r=>r.method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows');
  await start.click();const body=(await posted).postDataJSON();
- assert.equal(body.portfolio,'india');assert.equal(body.expected_source_hash,source.body.source_hash);assert.match(body.expected_plan_hash,/^[a-f0-9]{64}$/);assert.ok(Number.isInteger(body.expected_module_version));
+ assert.equal(body.portfolio,'india');assert.equal(body.expected_source_hash,setup.source_hash);assert.equal(body.expected_plan_hash,setup.plan_hash);assert.equal(body.expected_module_version,setup.module_version);assert.equal(body.snapshot_id,setup.snapshot_id);
  await region.getByRole('heading',{name:/^Research \d+ · Research completed$/}).waitFor({timeout:90000});
  const flow=sql("SELECT id FROM auto_rebalance_workflows WHERE user_id=? AND portfolio='india' AND status='completed' ORDER BY id DESC LIMIT 1",[owner])[0];assert(flow);
  assert.equal(count(),before+1,'One deliberate start creates exactly one owned workflow');
