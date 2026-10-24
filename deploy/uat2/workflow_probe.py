@@ -29,6 +29,7 @@ def main(phase):
     from app.core.security import JWTUtils
     from app.infrastructure.database.sync_session import SyncSessionLocal
     from app.domains.auth.models import User,UserProfile,UserRole
+    from app.domains.prompts.models import Prompt  # noqa: F401: User.prompts mapper dependency
     from app.domains.modules.models import UserModule,UserModulePreferences
     from app.domains.runs.models import AutoRebalanceWorkflow
     from app.domains.order_intents.models import OrderIntent

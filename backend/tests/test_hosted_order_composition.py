@@ -120,7 +120,8 @@ def test_relay_is_bounded_and_never_creates_approval(order_env, monkeypatch):
 
 
 def test_dedicated_worker_bootstrap_registers_only_bounded_simulation_tasks():
-    import json, os, subprocess, sys
+    import ast, json, os, subprocess, sys
+    from pathlib import Path
     env = {key: value for key, value in os.environ.items() if key in {'PATH', 'PYTHONPATH', 'SYSTEMROOT'}}
     env.update(CREDX_UAT2='1', ENVIRONMENT='uat2', AUTH_DISABLED='false', DEBUG='false',
         GOOGLE_SIGNIN_CLIENT_ID='unit-test-independent-client',
@@ -128,7 +129,33 @@ def test_dedicated_worker_bootstrap_registers_only_bounded_simulation_tasks():
         UAT2_ADAPTERS='simulation', UAT2_SOURCE_COMMIT='a'*40,
         DATABASE_URL='postgresql://credx_uat2@postgres:5432/credx_uat2',
         REDIS_URL='redis://redis:6379/0', FRONTEND_URL='https://uat2.example.invalid')
+    # Extract the probe's own initial imports, not this test process's populated
+    # mapper registry. Worker imports must not hide missing probe model imports.
+    probe = Path(__file__).resolve().parents[2] / 'deploy/uat2/workflow_probe.py'
+    main = next(node for node in ast.parse(probe.read_text()).body
+        if isinstance(node, ast.FunctionDef) and node.name == 'main')
+    imports = []
+    for node in main.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imports.append(ast.unparse(node))
+        elif (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+              and getattr(node.value.func, 'id', '') == 'validate_uat2_startup'):
+            break
+    assert imports
     source = """
+import sys
+from sqlalchemy.engine import Engine
+from celery.app.base import Celery
+from celery.app.task import Task
+def no_effects(*args, **kwargs):
+    raise AssertionError('Bootstrap must not connect to a database or publish a task')
+Engine.connect=no_effects
+Celery.send_task=no_effects
+Task.apply_async=no_effects
+""" + '\n'.join(imports) + """
+from sqlalchemy.orm import configure_mappers
+assert 'app.uat2.worker' not in sys.modules
+configure_mappers()
 import json
 from app.uat2.worker import celery, venue_engine
 from app.uat2.runtime import main, WORKER_ARGS
