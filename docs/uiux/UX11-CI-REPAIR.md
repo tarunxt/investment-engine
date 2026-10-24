@@ -80,3 +80,53 @@ executable-advisory, complete-privacy, accessibility/pilot or fresh hosted owner
 acceptance gaps. Local Chromium with synthetic responses is not hosted owner
 acceptance, a live integration test or production capacity proof. No merge,
 deployment, real orders or live settings changes occurred.
+
+## Linked-browser successor: local verification
+
+The published repair `e07571106172418d523c37e47e703b7ac2a5d38e` subsequently
+finished exact-head CI with 56 successful jobs and one failed job. All 133
+Stage12 tests, 90 backend UX tests, 505 frontend tests, scoped HTTP checks,
+authenticated rendering, standalone artifact verification, native PostgreSQL /
+Redis qualification and Stage18 rehearsal passed. The remaining failure was
+[the linked browser harness](https://github.com/tarunxt/investment-engine/actions/runs/40113468869/job/120929820042),
+which still expected the former portfolio selector on the legacy research route.
+That failed run remains evidence; its result has not been replaced with a pass.
+
+The local successor changes only that harness and this report. It follows the
+legacy chooser into canonical module-scoped research, verifies navigation and
+setup consent start nothing, observes the actual setup response, and binds the
+single deliberate start to its owner, portfolio, source/plan hashes, snapshot
+and module version. It checks the rendered completion heading, all six durable
+stage records, frozen hashes and settled zero-cost spending receipts. Exact order
+review and final confirmation are separate browser actions; opening review must
+neither approve nor dispatch. A foreign owner's direct review GET must return 404.
+Existing payload/digest, partial-fill, disable/history, unknown-outcome and
+restart/no-replay assertions remain. An optional existing Chromium-path setting
+allows the same guarded scenario to use locally installed Chrome; CI retains
+its default bundled Chromium. No application or runtime guard was changed.
+
+Full linked verification passed at implementation
+`ff3d853271807c62e1d85901716204d01b2ee3b0` on 24 October 2026. Its served
+fingerprint matched that commit. Both synthetic owners completed six stages:
+user-owned mode remained partial across restart; managed mode's accepted unknown
+outcome was observed in durable SQLite, remained unknown while stopped, and
+reconciled to filled after restart. Exactly two execution attempts and two venue
+receipts existed across both scenarios. No duplicate submission occurred. Both
+unapproved review screens, completion screens, partial before/after restart and
+reconciled outcome were captured privately. The final receipt reports passed,
+no error and successful owned-preview shutdown. All 68 affected frontend
+regressions passed with zero skips at the same implementation.
+
+The first local successor attempt at `2fb0554` was intentionally retained: a new
+harness assertion incorrectly equated the acquisition receipt hash with the
+analysis source projection hash. It stopped after one start; its fixture was
+quiesced and retained, never resubmitted. The corrected run used a new disposable
+fixture and compared the posted hashes with the actual setup-context response
+and persisted workflow. No product failure was established by that assertion.
+
+The full run used real login, HTTP, rendered UI and durable fake execution in a
+fresh local checkout with SQLite and blocked external networking. It is not
+PostgreSQL/Redis or hosted owner acceptance. The successor is unpublished and
+needs exact-head Linux CI after separately authorized publication. Previous
+functional and production-readiness gaps remain unchanged. No merge, deployment,
+live provider effect or actual user-data change occurred.
