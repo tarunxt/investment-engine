@@ -54,6 +54,11 @@ try{
  await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/console/profile/preferences');
  const response=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith('/auth/profile'));void response.catch(()=>{});
  await page.getByRole('button',{name:'Dark',exact:true}).click();assert.equal((await response).status(),200);await until(()=>page.locator('html').getAttribute('class').then(x=>x?.includes('dark')));
+ const contrast=await page.evaluate(()=>{
+  function rgba(value){const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');context.clearRect(0,0,1,1);context.fillStyle=value;context.fillRect(0,0,1,1);return [...context.getImageData(0,0,1,1).data];}
+  function ratio(element){let parent=element,background;while(parent){background=rgba(getComputedStyle(parent).backgroundColor);if(background[3]===255)break;parent=parent.parentElement;}if(!background||background[3]!==255)throw Error('Opaque contrast basis required');const light=rgb=>rgb.slice(0,3).map(value=>{const n=value/255;return n<=.04045?n/12.92:((n+.055)/1.055)**2.4;}).reduce((sum,n,i)=>sum+n*[.2126,.7152,.0722][i],0);const a=light(rgba(getComputedStyle(element).color)),b=light(background);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);}
+  const brand=document.querySelector('#console-sidebar a[href="/console/dashboard"]');const active=document.querySelector('#console-sidebar a[aria-current="page"]');if(!brand||!active)throw Error('Visible brand and active state required');return {brand:ratio(brand),active:ratio(active)};
+ });assert.ok(contrast.brand>=4.5,'Dark brand contrast');assert.ok(contrast.active>=4.5,'Dark active-link contrast');receipt.dark_contrast=contrast;
  await page.screenshot({path:path.join(evidence,'sidebar-dark.png')});receipt.screenshots.push('sidebar-dark.png');
  const restore=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith('/auth/profile'));void restore.catch(()=>{});await page.getByRole('button',{name:'Light',exact:true}).click();assert.equal((await restore).status(),200);
  receipt.checks.push('synthetic_dark_light_controls_and_restore');receipt.passed=true;save();await context.close();

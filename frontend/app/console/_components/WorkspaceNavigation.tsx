@@ -19,8 +19,8 @@ export function WorkspaceNavigation({pathname,user,onNavigate,onLogout}:{pathnam
   const exact=href==='/console/dashboard'||href==='/console/profile';
   const active=pathname===href||!exact&&!href.includes('#')&&pathname.startsWith(href+'/')||!!module&&activeModules.includes(module);
   return <Link key={href} href={href} prefetch={false} onClick={onNavigate} aria-current={active?'page':undefined}
-   className="group flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground aria-[current=page]:border-sidebar-border aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-primary aria-[current=page]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar">
-   <Icon aria-hidden="true" focusable="false" className="size-5 shrink-0 text-muted-foreground group-aria-[current=page]:text-sidebar-primary"/>
+   className="group flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 text-sm font-medium text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground aria-[current=page]:border-sidebar-border aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground aria-[current=page]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar">
+   <Icon aria-hidden="true" focusable="false" className="size-5 shrink-0 text-muted-foreground group-aria-[current=page]:text-sidebar-accent-foreground"/>
    <span className="min-w-0 flex-1 break-words">{label}{notice&&<span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">{notice}</span>}</span>
    {module&&<ChevronRight aria-hidden="true" focusable="false" className="size-3.5 shrink-0 text-muted-foreground/70"/>}
   </Link>;

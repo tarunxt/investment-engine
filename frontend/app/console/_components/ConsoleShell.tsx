@@ -86,7 +86,7 @@ export function ConsoleShell({
             >
                 <div className="flex flex-col h-full">
                     <div className="flex h-16 shrink-0 items-center justify-between border-b border-sidebar-border px-5">
-                      <Link href="/console/dashboard" prefetch={false} className="flex min-h-11 items-center gap-2.5 rounded-lg font-semibold tracking-tight focus-visible:ring-2 focus-visible:ring-sidebar-ring"><span aria-hidden="true" className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white shadow-sm">CX</span><span className="text-lg">Cred-X</span></Link>
+                      <Link href="/console/dashboard" prefetch={false} className="flex min-h-11 items-center gap-2.5 rounded-lg font-semibold tracking-tight text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"><span aria-hidden="true" className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white shadow-sm">CX</span><span className="text-lg">Cred-X</span></Link>
                       <button type="button" onClick={()=>setSidebarOpen(false)} aria-label="Close navigation" className="min-h-11 min-w-11 rounded-lg lg:hidden"><HiOutlineX/></button>
                     </div>
 
