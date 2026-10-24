@@ -19,6 +19,29 @@ class ShortlistInput(BaseModel):
     preview_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
     setup_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
 
+class ResearchConstraints(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    horizon_days:int=Field(ge=1,le=3650)
+    minimum_cash:str=Field(min_length=1,max_length=40)
+    maximum_position_percent:str=Field(min_length=1,max_length=40)
+    maximum_turnover_percent:str=Field(min_length=1,max_length=40)
+
+class ResearchOptionsInput(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    schema_version:Literal[2]
+    mode:Literal['holdings_only','llm_discovery','shortlist_only','combined']
+    raw_text:str=Field(default='',max_length=100000)
+    format:Literal['paste','csv']='paste'
+    constraints:ResearchConstraints
+    accepted_universe_limit:Literal[200]
+
+class AcceptedResearchOptions(ResearchOptionsInput):
+    preview_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
+    setup_hash:str=Field(pattern=r'^[a-f0-9]{64}$')
+
+class ResearchOptionsPreview(ResearchOptionsInput):
+    portfolio:Literal['india','indmoney_us']
+
 class Create(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     portfolio:Literal['indmoney_us','india']
@@ -28,7 +51,7 @@ class Create(BaseModel):
     expected_plan_hash:str|None=Field(default=None,pattern=r'^[a-f0-9]{64}$')
     expected_module_version:int|None=Field(default=None,gt=0)
     setup_schema_version:Literal[1,2]|None=None
-    research_setup:ShortlistInput|None=None
+    research_setup:ShortlistInput|AcceptedResearchOptions|None=None
     @model_validator(mode='after')
     def reviewed_pair(self):
         if (self.expected_source_hash is None)!=(self.expected_plan_hash is None) or self.setup_schema_version is not None and self.expected_source_hash is None:raise ValueError('Both reviewed hashes required')
@@ -98,9 +121,23 @@ async def setup_context(portfolio:Literal['india','indmoney_us'],db=Depends(get_
             'snapshot_id':source.get('snapshot_id'),'captured_at':source.get('captured_at'),'connection':{'id':connection['id'],'version':connection['version'],'mode':connection['mode'],'account_label':('***'+str(connection['account'])[-4:]) if connection.get('account') else None} if connection else None,
             'usage':{'estimated_cost_usd':'0' if synthetic_setup(runtime) else None,'simulation_only':synthetic_setup(runtime),'notice':'Zero-cost fake analysis' if synthetic_setup(runtime) else 'No cost estimate is available; configured server limits remain authoritative'},
             'constraints':{key:{'editable':False,'value':None,'reason':'No approved configurable constraint contract is installed'} for key in ['horizon','cash','exposure','turnover']},
-            'candidate_preview_available':synthetic_setup(runtime),'shortlist_analysis_available':synthetic_setup(runtime),'orders_authorized':False}
+            'candidate_preview_available':synthetic_setup(runtime),'shortlist_analysis_available':synthetic_setup(runtime),
+            'research_options_available':synthetic_setup(runtime),'live_discovery_available':False,'orders_authorized':False}
     try:return await db.run_sync(read)
     except WorkflowDenied:raise HTTPException(409,'Current owned source, connection and approved plan required; no work started') from None
+
+@router.post('/options-preview')
+async def preview_research_options(body:ResearchOptionsPreview,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+    from .analysis_workflows.research_options import build
+    from .analysis_workflows.contracts import digest
+    if not synthetic_setup(runtime):raise HTTPException(503,'Only the offline test discovery/constraint composition is installed')
+    def work(session):
+        runtime.policy(session,user.id,body.portfolio,version=None,scheduled=False)
+        source=runtime.source(session,user.id,body.portfolio,None)
+        options=build(user.id,body.portfolio,source,body.model_dump(exclude={'portfolio'}))
+        return {'owner_id':user.id,'portfolio':body.portfolio,'source_hash':digest(source),'preview_hash':digest(options),'setup_hash':digest(options),'options':options,'simulation_only':True,'orders_authorized':False}
+    try:return await db.run_sync(work)
+    except (PermissionError,ValueError):raise HTTPException(409,'Owned current source and valid complete research options required; no work started') from None
 
 class CandidatePreview(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
@@ -193,7 +230,8 @@ async def get_action_plan(workflow_id:int,db=Depends(get_async_db),user=Depends(
         service=Workflows(session,runtime);row=service.owned(user.id,workflow_id)
         receipt=composition.completed_analysis(session,user.id,workflow_id)
         original=project(receipt,workflow=row,source=row.execution_json['source'])
-        return select_plan(service.stages(row)[-1],original,version)
+        from app.uat2.revision_baskets import annotate
+        return annotate(session,composition,select_plan(service.stages(row)[-1],original,version))
     try:return await db.run_sync(read)
     except (WorkflowDenied,PermissionError,BoundaryDenied):raise HTTPException(409,'Current owned governed result could not be verified; retained research evidence remains available, no new review authorized') from None
 
@@ -222,7 +260,9 @@ async def revise_action_plan(workflow_id:int,body:AdvisoryRevision,db=Depends(ge
         service=Workflows(session,runtime);row=service.owned(user.id,workflow_id)
         receipt=composition.completed_analysis(session,user.id,workflow_id)
         original=project(receipt,workflow=row,source=row.execution_json['source'])
-        return revise(service.stages(row)[-1],original,body.expected_version,[item.model_dump() for item in body.targets])
+        from app.uat2.revision_baskets import annotate
+        result=revise(service.stages(row)[-1],original,body.expected_version,[item.model_dump() for item in body.targets])
+        return annotate(session,composition,result)
     try:result=await db.run_sync(work);await db.commit();return result
     except (WorkflowDenied,PermissionError,BoundaryDenied,OrderDenied):
         await db.rollback();raise HTTPException(409,'Advisory revision rejected: current owned evidence and exact finite targets required; no approval or execution available') from None

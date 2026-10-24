@@ -1,5 +1,6 @@
 export const researchStages=[['sync','Sync Portfolio','Validate the owned frozen holdings source'],['threats','Threats Scan','Review risks in the frozen research inputs'],['swing','Swing Scan','Run the configured opportunity analysis'],['rebalance','Rebalance','Evaluate the configured portfolio proposal'],['technical','Technical Scan','Review supported technical conditions'],['actionables','Actionables','Create a research result for separate plan review']] as const;
-export type ShortlistInput={raw_text:string;format:'paste'|'csv';preview_hash:string;setup_hash:string};
+export type ResearchConstraints={horizon_days:number;minimum_cash:string;maximum_position_percent:string;maximum_turnover_percent:string};
+export type ShortlistInput={raw_text:string;format:'paste'|'csv';preview_hash:string;setup_hash:string;schema_version?:2;mode?:'holdings_only'|'llm_discovery'|'shortlist_only'|'combined';constraints?:ResearchConstraints;accepted_universe_limit?:200};
 export type StartBinding={source_hash:string;plan_hash:string;snapshot_id:number|null;module_version?:number;research_setup?:ShortlistInput;research_setup_hash?:string};
 export async function researchRequestKey(owner:string,portfolio:string,binding:StartBinding,nonce='default'){
  if(!(binding.snapshot_id===null||Number.isInteger(binding.snapshot_id)&&binding.snapshot_id>0)||binding.module_version!==undefined&&(!Number.isInteger(binding.module_version)||binding.module_version<1))throw new Error('Verified source and module versions required');

@@ -102,17 +102,34 @@ async function analyze(page,base,owner){
  assert.equal(await region.getByRole('combobox').count(),0,'Portfolio is bound by the module, not a mutable selector');
  const start=region.getByRole('button',{name:'Start research',exact:true});
  await start.waitFor();assert.equal(await start.isEnabled(),false,'Unreviewed setup cannot start');
- const consent=page.getByRole('checkbox',{name:'I reviewed the account/source, approved plan and usage. Starting research is a separate deliberate action and does not approve orders.',exact:true});
+ await page.getByLabel(/^Candidate source/).selectOption('combined');
+ await page.getByLabel('Candidate symbols or CSV',{exact:true}).fill('SYNTHETIC0\nSYNTHETIC0');
+ await page.getByLabel('Minimum cash reserve',{exact:true}).fill('10.00');
+ await page.getByRole('checkbox',{name:/I accept a maximum of 200/}).check();
+ const optionsResponse=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows/options-preview');
+ await page.getByRole('button',{name:'Preview research inputs',exact:true}).click();
+ const optionsHTTP=await optionsResponse;assert.equal(optionsHTTP.status(),200);const preview=await optionsHTTP.json();
+ assert.equal(preview.owner_id,owner);assert.equal(preview.source_hash,setup.source_hash);assert.equal(preview.options.mode,'combined');assert.equal(preview.options.discovery_receipt.live_provider_called,false);
+ assert.equal(preview.options.coverage.shortlist_rows,2);assert.equal(preview.options.coverage.unique_candidates,1);assert.equal(preview.options.coverage.holdings_overlap,1);
+ for(const width of [320,390,768,1280,1440]){
+  await page.setViewportSize({width,height:844});
+  const geometry=await page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
+  assert.ok(geometry.page<=geometry.viewport+1,`Research options overflow at ${width}px`);
+  await shot(page,`owner-${owner}-research-options-${width}px`);
+ }
+ const consent=page.getByRole('checkbox',{name:/I reviewed this exact source, candidate coverage, constraints and usage/});
  await consent.check();await until(()=>start.isEnabled());
  assert.equal(count(),before,'Source acquisition and setup consent must not start research');
  const posted=page.waitForRequest(r=>r.method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows');
  await start.click();const body=(await posted).postDataJSON();
  assert.equal(body.portfolio,'india');assert.equal(body.expected_source_hash,setup.source_hash);assert.equal(body.expected_plan_hash,setup.plan_hash);assert.equal(body.expected_module_version,setup.module_version);assert.equal(body.snapshot_id,setup.snapshot_id);
+ assert.equal(body.research_setup.setup_hash,preview.setup_hash);assert.equal(body.research_setup.mode,'combined');assert.equal(body.research_setup.constraints.minimum_cash,'10.00');
  await region.getByRole('heading',{name:/^Research \d+ · Research completed$/}).waitFor({timeout:90000});
  const flow=sql("SELECT id FROM auto_rebalance_workflows WHERE user_id=? AND portfolio='india' AND status='completed' ORDER BY id DESC LIMIT 1",[owner])[0];assert(flow);
  assert.equal(count(),before+1,'One deliberate start creates exactly one owned workflow');
  const frozen=JSON.parse(sql('SELECT execution_json FROM auto_rebalance_workflows WHERE id=?',[flow.id])[0].execution_json);
  assert.equal(frozen.source_hash,body.expected_source_hash);assert.equal(frozen.plan_hash,body.expected_plan_hash);
+ assert.equal(frozen.research_setup_hash,preview.setup_hash);assert.equal(frozen.research_setup.discovery_performed,true);
  const stages=sql('SELECT stage,status FROM auto_rebalance_workflow_stages WHERE workflow_id=?',[flow.id]);
  assert.equal(stages.length,6);assert(stages.every(s=>s.status==='completed'));
  const spend=sql('SELECT status,actual_usd,request_hash FROM recommendation_spend_attempts WHERE user_id=?',[owner]);
@@ -189,6 +206,27 @@ try{
  await selection.click();await a.page.getByRole('button',{name:'Confirm disable',exact:true}).click();await until(async()=>!await selection.isChecked());
  await a.page.goto(base+'/console/profile/activity');await a.page.getByRole('article',{name:'Order '+first.row.id}).waitFor();assert.equal(venueCount(),1);
  receipt.checks.push('cancelled_disable_preserves_selection_actual_disable_preserves_order_history');save();
+ await a.page.goto(base+'/console/profile/privacy');
+ await a.page.getByRole('heading',{name:'Your privacy requests',exact:true}).waitFor();
+ await a.page.getByText('No privacy requests were returned in these account records.',{exact:true}).waitFor();
+ await a.page.getByRole('button',{name:'Download partial account snapshot',exact:true}).click();
+ await a.page.getByText('Account download is unavailable because its runtime inventory, storage or integrity could not be verified.',{exact:false}).waitFor();
+ await a.page.getByRole('checkbox',{name:/I request a review of my account erasure options/}).check();
+ const privacyResponse=a.page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/backend-api/account/operations/privacy-requests');
+ await a.page.getByRole('button',{name:'Record erasure-review request',exact:true}).click();
+ const privacyHTTP=await privacyResponse;assert.equal(privacyHTTP.status(),200);const privacy=await privacyHTTP.json();
+ assert.equal(privacy.owner_id,owners.usera);assert.equal(privacy.state,'retention_review_required');assert.equal(privacy.legal_approval,false);
+ await a.page.getByRole('button',{name:'Cancel this review request',exact:true}).waitFor();
+ await b.page.goto(base+'/console/profile/privacy');await b.page.getByText('No privacy requests were returned in these account records.',{exact:true}).waitFor();
+ const cancelResponse=a.page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname.endsWith('/privacy-requests/'+privacy.id+'/cancel'));
+ await a.page.getByRole('button',{name:'Cancel this review request',exact:true}).click();assert.equal((await cancelResponse).status(),200);
+ await a.page.getByRole('heading',{name:'Erasure review · cancelled',exact:true}).waitFor();
+ for(const width of [320,390,768,1280,1440]){
+  await a.page.setViewportSize({width,height:844});const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
+  assert.ok(geometry.page<=geometry.viewport+1,`Privacy utilities overflow at ${width}px`);await shot(a.page,`privacy-requests-${width}px`);
+ }
+ assert.equal(sql('SELECT count(*) n FROM users')[0].n,3);
+ receipt.checks.push('owned_privacy_request_cancel_no_erasure_no_foreign_history','research_and_privacy_five_width_reflow');save();
  await stop();state=await start('after_acceptance');
  const second=await analyze(b.page,base,owners.userb);
  await approve(b.page,second.row,second.card);

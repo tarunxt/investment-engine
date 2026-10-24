@@ -420,7 +420,7 @@ jobs:
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/stage13.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'Stage13 cannot skip checks'
-          assert len(root.findall('.//testcase')) == 129
+          assert len(root.findall('.//testcase')) == 143
           PY_CHECK
 
   stage07-module-policy:
@@ -731,6 +731,9 @@ jobs:
           tests/ux08-action-plan.test.mjs
           tests/ux08-plan-amendments.test.mjs
           tests/ux10-utilities.test.mjs
+          tests/ux06-governed-options.test.mjs
+          tests/ux08-revision-eligibility.test.mjs
+          tests/ux10-privacy-operations.test.mjs
           tests/stage11-import-integrity.test.mjs
           tests/stage12-server-analysis.test.mjs
           tests/stage16-order-reviews.test.mjs
@@ -1878,7 +1881,7 @@ jobs:
       - name: Verify owned review, PostgreSQL safety and linked SQLite ASGI fake acceptance
         run: python -m pytest -q --junitxml=/tmp/stage16.xml backend/tests/test_stage16_order_views.py backend/tests/test_stage16_postgres.py backend/tests/test_linked_preview_execution.py backend/tests/test_stage18_linked_analysis_preview.py
       - name: Verify UX owner scope, disabled capabilities and advisory-only workflows
-        run: python -m pytest -q --junitxml=/tmp/uiux.xml backend/tests/test_ux01_dashboard_scope.py backend/tests/test_ux02_admin_workspace.py backend/tests/test_ux04_selected_workflows.py backend/tests/test_ux06_candidate_preview.py backend/tests/test_ux06_frozen_shortlist.py backend/tests/test_ux06_linked_setup.py backend/tests/test_ux07_research_progress.py backend/tests/test_ux08_action_plan.py backend/tests/test_ux08_plan_revisions.py
+        run: python -m pytest -q --junitxml=/tmp/uiux.xml backend/tests/test_ux01_dashboard_scope.py backend/tests/test_ux02_admin_workspace.py backend/tests/test_ux04_selected_workflows.py backend/tests/test_ux06_candidate_preview.py backend/tests/test_ux06_frozen_shortlist.py backend/tests/test_ux06_linked_setup.py backend/tests/test_ux06_research_options.py backend/tests/test_ux07_research_progress.py backend/tests/test_ux08_action_plan.py backend/tests/test_ux08_manual_funds.py backend/tests/test_ux08_plan_revisions.py backend/tests/test_ux08_revised_execution.py backend/tests/test_ux10_privacy_workspace.py
       - name: Require all UX checks to execute
         run: |
           python - <<'PY_CHECK'
@@ -1886,7 +1889,7 @@ jobs:
           root=ET.parse('/tmp/uiux.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'UX checks cannot skip'
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
-          assert len(root.findall('.//testcase')) == 90
+          assert len(root.findall('.//testcase')) == 143
           PY_CHECK
       - name: Verify explicit synthetic acquisition scope and HTTP action
         run: python -m pytest -q --junitxml=/tmp/synthetic-source.xml backend/tests/test_simulation_source_scope.py backend/tests/test_synthetic_source_http.py

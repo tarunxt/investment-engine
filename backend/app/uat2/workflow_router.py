@@ -38,13 +38,17 @@ async def simulate_connection(body: ConnectionChange, request: Request,
         await db.rollback(); raise HTTPException(503, 'Connection transaction unavailable; refresh persisted status',headers={'Retry-After':'3'}) from None
 
 
+class BasketVersion(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    revision_version:str|None=Field(default=None,pattern=r'^[a-f0-9]{64}$')
+
 @router.post('/analysis/{workflow_id}/prepare-basket')
-async def prepare_basket(workflow_id: int, request: Request, user=Depends(get_current_user), db=Depends(get_async_db)):
+async def prepare_basket(workflow_id: int, request: Request,body:BasketVersion|None=None,user=Depends(get_current_user), db=Depends(get_async_db)):
     binding = request_binding(request)
     if binding is None: raise HTTPException(503, 'Simulation workflow unavailable')
     try:
         def work(session):
-            row = binding.orders.prepare(session, user.id, workflow_id)
+            row = binding.orders.prepare(session, user.id, workflow_id,revision_version=body.revision_version if body else None)
             return {'id': row.id, 'state': row.state, 'simulation_only': True, 'approval_recorded': False, 'requires_exact_confirmation': row.state == 'awaiting_approval'}
         result = await db.run_sync(work); await db.commit(); return result
     except (PermissionError, OrderDenied):

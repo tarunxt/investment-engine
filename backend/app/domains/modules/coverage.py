@@ -62,7 +62,7 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         ('POST','/account/operations/disposable/monitor/owners/{owner_id}/alerts/{id}/escalate','escalate_monitor')}:
         return None # Current owner or appointed active operator, explicit disposable DB/sink only.
     if domain=='public_service' and len(methods)==1 and (next(iter(methods),''),path) in {
-        ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests/{id}'),
+        ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests'),('GET','/account/operations/private-account-download'),('GET','/account/operations/privacy-requests/{id}'),
         ('POST','/account/operations/privacy-requests/{id}/cancel'),('GET','/account/operations/privacy-requests/{id}/export'),
         ('GET','/account/operations/eligibility'),('POST','/account/operations/eligibility'),
         ('GET','/account/operations/diagnostics'),('POST','/account/operations/support-consents'),

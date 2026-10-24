@@ -29,6 +29,10 @@ class SyntheticPrivacyStore:
 
 class PrivacyRequests:
     def __init__(self,db):self.db=db
+    def history(self,owner):
+        self.fence(owner)
+        rows=list(self.db.scalars(select(OutboxMessage).where(OutboxMessage.topic==TOPIC,OutboxMessage.payload['owner_id'].as_integer()==owner).order_by(OutboxMessage.created_at.desc(),OutboxMessage.id.desc()).limit(101)))
+        return {'owner_id':owner,'items':[public_receipt(row) for row in rows[:100]],'has_more':len(rows)>100,'real_deletion_enabled':False}
     def fence(self,owner):
         user=self.db.scalar(select(User).where(User.id==owner).with_for_update().execution_options(populate_existing=True))
         if user is None or not user.is_active:raise BoundaryDenied('ACTIVE_OWNER_REQUIRED')
@@ -80,4 +84,15 @@ class PrivacyRequests:
 
 
 def public_receipt(row):
+    p=row.payload
+    try:
+        if (type(p) is not dict or type(p.get('owner_id')) is not int or p['owner_id']<1
+            or p.get('kind') not in {'export','delete'} or p.get('legal_approval') is not False
+            or p.get('state') not in {'retention_review_required','cancelled','synthetic_drill_complete','synthetic_sql_complete'}
+            or digest({k:p[k] for k in ('owner_id','kind','key')})!=p.get('binding')
+            or digest({k:v for k,v in p.items() if k not in {'state','result','result_hash','receipt_hash'}})!=p.get('receipt_hash')):
+            raise ValueError()
+        for field in ('created_at','expires_at'):
+            if type(p[field]) is not str or len(p[field])>64 or datetime.fromisoformat(p[field]).tzinfo is None:raise ValueError()
+    except (KeyError,TypeError,ValueError):raise BoundaryDenied('PRIVACY_PUBLIC_RECEIPT_INVALID') from None
     return {'id':str(row.id),**{k:row.payload[k] for k in ('owner_id','kind','state','created_at','expires_at')},'legal_approval':False,'notice':'Request recorded; real export/deletion remains held for retention review and separately approved adapters.'}

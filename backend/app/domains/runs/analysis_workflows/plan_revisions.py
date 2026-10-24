@@ -65,7 +65,7 @@ def calculate(original,record):
         revision_validation={'quantity_schema':'validated','frozen_owned_source':'validated_at_revision','source_value_math':'calculated' if priced else 'missing_prices',
             'funds':'not_established','portfolio_exposure':'not_established','charges_taxes':'not_established',
             'within_default_gross_reference_bound':gross<=Decimal(ExecutionLimits().max_notional) if priced else None,'execution_eligible':False},
-        amendment={'available':True,'reason':'Advisory target revisions only; current funds/quotes/exposure and an amended-order provenance contract are unavailable. No approval is reused.','max_saved_revisions':MAX_REVISIONS})
+        amendment={'available':True,'reason':'Saved target/source-price calculation only. Review the separate current simulated or manual funds assessment; no approval is reused.','max_saved_revisions':MAX_REVISIONS})
     return result
 
 

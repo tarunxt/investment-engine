@@ -113,8 +113,10 @@ class NativeOutboxExport:
         if topic==BASKET:
             require(set(p)=={'schema','simulation','intent_id','owner_id','provenance','request_digest','order_hash','scenario','digest'})
             intent=self.intent(p['intent_id'],subject);proof=p['provenance']
-            require(type(proof) is dict and set(proof)==set(PROVENANCE) and proof['owner_id']==subject
-                and proof['module_version']==intent.module_version and p['schema']==1 and p['simulation'] is True
+            from app.uat2.revision_baskets import REVISION_PROVENANCE
+            fields=PROVENANCE+REVISION_PROVENANCE if p.get('schema')==2 else PROVENANCE
+            require(type(proof) is dict and set(proof)==set(fields) and proof['owner_id']==subject
+                and proof['module_version']==intent.module_version and type(p['schema']) is int and p['schema'] in {1,2} and p['simulation'] is True
                 and p['request_digest']==intent.request_digest and p['order_hash']==digest(intent.payload_json)
                 and p['scenario'] in {'filled','partial','after_acceptance','before_acceptance'}
                 and p['digest']==digest({k:v for k,v in p.items() if k!='digest'})
@@ -123,6 +125,17 @@ class NativeOutboxExport:
             require(proof['source_hash']==flow.execution_json['source_hash']
                 and proof['plan_hash']==flow.execution_json['plan_hash']
                 and intent.operation_key_digest==digest({'operation':'confirmed_order','key':'linked-analysis:'+digest(proof)}))
+            if p['schema']==2:
+                from app.domains.runs.models import AutoRebalanceWorkflowStage
+                from app.domains.runs.analysis_workflows.plan_revisions import ALGORITHM
+                stage=self.db.scalar(select(AutoRebalanceWorkflowStage).where(AutoRebalanceWorkflowStage.workflow_id==flow.id,AutoRebalanceWorkflowStage.stage=='actionables'))
+                revisions=stage.checkpoint_json.get('advisory_revisions',[]) if stage else []
+                require(type(revisions) is list and len(revisions)<=20 and hash_value(proof['revision_version']) and hash_value(proof['revision_math_hash']) and hash_value(proof['revision_risk_basis_hash']))
+                found=[item for item in revisions if type(item) is dict and type(item.get('record')) is dict and item['record'].get('version')==proof['revision_version']]
+                require(len(found)==1);entry=found[0];record=entry['record']
+                require(entry.get('receipt_hash')==digest(record) and record.get('algorithm')==ALGORITHM and record.get('orders_authorized') is False
+                    and record.get('math_hash')==proof['revision_math_hash'] and record.get('owner_id')==subject and record.get('workflow_id')==flow.id
+                    and record.get('source_hash')==proof['source_hash'] and record.get('plan_hash')==proof['plan_hash'] and record.get('result_hash')==proof['actionables_result_hash'])
             return {'kind':'analysis_basket_provenance','intent_id':intent.id,'provenance':proof,'scenario':p['scenario']}
         if topic==VENUE:
             reference=p['receipt']['client_reference']

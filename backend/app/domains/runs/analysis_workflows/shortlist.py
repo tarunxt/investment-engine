@@ -12,6 +12,9 @@ VERSION='synthetic-shortlist-v1'
 
 
 def prepare(owner,portfolio,source,request):
+    if isinstance(request,dict) and request.get('schema_version')==2:
+        from .research_options import prepare as prepare_options
+        return prepare_options(owner,portfolio,source,request)
     from app.domains.ai_limits.projection import projection
     module='zerodha_rebalance' if portfolio=='india' else 'indmoney_us'
     facts=projection(source,owner=owner,module=module)
@@ -46,6 +49,11 @@ def verified(row):
     body=e.get('research_setup')
     if not isinstance(body,dict) or body.get('owner_id')!=row.user_id or body.get('portfolio')!=row.portfolio:
         raise WorkflowDenied('Owned frozen shortlist required')
+    from .research_options import VERSION,prepare as prepare_options
+    if body.get('version')==VERSION:
+        expected,hash=prepare_options(row.user_id,row.portfolio,e['source'],{**body.get('request',{}),'preview_hash':e.get('research_setup_hash'),'setup_hash':e.get('research_setup_hash')})
+        if body!=expected or digest(body)!=hash:raise WorkflowDenied('Frozen research options integrity changed')
+        return body
     request={'raw_text':body.get('raw_source'),'format':body.get('format'),
         'preview_hash':body.get('preview_hash'),'setup_hash':e.get('research_setup_hash')}
     expected,hash=prepare(row.user_id,row.portfolio,e['source'],request)
@@ -55,8 +63,9 @@ def verified(row):
 
 def prompt_context(row):
     body=verified(row)
-    return None if body is None else {'mode':'shortlist_only','setup_hash':row.execution_json['research_setup_hash'],
-        'accepted_instruments':body['accepted_instruments'],'discovery_performed':False,
+    return None if body is None else {'mode':body['mode'],'setup_hash':row.execution_json['research_setup_hash'],
+        'accepted_instruments':body['accepted_instruments'],'discovery_performed':body['discovery_performed'],
+        **({'constraints':body['constraints'],'simulation_only':True,'discovery_receipt_hash':body['discovery_receipt']['hash'] if body['discovery_receipt'] else None} if 'constraints' in body else {}),
         'raw_provenance_excluded':True,'orders_authorized':False}
 
 
