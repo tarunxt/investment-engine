@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {useSession} from "next-auth/react";
 import { ModulePreferences } from "@/components/modules/ModulePreferences";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -23,7 +24,12 @@ type PreferencesFormData = {
   theme_preference: ThemePreference;
 };
 
-export default function PreferencesPage() {
+export default function PreferencesPage(){
+  const {data:session,status}=useSession();
+  if(status!=='authenticated'||!session?.user?.id)return <p role="status">Verifying your private preferences…</p>;
+  return <OwnedPreferencesPage key={`${session.user.id}:${session.generation}`}/>;
+}
+function OwnedPreferencesPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +41,11 @@ export default function PreferencesPage() {
   });
 
   useEffect(() => {
+    let active=true;
     async function loadPreferences() {
       try {
         const profile = await apiService.getProfile();
+        if(!active)return;
         const themePreference = isThemePreference(profile.theme_preference)
           ? profile.theme_preference
           : "light";
@@ -54,6 +62,7 @@ export default function PreferencesPage() {
       }
     }
     loadPreferences();
+    return()=>{active=false;};
   }, []);
 
   useEffect(()=>{
@@ -168,7 +177,8 @@ export default function PreferencesPage() {
           </select>
         </div>
 
-        <div className="space-y-2">
+        <div id="notification-settings" className="space-y-2">
+          <p className="text-sm">These preferences choose notification categories; they are not proof of delivery. External email/WhatsApp delivery is disabled in UAT2. Changing a preference never approves orders or restarts research.</p>
           <Label htmlFor="notification_preferences">Notifications</Label>
           <select
             id="notification_preferences"

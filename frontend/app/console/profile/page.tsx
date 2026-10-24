@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {useSession} from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +10,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiService } from "@/services/api";
 import { FormAlert } from "@/components/auth/FormAlert";
 
-export default function ProfilePage() {
+export default function ProfilePage(){
+  const {data:session,status}=useSession();const {user}=useAuth();
+  if(status!=='authenticated'||!user||String(user.id)!==String(session?.user?.id))return <p role="status">Verifying your private profile…</p>;
+  return <OwnedProfilePage key={`${user.id}:${session?.generation}`}/>;
+}
+function OwnedProfilePage() {
   const { user, refreshAuth } = useAuth();
   
   const [loading, setLoading] = useState(false);
@@ -26,6 +32,7 @@ export default function ProfilePage() {
 
   // Load profile data on mount
   useEffect(() => {
+    let active=true;
     async function loadProfile() {
       if (!user) return;
       
@@ -38,6 +45,7 @@ export default function ProfilePage() {
 
       try {
         const profile = await apiService.getProfile();
+        if(!active)return;
         setFormData(prev => ({
           ...prev,
           bio: profile.bio || "",
@@ -48,6 +56,7 @@ export default function ProfilePage() {
       }
     }
     loadProfile();
+    return()=>{active=false;};
   }, [user]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -85,7 +94,7 @@ export default function ProfilePage() {
       <div>
         <h3 className="text-lg font-medium">Profile</h3>
         <p className="text-sm text-muted-foreground">
-          This is how others will see you on the site.
+          Your private workspace profile. Changing these details does not change your sign-in identity or connected brokerage account.
         </p>
       </div>
       <Separator />

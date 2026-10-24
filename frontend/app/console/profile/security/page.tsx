@@ -69,9 +69,10 @@ export default function SecurityPage() {
       <div>
         <h3 className="text-lg font-medium">Security</h3>
         <p className="text-sm text-muted-foreground">
-          Update your password and secure your account.
+          Change a local account password only when you know its current password. This form does not manage Google or brokerage credentials.
         </p>
       </div>
+      <p className="text-sm">If you sign in with Google, manage your Google password with Google. Your sign-in method is not inferred from your display name or email. This page does not link accounts, configure provider keys or grant trading access.</p>
       <Separator />
       
       {success && (

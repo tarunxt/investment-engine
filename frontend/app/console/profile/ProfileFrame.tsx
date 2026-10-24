@@ -8,6 +8,12 @@ import { cn } from "@/lib/utils";
 
 const sidebarNavItems = [
   {title: "Get started",href: "/console/profile/get-started"},
+  {title: "Connections",href: "/console/profile/connections"},
+  {title: "My modules",href: "/console/profile/preferences#modules"},
+  {title: "Usage & plan",href: "/console/profile/usage"},
+  {title: "Notifications",href: "/console/profile/preferences#notification-settings"},
+  {title: "Privacy & exports",href: "/console/profile/privacy"},
+  {title: "Help",href: "/console/help"},
   {
     title: "Profile",
     href: URLs.routes.profile.root(),
@@ -25,7 +31,7 @@ const sidebarNavItems = [
     href: URLs.routes.profile.security(),
   },
   {
-    title: "Activity",
+    title: "My Activity",
     href: URLs.routes.profile.activity(),
   },
 ];
@@ -62,9 +68,9 @@ export function ProfileFrame({ children, costAccessOwner }: SettingsLayoutProps 
                 href={item.href}
                 aria-current={pathname === item.href ? "page" : undefined}
                 className={cn(
-                  "inline-flex items-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+                  "inline-flex items-center whitespace-normal rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
                   "hover:bg-muted hover:text-muted-foreground",
-                  "h-9 px-4 py-2 justify-start",
+                  "min-h-11 px-4 py-2 justify-start",
                   pathname === item.href
                     ? "bg-muted font-medium text-primary"
                     : "text-muted-foreground"

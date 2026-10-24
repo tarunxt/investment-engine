@@ -389,3 +389,28 @@ horizontal scrolling. No business POST occurred in that retest. The local owned
 preview was stopped. Floating mobile navigation can obscure scrolled text; UX-10
 will correct its layout/focus clearance rather than treating reflow alone as full
 accessibility acceptance.
+
+## UX-10: customer utilities and accessible workspace polish
+
+Profile navigation now includes Connections, My modules, personal Usage & plan,
+Notifications, My Activity, Privacy & exports and Help; existing cost-only role
+admission is preserved. Security wording distinguishes a known local password
+from Google/provider credentials without inferring or changing login methods.
+Notification preferences are not delivery evidence; external sends remain off.
+The read-only privacy page distinguishes a scoped analysis download from complete
+account export and explicitly retains all inventory/retention/restore/erasure gates.
+No deletion, credentials, new authority or security setting is introduced.
+
+Profile and Preferences remount by authenticated owner/session. Late profile
+reads are discarded; a prior-owner preference reply cannot apply global theme
+state after unmount (tested with a deferred real promise). The mobile menu now
+occupies a sticky full-width bar, replacing the floating text overlap. Scoped
+focus rings/scroll clearance, a focusable skip destination and reduced-motion
+rules support keyboard use. 44px touch targets are a design goal, not a WCAG
+minimum claim. Existing exact confirmation details are never balance-masked.
+
+31 related frontend checks pass; TypeScript and targeted lint pass. Independent
+review, full viewport/reduced-motion/keyboard browser checks and screenshots are
+pending. No actual screen-reader, real browser-zoom or unassisted usability result
+has been claimed. UX-06 accepted candidate modes/constraints and UX-08 validated
+amendments remain explicit implementation gaps to close before full-package signoff.

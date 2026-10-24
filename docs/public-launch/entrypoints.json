@@ -7,7 +7,7 @@
     "frontend": 25,
     "http": 321,
     "lifecycle": 9,
-    "page": 80,
+    "page": 81,
     "scheduler": 20,
     "websocket": 5,
     "worker": 53
@@ -16672,6 +16672,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/profile/privacy",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/privacy",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/privacy/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/profile/security",
       "classification": "owner-private",
       "kind": "page",
@@ -17747,9 +17766,10 @@
     "frontend/app/console/profile/connections/page.tsx": "3c95b14f97444dd5e9371ba1b6f934890a50146519af589292fa5a09ed04d69d",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/get-started/page.tsx": "1436f51f3084654a58ddb960be2113684b0b4f58771537cd906e56fb379b474a",
-    "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
-    "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",
-    "frontend/app/console/profile/security/page.tsx": "c39f32aae2cf5f63b12d6e0fec9ef1dd64e81288eb92e01b7d2fd77beaad98e3",
+    "frontend/app/console/profile/page.tsx": "2f5c64c4387a93fd707b416ae2695bcd3d6e29c19a6babb97bb1acde13981e9d",
+    "frontend/app/console/profile/preferences/page.tsx": "309604416c11fa4e916610aae9902913d82d75b50221476612e95fd05b8abbab",
+    "frontend/app/console/profile/privacy/page.tsx": "bc6f643868bb95e5e9f046e3a20269f3c10049d69fb5037bb5e478a222e678bd",
+    "frontend/app/console/profile/security/page.tsx": "3082b2ceba9096a61621c93743d3c8ed6e0eceaea2430ae698a065e7e3127d8a",
     "frontend/app/console/profile/usage/page.tsx": "1d83d320a1d910b2f09643fccfb7b1925ef2f4eb29efcbec2b9e26a0a933e19d",
     "frontend/app/console/prompts/page.tsx": "ea1d6bb90c7f95ceed02a3ee1da3493170ee9b18bb39343a0ec9d24b7aa41bdd",
     "frontend/app/console/runs/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",

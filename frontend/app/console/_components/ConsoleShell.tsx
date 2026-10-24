@@ -62,7 +62,7 @@ export function ConsoleShell({
         }
     }, [hasRedirectToParam, pathname, router, searchParamString]);
     return (
-        <div className="min-h-screen bg-background text-foreground" style={consoleSidebarStyle}>
+        <div data-workspace-shell="authenticated" className="min-h-screen bg-background text-foreground" style={consoleSidebarStyle}>
             <a href="#workspace-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-background focus:p-3">Skip to main content</a>
             {/* Mobile sidebar backdrop */}
             {sidebarOpen && (
@@ -104,22 +104,24 @@ export function ConsoleShell({
 
             {/* Main content area */}
             <div className="lg:pl-[var(--console-sidebar-width)]">
+                <div className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
                 <button
                     type="button"
                     ref={triggerRef}
                     onClick={() => setSidebarOpen(true)}
-                    className="fixed left-4 top-4 z-10 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
                     aria-label="Open navigation"
                     aria-expanded={sidebarOpen}
                     aria-controls="console-sidebar"
                 >
                     <HiOutlineMenu />
-                </button>
+                </button><span className="font-medium">Workspace</span></div>
 
                 {/* Page content */}
                 <main
                     id="workspace-main"
-                    className="px-4 pb-6 pt-20 sm:px-6 lg:py-6"
+                    tabIndex={-1}
+                    className="min-w-0 px-4 py-6 sm:px-6"
                     data-console-shell="authenticated"
                 >
                     {error ? (
