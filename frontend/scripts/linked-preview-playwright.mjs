@@ -114,7 +114,8 @@ async function analyze(page,base,owner){
  for(const width of [320,390,768,1280,1440]){
   await page.setViewportSize({width,height:844});
   const closeNavigation=page.getByRole('button',{name:'Close navigation',exact:true});
-  if(await closeNavigation.isVisible())await closeNavigation.click();
+  const closeBox=await closeNavigation.boundingBox();
+  if(closeBox&&closeBox.x>=0&&closeBox.x+closeBox.width<=width)await closeNavigation.click();
   const geometry=await page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
   assert.ok(geometry.page<=geometry.viewport+1,`Research options overflow at ${width}px`);
   await shot(page,`owner-${owner}-research-options-${width}px`);
@@ -228,7 +229,8 @@ try{
  for(const width of [320,390,768,1280,1440]){
   await a.page.setViewportSize({width,height:844});
   const closeNavigation=a.page.getByRole('button',{name:'Close navigation',exact:true});
-  if(await closeNavigation.isVisible())await closeNavigation.click();const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
+  const closeBox=await closeNavigation.boundingBox();
+  if(closeBox&&closeBox.x>=0&&closeBox.x+closeBox.width<=width)await closeNavigation.click();const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
   assert.ok(geometry.page<=geometry.viewport+1,`Privacy utilities overflow at ${width}px`);await shot(a.page,`privacy-requests-${width}px`);
  }
  assert.equal(sql('SELECT count(*) n FROM users')[0].n,3);
