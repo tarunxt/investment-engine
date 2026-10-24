@@ -337,3 +337,10 @@ backend work; controls are blocked rather than silently ignored. Cash is absent
 from the frozen analysis source, even though some import models store optional
 wallet values; it must not be inferred as zero or borrowed from another account.
 Exact-source build/browser qualification and amended-plan safety remain pending.
+
+The first UX-08 packaged browser attempt correctly failed at the local preview
+allowlist: the new GET /runs/analysis-workflows/{id}/action-plan was absent. No
+business POST occurred. Only that finite numeric read path is added; POST,
+DELETE, foreign/non-numeric and nested approval variants remain denied in a new
+regression. This changes the local preview boundary, not native activation or
+application runtime overrides. The failed receipt/log remain private.

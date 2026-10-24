@@ -54,3 +54,9 @@ def test_actual_endpoint_denies_foreign_and_stale_source(linked_env):
     with pytest.raises(HTTPException) as denied:asyncio.run(read(1))
     assert denied.value.status_code==409
     assert len(list(e.db.scalars(select(AutoRebalanceWorkflow))))==before
+
+
+def test_preview_new_action_plan_is_read_only_and_not_a_wildcard(linked_env):
+    allowed=linked_env.preview.allowed
+    assert allowed('GET','/runs/analysis-workflows/7/action-plan')
+    for method,path in [('POST','/runs/analysis-workflows/7/action-plan'),('DELETE','/runs/analysis-workflows/7/action-plan'),('GET','/runs/analysis-workflows/7/action-plan/approve'),('GET','/runs/analysis-workflows/foreign/action-plan')]:assert not allowed(method,path)
