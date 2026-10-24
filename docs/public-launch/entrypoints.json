@@ -5,7 +5,7 @@
     "background": 31,
     "export": 55,
     "frontend": 25,
-    "http": 320,
+    "http": 321,
     "lifecycle": 9,
     "page": 80,
     "scheduler": 20,
@@ -10861,13 +10861,18 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/candidate-preview",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:102"
+      "source": "backend/app/domains/runs/analysis_router.py:104"
     },
     {
       "calls": [
+        "AutoRebalanceWorkflow.execution_json['plan_hash'].as_string",
+        "AutoRebalanceWorkflow.execution_json['scheduled'].as_boolean",
+        "AutoRebalanceWorkflow.execution_json['scheduled'].as_boolean().is_",
+        "AutoRebalanceWorkflow.execution_json['source_hash'].as_string",
         "AutoRebalanceWorkflow.id.desc",
         "AutoRebalanceWorkflow.portfolio.in_",
         "Depends",
+        "Query",
         "Workflows",
         "datetime.now",
         "datetime.now().astimezone",
@@ -10905,15 +10910,20 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:118"
+      "source": "backend/app/domains/runs/analysis_router.py:120"
     },
     {
       "calls": [
         "Depends",
         "Workflows",
-        "Workflows(s, runtime).detail",
+        "datetime.now",
+        "datetime.now().astimezone",
+        "datetime.now().astimezone().isoformat",
         "db.run_sync",
-        "router.get"
+        "router.get",
+        "service.detail",
+        "service.owned",
+        "service.validate_current"
       ],
       "capability": "get_analysis_workflow",
       "classification": "owner-private",
@@ -10933,7 +10943,40 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:149"
+      "source": "backend/app/domains/runs/analysis_router.py:156"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Workflows",
+        "composition.completed_analysis",
+        "db.run_sync",
+        "getattr",
+        "project",
+        "router.get",
+        "service.owned",
+        "type"
+      ],
+      "capability": "get_action_plan",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{workflow_id}/action-plan')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/{workflow_id}/action-plan",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:168"
     },
     {
       "calls": [
@@ -10966,7 +11009,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:153"
+      "source": "backend/app/domains/runs/analysis_router.py:182"
     },
     {
       "calls": [
@@ -10998,7 +11041,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/synthetic-source",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:160"
+      "source": "backend/app/domains/runs/analysis_router.py:189"
     },
     {
       "calls": [
@@ -11030,7 +11073,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/controls",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:172"
+      "source": "backend/app/domains/runs/analysis_router.py:201"
     },
     {
       "calls": [
@@ -11055,7 +11098,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/config",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:65"
+      "source": "backend/app/domains/runs/analysis_router.py:67"
     },
     {
       "calls": [
@@ -11095,7 +11138,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/setup-context",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:73"
+      "source": "backend/app/domains/runs/analysis_router.py:75"
     },
     {
       "calls": [
@@ -17515,18 +17558,20 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/analysis_router.py": "23f3c80ff9c2f9b8311957e6eedeb4996b9fb085d8e3ce0bbdbe1a34d4224ef1",
+    "backend/app/domains/runs/analysis_router.py": "b86432c0cec46de1f98e465ee21860d5ec2a42e576748d51cec3618b828e3bbb",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
-    "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
+    "backend/app/domains/runs/analysis_workflows/action_plan.py": "2c71de1893e95182d1147636c0982a873081f4ffafb9b01bcc7822c04f4ec679",
+    "backend/app/domains/runs/analysis_workflows/adapters.py": "2aacc60c6d6050c386fc1907eb4d3dc1740190c90d5dcefe6f23fd0e182365f2",
     "backend/app/domains/runs/analysis_workflows/bindings.py": "4c8813e8ce9f2f52670a6360cddfd4e9978215a525f81bca079f97340cd88c28",
     "backend/app/domains/runs/analysis_workflows/candidate_preview.py": "62694ff81f8e3d06b8d994b8a830c9ccaa21e7db38128205812eb092fdb54e5b",
     "backend/app/domains/runs/analysis_workflows/contracts.py": "7316d7861ceab70369104a2438c199eb759b54440eae81bf62bd26a4ab8faf62",
     "backend/app/domains/runs/analysis_workflows/dispatch.py": "ad1ab3b3e82a78da6ee0eb3fe5cabfa3d3015f318434685146defb5ce42aab39",
     "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
+    "backend/app/domains/runs/analysis_workflows/progress.py": "a29ce41305be481ca5492cf8f349dc4e99a77492c00bdefae1507651762cf430",
     "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
-    "backend/app/domains/runs/analysis_workflows/service.py": "aba431a14e5c0f24b836c76bd2a3c8a06b283b55dfc91e9721064bc1775f3ab9",
-    "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "5b084cb1c497aed09583646c6d6334d2fc1b8ab3d0543faef1df57b1b6c7f591",
+    "backend/app/domains/runs/analysis_workflows/service.py": "4d3aafe47e979da85abe7f56a4096f5a254730b78ab64b687905846a645d67cc",
+    "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "cc22c0595c02fbd940b492ed2410362a09286219d0604112cb4bd9a04feffe49",
     "backend/app/domains/runs/analysis_workflows/synthetic_journal.py": "faddec2ce90f4946a61d8cee8cb82c7ae491ca71fad54918b1fb5b634975b830",
     "backend/app/domains/runs/analysis_workflows/synthetic_sources.py": "eddcfcc54903469e63a99d68e3d4929807563b7c98aeb29fc0f90183f02cbd0e",
     "backend/app/domains/runs/auto_rebalance_audit.py": "32e04c7bf212bcf7e989252f6877bf205ecfef13942babec807441efac0dbcab",

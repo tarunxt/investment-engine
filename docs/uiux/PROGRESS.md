@@ -308,3 +308,32 @@ saved identity without a second POST; reloaded to all six stages completed; chec
 captures and receipt are under .runtime/uiux-ux07; mobile capture inspected. This
 is not hosted, PostgreSQL/Redis or unassisted accessibility acceptance. The owned
 preview was stopped with existing synthetic source and research history retained.
+
+## UX-08: verified advisory action-plan projection; amendments still open
+
+Plans now load an owner-scoped verified governed receipt with immutable source,
+model-plan and result hashes. The screen orders account/mode/date/readiness,
+outcome and uncertainty, source-price before/after values, actual proposed rows,
+charges/tax limitations, coverage/exclusions, decisions and expandable evidence.
+No-change is useful success. Missing prices/cash/fees/tax/order conditions/rationale
+stay unavailable; no probability or affordability is invented. Values default
+masked; exact quantities remain visible. Save-for-later refers to already durable
+history and no-execution is a screen-local decision, explicitly labelled.
+
+INDmoney opens the owner/run/source-bound self-report checklist. India can prepare
+an existing exact fake review separately; a ref prevents double requests and the
+button remains blocked after any uncertain acknowledgement. No submission occurs.
+Independent review caught native journal sources lacking snapshot IDs; the new
+readiness predicate instead requires exact server hash/version validation and
+current connection identity/version for explicitly synthetic journal receipts.
+US imports still require matching accepted snapshot IDs. Historical metadata and
+original research evidence remain accessible without permitting a current review.
+
+30 affected backend and 15 frontend checks pass, TypeScript and lint pass.
+Initial stale static assertion/syntax and incorrect test working-directory attempts
+are retained in private logs; they were corrected, not counted as passes.
+Full validated revised-plan amendments and strategy constraints remain incomplete
+backend work; controls are blocked rather than silently ignored. Cash is absent
+from the frozen analysis source, even though some import models store optional
+wallet values; it must not be inferred as zero or borrowed from another account.
+Exact-source build/browser qualification and amended-plan safety remain pending.

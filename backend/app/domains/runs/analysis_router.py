@@ -164,6 +164,20 @@ async def get_analysis_workflow(workflow_id:int,db=Depends(get_async_db),user=De
         return item
     return await db.run_sync(read)
 
+@router.get('/{workflow_id}/action-plan')
+async def get_action_plan(workflow_id:int,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+    from .analysis_workflows.synthetic_composition import SyntheticAnalysis
+    from .analysis_workflows.action_plan import project
+    from app.domains.ai_limits.contracts import BoundaryDenied
+    composition=getattr(runtime.source,'__self__',None)
+    if type(composition) is not SyntheticAnalysis:raise HTTPException(503,'Verified advisory plan projection unavailable')
+    def read(session):
+        service=Workflows(session,runtime);row=service.owned(user.id,workflow_id)
+        receipt=composition.completed_analysis(session,user.id,workflow_id)
+        return project(receipt,workflow=row,source=row.execution_json['source'])
+    try:return await db.run_sync(read)
+    except (WorkflowDenied,PermissionError,BoundaryDenied):raise HTTPException(409,'Current owned governed result could not be verified; retained research evidence remains available, no new review authorized') from None
+
 @router.post('')
 async def create_analysis_workflow(body:Create,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
     try:
