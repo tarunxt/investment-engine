@@ -537,3 +537,25 @@ The failed matrix/DOM trace remains private; the dashboard repair needs packaged
 browser qualification before final receipt. No business action occurred in that
 failure. The test's Bullpen module identifiers were also corrected to canonical
 bullpen_research/bullpen_live before continuing; no product permission changed.
+
+
+## UX-11: final local evidence saved; full-feature/release gates remain
+
+Implementation 46f155d8124b63556eda3ad044da9f71b63230fd packaged build passed.
+109 final frontend checks pass with zero skips. Its backend tree is byte-identical
+to a4f09eb's tested tree: 447 backend plus 69 ownership/WebSocket/route/presentation
+checks passed with zero skips. The final actual-browser matrix passed 10 checks:
+Bullpen-off card/request/summary scope, navigation retained during an injected read
+failure, standard-owner admin denial, all five widths and same-browser synthetic
+owner change with a 404 on the prior owner's private workflow. No browser errors
+or business writes. The owned local preview was stopped; prior fixtures/history
+and the user's pre-existing untracked build directories were preserved.
+
+The stage matrix, exact-source evidence, functional gaps, unmeasured pilot script
+and safe rollback/release gates are in UX11-RELEASE-RECEIPT.md. The requested full
+package is not labelled complete: find/combined discovery, configurable strategy
+constraints and amended execution remain unavailable; complete account privacy,
+actual VoiceOver/zoom/pilot and new hosted/PG/Redis/exact-source CI remain gates.
+No publication, UAT2/production change, real order/provider send, security change,
+credential operation or actual erasure occurred. Ready for precisely scoped
+publication/CI review; not an unconditional UAT2 or public production release.
