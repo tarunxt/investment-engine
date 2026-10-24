@@ -414,3 +414,13 @@ review, full viewport/reduced-motion/keyboard browser checks and screenshots are
 pending. No actual screen-reader, real browser-zoom or unassisted usability result
 has been claimed. UX-06 accepted candidate modes/constraints and UX-08 validated
 amendments remain explicit implementation gaps to close before full-package signoff.
+
+UX-10 five packaged viewport checks passed at 0d397e4 (320/390/768/1280/1440).
+Keyboard wrap exposed a real existing drawer bug: closed absolute account-menu
+children reported rectangles, were selected as focus targets, and could not receive
+focus. The recorded trace shows Shift-Tab stayed at the first link and Tab then
+advanced to Close. A new shared focus selector explicitly excludes closed-details
+content while retaining its summary, plus hidden/inert descendants. A regression
+models hidden controls with nonempty rectangles. Failed traces are retained; the
+initial assumption that all rectangle-bearing links were focusable was corrected.
+No business POST occurred. Exact repaired-source keyboard qualification is pending.

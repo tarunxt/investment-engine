@@ -9,6 +9,7 @@ import {
     HiOutlineX,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
+import {workspaceFocusable} from '@/lib/workspaceFocus';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
 import dynamic from 'next/dynamic';
 const ModuleRouteGate = dynamic(() => import('@/components/modules/ModuleRouteGate').then(m=>m.ModuleRouteGate), {ssr:false,loading:()=> <p role="status">Loading workspace access…</p>});
@@ -37,7 +38,7 @@ export function ConsoleShell({
       if(!sidebarOpen||!mobile)return;
       const root=sidebarRef.current;
       const trigger=triggerRef.current;
-      const items=()=>Array.from(root?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),summary')??[]).filter(el=>el.getClientRects().length>0);
+      const items=()=>workspaceFocusable(root);
       items()[0]?.focus();
       const keys=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();setSidebarOpen(false);}if(event.key==='Tab'){const list=items(),first=list[0],last=list.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}};
       document.addEventListener('keydown',keys);
