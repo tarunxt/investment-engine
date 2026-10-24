@@ -55,9 +55,19 @@ async def analysis_config(user=Depends(get_current_user),runtime=Depends(optiona
     return {'enabled':runtime is not None,'analysis_only':True,'orders_authorized':False}
 
 @router.get('')
-async def list_analysis_workflows(db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+async def list_analysis_workflows(selected_only:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+    # Dashboard requests exclude disabled/unavailable modules before the SQL read.
+    # Core historical activity keeps its existing explicit all-owned semantics.
+    portfolios=None
+    if selected_only:
+        from app.domains.modules.visibility import visible_module_ids
+        selected=set(await visible_module_ids(db,user.id))
+        portfolios=[portfolio for module,portfolio in [('zerodha_rebalance','india'),('indmoney_us','indmoney_us')] if module in selected]
+        if not portfolios:return {'owner_id':user.id,'items':[]}
     def read(s):
-        rows=s.scalars(select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id==user.id,AutoRebalanceWorkflow.orchestration_kind=='analysis_v1').order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all()
+        query=select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id==user.id,AutoRebalanceWorkflow.orchestration_kind=='analysis_v1')
+        if portfolios is not None:query=query.where(AutoRebalanceWorkflow.portfolio.in_(portfolios))
+        rows=s.scalars(query.order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all()
         return [Workflows(s,runtime).detail(user.id,row.id) for row in rows]
     return {'owner_id':user.id,'items':await db.run_sync(read)}
 

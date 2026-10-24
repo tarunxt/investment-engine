@@ -7,7 +7,7 @@ import type {InitialDashboardScope} from '@/lib/dashboardScope';
 
 const DashboardPageClient = dynamic(
   () =>
-    import("./DashboardPageClient").then((module) => module.DashboardPageClient),
+    import("./PersonalDashboard").then((module) => module.PersonalDashboard),
   {
     ssr: false,
     loading: () => (

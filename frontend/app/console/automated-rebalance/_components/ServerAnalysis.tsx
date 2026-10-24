@@ -74,7 +74,7 @@ export function ServerAnalysisSession() {
       <label>Portfolio <select value={portfolio} onChange={e=>setPortfolio(e.target.value as typeof portfolio)}><option value="indmoney_us">US portfolio</option><option value="india">India portfolio</option></select></label>
       <button className="rounded border px-3 py-1" disabled={pending} onClick={()=>void submit()}>Start server analysis</button>
       {!items.length&&<p>No server workflows yet. A current eligible portfolio is required.</p>}
-      {items.map(row=><article key={row.id} className="rounded border p-3 space-y-2">
+      {items.map(row=><article id={`analysis-workflow-${row.id}`} key={row.id} className="rounded border p-3 space-y-2">
         <h3>Workflow {row.id} · {row.portfolio} · {row.status}</h3>
         {row.error&&<p>{row.error}</p>}
         <ol>{row.stages.map(stage=><li key={stage.stage}>{stage.stage}: {stage.status}; attempts {stage.attempts}; cost USD {stage.checkpoint.attempts?.map(a=>a.cost_usd??"unavailable").join(" + ")||"not recorded"}{stage.error?`; ${stage.error}`:""}</li>)}</ol>

@@ -112,3 +112,31 @@ A command initially used incorrect frontend-relative paths and executed no edits
 the corrected command and actual checks are retained separately. Independent
 boundary review found no concrete issue. Browser/build and first-use outcome
 qualification are still pending; no conversion or unassisted completion claimed.
+
+UX-03 actual local browser qualification at
+f7a4fe28465115675b8e183f5f9569c9b9e56e41 passed five checks: refresh,
+Skip/Back restoration, rejection of foreign-owner progress, corrected translucent
+mobile backdrop, and zero backend mutations during navigation. Mobile guide was
+visually inspected. Private receipt/captures: .runtime/uiux-ux03. This does not
+establish a first-use conversion rate or new hosted import/research acceptance.
+
+## UX-04: personal dashboard candidate; browser qualification pending
+
+The active dashboard island now loads one personal dashboard instead of the old
+duplicate overview/command center. It shows selected cards, masked native money,
+truthful absent cash, up to three consequential recorded attention items and a
+single prioritized next task. It has no direct Bullpen positions request, combined
+INR dependency, empty graphs, automatic research or order effects. Existing legacy
+component source remains available for comparison/history, but is not mounted.
+Selected-only workflow listing filters portfolios before SQL; explicit core owned
+history retains prior semantics. Account/status refresh is read-only. Research
+links retain durable workflow anchors and status/version; review is not approval.
+
+Initial focused checks: 28 backend and 15 frontend pass. Independent review found
+manual-import readiness ('not_required'), misattributed Bullpen money on other
+cards, and truncated history treated as complete. All three were corrected:
+accepted manual snapshots qualify source readiness, financial context is limited
+to the evidenced India/US projections, and partial/unavailable activity blocks a
+new-research next task. Existing backend unresolved-first ordering is preserved.
+Focused regression count increased to 16 frontend cases. Final build, type/lint
+and synthetic browser qualification remain recorded separately; no hosted claim.
