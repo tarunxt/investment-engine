@@ -23,3 +23,24 @@ test('actual dashboard effect never queries optional data when selected module i
 });
 
 test('empty selection still mounts core safety reads without optional data',async()=>{const seed=JSON.parse(read('./fixtures/stage08-ready-manifest.json'));for(const m of seed.modules)m.selection.enabled=false;const h=dashboardHarness(seed);assert.deepEqual(h.calls.map(x=>x.path),['/backend-api/order-intents/reviews']);h.cleanup();h.calls[0].resolve({owner_id:7101,has_more:false,intents:[]});await new Promise(resolve=>setImmediate(resolve));assert.equal(h.updates.length,0);assert.doesNotMatch(read('../components/modules/ModuleRouteGate.tsx'),/\['\/console\/dashboard','\/console\/jobs'/);});
+
+// Exercise the actual rendered Activity link and the existing module-policy gate.
+test('activity history uses canonical module routes and preserves disabled-module fences',()=>{
+ const source=read('../components/workspace/ModuleWorkspace.tsx');
+ const tree=ts.createSourceFile('workspace.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const fn=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='ModuleActivity');
+ const js=ts.transpileModule(fn.getText(tree),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+ const create=(type,props)=>({type,props}),runtime={jsx:create,jsxs:create};
+ const policy={};new Function('exports',ts.transpileModule(read('../lib/modulePolicy.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(policy);
+ function find(node){if(!node||typeof node!=='object')return null;if(node.props?.children==='Existing workflow history')return node.props.href;for(const child of [node.props?.children].flat(Infinity)){const value=find(child);if(value)return value;}return null;}
+ for(const [portfolio,route,moduleId] of [['india','zerodha','zerodha_rebalance'],['indmoney_us','indmoneyUs','indmoney_us']]){
+  const render=new Function('useModuleWorkspace','require','exports','Link',js+';return ModuleActivity;')(()=>({portfolio,facts:{loading:false,orders:[],known:true}}),()=>runtime,{},'a');
+  const href=find(render());assert.equal(href,'/console/auto-rebalance-runs/'+route);
+  const manifest=JSON.parse(read('./fixtures/stage08-ready-manifest.json'));
+  const selected=manifest.modules.find(m=>m.module_id===moduleId);selected.selection.enabled=true;selected.capabilities.view.allowed=true;
+  assert.equal(policy.surfaceFor(manifest,href).module_ids.includes(moduleId),true);
+  assert.equal(policy.surfaceAllowed(manifest,href),true);
+  manifest.modules.find(m=>m.module_id===moduleId).selection.enabled=false;
+  assert.equal(policy.surfaceAllowed(manifest,href),false);
+ }
+});
