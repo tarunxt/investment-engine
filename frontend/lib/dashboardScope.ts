@@ -15,7 +15,7 @@ export function scopeDashboardSummary(summary:DashboardSummaryResponse,manifest:
  const bullpen=surfaceAllowed(manifest,'/console/bullpen-ai');
  const allowed:Record<string,boolean>={zerodha:india,indmoney_us:us,bullpen,portfolio_history:india||us||bullpen,fx:us||bullpen};
  return {...summary,
-  sections:Object.fromEntries(Object.entries(summary.sections).filter(([key])=>allowed[key]===true)),
+  sections:{...Object.fromEntries(Object.entries(summary.sections??{}).filter(([key])=>allowed[key]===true)),...(!summary.portfolio_history&&(india||us||bullpen)?{portfolio_history:{status:'unavailable' as const,duration_ms:0,fresh_at:null,error:'Source did not supply chart history'}}:{})},
   fx:us||bullpen?summary.fx:{...summary.fx,value:null,source:null,as_of:null,age_seconds:null,status:'unavailable'},
   usd_inr_rate:us||bullpen?summary.usd_inr_rate:null,
   usd_inr_status:us||bullpen?summary.usd_inr_status:'unavailable',
@@ -23,8 +23,8 @@ export function scopeDashboardSummary(summary:DashboardSummaryResponse,manifest:
   usd_inr_as_of:us||bullpen?summary.usd_inr_as_of:null,
   usd_inr_age_seconds:us||bullpen?summary.usd_inr_age_seconds:null,
   zerodha:india?summary.zerodha:null,indmoney_us:us?summary.indmoney_us:null,bullpen:bullpen?summary.bullpen:null,
-  portfolio_history:{...summary.portfolio_history,india:india?summary.portfolio_history.india:[],
-   indmoney:us?summary.portfolio_history.indmoney:[],bullpen:bullpen?summary.portfolio_history.bullpen:[],combined:[]}};
+  portfolio_history:{...summary.portfolio_history,india:india?(summary.portfolio_history?.india??[]):[],
+   indmoney:us?(summary.portfolio_history?.indmoney??[]):[],bullpen:bullpen?(summary.portfolio_history?.bullpen??[]):[],combined:[]}};
 }
 
 export function completeSelectedTotal(values:(number|null|undefined)[]):number|null {

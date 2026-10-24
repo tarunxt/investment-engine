@@ -515,3 +515,25 @@ retry or approval defect. Storage was tightened before qualification to persist
 compact targets rather than duplicate full plan projections. Packaged browser
 qualification is pending. This is advisory validation, not fabricated funds or
 turnover-policy validation; configurable strategy constraints remain unavailable.
+
+UX-08 advisory packaged build a4f09eb8c0818da819ada5896d1d2684523b6454 passed.
+Eight actual-browser checks passed: draft sends nothing; one real advisory save
+with deliberately lost acknowledgement; recorded-state recovery; reload and
+original-version access; source-price net impact; original frozen inputs/jobs/
+model result unchanged; 390/320px reflow; zero financial/analysis/import/preference/
+security requests. Exactly one compact revision was saved on synthetic workflow 5.
+Mobile capture inspected. Independent review of the compact implementation found
+no specific defect. No amended-order execution or complete funds validation claim.
+
+UX-11 combined checks at a4f09eb passed: 447 backend, 108 frontend, zero skips;
+69 additional private ownership/WebSocket/presentation/aggregate/native-route
+checks passed. These are local/disposable evidence, not PostgreSQL/Redis. The
+final actual dashboard matrix then exposed a real missing optional-history guard:
+the native summary omits portfolio_history, while the client accessed .india.
+The shared shell stayed visible. Missing histories now normalize to no chart
+points with an explicit unavailable status; no empty portfolio is inferred.
+A native-shaped partial-summary regression and focused dashboard tests pass.
+The failed matrix/DOM trace remains private; the dashboard repair needs packaged
+browser qualification before final receipt. No business action occurred in that
+failure. The test's Bullpen module identifiers were also corrected to canonical
+bullpen_research/bullpen_live before continuing; no product permission changed.

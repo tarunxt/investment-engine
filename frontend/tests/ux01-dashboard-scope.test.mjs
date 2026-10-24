@@ -45,3 +45,6 @@ test('actual Bullpen fetch rejects off/unavailable scope before any request and 
  assert.match(source,/if \(!allowBullpen\) return;/);assert.match(source,/if \(allowBullpen\) void refreshBullpenTile\(false\)/);
 });
 test('incomplete selected funds never become a successful zero total',()=>{assert.equal(scope.completeSelectedTotal([100,null]),null);assert.equal(scope.completeSelectedTotal([]),null);assert.equal(scope.completeSelectedTotal([0]),0);assert.equal(scope.completeSelectedTotal([100,20]),120);});
+
+
+test('native partial summary without optional chart history cannot crash or imply verified empty history',()=>{const partial={sections:{zerodha:{status:'ok'}},fx:{value:null,status:'unavailable'},zerodha:{snapshot:null},indmoney_us:null};const value=scope.scopeDashboardSummary(partial,manifest(['zerodha_rebalance']));assert.deepEqual(value.portfolio_history,{india:[],indmoney:[],bullpen:[],combined:[]});assert.equal(value.sections.portfolio_history.status,'unavailable');assert.equal(value.fx.value,null);assert.equal(value.bullpen,null);assert.equal(scope.scopeDashboardSummary({...partial,sections:undefined},manifest([])).sections.portfolio_history,undefined);});
