@@ -113,6 +113,8 @@ async function analyze(page,base,owner){
  assert.equal(preview.options.coverage.shortlist_rows,2);assert.equal(preview.options.coverage.unique_candidates,1);assert.equal(preview.options.coverage.holdings_overlap,1);
  for(const width of [320,390,768,1280,1440]){
   await page.setViewportSize({width,height:844});
+  const closeNavigation=page.getByRole('button',{name:'Close navigation',exact:true});
+  if(await closeNavigation.isVisible())await closeNavigation.click();
   const geometry=await page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
   assert.ok(geometry.page<=geometry.viewport+1,`Research options overflow at ${width}px`);
   await shot(page,`owner-${owner}-research-options-${width}px`);
@@ -222,7 +224,9 @@ try{
  await a.page.getByRole('button',{name:'Cancel this review request',exact:true}).click();assert.equal((await cancelResponse).status(),200);
  await a.page.getByRole('heading',{name:'Erasure review · cancelled',exact:true}).waitFor();
  for(const width of [320,390,768,1280,1440]){
-  await a.page.setViewportSize({width,height:844});const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
+  await a.page.setViewportSize({width,height:844});
+  const closeNavigation=a.page.getByRole('button',{name:'Close navigation',exact:true});
+  if(await closeNavigation.isVisible())await closeNavigation.click();const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
   assert.ok(geometry.page<=geometry.viewport+1,`Privacy utilities overflow at ${width}px`);await shot(a.page,`privacy-requests-${width}px`);
  }
  assert.equal(sql('SELECT count(*) n FROM users')[0].n,3);
