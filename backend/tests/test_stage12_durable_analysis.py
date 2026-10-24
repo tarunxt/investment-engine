@@ -387,3 +387,22 @@ async def test_setup_context_is_owned_read_only_and_does_not_invent_candidate_su
     env.states[1]['owner_id']=2
     with pytest.raises(HTTPException) as denied:await setup_context(portfolio='indmoney_us',db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
     assert denied.value.status_code==409
+
+def test_reviewed_module_version_rejects_stale_policy_before_enqueue(env):
+    with pytest.raises(ConflictException):service(env).create(1,'indmoney_us','old-policy-review',expected_module_version=2,now=NOW)
+    assert not list(env.db.scalars(select(Workflow))) and not list(env.db.scalars(select(OutboxMessage)))
+    row=service(env).create(1,'indmoney_us','current-policy-review',expected_module_version=1,now=NOW)
+    assert row.module_version==1
+
+@pytest.mark.asyncio
+async def test_owner_scoped_frozen_input_lookup_recovers_prior_key_before_limits(env,monkeypatch):
+    from app.domains.runs.analysis_router import list_analysis_workflows
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr('app.domains.modules.visibility.visible_module_ids',AsyncMock(return_value=['indmoney_us']))
+    first=create(env,'retained-owner-one')
+    other=service(env).create(2,'indmoney_us','retained-owner-two',now=NOW);env.db.commit()
+    async def run_sync(fn):return fn(env.db)
+    result=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',source_hash=first.execution_json['source_hash'],plan_hash=first.execution_json['plan_hash'],module_version=1,manual_only=True,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert [row['id'] for row in result['items']]==[first.id]
+    foreign=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',request_key=other.request_key,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert foreign['items']==[]

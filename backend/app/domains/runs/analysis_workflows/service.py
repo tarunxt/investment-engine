@@ -39,13 +39,14 @@ class Workflows:
         if digest(self.runtime.plan(row.portfolio))!=e['plan_hash']:raise WorkflowDenied('Prompt/model version changed; start a new workflow')
         if row.module_cancel_requested:raise WorkflowDenied('Module cancellation requested')
 
-    def create(self,owner,portfolio,key,*,snapshot_id=None,scheduled_at=None,schedule_id=None,expected_source_hash=None,expected_plan_hash=None,now=None):
+    def create(self,owner,portfolio,key,*,snapshot_id=None,scheduled_at=None,schedule_id=None,expected_source_hash=None,expected_plan_hash=None,expected_module_version=None,now=None):
         now=utc(now or now_utc())
         if portfolio not in {'indmoney_us','india'} or not isinstance(key,str) or not 8<=len(key)<=96:raise ValidationException('Known portfolio and scoped request key required')
         scheduled=scheduled_at is not None
         if scheduled and (scheduled_at.tzinfo is None or not schedule_id):raise ValidationException('Aware scheduled time and schedule ID required')
         due=utc(scheduled_at) if scheduled else now
         identity=self.runtime.policy(self.db,owner,portfolio,version=None,scheduled=scheduled)
+        if expected_module_version is not None and identity.version!=expected_module_version:raise ConflictException('Reviewed module policy changed; reload setup')
         source=deepcopy(self.runtime.source(self.db,owner,portfolio,snapshot_id));plan=deepcopy(self.runtime.plan(portfolio))
         if source.get('owner_id')!=owner:raise WorkflowDenied('Source owner mismatch')
         source_hash,plan_hash=digest(source),digest(plan)
@@ -79,25 +80,29 @@ class Workflows:
         sync_owner_fence(self.db,owner)
         row=self.owned(owner,id)
         if row.control_version!=expected_version:raise ConflictException('Workflow control version changed')
-        if row.status in {'completed','cancelled','skipped'}:raise ConflictException('Terminal workflow cannot be resumed or rewritten')
+        from .progress import operation_facts,permitted_actions
+        stages=self.stages(row)
+        if action in {'resume','retry'}:self.validate_current(row)
+        facts=operation_facts(self.db,row,stages) if action in {'resume','retry'} else None
+        if not permitted_actions(row,stages,facts)[action]:raise ConflictException('Control is not permitted by the persisted research/receipt state')
         if action in {'cancel','pause'}:
             row.status='cancelled' if action=='cancel' else 'paused'
             row.error_message='Explicit owner '+action
             for stage in self.stages(row):
                 if stage.status!='completed':
                     stage.status=row.status
+                    checkpoint=deepcopy(stage.checkpoint_json);checkpoint['pause_reason']='owner_pause' if action=='pause' else 'owner_cancel';stage.checkpoint_json=checkpoint
                     if stage.job_id:
                         from app.domains.jobs.models import Job
                         job=self.db.scalar(select(Job).where(Job.id==stage.job_id,Job.user_id==owner))
                         if job:job.module_cancel_requested=True
         else:
-            self.validate_current(row)
             if action=='resume' and row.status!='paused' or action=='retry' and row.status not in {'failed','partial'}:raise ConflictException('Control does not match persisted workflow state')
             stage=next((s for s in self.stages(row) if s.status!='completed'),None)
             if stage is None:raise ConflictException('No failed or paused stage')
             # A queued old job is never recycled after cancellation/pause.
             stage.job_id=None;stage.status='queued';stage.error_message=None;stage.started_at=None;stage.completed_at=None
-            checkpoint=deepcopy(stage.checkpoint_json);checkpoint['cycle_attempts']=0;stage.checkpoint_json=checkpoint
+            checkpoint=deepcopy(stage.checkpoint_json);checkpoint['cycle_attempts']=0;checkpoint.pop('pause_reason',None);checkpoint.pop('failure_kind',None);stage.checkpoint_json=checkpoint
             row.status='queued';row.error_message=None;row.completed_at=None
         row.control_version+=1
         if action in {'resume','retry'}:self.enqueue(row,stage,at=now)
@@ -126,6 +131,7 @@ class Workflows:
         if any(s.status!='completed' or not s.checkpoint_json.get('result_hash') or digest(s.checkpoint_json.get('result'))!=s.checkpoint_json['result_hash'] for s in prior):raise WorkflowDenied('Stage dependencies are incomplete or corrupted')
         try:self.validate_current(row)
         except (WorkflowDenied,PermissionError) as error:
+            checkpoint=deepcopy(stage.checkpoint_json);checkpoint['failure_kind']='invalid_input' if isinstance(error,WorkflowDenied) else 'policy_stopped';checkpoint['pause_reason']='input_or_policy';stage.checkpoint_json=checkpoint
             row.status='paused';row.error_message='Policy/input validation denied; explicit review required';row.control_version+=1;stage.status='paused';message.execution_attempts+=1;return 'policy_denied'
         e=row.execution_json
         if e['scheduled'] and stage.stage=='sync' and not stage.started_at and (now-utc(datetime.fromisoformat(e['scheduled_at']))).total_seconds()>e['calendar']['max_lateness_seconds']:
@@ -158,6 +164,7 @@ class Workflows:
             checkpoint['attempts']=[*checkpoint['attempts'],{'number':stage.attempt_count,'outcome':'completed','cost_usd':str(cost) if cost is not None else None,'at':now.isoformat()}]
             try:result_hash=digest(result)
             except (TypeError,ValueError):raise PermanentAnalysisError('Non-JSON stage result') from None
+            checkpoint.pop('failure_kind',None);checkpoint.pop('pause_reason',None)
             checkpoint.update(result=deepcopy(result),result_hash=result_hash)
             stage.checkpoint_json=checkpoint;stage.status='completed';stage.completed_at=naive(now);stage.summary_json={'server_owned':True,'analysis_only':True,'cost_usd':str(cost) if cost is not None else None,'attempt':stage.attempt_count};stage.error_message=None
             index=STAGES.index(stage.stage)
@@ -169,6 +176,7 @@ class Workflows:
         except (TransientAnalysisError,PermanentAnalysisError) as error:
             transient=isinstance(error,TransientAnalysisError)
             checkpoint=deepcopy(stage.checkpoint_json)
+            checkpoint['failure_kind']=getattr(error,'failure_kind','failed') if getattr(error,'failure_kind','failed') in {'source_partial','invalid_input','budget_stop','unknown_spend','policy_stopped','failed'} else 'failed'
             checkpoint['attempts']=[*checkpoint['attempts'],{'number':stage.attempt_count,'outcome':'transient_failure' if transient else 'failed','cost_usd':getattr(error,'cost_usd',None),'job_id':getattr(error,'job_id',stage.job_id),'at':now.isoformat()}]
             stage.checkpoint_json=checkpoint;stage.error_message='Transient analysis failure' if transient else 'Analysis stage failed; inspect owned receipt'
             if transient and checkpoint.get('cycle_attempts',stage.attempt_count)<MAX_ATTEMPTS:
@@ -177,4 +185,8 @@ class Workflows:
 
     def detail(self,owner,id):
         row=self.owned(owner,id)
-        return {'id':row.id,'owner_id':row.user_id,'portfolio':row.portfolio,'status':row.status,'stage':row.current_stage,'version':row.control_version,'error':row.error_message,'inputs':row.execution_json,'stages':[{'stage':s.stage,'status':s.status,'attempts':s.attempt_count,'job_id':s.job_id,'checkpoint':s.checkpoint_json,'error':s.error_message} for s in self.stages(row)]}
+        stages=self.stages(row)
+        from .progress import progress_view
+        return {'id':row.id,'owner_id':row.user_id,'portfolio':row.portfolio,'status':row.status,'stage':row.current_stage,'version':row.control_version,'module_version':row.module_version,'request_key':row.request_key,'error':row.error_message,'inputs':row.execution_json,
+            'progress':progress_view(self.db,row,stages),
+            'stages':[{'stage':s.stage,'status':s.status,'attempts':s.attempt_count,'job_id':s.job_id,'checkpoint':s.checkpoint_json,'error':s.error_message,'started_at':utc(s.started_at).isoformat() if s.started_at else None,'completed_at':utc(s.completed_at).isoformat() if s.completed_at else None,'updated_at':utc(s.updated_at).isoformat()} for s in stages]}

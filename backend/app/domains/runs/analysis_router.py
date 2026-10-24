@@ -1,7 +1,7 @@
 """Authenticated controls for server-owned analysis. Default composition is off."""
 from datetime import datetime
-from typing import Literal
-from fastapi import APIRouter,Depends,HTTPException,Response,Request
+from typing import Literal,Annotated
+from fastapi import APIRouter,Depends,HTTPException,Response,Request,Query
 from pydantic import BaseModel,ConfigDict,Field,field_validator,model_validator
 from sqlalchemy import select
 from app.domains.auth.dependencies import get_current_user
@@ -19,10 +19,12 @@ class Create(BaseModel):
     snapshot_id:int|None=Field(default=None,gt=0)
     expected_source_hash:str|None=Field(default=None,pattern=r'^[a-f0-9]{64}$')
     expected_plan_hash:str|None=Field(default=None,pattern=r'^[a-f0-9]{64}$')
-    setup_schema_version:Literal[1]|None=None
+    expected_module_version:int|None=Field(default=None,gt=0)
+    setup_schema_version:Literal[1,2]|None=None
     @model_validator(mode='after')
     def reviewed_pair(self):
         if (self.expected_source_hash is None)!=(self.expected_plan_hash is None) or self.setup_schema_version is not None and self.expected_source_hash is None:raise ValueError('Both reviewed hashes required')
+        if self.setup_schema_version==2 and self.expected_module_version is None:raise ValueError('Reviewed module version required')
         return self
     scheduled_at:datetime|None=None
     schedule_id:str|None=Field(default=None,min_length=1,max_length=80)
@@ -73,7 +75,7 @@ async def analysis_config(user=Depends(get_current_user),runtime=Depends(optiona
 async def setup_context(portfolio:Literal['india','indmoney_us'],db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
     from .analysis_workflows.contracts import digest
     def read(session):
-        runtime.policy(session,user.id,portfolio,version=None,scheduled=False)
+        identity=runtime.policy(session,user.id,portfolio,version=None,scheduled=False)
         source=runtime.source(session,user.id,portfolio,None);plan=runtime.plan(portfolio)
         if source.get('owner_id')!=user.id:raise WorkflowDenied('Owned source required')
         connection=source.get('connection')
@@ -83,7 +85,7 @@ async def setup_context(portfolio:Literal['india','indmoney_us'],db=Depends(get_
         except (KeyError,TypeError,ValueError):raise WorkflowDenied('Verified source time required') from None
         if connection is not None and (portfolio!='india' or not isinstance(connection,dict) or not isinstance(connection.get('id'),str) or type(connection.get('version')) is not int or connection['version']<1 or connection.get('mode') not in {'user_owned','platform_managed'}):raise WorkflowDenied('Verified account binding required')
         if portfolio=='india' and connection is None:raise WorkflowDenied('Verified India connection required')
-        return {'schema_version':1,'owner_id':user.id,'portfolio':portfolio,'source_hash':digest(source),'plan_hash':digest(plan),'plan_version':plan['version'],
+        return {'schema_version':1,'owner_id':user.id,'portfolio':portfolio,'module_version':identity.version,'source_hash':digest(source),'plan_hash':digest(plan),'plan_version':plan['version'],
             'snapshot_id':source.get('snapshot_id'),'captured_at':source.get('captured_at'),'connection':{'id':connection['id'],'version':connection['version'],'mode':connection['mode'],'account_label':('***'+str(connection['account'])[-4:]) if connection.get('account') else None} if connection else None,
             'usage':{'estimated_cost_usd':'0' if synthetic_setup(runtime) else None,'simulation_only':synthetic_setup(runtime),'notice':'Zero-cost fake analysis' if synthetic_setup(runtime) else 'No cost estimate is available; configured server limits remain authoritative'},
             'constraints':{key:{'editable':False,'value':None,'reason':'No approved configurable constraint contract is installed'} for key in ['horizon','cash','exposure','turnover']},
@@ -115,7 +117,7 @@ async def preview_candidates(body:CandidatePreview,db=Depends(get_async_db),user
     except WorkflowDenied:raise HTTPException(409,'Candidate preview rejected: current owned source and bounded canonical input required; nothing was accepted or truncated') from None
 
 @router.get('')
-async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['india','indmoney_us']|None=None,include_readiness:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['india','indmoney_us']|None=None,include_readiness:bool=False,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime),request_key:Annotated[str|None,Query(min_length=8,max_length=128)]=None,source_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,plan_hash:Annotated[str|None,Query(pattern=r'^[a-f0-9]{64}$')]=None,module_version:Annotated[int|None,Query(gt=0)]=None,manual_only:bool=False):
     # Dashboard requests exclude disabled/unavailable modules before the SQL read.
     # Core historical activity keeps its existing explicit all-owned semantics.
     portfolios=None
@@ -129,6 +131,11 @@ async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['in
         query=select(AutoRebalanceWorkflow).where(AutoRebalanceWorkflow.user_id==user.id,AutoRebalanceWorkflow.orchestration_kind=='analysis_v1')
         if portfolios is not None:query=query.where(AutoRebalanceWorkflow.portfolio.in_(portfolios))
         elif portfolio is not None:query=query.where(AutoRebalanceWorkflow.portfolio==portfolio)
+        if request_key is not None:query=query.where(AutoRebalanceWorkflow.request_key==request_key)
+        if source_hash is not None:query=query.where(AutoRebalanceWorkflow.execution_json['source_hash'].as_string()==source_hash)
+        if plan_hash is not None:query=query.where(AutoRebalanceWorkflow.execution_json['plan_hash'].as_string()==plan_hash)
+        if module_version is not None:query=query.where(AutoRebalanceWorkflow.module_version==module_version)
+        if manual_only:query=query.where(AutoRebalanceWorkflow.execution_json['scheduled'].as_boolean().is_(False))
         rows=s.scalars(query.order_by(AutoRebalanceWorkflow.id.desc()).limit(30)).all()
         service=Workflows(s,runtime)
         items=[]
@@ -137,7 +144,7 @@ async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['in
             if include_readiness:
                 current=True
                 try:service.validate_current(row)
-                except WorkflowDenied:current=False
+                except (WorkflowDenied,PermissionError):current=False
                 item['input_readiness']={'current':current,'version':item['version'],
                     'source_hash':item['inputs']['source_hash'],'plan_hash':item['inputs']['plan_hash'],
                     'checked_at':datetime.now().astimezone().isoformat(),'orders_authorized':False}
@@ -146,8 +153,16 @@ async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['in
     return {'owner_id':user.id,'items':await db.run_sync(read)}
 
 @router.get('/{workflow_id}')
-async def get_analysis_workflow(workflow_id:int,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
-    return await db.run_sync(lambda s:Workflows(s,runtime).detail(user.id,workflow_id))
+async def get_analysis_workflow(workflow_id:int,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime),include_readiness:bool=False):
+    def read(session):
+        service=Workflows(session,runtime);item=service.detail(user.id,workflow_id)
+        if include_readiness:
+            row=service.owned(user.id,workflow_id);current=True
+            try:service.validate_current(row)
+            except (WorkflowDenied,PermissionError):current=False
+            item['input_readiness']={'current':current,'version':item['version'],'source_hash':item['inputs']['source_hash'],'plan_hash':item['inputs']['plan_hash'],'checked_at':datetime.now().astimezone().isoformat(),'orders_authorized':False}
+        return item
+    return await db.run_sync(read)
 
 @router.post('')
 async def create_analysis_workflow(body:Create,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):

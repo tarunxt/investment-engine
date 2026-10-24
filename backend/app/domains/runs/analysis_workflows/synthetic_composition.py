@@ -124,13 +124,17 @@ class SyntheticAnalysis:
             return {'status': 'terminal', 'job_id': job.id}
         try:
             result = execute_governed_job(db, job.id, self.runtime, now=now)
-        except (BoundaryDenied, PermissionError):
+        except (BoundaryDenied, PermissionError) as error:
             # Preserve spend evidence on uncertain/invalid results and stop, never
             # fall back to the ungoverned fake or any live provider.
             db.rollback()
             job = db.get(Job, job_id, populate_existing=True)
             job.status = JobStatus.FAILED
             job.error_message = 'Governed synthetic analysis denied; inspect owned workflow receipt'
+            from .progress import BUDGET_CODES
+            code=getattr(error,'code',None)
+            kind='budget_stop' if code in BUDGET_CODES else 'policy_stopped' if isinstance(error,PermissionError) else 'invalid_input'
+            job.runtime_metadata_json={**(job.runtime_metadata_json or {}),'analysis_failure':{'kind':kind,'code':code if isinstance(code,str) and code.isupper() else None}}
             result = {'status': 'denied', 'job_id': job_id}
         message = db.get(OutboxMessage, UUID(str(dispatch_id)), populate_existing=True)
         if result['status'] == 'waiting_for_admission':

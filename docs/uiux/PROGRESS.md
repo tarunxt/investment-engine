@@ -275,3 +275,26 @@ an exact-source root-overflow retest that will reuse the existing run. Four extr
 linked source tests cover both fake ownership modes and both owners' real accepted
 synthetic imports with all networking/provider factories denied, and prove setup/
 preview enqueue nothing. These are SQLite fixtures, not PG/Redis or hosted proof.
+
+## UX-07: durable progress and safe recovery implementation
+
+Six named stages now explain their purpose and checkpoint/attempt counts without
+invented percentages. Owner-scoped receipt facts distinguish invalid input,
+partial source, policy stop, budget stop, unknown spend, cancellation requested and
+completion. Elapsed wall time includes waits/pauses; missing receipts remain
+unknown. Stop does not require a budget-store read. Current source/module checks,
+complete receipt history and shared server/UI action predicates gate resume/retry.
+Independent adversarial review found a pause/resume bypass of typed nonretryable
+failures; the shared predicates now close it, with four explicit regressions.
+Current-input validation still returns the existing permission failure contract.
+
+Reviewed source/plan/snapshot/module identity yields a stable request key. Owned
+lookup occurs before creation, reload can resume existing work, and uncertain
+transport recovery retains the same key/body. Lower-version delayed polling cannot
+undo accepted controls. Private export recovery stays separate from analysis.
+79 backend checks and 26 frontend checks pass; TypeScript and targeted lint pass.
+Independent re-review confirmed the bypass closed with all 11 focused progress
+checks passing. The initial seven permission-exception regressions and ref-render
+lint errors were corrected, not hidden. Local packaged build/browser qualification
+is pending; no PostgreSQL/Redis, hosted acceptance or accessibility-user claim.
+UX-06 full candidate modes/constraints remain open implementation work.
