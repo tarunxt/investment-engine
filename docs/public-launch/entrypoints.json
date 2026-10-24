@@ -14618,7 +14618,7 @@
       "registration": "unmounted",
       "route": "/uat2/email",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:101"
+      "source": "backend/app/uat2/router.py:111"
     },
     {
       "calls": [
@@ -14640,7 +14640,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:108"
+      "source": "backend/app/uat2/router.py:118"
     },
     {
       "calls": [
@@ -14663,7 +14663,7 @@
       "registration": "unmounted",
       "route": "/uat2/export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:108"
+      "source": "backend/app/uat2/router.py:118"
     },
     {
       "calls": [
@@ -14686,7 +14686,7 @@
       "registration": "unmounted",
       "route": "/uat2/status",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:15"
+      "source": "backend/app/uat2/router.py:16"
     },
     {
       "calls": [
@@ -14710,7 +14710,7 @@
       "registration": "unmounted",
       "route": "/zerodha/portfolio",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:25"
+      "source": "backend/app/uat2/router.py:26"
     },
     {
       "calls": [
@@ -14732,7 +14732,7 @@
       "registration": "unmounted",
       "route": "/zerodha/status",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:30"
+      "source": "backend/app/uat2/router.py:31"
     },
     {
       "calls": [
@@ -14754,7 +14754,7 @@
       "registration": "unmounted",
       "route": "/zerodha/login-url",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:38"
+      "source": "backend/app/uat2/router.py:39"
     },
     {
       "calls": [
@@ -14776,7 +14776,7 @@
       "registration": "unmounted",
       "route": "/zerodha/orders",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:46"
+      "source": "backend/app/uat2/router.py:47"
     },
     {
       "calls": [
@@ -14800,15 +14800,20 @@
       "registration": "unmounted",
       "route": "/zerodha/orders",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:51"
+      "source": "backend/app/uat2/router.py:52"
     },
     {
       "calls": [
+        "(await _load_indmoney_with_session(db, current_user.id)).model_dump",
+        "Depends",
+        "_load_indmoney_with_session",
         "broker.portfolio",
         "dict",
         "os.getenv",
         "portfolio.items",
-        "router.get"
+        "router.get",
+        "set",
+        "visible_module_ids"
       ],
       "capability": "dashboard",
       "classification": "owner-private",
@@ -14817,16 +14822,18 @@
       "module": "platform",
       "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
         "[Depends(get_current_user)]",
         "router.get('/dashboard/summary', response_model=DashboardSummaryResponse)"
       ],
       "owner_source": [
-        "not established in local function; inspect callers/repository"
+        "current_user.id"
       ],
       "registration": "unmounted",
       "route": "/dashboard/summary",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:56"
+      "source": "backend/app/uat2/router.py:57"
     },
     {
       "calls": [
@@ -14849,7 +14856,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:79"
+      "source": "backend/app/uat2/router.py:89"
     },
     {
       "calls": [
@@ -14875,7 +14882,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai/{task_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:86"
+      "source": "backend/app/uat2/router.py:96"
     },
     {
       "calls": [],
@@ -15989,6 +15996,7 @@
       "module": "frontend",
       "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
       "observed_guards": [
+        "auth(",
         "createBackendSessionContext("
       ],
       "owner_source": [
@@ -16927,7 +16935,7 @@
     "backend/app/domains/dashboard/models.py": "94888385aad300fd1ea0473527c3e6a0d94565a85e33294c020306e54b7b36fa",
     "backend/app/domains/dashboard/router.py": "698e48fd609123099385273d77478752bf5dadef970c7452073f1072a01cc5b3",
     "backend/app/domains/dashboard/schemas.py": "8eed84716c178d2fdb0d567fa5673149bdc54e6dcfb3a23b57d15aff9a5d0f47",
-    "backend/app/domains/dashboard/service.py": "48168ac9499020e2adb47b4b283b6f8efb43c4006796da5d56ad4b7c589e6919",
+    "backend/app/domains/dashboard/service.py": "e38f8aa44f7e70220955c51c24fa9e1d6bd215b5256f9458a3e6eb8e65996f01",
     "backend/app/domains/dashboard/tasks.py": "5a91b4dffe8a30c02c62e4969ae71002da0c585eb5648c8c8a1c61a5ecd8c298",
     "backend/app/domains/fx_rates/__init__.py": "3f50e1de2cf5a33d4ec3e7f1f2124cde14c699dd62965ad3c75ebfbcad836eee",
     "backend/app/domains/fx_rates/models.py": "12b83795d5f44d5d392600344f5a048b88236e8a50d4223b6d429113f4594d73",
@@ -17281,7 +17289,7 @@
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
     "backend/app/uat2/private_exports.py": "59ffc52b91623cd7c4644b6dd19a06dc07a6ebffb1156be5720ba477272b754a",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
-    "backend/app/uat2/router.py": "d7d48ec1e0cac89265f1059c9cde0d6c023707e2a9f4bfefd6253f45197638c8",
+    "backend/app/uat2/router.py": "fd5a7b806768432c70966d5331d657933a13fa263e1c801d508808d2dd524816",
     "backend/app/uat2/runtime.py": "072136970cd41c2f35d7a23cfd32a14d8952e51afa6f5e314f07c0ac18662876",
     "backend/app/uat2/scheduler.py": "6d34a1dee4c56f4220e7ae817b36d5379a7b345a62f7799b197f624c5890f782",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
@@ -17332,7 +17340,7 @@
     "frontend/app/console/bullpen008/history/page.tsx": "409511021f20207787e4e467f647bb69075910733a6271bdbff4212b1770038b",
     "frontend/app/console/bullpen008/page.tsx": "d385faf3b0442acd171170aab3184400a755180485b9b80a0b14eb9068ef616f",
     "frontend/app/console/bullpen008/runs/[runId]/page.tsx": "51f5db9da76b763bf15b30a19f6db8903f959ea1addd173bf4ed37ae2165a5c2",
-    "frontend/app/console/dashboard/page.tsx": "a62c52eceeeae2e22276c31b5bc6477b99eab924781335e242a47ce15a99faf9",
+    "frontend/app/console/dashboard/page.tsx": "c7d2445192cfc9580066e4c2e39fcb015af0da4aa54e6f5bb325e2d2b83782b3",
     "frontend/app/console/google-sheets/callback/page.tsx": "272561226de5762adeb940fdbe9513da1ddce29359d23e7d351709575d894ce2",
     "frontend/app/console/google-sheets/page.tsx": "47ccecf7cbf94700513b444c5927a95893404eeb00cfb730e34909ce807f2e43",
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",

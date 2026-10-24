@@ -11,7 +11,7 @@ for(const selected of [[],['zerodha_rebalance'],['indmoney_us'],['zerodha_rebala
  assert.equal(surfaceVisible(data,'/console/zerodha-other'),false);
 });
 test('unavailable versus selected-but-not-ready never grants operations',()=>{
- const data=policy(['bullpen_research','zerodha_rebalance']);assert.equal(surfaceVisible(data,'/console/bullpen-ai'),false);
+ const data=policy(['bullpen_research','zerodha_rebalance']);assert.equal(surfaceVisible(data,'/console/bullpen-ai'),true);
  data.modules[0].capabilities.view.allowed=false;assert.equal(surfaceVisible(data,'/console/zerodha'),true);assert.equal(surfaceAllowed(data,'/console/zerodha'),false);
  assert.equal(allowedModule(data,'sheets_export','export'),false);
 });

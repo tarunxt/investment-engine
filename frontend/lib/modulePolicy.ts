@@ -31,10 +31,13 @@ export function pathMatch(path:string,prefix:string){return path===prefix||path.
 export function surfaceFor(manifest:ModuleCollection|null,path:string,api=false){
   return (api?manifest?.presentation.api_rules:manifest?.presentation.surfaces)?.filter(s=>pathMatch(path,s.path)).sort((a,b)=>b.path.length-a.path.length)[0];
 }
-export function visibleModule(manifest:ModuleCollection|null,id:string){return manifest?.modules.some(m=>m.module_id===id&&m.selection.enabled&&m.availability.available)??false;}
+// Visibility describes a customer's choice, not authority to fetch data.
+export function visibleModule(manifest:ModuleCollection|null,id:string){return manifest?.modules.some(m=>m.module_id===id&&m.selection.enabled)??false;}
 export function allowedModule(manifest:ModuleCollection|null,id:string,capability='view'){return manifest?.modules.some(m=>m.module_id===id&&m.selection.enabled&&m.availability.available&&m.capabilities[capability]?.allowed===true)??false;}
 export function surfaceVisible(manifest:ModuleCollection|null,path:string){
   const surface=surfaceFor(manifest,path);
-  return surface?surface.module_ids.some(id=>visibleModule(manifest,id)):!!manifest&&(path==='/console/dashboard'||manifest.presentation.core_paths.some(p=>pathMatch(path,p)));
+  const core=['/console/dashboard','/console/profile','/console/apis'];
+  return surface?surface.module_ids.some(id=>visibleModule(manifest,id)):core.some(p=>pathMatch(path,p))||!!manifest&&manifest.presentation.core_paths.some(p=>pathMatch(path,p));
 }
 export function surfaceAllowed(manifest:ModuleCollection|null,path:string){const s=surfaceFor(manifest,path);return s?s.module_ids.some(id=>allowedModule(manifest,id,s.capability)):surfaceVisible(manifest,path);}
+export function moduleScopeKey(manifest:ModuleCollection|null){return manifest?JSON.stringify([manifest.owner_id,manifest.version,manifest.modules.map(m=>[m.module_id,m.selection.version,m.selection.enabled,m.availability.available,m.connection.state,m.capabilities.view?.allowed])]):'policy-unavailable';}

@@ -200,46 +200,50 @@ async def _load_zerodha(user_id: int) -> DashboardZerodhaSection:
 
 async def _load_indmoney(user_id: int) -> DashboardIndMoneySection:
     async with AsyncSessionLocal() as db:
-        latest = (
-            await db.execute(
-                select(
-                    IndMoneyUsPortfolioSnapshot.snapshot_date,
-                    IndMoneyUsPortfolioSnapshot.captured_at,
-                    IndMoneyUsPortfolioSnapshot.source,
-                    IndMoneyUsPortfolioSnapshot.parse_status,
-                    IndMoneyUsPortfolioSnapshot.holdings_count,
-                    IndMoneyUsPortfolioSnapshot.wallet_balance,
-                    IndMoneyUsPortfolioSnapshot.current_value,
-                    IndMoneyUsPortfolioSnapshot.invested_value,
-                    IndMoneyUsPortfolioSnapshot.day_return_value,
-                    IndMoneyUsPortfolioSnapshot.day_return_percent,
-                    IndMoneyUsPortfolioSnapshot.total_return_value,
-                    IndMoneyUsPortfolioSnapshot.total_return_percent,
-                    IndMoneyUsPortfolioSnapshot.dashboard_top_holdings,
-                )
-                .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
-                .order_by(
-                    desc(IndMoneyUsPortfolioSnapshot.captured_at),
-                    desc(IndMoneyUsPortfolioSnapshot.id),
-                )
-                .limit(1)
+        return await _load_indmoney_with_session(db, user_id)
+
+
+async def _load_indmoney_with_session(db, user_id: int) -> DashboardIndMoneySection:
+    latest = (
+        await db.execute(
+            select(
+                IndMoneyUsPortfolioSnapshot.snapshot_date,
+                IndMoneyUsPortfolioSnapshot.captured_at,
+                IndMoneyUsPortfolioSnapshot.source,
+                IndMoneyUsPortfolioSnapshot.parse_status,
+                IndMoneyUsPortfolioSnapshot.holdings_count,
+                IndMoneyUsPortfolioSnapshot.wallet_balance,
+                IndMoneyUsPortfolioSnapshot.current_value,
+                IndMoneyUsPortfolioSnapshot.invested_value,
+                IndMoneyUsPortfolioSnapshot.day_return_value,
+                IndMoneyUsPortfolioSnapshot.day_return_percent,
+                IndMoneyUsPortfolioSnapshot.total_return_value,
+                IndMoneyUsPortfolioSnapshot.total_return_percent,
+                IndMoneyUsPortfolioSnapshot.dashboard_top_holdings,
             )
-        ).one_or_none()
-        history_rows = (
-            await db.execute(
-                select(
-                    IndMoneyUsPortfolioSnapshot.captured_at,
-                    IndMoneyUsPortfolioSnapshot.current_value,
-                    IndMoneyUsPortfolioSnapshot.wallet_balance,
-                )
-                .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
-                .order_by(
-                    desc(IndMoneyUsPortfolioSnapshot.captured_at),
-                    desc(IndMoneyUsPortfolioSnapshot.id),
-                )
-                .limit(DASHBOARD_HISTORY_LIMIT)
+            .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
+            .order_by(
+                desc(IndMoneyUsPortfolioSnapshot.captured_at),
+                desc(IndMoneyUsPortfolioSnapshot.id),
             )
-        ).all()
+            .limit(1)
+        )
+    ).one_or_none()
+    history_rows = (
+        await db.execute(
+            select(
+                IndMoneyUsPortfolioSnapshot.captured_at,
+                IndMoneyUsPortfolioSnapshot.current_value,
+                IndMoneyUsPortfolioSnapshot.wallet_balance,
+            )
+            .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
+            .order_by(
+                desc(IndMoneyUsPortfolioSnapshot.captured_at),
+                desc(IndMoneyUsPortfolioSnapshot.id),
+            )
+            .limit(DASHBOARD_HISTORY_LIMIT)
+        )
+    ).all()
 
     if latest is None:
         return DashboardIndMoneySection()
@@ -467,7 +471,9 @@ async def build_dashboard_summary(
         if 'indmoney_us' in module_ids:loaders.append(_timed_section('indmoney_us',_load_indmoney,user_id))
         if any(module in module_ids for module in ('zerodha_rebalance','indmoney_us','bullpen_research')):
             async def scoped_history(owner):return await _load_portfolio_history(owner,module_ids=module_ids)
-            loaders.extend([_timed_section('portfolio_history',scoped_history,user_id),_timed_section('fx',_load_fx,user_id)])
+            loaders.append(_timed_section('portfolio_history',scoped_history,user_id))
+        if any(module in module_ids for module in ('indmoney_us','bullpen_research')):
+            loaders.append(_timed_section('fx',_load_fx,user_id))
         if include_singleton_bullpen:loaders.append(_timed_section('bullpen',_load_bullpen,user_id))
     results = await asyncio.gather(*loaders)
     values = {name: value for name, value, _meta in results}

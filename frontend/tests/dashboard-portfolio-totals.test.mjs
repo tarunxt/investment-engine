@@ -115,7 +115,7 @@ test("portfolio command chart supports and remembers every portfolio view", () =
   assert.match(chartSource, /dashboard-command-chart-history:v1:user:/);
 });
 
-test("Refresh Board preserves last-known-good Bullpen and requests a live refresh", () => {
+test("Refresh Board preserves only currently authorized Bullpen and requests a scoped refresh", () => {
   const source = readFileSync(
     new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
     "utf8",
@@ -123,7 +123,7 @@ test("Refresh Board preserves last-known-good Bullpen and requests a live refres
 
   assert.match(
     source,
-    /bullpenPositions:\s*current\.bullpenPositions \?\? update\.bullpenPositions \?\? null/,
+    /bullpenPositions:\s*allowBullpen \? current\.bullpenPositions \?\? update\.bullpenPositions \?\? null : null/,
   );
   assert.match(
     source,
