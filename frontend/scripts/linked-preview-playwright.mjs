@@ -58,6 +58,13 @@ function sql(query,params=[],{venue=false}={}){
  return JSON.parse(execFileSync(python,['-c',`import sqlite3,json,sys\nc=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True);c.row_factory=sqlite3.Row\nprint(json.dumps([dict(r) for r in c.execute(sys.argv[2],json.loads(sys.argv[3]))]))`,file,query,JSON.stringify(params)],{encoding:'utf8'}));
 }
 async function until(fn,timeout=30000){const end=Date.now()+timeout;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,100));}throw Error('Bounded linked preview condition timed out');}
+async function closeMobileNavigation(page,width){
+ if(width>=1024)return;
+ const trigger=page.getByRole('button',{name:'Open navigation',exact:true});
+ await trigger.waitFor();
+ if(await trigger.getAttribute('aria-expanded')==='true')await page.keyboard.press('Escape');
+ await page.waitForFunction(()=>document.getElementById('console-sidebar')?.getBoundingClientRect().right<=1);
+}
 async function shot(page,name){const file=path.join(evidence,`${name}.png`);await page.screenshot({path:file,fullPage:true});receipt.screenshots.push(path.basename(file));save();}
 async function login(base,name){
  const context=await browser.newContext({serviceWorkers:'block'});
@@ -113,9 +120,7 @@ async function analyze(page,base,owner){
  assert.equal(preview.options.coverage.shortlist_rows,2);assert.equal(preview.options.coverage.unique_candidates,1);assert.equal(preview.options.coverage.holdings_overlap,1);
  for(const width of [320,390,768,1280,1440]){
   await page.setViewportSize({width,height:844});
-  const closeNavigation=page.getByRole('button',{name:'Close navigation',exact:true});
-  const closeBox=await closeNavigation.boundingBox();
-  if(closeBox&&closeBox.x>=0&&closeBox.x+closeBox.width<=width)await closeNavigation.click();
+  await closeMobileNavigation(page,width);
   const geometry=await page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
   assert.ok(geometry.page<=geometry.viewport+1,`Research options overflow at ${width}px`);
   await shot(page,`owner-${owner}-research-options-${width}px`);
@@ -228,9 +233,8 @@ try{
  await a.page.getByRole('heading',{name:'Erasure review · cancelled',exact:true}).waitFor();
  for(const width of [320,390,768,1280,1440]){
   await a.page.setViewportSize({width,height:844});
-  const closeNavigation=a.page.getByRole('button',{name:'Close navigation',exact:true});
-  const closeBox=await closeNavigation.boundingBox();
-  if(closeBox&&closeBox.x>=0&&closeBox.x+closeBox.width<=width)await closeNavigation.click();const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
+  await closeMobileNavigation(a.page,width);
+  const geometry=await a.page.evaluate(()=>({viewport:innerWidth,page:document.documentElement.scrollWidth}));
   assert.ok(geometry.page<=geometry.viewport+1,`Privacy utilities overflow at ${width}px`);await shot(a.page,`privacy-requests-${width}px`);
  }
  assert.equal(sql('SELECT count(*) n FROM users')[0].n,3);
