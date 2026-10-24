@@ -17108,6 +17108,7 @@
     "backend/app/domains/public_service/monitor_dispatch.py": "e13550d77d7f2c154a8fa21249997be6014e6f43f2ac9dd409c46eddf379e0f5",
     "backend/app/domains/public_service/monitoring.py": "209c576cb5b61b0c982aae6766c06efe434ab2e89ee537e1d2af373b14cba5b3",
     "backend/app/domains/public_service/native_outbox_export.py": "431d167ca163b9757f27f59496190819463961705ffce06eb8ead39594bed4e6",
+    "backend/app/domains/public_service/native_profile_restore_contract.py": "ed76b9d48e1ceecfa9247094cde82745527887947404608ceb07f4a2d25a27f3",
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "b445ff6d7ad9d1aae8fab7a74a5e8fcae81330fe03b2fcd6d7284be17115906d",
     "backend/app/domains/public_service/privacy_policy_fixture.py": "6517ba290bd535d2f15643705c2d3d3ad80ec38f32bc0889e7ad5b804473f55b",
