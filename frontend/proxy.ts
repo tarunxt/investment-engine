@@ -143,13 +143,8 @@ export async function proxy(req: NextRequest) {
     );
   }
 
-  if (path.startsWith("/console/admin") && token.role !== "admin") {
-    return attachAuthTiming(
-      NextResponse.redirect(new URL("/console/dashboard", req.url)),
-      authDurationMs,
-    );
-  }
-
+  // The admin page renders its permission state inside the authenticated shell.
+  // Its server component checks the current backend role before requesting data.
   return attachAuthTiming(NextResponse.next(), authDurationMs);
 }
 

@@ -34,3 +34,5 @@ test('existing cost-only admission retains its profile link without provider-adm
  assert.match(JSON.stringify(ui.ProfileFrame({children:'personal',costAccessOwner:7102})),/Platform Cost Drivers/);
  owner=7101;assert.doesNotMatch(JSON.stringify(ui.ProfileFrame({children:'personal',costAccessOwner:7102})),/Platform Cost Drivers/);
 });
+
+test("administrator deep link reaches the server permission state inside the shell",()=>{const proxy=readFileSync(new URL("../proxy.ts",import.meta.url),"utf8");assert.doesNotMatch(proxy,/path\.startsWith\("\/console\/admin"\)/);});
