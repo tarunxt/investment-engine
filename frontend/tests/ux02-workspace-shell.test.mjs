@@ -7,10 +7,10 @@ const jsx=(type,props,key)=>({type,props,key});
 function compile(file,imports){const result={};new Function('require','exports',ts.transpileModule(read(file),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText)(name=>{assert.ok(name in imports,`Unexpected import ${name}`);return imports[name];},result);return result;}
 const policy=compile('../lib/modulePolicy.ts',{});
 const seed=JSON.parse(read('./fixtures/stage08-ready-manifest.json'));
-function navigation({selected=[],admin=false,failed=false}={}){
+function navigation({selected=[],admin=false,failed=false,pathname='/console/zerodha/rebalance'}={}){
  const manifest=structuredClone(seed);for(const m of manifest.modules)m.selection.enabled=selected.includes(m.module_id);
- const ui=compile('../app/console/_components/WorkspaceNavigation.tsx',{'react/jsx-runtime':{jsx,jsxs:jsx},'next/link':{default:'a'},'@/providers/ModuleContext':{useModules:()=>({manifest:failed?null:manifest,error:failed?'synthetic timeout':null,loading:false})},'@/lib/modulePolicy':policy});
- return ui.WorkspaceNavigation({pathname:'/console/zerodha/rebalance',user:{full_name:'Synthetic Customer',email:'synthetic@example.test',role:admin?'admin':'user'},onNavigate(){}});
+ const ui=compile('../app/console/_components/WorkspaceNavigation.tsx',{'react/jsx-runtime':{jsx,jsxs:jsx},'next/link':{default:'a'},'@/providers/ModuleContext':{useModules:()=>({manifest:failed?null:manifest,error:failed?'synthetic timeout':null,loading:false})},'@/lib/modulePolicy':policy,'lucide-react':new Proxy({},{get:(_,name)=>String(name)}),'./SidebarThemeToggle':{SidebarThemeToggle:'ThemeToggle'}});
+ return ui.WorkspaceNavigation({pathname,user:{full_name:'Synthetic Customer',email:'synthetic@example.test',role:admin?'admin':'user'},onNavigate(){}});
 }
 for(const state of [{},{failed:true},{selected:['zerodha_rebalance']},{selected:['indmoney_us']},{selected:['zerodha_rebalance','indmoney_us']}])test(`navigation stable and selected: ${JSON.stringify(state)}`,()=>{
  const text=JSON.stringify(navigation(state));for(const label of ['Dashboard','My Activity','Connections','Usage & plan','Help','Synthetic Customer'])assert.ok(text.includes(label));
@@ -36,3 +36,18 @@ test('existing cost-only admission retains its profile link without provider-adm
 });
 
 test("administrator deep link reaches the server permission state inside the shell",()=>{const proxy=readFileSync(new URL("../proxy.ts",import.meta.url),"utf8");assert.doesNotMatch(proxy,/path\.startsWith\("\/console\/admin"\)/);});
+
+function elements(node){if(!node||typeof node!=='object')return [];return [node,...[node.props?.children].flat(Infinity).flatMap(elements)];}
+test('profile and preferences are discoverable without opening an account disclosure',()=>{
+ const tree=elements(navigation());assert.equal(tree.some(x=>x.type==='details'),false);
+ for(const href of ['/console/profile','/console/profile/preferences','/console/profile/usage'])assert.equal(tree.filter(x=>x.type==='a'&&x.props.href===href).length,1);
+ assert.ok(tree.some(x=>x.props?.['aria-label']==='Your account'));
+ assert.ok(tree.some(x=>x.type==='ThemeToggle'));
+});
+test('active module and settings states are specific and every decorative icon is hidden from accessibility names',()=>{
+ for(const [pathname,selected,expected] of [['/console/zerodha/research',['zerodha_rebalance'],'/console/zerodha'],['/console/profile/preferences',[],'/console/profile/preferences'],['/console/profile',[],'/console/profile']]){
+  const tree=elements(navigation({pathname,selected}));
+  assert.deepEqual(tree.filter(x=>x.type==='a'&&x.props['aria-current']==='page').map(x=>x.props.href),[expected]);
+  const icons=tree.filter(x=>['LayoutDashboard','BriefcaseBusiness','Settings2','UserRound'].includes(x.type));assert.ok(icons.length>=3);assert.ok(icons.every(x=>x.props['aria-hidden']==='true'&&x.props.focusable==='false'));
+ }
+});
