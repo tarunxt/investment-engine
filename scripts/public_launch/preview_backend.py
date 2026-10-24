@@ -135,7 +135,7 @@ async def synthetic_boundary(request: Request, call_next):
         return JSONResponse({"enabled": False, "client_id": None, "synthetic_preview": True})
     if request.url.path == "/preview-health":
         return JSONResponse({"synthetic": True, "database": "isolated SQLite", "outbound_network": "denied"})
-    private_read = request.method == "GET" and (request.url.path.startswith("/me/connections/") or request.url.path in {"/me/connections","/jobs", "/runs","/me/modules/safety-activity"}|preview_stage08.READS or
+    private_read = request.method == "GET" and (request.url.path.startswith("/me/connections/") or request.url.path in {"/me/connections","/jobs", "/runs","/me/modules/safety-activity","/api-usage/limits"}|preview_stage08.READS or
                    request.url.path.startswith('/me/modules/resource-access/') or any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
                        for prefix in ("/jobs/", "/runs/","/indmoney-us/portfolio/")))
     if not preview_stage16.allowed(request.method,request.url.path) and not preview_stage12.allowed(request.method,request.url.path) and not preview_stage11.allowed(request.method,request.url.path) and request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and not (request.method=='POST' and request.url.path in {'/me/connection-authorization/synthetic-setup','/me/connection-authorization/start','/me/connection-authorization/callback','/me/connection-authorization/confirm','/me/connection-authorization/disconnect'}) and request.url.path!='/me/connection-authorization/config' and (request.method, request.url.path) not in ALLOWED:
@@ -153,6 +153,10 @@ app.include_router(router)
 app.include_router(modules_router)
 from app.domains.connections.router import router as connections_router
 app.include_router(connections_router)
+from app.domains.ai_limits.router import router as personal_limits_router
+for route in personal_limits_router.routes:
+    if route.path == '/api-usage/limits' and route.methods == {'GET'}:
+        app.include_router(APIRouter(routes=[route]))
 
 preview_stage12.install(app)
 preview_stage16.install(app)

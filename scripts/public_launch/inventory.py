@@ -57,7 +57,7 @@ def module_for(path):
 
 
 def classify(module, kind, capability, text, method=""):
-    if any(guard in text for guard in ("require_admin", "require_singleton_bullpen_runtime_access", "require_operator_", "requireBullpenOperator")):
+    if any(guard in text for guard in ("require_admin", "require_platform_admin", "require_singleton_bullpen_runtime_access", "require_operator_", "requireBullpenOperator")):
         return "administrator-only"
     if module in {"polymarket", "polymarket_direct", "polymarket_auto_live", "bullpen008", "bullpen_trade_analysis", "bullpen_run_audit", "trading_bots", "cost_drivers"}:
         return "administrator-only"

@@ -20,7 +20,7 @@ export function ModuleRouteGate({children}:{children:React.ReactNode}){
   return()=>controller.abort();
  },[resourcePath,accessKey,ownerId]);
  // These account and safety screens never depend on optional selections.
- const core=['/console/profile','/console/apis','/console/uat2'].some(p=>path===p||path.startsWith(p+'/'));
+ const core=['/console/profile','/console/apis','/console/uat2','/console/help','/console/admin'].some(p=>path===p||path.startsWith(p+'/'));
  if(core)return children;
  if(loading)return <p role="status">Loading your module preferences…</p>;
  if(!manifest)return <section role="alert"><h1>Module preferences unavailable</h1><p>{error||'Optional data is paused until your preferences can be verified.'}</p><button onClick={()=>void refresh()}>Retry preferences</button><p><Link href="/console/profile/preferences">Open Preferences</Link></p></section>;

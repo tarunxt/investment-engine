@@ -5,9 +5,9 @@
     "background": 31,
     "export": 55,
     "frontend": 25,
-    "http": 317,
+    "http": 318,
     "lifecycle": 9,
-    "page": 68,
+    "page": 71,
     "scheduler": 20,
     "websocket": 5,
     "worker": 53
@@ -212,14 +212,14 @@
         "summary.get"
       ],
       "capability": "corrected_api_usage_summary",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
       "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
-        "Depends(get_current_user)",
+        "Depends(require_platform_admin)",
         "router.get('/summary')"
       ],
       "owner_source": [
@@ -228,7 +228,7 @@
       "registration": "unmounted",
       "route": "/api-usage/summary",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/corrected_router.py:1041"
+      "source": "backend/app/domains/api_usage/corrected_router.py:1042"
     },
     {
       "calls": [
@@ -270,7 +270,7 @@
       "registration": "unmounted",
       "route": "/api-usage/llms/breakdown",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/corrected_router.py:1081"
+      "source": "backend/app/domains/api_usage/corrected_router.py:1082"
     },
     {
       "calls": [
@@ -316,7 +316,7 @@
       "registration": "unmounted",
       "route": "/api-usage/llms/cost-history",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/corrected_router.py:1136"
+      "source": "backend/app/domains/api_usage/corrected_router.py:1137"
     },
     {
       "calls": [
@@ -359,14 +359,14 @@
         "usage_by_provider.get"
       ],
       "capability": "api_usage_summary",
-      "classification": "owner-private",
+      "classification": "administrator-only",
       "kind": "http",
       "method": "GET",
       "module": "api_usage",
       "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
       "observed_guards": [
         "Depends(get_async_db)",
-        "Depends(get_current_user)",
+        "Depends(require_platform_admin)",
         "router.get('/summary')"
       ],
       "owner_source": [
@@ -375,7 +375,7 @@
       "registration": "mounted",
       "route": "/api-usage/summary",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/router.py:220"
+      "source": "backend/app/domains/api_usage/router.py:221"
     },
     {
       "calls": [
@@ -440,7 +440,7 @@
       "registration": "mounted",
       "route": "/api-usage/llms/cost-history",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/router.py:427"
+      "source": "backend/app/domains/api_usage/router.py:428"
     },
     {
       "calls": [
@@ -497,7 +497,7 @@
       "registration": "mounted",
       "route": "/api-usage/llms/performance",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/router.py:556"
+      "source": "backend/app/domains/api_usage/router.py:557"
     },
     {
       "calls": [
@@ -518,7 +518,7 @@
       "registration": "",
       "route": "",
       "side_effects": "usage ledger; platform/private cost data",
-      "source": "backend/app/domains/api_usage/router.py:68"
+      "source": "backend/app/domains/api_usage/router.py:69"
     },
     {
       "calls": [
@@ -2823,6 +2823,29 @@
     {
       "calls": [
         "Depends",
+        "router.get"
+      ],
+      "capability": "access",
+      "classification": "administrator-only",
+      "kind": "http",
+      "method": "GET",
+      "module": "cost_drivers",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(_allowed_admin)",
+        "router.get('/access')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/api/admin/cost-drivers/access",
+      "side_effects": "platform billing/configuration and provider reads",
+      "source": "backend/app/domains/cost_drivers/router.py:16"
+    },
+    {
+      "calls": [
+        "Depends",
         "Query",
         "_month_param",
         "get_dashboard",
@@ -2844,7 +2867,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/summary",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:28"
+      "source": "backend/app/domains/cost_drivers/router.py:34"
     },
     {
       "calls": [
@@ -2868,7 +2891,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/aws",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:32"
+      "source": "backend/app/domains/cost_drivers/router.py:38"
     },
     {
       "calls": [
@@ -2892,7 +2915,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/traffic",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:36"
+      "source": "backend/app/domains/cost_drivers/router.py:42"
     },
     {
       "calls": [
@@ -2916,7 +2939,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/recommendations",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:40"
+      "source": "backend/app/domains/cost_drivers/router.py:46"
     },
     {
       "calls": [
@@ -2944,7 +2967,7 @@
       "registration": "mounted",
       "route": "/api/admin/cost-drivers/refresh",
       "side_effects": "platform billing/configuration and provider reads",
-      "source": "backend/app/domains/cost_drivers/router.py:44"
+      "source": "backend/app/domains/cost_drivers/router.py:50"
     },
     {
       "calls": [
@@ -15571,6 +15594,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/admin",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/admin",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/admin/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/apis",
       "classification": "owner-private",
       "kind": "page",
@@ -16047,6 +16089,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/help",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/help",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/help/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/indmoney-us-swing-run/[id]",
       "classification": "owner-private",
       "kind": "page",
@@ -16405,6 +16466,25 @@
       "route": "/console/profile/security",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/profile/security/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/profile/usage",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/usage",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/usage/page.tsx:1"
     },
     {
       "calls": [],
@@ -16862,12 +16942,12 @@
     "backend/app/domains/ai_providers/tools/web_search.py": "52484bfe88c6629cb3463a978d11d9159f5ef1d385f55dbcd437f35a0a3448c7",
     "backend/app/domains/ai_providers/web_metadata.py": "9f7b547d471c0df964ada372dec4da6e6c01c34d152f4bffc58f0d9f5fd36ba0",
     "backend/app/domains/api_usage/__init__.py": "b15a9801c8a2f57f82dc9c76f4ef51e1119e9d97a2166647eb0e0efe1f95b13b",
-    "backend/app/domains/api_usage/corrected_router.py": "4912e89bdbe147acbbe45f62e958d5ad6d430b56c9d3e1b1c9067e913bcc2c1f",
+    "backend/app/domains/api_usage/corrected_router.py": "09ff4348b1ea8f6be2ccc24570d51b219e33bd38ec3fbe49d1222c45c41e3cea",
     "backend/app/domains/api_usage/coverage.py": "621d7951a17f509388ee5915500ec30b5fbed9ef47329b5281c305bfd3a5e3e4",
     "backend/app/domains/api_usage/metering.py": "d0760d95128f3a2975d7192b629205b77a5c6174218270893f6eb0ca7b20cd1e",
     "backend/app/domains/api_usage/models.py": "818231dead71786aec84a7b3c4784a502af39f53b81e80de96e359b0f4019084",
     "backend/app/domains/api_usage/recorder.py": "1a52e110931d6380569e27445d20ac2e97e43a80071dcdbad95446d4201846f0",
-    "backend/app/domains/api_usage/router.py": "d443d8f92f609d0965f6f6cd602b7226a1d3ee379f2473ca9852aa473a92a912",
+    "backend/app/domains/api_usage/router.py": "a14e8f8bbcb8d1a3982b9c400f11781e4133bc5120051fb4ecb5ff2ff2cdf96b",
     "backend/app/domains/api_usage/schemas.py": "e1ba61871de81c3b3fab7220aec86fa8190a85369d1e3494031ba381a3bed148",
     "backend/app/domains/api_usage/usage_metadata.py": "ea4f6912cc8d28c75fd1245f8be6a505179382f9bcad284907d1a33f6a58cd91",
     "backend/app/domains/auth/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -16927,7 +17007,7 @@
     "backend/app/domains/cost_drivers/estimators.py": "075281c218673419cac2c1bb6762ea3cd04c2e5a44a297252aa72ef7f4ba0738",
     "backend/app/domains/cost_drivers/models.py": "ea1628afeb9cb078c29824d3f0efac4d3f826b9ae07b9046f3b15aaa3ad4d4da",
     "backend/app/domains/cost_drivers/recommendations.py": "b9191815b92a545f6c1841a008e84943d348646521fa98f2cee0bf186c6770d7",
-    "backend/app/domains/cost_drivers/router.py": "2a26b42e2b6fc02b867b1e020145050bd201ebf729944f89133350a33303a095",
+    "backend/app/domains/cost_drivers/router.py": "9d708d3545408435d29238a497b8b6a04c5deeebd16cfafd3f4bf667d3e3271a",
     "backend/app/domains/cost_drivers/schemas.py": "973afe7dc204d6dd011ffd3e97b98a7fe6d9e47652684f6d330d271531f86e84",
     "backend/app/domains/cost_drivers/service.py": "7a11904480fe76a087ac6e7db946bb7f0f983a00584fd95ed423065aa11081c1",
     "backend/app/domains/cost_drivers/transfer.py": "66e90ae518e4d64ada01ea0505d820cb4a8ea98839e7d7d48bc92cc35bd0e474",
@@ -17318,7 +17398,8 @@
     "frontend/app/api/runtime-fingerprint/route.ts": "7367196caadada31a88ce9ee02565b9a9e9f677675c5b2aa8da9a7423ec07fb9",
     "frontend/app/api/universal-polymarket-scan/auto-run/route.ts": "393550f47b1e629ea7184df1ad09399d3d70930de56cb0db5b3b582b4a06e874",
     "frontend/app/backend-api/[...path]/route.ts": "9717e58b3fc955a084ef5c6b668ea8bd7258dd9be0a13c29b7f16e789a969814",
-    "frontend/app/console/apis/page.tsx": "cc6086c4720bb45c843e0b983bf8d9e0a0bee7cb9c852df58f1adb15c2913521",
+    "frontend/app/console/admin/page.tsx": "91387a19b9c6a56242ddb2806d63532e991367a82732f9ea0aecd811ef34835c",
+    "frontend/app/console/apis/page.tsx": "43b77c7bfb2893a9375ab5364715f6dfd08112ca032fdb4e644d33ba9d0916a4",
     "frontend/app/console/auto-rebalance-runs/[portfolio]/[sequence]/page.tsx": "f5b9d76b220d2d43eefdc338b6f2aebd1f80a3ba791ebeee00541f41a80d8ff8",
     "frontend/app/console/auto-rebalance-runs/[portfolio]/page.tsx": "538bab4699132cabd73168e3a64f354b7302749a20d208d1718ff5563d60eb9f",
     "frontend/app/console/automated-rebalance/page.tsx": "06561bf8c7f9faf2b4f500887bffb15b439855e6b34541c95bdd6be3d78e772d",
@@ -17343,6 +17424,7 @@
     "frontend/app/console/dashboard/page.tsx": "c7d2445192cfc9580066e4c2e39fcb015af0da4aa54e6f5bb325e2d2b83782b3",
     "frontend/app/console/google-sheets/callback/page.tsx": "272561226de5762adeb940fdbe9513da1ddce29359d23e7d351709575d894ce2",
     "frontend/app/console/google-sheets/page.tsx": "47ccecf7cbf94700513b444c5927a95893404eeb00cfb730e34909ce807f2e43",
+    "frontend/app/console/help/page.tsx": "019371f92e1813d1153277a042bf4d48a12a18140a8d1c733b3c5c845ce3d86b",
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/indmoney-us/events/page.tsx": "797f251250268ac1d342fd7903085fb549319b3ae547068498fa87743218bde4",
     "frontend/app/console/indmoney-us/final-actionables/page.tsx": "a36427bc53a0e6a2bc77b3cf7f72fa156eff738e0ba20d55890e7610e96c648c",
@@ -17362,6 +17444,7 @@
     "frontend/app/console/profile/page.tsx": "c43066ae3d95d64ce1ffa92a1fe8eff698208d2fb60fda019f18c1c9f3764a88",
     "frontend/app/console/profile/preferences/page.tsx": "522594df7ac19d2711ed384b27e01e35309bc835bbe63427c849f9cd7caf7617",
     "frontend/app/console/profile/security/page.tsx": "c39f32aae2cf5f63b12d6e0fec9ef1dd64e81288eb92e01b7d2fd77beaad98e3",
+    "frontend/app/console/profile/usage/page.tsx": "1d83d320a1d910b2f09643fccfb7b1925ef2f4eb29efcbec2b9e26a0a933e19d",
     "frontend/app/console/prompts/page.tsx": "ea1d6bb90c7f95ceed02a3ee1da3493170ee9b18bb39343a0ec9d24b7aa41bdd",
     "frontend/app/console/runs/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/runs/page.tsx": "13bf15e2316b839c70a306385e5f94e3d1bed31d2b1f1e386a09a9d3e75af194",

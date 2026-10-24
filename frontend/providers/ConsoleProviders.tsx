@@ -4,8 +4,7 @@ import { SessionProvider } from "next-auth/react";
 import type { Session } from "next-auth";
 import type { UserResponse } from "@/types/api";
 import { AuthProvider } from "@/providers/AuthProvider";
-import dynamic from "next/dynamic";
-const ModuleProvider = dynamic(() => import("@/providers/ModuleProvider").then(m => m.ModuleProvider), {ssr:false, loading:()=> <p role="status">Loading workspace policy…</p>});
+import {ModuleProvider} from '@/providers/ModuleProvider';
 import { ThemeProvider } from "@/providers/ThemeProvider";
 
 export function ConsoleProviders({

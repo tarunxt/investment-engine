@@ -18,6 +18,7 @@ from app.domains.api_usage.router import (
     llm_cost_history as legacy_llm_cost_history,
 )
 from app.domains.auth.dependencies import get_current_user
+from app.domains.auth.admin_roles import require_platform_admin
 from app.domains.auth.models import User
 from app.domains.api_usage.models import (
     LlmProviderUsageCallRecord,
@@ -1043,7 +1044,7 @@ async def corrected_api_usage_summary(
     custom_start: date | None = Query(default=None),
     custom_end: date | None = Query(default=None),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
 ):
     summary = await legacy_api_usage_summary(
         period=period,

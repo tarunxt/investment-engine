@@ -48,3 +48,24 @@ were changed.
 Rollback: revert this package's source commit locally; no schema migration or data
 rollback is required. Legacy history remains in its original stores. Continue with
 UX-02 shell/role separation, then the remaining prompts in their supplied order.
+
+## UX-02: source candidate; visual/browser verification pending
+
+The shared console shell now has a compact rail, scrollable selected-module
+navigation, stable core links, a friendly account menu and mobile focus/Escape
+handling. Policy loading does not replace the entire shell. Legacy APIs shows
+personal usage for ordinary users, with no provider usage/billing component
+mounted; admin views require current backend identity rather than a stale client
+role. Both effective corrected and legacy provider-summary routes enforce the
+existing platform-admin guard. Existing cost-only grants retain an owner-bound
+admission-backed profile link and cannot access provider administration. No grant
+or account was changed. The admission endpoint performs no billing/provider fetch.
+
+Local candidate checks: 48 backend and 18 frontend cases pass, zero skips;
+TypeScript and targeted lint pass. Initial tests found a package-router import
+mistake and the effective corrected-route entrypoint; both were corrected and
+retained. Independent review identified the cost-only navigation regression; its
+owner-bound correction has a focused regression. Synthetic desktop/mobile/error
+captures and browser interaction remain pending. The disposable preview adds only
+the existing owner-scoped GET limits handler, not new effect adapters. No hosted
+verification, production change, publication or deployment follows from this entry.
