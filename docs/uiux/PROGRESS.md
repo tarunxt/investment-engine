@@ -255,3 +255,23 @@ found frozen account details were not displayed; they are now visible and source
 shape/time validation fails closed. Re-review found no further concrete issue.
 Exact-source build and browser verification remain pending. No new persistent
 store, provider call, credential, permission, send, order or deployment was added.
+
+UX-06 actual browser at 0fedf834eeeb748e87288fc2e3ba44ef8bc6a60e correctly
+blocked a stale source. A malformed test CSV escaped newlines and produced only
+an unaccepted preview; logs confirmed no accept or workflow submission, and the
+fixture was corrected. The real browser then previewed/accepted a fresh explicitly
+synthetic UATA import, parsed the inert shortlist (including duplicate, unknown
+and malicious text), required deliberate draft exclusion and source/usage review,
+and started exactly one zero-cost holdings-only workflow. Local workflow 3
+completed all six stages and survived reload with no second start. No order/send
+request occurred; preferences were restored and read back. Existing source/history
+rows were retained, and no hosted account was touched.
+
+Eleven automated browser checks passed, but visual inspection caught a 19px root
+overflow from the format select that the container-only assertion missed. The
+selector is now constrained to container width and a regression was added. The
+original receipt/captures remain private, explicitly visual-unqualified pending
+an exact-source root-overflow retest that will reuse the existing run. Four extra
+linked source tests cover both fake ownership modes and both owners' real accepted
+synthetic imports with all networking/provider factories denied, and prove setup/
+preview enqueue nothing. These are SQLite fixtures, not PG/Redis or hosted proof.
