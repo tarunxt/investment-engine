@@ -142,6 +142,7 @@ async function analyze(page,base,owner){
  assert.equal(row.state,'awaiting_approval');assert.equal(row.approved_at,null);assert.match(row.review_digest,/^[a-f0-9]{64}$/);
  assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[row.id])[0].n,0);
  await page.goto(base+'/console/profile/activity');
+ await page.getByRole('button',{name:'Refresh recorded order status',exact:true}).click();
  const card=page.getByRole('article',{name:'Order '+row.id});await card.getByText('awaiting approval',{exact:true}).waitFor();
  const payload=JSON.parse(row.payload_json);
  assert.deepEqual(payload,{sequencing:'listed',legs:[{exchange:'NSE',symbol:'SYNTHETIC0',side:'SELL',quantity:2,limit_price:'10.01',product:'CNC',order_type:'LIMIT'}]});
@@ -189,6 +190,7 @@ try{
  await enable(a.page);await enable(b.page);
  const first=await analyze(a.page,base,owners.usera);
  await b.page.goto(base+'/console/profile/activity');
+ await b.page.getByRole('button',{name:'Refresh recorded order status',exact:true}).click();
  await b.page.getByText('No persisted order intents in these account records.',{exact:false}).waitFor();
  assert.equal(await b.page.getByRole('article',{name:'Order '+first.row.id}).count(),0);
  assert.equal((await b.page.request.get(base+'/backend-api/order-intents/reviews/'+first.row.id)).status(),404);
