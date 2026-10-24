@@ -34,7 +34,7 @@ try{
  await page.getByRole('checkbox',{name:'Select Zerodha Rebalance',exact:true}).waitFor();
  assert.equal(await workspace.getByRole('link',{name:'Zerodha Rebalance',exact:true}).count(),0);assert.equal(await workspace.getByRole('link',{name:'INDmoney US',exact:true}).count(),0);
  receipt.checks.push('zero_module_keeps_core_and_visible_account_without_optional_links');
- for(const name of ['Select Zerodha Rebalance','Select INDmoney US']){const box=page.getByRole('checkbox',{name,exact:true});assert.equal(await box.isChecked(),false);const response=page.waitForResponse(r=>r.request().method()==='PATCH'&&new URL(r.url()).pathname.endsWith('/me/modules'));await box.check();assert.equal((await response).status(),200);}
+ for(const name of ['Select Zerodha Rebalance','Select INDmoney US']){const box=page.getByRole('checkbox',{name,exact:true});assert.equal(await box.isChecked(),false);const response=page.waitForResponse(r=>r.request().method()==='PATCH'&&new URL(r.url()).pathname.endsWith('/me/modules'));void response.catch(()=>{});await box.click();assert.equal((await response).status(),200);await until(()=>box.isChecked());}
  await page.goto(base+'/console/zerodha');await workspace.getByRole('link',{name:/Zerodha Rebalance/}).waitFor();
  assert.equal(await workspace.getByRole('link',{name:/Zerodha Rebalance/}).getAttribute('aria-current'),'page');assert.equal(await workspace.getByRole('link',{name:'INDmoney US',exact:true}).count(),1);
  const account=page.getByRole('region',{name:'Your account',exact:true});
@@ -52,10 +52,10 @@ try{
  }
  receipt.checks.push('five_width_sidebar_reflow','mobile_focus_wrap_escape_restore','selected_module_active_icons_and_account_discoverability');
  await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/console/profile/preferences');
- const response=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith('/auth/profile'));
+ const response=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith('/auth/profile'));void response.catch(()=>{});
  await page.getByRole('button',{name:'Dark',exact:true}).click();assert.equal((await response).status(),200);await until(()=>page.locator('html').getAttribute('class').then(x=>x?.includes('dark')));
  await page.screenshot({path:path.join(evidence,'sidebar-dark.png')});receipt.screenshots.push('sidebar-dark.png');
- const restore=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith('/auth/profile'));await page.getByRole('button',{name:'Light',exact:true}).click();assert.equal((await restore).status(),200);
+ const restore=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith('/auth/profile'));void restore.catch(()=>{});await page.getByRole('button',{name:'Light',exact:true}).click();assert.equal((await restore).status(),200);
  receipt.checks.push('synthetic_dark_light_controls_and_restore');receipt.passed=true;save();await context.close();
 }catch(error){receipt.error=String(error.stack||error);save();throw error;}
 finally{if(browser)await browser.close();if(child&&!closed){child.kill('SIGINT');await until(()=>closed,20000);}receipt.cleanup=existsSync(path.join(runtime,'state.json'))?'incomplete; retain owned fixture':'Owned preview stopped; synthetic evidence retained';save();}
