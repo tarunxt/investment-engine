@@ -413,3 +413,15 @@ Stage17 independent c2441d82 review required a stale-claimant lease fence repair
 
 Stage17 second local repair began21October2026 19:28:21UTC for a source-identified PostgreSQL owner/queue inversion (not locally reproduced on PostgreSQL). Consistent lock order and release-before-global-control are implemented;51focused ordinary checks pass. New concurrent enqueue/dispatch PostgreSQL regression is prepared/unrun; exact successor review/CI/artifacts remain gates. No publication, deployment, activation orStage18.
 
+
+### Conditional privacy policy local successor
+
+The published exact candidate267b476 has terminal CI: baseline/API migration
+passed; PR checks51passed/3failed. PUBLICATION_267_CI.md records the three defects
+and verified actual disposable PostgreSQL/Redis restart evidence. No deployment.
+
+The subsequent local category policy implements conditional30-day targets,
+review-bound eligibility/holds, minimal encrypted audit, selected-profile unlink
+and a suppression-aware disposable backup consumer.39policy+33affected tests
+passed; real deletion remains disabled. CATEGORY_PRIVACY_POLICY_LOCAL.md records
+remaining legal/inventory/full-store gates. No successor publication is authorized.

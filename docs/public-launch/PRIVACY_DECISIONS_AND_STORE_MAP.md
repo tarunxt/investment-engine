@@ -136,3 +136,13 @@ metadata, canonical bundle metadata, selected held-spend recovery and the local
 rendered walkthrough. Historical lost arguments, old unindexed/unlinked consent,
 unsupported opaque payloads, actual deployed inventory and the three policy
 choices remain held. Full export/erasure and hosted qualification remain false.
+
+## Owner-selected policy design successor
+
+The owner has now selected conditional30-day targets for eligible profile/upload/
+analysis data, minimal restricted audit plus selective unlinking, and proposed
+30-day rolling backup expiry with restore suppression. The earlier open design
+options are superseded by CATEGORY_PRIVACY_POLICY_LOCAL.md. Applicable legal-duty
+and hold mapping, actual backup inventory and per-store suppression coverage are
+still unverified. No legal approval, real erasure or live backup change follows
+from selecting this design. The new implementation remains local and unpublished.
