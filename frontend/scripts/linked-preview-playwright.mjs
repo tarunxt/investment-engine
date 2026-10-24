@@ -78,13 +78,11 @@ async function enable(page){
  await box.click();assert.equal((await saved).status(),200);await until(()=>box.isChecked());
 }
 async function analyze(page,base,owner){
+ const count=()=>sql('SELECT count(*) n FROM auto_rebalance_workflows WHERE user_id=?',[owner])[0].n;
+ const before=count();
  await page.goto(base+'/console/automated-rebalance');
- const region=page.getByRole('region',{name:'Server analysis'});
- // The wrapping label includes option text; exact text-label matching is not stable.
- const portfolio=region.getByRole('combobox');
- await portfolio.waitFor();assert.equal(await portfolio.count(),1);
- assert.deepEqual(await portfolio.locator('option').evaluateAll(options=>options.map(o=>({value:o.value,text:o.textContent}))),[{value:'indmoney_us',text:'US portfolio'},{value:'india',text:'India portfolio'}]);
- await portfolio.selectOption('india');assert.equal(await portfolio.inputValue(),'india');
+ await page.getByRole('heading',{name:'Choose your research workspace',exact:true}).waitFor();
+ assert.equal(count(),before,'Legacy navigation must not start research');
  const source=await page.evaluate(async()=>{
   const response=await fetch('/backend-api/runs/analysis-workflows/synthetic-source',{
    method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({portfolio:'india'})});
@@ -93,14 +91,30 @@ async function analyze(page,base,owner){
  assert.equal(source.status,200);assert.equal(source.body.owner_id,owner);
  assert.equal(source.body.simulation_only,true);assert.match(source.body.source_hash,/^[a-f0-9]{64}$/);
  receipt.checks.push('explicit_owned_synthetic_source_after_module_selection');save();
- await region.getByRole('button',{name:'Start server analysis',exact:true}).click();
- await region.getByRole('heading',{name:/Workflow \d+ · india · completed/}).waitFor({timeout:90000});
+ await page.getByRole('link',{name:'Open Zerodha Rebalance research',exact:true}).click();
+ await page.waitForURL(base+'/console/zerodha/research');
+ await page.getByRole('heading',{name:'Research setup',exact:true}).waitFor();
+ const region=page.getByRole('region',{name:'Server analysis'});
+ assert.equal(await region.getByRole('combobox').count(),0,'Portfolio is bound by the module, not a mutable selector');
+ const start=region.getByRole('button',{name:'Start research',exact:true});
+ await start.waitFor();assert.equal(await start.isEnabled(),false,'Unreviewed setup cannot start');
+ const consent=page.getByRole('checkbox',{name:'I reviewed the account/source, approved plan and usage. Starting research is a separate deliberate action and does not approve orders.',exact:true});
+ await consent.check();await until(()=>start.isEnabled());
+ assert.equal(count(),before,'Source acquisition and setup consent must not start research');
+ const posted=page.waitForRequest(r=>r.method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows');
+ await start.click();const body=(await posted).postDataJSON();
+ assert.equal(body.portfolio,'india');assert.equal(body.expected_source_hash,source.body.source_hash);assert.match(body.expected_plan_hash,/^[a-f0-9]{64}$/);assert.ok(Number.isInteger(body.expected_module_version));
+ await region.getByRole('heading',{name:/^Research \d+ · Research completed$/}).waitFor({timeout:90000});
  const flow=sql("SELECT id FROM auto_rebalance_workflows WHERE user_id=? AND portfolio='india' AND status='completed' ORDER BY id DESC LIMIT 1",[owner])[0];assert(flow);
+ assert.equal(count(),before+1,'One deliberate start creates exactly one owned workflow');
+ const frozen=JSON.parse(sql('SELECT execution_json FROM auto_rebalance_workflows WHERE id=?',[flow.id])[0].execution_json);
+ assert.equal(frozen.source_hash,body.expected_source_hash);assert.equal(frozen.plan_hash,body.expected_plan_hash);
  const stages=sql('SELECT stage,status FROM auto_rebalance_workflow_stages WHERE workflow_id=?',[flow.id]);
  assert.equal(stages.length,6);assert(stages.every(s=>s.status==='completed'));
  const spend=sql('SELECT status,actual_usd,request_hash FROM recommendation_spend_attempts WHERE user_id=?',[owner]);
  assert.equal(spend.length,5);assert(spend.every(s=>s.status==='settled'&&s.actual_usd!==null&&Number(s.actual_usd)===0&&/^[a-f0-9]{64}$/.test(s.request_hash)));
  await shot(page,`owner-${owner}-six-stage-analysis`);
+ receipt.checks.push('canonical_module_setup_explicit_consent_one_start_six_stage_completion');save();
  const row=await until(()=>sql("SELECT id,state,review_digest,approved_at,account_id,app_mode,connection_version,payload_json FROM confirmed_order_intents WHERE owner_id=? ORDER BY created_at DESC LIMIT 1",[owner])[0]);
  assert.equal(row.state,'awaiting_approval');assert.equal(row.approved_at,null);assert.match(row.review_digest,/^[a-f0-9]{64}$/);
  assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[row.id])[0].n,0);
@@ -116,9 +130,17 @@ async function analyze(page,base,owner){
  return {row,card,flow};
 }
 async function approve(page,row,card){
+ const approvals=[];const observe=r=>{if(r.url().endsWith(`/order-intents/${row.id}/approve`)&&r.method()==='POST')approvals.push(r);};page.on('request',observe);
+ try{
+ assert.equal(await card.getByRole('button',{name:'Confirm simulated orders',exact:true}).count(),0);
+ await card.getByRole('button',{name:'Review exact simulated orders',exact:true}).click();
+ assert.equal(approvals.length,0,'Opening exact review is not consent or dispatch');
+ assert.equal(sql('SELECT approved_at FROM confirmed_order_intents WHERE id=?',[row.id])[0].approved_at,null);
  const request=page.waitForRequest(r=>r.url().endsWith(`/order-intents/${row.id}/approve`)&&r.method()==='POST');
- await card.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).click();
+ await card.getByRole('button',{name:'Confirm simulated orders',exact:true}).click();
  assert.deepEqual((await request).postDataJSON(),{displayed_digest:row.review_digest,action:'confirm_exact_order_or_basket'});
+ assert.equal(approvals.length,1);
+ }finally{page.off('request',observe);}
 }
 function venueCount(){return sql('SELECT count(*) n FROM synthetic_venue_orders',[],{venue:true})[0].n;}
 async function refreshAfterRestart(page,origin,intentId,state){
@@ -138,7 +160,7 @@ try{
  makeLauncher('partial');writeFileSync(path.join(evidence,'build.log'),command(['build'],600000));
  let state=await start('partial');const base=new URL(state.url).origin;
  const fingerprint=await (await fetch(base+'/api/runtime-fingerprint')).json();assert.equal(fingerprint.build_sha,sourceSha);receipt.served_fingerprint=fingerprint;
- browser=await chromium.launch({headless:true,env:{PATH:process.env.PATH,HOME:'/tmp'}});
+ browser=await chromium.launch({headless:true,env:{PATH:process.env.PATH,HOME:'/tmp'},...(process.env.STAGE18_CHROMIUM_PATH?{executablePath:process.env.STAGE18_CHROMIUM_PATH}:{})});
  const a=await login(base,'usera'),b=await login(base,'userb');
  const owners=Object.fromEntries(sql("SELECT username,id FROM users WHERE username IN ('usera','userb')").map(r=>[r.username,r.id]));
  await enable(a.page);await enable(b.page);
@@ -146,6 +168,7 @@ try{
  await b.page.goto(base+'/console/profile/activity');
  await b.page.getByText('No persisted order intents in these account records.',{exact:false}).waitFor();
  assert.equal(await b.page.getByRole('article',{name:'Order '+first.row.id}).count(),0);
+ assert.equal((await b.page.request.get(base+'/backend-api/order-intents/reviews/'+first.row.id)).status(),404);
  receipt.checks.push('real_login_two_owners_no_foreign_review','unapproved_analysis_creates_no_execution');save();
  await approve(a.page,first.row,first.card);
  await until(()=>sql('SELECT state FROM confirmed_order_intents WHERE id=?',[first.row.id])[0].state==='partial');
@@ -174,7 +197,8 @@ try{
  const reconciled=await refreshAfterRestart(b.page,base,second.row.id,'filled');
  await reconciled.getByText(/filled 2 of 2/).waitFor();
  assert.equal(venueCount(),countBefore);assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[second.row.id])[0].n,1);
- assert.equal(await reconciled.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).count(),0);
+ assert.equal(await reconciled.getByRole('button',{name:'Confirm simulated orders',exact:true}).count(),0);
+ assert.equal(await reconciled.getByRole('button',{name:'Review exact simulated orders',exact:true}).count(),0);
  await shot(b.page,'unknown-restart-reconciled-ui');receipt.checks.push('accepted_unknown_durable_evidence_restart_filled_ui_one_venue_submission');
  receipt.passed=true;
 }catch(error){
