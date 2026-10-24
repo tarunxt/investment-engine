@@ -424,3 +424,15 @@ content while retaining its summary, plus hidden/inert descendants. A regression
 models hidden controls with nonempty rectangles. Failed traces are retained; the
 initial assumption that all rectangle-bearing links were focusable was corrected.
 No business POST occurred. Exact repaired-source keyboard qualification is pending.
+
+UX-10 repaired packaged build 19e1aae35986375a07e2c706d06b23e52c8398fb passed.
+Six targeted actual-browser checks passed: read-only privacy limits; repaired
+closed-menu focus wrap/containment/Escape/return under reduced motion and 44px
+menu bounds; skip-link focus; accurate login/notification copy; full-width mobile
+bar; zero business POSTs. The unchanged five-width layout evidence remains tied to
+0d397e4, not relabelled as a rerun. Current mobile plan capture was inspected and
+shows source values masked without hiding exact quantities. Independent review
+found no concrete owner/session or accessibility regression. The owned preview
+was stopped. Actual VoiceOver, real browser zoom and unassisted pilot remain
+unmeasured. Before UX-11 final evidence, remaining supported candidate-analysis
+contracts and amendment/constraint limitations are being revisited explicitly.
