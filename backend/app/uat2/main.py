@@ -33,14 +33,15 @@ app.include_router(modules_router)
 # Masked owner connection metadata only; no setup writes or broker adapters.
 from app.domains.connections.router import router as connections_router
 app.include_router(connections_router)
+# Mount static /runs/analysis-workflows paths before legacy /runs/{run_id}.
+from app.uat2.workflow import install_workflow
+workflow_binding = install_workflow(app)
 # Read-only actual job/run handlers make Stage02 ownership reviewable without
 # mounting AI dispatch, exports, cancellations or production WebSocket relays.
 for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
         if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
             app.include_router(APIRouter(routes=[route]))
-from app.uat2.workflow import install_workflow
-workflow_binding = install_workflow(app)
 app.include_router(router)
 
 

@@ -14285,7 +14285,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:54"
+      "source": "backend/app/uat2/main.py:55"
     },
     {
       "calls": [
@@ -14307,7 +14307,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:59"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -14329,7 +14329,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:59"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -14351,7 +14351,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:59"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -14373,7 +14373,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:59"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -14395,7 +14395,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:59"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -14417,7 +14417,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:59"
+      "source": "backend/app/uat2/main.py:60"
     },
     {
       "calls": [
@@ -14439,7 +14439,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:65"
+      "source": "backend/app/uat2/main.py:66"
     },
     {
       "calls": [
@@ -17256,7 +17256,7 @@
     "backend/app/uat2/analysis_worker.py": "4b6a3ed3d38c218769c03ede728354ce1f48fd66408b414cd0978118405be1af",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/http_bindings.py": "0c4e8502eb31db87715726db22566007e20a121908e237e523a14aadca2797f2",
-    "backend/app/uat2/main.py": "55ec862112db5168a595d5015e1d08e30555f5d17b7bfd561d995eedce1e9e54",
+    "backend/app/uat2/main.py": "56d35cecdf7fb1101b4938d5b3492aca3cdf3881756d35dc3b873b9483b23160",
     "backend/app/uat2/operations.py": "bd613e122f26911ce3ab3f5e7c0c181a94e83b42e248add14a9ca08bacef0618",
     "backend/app/uat2/order_worker.py": "3a270628c8855d4a497bca4970397d8644d0ec24ac2e774de90ccbcb737ddb59",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",

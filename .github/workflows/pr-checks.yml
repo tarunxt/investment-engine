@@ -725,6 +725,7 @@ jobs:
           tests/stage12-server-analysis.test.mjs
           tests/stage16-order-reviews.test.mjs
           tests/stage16-safety-support.test.mjs
+          tests/uat2-diagnostics-uncertainty.test.mjs
           tests/stage16-mobile-shell.test.mjs
           tests/stage17-dependency-boundaries.test.mjs
           tests/public-auth-lazy-client.test.mjs
@@ -1104,7 +1105,7 @@ jobs:
           AUTH_DISABLED: 'false'
         run: |
           python -m unittest discover -s deploy/uat2/native -p 'test_*.py' -v
-          pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py
+          pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py backend/tests/test_uat2_native_route_order.py
       - name: Verify actual dedicated PostgreSQL Redis HTTP workflow and worker restart
         run: |
           candidate=$(git rev-parse HEAD)

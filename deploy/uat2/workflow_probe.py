@@ -79,10 +79,15 @@ def main(phase):
             time.sleep(1)
         raise AssertionError('Bounded analysis completion timeout')
     if phase=='start':
+        # Exercise the actual collection/static route, not only POST/detail paths.
+        assert call('/runs/analysis-workflows/config')['enabled'] is True
+        listing=call('/runs/analysis-workflows')
+        assert listing['owner_id']==owner_id and isinstance(listing['items'],list)
         connected=call('/uat2/simulation/connections',{'mode':'user_owned','key':'smoke-user-mode','expected_id':None,'expected_version':None})
         call('/runs/analysis-workflows/synthetic-source',{'portfolio':'india','key':'smoke-user-source'})
         flow=call('/runs/analysis-workflows',{'portfolio':'india','key':'smoke-user-analysis'})
         completed(flow['id'])
+        assert flow['id'] in {item['id'] for item in call('/runs/analysis-workflows')['items']}
         intent=call('/uat2/simulation/analysis/'+str(flow['id'])+'/prepare-basket',{})['id']
         review=call('/order-intents/reviews/'+intent)['intents'][0]
         assert review['actions']['confirm'] and review['simulation_scenario']=='after_acceptance'
@@ -122,7 +127,7 @@ def main(phase):
         assert call('/order-intents/reviews/'+intent)['intents'][0]['state']=='unknown'
         print(json.dumps({'phase':'start','synthetic_identity':True,'google_verification':False,
             'actual_http':True,'actual_postgresql':True,'actual_redis_tasks':True,
-            'both_modes_analysis':True,'accepted_us_analysis':True,'unknown_observed':True,
+            'actual_static_analysis_collection':True,'both_modes_analysis':True,'accepted_us_analysis':True,'unknown_observed':True,
             'private_json_download':True,'source_aware_monitoring':True,'intent_id':intent,'owner_acceptance':False}))
     elif phase=='recover':
         with SyncSessionLocal() as db:
