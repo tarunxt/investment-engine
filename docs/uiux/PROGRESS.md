@@ -194,3 +194,16 @@ Several commands initially used incorrect frontend-relative paths and performed
 no intended writes; corrected commands/checks are retained. Exact-source build,
 browser route/Back/account-switch and visual qualification follow separately.
 No publication, hosted change, provider effect, actual order or deletion occurred.
+
+UX-05 browser at e4949fc passed actual module Overview/Portfolio/Back and US
+import direct refresh, then timed out on legacy alias navigation. A diagnostic
+attempt subsequently encountered a local SQLite lock and login HTTP 500, not a
+confirmed wrong password. The owned preview was stopped without resetting data
+or credentials. Traceback identified the local Stage08 wrapper calling the
+updated owner-scoped dashboard without user/db arguments. That wrapper now
+passes both and delegates the native accepted-data projection rather than
+inventing a fixed US balance. A focused delegation regression and actual scoped
+summary suite pass (14 cases). The workflow-list-signature theory was rejected
+by source inspection; it was not the diagnosed root cause. Alias and SQLite
+qualification remain pending a bounded owned-preview restart. Failed receipts
+are retained privately, and are not reported as passing acceptance.
