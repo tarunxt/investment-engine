@@ -18,7 +18,8 @@ from app.domains.order_intents.execution_fake import MarketDataFake
 from app.domains.order_intents.journal_fake import JournalBrokerFake, TOPIC
 from app.domains.order_intents.models import OrderIntent
 from app.domains.order_intents.service import Orders
-from app.domains.public_service.recoverable_privacy import RecoverableFixturePrivacy
+from app.domains.public_service.quarantined_privacy import QuarantinedFixturePrivacy, REFERENCE
+from app.domains.public_service.sql_privacy_workflow import DisposablePrivacyScope
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 pytestmark = pytest.mark.skipif(os.getenv('CREDX_STAGE09_DATABASE_ACK') != 'disposable-docker-only',
@@ -79,14 +80,21 @@ def test_pg_recoverable_erasure_roundtrip_is_atomic_and_owned(pg_workflow):
     from app.domains.auth.models import APIKey, UserProfile
     def service(db):
         base = original(db)
-        return RecoverableFixturePrivacy(db, base.reader, base.keyring, retention=base.retention, scope=base.scope)
+        return QuarantinedFixturePrivacy(db, base.reader, base.keyring, retention=base.retention,
+            scope=DisposablePrivacyScope(REFERENCE))
     with Session(engine) as db:
         erased = service(db).execute(owner, request, now=now); db.commit()
         assert erased['removed_counts'] == {'api_keys': 1, 'user_profiles': 1}
     with Session(engine) as db:
-        assert service(db).restore(owner, request, now=now)['state'] == 'restored'; db.commit()
+        restored = service(db).restore(owner, request, now=now); db.commit()
+        assert restored['state'] == 'restored'
+        assert restored['restore_controls']['authority_restored'] is False
+        assert restored['restore_controls']['prior_sessions_revoked'] is True
+        assert 'api_keys' in restored['restore_controls']['quarantined_tables']
     with Session(engine) as db:
         assert service(db).restore(owner, request, now=now)['state'] == 'already_restored'
         for principal in (owner, other):
             assert db.scalar(select(func.count()).select_from(APIKey).where(APIKey.user_id == principal)) == 1
             assert db.get(UserProfile, principal) is not None
+            key = db.scalar(select(APIKey).where(APIKey.user_id == principal))
+            assert key.is_active is (principal == other)

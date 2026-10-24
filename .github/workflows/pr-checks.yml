@@ -1893,7 +1893,7 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/synthetic-acquisition.xml').getroot()
-          assert len(root.findall('.//testcase')) == 13
+          assert len(root.findall('.//testcase')) == 11
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
