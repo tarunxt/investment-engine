@@ -4,7 +4,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import MetaData,select,event,func
 from test_stage17_sql_privacy_plan import setup as plan_setup,residency_setup,NOW
-from app.domains.auth.models import UserSession,ActivityLog
+from app.domains.auth.models import UserSession,ActivityLog,APIKey
 from app.domains.jobs.models import Job
 from app.domains.modules.models import UserModule,UserModulePreferences
 from app.domains.public_service.sql_account import SQLAccountReader,AccountInventory,AccountTableRule,OwnerHop,schema_digest,_credential_column
@@ -20,8 +20,10 @@ from app.infrastructure.database.outbox.models import OutboxMessage
 @pytest.fixture
 def quarantined(plan_setup):
     db,planner,request=plan_setup
-    for model in (Job,UserModulePreferences,UserModule,UserSession):model.__table__.create(db.get_bind())
+    for model in (Job,UserModulePreferences,UserModule,UserSession,APIKey):model.__table__.create(db.get_bind())
     for owner in (1,2):
+        db.add(APIKey(id=owner,user_id=owner,key='synthetic-never-live-'+str(owner),
+            key_hash='synthetic-unusable-hash',name='fixture',is_active=True))
         db.add(UserModulePreferences(user_id=owner,version=1))
         db.add(UserModule(user_id=owner,module_id='indmoney_us',enabled=True,version=1,
             schedules_paused=False,config={'schema_version':1}))
@@ -58,6 +60,9 @@ def test_restored_jobs_sessions_and_modules_have_no_replay_authority(quarantined
     assert job.module_version==1 and module.version>job.module_version
     assert module.enabled is False and module.schedules_paused is True
     assert db.get(UserSession,1).is_active is False
+    assert db.get(APIKey,1).is_active is False
+    assert db.get(APIKey,2).is_active is True
+    assert 'api_keys' in restored['restore_controls']['quarantined_tables']
     assert db.get(Job,2).status==JobStatus.PENDING and db.get(UserSession,2).is_active is True
     assert restored['restore_controls']['authority_restored'] is False
     assert restored['complete_account_erasure'] is False
@@ -85,6 +90,7 @@ def test_quarantine_audit_failure_rolls_back_restore_and_controls_even_after_out
         db.commit()
     finally:event.remove(db,'before_flush',fail)
     db.expire_all();assert db.get(Job,1) is None
+    assert db.get(APIKey,1) is None and db.get(APIKey,2).is_active is True
     assert db.scalar(select(OutboxMessage).where(OutboxMessage.topic==TOPIC)).payload['state']=='recoverable'
     assert db.get(Job,2).status==JobStatus.PENDING
 

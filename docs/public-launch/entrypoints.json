@@ -17270,7 +17270,7 @@
     "backend/app/uat2/workflow.py": "afb2a82131ab95b5cb8f4fafe6ade112a8ae87561c1ac95b7a5e994f98c2db44",
     "backend/app/uat2/workflow_router.py": "fd689946e830be8df6e6cfd527bb5e87efec26607e62ac58b49cc27499f9d9d3",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
-    "frontend/app/(auth)/login/page.tsx": "381c13115c6d501d4ba8efbf51f9987ace29e9734a1649060b5a4d456cf33e2b",
+    "frontend/app/(auth)/login/page.tsx": "cebbc34fe9f9da600ec3499e39b2efb58d513fc8b8220b0e4f48dc0accf295e5",
     "frontend/app/(auth)/register/page.tsx": "025d5a3992465a4c2fc39f9066d3a25b619214af0a0c96a302efbfc0074ace97",
     "frontend/app/(auth)/reset-password/[token]/page.tsx": "3dd396ea8fdea7dde1b42f510102e70dae5755808ec6a773a9f87a0fb9275193",
     "frontend/app/admin/cost-drivers/page.tsx": "7fe99b80604b2c682e31866de2a44eb937af7ba4665b0b1ddd96e8cd8a5fb536",

@@ -1,0 +1,121 @@
+{
+  "product_source_sha": "5825ffa571bac0deec66a94c5991d83171d66e7b",
+  "kind": "local_ci_repair_validation",
+  "standalone_build": true,
+  "packaged_runtime_auth_proxy_assets_passed": true,
+  "login_bytes": {
+    "before_ci_transferred": 195079,
+    "before_ci_decoded": 623169,
+    "after_local_transferred": 192997,
+    "after_local_decoded": 618310,
+    "relative_ceiling": 194099,
+    "same_platform_comparison": false
+  },
+  "budget_script_sha256": "6a06802cca34aedde1198f5237e8083ea8a26449f1f8a190f02ed0ec0debe67e",
+  "auth_browser_checks": [
+    {
+      "name": "delayed_bootstrap",
+      "passed": true,
+      "duration_seconds": 1.4222402919999995
+    },
+    {
+      "name": "auth_failure_states",
+      "passed": true,
+      "duration_seconds": 1.7314609170000004
+    },
+    {
+      "name": "module_routes",
+      "passed": true,
+      "duration_seconds": 1.7686927919999997
+    },
+    {
+      "name": "preference_races_account_switch_mobile",
+      "passed": true,
+      "duration_seconds": 6.293503541
+    }
+  ],
+  "browser_load": {
+    "completed": 12,
+    "errors": 0,
+    "configured_concurrency": 3,
+    "observed_peak_concurrency": 3,
+    "duration_seconds": 2.0757383329999977,
+    "p95_seconds": 0.4624600419999988,
+    "threshold_seconds": 10,
+    "scope": "Actual Chromium navigation against loopback Next.js with synthetic module policy, not backend/proxy capacity"
+  },
+  "served_fingerprint": {
+    "build_sha": "5825ffa571bac0deec66a94c5991d83171d66e7b",
+    "build_timestamp": "2026-10-24T06:05:00Z"
+  },
+  "browser_harness_sha256": "282b223d78a61150e957bf29977f3fa51582a43df5a1ce411f3a610f034da2ae",
+  "packaged_artifact_sha256": "193a1b4e182e597407dadb75d8bbf7d82e22149265bdf77f9d127c15fe5cd70d",
+  "sqlite_acquisition_and_quarantine_tests": 18,
+  "dependent_financial_recovery_tests": 6,
+  "baseline_tests": 6,
+  "postgresql_tests_executed_locally": false,
+  "hosted": false,
+  "deployed": false,
+  "real_provider_certification": false,
+  "full_release_verified": false,
+  "linked_preview": {
+    "source_sha": "5825ffa571bac0deec66a94c5991d83171d66e7b",
+    "passed": true,
+    "checks": [
+      "explicit_owned_synthetic_source_after_module_selection",
+      "real_login_two_owners_no_foreign_review",
+      "unapproved_analysis_creates_no_execution",
+      "exact_http_approval_partial_ui_restart_no_replay",
+      "cancelled_disable_preserves_selection_actual_disable_preserves_order_history",
+      "explicit_owned_synthetic_source_after_module_selection",
+      "accepted_unknown_durable_evidence_restart_filled_ui_one_venue_submission"
+    ],
+    "cleanup": "Owned preview stop succeeded; synthetic databases retained",
+    "served_fingerprint": {
+      "build_sha": "5825ffa571bac0deec66a94c5991d83171d66e7b",
+      "build_timestamp": "2026-10-24T06:05:00Z"
+    },
+    "scope": "Real login, selection, governed India analysis and exact UI approval; synthetic current-version source, fake venue, SQLite. Unknown transition is durable-store evidence, not guaranteed visible UI.",
+    "driver_sha256": "8b8244586fdb8314ca151ddc80f5e6442f52e5b40372dd6d3a4a9951166d92f3",
+    "screenshots": [
+      {
+        "name": "owner-1-six-stage-analysis.png",
+        "sha256": "a1cd3a85fe52b5cb0bb4fd82ed6a5490ed2cb7f10841c695587b19eb08b94b92"
+      },
+      {
+        "name": "owner-1-exact-unapproved-review.png",
+        "sha256": "524a654a18c8e06c527690ba5b2e19cafe66441dac7cb53dc6c09271b2f263c8"
+      },
+      {
+        "name": "partial-ui-before-restart.png",
+        "sha256": "9526b7be1d25205fa76f4d3ee2943f6c6233ed9730f7d3d94cfe12605b48ede7"
+      },
+      {
+        "name": "partial-ui-after-restart.png",
+        "sha256": "a3d42c89dd4781b9b92820d027f5f8c5b73d9a29a74116bc0c15160b8191c327"
+      },
+      {
+        "name": "owner-2-six-stage-analysis.png",
+        "sha256": "f9e1146363c1247c37e5084777698aaf936df4b221bdcafc46c6db3a3b2fb150"
+      },
+      {
+        "name": "owner-2-exact-unapproved-review.png",
+        "sha256": "722ac94864a3867c289c756d635a65002d55b909e00f6ebbbcad592b4ad4a9b8"
+      },
+      {
+        "name": "unknown-restart-reconciled-ui.png",
+        "sha256": "e28f3a322a33adcfac19f3e3d592439ca9717542ce1ce5ec64bd99f8689cc051"
+      }
+    ]
+  },
+  "earlier_linked_attempts": [
+    {
+      "result": "failed_after_partial_restart_read_timeout",
+      "owned_cleanup_confirmed": true
+    },
+    {
+      "result": "fingerprint_rejected_development_before_workflow",
+      "owned_cleanup_confirmed": true
+    }
+  ]
+}

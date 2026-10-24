@@ -121,6 +121,19 @@ async function approve(page,row,card){
  assert.deepEqual((await request).postDataJSON(),{displayed_digest:row.review_digest,action:'confirm_exact_order_or_basket'});
 }
 function venueCount(){return sql('SELECT count(*) n FROM synthetic_venue_orders',[],{venue:true})[0].n;}
+async function refreshAfterRestart(page,origin,intentId,state){
+ // Restart can invalidate an in-flight pooled read. Wait on authenticated GETs,
+ // then use the UI's documented refresh action. Never retry approval/dispatch.
+ await until(async()=>{try{const response=await page.request.get(origin+'/backend-api/order-intents/reviews',{timeout:5000,maxRedirects:0});return response.ok();}catch{return false;}},30000);
+ await page.reload({waitUntil:'domcontentloaded',timeout:15000});
+ const card=page.getByRole('article',{name:'Order '+intentId});
+ for(let attempt=0;attempt<3;attempt++){
+  await page.getByRole('button',{name:'Refresh recorded order status',exact:true}).click();
+  try{await card.getByRole('heading',{name:state,exact:true}).waitFor({timeout:5000});return card;}
+  catch(error){if(attempt===2)throw error;await new Promise(resolve=>setTimeout(resolve,500));}
+ }
+}
+
 try{
  makeLauncher('partial');writeFileSync(path.join(evidence,'build.log'),command(['build'],600000));
  let state=await start('partial');const base=new URL(state.url).origin;
@@ -140,8 +153,7 @@ try{
  await first.card.getByRole('heading',{name:'Unresolved: partial',exact:true}).waitFor();
  await first.card.getByText(/filled 1 of 2/).waitFor();assert.equal(venueCount(),1);
  await shot(a.page,'partial-ui-before-restart');await stop();state=await start('partial');
- await a.page.reload();const again=a.page.getByRole('article',{name:'Order '+first.row.id});
- await again.getByRole('heading',{name:'Unresolved: partial',exact:true}).waitFor();assert.equal(venueCount(),1);
+ const again=await refreshAfterRestart(a.page,base,first.row.id,'Unresolved: partial');assert.equal(venueCount(),1);
  assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[first.row.id])[0].n,1);
  await shot(a.page,'partial-ui-after-restart');receipt.checks.push('exact_http_approval_partial_ui_restart_no_replay');save();
  // Cancel a disable first, then actually disable. Neither action may resubmit.
@@ -159,8 +171,8 @@ try{
  receipt.unknown_transition={intent:second.row.id,...unknown,observed_by:'read-only SQLite query',observed_at:new Date().toISOString()};save();
  await stop();assert.equal(sql('SELECT state FROM confirmed_order_intents WHERE id=?',[second.row.id])[0].state,'unknown','Unknown must remain durable after quiescent shutdown, not reconcile before restart');const countBefore=venueCount();assert.equal(countBefore,2);state=await start('after_acceptance');
  await until(()=>sql('SELECT state FROM confirmed_order_intents WHERE id=?',[second.row.id])[0].state==='filled');
- await b.page.reload();const reconciled=b.page.getByRole('article',{name:'Order '+second.row.id});
- await reconciled.getByRole('heading',{name:'filled',exact:true}).waitFor();await reconciled.getByText(/filled 2 of 2/).waitFor();
+ const reconciled=await refreshAfterRestart(b.page,base,second.row.id,'filled');
+ await reconciled.getByText(/filled 2 of 2/).waitFor();
  assert.equal(venueCount(),countBefore);assert.equal(sql('SELECT count(*) n FROM order_execution_attempts WHERE intent_id=?',[second.row.id])[0].n,1);
  assert.equal(await reconciled.getByRole('button',{name:'I confirm this exact synthetic order / basket',exact:true}).count(),0);
  await shot(b.page,'unknown-restart-reconciled-ui');receipt.checks.push('accepted_unknown_durable_evidence_restart_filled_ui_one_venue_submission');

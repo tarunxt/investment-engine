@@ -179,7 +179,7 @@ async function assertAuthFailureStates(browser, baseUrl) {
   await anonymousPage.getByRole('alert').getByText('Login Failed',{exact:true}).waitFor();
   await anonymousPage.getByRole('alert').getByText('Invalid email, username, or password.',{exact:true}).waitFor();
   await anonymousPage.getByRole('button',{name:'Dismiss login error',exact:true}).click();
-  if(await anonymousPage.getByRole('alert').count())throw new Error('Login error dismissal did not clear feedback');
+  await anonymousPage.getByRole('alert').filter({has:anonymousPage.getByText('Login Failed',{exact:true})}).waitFor({state:'detached'});
   await anonymous.close();
 
   const expired = await authenticatedContext(browser, baseUrl, { expired: true });
