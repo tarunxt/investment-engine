@@ -354,3 +354,24 @@ caught excessively narrow wrapped table columns causing tall rows; a minimum
 horizontal table width and explicit scroll instruction are being applied for
 follow-up visual qualification. Passing root bounds alone did not qualify that
 layout. The owned preview is stopped, and failed first-attempt evidence remains.
+
+## UX-09: distinct exact simulated review and outcome journey
+
+My Activity now separates the read-only exact review gesture from explicit
+`Confirm simulated orders`. The displayed basket digest keys that gesture; a
+changed digest requires a new review. Account/mode/connection version, every leg,
+price/product, gross-notional limits and approval validity remain visible. Existing
+server approval, fresh risk, owner authority, fake dispatch and reconciliation
+contracts are unchanged. One in-flight confirmation and per-intent uncertain
+outcome guards remain in place; no Retry all or residual submission is offered.
+Recorded filled/not-recorded-filled quantities are explicitly limited to receipts,
+not complete positions/cash. Partial/unknown outcomes require reconciliation;
+notification delivery is separate and this view sends no messages.
+
+131 affected backend execution/view checks and 22 frontend checks pass, including
+wrong account, changed risk/price/funds, expiry, crash/restart, partial/unknown,
+material edits, replay and double-click. These are disposable SQLite/fake tests,
+not hosted/PG proof. TypeScript and targeted lint pass. New UI tests verify the
+separate review gesture sends nothing and changed digest invalidates it. Packaged
+browser qualification and independent review remain pending. UX-06 modes and
+UX-08 validated amendments remain explicitly open, not waived by this milestone.
