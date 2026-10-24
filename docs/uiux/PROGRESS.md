@@ -375,3 +375,17 @@ not hosted/PG proof. TypeScript and targeted lint pass. New UI tests verify the
 separate review gesture sends nothing and changed digest invalidates it. Packaged
 browser qualification and independent review remain pending. UX-06 modes and
 UX-08 validated amendments remain explicitly open, not waived by this milestone.
+
+UX-09 packaged build f71fa1b394929a6932bc4969d1acf8808a119ae7 passed.
+Seven browser checks passed after an actual owned order-record GET (200): a
+separate read-only review, one digest-bound intercepted approval despite duplicate
+click/lost acknowledgement, unknown→partial/filled/rejected fixture visibility,
+and 390/320px bounds. These order responses/approval were explicitly intercepted
+UI fixtures, not backend execution or hosted evidence. Independent review found
+no concrete safety issue. The real SQLite/fake backend matrix remains separate.
+The corrected UX-08 table was retested against actual saved workflow 4 with seven
+read-only checks and inspected mobile capture; columns are readable with explicit
+horizontal scrolling. No business POST occurred in that retest. The local owned
+preview was stopped. Floating mobile navigation can obscure scrolled text; UX-10
+will correct its layout/focus clearance rather than treating reflow alone as full
+accessibility acceptance.
