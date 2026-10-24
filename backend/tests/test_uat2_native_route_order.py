@@ -23,6 +23,8 @@ def first(path,method='GET'):
 @pytest.mark.parametrize('path,method,name',[
     ('/runs/analysis-workflows','GET','list_analysis_workflows'),
     ('/runs/analysis-workflows/config','GET','analysis_config'),
+    ('/runs/analysis-workflows/setup-context','GET','setup_context'),
+    ('/runs/analysis-workflows/candidate-preview','POST','preview_candidates'),
     ('/runs/analysis-workflows/7','GET','get_analysis_workflow'),
     ('/runs/analysis-workflows','POST','create_analysis_workflow'),
     ('/runs/analysis-workflows/synthetic-source','POST','acquire_synthetic_source'),

@@ -51,8 +51,8 @@ def synthetic_acquire(db, owner, *, now=None):
 
 
 def allowed(method, path):
-    return (method == 'POST' and path == '/runs/analysis-workflows/synthetic-source'
-            or method == 'GET' and re.fullmatch(r'/runs/analysis-workflows(?:/config|/[1-9][0-9]*)?', path) is not None
+    return (method == 'POST' and path in {'/runs/analysis-workflows/synthetic-source','/runs/analysis-workflows/candidate-preview'}
+            or method == 'GET' and re.fullmatch(r'/runs/analysis-workflows(?:/config|/setup-context|/[1-9][0-9]*)?', path) is not None
             or method == 'POST' and re.fullmatch(r'/runs/analysis-workflows(?:/[1-9][0-9]*/controls)?', path) is not None)
 
 

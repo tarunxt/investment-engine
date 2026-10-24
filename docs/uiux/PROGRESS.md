@@ -207,3 +207,51 @@ summary suite pass (14 cases). The workflow-list-signature theory was rejected
 by source inspection; it was not the diagnosed root cause. Alias and SQLite
 qualification remain pending a bounded owned-preview restart. Failed receipts
 are retained privately, and are not reported as passing acceptance.
+
+UX-05 final local browser receipt at
+251e4b5b14ad4d24c8f9be76d41bacb673f422f1 passed eight checks: actual module
+route/Back and US refresh, legacy alias query/hash retention, synthetic checklist
+reload and changed-source read-only behavior, 390px layout, no navigation/checklist
+backend mutations, and preference restoration verified by read-back. Desktop and
+mobile Plans captures were inspected. A prior synthetic snapshot fixture omitted
+required holdings fields and crashed that full legacy renderer; it was removed
+from that inappropriate test path, not labelled a product regression. The final
+metadata-only transition specifically tests stale-checklist protection. Failure
+receipts remain private. The owned preview was stopped after qualification.
+
+## UX-06: supported preflight/preview milestone; full candidate modes incomplete
+
+The canonical Research screen now reviews server-owned source and plan hashes,
+masked frozen account/mode/version or manual snapshot, source time and actual
+usage availability. A deliberate start sends the reviewed hash pair; changes are
+rejected before a workflow/outbox is created. Existing six stages and exact order
+consent remain unchanged. Unsupported horizon/cash/exposure/turnover controls are
+clearly non-configurable, not silently ignored edits.
+
+Paste/CSV preview uses only the three already documented synthetic canonical IDs,
+retains raw/row provenance and a versioned digest, identifies duplicates/holdings
+overlap/unresolved rows, and rejects malformed or oversized inputs without
+truncation (1,000 rows / 100,000 characters). Counts define zero analysed and
+resolved-but-deferred candidates; no preview is accepted for analysis. Raw source
+is never used as a prompt, URL fetch or instruction. Existing holdings remain a
+separate required source. A nonempty draft must be explicitly excluded before a
+current-holdings-only start. Owner/source mismatches and late replies fail closed.
+
+Important incomplete scope: Find candidates / shortlist-only / combine-both
+analysis, accepted candidate-universe persistence and editable strategy constraints
+are absent from the current durable backend contract. The UI disables these modes
+and does not call this full UX-06 feature completion. Real canonical catalogue and
+provider evidence are unavailable; further synthetic backend mode/constraint
+integration remains local implementation work, separately from those external
+gates. Current preflight/preview contracts allow the existing holdings-only flow
+to be qualified without pretending the new modes execute.
+
+93 affected backend and 16 frontend checks pass, including actual SQL proof that
+stale reviewed hashes enqueue nothing, native static route composition, malformed
+and malicious CSV, owner separation, explicit review/exclusion and stale preview
+aborts. TypeScript and targeted lint pass. Initial lint warning on a numeric
+cleanup epoch was corrected with unique lifetime tokens. Independent review
+found frozen account details were not displayed; they are now visible and source
+shape/time validation fails closed. Re-review found no further concrete issue.
+Exact-source build and browser verification remain pending. No new persistent
+store, provider call, credential, permission, send, order or deployment was added.

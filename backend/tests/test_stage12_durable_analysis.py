@@ -360,3 +360,30 @@ async def test_workspace_readiness_read_never_dispatches_or_changes_frozen_work(
     assert len(list(env.db.scalars(select(OutboxMessage))))==before
     assert row.execution_json==original and row.status=='queued'
     assert not env.db.new and not env.db.dirty
+
+def test_reviewed_setup_hashes_are_checked_before_new_work_or_outbox(env):
+    source_hash=digest(env.states[1]);plan_hash=digest(env.plan)
+    for source,plan in [('0'*64,plan_hash),(source_hash,'0'*64),(digest(env.states[2]),plan_hash)]:
+        with pytest.raises(ConflictException):service(env).create(1,'indmoney_us','reviewed-hash-start',expected_source_hash=source,expected_plan_hash=plan,now=NOW)
+        assert not list(env.db.scalars(select(Workflow)))
+        assert not list(env.db.scalars(select(OutboxMessage)))
+    row=service(env).create(1,'indmoney_us','reviewed-hash-start',expected_source_hash=source_hash,expected_plan_hash=plan_hash,now=NOW)
+    assert row.execution_json['source_hash']==source_hash and row.execution_json['plan_hash']==plan_hash
+    assert row.execution_json['orders_authorized'] is False
+
+@pytest.mark.asyncio
+async def test_setup_context_is_owned_read_only_and_does_not_invent_candidate_support(env):
+    from app.domains.runs.analysis_router import setup_context
+    from fastapi import HTTPException
+    env.states[1]={'owner_id':1,'snapshot_id':12,'captured_at':NOW.isoformat(),'connection':None,'holdings':[]}
+    async def run_sync(fn):return fn(env.db)
+    context=await setup_context(portfolio='indmoney_us',db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert context['source_hash']==digest(env.states[1])
+    assert context['plan_hash']==digest(env.plan) and context['orders_authorized'] is False
+    assert context['candidate_preview_available'] is False
+    assert context['usage']['estimated_cost_usd'] is None
+    assert all(not value['editable'] for value in context['constraints'].values())
+    assert not list(env.db.scalars(select(Workflow))) and not list(env.db.scalars(select(OutboxMessage)))
+    env.states[1]['owner_id']=2
+    with pytest.raises(HTTPException) as denied:await setup_context(portfolio='indmoney_us',db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert denied.value.status_code==409

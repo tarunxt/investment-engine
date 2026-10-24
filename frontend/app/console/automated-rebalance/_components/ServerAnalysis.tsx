@@ -6,14 +6,16 @@ import { URLs } from "@/lib/urls";
 
 type Stage = { stage:string; status:string; attempts:number; error:string|null; checkpoint:{attempts?:{cost_usd:string|null}[]}; };
 type Workflow = { id:number; portfolio:"india"|"indmoney_us"; status:string; stage:string; version:number; error:string|null; inputs:{source_hash:string; plan_hash:string; orders_authorized:false}; stages:Stage[]; };
+type ReviewedSetup={source_hash:string;plan_hash:string;snapshot_id:number|null};
+type AnalysisProps={portfolioScope?:"india"|"indmoney_us";reviewedSetup?:ReviewedSetup;requireReviewedSetup?:boolean};
 const endpoint=()=>URLs.runs.list()+"/analysis-workflows";
-export function ServerAnalysis({portfolioScope}:{portfolioScope?:"india"|"indmoney_us"}={}) {
+export function ServerAnalysis({portfolioScope,reviewedSetup,requireReviewedSetup=false}:AnalysisProps={}) {
   const {data:session,status}=useSession();
   const lifetime=status==="authenticated"&&session?.user?.id?String(session.user.id)+":"+String(session.generation):null;
-  return lifetime?<ServerAnalysisSession key={`${lifetime}:${portfolioScope??"all"}`} portfolioScope={portfolioScope}/>:<p>Sign in to review server analysis.</p>;
+  return lifetime?<ServerAnalysisSession key={`${lifetime}:${portfolioScope??"all"}`} portfolioScope={portfolioScope} reviewedSetup={reviewedSetup} requireReviewedSetup={requireReviewedSetup}/>:<p>Sign in to review server analysis.</p>;
 }
 
-export function ServerAnalysisSession({portfolioScope}:{portfolioScope?:"india"|"indmoney_us"}={}) {
+export function ServerAnalysisSession({portfolioScope,reviewedSetup,requireReviewedSetup=false}:AnalysisProps={}) {
   const {data:session}=useSession();
   const owner=session?.user?.id;
   const epoch=useRef(0);
@@ -59,9 +61,9 @@ export function ServerAnalysisSession({portfolioScope}:{portfolioScope?:"india"|
     finally{busy.current=false;if(epoch.current===generation)setPending(false);}
   }
   async function submit(row?:Workflow,action?:string){
-    if(busy.current||(!row&&error))return;busy.current=true;setPending(true);const generation=epoch.current;
+    if(busy.current||(!row&&(error||requireReviewedSetup&&!reviewedSetup)))return;busy.current=true;setPending(true);const generation=epoch.current;
     try {
-      const result=await apiService.post<Workflow>(endpoint()+(row?`/${row.id}/controls`:""),row?{portfolio:row.portfolio,version:row.version,action}:{portfolio,key:crypto.randomUUID()});
+      const result=await apiService.post<Workflow>(endpoint()+(row?`/${row.id}/controls`:""),row?{portfolio:row.portfolio,version:row.version,action}:{portfolio,key:crypto.randomUUID(),...(reviewedSetup?{expected_source_hash:reviewedSetup.source_hash,expected_plan_hash:reviewedSetup.plan_hash,snapshot_id:reviewedSetup.snapshot_id,setup_schema_version:1}:{})});
       if(epoch.current===generation){setItems(previous=>[result,...previous.filter(item=>item.id!==result.id)]);setError(null);}
     }catch(e){if(epoch.current===generation)setError(e instanceof Error?e.message:"Request failed; refresh status before retrying");}
     finally{busy.current=false;if(epoch.current===generation)setPending(false);}
@@ -72,7 +74,7 @@ export function ServerAnalysisSession({portfolioScope}:{portfolioScope?:"india"|
     {error&&<p role="alert">{error}</p>}
     {!enabled?<p>Server analysis is unavailable until its approved runtime, model plan and calendar are configured.</p>:<>
       {portfolioScope?<p>Portfolio: {portfolioScope==='india'?'India':'US manual portfolio'}</p>:<label>Portfolio <select value={portfolio} onChange={e=>setPortfolio(e.target.value as typeof portfolio)}><option value="indmoney_us">US portfolio</option><option value="india">India portfolio</option></select></label>}
-      <button className="rounded border px-3 py-1" disabled={pending||!!error} onClick={()=>void submit()}>Start server analysis</button>
+      <button className="rounded border px-3 py-1" disabled={pending||!!error||requireReviewedSetup&&!reviewedSetup} onClick={()=>void submit()}>{requireReviewedSetup?'Start research':'Start server analysis'}</button>
       {!items.length&&<p>No server workflows yet. A current eligible portfolio is required.</p>}
       {items.map(row=><article id={`analysis-workflow-${row.id}`} key={row.id} className="rounded border p-3 space-y-2">
         <h3>Workflow {row.id} · {row.portfolio} · {row.status}</h3>

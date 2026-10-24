@@ -6,12 +6,12 @@ const path='../app/console/automated-rebalance/_components/ServerAnalysis.tsx';
 function load(imports,timer=()=>0){const out={};const js=ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;new Function('require','exports','setTimeout','clearTimeout',js)(name=>imports[name],out,timer,()=>{});return out;}
 const jsx=(type,props,key)=>({type,props,key});
 const nodes=tree=>tree==null||typeof tree==='boolean'?[]:Array.isArray(tree)?tree.flatMap(nodes):typeof tree==='object'?[tree,...nodes(tree.props?.children)]:[];
-function harness({enabled=true,items=[],error=null,portfolioScope=undefined,responseOwner=1}={}){
+function harness({enabled=true,items=[],error=null,portfolioScope=undefined,responseOwner=1,requireReviewedSetup=false,reviewedSetup=undefined}={}){
   let slots=[],index=0,effects=[],cleanup=[],tree,gets=[],posts=[],release,session={user:{id:'1'},generation:'a'};
   const react={useState(init){const i=index++;if(!(i in slots))slots[i]=init;return [slots[i],v=>{slots[i]=typeof v==='function'?v(slots[i]):v;}];},useRef(init){const i=index++;if(!(i in slots))slots[i]={current:init};return slots[i];},useEffect(fn){index++;if(!cleanup.length)effects.push(fn);}};
   const api={async get(url){gets.push(url);if(error)throw new Error(error);return url.endsWith('/config')?{enabled}:{owner_id:responseOwner,items};},post(url,body){posts.push({url,body});return new Promise(resolve=>{release=resolve;});}};
   const ui=load({react,'next-auth/react':{useSession:()=>({status:'authenticated',data:session})},'@/services/api':{apiService:api},'@/lib/urls':{URLs:{runs:{list:()=>'/runs'}}},'react/jsx-runtime':{jsx,jsxs:jsx}});
-  function render(){index=0;tree=ui.ServerAnalysisSession({portfolioScope});}
+  function render(){index=0;tree=ui.ServerAnalysisSession({portfolioScope,requireReviewedSetup,reviewedSetup});}
   async function flush(){for(let i=0;i<8;i++)await Promise.resolve();render();}
   render();cleanup=effects.map(fn=>fn());
   return {flush,gets,posts,find:label=>nodes(tree).find(n=>n.type==='button'&&n.props.children===label),tree:()=>tree,release:row=>release(row),unmount:()=>cleanup.forEach(fn=>fn?.())};
@@ -27,3 +27,6 @@ test('owner and same-owner session changes replace private component lifetime',(
 
 test('scoped module observes only its selected portfolio and binds deliberate start',async()=>{const h=harness({portfolioScope:'india'});await h.flush();assert.deepEqual(h.gets,['/runs/analysis-workflows/config','/runs/analysis-workflows?selected_only=true&portfolio=india']);assert.equal(nodes(h.tree()).some(n=>n.type==='select'),false);const first=h.find('Start server analysis').props.onClick();assert.equal(h.posts[0].body.portfolio,'india');h.release({...row(),portfolio:'india'});await first;h.unmount();});
 test('foreign-owner list is rejected before showing another account run',async()=>{const h=harness({items:[row()],responseOwner:2});await h.flush();assert.match(JSON.stringify(h.tree()),/Invalid owned module analysis/);assert.doesNotMatch(JSON.stringify(h.tree()),/Workflow 3/);h.unmount();});
+
+test('review-required research cannot start before deliberate input review, even by direct handler call',async()=>{const h=harness({portfolioScope:'indmoney_us',requireReviewedSetup:true});await h.flush();const button=h.find('Start research');assert.equal(button.props.disabled,true);await button.props.onClick();assert.equal(h.posts.length,0);h.unmount();});
+test('deliberate reviewed start carries exact source and plan without candidate drafts',async()=>{const reviewedSetup={source_hash:'a'.repeat(64),plan_hash:'b'.repeat(64),snapshot_id:12};const h=harness({portfolioScope:'indmoney_us',requireReviewedSetup:true,reviewedSetup});await h.flush();const work=h.find('Start research').props.onClick();assert.equal(h.posts[0].body.expected_source_hash,reviewedSetup.source_hash);assert.equal(h.posts[0].body.expected_plan_hash,reviewedSetup.plan_hash);assert.equal(h.posts[0].body.snapshot_id,12);assert.equal(h.posts[0].body.setup_schema_version,1);assert.equal('candidates' in h.posts[0].body,false);h.release(row());await work;h.unmount();});

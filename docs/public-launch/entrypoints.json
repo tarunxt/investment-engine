@@ -5,7 +5,7 @@
     "background": 31,
     "export": 55,
     "frontend": 25,
-    "http": 318,
+    "http": 320,
     "lifecycle": 9,
     "page": 80,
     "scheduler": 20,
@@ -10833,15 +10833,17 @@
       "calls": [
         "Depends",
         "HTTPException",
-        "composition.acquire",
-        "db.commit",
-        "db.rollback",
         "db.run_sync",
-        "getattr",
+        "digest",
+        "preview",
+        "projection",
         "router.post",
-        "type"
+        "runtime.policy",
+        "runtime.source",
+        "str",
+        "synthetic_setup"
       ],
-      "capability": "acquire_synthetic_source",
+      "capability": "preview_candidates",
       "classification": "owner-private",
       "kind": "http",
       "method": "POST",
@@ -10851,71 +10853,15 @@
         "Depends(analysis_runtime)",
         "Depends(get_async_db)",
         "Depends(get_current_user)",
-        "router.post('/synthetic-source')"
+        "router.post('/candidate-preview')"
       ],
       "owner_source": [
         "user.id"
       ],
       "registration": "mounted",
-      "route": "/runs/analysis-workflows/synthetic-source",
+      "route": "/runs/analysis-workflows/candidate-preview",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:100"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
-        "Workflows",
-        "Workflows(s, runtime).control",
-        "Workflows(s, runtime).detail",
-        "db.commit",
-        "db.rollback",
-        "db.run_sync",
-        "router.post"
-      ],
-      "capability": "control_analysis_workflow",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "runs",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(analysis_runtime)",
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "router.post('/{workflow_id}/controls')"
-      ],
-      "owner_source": [
-        "user.id"
-      ],
-      "registration": "mounted",
-      "route": "/runs/analysis-workflows/{workflow_id}/controls",
-      "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:112"
-    },
-    {
-      "calls": [
-        "Depends",
-        "router.get"
-      ],
-      "capability": "analysis_config",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "GET",
-      "module": "runs",
-      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
-      "observed_guards": [
-        "Depends(get_current_user)",
-        "Depends(optional_analysis_runtime)",
-        "router.get('/config')"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "mounted",
-      "route": "/runs/analysis-workflows/config",
-      "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:54"
+      "source": "backend/app/domains/runs/analysis_router.py:102"
     },
     {
       "calls": [
@@ -10959,7 +10905,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:58"
+      "source": "backend/app/domains/runs/analysis_router.py:118"
     },
     {
       "calls": [
@@ -10987,7 +10933,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:89"
+      "source": "backend/app/domains/runs/analysis_router.py:149"
     },
     {
       "calls": [
@@ -11020,7 +10966,136 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:93"
+      "source": "backend/app/domains/runs/analysis_router.py:153"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "composition.acquire",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "getattr",
+        "router.post",
+        "type"
+      ],
+      "capability": "acquire_synthetic_source",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/synthetic-source')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/synthetic-source",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:160"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Workflows",
+        "Workflows(s, runtime).control",
+        "Workflows(s, runtime).detail",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "router.post"
+      ],
+      "capability": "control_analysis_workflow",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/{workflow_id}/controls')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/{workflow_id}/controls",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:172"
+    },
+    {
+      "calls": [
+        "Depends",
+        "router.get",
+        "synthetic_setup"
+      ],
+      "capability": "analysis_config",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(get_current_user)",
+        "Depends(optional_analysis_runtime)",
+        "router.get('/config')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/config",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:65"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "ValueError",
+        "WorkflowDenied",
+        "connection.get",
+        "datetime.fromisoformat",
+        "db.run_sync",
+        "digest",
+        "isinstance",
+        "router.get",
+        "runtime.plan",
+        "runtime.policy",
+        "runtime.source",
+        "source.get",
+        "str",
+        "synthetic_setup",
+        "type"
+      ],
+      "capability": "setup_context",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "runs",
+      "module_lifecycle_gate": "core/safety; existing auth/owner/role checks",
+      "observed_guards": [
+        "Depends(analysis_runtime)",
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/setup-context')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/runs/analysis-workflows/setup-context",
+      "side_effects": "run DB; Redis; queued AI; notifications and exports",
+      "source": "backend/app/domains/runs/analysis_router.py:73"
     },
     {
       "calls": [
@@ -17440,16 +17515,17 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/analysis_router.py": "9479a2d4d6c2086a45d1fe0a44b366e414a89e690bb45dd7f7f1a6a73ad63090",
+    "backend/app/domains/runs/analysis_router.py": "23f3c80ff9c2f9b8311957e6eedeb4996b9fb085d8e3ce0bbdbe1a34d4224ef1",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
     "backend/app/domains/runs/analysis_workflows/adapters.py": "64dfd200aa575dde375ef02d5ae0904ce81d18f5b57e493dee331ed0a8f8185e",
     "backend/app/domains/runs/analysis_workflows/bindings.py": "4c8813e8ce9f2f52670a6360cddfd4e9978215a525f81bca079f97340cd88c28",
+    "backend/app/domains/runs/analysis_workflows/candidate_preview.py": "62694ff81f8e3d06b8d994b8a830c9ccaa21e7db38128205812eb092fdb54e5b",
     "backend/app/domains/runs/analysis_workflows/contracts.py": "7316d7861ceab70369104a2438c199eb759b54440eae81bf62bd26a4ab8faf62",
     "backend/app/domains/runs/analysis_workflows/dispatch.py": "ad1ab3b3e82a78da6ee0eb3fe5cabfa3d3015f318434685146defb5ce42aab39",
     "backend/app/domains/runs/analysis_workflows/effects.py": "95a54f218f06bb28dda4ccb0d2c1d01c3f857ed8c27adb5404378bb41a5aea40",
     "backend/app/domains/runs/analysis_workflows/runtime.py": "c719ca930cd951dd7d0559e3bfed187013773335a806fa18870deedffb5f14c9",
-    "backend/app/domains/runs/analysis_workflows/service.py": "4d25f2f20bd81353707945c127202b4ec9f806c5dd4621e05c87c68514ff0653",
+    "backend/app/domains/runs/analysis_workflows/service.py": "aba431a14e5c0f24b836c76bd2a3c8a06b283b55dfc91e9721064bc1775f3ab9",
     "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "5b084cb1c497aed09583646c6d6334d2fc1b8ab3d0543faef1df57b1b6c7f591",
     "backend/app/domains/runs/analysis_workflows/synthetic_journal.py": "faddec2ce90f4946a61d8cee8cb82c7ae491ca71fad54918b1fb5b634975b830",
     "backend/app/domains/runs/analysis_workflows/synthetic_sources.py": "eddcfcc54903469e63a99d68e3d4929807563b7c98aeb29fc0f90183f02cbd0e",
@@ -17613,7 +17689,7 @@
     "frontend/app/console/indmoney-us/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
     "frontend/app/console/indmoney-us/portfolio/page.tsx": "a93366c77c55c940cdaf4844923f59ac21891fd54fcc0e6753963f05a73a8211",
     "frontend/app/console/indmoney-us/rebalance/page.tsx": "911d6a66bcc7e5344584ae975b55f3b666f6a417353a62c65dab91730fd0c8cb",
-    "frontend/app/console/indmoney-us/research/page.tsx": "f0c7e92f5923b449edb9807629b1a871abd45f85fff03a315a65f2973d00aa8b",
+    "frontend/app/console/indmoney-us/research/page.tsx": "3368bf5bab8e8a10bae7ca0d4f78ee1667b8dc9810773218f09f312f0101524d",
     "frontend/app/console/indmoney-us/swing-trade/page.tsx": "87ba0b9e6a61c6e6f39cbc178a642d9902c1fb87a8d64921b763ac17f5e77078",
     "frontend/app/console/indmoney-us/threats/page.tsx": "9abf78fb8902f397ad16693608f559de62e216d7585c7f6cf65aed04c4efa020",
     "frontend/app/console/jobs/[id]/page.tsx": "b77a6915c1d3a8b34c68d794e7ca190d6cc1ca763d9b84c935136c725ef04a3e",
@@ -17646,7 +17722,7 @@
     "frontend/app/console/zerodha/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
     "frontend/app/console/zerodha/portfolio/page.tsx": "9f8fd337e4211cdcb25801922a46db146b7d0758027dc687cb0a67cce4c62f6e",
     "frontend/app/console/zerodha/rebalance/page.tsx": "71b1341f864e17d0ce9b595865562818522968594e7e96bc5feac62ff0818338",
-    "frontend/app/console/zerodha/research/page.tsx": "fe58f73d924a1208a2095c7efad43b3d2b021680fc6cd5fbaa39dd2d63415f5d",
+    "frontend/app/console/zerodha/research/page.tsx": "3368bf5bab8e8a10bae7ca0d4f78ee1667b8dc9810773218f09f312f0101524d",
     "frontend/app/console/zerodha/swing-trade/page.tsx": "9fac9e718e9aaae148aae3294e59a843c0953b720c47194e48be021a764dcf7c",
     "frontend/app/console/zerodha/threats/page.tsx": "252b68e29530d742f8802dca1f4d46c92757a115d3a25c709711ec29ac7b3e45",
     "frontend/app/database/page.tsx": "0d09f24b8bd2947fad39f124617596c55a9b24e51d8e0dabcad742f18307553c",

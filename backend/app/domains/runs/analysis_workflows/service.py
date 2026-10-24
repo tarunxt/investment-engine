@@ -39,7 +39,7 @@ class Workflows:
         if digest(self.runtime.plan(row.portfolio))!=e['plan_hash']:raise WorkflowDenied('Prompt/model version changed; start a new workflow')
         if row.module_cancel_requested:raise WorkflowDenied('Module cancellation requested')
 
-    def create(self,owner,portfolio,key,*,snapshot_id=None,scheduled_at=None,schedule_id=None,now=None):
+    def create(self,owner,portfolio,key,*,snapshot_id=None,scheduled_at=None,schedule_id=None,expected_source_hash=None,expected_plan_hash=None,now=None):
         now=utc(now or now_utc())
         if portfolio not in {'indmoney_us','india'} or not isinstance(key,str) or not 8<=len(key)<=96:raise ValidationException('Known portfolio and scoped request key required')
         scheduled=scheduled_at is not None
@@ -49,6 +49,7 @@ class Workflows:
         source=deepcopy(self.runtime.source(self.db,owner,portfolio,snapshot_id));plan=deepcopy(self.runtime.plan(portfolio))
         if source.get('owner_id')!=owner:raise WorkflowDenied('Source owner mismatch')
         source_hash,plan_hash=digest(source),digest(plan)
+        if (expected_source_hash is None)!=(expected_plan_hash is None) or expected_source_hash is not None and (expected_source_hash!=source_hash or expected_plan_hash!=plan_hash):raise ConflictException('Reviewed source or plan changed; reload setup before starting')
         calendar=deepcopy(self.runtime.calendar(portfolio,due,now));ZoneInfo(calendar['timezone'])
         if calendar.get('missed_policy')!='skip' or not 0<=calendar['max_lateness_seconds']<=3600 or not calendar.get('calendar_version'):raise ValidationException('Bounded calendar/missed-run policy required')
         request_key=('tick:'+digest([str(schedule_id),due.isoformat()])) if scheduled else key
