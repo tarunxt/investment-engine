@@ -67,7 +67,7 @@ export function ConsoleShell({
             {/* Mobile sidebar backdrop */}
             {sidebarOpen && (
                 <div
-                    className="fixed inset-0 z-20 bg-black bg-opacity-50 transition-opacity lg:hidden"
+                    className="fixed inset-0 z-20 bg-black/50 transition-opacity lg:hidden"
                     onClick={() => setSidebarOpen(false)}
                 />
             )}

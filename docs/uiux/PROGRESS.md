@@ -69,3 +69,23 @@ owner-bound correction has a focused regression. Synthetic desktop/mobile/error
 captures and browser interaction remain pending. The disposable preview adds only
 the existing owner-scoped GET limits handler, not new effect adapters. No hosted
 verification, production change, publication or deployment follows from this entry.
+
+
+UX-02 browser qualification at ba4b011c078e2465d65e5018b5488f6e1b16ef3c:
+8 synthetic actual Next/Auth/BFF browser checks passed: no off-Bullpen requests,
+personal APIs without provider fanout, failure distinct from empty success,
+permission denial inside shell, mobile keyboard containment/Escape/focus return,
+390px no horizontal overflow, 720x450 short reflow and preference restoration.
+Screenshots and exact-source receipt remain private under .runtime/uiux-ux02.
+Desktop personal/error captures and mobile drawer were visually inspected. The
+first mobile capture caught its opening transition; settled capture was inspected.
+An initial import-path error prevented browser execution; a subsequent timeout
+proved the proxy redirected before the permission page. That source defect was
+fixed with a regression, rebuilt, and the full browser check passed. Independent
+review found no further concrete boundary issue. Visual review then corrected
+legacy unsupported backdrop opacity syntax to explicit bg-black/50; next preview
+build will qualify that small CSS correction. Actual browser zoom/screen-reader
+and hosted verification were not performed. No PostgreSQL/Redis inference.
+
+UX-01 and UX-02 source/interaction gates accepted for proceeding to UX-03;
+remaining broad release/accessibility matrix stays explicit for UX-10/11.
