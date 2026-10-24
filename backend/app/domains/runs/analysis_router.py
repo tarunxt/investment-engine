@@ -1,7 +1,7 @@
 """Authenticated controls for server-owned analysis. Default composition is off."""
 from datetime import datetime
 from typing import Literal
-from fastapi import APIRouter,Depends,HTTPException,Response
+from fastapi import APIRouter,Depends,HTTPException,Response,Request
 from pydantic import BaseModel,ConfigDict,Field,field_validator
 from sqlalchemy import select
 from app.domains.auth.dependencies import get_current_user
@@ -31,7 +31,15 @@ class Control(BaseModel):
     version:int=Field(ge=0)
     action:Literal['pause','cancel','resume','retry']
 
-def optional_analysis_runtime():
+class SyntheticSource(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    portfolio:Literal['india']
+    key:str|None=Field(default=None,min_length=8,max_length=96)
+
+async def optional_analysis_runtime(request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
+    from app.uat2.http_bindings import request_binding, analysis_runtime as scoped_runtime
+    if request_binding(request) is not None:
+        return await scoped_runtime(request,db,user.id)
     return configured_runtime()
 
 def analysis_runtime(value=Depends(optional_analysis_runtime)):
@@ -63,6 +71,18 @@ async def create_analysis_workflow(body:Create,db=Depends(get_async_db),user=Dep
         row=await db.run_sync(lambda s:Workflows(s,runtime).create(user.id,**body.model_dump()))
         result=await db.run_sync(lambda s:Workflows(s,runtime).detail(user.id,row.id));await db.commit();return result
     except WorkflowDenied:await db.rollback();raise HTTPException(403,'Current analysis policy or inputs denied') from None
+
+@router.post('/synthetic-source')
+async def acquire_synthetic_source(body:SyntheticSource,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):
+    from app.domains.runs.analysis_workflows.synthetic_composition import SyntheticAnalysis
+    composition=getattr(runtime.policy,'__self__',None)
+    if type(composition) is not SyntheticAnalysis:
+        raise HTTPException(503,'Explicit synthetic acquisition binding unavailable')
+    try:
+        result=await db.run_sync(lambda session:composition.acquire(session,user.id,key=body.key))
+        await db.commit();return result
+    except WorkflowDenied:
+        await db.rollback();raise HTTPException(403,'Current owned synthetic source policy required') from None
 
 @router.post('/{workflow_id}/controls')
 async def control_analysis_workflow(workflow_id:int,body:Control,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):

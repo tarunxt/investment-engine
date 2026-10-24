@@ -33,11 +33,18 @@ def dispatch_due(session, publisher, *, now=None, limit=MAX_BATCH, should_stop=l
         from app.domains.runs.analysis_workflows.dispatch import dispatch
         from app.domains.runs.tasks import advance_analysis_workflow
         dispatch(session,lambda message_id:advance_analysis_workflow.apply_async(args=[message_id],queue='ai',retry=False),runtime,now=now)
+    return dispatch_jobs_due(session, publisher, now=now, limit=limit, should_stop=should_stop)
+
+
+def dispatch_jobs_due(session, publisher, *, now=None, limit=MAX_BATCH,
+                      should_stop=lambda: False, job_predicate=None):
+    """Job-only relay port; caller may narrow SQL eligibility without task imports."""
     now = now or datetime.utcnow()
     due = or_(OutboxMessage.published_at.is_(None), OutboxMessage.published_at <= now - timedelta(seconds=RETRY_SECONDS))
     joined = (OutboxMessage.payload['job_id'].as_integer() == Job.id) & (OutboxMessage.payload['user_id'].as_integer() == Job.user_id)
     rows = list(session.execute(select(OutboxMessage, Job).join(Job, joined).where(
         OutboxMessage.topic == TOPIC, due, Job.status.in_(JobStatus.active()),
+        job_predicate if job_predicate is not None else True,
         or_(OutboxMessage.available_at.is_(None), OutboxMessage.available_at <= now),
         or_(Job.scheduled_at.is_(None), Job.scheduled_at <= now),
     ).order_by(OutboxMessage.created_at, OutboxMessage.id).limit(max(1, min(limit, MAX_BATCH)))))

@@ -1,5 +1,5 @@
 """Owner-only request receipts. No external export, erasure or approval route."""
-from fastapi import APIRouter,Depends,HTTPException
+from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from .transaction_outcomes import serialization_conflict
@@ -60,9 +60,11 @@ async def privacy_export(id:str,user=Depends(get_current_user),db=Depends(get_as
 
 
 @router.get('/diagnostics')
-async def own_diagnostics(user=Depends(get_current_user),db=Depends(get_async_db)):
+async def own_diagnostics(request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
     from .monitoring import OperationalMonitor
-    return response(await db.run_sync(lambda s:OperationalMonitor(s).snapshot(user.id)))
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    return response(await db.run_sync(lambda s:binding.operations.snapshot(s,user.id) if binding is not None else OperationalMonitor(s).snapshot(user.id)))
 
 class ConsentBody(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -89,9 +91,12 @@ async def support_revoke(id:str,user=Depends(get_current_user),db=Depends(get_as
         await db.rollback();raise HTTPException(404,'Owned consent required') from None
 
 @router.get('/support-consents/{id}/access')
-async def support_read(id:str,scope:str,user=Depends(get_current_user),db=Depends(get_async_db)):
+async def support_read(id:str,scope:str,request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
     from .support import SupportAccess
-    try:return response(await db.run_sync(lambda s:SupportAccess(s).read(user.id,id,scope)))
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    diagnostics=binding.operations.snapshot if binding is not None else None
+    try:return response(await db.run_sync(lambda s:SupportAccess(s,diagnostics=diagnostics).read(user.id,id,scope)))
     except BoundaryDenied:
         await db.rollback();raise HTTPException(403,'Support access denied') from None
 

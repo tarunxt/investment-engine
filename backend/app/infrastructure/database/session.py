@@ -56,7 +56,9 @@ async def get_async_db(request: Request = None) -> AsyncGenerator[AsyncSession, 
     async with AsyncSessionLocal() as session:
         from app.domains.public_service.application_bindings import attach_request_facts
         bindings=attach_request_facts(request,session)
+        from app.uat2.http_bindings import attach_request_binding
         try:
+            attach_request_binding(request,session)
             if bindings is not None:
                 from app.domains.ai_limits.contracts import BoundaryDenied
                 try:await session.run_sync(lambda db:bindings.scope.validate(db))
@@ -65,3 +67,5 @@ async def get_async_db(request: Request = None) -> AsyncGenerator[AsyncSession, 
         finally:
             from app.domains.public_service.application_bindings import SESSION,SIGNUP
             session.info.pop(SESSION,None);session.info.pop(SIGNUP,None)
+            from app.uat2.policy_bindings import SESSION as SIMULATION_SESSION
+            session.info.pop(SIMULATION_SESSION,None)

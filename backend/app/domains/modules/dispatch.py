@@ -20,6 +20,21 @@ def request_digest(name,args,kwargs):
     except (TypeError,ValueError):raise ModuleLifecycleDenied('Task request cannot be bound') from None
 
 
+def resource_locator(name,args,kwargs):
+    """Persist only a typed authoritative locator, never task arguments."""
+    args=args or ();kwargs=kwargs or {}
+    domain=name.split('.')[2] if name.startswith('app.domains.') else None
+    if domain=='google_sheets' and 'export_job' in name:
+        kind='job';value=kwargs.get('job_id',args[1] if len(args)>1 else None)
+    elif domain=='google_sheets' and 'export_run' in name:
+        kind='run';value=kwargs.get('run_id',args[1] if len(args)>1 else None)
+    elif domain=='zerodha' and name.endswith('sync_portfolio_snapshot_task'):
+        kind='user';value=kwargs.get('user_id',args[0] if args else None)
+    else:raise ModuleLifecycleDenied('Typed task resource unavailable')
+    if type(value) is not int or value<1:raise ModuleLifecycleDenied('Typed owned task resource required')
+    return {'kind':kind,'id':value}
+
+
 def load_binding(session,id,name,args,kwargs):
     try:id=UUID(str(id))
     except (ValueError,TypeError):raise ModuleLifecycleDenied('Persisted task binding required') from None
@@ -28,6 +43,7 @@ def load_binding(session,id,name,args,kwargs):
     p=row.payload
     if p.get('schema_version')!=1 or p.get('task')!=name or p.get('request_digest')!=request_digest(name,args,kwargs):
         raise ModuleLifecycleDenied('Task binding mismatch')
+    if 'resource' in p and p['resource']!=resource_locator(name,args,kwargs):raise ModuleLifecycleDenied('Task resource mismatch')
     if p.get('state') in {'cancelled','completed'} or p.get('cancel_requested'):raise ModuleLifecycleDenied('Task already stopped')
     if type(p.get('user_id'))is not int or type(p.get('module_version'))is not int:raise ModuleLifecycleDenied('Invalid task binding')
     return row,WorkIdentity(p['user_id'],p['module_id'],p['module_version'])
@@ -51,7 +67,8 @@ def prepare_dispatch(name,args,kwargs,options,*,factory=None):
             if bound!=identity:raise ModuleLifecycleDenied('Stale task cannot be rebound')
         else:
             row=OutboxMessage(topic=TOPIC,payload={'schema_version':1,'task':name,'request_digest':request_digest(name,args,kwargs),
-                'user_id':identity.owner_id,'module_id':identity.module_id,'module_version':identity.version,'state':'queued','cancel_requested':False})
+                'user_id':identity.owner_id,'module_id':identity.module_id,'module_version':identity.version,'state':'queued','cancel_requested':False,
+                'resource':resource_locator(name,args,kwargs)})
             session.add(row);session.flush();headers[HEADER]=str(row.id)
         current_sync(session,identity,scheduled=kwargs.get('source')=='scheduled' or 'scheduled' in args)
         session.commit()

@@ -72,7 +72,7 @@ class ReviewedResidencyProducer:
                 raise BoundaryDenied('RESIDENCY_CONSENT_REPLAY_CONFLICT')
             return old
         ciphertext, version = self.keyring.seal(payload)
-        row = OutboxMessage(id=id, topic=CONSENT, payload={'ciphertext': ciphertext, 'key_version': version, 'consumed': False})
+        row = OutboxMessage(id=id, topic=CONSENT, payload={'owner_id': owner_id, 'ciphertext': ciphertext, 'key_version': version, 'consumed': False})
         db.add(row); db.flush(); return row
 
     def ingest(self, db, actor, owner_id, consent_id, *, country, evidence_type, reference_hash, expires, now=None):
@@ -100,7 +100,7 @@ class ReviewedResidencyProducer:
             prior = OutboxMessage(id=id, topic=EVIDENCE, payload=values); db.add(prior)
         else: prior.payload = values
         consumed_cipher, consumed_version = self.keyring.seal({**bound, 'consumed': True})
-        consent.payload = {'ciphertext': consumed_cipher, 'key_version': consumed_version, 'consumed': True}
+        consent.payload = {'owner_id': owner_id, 'ciphertext': consumed_cipher, 'key_version': consumed_version, 'consumed': True}
         db.add(ActivityLog(user_id=actor, action='residency_review_ingested', resource_type='user', resource_id=owner_id, details=str(prior.id)))
         db.flush(); return prior
 

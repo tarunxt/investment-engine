@@ -13,7 +13,7 @@ EnvironmentFile=/etc/credx-uat2/backend.env
 EnvironmentFile=/etc/credx-uat2/release.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStartPre=/usr/bin/python3 /opt/credx-uat2/current/deploy/uat2/native/runtime-preflight.py
-ExecStart=/opt/credx-uat2/current/.venv/bin/celery -A app.uat2.worker worker -Q uat2_simulation --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=25 --loglevel=warning
+ExecStart=/opt/credx-uat2/current/.venv/bin/celery -A app.uat2.worker worker -Q uat2_simulation,uat2_analysis,uat2_orders,uat2_reconcile --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=25 --loglevel=warning
 MemoryMax=512M
 TasksMax=128
 ReadWritePaths=/var/lib/credx-uat2/artifacts

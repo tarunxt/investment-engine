@@ -164,6 +164,22 @@ async function assertAuthFailureStates(browser, baseUrl) {
   if (!new URL(anonymousPage.url()).pathname.startsWith("/login")) {
     throw new Error("Unauthenticated console request did not redirect to login");
   }
+  // Exercise the optimized login feedback through the real public auth context.
+  // Only this disposable callback is synthetic; no credential/provider is used.
+  await anonymousPage.route('**/api/auth/callback/credentials', async route => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({url:baseUrl+'/api/auth/error?error=CredentialsSignin'})});
+  });
+  await anonymousPage.getByLabel('Email Address',{exact:true}).fill('login-check@example.invalid');
+  await anonymousPage.getByLabel('Password',{exact:true}).fill('SyntheticRejected123!');
+  const submitted=anonymousPage.waitForRequest(request=>new URL(request.url()).pathname==='/api/auth/callback/credentials');
+  await anonymousPage.getByRole('button',{name:'Sign In',exact:true}).click();
+  await submitted;
+  if(!await anonymousPage.getByRole('button',{name:'Signing in...',exact:true}).isDisabled())throw new Error('Login pending state permits duplicate submission');
+  await anonymousPage.getByRole('alert').getByText('Login Failed',{exact:true}).waitFor();
+  await anonymousPage.getByRole('alert').getByText('Invalid email, username, or password.',{exact:true}).waitFor();
+  await anonymousPage.getByRole('button',{name:'Dismiss login error',exact:true}).click();
+  await anonymousPage.getByRole('alert').filter({has:anonymousPage.getByText('Login Failed',{exact:true})}).waitFor({state:'detached'});
   await anonymous.close();
 
   const expired = await authenticatedContext(browser, baseUrl, { expired: true });
