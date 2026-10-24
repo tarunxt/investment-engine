@@ -469,3 +469,19 @@ Independent review found no concrete owner/hash/raw-prompt/retry defect after
 coverage-label correction. Frontend/type/lint and packaged browser qualification
 are recorded separately. This remains local SQLite/fake evidence, never hosted or
 PostgreSQL/Redis qualification.
+
+Frozen-shortlist packaged build 6262c234a44fe51d55f60d04f3979bb0f0186a22 passed;
+34 focused frontend checks, TypeScript and lint pass. Nine actual-browser checks
+passed: unresolved input blocked; exact CSV preview/duplicate/holdings overlap;
+explicit acceptance and review; one creation of workflow 5 with frozen setup hash;
+all six stages after reload; verified Plans coverage; repeated identical review
+resumed workflow 5 with no second creation; 390/320px bounds; no imports, orders,
+sends, preference or security changes. Mobile capture inspected. The two earlier
+attempts failed only on an exact textarea-label locator after it held text; body
+and browser-error traces confirmed the input remained present and no workflow
+start occurred. They remain private. The owned preview was stopped with workflow 5
+and prior history retained. A further owner-scoped SQL lookup regression passes
+(12 shortlist tests total), and all 69 UX-00–10 helper/utility checks pass. Selected
+mode styling is now explicit via aria-pressed background/weight; final packaged
+visual verification will include this small follow-up. Native/PG/Redis/hosted and
+full-live-catalogue claims remain excluded.

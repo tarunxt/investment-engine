@@ -102,3 +102,19 @@ def test_missing_candidate_output_stops_without_retry_or_financial_authority(lin
     detail=Workflows(e.db,e.runtime).detail(1,row.id)
     assert detail['progress']['display_state']=='invalid_input' and not detail['progress']['actions']['retry']
     with pytest.raises(WorkflowDenied):e.preview.completed_analysis(e.db,1,row.id,now=e.now)
+
+
+def test_owned_sql_lookup_separates_shortlists_from_holdings_only(linked_env):
+    import asyncio
+    from app.domains.runs.analysis_router import list_analysis_workflows
+    e=linked_env;args,_=request(e);row=Workflows(e.db,e.runtime).create(1,'indmoney_us','shortlist-owned-lookup',now=e.now,**args);id=row.id;e.db.commit();finish(e,id)
+    plain={key:value for key,value in args.items() if key!='research_setup'}
+    ordinary=Workflows(e.db,e.runtime).create(1,'indmoney_us','holdings-owned-lookup',now=e.now,**plain);e.db.commit()
+    async def run_sync(fn):return fn(e.db)
+    async def lookup(owner,**filters):return await list_analysis_workflows(selected_only=False,portfolio='indmoney_us',include_readiness=False,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=owner),runtime=e.runtime,**filters)
+    before=[len(list(e.db.scalars(select(model)))) for model in (AutoRebalanceWorkflow,Job,OutboxMessage)]
+    result=asyncio.run(lookup(1,research_setup_hash=args['research_setup']['setup_hash']))
+    assert [item['id'] for item in result['items']]==[id]
+    assert [item['id'] for item in asyncio.run(lookup(1,holdings_only=True))['items']]==[ordinary.id]
+    assert asyncio.run(lookup(2,research_setup_hash=args['research_setup']['setup_hash']))['items']==[]
+    assert before==[len(list(e.db.scalars(select(model)))) for model in (AutoRebalanceWorkflow,Job,OutboxMessage)]
