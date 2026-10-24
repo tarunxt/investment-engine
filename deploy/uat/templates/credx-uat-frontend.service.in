@@ -1,0 +1,34 @@
+[Unit]
+Description=CredX UAT frontend - gated candidate
+After=credx-uat-backend.service
+ConditionPathExists=/etc/credx-uat/ISOLATION_VERIFIED
+
+[Service]
+Type=simple
+User=credx-uat
+Group=credx-uat
+Slice=credx-uat.slice
+WorkingDirectory=/srv/credx-uat/current/frontend-runtime
+EnvironmentFile=/etc/credx-uat/frontend.env
+Environment=HOSTNAME=127.0.0.1 PORT=13000
+ExecStart=/usr/bin/node server.js
+Restart=no
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET
+ReadWritePaths=/var/lib/credx-uat /var/log/credx-uat
+InaccessiblePaths=-/etc/investor -/srv/investor -/srv/investment-engine -/run/postgresql -/run/redis -/run/docker.sock
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+StandardOutput=append:/var/log/credx-uat/frontend.log
+StandardError=append:/var/log/credx-uat/frontend.log
