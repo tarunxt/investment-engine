@@ -258,9 +258,16 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
   }
 
   const empty=await context.newPage();await installSyntheticModulePolicy(empty,{none:true});
+  const emptyRequests=[];empty.on('request',request=>emptyRequests.push(new URL(request.url()).pathname));
+  await empty.route('**/backend-api/order-intents/reviews',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({owner_id:71,has_more:false,intents:[]})}));
   await empty.goto(`${baseUrl}/console/dashboard`,{waitUntil:'domcontentloaded'});
-  await empty.getByRole('heading',{name:'Choose your modules'}).waitFor();
-  if(await empty.locator('[data-dashboard-analytics="mounted"]').count())throw new Error('No-module dashboard mounted hidden analytics');
+  await empty.getByRole('heading',{name:'Your workspace',exact:true}).waitFor();
+  await empty.getByText('Choose the modules you need to begin.',{exact:false}).waitFor();
+  await empty.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.textContent==='Refresh status'&&!button.disabled));
+  if(!await empty.getByRole('link',{name:'Personal activity and history',exact:true}).isVisible())throw new Error('No-module dashboard hid core safety activity');
+  if(!emptyRequests.includes('/backend-api/order-intents/reviews'))throw new Error('No-module dashboard omitted owned safety records');
+  if(emptyRequests.some(url=>/^\/(backend-api|api)\/(dashboard\/summary|runs\/analysis-workflows|bullpen|polymarket)(\/|\?|$)/.test(url)))throw new Error('No-module dashboard requested optional module data');
+  if(await empty.getByRole('heading',{level:3}).count())throw new Error('No-module dashboard rendered an optional module card');
   const failed=await context.newPage();await installSyntheticModulePolicy(failed,{fail:true});
   await failed.goto(`${baseUrl}/console/zerodha`,{waitUntil:'domcontentloaded'});
   await failed.getByRole('heading',{name:'Module preferences unavailable'}).waitFor();
@@ -268,13 +275,16 @@ async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
 }
 
 async function assertProfileNavigationWidths(page,baseUrl){
- const expected=['Profile','Preferences','Platform Cost Drivers','Security','Activity'];
+ // This fixture has no backend cost-role admission. An admin identity alone
+ // must not expose cost administration; the positive grant is tested separately.
+ const expected=['Get started','Connections','My modules','Usage & plan','Notifications','Privacy & exports','Help','Profile','Preferences','Security','My Activity'];
  for(const width of [320,360,390,430]){
   await page.setViewportSize({width,height:844});
   await page.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
   const nav=page.locator('main aside nav');await nav.waitFor({state:'visible'});
   const links=nav.getByRole('link');
   if(JSON.stringify(await links.allTextContents())!==JSON.stringify(expected))throw new Error('Profile navigation labels/order changed');
+  if(await nav.getByRole('link',{name:'Platform Cost Drivers',exact:true}).count())throw new Error('Cost administration exposed without backend role admission');
   const geometry=await page.evaluate(()=>({width:innerWidth,documentWidth:document.documentElement.scrollWidth}));
   if(geometry.documentWidth>geometry.width)throw new Error(`Profile navigation overflows at ${width}px: document ${geometry.documentWidth}px`);
   if(await nav.getAttribute('aria-label')!=='Profile settings'||await nav.getByRole('link',{name:'Preferences',exact:true}).getAttribute('aria-current')!=='page')throw new Error('Profile navigation accessibility labels/current page missing');
@@ -282,6 +292,7 @@ async function assertProfileNavigationWidths(page,baseUrl){
   for(let i=0;i<expected.length;i++){
    const link=links.nth(i);
    if(!await link.evaluate(node=>document.activeElement===node))throw new Error(`Profile Tab order lost ${expected[i]} at ${width}px`);
+   await link.scrollIntoViewIfNeeded();
    const bounds=await link.boundingBox();
    if(!bounds||bounds.x<0||bounds.x+bounds.width>width+1||bounds.y<0||bounds.y+bounds.height>844)throw new Error(`Profile tab unreachable in viewport: ${expected[i]} at ${width}px`);
    if(i<expected.length-1)await page.keyboard.press('Tab');
@@ -291,7 +302,7 @@ async function assertProfileNavigationWidths(page,baseUrl){
   await page.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
   await page.locator('main aside nav').getByRole('link',{name:'Security',exact:true}).press('Enter');
   await page.waitForURL(`${baseUrl}/console/profile/security`);
-  console.log(`Stage08 profile tabs fit ${width}x844; all five Tab-reachable; Activity/Security Enter navigation passed`);
+  console.log(`Profile utilities fit ${width}x844; all eleven Tab-reachable; Activity/Security Enter navigation passed; ungranted cost administration absent`);
  }
  await page.goto(`${baseUrl}/console/profile/preferences`,{waitUntil:'domcontentloaded'});
 }
@@ -367,7 +378,7 @@ async function assertBoundedBrowserLoad(browser,baseUrl) {
   const context=await authenticatedContext(browser,baseUrl,{owner});
   try {const page=await context.newPage();await installSyntheticModulePolicy(page,{none:true,owner});
    for(let n=0;n<4;n++) {const start=performance.now();active++;peak=Math.max(peak,active);
-    try {await page.goto(`${baseUrl}/console/dashboard`,{waitUntil:'domcontentloaded',timeout:10000});await page.getByRole('heading',{name:'Choose your modules'}).waitFor({timeout:10000});}
+    try {await page.goto(`${baseUrl}/console/dashboard`,{waitUntil:'domcontentloaded',timeout:10000});await page.getByRole('heading',{name:'Your workspace',exact:true}).waitFor({timeout:10000});await page.getByText('Choose the modules you need to begin.',{exact:false}).waitFor({timeout:10000});}
     finally {active--;}
     durations.push((performance.now()-start)/1000);
    }

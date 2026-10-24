@@ -3,11 +3,21 @@ import asyncio
 from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
-from app.domains.runs.analysis_router import setup_context,preview_candidates,CandidatePreview
+from app.domains.runs.analysis_router import analysis_config,setup_context,preview_candidates,CandidatePreview
 from app.domains.runs.models import AutoRebalanceWorkflow
 from app.domains.jobs.models import Job
 from app.infrastructure.database.outbox.models import OutboxMessage
 from test_stage18_linked_analysis_preview import linked_env,current_source
+
+
+@pytest.mark.parametrize('runtime',[None,SimpleNamespace(source=lambda *args: None)])
+def test_config_additive_capabilities_never_grant_synthetic_or_order_authority(runtime):
+    config=asyncio.run(analysis_config(user=SimpleNamespace(id=1),runtime=runtime))
+    assert {key:config[key] for key in ('enabled','analysis_only','orders_authorized')} == {
+        'enabled':runtime is not None,'analysis_only':True,'orders_authorized':False}
+    assert config['candidate_preview_available'] is False
+    assert set(config['candidate_modes'])=={'llm_discovery','shortlist_only','combined'}
+    assert all(mode['available'] is False and mode['reason'] for mode in config['candidate_modes'].values())
 
 @pytest.mark.parametrize('owner,portfolio',[(1,'india'),(2,'india'),(1,'indmoney_us'),(2,'indmoney_us')])
 def test_actual_fake_owned_source_setup_and_canonical_preview_enqueue_nothing(linked_env,owner,portfolio):

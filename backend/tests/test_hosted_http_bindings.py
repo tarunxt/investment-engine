@@ -41,7 +41,18 @@ async def test_installed_http_binding_uses_owned_session_and_clears_it(linked_en
                 assert workflow.json()['owner_id'] == owner
                 assert (await client.get('/runs/analysis-workflows')).json()['owner_id'] == owner
         assert response.status_code == (200 if owner in (1, 2) else 503)
-        if owner in (1, 2): assert response.json() == {'enabled': True, 'analysis_only': True, 'orders_authorized': False}
+        if owner in (1, 2):
+            config = response.json()
+            # Additive capabilities preserve the legacy safety contract. They
+            # describe only the installed synthetic setup, never order authority.
+            assert {key: config[key] for key in ('enabled', 'analysis_only', 'orders_authorized')} == {
+                'enabled': True, 'analysis_only': True, 'orders_authorized': False}
+            assert config['candidate_preview_available'] is True
+            assert config['candidate_modes'] == {
+                'llm_discovery': {'available': False, 'reason': 'No approved candidate-discovery contract is installed'},
+                'shortlist_only': {'available': True, 'reason': 'Explicit reviewed synthetic shortlist only; holdings remain required'},
+                'combined': {'available': False, 'reason': 'No approved combined-universe/batch contract is installed'}}
+            assert response.headers['cache-control'] == 'private, no-store'
         assert sessions and all(SESSION not in db.info for db in sessions)
         assert configured_runtime() is None
         assert binding._app is app
