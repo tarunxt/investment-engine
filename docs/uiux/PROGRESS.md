@@ -140,3 +140,15 @@ to the evidenced India/US projections, and partial/unavailable activity blocks a
 new-research next task. Existing backend unresolved-first ordering is preserved.
 Focused regression count increased to 16 frontend cases. Final build, type/lint
 and synthetic browser qualification remain recorded separately; no hosted claim.
+
+Further UX-04 review corrected normal durable-run links to preserve their anchor
+on the actual automated-rebalance analysis screen. It also removed obsolete
+empty/unavailable dashboard gate replacements: zero selected modules still mount
+core order safety, while unavailable/absent module grants prevent optional data
+requests. Tests execute the actual dashboard effect and confirm only the core
+safety read occurs for empty/unavailable selections, and late responses after
+cleanup cannot update state. Combined dashboard/policy suite: 27 passed. Initial
+harness compilation failed due to an injected JSX binding collision, then passed
+with proper module imports. Earlier build successes bind to earlier source;
+latest candidate still requires its own build/browser receipt. These corrections
+do not change any backend grant, owner filter, provider or order effect.
