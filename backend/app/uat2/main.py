@@ -36,11 +36,13 @@ app.include_router(connections_router)
 # Mount static /runs/analysis-workflows paths before legacy /runs/{run_id}.
 from app.uat2.workflow import install_workflow
 workflow_binding = install_workflow(app)
+# Read-only history must precede /runs/{run_id}; never mount its write siblings.
 # Read-only actual job/run handlers make Stage02 ownership reviewable without
 # mounting AI dispatch, exports, cancellations or production WebSocket relays.
 for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
-        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
+        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}',
+                          '/runs/auto-rebalance-history', '/runs/auto-rebalance-history/{portfolio}/{sequence}'} and route.methods == {'GET'}:
             app.include_router(APIRouter(routes=[route]))
 app.include_router(router)
 

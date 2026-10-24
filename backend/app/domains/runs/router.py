@@ -1,7 +1,7 @@
 import redis.asyncio as aioredis
 from redis.exceptions import WatchError
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
@@ -327,18 +327,29 @@ async def _build_auto_rebalance_history(
     portfolio: str,
     sequences: set[int] | None = None,
 ) -> list[tuple[AutoRebalanceHistoryItemResponse, list[Run], list[Job]]]:
+    # Legacy history must apply the same related-job ownership predicate as
+    # ordinary run reads before exposing nested responses or stage pointers.
+    owned_runs = PostgresRunRepository(db)._owned_query(user_id)
+    foreign_stage = select(AutoRebalanceWorkflowStage.id).where(
+        AutoRebalanceWorkflowStage.workflow_id == AutoRebalanceWorkflow.id,
+        or_(
+            AutoRebalanceWorkflowStage.run_id.is_not(None) & ~owned_runs.where(
+                Run.id == AutoRebalanceWorkflowStage.run_id).exists(),
+            AutoRebalanceWorkflowStage.job_id.is_not(None) & ~select(Job.id).where(
+                Job.id == AutoRebalanceWorkflowStage.job_id, Job.user_id == user_id).exists(),
+        ),
+    ).exists()
     workflow_query = (
         select(AutoRebalanceWorkflow)
         .where(
             AutoRebalanceWorkflow.user_id == user_id,
             AutoRebalanceWorkflow.portfolio == portfolio,
+            ~foreign_stage,
         )
         .options(selectinload(AutoRebalanceWorkflow.stages))
     )
     run_query = (
-        select(Run)
-        .where(
-            Run.user_id == user_id,
+        owned_runs.where(
             Run.auto_rebalance_portfolio == portfolio,
             Run.auto_rebalance_sequence.is_not(None),
         )

@@ -11359,7 +11359,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1007"
+      "source": "backend/app/domains/runs/router.py:1018"
     },
     {
       "calls": [
@@ -11407,7 +11407,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}/cancel",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1020"
+      "source": "backend/app/domains/runs/router.py:1031"
     },
     {
       "calls": [
@@ -11436,7 +11436,7 @@
       "registration": "mounted",
       "route": "/runs/final-actionables/history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:480"
+      "source": "backend/app/domains/runs/router.py:491"
     },
     {
       "calls": [
@@ -11465,7 +11465,7 @@
       "registration": "mounted",
       "route": "/runs/final-actionables/history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:510"
+      "source": "backend/app/domains/runs/router.py:521"
     },
     {
       "calls": [
@@ -11494,7 +11494,7 @@
       "registration": "mounted",
       "route": "/runs/final-actionables/history/backfill",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:535"
+      "source": "backend/app/domains/runs/router.py:546"
     },
     {
       "calls": [
@@ -11528,7 +11528,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-label",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:554"
+      "source": "backend/app/domains/runs/router.py:565"
     },
     {
       "calls": [
@@ -11566,7 +11566,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:585"
+      "source": "backend/app/domains/runs/router.py:596"
     },
     {
       "calls": [
@@ -11599,7 +11599,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history/{portfolio}/{sequence}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:623"
+      "source": "backend/app/domains/runs/router.py:634"
     },
     {
       "calls": [
@@ -11652,7 +11652,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history/{portfolio}/{sequence}/stages/{stage}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:670"
+      "source": "backend/app/domains/runs/router.py:681"
     },
     {
       "calls": [
@@ -11697,7 +11697,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-completion-email",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:804"
+      "source": "backend/app/domains/runs/router.py:815"
     },
     {
       "calls": [
@@ -11735,7 +11735,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:899"
+      "source": "backend/app/domains/runs/router.py:910"
     },
     {
       "calls": [
@@ -11769,7 +11769,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:970"
+      "source": "backend/app/domains/runs/router.py:981"
     },
     {
       "calls": [
@@ -14608,7 +14608,7 @@
       "registration": "unmounted",
       "route": "/health",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:55"
+      "source": "backend/app/uat2/main.py:57"
     },
     {
       "calls": [
@@ -14630,7 +14630,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -14652,7 +14652,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -14674,7 +14674,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -14696,7 +14696,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -14718,7 +14718,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -14740,7 +14740,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:60"
+      "source": "backend/app/uat2/main.py:62"
     },
     {
       "calls": [
@@ -14762,7 +14762,7 @@
       "registration": "unmounted",
       "route": "/{path:path}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/main.py:66"
+      "source": "backend/app/uat2/main.py:68"
     },
     {
       "calls": [
@@ -17777,7 +17777,7 @@
     "backend/app/domains/runs/models.py": "0676320045948635562975a39d85e7a590578d1dbad85bc98464563bdb7ae21b",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
     "backend/app/domains/runs/repository.py": "19867e37b290858e22d6fa99aae79a24522a9012a4c76d4125c26aad3c0d5ce7",
-    "backend/app/domains/runs/router.py": "d9225badfc916db762295110c270a78dd8e14a353e1b6a04f46d43640d57894a",
+    "backend/app/domains/runs/router.py": "b9f1e3fc19d3f3677f0af409b832d879fe4e46c7dc4019e36a40f2f9c179bd63",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
     "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
     "backend/app/domains/runs/tasks.py": "0618d24488224f4d67a0224cc6f89208c7368cce2b885b5642bf2fc03062cdaa",
@@ -17862,7 +17862,7 @@
     "backend/app/uat2/analysis_worker.py": "4b6a3ed3d38c218769c03ede728354ce1f48fd66408b414cd0978118405be1af",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/http_bindings.py": "0c4e8502eb31db87715726db22566007e20a121908e237e523a14aadca2797f2",
-    "backend/app/uat2/main.py": "56d35cecdf7fb1101b4938d5b3492aca3cdf3881756d35dc3b873b9483b23160",
+    "backend/app/uat2/main.py": "1cc36856f4acdc177a13fcbed744fd7fcd21e37ee62ebd1bb0d63703e53c45e9",
     "backend/app/uat2/operations.py": "bd613e122f26911ce3ab3f5e7c0c181a94e83b42e248add14a9ca08bacef0618",
     "backend/app/uat2/order_worker.py": "3a270628c8855d4a497bca4970397d8644d0ec24ac2e774de90ccbcb737ddb59",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",

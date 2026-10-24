@@ -221,7 +221,7 @@ jobs:
           AUTH_DISABLED: 'false'
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_URL: postgresql+psycopg2://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_PRIVATE_OWNERSHIP_TEST_DATABASE_ACK: disposable-ci-only
-        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py backend/tests/test_stage09_connections.py backend/tests/test_stage19_stream_admission.py backend/tests/test_stage19_manual_cancel.py
+        run: pytest -q backend/tests/test_private_api_ownership.py backend/tests/test_uat2_native_route_order.py backend/tests/test_live_boundaries.py backend/tests/test_stage05_runtime_admin.py backend/tests/test_stage06_modules.py backend/tests/test_stage07_lifecycle.py backend/tests/test_stage08_presentation.py backend/tests/test_stage09_connections.py backend/tests/test_stage19_stream_admission.py backend/tests/test_stage19_manual_cancel.py
 
   stage09-connection-bindings:
     name: Stage09 connection isolation, rotation races and additive migration
