@@ -131,9 +131,19 @@ def test_dedicated_worker_bootstrap_registers_only_bounded_simulation_tasks():
     source = """
 import json
 from app.uat2.worker import celery, venue_engine
+from app.uat2.runtime import main, WORKER_ARGS
+from app.uat2.scheduler import SimulationScheduler
 from sqlalchemy.orm import configure_mappers
 configure_mappers()
 names=sorted(name for name in celery.tasks if not name.startswith('celery.'))
+launched=[]
+celery.worker_main=lambda argv:launched.extend(argv)
+main()
+assert launched==list(WORKER_ARGS) and '--beat' in launched
+assert celery.conf.task_publish_retry is False
+assert celery.conf.broker_transport_options['socket_timeout']==3
+scheduler=SimulationScheduler(celery)
+assert len(scheduler.schedule)==3
 print(json.dumps({'tasks':names,'schedules':sorted(celery.conf.beat_schedule),'queue':celery.conf.task_default_queue}))
 venue_engine.dispose()
 """

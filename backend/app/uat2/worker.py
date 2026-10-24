@@ -8,6 +8,11 @@ celery.conf.update(task_default_queue='uat2_simulation', task_serializer='json',
                    result_serializer='json', accept_content=['json'], worker_prefetch_multiplier=1,
                    task_time_limit=15, task_soft_time_limit=10, result_expires=3600,
                    beat_schedule={}, broker_connection_retry_on_startup=True)
+# Beat publishes only bounded control hints. Transport loss must not block a
+# scheduler indefinitely; durable outboxes recover on a later tick.
+celery.conf.update(task_publish_retry=False, broker_connection_timeout=3,
+                   broker_transport_options={'socket_connect_timeout': 3,
+                       'socket_timeout': 3, 'retry_on_timeout': False})
 
 
 @celery.task(name='uat2.fake_ai', autoretry_for=(OSError,), retry_backoff=True,

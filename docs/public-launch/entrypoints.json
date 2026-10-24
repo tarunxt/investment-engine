@@ -8,7 +8,7 @@
     "http": 317,
     "lifecycle": 9,
     "page": 68,
-    "scheduler": 19,
+    "scheduler": 20,
     "websocket": 5,
     "worker": 53
   },
@@ -14878,6 +14878,25 @@
       "source": "backend/app/uat2/router.py:86"
     },
     {
+      "calls": [],
+      "capability": "task",
+      "classification": "administrator-only",
+      "kind": "scheduler",
+      "method": "",
+      "module": "platform",
+      "module_lifecycle_gate": "RecoveryCelery producer/run + persisted binding/current policy; explicit safety classification in modules.tasks; UAT2 fake worker has its own stored Job guard",
+      "observed_guards": [
+        "none found locally; not proof of public access"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "{'task': task, 'schedule': interval, 'options': {'queue': CONTROL_QUEUE, 'expires': expires}}",
+      "route": "",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/scheduler.py:20"
+    },
+    {
       "calls": [
         "FakeAI",
         "FakeAI().generate",
@@ -14901,7 +14920,7 @@
       "registration": "celery.task(name='uat2.fake_ai', autoretry_for=(OSError,), retry_backoff=True, max_retries=1, acks_late=True)",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/worker.py:15"
+      "source": "backend/app/uat2/worker.py:20"
     },
     {
       "calls": [
@@ -17263,11 +17282,13 @@
     "backend/app/uat2/private_exports.py": "59ffc52b91623cd7c4644b6dd19a06dc07a6ebffb1156be5720ba477272b754a",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
     "backend/app/uat2/router.py": "d7d48ec1e0cac89265f1059c9cde0d6c023707e2a9f4bfefd6253f45197638c8",
+    "backend/app/uat2/runtime.py": "072136970cd41c2f35d7a23cfd32a14d8952e51afa6f5e314f07c0ac18662876",
+    "backend/app/uat2/scheduler.py": "6d34a1dee4c56f4220e7ae817b36d5379a7b345a62f7799b197f624c5890f782",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
     "backend/app/uat2/stage07_lifecycle_smoke.py": "31f8d111818f63437b7a3fe893cce9052719d61f9d85004ce9e715688f001b40",
     "backend/app/uat2/synthetic_connections.py": "ccb6f15bd14d200927cf753451486b0219cd8fd721f023e36b731125e29baee8",
     "backend/app/uat2/synthetic_orders.py": "8e6547c8f8a10352e3e3151ae77f3999ba0fae958eb8b26924751e8b08df2654",
-    "backend/app/uat2/worker.py": "33f03cdefddb54d0f8cf99e41dfc403c0afc68c154b218695121a45ebba3f884",
+    "backend/app/uat2/worker.py": "4fbb9691147235f805adde7a1baff510b299eb7eab235ed619bc3b09e3cf1b4e",
     "backend/app/uat2/workflow.py": "afb2a82131ab95b5cb8f4fafe6ade112a8ae87561c1ac95b7a5e994f98c2db44",
     "backend/app/uat2/workflow_router.py": "fd689946e830be8df6e6cfd527bb5e87efec26607e62ac58b49cc27499f9d9d3",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",

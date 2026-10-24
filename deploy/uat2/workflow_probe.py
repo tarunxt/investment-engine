@@ -35,9 +35,8 @@ def main(phase):
     from app.domains.order_intents.execution_models import ExecutionAttempt
     from app.domains.order_intents.journal_fake import TOPIC as VENUE_TOPIC
     from app.infrastructure.database.outbox.models import OutboxMessage
-    from app.uat2.worker import analysis_worker,order_worker
-    from app.uat2.analysis_worker import RELAY as ANALYSIS_RELAY,CONTROL_QUEUE
-    from app.uat2.order_worker import RELAY as ORDER_RELAY
+    # The application under test owns worker/scheduler delivery. This probe
+    # only creates explicit synthetic HTTP work and observes persisted state.
     validate_uat2_startup()
     with SyncSessionLocal() as db:
         owner=db.scalar(select(User).where(User.email==OWNER_EMAIL))
@@ -66,11 +65,8 @@ def main(phase):
         except urllib.error.HTTPError as error:
             if error.code!=expected:raise AssertionError('Unexpected HTTP status '+str(error.code)) from None
             return None
-    def relay(worker,name):
-        return worker.tasks[name].apply_async(queue=CONTROL_QUEUE,retry=False).get(timeout=15)
     def completed(workflow_id):
-        for _ in range(80):
-            relay(analysis_worker,ANALYSIS_RELAY)
+        for _ in range(120):
             result=call('/runs/analysis-workflows/'+str(workflow_id))
             if result['status']=='completed':
                 assert len(result['stages'])==6 and all(stage['status']=='completed' for stage in result['stages'])
@@ -95,46 +91,30 @@ def main(phase):
         call(path,{'displayed_digest':'0'*64,'action':'confirm_exact_order_or_basket'},expected=409)
         call(path,{'displayed_digest':review['review_digest'],'action':'confirm_exact_order_or_basket'})
         call(path,{'displayed_digest':review['review_digest'],'action':'confirm_exact_order_or_basket'},expected=409)
-        relay(order_worker,ORDER_RELAY)
-        for _ in range(30):
+        for _ in range(60):
             observed=call('/order-intents/reviews/'+intent)['intents'][0]
             if observed['state']=='unknown':break
             time.sleep(0.2)
         assert observed['state']=='unknown' and not any(observed['actions'].values())
-        # An old account's uncertainty must remain recoverable after the current
-        # fake connection switches mode/account. No old receipt is overwritten.
-        call('/uat2/simulation/connections',{'mode':'platform_managed','key':'smoke-managed-mode',
-            'expected_id':connected['id'],'expected_version':connected['version']})
-        call('/runs/analysis-workflows',{'portfolio':'india','key':'smoke-stale-source'},expected=403)
-        call('/runs/analysis-workflows/synthetic-source',{'portfolio':'india','key':'smoke-managed-source'})
-        managed=call('/runs/analysis-workflows',{'portfolio':'india','key':'smoke-managed-analysis'})
-        completed(managed['id'])
-        template=call('/indmoney-us/imports/template')
-        from datetime import datetime,timezone
-        preview=call('/indmoney-us/imports/preview',{'format':'csv','raw_text':template,'captured_at':datetime.now(timezone.utc).isoformat()})
-        call('/runs/analysis-workflows',{'portfolio':'indmoney_us','key':'smoke-unaccepted-us'},expected=403)
-        call('/indmoney-us/imports/'+str(preview['id'])+'/accept',{'content_hash':preview['content_hash'],'accept':True})
-        us=call('/runs/analysis-workflows',{'portfolio':'indmoney_us','key':'smoke-accepted-us'})
-        completed(us['id'])
-        exported=call('/uat2/simulation/analysis/'+str(managed['id'])+'/private-export',{'key':'smoke-private-export'})
-        download=call(exported['download_path'])
-        assert download['owner_id']==owner_id and download['orders_authorized'] is False and exported['external_delivery'] is False
-        observed=call('/account/operations/diagnostics')
-        assert observed['source_unavailable'] is False and observed['unknown_orders'] is True and observed['external_delivery'] is False
-        from app.uat2.analysis_worker import OBSERVE
-        monitor=analysis_worker.tasks[OBSERVE].apply_async(queue=CONTROL_QUEUE,retry=False).get(timeout=15)
-        assert all(item['external_delivery'] is False for item in monitor['items'])
-        assert call('/order-intents/reviews/'+intent)['intents'][0]['state']=='unknown'
         print(json.dumps({'phase':'start','synthetic_identity':True,'google_verification':False,
             'actual_http':True,'actual_postgresql':True,'actual_redis_tasks':True,
-            'actual_static_analysis_collection':True,'both_modes_analysis':True,'accepted_us_analysis':True,'unknown_observed':True,
-            'private_json_download':True,'source_aware_monitoring':True,'intent_id':intent,'owner_acceptance':False}))
+            'actual_scheduler_dispatch':True,'manual_relay_submission':False,
+            'actual_static_analysis_collection':True,'user_owned_analysis':True,'unknown_observed':True,
+            'intent_id':intent,'owner_acceptance':False}))
+    elif phase=='before-restart':
+        # smoke.py has stopped the worker and its Beat child. This check is
+        # deliberately read-only and fails if reconciliation won the stop race.
+        with SyncSessionLocal() as db:
+            row=db.execute(select(OrderIntent).where(OrderIntent.owner_id==owner_id)).scalar_one()
+            assert row.state=='unknown'
+            assert db.scalar(select(func.count()).select_from(ExecutionAttempt).where(ExecutionAttempt.intent_id==row.id))==1
+        print(json.dumps({'phase':'before-restart','unknown_while_worker_stopped':True,
+            'manual_relay_submission':False,'owner_acceptance':False}))
     elif phase=='recover':
         with SyncSessionLocal() as db:
-            intent=db.scalar(select(OrderIntent.id).where(OrderIntent.owner_id==owner_id,OrderIntent.state=='unknown'))
-        if intent is None:raise AssertionError('Persisted original unknown intent required')
-        for _ in range(20):
-            relay(order_worker,ORDER_RELAY)
+            intent=db.scalar(select(OrderIntent.id).where(OrderIntent.owner_id==owner_id))
+        if intent is None:raise AssertionError('Persisted original intent required')
+        for _ in range(40):
             record=call('/order-intents/reviews/'+intent)['intents'][0]
             if record['state']=='filled':break
             time.sleep(1)
@@ -152,10 +132,45 @@ def main(phase):
             evidence=NativeOutboxExport(db,scope=SimulationSourceScope('hosted')).export(owner_id)
             assert evidence['complete_account_export'] is False and evidence['complete_account_erasure'] is False
             assert any(item['data']['kind']=='synthetic_venue_evidence' for item in evidence['items'])
+        # The same original account's receipt remains immutable across a mode switch.
+        from app.domains.connections.models import IntegrationConnection
+        with SyncSessionLocal() as db:
+            current=db.scalar(select(IntegrationConnection).where(IntegrationConnection.owner_id==owner_id,
+                IntegrationConnection.is_current.is_(True)))
+            connected={'id':current.id,'version':current.version}
+        call('/uat2/simulation/connections',{'mode':'platform_managed','key':'smoke-managed-mode',
+            'expected_id':connected['id'],'expected_version':connected['version']})
+        call('/runs/analysis-workflows',{'portfolio':'india','key':'smoke-stale-source'},expected=403)
+        call('/runs/analysis-workflows/synthetic-source',{'portfolio':'india','key':'smoke-managed-source'})
+        managed=call('/runs/analysis-workflows',{'portfolio':'india','key':'smoke-managed-analysis'})
+        completed(managed['id'])
+        template=call('/indmoney-us/imports/template')
+        from datetime import datetime,timezone
+        preview=call('/indmoney-us/imports/preview',{'format':'csv','raw_text':template,'captured_at':datetime.now(timezone.utc).isoformat()})
+        call('/runs/analysis-workflows',{'portfolio':'indmoney_us','key':'smoke-unaccepted-us'},expected=403)
+        call('/indmoney-us/imports/'+str(preview['id'])+'/accept',{'content_hash':preview['content_hash'],'accept':True})
+        us=call('/runs/analysis-workflows',{'portfolio':'indmoney_us','key':'smoke-accepted-us'})
+        completed(us['id'])
+        exported=call('/uat2/simulation/analysis/'+str(managed['id'])+'/private-export',{'key':'smoke-private-export'})
+        download=call(exported['download_path'])
+        assert download['owner_id']==owner_id and download['orders_authorized'] is False and exported['external_delivery'] is False
+        observed=call('/account/operations/diagnostics')
+        assert observed['source_unavailable'] is False and observed['unknown_orders'] is False and observed['external_delivery'] is False
+        # Scheduled monitoring must run without this probe publishing a task.
+        from app.domains.public_service.monitoring import TOPIC as MONITOR_TOPIC
+        for _ in range(75):
+            with SyncSessionLocal() as db:
+                monitor=db.scalar(select(OutboxMessage).where(OutboxMessage.topic==MONITOR_TOPIC,
+                    OutboxMessage.payload['owner_id'].as_integer()==owner_id))
+                if monitor is not None:break
+            time.sleep(1)
+        assert monitor is not None and monitor.payload['synthetic_sink'] is True
         print(json.dumps({'phase':'recover','actual_worker_restart':True,'original_account_reconciled':True,
-            'state':'filled','submission_attempts':1,'venue_receipts':1,'typed_native_evidence_export':True,
+            'actual_scheduler_dispatch':True,'manual_relay_submission':False,
+            'both_modes_analysis':True,'accepted_us_analysis':True,'private_json_download':True,
+            'source_aware_monitoring':True,'state':'filled','submission_attempts':1,'venue_receipts':1,'typed_native_evidence_export':True,
             'full_account_export':False,'owner_acceptance':False}))
-    else:raise SystemExit('Expected start or recover phase')
+    else:raise SystemExit('Expected start, before-restart or recover phase')
 
 
 if __name__=='__main__':main(sys.argv[1] if len(sys.argv)>1 else '')

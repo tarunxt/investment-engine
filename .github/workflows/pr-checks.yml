@@ -1106,6 +1106,19 @@ jobs:
         run: |
           python -m unittest discover -s deploy/uat2/native -p 'test_*.py' -v
           pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py backend/tests/test_uat2_native_route_order.py
+      - name: Verify bounded Beat dispatch, consumer restart and duplicate safety
+        env:
+          PYTHONPATH: backend
+          ENVIRONMENT: test
+        run: |
+          pytest -q --junitxml=/tmp/uat2-scheduler.xml backend/tests/test_uat2_scheduler.py
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('/tmp/uat2-scheduler.xml').getroot()
+          assert len(root.findall('.//testcase')) == 11
+          assert not root.findall('.//testcase/skipped')
+          assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
+          PY
       - name: Verify actual dedicated PostgreSQL Redis HTTP workflow and worker restart
         run: |
           candidate=$(git rev-parse HEAD)

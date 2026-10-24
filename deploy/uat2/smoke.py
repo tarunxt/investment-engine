@@ -75,8 +75,7 @@ try:
     worker_name = prefix+'-worker'
     containers.append(worker_name)
     docker('run', '-d', '--name', worker_name, '--network', private, '--memory', '512m',
-           *env_args, backend, 'celery', '-A', 'app.uat2.worker', 'worker', '-Q',
-           'uat2_simulation,uat2_analysis,uat2_orders,uat2_reconcile', '--concurrency=1', '--prefetch-multiplier=1', '--loglevel=warning')
+           *env_args, backend, 'python', '-m', 'app.uat2.runtime')
     check = '''import json, urllib.request, urllib.error, time
 for _ in range(30):
  try:
@@ -123,9 +122,13 @@ print('PASS synthetic SQLAlchemy fixture populated/empty reset and real response
     print(docker('exec', prefix+'-backend', 'python', '-c', fixture_check), flush=True)
     workflow_probe=Path(__file__).with_name('workflow_probe.py').read_text()
     print(docker('exec',prefix+'-backend','python','-c',workflow_probe,'start',timeout=300),flush=True)
-    docker('restart',worker_name)
+    # Quiesce both consumer and embedded Beat, then verify uncertainty survived.
+    # Otherwise Beat could reconcile before restart and produce a false claim.
+    docker('stop',worker_name)
+    print(docker('exec',prefix+'-backend','python','-c',workflow_probe,'before-restart',timeout=30),flush=True)
+    docker('start',worker_name)
     # The same PostgreSQL/Redis volumes and immutable venue receipts survive.
-    print(docker('exec',prefix+'-backend','python','-c',workflow_probe,'recover',timeout=90),flush=True)
+    print(docker('exec',prefix+'-backend','python','-c',workflow_probe,'recover',timeout=360),flush=True)
     if '--backend-only' not in sys.argv:
         start(prefix+'-frontend', frontend, '--network', private, '-e', 'CREDX_UAT2=1',
               '-e', 'NEXTAUTH_URL=https://uat2.cred-x.in', '-e', 'BACKEND_API_URL=http://backend:8000',
