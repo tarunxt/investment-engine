@@ -49,10 +49,10 @@ jobs:
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/priority-adapters.xml').getroot()
           cases=root.findall('.//testcase')
-          assert len(cases) == 42
+          assert len(cases) == 43
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
-          assert sum(c.attrib.get('classname','').split('.')[-1]=='test_priority_adapters_postgres' for c in cases)==5
+          assert sum(c.attrib.get('classname','').split('.')[-1]=='test_priority_adapters_postgres' for c in cases)==6
           PY_CHECK
 
   backend-syntax:

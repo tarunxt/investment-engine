@@ -98,3 +98,40 @@ def test_pg_recoverable_erasure_roundtrip_is_atomic_and_owned(pg_workflow):
             assert db.get(UserProfile, principal) is not None
             key = db.scalar(select(APIKey).where(APIKey.user_id == principal))
             assert key.is_active is (principal == other)
+
+
+@pytest.mark.asyncio
+async def test_pg_dashboard_us_correction_metadata_is_owned_and_preview_is_not_history(database):
+    """Real query/alias/JSONB contract; cannot be qualified by SQLite or skips."""
+    from app.domains.auth.models import User
+    from app.domains.indmoney_us.import_service import ManualImportService
+    from app.domains.indmoney_us.schemas import IndMoneyUsPortfolioSnapshotCreateRequest
+    from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+    from app.domains.dashboard.service import _load_indmoney_with_session
+    from app.shared.exceptions import NotFoundException
+    from test_stage18_linked_analysis_preview import CSV_TEMPLATE
+    _,factory,owner,_,_=database
+    now=datetime.now(timezone.utc)
+    async with factory() as db:
+        foreign=User(email='dashboard-other@stage09.example.invalid',username='dashboard_other',password_hash='unusable',is_active=True,is_verified=True)
+        db.add(foreign);await db.commit();other=foreign.id
+        service=ManualImportService(db)
+        original=await service.preview(owner,IndMoneyUsPortfolioSnapshotCreateRequest(raw_text=CSV_TEMPLATE,captured_at=now,format='csv'))
+        await service.accept(owner,original.id,original.content_hash);await db.commit()
+        changed=CSV_TEMPLATE.replace(',2,55,100,110,10,10',',3,55,150,165,15,10')
+        correction=await service.preview(owner,IndMoneyUsPortfolioSnapshotCreateRequest(raw_text=changed,captured_at=now,format='csv',supersedes_id=original.id))
+        await service.accept(owner,correction.id,correction.content_hash);await db.commit()
+        # A later unaccepted preview must not replace the accepted correction.
+        await service.preview(owner,IndMoneyUsPortfolioSnapshotCreateRequest(raw_text=CSV_TEMPLATE,captured_at=now+timedelta(seconds=1),format='csv'))
+        await db.commit()
+        view=await _load_indmoney_with_session(db,owner)
+        assert view.snapshot.current_value==165 and len(view.snapshot.history)==1
+        point=view.snapshot.history[0]
+        assert point.owner_id==owner and point.snapshot_id==correction.id and point.supersedes_id==original.id
+        assert point.currency=='USD' and point.recorded_value==165 and point.recorded_value_known is True
+        assert point.import_source_hash==correction.import_provenance['source_hash']
+        assert view.model_dump(mode='json')['snapshot']['history'][0]['snapshot_id']==correction.id
+        assert await db.get(IndMoneyUsPortfolioSnapshot,original.id) is not None
+        assert (await _load_indmoney_with_session(db,other)).snapshot is None
+        with pytest.raises(NotFoundException):
+            await service.preview(other,IndMoneyUsPortfolioSnapshotCreateRequest(raw_text=changed,captured_at=now,format='csv',supersedes_id=original.id))

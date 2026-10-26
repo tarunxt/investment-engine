@@ -28,6 +28,18 @@ class DashboardHistoryPoint(BaseModel):
     value: float
 
 
+class DashboardUsdHistoryPoint(DashboardHistoryPoint):
+    # Additive metadata only for the bounded native USD snapshot history.
+    metric: Literal["accepted_us_portfolio_value_v1"] | None = None
+    currency: Literal["USD"] | None = None
+    owner_id: int | None = Field(default=None, ge=1)
+    snapshot_id: int | None = Field(default=None, ge=1)
+    supersedes_id: int | None = Field(default=None, ge=1)
+    import_source_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    recorded_value: float | None = Field(default=None, ge=0)
+    recorded_value_known: bool = False
+
+
 class DashboardPortfolioHistory(BaseModel):
     india: list[DashboardHistoryPoint] = Field(default_factory=list, max_length=400)
     indmoney: list[DashboardHistoryPoint] = Field(default_factory=list, max_length=400)
@@ -80,7 +92,7 @@ class DashboardIndMoneySnapshot(BaseModel):
     total_return_value: float | None = None
     total_return_percent: float | None = None
     top_holdings: list[DashboardHolding] = Field(max_length=4)
-    history: list[DashboardHistoryPoint] = Field(max_length=12)
+    history: list[DashboardUsdHistoryPoint | DashboardHistoryPoint] = Field(max_length=12)
 
 
 class DashboardIndMoneySection(BaseModel):
