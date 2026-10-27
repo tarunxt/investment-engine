@@ -973,6 +973,24 @@ jobs:
           LINKED_BROWSER_EVIDENCE: ${{ runner.temp }}/linked-browser-evidence
         run: node scripts/linked-preview-playwright.mjs
 
+      - name: Verify exact-source incremental F53 reference UI
+        if: matrix.bundler == 'webpack'
+        timeout-minutes: 10
+        run: |
+          BROWSER_PATH="$(cd frontend && node --input-type=module -e "import {chromium} from 'playwright'; process.stdout.write(chromium.executablePath())")"
+          python scripts/public_launch/qualify_incremental_formula.py \
+            --source "${SOURCE_SHA}" --node "$(command -v node)" \
+            --browser "${BROWSER_PATH}" --evidence "${RUNNER_TEMP}/f53-reference-evidence"
+
+      - name: Retain incremental F53 synthetic UI evidence
+        if: always() && matrix.bundler == 'webpack'
+        uses: actions/upload-artifact@v7
+        with:
+          name: f53-reference-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/f53-reference-evidence
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Retain linked fake browser evidence
         if: always() && matrix.bundler == 'webpack'
         uses: actions/upload-artifact@v7
