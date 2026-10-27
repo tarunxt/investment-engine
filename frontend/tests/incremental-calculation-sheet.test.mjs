@@ -7,11 +7,11 @@ const file=new URL('../components/workspace/IncrementalCalculationSheet.tsx',imp
 const model={};new Function('exports',ts.transpileModule(readFileSync(new URL('../lib/conceptFLegacyFormula.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(model);
 function setup(portfolio='india'){
  let ownerMatches=true;
- const h=harness(file,'OwnedSheet',{owner:1,portfolio},{privateStorageOwnerMatches:()=>ownerMatches,privateLocalStorage:{getItem:()=>null},configKey:'config',DEFAULT_SCORE_MATRIX_FORMULA_CONFIG:{},normalizeScoreMatrixFormulaConfig:x=>x,...model,isAnalysisRunForStage:()=>true,buildConsensusRows:()=>[],buildTechnicalScanMap:()=>({}),buildActionablesCalculationRows:()=>[],headers:['Stock Info'],ConceptFCalculationSheet:'Sheet',ConceptFDetailPanel:'Panel',ConceptFSavedText:'SavedText'});
+ const h=harness(file,'OwnedSheet',{owner:1,portfolio},{useRouter:()=>({push:()=>{}}),privateStorageOwnerMatches:()=>ownerMatches,privateLocalStorage:{getItem:()=>null},configKey:'config',DEFAULT_SCORE_MATRIX_FORMULA_CONFIG:{},normalizeScoreMatrixFormulaConfig:x=>x,...model,isAnalysisRunForStage:()=>true,buildConsensusRows:()=>[],buildTechnicalScanMap:()=>({}),buildActionablesCalculationRows:()=>[],headers:['Stock Info'],ConceptFCalculationSheet:'Sheet',ConceptFDetailPanel:'Panel',ConceptFSavedText:'SavedText'});
  return{h,foreign:()=>ownerMatches=false};
 }
 test('history is market scoped, explicit, and refresh never implies successful empty history',async()=>{
- for(const portfolio of ['india','indmoney_us']){const{h}=setup(portfolio);assert.equal(h.requests.length,1);assert.match(h.requests[0].url,new RegExp('portfolio='+portfolio));assert.equal(h.requests[0].options.cache,'no-store');h.requests[0].resolve({items:[]});await h.flush();assert.match(h.text(),/not a completed empty analysis/);assert.equal(h.requests.length,1);h.cleanup();}
+ for(const portfolio of ['india','indmoney_us']){const{h}=setup(portfolio);assert.equal(h.requests.length,1);assert.match(h.requests[0].url,new RegExp('portfolio='+portfolio));assert.equal(h.requests[0].options.cache,'no-store');assert.equal(h.control('Exact historical sequence').props['aria-label'],'Exact historical sequence');h.requests[0].resolve({items:[]});await h.flush();assert.match(h.text(),/not a completed empty analysis/);assert.equal(h.requests.length,1);h.cleanup();}
 });
 test('foreign history and late owner responses fail closed without Run fetching',async()=>{
  const{h}=setup();h.requests[0].resolve({items:[{portfolio:'indmoney_us',sequence:1}]});await h.flush();assert.match(h.text(),/Owned history unavailable/);assert.equal(h.requests.length,1);h.cleanup();
