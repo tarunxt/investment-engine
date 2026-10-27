@@ -7,7 +7,7 @@
     "frontend": 25,
     "http": 325,
     "lifecycle": 9,
-    "page": 81,
+    "page": 83,
     "scheduler": 20,
     "websocket": 5,
     "worker": 53
@@ -16465,6 +16465,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/indmoney-us/final-actionables/calculation-sheet",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/final-actionables/calculation-sheet",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/final-actionables/calculation-sheet/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/indmoney-us/final-actionables",
       "classification": "owner-private",
       "kind": "page",
@@ -17108,6 +17127,25 @@
       "route": "/console/zerodha/events",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/zerodha/events/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/zerodha/final-actionables/calculation-sheet",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/final-actionables/calculation-sheet",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/final-actionables/calculation-sheet/page.tsx:1"
     },
     {
       "calls": [],
@@ -17928,7 +17966,8 @@
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/indmoney-us/activity/page.tsx": "6d5978ee151e393363e223afad13c00d47676b87834c56a344b5169cae443550",
     "frontend/app/console/indmoney-us/events/page.tsx": "797f251250268ac1d342fd7903085fb549319b3ae547068498fa87743218bde4",
-    "frontend/app/console/indmoney-us/final-actionables/page.tsx": "a36427bc53a0e6a2bc77b3cf7f72fa156eff738e0ba20d55890e7610e96c648c",
+    "frontend/app/console/indmoney-us/final-actionables/calculation-sheet/page.tsx": "2f17022ab6219be6004c107d9d98e0416d42c7b1d9423a444c61b79c06078207",
+    "frontend/app/console/indmoney-us/final-actionables/page.tsx": "ddc4cf1515d0aa44ba9fcaeef1e5f45d22f97cfd98891133cb4e47bd2ed09b34",
     "frontend/app/console/indmoney-us/page.tsx": "10300aa829ed847027328bfad4ee32734460382238c015daaa467bc8e8927995",
     "frontend/app/console/indmoney-us/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
     "frontend/app/console/indmoney-us/portfolio/page.tsx": "a93366c77c55c940cdaf4844923f59ac21891fd54fcc0e6753963f05a73a8211",
@@ -17962,7 +18001,8 @@
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/zerodha/activity/page.tsx": "6d5978ee151e393363e223afad13c00d47676b87834c56a344b5169cae443550",
     "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
-    "frontend/app/console/zerodha/final-actionables/page.tsx": "054a42b3efcfd5b740e28fab42407c8c2ffb7f5c3dff18867acd0f7adc206e01",
+    "frontend/app/console/zerodha/final-actionables/calculation-sheet/page.tsx": "cbb82c389f7f3a87ae3cf88c69af53965c1c9fa8d030122a6ef4dece3ecc1bd4",
+    "frontend/app/console/zerodha/final-actionables/page.tsx": "aaeb1a87341353b2fb314688ca7af9c55e6a444e8b45115021bbfe9fdb093ad3",
     "frontend/app/console/zerodha/page.tsx": "10300aa829ed847027328bfad4ee32734460382238c015daaa467bc8e8927995",
     "frontend/app/console/zerodha/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
     "frontend/app/console/zerodha/portfolio/page.tsx": "9f8fd337e4211cdcb25801922a46db146b7d0758027dc687cb0a67cce4c62f6e",
