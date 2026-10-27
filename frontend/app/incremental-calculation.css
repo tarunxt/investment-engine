@@ -25,3 +25,16 @@
 .f53-workspace :is(button,summary,input,a) {min-height:44px}
 .f53-workspace [role="region"][tabindex="0"] {max-width:100%;min-width:0}
 @media(max-width:767px){.f53-workspace .concept-f-card{padding:16px}.f53-workspace h1,.f53-workspace h3{overflow-wrap:anywhere}.f53-workspace .concept-f-table{min-width:400px}}
+
+/* Keep module context available below the focused read-only reference screen. */
+[data-module-workspace-root]:has(.f53-workspace) {display:flex;flex-direction:column}
+[data-module-workspace-root]:has(.f53-workspace)>header {order:2}
+.f53-workspace {--f53-ink:#183047;--f53-soft:#edf2f8;--f53-link:#2864d9;--f53-outline:#d9e4ee;--f53-page:#f3f7fa;color:var(--f53-ink);background:var(--f53-page);padding:20px;border-radius:16px}
+.dark .f53-workspace {--f53-ink:#e3ecf8;--f53-soft:#22344b;--f53-link:#8ab4ff;--f53-outline:#30435b;--f53-page:#101c2c}
+.f53-workspace .concept-f-formula-references .concept-f-card {border-color:var(--f53-outline)}
+.f53-workspace .concept-f-formula-references .concept-f-table :is(th,td) {border:0}
+.f53-workspace .concept-f-formula-references .concept-f-table thead {background:var(--f53-soft);font-size:11px;text-transform:uppercase;letter-spacing:.025em}
+.f53-workspace .concept-f-formula-references .concept-f-table tbody tr:nth-child(even) {background:color-mix(in srgb,var(--f53-soft) 60%,transparent)}
+.f53-workspace .concept-f-formula-references .concept-f-text-link {border:0;border-radius:0;background:transparent;color:var(--f53-link);text-align:left;padding-inline:0;text-decoration:none}
+.f53-workspace .concept-f-tabs button[aria-pressed="true"] {color:var(--f53-link);border-bottom-color:var(--f53-link)}
+@media(max-width:767px){.f53-workspace{padding:12px}}
