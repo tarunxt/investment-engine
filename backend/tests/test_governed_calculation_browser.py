@@ -1,6 +1,7 @@
 """Actual-auth read-only governed browser fixture, real durable fake services, SQLite only."""
 import os,time,threading,subprocess,json,asyncio,hashlib
 from pathlib import Path
+from datetime import datetime,timezone
 from contextvars import ContextVar
 import pytest
 from fastapi import FastAPI
@@ -35,8 +36,11 @@ def test_governed_zero_run_actual_auth_and_no_effects(linked_env,monkeypatch,tmp
     monkeypatch.setenv('CREDX_UAT2','0');monkeypatch.setenv('JWT_SIGNING_KEY','governed-local-synthetic-'+('x'*40))
     Base.metadata.create_all(e.engine)
     for owner in (1,2):
-        for portfolio in ('india','indmoney_us'):complete_analysis(e,owner,portfolio,key=f'governed-browser-{owner}-{portfolio}')
+        for portfolio in ('india','indmoney_us'):
+            e.now=datetime.now(timezone.utc)
+            complete_analysis(e,owner,portfolio,key=f'governed-browser-{owner}-{portfolio}')
         e.db.get(User,owner).password_hash=PasswordUtils.hash_password('SyntheticPreview123!')
+    e.now=datetime.now(timezone.utc)
     snapshot=current_source(e,1,'india');Workflows(e.db,e.runtime).create(1,'india','governed-pending-history',snapshot_id=snapshot,now=e.now);e.db.commit()
     assert e.db.scalar(select(func.count()).select_from(Run))==0 and e.db.scalar(select(func.count()).select_from(RunJob))==0
     e.db.commit()
@@ -78,7 +82,7 @@ def test_governed_zero_run_actual_auth_and_no_effects(linked_env,monkeypatch,tmp
         assert fingerprint()==before
         assert queries and all(q.lstrip().upper().startswith('SELECT') and 'FOR UPDATE' not in q.upper() for q in queries)
         after=verified_build(root/'frontend'/os.environ['LOCAL_NATIVE_NEXT_DIR'],root/'backend/app');assert all(binding[k]==after[k] for k in ('source_sha','build_id','asset_tree_sha256','backend_source_tree_sha256'))
-        receipt.update(source_binding_verified=True,business_store_fingerprint_unchanged=True,projection_select_only=True,legacy_run_count=0,sqlite=True,postgresql=False,redis=False,hosted=False)
+        receipt.update(harness_sha=os.environ.get('LOCAL_NATIVE_BROWSER_HARNESS_SHA',sha),source_binding_verified=True,business_store_fingerprint_unchanged=True,projection_select_only=True,legacy_run_count=0,sqlite=True,postgresql=False,redis=False,hosted=False)
         (Path(evidence)/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
     finally:
         server.should_exit=True;thread.join(timeout=10)
