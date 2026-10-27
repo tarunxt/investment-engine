@@ -1,0 +1,9 @@
+.incremental-calculation .concept-f-card {border:1px solid var(--border);border-radius:16px;padding:22px;background:var(--card)}
+.incremental-calculation .concept-f-tabs {display:flex;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:12px}
+.incremental-calculation button,.incremental-calculation select {min-height:44px;border:1px solid var(--border);border-radius:8px;padding:8px 12px}
+.incremental-calculation button:disabled {opacity:.5}
+.incremental-calculation .concept-f-table {border-collapse:collapse;font-size:13px}
+.incremental-calculation th,.incremental-calculation td {border:1px solid var(--border);padding:10px;vertical-align:top}
+.incremental-calculation th {position:relative;text-align:left}
+.incremental-calculation .concept-f-text-link {text-decoration:underline}
+.incremental-calculation :focus-visible {outline:2px solid var(--primary);outline-offset:3px}

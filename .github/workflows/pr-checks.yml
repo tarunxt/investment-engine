@@ -721,6 +721,9 @@ jobs:
       - name: Run dashboard regression tests
         run: >-
           node --test
+          tests/concept-f-calculation-sheet.test.mjs
+          tests/concept-f-saved-text.test.mjs
+          tests/incremental-calculation-sheet.test.mjs
           tests/ux01-dashboard-scope.test.mjs
           tests/ux02-workspace-shell.test.mjs
           tests/ux03-onboarding.test.mjs

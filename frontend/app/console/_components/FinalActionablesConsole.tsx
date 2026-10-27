@@ -5935,7 +5935,7 @@ type ActionablesCalculationSortState = {
   direction: "asc" | "desc";
 };
 
-type ActionablesCalculationRow = {
+export type ActionablesCalculationRow = {
   id: string;
   stock: StockConsensus;
   stockLabel: string;
@@ -5947,7 +5947,7 @@ type ActionablesCalculationRow = {
   isFormula?: boolean;
 };
 
-const ACTIONABLES_CALCULATION_HEADERS = [
+export const ACTIONABLES_CALCULATION_HEADERS = [
   "Stock Info",
   "Job / Run No (Timestamp)",
   "LLMs",
@@ -6143,7 +6143,7 @@ function renderStockInfoBlock(
   );
 }
 
-function buildActionablesCalculationRows(
+export function buildActionablesCalculationRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,

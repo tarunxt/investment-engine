@@ -1,3 +1,4 @@
+import './incremental-calculation.css';
 import type { Metadata } from "next";
 import "./globals.css";
 import "./bullpen-ui.css";
