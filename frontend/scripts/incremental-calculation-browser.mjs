@@ -4,7 +4,7 @@ import {chromium} from 'playwright';
 import {mkdirSync,writeFileSync} from 'node:fs';
 const base=process.env.LOCAL_NATIVE_BROWSER_URL,sha=process.env.LOCAL_NATIVE_BROWSER_SHA,output=process.env.LOCAL_NATIVE_BROWSER_EVIDENCE;
 assert.match(base,/^http:\/\/(localhost|127\.0\.0\.1):\d+$/);assert.match(sha,/^[a-f0-9]{40}$/);assert.ok(output.startsWith('/tmp/'));mkdirSync(output,{recursive:true});
-const receipt={source_sha:sha,passed:false,checks:[],writes:[],sqlite:true,postgresql:false,redis:false,hosted:false};
+const receipt={source_sha:sha,harness_sha:process.env.LOCAL_NATIVE_BROWSER_HARNESS_SHA,passed:false,checks:[],writes:[],sqlite:true,postgresql:false,redis:false,hosted:false};
 const browser=await chromium.launch({headless:true,executablePath:process.env.CONCEPT_F_CHROMIUM_PATH});let context,page;
 async function confine(c){await c.route('**/*',route=>route.request().url().startsWith(base+'/')?route.continue():route.abort());await c.routeWebSocket('**/*',socket=>socket.close());c.on('request',r=>{if(!['GET','HEAD'].includes(r.method()))receipt.writes.push({method:r.method(),path:new URL(r.url()).pathname});});}
 async function login(p,email){await p.goto(base+'/login?redirectTo=/console/profile');await p.getByLabel('Email Address',{exact:true}).fill(email);await p.getByLabel('Password',{exact:true}).fill('SyntheticPreview123!');await p.getByRole('button',{name:'Sign In',exact:true}).click();await p.waitForURL(url=>url.pathname==='/console/profile');}
@@ -14,7 +14,7 @@ try{
  let firstRun;
  for(const route of ['zerodha','indmoney-us']){
   await page.goto(base+'/console/'+route+'/final-actionables/calculation-sheet');await page.getByRole('heading',{name:'The calculations sheet, without hidden columns',exact:true}).waitFor();
-  const sequence=page.getByLabel('Exact historical sequence',{exact:true});await sequence.locator('option[value="97"]').waitFor();assert.equal(await sequence.inputValue(),'');
+  const sequence=page.getByLabel('Exact historical sequence',{exact:true});await sequence.locator('option[value="97"]').waitFor({state:'attached'});assert.equal(await sequence.inputValue(),'');
   assert.equal(await page.getByRole('row').count(),1);receipt.checks.push(route+'_no_implicit_history_run_or_job_selection');
   await sequence.selectOption('97');const runs=page.getByRole('group',{name:'Saved Runs to inspect',exact:true});await runs.getByRole('checkbox').first().waitFor();const runId=Number((await runs.innerText()).match(/Run (\d+)/)[1]);firstRun??=runId;await runs.getByRole('checkbox').first().check();
   await page.getByRole('button',{name:'Load selected saved Runs',exact:true}).dblclick();const jobs=page.getByRole('group',{name:'Exact saved job inputs',exact:true});await jobs.getByRole('checkbox').first().waitFor();for(const checkbox of await jobs.getByRole('checkbox').all())await checkbox.check();

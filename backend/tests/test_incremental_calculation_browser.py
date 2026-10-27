@@ -37,11 +37,12 @@ def test_incremental_calculation_with_actual_owned_history_and_login(order_env,m
     for subject in (1,2):e.db.get(User,subject).password_hash=PasswordUtils.hash_password('SyntheticPreview123!')
     e.db.commit()
     # Persisted synthetic source records only; no analysis, provider or order submission.
-    from app.domains.runs.models import Run,RunJob
+    from app.domains.runs.models import Run,RunJob,AutoRebalanceWorkflow
     from app.domains.jobs.models import Job
     from app.shared.types import JobStatus
     for subject in (1,2):
         for portfolio,module,market,exchange in (('india','zerodha_rebalance','India','NSE'),('indmoney_us','indmoney_us','IndMoney US','NASDAQ')):
+            e.db.add(AutoRebalanceWorkflow(user_id=subject,module_id=module,module_version=1,portfolio=portfolio,sequence=97,label=f'{market} saved synthetic sequence',status='completed',current_stage='rebalance'))
             prompt=f'Synthetic {market} rebalance scan, persisted fixture only'
             run=Run(user_id=subject,module_id=module,module_version=1,prompt=prompt,prompt_preview=prompt,status=JobStatus.COMPLETED,auto_export_enabled=False,auto_rebalance_portfolio=portfolio,auto_rebalance_sequence=97,auto_rebalance_label=f'{market} Run #97 (Rebalance Scan)')
             e.db.add(run);e.db.flush()
@@ -92,7 +93,7 @@ def test_incremental_calculation_with_actual_owned_history_and_login(order_env,m
         from scripts.public_launch.concept_f_build_receipt import verified_build
         before_binding=verified_build(root/'frontend'/os.environ['LOCAL_NATIVE_NEXT_DIR'],root/'backend/app')
         assert before_binding['source_sha']==sha
-    evidence='/tmp/credx-incremental-f52-native-browser' if frame_only else '/tmp/credx-local-native-browser'
+    evidence=os.getenv('LOCAL_NATIVE_BROWSER_EVIDENCE','/tmp/credx-incremental-f52-native-browser')
     log=open('/tmp/credx-incremental-f52-frontend.log' if frame_only else '/tmp/credx-local-native-frontend.log','w')
     frontend=None
     try:
@@ -102,7 +103,7 @@ def test_incremental_calculation_with_actual_owned_history_and_login(order_env,m
         env={**os.environ,'NEXT_DIST_DIR':os.environ['LOCAL_NATIVE_NEXT_DIR'],'NEXTAUTH_URL':f'http://localhost:{frontend_port}',
             'AUTH_URL':f'http://localhost:{frontend_port}','NEXTAUTH_SECRET':'local-native-synthetic-only','AUTH_SECRET':'local-native-synthetic-only',
             'AUTH_TRUST_HOST':'true','NEXT_PUBLIC_UAT2':'true','NEXT_PUBLIC_UAT2_COMMIT':sha,'BACKEND_API_URL':f'http://127.0.0.1:{backend_port}','API_URL':f'http://127.0.0.1:{backend_port}',
-            'LOCAL_NATIVE_BROWSER_URL':f'http://localhost:{frontend_port}','LOCAL_NATIVE_BROWSER_SHA':sha,
+            'LOCAL_NATIVE_BROWSER_URL':f'http://localhost:{frontend_port}','LOCAL_NATIVE_BROWSER_SHA':sha,'LOCAL_NATIVE_BROWSER_HARNESS_SHA':os.environ.get('LOCAL_NATIVE_BROWSER_HARNESS_SHA',sha),
             'LOCAL_NATIVE_BROWSER_EVIDENCE':evidence}
         frontend=subprocess.Popen([node,'node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',str(frontend_port)],cwd=root/'frontend',env=env,stdout=log,stderr=log)
         time.sleep(3)
