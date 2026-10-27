@@ -4,6 +4,11 @@
 .incremental-calculation button:disabled {opacity:.5}
 .incremental-calculation .concept-f-table {border-collapse:collapse;font-size:13px}
 .incremental-calculation th,.incremental-calculation td {border:1px solid var(--border);padding:10px;vertical-align:top}
-.incremental-calculation th {position:relative;text-align:left}
+.incremental-calculation th {text-align:left}
+.incremental-calculation th:not(.sticky) {position:relative}
 .incremental-calculation .concept-f-text-link {text-decoration:underline}
 .incremental-calculation :focus-visible {outline:2px solid var(--primary);outline-offset:3px}
+
+.incremental-calculation select {max-width:100%;width:100%;min-width:0}
+.incremental-calculation label {display:block;min-width:0}
+.incremental-calculation fieldset {min-inline-size:0}
