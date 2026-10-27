@@ -75,6 +75,32 @@ def main(phase):
             if result['status'] in {'failed','partial','cancelled','paused'}:raise AssertionError('Durable analysis did not complete')
             time.sleep(1)
         raise AssertionError('Bounded analysis completion timeout')
+    def calculation_read(workflow_id,portfolio):
+        # Actual disposable PostgreSQL + HTTP; never manufacture a legacy Run.
+        from sqlalchemy.orm import Session
+        from app.infrastructure.database.sync_session import sync_engine
+        from app.domains.runs.models import Run,RunJob
+        from app.domains.runs.analysis_workflows.calculation_projection import project
+        from app.domains.runs.analysis_workflows.calculation_schema import GovernedEvidence
+        listing=call('/runs/analysis-workflows/calculation-inputs?portfolio='+portfolio)
+        assert listing['owner_id']==owner_id and workflow_id in {item['id'] for item in listing['items']}
+        actual=call('/runs/analysis-workflows/'+str(workflow_id)+'/calculation-inputs?portfolio='+portfolio)
+        GovernedEvidence.model_validate(actual)
+        with sync_engine.connect() as connection:
+            with connection.begin():
+                connection.exec_driver_sql('SET TRANSACTION READ ONLY')
+                with Session(connection,autoflush=False) as db:
+                    assert db.scalar(select(func.count()).select_from(Run))==0
+                    assert db.scalar(select(func.count()).select_from(RunJob))==0
+                    expected=project(db,owner_id,portfolio,workflow_id)
+                    assert expected['evidence_hash']==actual['evidence_hash']
+                    assert not db.new and not db.dirty and not db.deleted
+        assert actual['current_readiness']=='not_established' and actual['orders_authorized'] is False
+        assert len([stage for stage in actual['stages'] if stage['state']=='available'])==5
+        assert all(stage['rows'] for stage in actual['stages'] if stage['state']=='available')
+        assert 'confidence' in actual['missing_fields'] and 'legacy_formula_inputs' in actual['missing_fields']
+        call('/runs/analysis-workflows/'+str(workflow_id)+'/calculation-inputs?portfolio='+('india' if portfolio=='indmoney_us' else 'indmoney_us'),expected=409)
+
     if phase=='start':
         # Exercise the actual collection/static route, not only POST/detail paths.
         assert call('/runs/analysis-workflows/config')['enabled'] is True
@@ -145,6 +171,7 @@ def main(phase):
         call('/runs/analysis-workflows/synthetic-source',{'portfolio':'india','key':'smoke-managed-source'})
         managed=call('/runs/analysis-workflows',{'portfolio':'india','key':'smoke-managed-analysis'})
         completed(managed['id'])
+        calculation_read(managed['id'],'india')
         template=call('/indmoney-us/imports/template')
         from datetime import datetime,timezone
         preview=call('/indmoney-us/imports/preview',{'format':'csv','raw_text':template,'captured_at':datetime.now(timezone.utc).isoformat()})
@@ -152,6 +179,7 @@ def main(phase):
         call('/indmoney-us/imports/'+str(preview['id'])+'/accept',{'content_hash':preview['content_hash'],'accept':True})
         us=call('/runs/analysis-workflows',{'portfolio':'indmoney_us','key':'smoke-accepted-us'})
         completed(us['id'])
+        calculation_read(us['id'],'indmoney_us')
         exported=call('/uat2/simulation/analysis/'+str(managed['id'])+'/private-export',{'key':'smoke-private-export'})
         download=call(exported['download_path'])
         assert download['owner_id']==owner_id and download['orders_authorized'] is False and exported['external_delivery'] is False
@@ -166,7 +194,7 @@ def main(phase):
                 if monitor is not None:break
             time.sleep(1)
         assert monitor is not None and monitor.payload['synthetic_sink'] is True
-        print(json.dumps({'phase':'recover','actual_worker_restart':True,'original_account_reconciled':True,
+        print(json.dumps({'phase':'recover','governed_calculation_readonly_both_markets':True,'governed_calculation_zero_legacy_runs':True,'actual_worker_restart':True,'original_account_reconciled':True,
             'actual_scheduler_dispatch':True,'manual_relay_submission':False,
             'both_modes_analysis':True,'accepted_us_analysis':True,'private_json_download':True,
             'source_aware_monitoring':True,'state':'filled','submission_attempts':1,'venue_receipts':1,'typed_native_evidence_export':True,

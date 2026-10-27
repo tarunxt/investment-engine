@@ -724,6 +724,7 @@ jobs:
           tests/concept-f-calculation-sheet.test.mjs
           tests/concept-f-saved-text.test.mjs
           tests/incremental-calculation-sheet.test.mjs
+          tests/governed-calculation.test.mjs
           tests/ux01-dashboard-scope.test.mjs
           tests/ux02-workspace-shell.test.mjs
           tests/ux03-onboarding.test.mjs
@@ -1121,7 +1122,7 @@ jobs:
           AUTH_DISABLED: 'false'
         run: |
           python -m unittest discover -s deploy/uat2/native -p 'test_*.py' -v
-          pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py backend/tests/test_uat2_native_route_order.py
+          pytest -q backend/tests/test_uat2_policy.py backend/tests/test_uat2_runtime.py backend/tests/test_google_signin.py backend/tests/test_uat2_native_route_order.py backend/tests/test_governed_calculation_projection.py
       - name: Verify bounded Beat dispatch, consumer restart and duplicate safety
         env:
           PYTHONPATH: backend

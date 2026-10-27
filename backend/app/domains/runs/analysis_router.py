@@ -204,6 +204,41 @@ async def list_analysis_workflows(selected_only:bool=False,portfolio:Literal['in
         return items
     return {'owner_id':user.id,'items':await db.run_sync(read)}
 
+from .analysis_workflows.calculation_schema import GovernedCatalogue, GovernedEvidence
+
+
+async def calculation_view_access(db, user, portfolio, runtime):
+    from .analysis_workflows.synthetic_composition import SyntheticAnalysis
+    from app.domains.modules.policy import ModulePolicy
+    if type(getattr(runtime.source, '__self__', None)) is not SyntheticAnalysis:
+        raise HTTPException(503, 'Explicit simulated historical projection unavailable')
+    module = 'zerodha_rebalance' if portfolio == 'india' else 'indmoney_us'
+    with db.no_autoflush:
+        decision = await ModulePolicy(db).authorize(owner_id=user.id, resource_owner_id=user.id,
+            module_id=module, capability='view', boundary='http')
+    if not decision.allowed:
+        raise HTTPException(403, 'Selected owned module view required')
+
+
+@router.get('/calculation-inputs', response_model=GovernedCatalogue)
+async def list_calculation_inputs(portfolio: Literal['india', 'indmoney_us'],
+        db=Depends(get_async_db), user=Depends(get_current_user), runtime=Depends(analysis_runtime)):
+    from .analysis_workflows.calculation_projection import catalogue
+    await calculation_view_access(db, user, portfolio, runtime)
+    return await db.run_sync(lambda session: catalogue(session, user.id, portfolio))
+
+
+@router.get('/{workflow_id}/calculation-inputs', response_model=GovernedEvidence)
+async def get_calculation_inputs(workflow_id: int, portfolio: Literal['india', 'indmoney_us'],
+        db=Depends(get_async_db), user=Depends(get_current_user), runtime=Depends(analysis_runtime)):
+    from .analysis_workflows.calculation_projection import project
+    await calculation_view_access(db, user, portfolio, runtime)
+    try:
+        return await db.run_sync(lambda session: project(session, user.id, portfolio, workflow_id))
+    except WorkflowDenied:
+        raise HTTPException(409, 'Exact owned historical evidence unavailable or failed integrity; no replacement source used') from None
+
+
 @router.get('/{workflow_id}')
 async def get_analysis_workflow(workflow_id:int,db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime),include_readiness:bool=False):
     def read(session):

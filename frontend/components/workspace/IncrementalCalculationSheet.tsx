@@ -12,6 +12,7 @@ import {distinctCalculationHeaders} from '@/lib/conceptFCalculationSheet';
 import {ConceptFCalculationSheet} from './ConceptFCalculationSheet';
 import {ConceptFDetailPanel} from './ConceptFDetailPanel';
 import {ConceptFSavedText} from './ConceptFSavedText';
+import {GovernedCalculationSheet} from './GovernedCalculationSheet';
 import {buildConsensusRows,buildTechnicalScanMap,buildActionablesCalculationRows,ACTIONABLES_CALCULATION_HEADERS,DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,normalizeScoreMatrixFormulaConfig,type ScoreMatrixFormulaConfig} from '@/app/console/_components/FinalActionablesConsole';
 import type {AutoRebalanceHistoryItemResponse,AutoRebalanceHistoryDetailResponse,RunResponse} from '@/types/api';
 
@@ -21,7 +22,11 @@ export function IncrementalCalculationSheet({portfolio}:{portfolio:'india'|'indm
  const {data:session,status}=useSession(),{manifest}=useModules();
  const owner=Number(session?.user?.id),moduleId=portfolio==='india'?'zerodha_rebalance':'indmoney_us';
  if(status!=='authenticated'||!Number.isSafeInteger(owner)||owner<1||manifest?.owner_id!==owner||!allowedModule(manifest,moduleId))return <p>Calculation inputs are unavailable for this account or module. No source data requested.</p>;
- return <OwnedSheet key={`${owner}:${session?.generation}:${portfolio}:${moduleScopeKey(manifest)}`} owner={owner} portfolio={portfolio}/>;
+ return <CalculationSourceChoice key={`${owner}:${session?.generation}:${portfolio}:${moduleScopeKey(manifest)}`} owner={owner} portfolio={portfolio}/>;
+}
+function CalculationSourceChoice({owner,portfolio}:{owner:number;portfolio:'india'|'indmoney_us'}){
+ const [kind,setKind]=useState<'governed'|'legacy'|null>(null);
+ return <section className="space-y-5"><nav className="flex flex-wrap gap-3" aria-label="Calculation source kind"><button className="min-h-11 rounded border px-4" aria-pressed={kind==='governed'} onClick={()=>setKind('governed')}>Governed saved history</button><button className="min-h-11 rounded border px-4" aria-pressed={kind==='legacy'} onClick={()=>setKind('legacy')}>Legacy Run calculations</button></nav>{kind==='governed'?<GovernedCalculationSheet owner={owner} portfolio={portfolio}/>:kind==='legacy'?<OwnedSheet owner={owner} portfolio={portfolio}/>:<><h1 className="text-2xl font-bold">Choose calculation evidence</h1><p>Governed workflows save standalone stage Jobs. Legacy formula calculations require saved Run-linked inputs. These sources remain separate; choosing a view creates no financial work.</p></>}</section>;
 }
 function OwnedSheet({owner,portfolio}:{owner:number;portfolio:'india'|'indmoney_us'}){
  const market=portfolio==='india'?'india':'us',router=useRouter();

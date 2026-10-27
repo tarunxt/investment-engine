@@ -13,7 +13,7 @@ try{
  assert.equal((await page.request.get(base+'/backend-api/runs/auto-rebalance-history?portfolio=india')).status(),401);await login(page,'usera@stage01.example.com');receipt.checks.push('actual_auth_required_before_history');
  let firstRun;
  for(const route of ['zerodha','indmoney-us']){
-  await page.goto(base+'/console/'+route+'/final-actionables/calculation-sheet');await page.getByRole('heading',{name:'The calculations sheet, without hidden columns',exact:true}).waitFor();
+  await page.goto(base+'/console/'+route+'/final-actionables/calculation-sheet');await page.getByRole('button',{name:'Legacy Run calculations',exact:true}).click();await page.getByRole('heading',{name:'The calculations sheet, without hidden columns',exact:true}).waitFor();
   const sequence=page.getByLabel('Exact historical sequence',{exact:true});await sequence.locator('option[value="97"]').waitFor({state:'attached'});assert.equal(await sequence.inputValue(),'');
   assert.equal(await page.getByRole('row').count(),1);receipt.checks.push(route+'_no_implicit_history_run_or_job_selection');
   await sequence.selectOption('97');const runs=page.getByRole('group',{name:'Saved Runs to inspect',exact:true});await runs.getByRole('checkbox').first().waitFor();const runId=Number((await runs.innerText()).match(/Run (\d+)/)[1]);firstRun??=runId;await runs.getByRole('checkbox').first().check();
