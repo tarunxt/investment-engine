@@ -23,7 +23,7 @@ def main():
         (archive/'source.json').write_text(json.dumps({'sha':args.source})+'\n')
         (archive/'frontend/node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
         assert not any((base/name).exists() for base in [archive,archive/'frontend'] for name in ['.env','.env.local','.env.production','.env.production.local'])
-        env={key:value for key,value in os.environ.items() if key in {'PATH','HOME','TMPDIR','TMP','TEMP','SYSTEMROOT'}}
+        env={key:value for key,value in os.environ.items() if key in {'PATH','HOME','TMPDIR','TMP','TEMP','SYSTEMROOT','RUNNER_TEMP'}}
         env.update(NEXT_TELEMETRY_DISABLED='1',NEXT_PUBLIC_UAT2='true',NEXT_PUBLIC_UAT2_COMMIT=args.source,NEXT_PUBLIC_DISABLE_AUTH='false',NEXT_PUBLIC_DISABLE_API_PROXY='false')
         with (evidence/'build.log').open('w') as log:
             subprocess.run([args.node,'node_modules/next/dist/bin/next','build','--webpack'],cwd=archive/'frontend',env=env,stdout=log,stderr=subprocess.STDOUT,timeout=300,check=True)
