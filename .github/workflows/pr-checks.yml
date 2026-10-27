@@ -726,6 +726,8 @@ jobs:
           tests/concept-f-formula-source-version.test.mjs
           tests/concept-f-advisory-revision.test.mjs
           tests/concept-f-symbol-reference.test.mjs
+          tests/concept-f-rationale-pairs.test.mjs
+          tests/incremental-formula-workspace.test.mjs
           tests/concept-f-saved-text.test.mjs
           tests/incremental-calculation-sheet.test.mjs
           tests/governed-calculation.test.mjs

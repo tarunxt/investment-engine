@@ -108,6 +108,9 @@ def test_incremental_calculation_with_actual_owned_history_and_login(order_env,m
         frontend=subprocess.Popen([node,'node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',str(frontend_port)],cwd=root/'frontend',env=env,stdout=log,stderr=log)
         time.sleep(3)
         script='scripts/incremental-calculation-browser.mjs'
+        if os.getenv('LOCAL_NATIVE_F53_BROWSER'):
+            assert os.getenv('LOCAL_NATIVE_F53_BROWSER')=='read-only-reference-ui'
+            script='scripts/incremental-formula-browser.mjs'
         subprocess.run([node,script],cwd=root/'frontend',env=env,check=True,timeout=180)
         receipt=json.loads((Path(evidence)/'receipt.json').read_text())
         assert receipt['passed'] and receipt['source_sha']==sha

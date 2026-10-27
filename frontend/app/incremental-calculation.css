@@ -12,3 +12,16 @@
 .incremental-calculation select {max-width:100%;width:100%;min-width:0}
 .incremental-calculation label {display:block;min-width:0}
 .incremental-calculation fieldset {min-inline-size:0}
+
+/* Focused F53 references retain the existing shell and source-specific boundaries. */
+.f53-choice:has(.f53-workspace)>nav {display:none}
+.f53-workspace .concept-f-formula-references .concept-f-table {width:100%;font-size:13px;line-height:1.5}
+.f53-workspace .concept-f-formula-references :is(th,td) {padding:7px 12px}
+.f53-workspace .concept-f-formula-references .concept-f-tabs {gap:12px;padding-bottom:0}
+.f53-workspace .concept-f-tabs button {border:0;border-radius:0;background:transparent;color:var(--muted-foreground)}
+.f53-workspace .concept-f-tabs button[aria-pressed="true"] {color:var(--primary);border-bottom:3px solid var(--primary);font-weight:700}
+.f53-workspace .concept-f-formula-references .concept-f-table thead {background:var(--muted)}
+.f53-workspace .concept-f-formula-references .concept-f-table tbody tr:nth-child(even) {background:color-mix(in srgb,var(--muted) 45%,transparent)}
+.f53-workspace :is(button,summary,input,a) {min-height:44px}
+.f53-workspace [role="region"][tabindex="0"] {max-width:100%;min-width:0}
+@media(max-width:767px){.f53-workspace .concept-f-card{padding:16px}.f53-workspace h1,.f53-workspace h3{overflow-wrap:anywhere}.f53-workspace .concept-f-table{min-width:400px}}
