@@ -65,3 +65,17 @@ def test_cursor_validation_and_empty_pages_reach_audit_phase(db):
     with pytest.raises(ValueError): stock_observation_page(db, user_id=1, market='india', symbol='X', cursor='jobs:bad')
     with pytest.raises(ValueError): stock_observation_page(db, user_id=1, market='india', symbol='X', cursor='invalid:0')
     assert pages(db) == []
+
+
+def test_technical_rows_need_no_action_column_and_malformed_rows_keep_every_cell(db):
+    from app.domains.runs.stock_observations import matching_rows
+    technical = "| Stock Symbol | Confidence | Rationale |\n|---|---|---|\n| HAL | 2 | Original technical rationale |"
+    assert matching_rows(technical, 'HAL')[0][1]['confidence'] == '2'
+    escaped = "| Stock Symbol | Rationale |\n|---|---|\n| HAL | Breakout \\| original |"
+    assert matching_rows(escaped, 'HAL')[0][1]['rationale'] == 'Breakout | original'
+    malformed = "| Stock Symbol | Score |\n|---|---|\n| HAL | 2 | additional financial cell |"
+    row = matching_rows(malformed, 'HAL')[0][1]
+    assert row['original cells'] == ['HAL', '2', 'additional financial cell']
+    assert 'score' not in row and 'Malformed' in row['source contract status']
+    assert matching_rows('HAL is mentioned in retained narrative.', 'HAL')[0][1]['original source text'].startswith('HAL')
+    assert matching_rows(technical.replace('HAL', 'HALOTHER'), 'HAL') == []

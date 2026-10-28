@@ -1,15 +1,32 @@
 """Paged, owner-scoped original source observations; never backfill history."""
+import re
 from sqlalchemy import select
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.run_identity import analysis_run_identity
-from app.domains.runs.final_actionable_history import normalize_stock_symbol, parse_markdown_action_rows, row_value, status_value
+from app.domains.runs.final_actionable_history import normalize_stock_symbol, normalize_header, status_value
 from app.domains.recommendation_audit.models import EvidenceRecord
 from app.domains.recommendation_audit.capture import digest
+from app.domains.jobs.output_contracts.document import parse_markdown, parse_json, MISSING
 
 
 def matching_rows(text, symbol):
-    return [(index, row) for index, row in enumerate(parse_markdown_action_rows(text)) if normalize_stock_symbol(row_value(row, 'Stock Symbol', 'Ticker', 'Symbol', 'Stock')) == normalize_stock_symbol(symbol)]
+    # Reuse the lossless contract fragment parser. No padding, truncation or
+    # action-column requirement: technical and swing tables are observations too.
+    blocks, findings = parse_json(text) if text.lstrip().startswith(('[', '{')) else parse_markdown(text)
+    matches = []
+    for block in blocks:
+        if block.kind != 'table': continue
+        headers = [normalize_header(str(header)) for header in block.headers]
+        positions = [index for index, header in enumerate(headers) if header in {'stock symbol', 'symbol', 'ticker', 'stock'}]
+        for index, cells in enumerate(block.rows):
+            if not any(position < len(cells) and normalize_stock_symbol(str(cells[position])) == normalize_stock_symbol(symbol) for position in positions): continue
+            malformed = len(cells) != len(headers) or len(set(headers)) != len(headers) or bool(findings)
+            values = {'source contract status': 'Malformed/ambiguous source row; financial fields are not mapped', 'original headers': list(block.headers), 'original cells': list(cells), 'original source fragment': block.text} if malformed else {header: cell for header, cell in zip(headers, cells) if cell is not MISSING}
+            matches.append((f'{block.index}.{index}', values))
+    if not matches and re.search(r'(?<![A-Za-z0-9])' + re.escape(normalize_stock_symbol(symbol)) + r'(?![A-Za-z0-9])', text, re.IGNORECASE):
+        matches.append(('unparsed', {'source contract status': 'Symbol mentioned in unparsed output; no financial fields inferred', 'original source text': text}))
+    return matches
 
 
 def rows_for_source(*, text, symbol, run_id, job_id, revision, stage, run_status, job_status, provider, model, created_at, source):
