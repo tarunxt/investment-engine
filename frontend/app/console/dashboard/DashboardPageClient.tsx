@@ -1,7 +1,10 @@
 "use client";
 
+import {useSession} from "next-auth/react";
 import {useModules} from "@/providers/ModuleContext";
-import {surfaceAllowed} from "@/lib/modulePolicy";
+import {moduleScopeKey,surfaceAllowed} from "@/lib/modulePolicy";
+import {acceptInitialDashboard,scopeDashboardSummary as scopeSummary,completeSelectedTotal,type InitialDashboardScope} from "@/lib/dashboardScope";
+import {moduleRequestSignal} from "@/lib/moduleRequests";
 import {ModuleSurface} from "@/components/modules/ModuleSurface";
 import { privateLocalStorage } from "@/lib/privateBrowserStorage";
 
@@ -230,12 +233,12 @@ function sanitizeDashboardCacheValue(
   return value;
 }
 
-function dashboardOverviewCacheKey(userId: number) {
+function dashboardOverviewCacheKey(userId: number | string) {
   return `${DASHBOARD_OVERVIEW_CACHE_KEY_PREFIX}${userId}`;
 }
 
 function readDashboardOverviewCachePayload(
-  userId: number | null | undefined,
+  userId: number | string | null | undefined,
 ): DashboardOverviewCachePayload {
   const emptyPayload: DashboardOverviewCachePayload = {
     version: 2,
@@ -262,7 +265,7 @@ function readDashboardOverviewCachePayload(
 }
 
 function readDashboardOverviewCache(
-  userId: number | null | undefined,
+  userId: number | string | null | undefined,
 ): Partial<DashboardState> | null {
   if (typeof window === "undefined") return null;
 
@@ -284,7 +287,7 @@ function readDashboardOverviewCache(
 }
 
 function readDashboardOverviewCacheProvenance(
-  userId: number | null | undefined,
+  userId: number | string | null | undefined,
 ): DashboardDataProvenance | null {
   const entries = Object.values(
     readDashboardOverviewCachePayload(userId).entries,
@@ -311,7 +314,7 @@ function formatDataAge(asOf: number | string | null | undefined) {
 }
 
 function writeDashboardOverviewCacheEntry(
-  userId: number | null | undefined,
+  userId: number | string | null | undefined,
   key: DashboardSectionKey,
   value: DashboardState[DashboardSectionKey],
 ) {
@@ -723,10 +726,11 @@ function PortfolioCommandSummary({
               ? "Combined INR unavailable"
               : formatPrivateInvestmentValue(totalValue)}
           </div>
-          <div
+          {(surfaceAllowed(manifest,'/console/indmoney-us')||surfaceAllowed(manifest,'/console/bullpen-ai'))&&<div
             className={`mt-2 text-xs leading-5 ${
               fx?.status === "valid" ? "text-slate-300" : "text-amber-200"
             }`}
+
             data-fx-status={fx?.status ?? "unavailable"}
           >
             {fx?.status === "valid" && fx.source && fx.as_of
@@ -734,7 +738,7 @@ function PortfolioCommandSummary({
               : fx?.status === "stale"
                 ? `USD/INR is stale as of ${fx.as_of ? formatTs(fx.as_of) : "an unknown time"}; combined INR totals are omitted.`
                 : "USD/INR is unavailable; combined INR totals are omitted and USD values remain in USD."}
-          </div>
+          </div>}
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -842,6 +846,7 @@ async function fetchBullpenPositions(
   const response = await fetch(`/api/bullpen-ai/positions?${params}`, {
     cache: "no-store",
     credentials: "same-origin",
+    signal: moduleRequestSignal(`/api/bullpen-ai/positions?${params}`),
     headers: { "Cache-Control": "no-cache" },
   });
   if (!response.ok) {
@@ -1037,12 +1042,6 @@ function dashboardSummaryToState(
   };
 }
 
-function scopeSummary(summary:DashboardSummaryResponse,manifest:import('@/lib/modulePolicy').ModuleCollection|null):DashboardSummaryResponse{
- const india=surfaceAllowed(manifest,'/console/zerodha'),us=surfaceAllowed(manifest,'/console/indmoney-us'),bullpen=surfaceAllowed(manifest,'/console/bullpen-ai');
- return {...summary,zerodha:india?summary.zerodha:null,indmoney_us:us?summary.indmoney_us:null,bullpen:bullpen?summary.bullpen:null,
- portfolio_history:summary.portfolio_history?{...summary.portfolio_history,india:india?summary.portfolio_history.india:[],indmoney:us?summary.portfolio_history.indmoney:[],bullpen:bullpen?summary.portfolio_history.bullpen:[],combined:[]}:summary.portfolio_history};
-}
-
 function DashboardPageForUser({
   userId,
   initialSummary,
@@ -1051,7 +1050,9 @@ function DashboardPageForUser({
   initialSummary?: DashboardSummaryResponse | null;
 }) {
   const {manifest}=useModules();
-  const allowIndia=surfaceAllowed(manifest,"/console/zerodha"),allowUs=surfaceAllowed(manifest,"/console/indmoney-us");
+  const allowIndia=surfaceAllowed(manifest,"/console/zerodha"),allowUs=surfaceAllowed(manifest,"/console/indmoney-us"),allowBullpen=surfaceAllowed(manifest,"/console/bullpen-ai");
+ const {data:session}=useSession();
+ const cacheIdentity=manifest?`${userId}:${session?.generation??"bootstrap"}:${moduleScopeKey(manifest)}`:null;
   const [dashboard, setDashboard] = useState<DashboardState>(() => {
     if (initialSummary) {
       return {
@@ -1059,7 +1060,7 @@ function DashboardPageForUser({
         ...dashboardSummaryToState(scopeSummary(initialSummary,manifest)),
       };
     }
-    const cachedOverview = readDashboardOverviewCache(userId);
+    const cachedOverview = readDashboardOverviewCache(cacheIdentity);
     return cachedOverview
       ? { ...INITIAL_STATE, ...cachedOverview }
       : INITIAL_STATE;
@@ -1086,7 +1087,7 @@ function DashboardPageForUser({
           asOf: Date.parse(initialSummary.generated_at),
         };
       }
-      return readDashboardOverviewCacheProvenance(userId);
+      return readDashboardOverviewCacheProvenance(cacheIdentity);
     });
   const requestIdRef = useRef(0);
   const loadDashboardPromiseRef = useRef<Promise<void> | null>(null);
@@ -1109,6 +1110,7 @@ function DashboardPageForUser({
   );
 
   const loadDashboard = useCallback((initialLoad = false) => {
+    if (!allowIndia&&!allowUs&&!allowBullpen) return Promise.resolve();
     if (loadDashboardPromiseRef.current) {
       console.info(
         JSON.stringify({
@@ -1151,36 +1153,36 @@ function DashboardPageForUser({
             ...update,
             // A temporarily unavailable summary must never erase a verified
             // Bullpen snapshot already displayed or cached in this browser.
-            bullpenPositions:
-              current.bullpenPositions ?? update.bullpenPositions ?? null,
+            bullpenPositions: allowBullpen ? current.bullpenPositions ?? update.bullpenPositions ?? null : null,
           };
           for (const key of DASHBOARD_CRITICAL_KEYS) {
-            writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
+            writeDashboardOverviewCacheEntry(cacheIdentity, key, nextState[key]);
           }
           return nextState;
         });
         const sectionErrors: DashboardErrorsState = {};
-        if (summary.sections.zerodha?.status === "unavailable") {
+        if (allowIndia && summary.sections.zerodha?.status === "unavailable") {
           sectionErrors.zerodhaOverview =
             "India portfolio: temporarily unavailable.";
         }
-        if (summary.sections.indmoney_us?.status === "unavailable") {
+        if (allowUs && summary.sections.indmoney_us?.status === "unavailable") {
           sectionErrors.indmoneyOverview =
             "US portfolio: temporarily unavailable.";
         }
-        if (summary.sections.bullpen?.status === "unavailable") {
+        if (allowBullpen && summary.sections.bullpen?.status === "unavailable") {
           sectionErrors.bullpenPositions =
             "Bullpen wallet: no passive cached snapshot is available.";
         }
         setErrorsBySection(sectionErrors);
       })
       .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (requestId !== requestIdRef.current) return;
-        const cached = readDashboardOverviewCache(userId);
+        const cached = readDashboardOverviewCache(cacheIdentity);
         if (cached) {
           logDashboardCacheFallback("zerodhaOverview", error);
           setDashboard((current) => ({ ...current, ...cached }));
-          setDataProvenance(readDashboardOverviewCacheProvenance(userId));
+          setDataProvenance(readDashboardOverviewCacheProvenance(cacheIdentity));
           setErrorsBySection({
             zerodhaOverview:
               "Dashboard summary: live refresh failed; showing last saved data.",
@@ -1210,7 +1212,7 @@ function DashboardPageForUser({
       });
     loadDashboardPromiseRef.current = loadPromise;
     return loadPromise;
-  }, [userId]);
+  }, [cacheIdentity, manifest, allowIndia, allowUs, allowBullpen]);
 
   const loadThreats = useCallback(() => {
     if (loadThreatsPromiseRef.current) return loadThreatsPromiseRef.current;
@@ -1227,7 +1229,7 @@ function DashboardPageForUser({
           setDashboard((current) => {
             const nextState = { ...current, zerodhaThreat: analysis };
             writeDashboardOverviewCacheEntry(
-              userId,
+              cacheIdentity,
               "zerodhaThreat",
               nextState.zerodhaThreat,
             );
@@ -1252,7 +1254,7 @@ function DashboardPageForUser({
           setDashboard((current) => {
             const nextState = { ...current, indmoneyThreat: analysis };
             writeDashboardOverviewCacheEntry(
-              userId,
+              cacheIdentity,
               "indmoneyThreat",
               nextState.indmoneyThreat,
             );
@@ -1279,7 +1281,7 @@ function DashboardPageForUser({
       });
     loadThreatsPromiseRef.current = request;
     return request;
-  }, [userId]);
+  }, [cacheIdentity, allowIndia, allowUs]);
 
   useEffect(() => {
     if (initialSummary) {
@@ -1287,10 +1289,9 @@ function DashboardPageForUser({
       for (const key of DASHBOARD_CRITICAL_KEYS) {
         const value = initialState[key];
         if (value !== undefined) {
-          writeDashboardOverviewCacheEntry(userId, key, value);
+          writeDashboardOverviewCacheEntry(cacheIdentity, key, value);
         }
       }
-      return;
     }
     const timeoutId = window.setTimeout(() => {
       void loadDashboard(true);
@@ -1299,7 +1300,7 @@ function DashboardPageForUser({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [initialSummary, loadDashboard, userId]);
+  }, [initialSummary, loadDashboard, cacheIdentity, manifest]);
 
   const indiaSnapshot = dashboard.zerodhaOverview?.latest ?? null;
   const usSnapshot = dashboard.indmoneyOverview?.latest ?? null;
@@ -1396,12 +1397,11 @@ function DashboardPageForUser({
   const bullpenPortfolioValue = bullpenDisplayValues.portfolioValue;
   const bullpenCashValue = bullpenDisplayValues.cashValue;
   const bullpenTotalValue = bullpenDisplayValues.totalValue;
-  const totalCommandValue =
-    usdInrRate == null
-      ? null
-      : bullpenTotalValue == null
-        ? null
-        : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
+  const totalCommandValue = completeSelectedTotal([
+    ...(allowIndia?[indiaSnapshot?.holdings_market_value==null||indiaSnapshot.available_margin==null?null:zerodhaCommandValue]:[]),
+    ...(allowUs?[usdInrRate==null||usSnapshot?.current_value==null||usSnapshot.wallet_balance==null?null:indmoneyCommandValue]:[]),
+    ...(allowBullpen?[usdInrRate==null?null:bullpenTotalValue]:[]),
+  ]);
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
   const persistedIndiaTrend = buildPersistedDashboardTrend(
     dashboard.portfolioHistory?.india ?? [],
@@ -1484,13 +1484,14 @@ function DashboardPageForUser({
     },
   };
   const refreshBullpenTile = useCallback(async (forceFresh = true) => {
+    if (!allowBullpen) return;
     setRefreshingBullpenTile(true);
     try {
       const positions = await fetchBullpenPositions(forceFresh);
       setDashboard((current) => {
         const nextState = { ...current, bullpenPositions: positions };
         writeDashboardOverviewCacheEntry(
-          userId,
+          cacheIdentity,
           "bullpenPositions",
           nextState.bullpenPositions,
         );
@@ -1510,14 +1511,14 @@ function DashboardPageForUser({
     } finally {
       setRefreshingBullpenTile(false);
     }
-  }, [userId]);
+  }, [cacheIdentity, allowBullpen]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
-      void refreshBullpenTile(false);
+      if (allowBullpen) void refreshBullpenTile(false);
     }, 0);
     return () => window.clearTimeout(timeoutId);
-  }, [refreshBullpenTile]);
+  }, [refreshBullpenTile,allowBullpen]);
 
   useEffect(() => {
     if (!showHeroSkeleton && dataProvenance) {
@@ -1545,10 +1546,12 @@ function DashboardPageForUser({
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           {[
             {
+              visible:allowIndia,
               label: "India total (portfolio + cash)",
               value: formatInr(zerodhaCommandValue),
             },
             {
+              visible:allowUs,
               label: "INDmoney total (portfolio + cash)",
               value:
                 usdInrRate == null
@@ -1556,13 +1559,14 @@ function DashboardPageForUser({
                   : formatInr(indmoneyCommandValue),
             },
             {
+              visible:allowBullpen,
               label: "Bullpen total (portfolio + cash)",
               value:
                 usdInrRate == null || bullpenTotalValue == null
                   ? "Unavailable"
                   : formatInr(bullpenTotalValue),
             },
-          ].map((metric) => (
+          ].filter(metric=>metric.visible).map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {metric.label}
@@ -1573,11 +1577,11 @@ function DashboardPageForUser({
             </div>
           ))}
         </div>
-        <p className="mt-4 text-xs text-slate-500">
+        {(allowUs||allowBullpen)&&<p className="mt-4 text-xs text-slate-500">
           {usdInrRate != null && effectiveFx?.source && effectiveFx.as_of
             ? `USD/INR ${usdInrRate.toFixed(4)} from ${effectiveFx.source}; as of ${formatTs(effectiveFx.as_of)}.`
-            : "USD/INR conversion unavailable or stale. INDmoney and Bullpen INR totals are omitted until a verified rate is available."}
-        </p>
+            : "Currency conversion unavailable or stale. Selected portfolios remain available in their native currency."}
+        </p>}
       </section>
 
       {dataProvenance ? (
@@ -2023,15 +2027,19 @@ function DashboardPageForUser({
 
 export function DashboardPageClient({
   initialSummary = null,
+  initialScope = null,
 }: {
   initialSummary?: DashboardSummaryResponse | null;
+  initialScope?: InitialDashboardScope|null;
 }) {
   const { user } = useAuth();
+  const {manifest}=useModules();
+  const {data:session}=useSession();
   return (
     <DashboardPageForUser
-      key={user?.id ?? "no-authenticated-user"}
+      key={`${user?.id ?? "no-authenticated-user"}:${session?.generation??"bootstrap"}:${moduleScopeKey(manifest)}`}
       userId={user?.id}
-      initialSummary={initialSummary}
+      initialSummary={acceptInitialDashboard(initialSummary,initialScope,manifest,user?.id,session?.generation)}
     />
   );
 }

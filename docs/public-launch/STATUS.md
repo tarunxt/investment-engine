@@ -1,3 +1,70 @@
+## Local held-spend recovery successor (2026-10-23)
+
+Selected spend account/attempt/verification recovery preserves balances and
+uncertain reservations while retiring old dispatch authority. Four new fixture
+checks and 142 affected regressions pass, zero skips; independent review found
+no additional verified defect. This adds to the immutable local financial/export
+checkpoint `1032da6fe50d7c2dd8f6779900c0399252015a24` and does not confer full
+privacy or hosted qualification. [Exact scope and remaining decisions](PRIVACY_DECISIONS_AND_STORE_MAP.md).
+
+## Local financial/privacy successor (2026-10-23)
+
+Selected confirmed-order recovery, seven additional typed public/worker topic
+projections, five encrypted topic metadata contracts and owned generated-file
+metadata are implemented locally. Independent review defects were fixed and
+95 focused/retained tests pass with zero skips. Complete privacy and hosted
+qualification remain pending; see [decisions, source ownership and exact gaps](PRIVACY_DECISIONS_AND_STORE_MAP.md).
+No remote publication or server operation occurred.
+
+## Local review successor (2026-10-23 22:41 UTC)
+
+The uninstalled successor to `4b6ede01a616d1d7ee919341f3595c5ee1205e0b`
+fixes two independently reproduced recovery defects and extends read-only
+canonical export, exact owned-job cache projection and disposable work-graph
+quarantine. See [scope, evidence and remaining gates](PRIVACY_REVIEW_SUCCESSOR.md).
+81 focused/retained tests pass locally, zero skips. H2 remains incomplete;
+publication, PostgreSQL/Redis/native browser evidence and new owner acceptance
+are pending. No remote or server changes were made.
+
+# Latest remaining-priority implementation checkpoint — 23 October 2026
+
+This entry supersedes earlier pending-publication statements only for their later resolved operations; historical evidence below is preserved. The approved public PR1262 candidate remains 6f3214c until a separately approved push is verified. The five-commit batch ending ad6790fa691d77378a7b75c4a518f7369f55e143 is preserved on its own local branch; no approval for that batch has been received in this worker. Later local composition/security/operations commits are 2d5345b0e55cdad2c91aea2d7df98712c53f22a0, 8a57f1ab1875e5f0782ea8f0d70730af8147ed96 and 391872ace445bda6b9a1a7495354a5f80912bc9b. This checkpoint accompanies their privacy-adapter successor; its exact SHA is recorded in Git/task evidence.
+
+| Priority | Current code outcome | Remaining verification/completion |
+| --- | --- | --- |
+| H1 guarded hosted workflow | Native owner-only fake app/worker composition, keyless both-mode connections, immutable acquisitions, six-stage analysis, exact provenance/review/approval and durable fake dispatch/reconciliation implemented locally. | Actual full PostgreSQL/Redis probe, new exact-source browser/UI acceptance, review and safe deployment gate. |
+| H2 scoped account privacy | Typed projections cover eight native evidence topics; selected queued-job/module/session/key fixtures recover in quarantine using existing encrypted/atomic workflow. | Full canonical account runtime, remaining shared/opaque/outbox/file/cache/operator stores and reviewed identity/backup/retention dispositions. Full export/erasure remains false; no hosted erasure installed. |
+| H3 runtime/evidence/operations | Separate bounded queues in the same prepared worker; source-aware local monitoring and audited support binding; external sinks remain disabled. | Actual runtime verification and real operator/destination evidence; no external delivery claimed. |
+| H4 both-mode/US acceptance | Installed-route ASGI tests cover both modes/reacquisition and digest-accepted US six-stage analysis; earlier exact-source 159843a browser evidence retained. | New native composition browser/hosted receipt and new owner acceptance. |
+| M1 AI/private export | Explicit completed-analysis private JSON download with provenance, ownership, expiry/disable checks and no destination injection. | External destination integrations remain disabled; full account export is a separate H2 gate. |
+| M2 release matrix | 702-case local runtime regression, 82-case overlapping privacy regression, 17 frontend races/policy cases, six baseline cases and prepared zero-skip CI gates. | Exact-source remote CI and actual PostgreSQL/Redis concurrency remain distinct; no transfer of old evidence. |
+| M3 operational UX/release | Owner walkthrough, keyless connection/source flow, exact review/private download and recovery observations are implemented; Next.js/Zod repaired and fresh npm audit is zero. | New visual/browser acceptance, complete release dossier/cutover preparation and external gates. Stage20 is preparation only; no cutover GO. |
+
+Source reports: NATIVE_SIMULATION_COMPOSITION.md, DEPENDENCY_SECURITY_REPAIR.md, NATIVE_OPERATIONS_EXPORT.md and NATIVE_PRIVACY_ADAPTERS.md. Builds/type/lint passed locally; there is no new hosted acceptance claim. Existing UAT2/production/controller/security settings and actual user data were untouched. The earlier verified c493 deployment evidence is preserved, not transferred to this candidate. Full High/Medium completion remains open.
+
+---
+
+# Remaining-priority implementation started — 23 October 2026
+
+New isolated branch `codex/credx-priority-completion-20261024` starts from verified
+integration documentation head `a5658773cd4687b2ecae7f7efc43c3173822032d`.
+The [priority chart and bounded outcomes](PRIORITY_COMPLETION.md) distinguish
+new implementation from the existing qualified c493 deployment below. Durable
+SQL fake-venue and recoverable disposable erasure adapters are locally tested;
+full hosted composition, complete privacy coverage, runtime/operations bindings,
+both-mode/US linked browser acceptance and the remaining release matrix are
+still incomplete. Exact-candidate CI and PostgreSQL evidence remain pending.
+No new deployment, actual user-data deletion, provider approval, owner acceptance
+or production action is claimed. The previous restricted owner acceptance and
+all existing evidence remain preserved.
+
+Local milestone commits: `18d8f00` and `d7250e4`. Final combined local validation:
+171 tests passed, zero skips; subsequent archive-bounds check:15 passed.
+Automatic approval review denied the task-branch push before execution because
+this exact external publication requires explicit approval. No remote write or
+PR creation occurred. Five new actual PostgreSQL cases and their zero-skip CI
+gate remain prepared/unrun. No workaround or retry was attempted.
+
 # Qualified release closure: owner-only simulated UAT2
 
 Recorded 24 October 2026, following deployment at 01:11:41–01:12:51 IST (23 October 19:41:41–19:42:51 UTC). Tested and installed source: `c493e95acb82345d54288f4996c89b6931c26bcd`, [PR #1260](https://github.com/tarunxt/investment-engine/pull/1260). Any later documentation commit is not the installed source and inherits no unrun CI claim.
@@ -346,3 +413,15 @@ Stage17 independent c2441d82 review required a stale-claimant lease fence repair
 
 Stage17 second local repair began21October2026 19:28:21UTC for a source-identified PostgreSQL owner/queue inversion (not locally reproduced on PostgreSQL). Consistent lock order and release-before-global-control are implemented;51focused ordinary checks pass. New concurrent enqueue/dispatch PostgreSQL regression is prepared/unrun; exact successor review/CI/artifacts remain gates. No publication, deployment, activation orStage18.
 
+
+### Conditional privacy policy local successor
+
+The published exact candidate267b476 has terminal CI: baseline/API migration
+passed; PR checks51passed/3failed. PUBLICATION_267_CI.md records the three defects
+and verified actual disposable PostgreSQL/Redis restart evidence. No deployment.
+
+The subsequent local category policy implements conditional30-day targets,
+review-bound eligibility/holds, minimal encrypted audit, selected-profile unlink
+and a suppression-aware disposable backup consumer.39policy+33affected tests
+passed; real deletion remains disabled. CATEGORY_PRIVACY_POLICY_LOCAL.md records
+remaining legal/inventory/full-store gates. No successor publication is authorized.

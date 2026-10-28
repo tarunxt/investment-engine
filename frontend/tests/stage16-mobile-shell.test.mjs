@@ -10,11 +10,18 @@ const button=elements.find(n=>attr(n,'aria-label')==='Open navigation');
 const main=elements.find(n=>attr(n,'data-console-shell')==='authenticated');
 const classes=n=>attr(n,'className').split(/\s+/);
 const spacing=(tokens,prefix)=>Number(tokens.find(c=>c.startsWith(prefix))?.slice(prefix.length))*4;
-test('mobile page content clears the fixed navigation target with a visible gap',()=>{
- const control=classes(button),content=classes(main);
- assert.ok(control.includes('fixed'));assert.ok(control.includes('lg:hidden'));
- assert.ok(spacing(content,'pt-')>=spacing(control,'top-')+(spacing(control,'min-h-')||32)+16);
- assert.ok(content.includes('lg:py-6'),'desktop spacing stays compact');
+test('mobile navigation occupies a sticky bar before content with keyboard clearance',()=>{
+ const bar=button.parent.parent;
+ assert.ok(ts.isJsxElement(bar));
+ const control=classes(button),container=classes(bar.openingElement),content=classes(main);
+ assert.ok(container.includes('sticky')&&container.includes('top-0')&&container.includes('lg:hidden'));
+ assert.ok(!control.includes('fixed')&&!container.includes('fixed'),'navigation stays in document flow');
+ assert.ok(spacing(container,'h-')>=spacing(control,'min-h-')+16,'bar contains the touch target and gap');
+ assert.ok(spacing(content,'py-')>=16,'content retains spacing below the bar');
+ assert.ok(bar.end<main.pos,'bar precedes main content');
+ assert.equal(attr(main,'id'),'workspace-main');
+ const css=readFileSync(new URL('../app/globals.css',import.meta.url),'utf8');
+ assert.match(css,/scroll-margin-block: 5rem 1rem/,'keyboard targets clear the sticky bar');
 });
 test('mobile navigation keeps an accessible touch target and disclosure semantics',()=>{
  const control=classes(button);

@@ -1,0 +1,66 @@
+.incremental-calculation .concept-f-card {border:1px solid var(--border);border-radius:16px;padding:22px;background:var(--card)}
+.incremental-calculation .concept-f-tabs {display:flex;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:12px}
+.incremental-calculation button,.incremental-calculation select {min-height:44px;border:1px solid var(--border);border-radius:8px;padding:8px 12px}
+.incremental-calculation button:disabled {opacity:.5}
+.incremental-calculation .concept-f-table {border-collapse:collapse;font-size:13px}
+.incremental-calculation th,.incremental-calculation td {border:1px solid var(--border);padding:10px;vertical-align:top}
+.incremental-calculation th {text-align:left}
+.incremental-calculation th:not(.sticky) {position:relative}
+.incremental-calculation .concept-f-text-link {text-decoration:underline}
+.incremental-calculation :focus-visible {outline:2px solid var(--primary);outline-offset:3px}
+
+.incremental-calculation select {max-width:100%;width:100%;min-width:0}
+.incremental-calculation label {display:block;min-width:0}
+.incremental-calculation fieldset {min-inline-size:0}
+
+/* Focused F53 references retain the existing shell and source-specific boundaries. */
+.f53-choice:has(.f53-workspace)>nav {display:none}
+.f53-workspace .concept-f-formula-references .concept-f-table {width:100%;font-size:13px;line-height:1.5}
+.f53-workspace .concept-f-formula-references :is(th,td) {padding:7px 12px}
+.f53-workspace .concept-f-formula-references .concept-f-tabs {gap:12px;padding-bottom:0}
+.f53-workspace .concept-f-tabs button {border:0;border-radius:0;background:transparent;color:var(--muted-foreground)}
+.f53-workspace .concept-f-tabs button[aria-pressed="true"] {color:var(--primary);border-bottom:3px solid var(--primary);font-weight:700}
+.f53-workspace .concept-f-formula-references .concept-f-table thead {background:var(--muted)}
+.f53-workspace .concept-f-formula-references .concept-f-table tbody tr:nth-child(even) {background:color-mix(in srgb,var(--muted) 45%,transparent)}
+.f53-workspace :is(button,summary,input,a) {min-height:44px}
+.f53-workspace [role="region"][tabindex="0"] {max-width:100%;min-width:0}
+@media(max-width:767px){.f53-workspace .concept-f-card{padding:16px}.f53-workspace h1,.f53-workspace h3{overflow-wrap:anywhere}.f53-workspace .concept-f-table{min-width:400px}}
+
+/* Keep module context available below the focused read-only reference screen. */
+[data-module-workspace-root]:has(.f53-workspace) {display:flex;flex-direction:column}
+[data-module-workspace-root]:has(.f53-workspace)>header {order:2}
+.f53-workspace {--f53-ink:#183047;--f53-soft:#edf2f8;--f53-link:#2864d9;--f53-outline:#d9e4ee;--f53-page:#f3f7fa;color:var(--f53-ink);background:var(--f53-page);padding:20px;border-radius:16px}
+.dark .f53-workspace {--f53-ink:#e3ecf8;--f53-soft:#22344b;--f53-link:#8ab4ff;--f53-outline:#30435b;--f53-page:#101c2c}
+.f53-workspace .concept-f-formula-references .concept-f-card {border-color:var(--f53-outline)}
+.f53-workspace .concept-f-formula-references .concept-f-table :is(th,td) {border:0}
+.f53-workspace .concept-f-formula-references .concept-f-table thead {background:var(--f53-soft);font-size:11px;text-transform:uppercase;letter-spacing:.025em}
+.f53-workspace .concept-f-formula-references .concept-f-table tbody tr:nth-child(even) {background:color-mix(in srgb,var(--f53-soft) 60%,transparent)}
+.f53-workspace .concept-f-formula-references .concept-f-text-link {border:0;border-radius:0;background:transparent;color:var(--f53-link);text-align:left;padding-inline:0;text-decoration:none}
+.f53-workspace .concept-f-tabs button[aria-pressed="true"] {color:var(--f53-link);border-bottom-color:var(--f53-link)}
+@media(max-width:767px){.f53-workspace{padding:12px}}
+
+/* Measured F53 reference frame, scoped to the focused view; routes and gates stay unchanged. */
+[data-workspace-shell="authenticated"]:has(.f53-workspace) {--console-sidebar-width:222px!important;--sidebar:#122d43;--sidebar-foreground:#c2d3e1;--sidebar-border:#2b475c;--sidebar-accent:#24485f;--sidebar-accent-foreground:#fff;--sidebar-ring:#2dd4bf;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) #console-sidebar {box-shadow:none}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) #console-sidebar .text-muted-foreground {color:#99b3c7}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) #console-sidebar .console-brand-letters {display:none}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) #console-sidebar .console-brand-trend {display:block}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) #console-sidebar>div>div:first-child>a>span:first-child {background:#0b8e85;border-radius:10px}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) #console-sidebar a[aria-current="page"] {border-left:3px solid #2dd4bf;border-radius:8px}
+[data-workspace-shell="authenticated"]:has(.f53-workspace) [data-console-shell="authenticated"] {padding:0;background:#f3f7fa}
+.f53-workspace {position:relative;padding:108px 40px 32px;border-radius:0;min-height:100dvh;font-size:14px;line-height:1.5}
+.f53-workspace .f53-breadcrumb {position:absolute;inset:0 0 auto;display:flex;align-items:center;gap:4px;height:76px;padding:0 36px;background:var(--card);color:var(--muted-foreground);font-size:13px}
+.f53-workspace .f53-breadcrumb a {display:inline-flex;align-items:center;text-decoration:none}
+.f53-workspace .f53-context-badges {margin-left:auto;display:flex;gap:14px;font-size:11px;font-weight:700;text-transform:uppercase}
+.f53-workspace .f53-context-badges>span {border-radius:7px;padding:5px 12px;background:#edf2f8;color:#60798c}
+.f53-workspace .f53-context-badges>span:last-child {background:#fff3d7;color:#a56700}
+.f53-workspace .concept-f-formula-references>header h3 {font-size:30px;line-height:1.25;letter-spacing:.01em}
+.f53-workspace .concept-f-formula-references>header p {color:#60798c}
+.f53-workspace .concept-f-formula-references .concept-f-card {border-radius:14px}
+.f53-workspace .concept-f-formula-references .concept-f-card h4 {font-size:18px;line-height:1.3}
+.f53-workspace .concept-f-formula-references .concept-f-tabs {gap:28px}
+.f53-workspace .concept-f-formula-references .concept-f-tabs button {padding-inline:0}
+.f53-workspace .concept-f-formula-references .concept-f-card>p {font-size:12px;color:#60798c}
+.dark [data-workspace-shell="authenticated"]:has(.f53-workspace) [data-console-shell="authenticated"] {background:#101c2c}
+.dark .f53-workspace .concept-f-formula-references :is(.concept-f-card>p,header>p) {color:#a7bad0}
+@media(max-width:767px){.f53-workspace{padding:92px 16px 24px}.f53-workspace .f53-breadcrumb{height:72px;padding:0 16px;flex-wrap:wrap;gap:2px}.f53-workspace .f53-context-badges{gap:6px;font-size:9px}.f53-workspace .f53-context-badges>span{padding:4px 6px}.f53-workspace .concept-f-formula-references>header h3{font-size:24px}.f53-workspace .concept-f-formula-references .concept-f-tabs{gap:16px}}

@@ -6,6 +6,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.zerodha.schemas import ZerodhaPlaceOrderRequest, ZerodhaPlaceOrderResponse, ZerodhaPortfolioOverviewResponse
 from app.domains.dashboard.schemas import DashboardSummaryResponse
 from app.uat2.adapters import FakeBroker, STAMP
+from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 broker = FakeBroker()
@@ -15,9 +16,10 @@ broker = FakeBroker()
 async def status():
     return {'simulation': True, 'commit': os.getenv('UAT2_SOURCE_COMMIT', 'unbuilt'),
             'available': ['dashboard', 'profile/preferences', 'synthetic India portfolio',
-                          'synthetic US portfolio', 'fake order', 'deterministic AI', 'email sink'],
-            'unavailable': ['live brokers', 'live AI', 'Sheets', 'scheduled jobs',
-                            'sports/Bullpen workflows', 'Stage01 module controls (not integrated)']}
+                          'accepted US imports', 'six-stage durable fake analysis',
+                          'exact fake basket approval', 'durable fake execution and reconciliation'],
+            'unavailable': ['live brokers', 'live AI', 'Sheets', 'external sends',
+                            'sports/Bullpen workflows', 'public activation']}
 
 
 @router.get('/zerodha/portfolio', response_model=ZerodhaPortfolioOverviewResponse)
@@ -52,22 +54,31 @@ async def fake_order(order: ZerodhaPlaceOrderRequest):
 
 
 @router.get('/dashboard/summary', response_model=DashboardSummaryResponse)
-async def dashboard():
+async def dashboard(current_user=Depends(get_current_user), db=Depends(get_async_db)):
+    from app.domains.modules.visibility import visible_module_ids
+    from app.domains.dashboard.service import _load_indmoney_with_session
+    selected = set(await visible_module_ids(db, current_user.id))
+    india_allowed = 'zerodha_rebalance' in selected
+    us_allowed = 'indmoney_us' in selected
     empty = os.getenv('UAT2_FIXTURE_STATE', 'populated') == 'empty'
-    portfolio = broker.portfolio(empty)['latest']
-    india = None if empty else {
+    portfolio = broker.portfolio(empty)['latest'] if india_allowed else None
+    india = None if empty or not india_allowed else {
         **{k: v for k, v in portfolio.items() if k not in {'holdings', 'positions'}},
         'top_holdings': [dict(symbol=h['tradingsymbol'], company_name='Synthetic '+h['tradingsymbol'],
                              current_value=h['quantity']*h['last_price'],
                              invested_value=h['quantity']*h['average_price'], pnl=h['pnl'])
                          for h in portfolio['holdings']], 'history': []}
-    return {'generated_at': STAMP, 'fx': {'value': 84, 'source': 'synthetic', 'as_of': STAMP,
-            'age_seconds': 0, 'stale_after_seconds': 86400, 'status': 'valid'},
-            'usd_inr_rate': 84, 'usd_inr_status': 'valid', 'usd_inr_source': 'synthetic',
-            'zerodha': {'connected': True, 'snapshot': india}, 'indmoney_us': {'snapshot': None},
-            'sections': {name: {'status': 'ok' if name != 'bullpen' else 'unavailable',
-                               'duration_ms': 0, 'error': 'Unavailable in UAT2' if name == 'bullpen' else None}
-                         for name in ['zerodha', 'indmoney_us', 'bullpen']}}
+    us = (await _load_indmoney_with_session(db, current_user.id)).model_dump(mode='json') if us_allowed else None
+    fx = {'value': 84 if us_allowed else None, 'source': 'synthetic' if us_allowed else None,
+          'as_of': STAMP if us_allowed else None, 'age_seconds': 0 if us_allowed else None,
+          'stale_after_seconds': 86400, 'status': 'valid' if us_allowed else 'unavailable'}
+    return {'generated_at': STAMP, 'fx': fx,
+            'usd_inr_rate': fx['value'], 'usd_inr_status': fx['status'], 'usd_inr_source': fx['source'],
+            'zerodha': {'connected': True, 'snapshot': india} if india_allowed else None,
+            'indmoney_us': us,
+            'sections': {name: {'status': 'ok', 'duration_ms': 0, 'error': None}
+                         for name, allowed in [('zerodha', india_allowed), ('indmoney_us', us_allowed), ('fx', us_allowed)] if allowed}}
+
 
 
 class SimulationRequest(BaseModel):

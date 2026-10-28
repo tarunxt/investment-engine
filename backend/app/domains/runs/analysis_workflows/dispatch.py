@@ -7,9 +7,9 @@ from .contracts import TOPIC,utc,naive,WorkflowDenied
 from .service import Workflows
 
 
-def dispatch(session,publisher,runtime,*,now=None,limit=10,fault=lambda point:None):
+def dispatch(session,publisher,runtime,*,now=None,limit=10,fault=lambda point:None,message_predicate=None):
     now=utc(now or datetime.now(timezone.utc));counts={'published':0,'deferred':0,'denied':0}
-    hints=list(session.scalars(select(OutboxMessage).where(OutboxMessage.topic==TOPIC,OutboxMessage.execution_attempts==0,OutboxMessage.available_at<=naive(now),or_(OutboxMessage.published_at.is_(None),OutboxMessage.published_at<=naive(now-timedelta(seconds=30)))).order_by(OutboxMessage.created_at,OutboxMessage.id).limit(max(1,min(limit,10)))))
+    hints=list(session.scalars(select(OutboxMessage).where(OutboxMessage.topic==TOPIC,OutboxMessage.execution_attempts==0,OutboxMessage.available_at<=naive(now),or_(OutboxMessage.published_at.is_(None),OutboxMessage.published_at<=naive(now-timedelta(seconds=30))),message_predicate if message_predicate is not None else True).order_by(OutboxMessage.created_at,OutboxMessage.id).limit(max(1,min(limit,10)))))
     for hint in hints:
         # Selection/account lock always precedes workflow/message locks.
         parent=session.scalar(select(Workflow).where(Workflow.id==hint.payload.get('workflow_id'),Workflow.user_id==hint.payload.get('owner_id')))

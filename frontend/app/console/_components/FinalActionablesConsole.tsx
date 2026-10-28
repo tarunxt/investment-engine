@@ -894,7 +894,7 @@ const ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Buy New": 2,
 };
 
-const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; category: ActionCategory }> = [
+export const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; category: ActionCategory }> = [
   { label: "Sell All", category: "Sell All" },
   { label: "Trim", category: "Trim" },
   { label: "Hold", category: "Hold" },
@@ -912,8 +912,8 @@ const DEFAULT_DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory
 
 const SCORE_GUARDRAIL_MIN = -3;
 const SCORE_GUARDRAIL_MAX = 3;
-const TECHNICAL_SCAN_CONFIDENCE_MIN = 0;
-const TECHNICAL_SCAN_CONFIDENCE_MAX = 10;
+export const TECHNICAL_SCAN_CONFIDENCE_MIN = 0;
+export const TECHNICAL_SCAN_CONFIDENCE_MAX = 10;
 
 const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; key: TechnicalScanMultiplierKey }> = [
   { label: "Bullish", key: "bullish" },
@@ -929,7 +929,7 @@ const DEFAULT_SCORE_SYMBOL_THRESHOLDS: Record<ScoreSymbolThresholdKey, number> =
   strongNegative: -3,
 };
 
-const SCORE_SYMBOL_THRESHOLD_ROWS: Array<{ key: ScoreSymbolThresholdKey; label: string }> = [
+export const SCORE_SYMBOL_THRESHOLD_ROWS: Array<{ key: ScoreSymbolThresholdKey; label: string }> = [
   { key: "strongPositive", label: "Green up minimum" },
   { key: "positive", label: "Light green up minimum" },
   { key: "weakPositive", label: "Yellow up minimum" },
@@ -937,6 +937,21 @@ const SCORE_SYMBOL_THRESHOLD_ROWS: Array<{ key: ScoreSymbolThresholdKey; label: 
   { key: "negative", label: "Light red down minimum" },
   { key: "strongNegative", label: "Red down minimum" },
 ];
+
+/** Read-only descriptions of the existing ordered classifier below; no scoring. */
+export function getScoreSymbolReferenceRows(config: ScoreMatrixFormulaConfig) {
+  const t = config.scoreSymbolThresholds;
+  const ranges: Record<ScoreSymbolThresholdKey, string> = {
+    strongPositive: `score > ${t.strongPositive}`,
+    positive: `${t.positive} ≤ score ≤ ${t.strongPositive}`,
+    weakPositive: `${t.weakPositive} ≤ score < ${t.positive}`,
+    weakNegative: `${t.weakNegative} ≤ score < ${t.weakPositive}`,
+    negative: `${t.negative} ≤ score < ${t.weakNegative}`,
+    strongNegative: `${t.strongNegative} ≤ score < ${t.negative}`,
+  };
+  const verified = SCORE_SYMBOL_THRESHOLD_ROWS.every(row => Number.isFinite(t[row.key]));
+  return SCORE_SYMBOL_THRESHOLD_ROWS.map(row => ({...row, range: verified ? ranges[row.key] : undefined}));
+}
 
 export const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
   detailedRationaleMultipliers: {
@@ -5935,7 +5950,7 @@ type ActionablesCalculationSortState = {
   direction: "asc" | "desc";
 };
 
-type ActionablesCalculationRow = {
+export type ActionablesCalculationRow = {
   id: string;
   stock: StockConsensus;
   stockLabel: string;
@@ -5947,7 +5962,7 @@ type ActionablesCalculationRow = {
   isFormula?: boolean;
 };
 
-const ACTIONABLES_CALCULATION_HEADERS = [
+export const ACTIONABLES_CALCULATION_HEADERS = [
   "Stock Info",
   "Job / Run No (Timestamp)",
   "LLMs",
@@ -6143,7 +6158,7 @@ function renderStockInfoBlock(
   );
 }
 
-function buildActionablesCalculationRows(
+export function buildActionablesCalculationRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,

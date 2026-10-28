@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
+from app.domains.auth.admin_roles import require_platform_admin
 from app.domains.auth.models import User
 from app.domains.google_sheets.service import GoogleSheetsService
 from app.domains.fx_rates.service import load_persisted_usd_inr_rate
@@ -222,7 +223,7 @@ async def api_usage_summary(
     custom_start: date | None = Query(default=None),
     custom_end: date | None = Query(default=None),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_platform_admin),
 ):
     google_sheets_configured = await run_in_threadpool(
         lambda: _google_sheets_service.is_configured

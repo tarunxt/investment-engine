@@ -1,5 +1,2 @@
-import { PortfolioRebalanceConsole } from '@/app/console/_components/PortfolioRebalanceConsole';
-
-export default function ZerodhaRebalancePage() {
-  return <PortfolioRebalanceConsole portfolio="zerodha" market="india" />;
-}
+import {ModuleResearchAlias} from '@/components/workspace/ModuleResearchAlias';
+export default function Page(){return <ModuleResearchAlias target='/console/zerodha/research'/>;}

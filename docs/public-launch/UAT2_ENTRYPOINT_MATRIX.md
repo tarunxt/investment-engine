@@ -35,6 +35,8 @@ The complete auth router is included, with existing UAT2 exact-owner checks befo
 | GET | /jobs/{job_id} | backend/app/domains/jobs/router.py:98 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
 | GET | /runs | backend/app/domains/runs/router.py:959 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
 | GET | /runs/{run_id} | backend/app/domains/runs/router.py:992 | Actual owner-scoped handler; active identity/exact UAT2 owner; DB owner/count/relationship predicates |
+| GET | /runs/auto-rebalance-history?portfolio=india or indmoney_us | backend/app/domains/runs/router.py list_auto_rebalance_history | Explicit read-only mount before run-ID route; authenticated owner, scoped related records; no acquisition/readiness bypass |
+| GET | /runs/auto-rebalance-history/{portfolio}/{sequence} | backend/app/domains/runs/router.py get_auto_rebalance_history_detail | Exact owned history only; foreign/corrupt related evidence excluded; stage mutation siblings remain unmounted |
 | GET | /health | backend/app/uat2/main.py | Simulation health; external barrier still required |
 | GET/POST/PUT/DELETE/PATCH/OPTIONS | /{path:path} fallback | backend/app/uat2/main.py | Explicit UAT2_UNAVAILABLE / 503; no production router fallthrough |
 | WebSocket | /{path:path} fallback | backend/app/uat2/main.py | Close 1008 before subscription; live WS functionality unavailable |

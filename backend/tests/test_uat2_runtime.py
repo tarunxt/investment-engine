@@ -79,7 +79,7 @@ def test_broker_adapter_deterministic_but_disabled_module_route_denies(owner_cli
 def test_empty_portfolio_state(owner_client, monkeypatch):
     monkeypatch.setenv('UAT2_FIXTURE_STATE', 'empty')
     assert owner_client.get('/zerodha/portfolio').json() == {'latest': None, 'history': []}
-    assert owner_client.get('/dashboard/summary').json()['zerodha']['snapshot'] is None
+    assert owner_client.get('/dashboard/summary').json()['zerodha'] is None  # No selected module: no data projection.
 
 
 def test_unauthenticated_direct_api_denied(monkeypatch):

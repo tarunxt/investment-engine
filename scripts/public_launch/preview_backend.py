@@ -43,7 +43,7 @@ from scripts.public_launch.preview_streams import install
 install()
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.operation_models import IdempotencyOperation
-from scripts.public_launch import preview_jobs, preview_stage05,preview_stage08,preview_stage09,preview_stage11,preview_stage12,preview_stage16
+from scripts.public_launch import preview_privacy, preview_jobs, preview_stage05,preview_stage08,preview_stage09,preview_stage11,preview_stage12,preview_stage16
 from app.domains.connections.models import ConnectionAttempt,ConnectionBindingHistory
 from app.shared.exceptions import AppException
 from app.shared.types import JobStatus
@@ -135,10 +135,10 @@ async def synthetic_boundary(request: Request, call_next):
         return JSONResponse({"enabled": False, "client_id": None, "synthetic_preview": True})
     if request.url.path == "/preview-health":
         return JSONResponse({"synthetic": True, "database": "isolated SQLite", "outbound_network": "denied"})
-    private_read = request.method == "GET" and (request.url.path.startswith("/me/connections/") or request.url.path in {"/me/connections","/jobs", "/runs","/me/modules/safety-activity"}|preview_stage08.READS or
+    private_read = request.method == "GET" and (request.url.path.startswith("/me/connections/") or request.url.path in {"/me/connections","/jobs", "/runs","/me/modules/safety-activity","/api-usage/limits"}|preview_stage08.READS or
                    request.url.path.startswith('/me/modules/resource-access/') or any(request.url.path.startswith(prefix) and request.url.path[len(prefix):].isdigit()
                        for prefix in ("/jobs/", "/runs/","/indmoney-us/portfolio/")))
-    if not preview_stage16.allowed(request.method,request.url.path) and not preview_stage12.allowed(request.method,request.url.path) and not preview_stage11.allowed(request.method,request.url.path) and request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and not (request.method=='POST' and request.url.path in {'/me/connection-authorization/synthetic-setup','/me/connection-authorization/start','/me/connection-authorization/callback','/me/connection-authorization/confirm','/me/connection-authorization/disconnect'}) and request.url.path!='/me/connection-authorization/config' and (request.method, request.url.path) not in ALLOWED:
+    if not preview_privacy.allowed(request.method,request.url.path) and not preview_stage16.allowed(request.method,request.url.path) and not preview_stage12.allowed(request.method,request.url.path) and not preview_stage11.allowed(request.method,request.url.path) and request.method != "OPTIONS" and (request.method, request.url.path) not in preview_stage05.ALLOWED and not private_read and not (request.method=='POST' and request.url.path in {'/me/connection-authorization/synthetic-setup','/me/connection-authorization/start','/me/connection-authorization/callback','/me/connection-authorization/confirm','/me/connection-authorization/disconnect'}) and request.url.path!='/me/connection-authorization/config' and (request.method, request.url.path) not in ALLOWED:
         return JSONResponse({"detail": "Unavailable in synthetic Stage01 preview; no external actions are permitted"}, status_code=503)
     response = await call_next(request)
     response.headers["X-Stage01-Synthetic-Preview"] = "true"
@@ -153,6 +153,10 @@ app.include_router(router)
 app.include_router(modules_router)
 from app.domains.connections.router import router as connections_router
 app.include_router(connections_router)
+from app.domains.ai_limits.router import router as personal_limits_router
+for route in personal_limits_router.routes:
+    if route.path == '/api-usage/limits' and route.methods == {'GET'}:
+        app.include_router(APIRouter(routes=[route]))
 
 preview_stage12.install(app)
 preview_stage16.install(app)
@@ -182,3 +186,5 @@ def _authorization_runtime():
         'allowed_callbacks':{_preview_callback},'synthetic_setup':True,'synthetic_browser_roundtrip':True}
 app.dependency_overrides[authorization_runtime] = _authorization_runtime
 app.include_router(authorization_router)
+
+preview_privacy.install(app)

@@ -18,6 +18,7 @@ from .contracts import BoundaryDenied,Limits,digest
 from .runner import FakeProvider,run_next
 from .validation import validate_recommendations,validate_source
 from .projection import frozen_projection,projection
+from app.domains.runs.analysis_workflows.shortlist import required as required_candidates
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,9 @@ def validate_completed_job(db,row,job,governance,now):
     source=recommendation_source(db,row,job,governance,now)
     try:document=json.loads(job.response)
     except (ValueError,TypeError):raise BoundaryDenied('GOVERNED_RESPONSE_SCHEMA') from None
-    verdict=validate_recommendations(document,source=source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job))
+    verdict=validate_recommendations(document,source=source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job),required_instruments=required_candidates(row))
+    from app.domains.runs.analysis_workflows.research_options import validate_output
+    validate_output(row,document)
     metadata=job.runtime_metadata_json or {}
     attempt=db.get(SpendAttempt,metadata.get('budget_attempt_id'),populate_existing=True) if metadata.get('budget_attempt_id') else None
     account=db.get(SpendAccount,attempt.account_id,populate_existing=True) if attempt is not None else None
@@ -109,7 +112,10 @@ def execute_governed_job(db,job_id,runtime,*,now=None,effect_fence=lambda:None):
     def validate(document):
         bound()
         current_source=recommendation_source(db,row,job,governance,now)
-        return validate_recommendations(document,source=current_source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job))
+        verdict=validate_recommendations(document,source=current_source,owner_id=job.user_id,module_id=job.module_id,now=now,allowed_instruments=governance.instruments(db,row,job),required_instruments=required_candidates(row))
+        from app.domains.runs.analysis_workflows.research_options import validate_output
+        validate_output(row,document)
+        return verdict
     def before_call():
         bound();recommendation_source(db,row,job,governance,now)
     result=run_next(budget,provider,validate=validate,now=now,expected_id=attempt.id,before_call=before_call,effect_fence=effect_fence)

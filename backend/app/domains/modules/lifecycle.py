@@ -57,11 +57,18 @@ def sync_snapshot(session,owner_id):
 
 def current_sync(session,identity,*,capability='analyze',boundary='worker',scheduled=False,facts=None):
     from app.core.uat2 import uat2_mode
+    from app.uat2.policy_bindings import sync_availability, binding_for
+    try:
+        simulation = sync_availability(session, identity.owner_id)
+        binding = binding_for(session)
+        if facts is None and binding is not None:
+            facts = binding.facts(identity.owner_id, ModuleId(identity.module_id))
+    except PermissionError: raise ModuleLifecycleDenied('Current simulation scope unavailable') from None
     snapshot=sync_snapshot(session,identity.owner_id)
     active=bool(session.scalar(select(User.is_active).where(User.id==identity.owner_id)))
     decision=decide(owner_id=identity.owner_id,resource_owner_id=identity.owner_id,
         active=active,module_id=identity.module_id,capability=capability,boundary=boundary,
-        snapshot=snapshot,facts=facts or DefaultFactsResolver().resolve_sync(identity.owner_id,ModuleId(identity.module_id)),uat2=uat2_mode(),expected_version=None)
+        snapshot=snapshot,facts=facts or DefaultFactsResolver().resolve_sync(identity.owner_id,ModuleId(identity.module_id)),uat2=uat2_mode(),expected_version=None,simulation=simulation)
     if not decision.allowed:raise ModuleLifecycleDenied('Current module policy denied: '+','.join(decision.reasons))
     row=snapshot.rows.get(ModuleId(identity.module_id))
     if row is None or row.version != identity.version:raise ModuleLifecycleDenied("Module selection version changed")

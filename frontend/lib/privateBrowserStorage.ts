@@ -15,6 +15,10 @@ export function setPrivateStorageOwner(userId: number): boolean {
 
 export function clearPrivateStorageOwner() { owner = null; }
 
+export function privateStorageOwnerMatches(userId: number): boolean {
+  return Number.isSafeInteger(userId) && userId > 0 && owner === String(userId);
+}
+
 function storage(kind: "localStorage" | "sessionStorage") {
   return typeof window === "undefined" ? null : window[kind];
 }

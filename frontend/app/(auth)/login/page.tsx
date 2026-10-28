@@ -9,8 +9,6 @@ import { AuthRedirect } from "@/components/AuthRedirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { FormAlert } from "@/components/auth/FormAlert";
-import { Loader2 } from "lucide-react";
 import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 
 export default function LoginPage() {
@@ -63,13 +61,16 @@ export default function LoginPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
               {(error || validationError) && (
-                <FormAlert
-                  type="error"
-                  title={validationError ? "Validation Error" : "Login Failed"}
-                  message={error || validationError || "Please try again"}
-                  details={validationError ? [] : errorDetails}
-                  onDismiss={clearError}
-                />
+                <div role="alert" className="space-y-2 rounded border border-red-200 bg-red-50 p-4 text-red-900">
+                  <p className="font-semibold">{validationError ? "Validation Error" : "Login Failed"}</p>
+                  <p>{error || validationError || "Please try again"}</p>
+                  {!validationError && errorDetails.length > 0 && (
+                    <ul className="list-inside list-disc text-sm">
+                      {errorDetails.map((detail, index) => <li key={index}>{detail}</li>)}
+                    </ul>
+                  )}
+                  <Button type="button" variant="ghost" onClick={clearError} aria-label="Dismiss login error">Dismiss</Button>
+                </div>
               )}
 
               {isClientAuthBypassed && (
@@ -135,7 +136,7 @@ export default function LoginPage() {
               >
                 {loading ? (
                   <div className="flex items-center justify-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" />
                     <span>Signing in...</span>
                   </div>
                 ) : (

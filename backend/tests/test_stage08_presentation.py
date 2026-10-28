@@ -72,7 +72,7 @@ async def test_dashboard_starts_only_permitted_loaders_and_never_singleton(monke
     monkeypatch.setattr(d,'_load_zerodha',india);monkeypatch.setattr(d,'_load_indmoney',us);monkeypatch.setattr(d,'_load_bullpen',forbidden)
     monkeypatch.setattr(d,'_load_portfolio_history',history);monkeypatch.setattr(d,'_load_fx',fx)
     result=await d.build_dashboard_summary(1,module_ids=selected)
-    assert set(calls)==set([m for m in selected if m in {'zerodha_rebalance','indmoney_us'}]+(['history','fx'] if any(m in selected for m in ('zerodha_rebalance','indmoney_us')) else []))
+    assert set(calls)==set([m for m in selected if m in {'zerodha_rebalance','indmoney_us'}]+(['history'] if any(m in selected for m in ('zerodha_rebalance','indmoney_us')) else [])+(['fx'] if 'indmoney_us' in selected else []))
     assert result.bullpen is None
     if 'zerodha_rebalance' not in selected:assert result.zerodha is None
     if 'indmoney_us' not in selected:assert result.indmoney_us is None

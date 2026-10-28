@@ -93,9 +93,19 @@ INTERNAL_ANALYSIS_CONSUMERS = frozenset({ModuleId.ZERODHA_REBALANCE, ModuleId.IN
 INTERNAL_ANALYSIS_CAPABILITIES = frozenset({'analysis.technical', 'analysis.structured'})
 
 
-def platform_available(module: ModuleSpec, *, uat2: bool) -> tuple[bool, str | None]:
+@dataclass(frozen=True)
+class SimulationAvailability:
+    """Server-issued scoped simulation fact; never a residency/provider grant."""
+    owner_id: int
+
+
+def platform_available(module: ModuleSpec, *, uat2: bool, simulation=None, owner_id=None) -> tuple[bool, str | None]:
     if not module.available:
         return False, module.unavailable_reason
     if uat2:
+        if (type(simulation) is SimulationAvailability and type(owner_id) is int
+                and simulation.owner_id == owner_id and owner_id > 0
+                and module.id in {ModuleId.ZERODHA_REBALANCE, ModuleId.INDMONEY_US}):
+            return True, 'Owner-scoped synthetic simulation only; no real integration or residency approval'
         return False, 'Optional module operations are not mounted in the restricted UAT2 simulation'
     return True, None

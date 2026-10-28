@@ -1,5 +1,5 @@
 """Owner-only request receipts. No external export, erasure or approval route."""
-from fastapi import APIRouter,Depends,HTTPException
+from fastapi import APIRouter,Depends,HTTPException,Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
 from .transaction_outcomes import serialization_conflict
@@ -19,6 +19,32 @@ class ResidencyBody(BaseModel):
     model_config=ConfigDict(extra='forbid')
     country:str=Field(max_length=2)
 def response(value):return JSONResponse(value,headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+@router.get('/privacy-requests')
+async def privacy_history(user=Depends(get_current_user),db=Depends(get_async_db)):
+    try:return response(await db.run_sync(lambda s:PrivacyRequests(s).history(user.id)))
+    except BoundaryDenied:raise HTTPException(409,'Current owned request history unavailable') from None
+
+@router.get('/private-account-download')
+async def private_account_download(request:Request,user=Depends(get_current_user)):
+    from app.uat2.http_bindings import request_binding,attach_request_binding
+    from app.infrastructure.database.session import AsyncSessionLocal
+    from .account_download import snapshot
+    binding=request_binding(request)
+    if binding is None:raise HTTPException(503,'Account export runtime inventory is not admitted')
+    async with AsyncSessionLocal() as db:
+        try:
+            if db.bind.dialect.name=='postgresql':await db.connection(execution_options={'isolation_level':'REPEATABLE READ'})
+            attach_request_binding(request,db)
+            value=await db.run_sync(lambda s:snapshot(s,user.id,binding.scope))
+            return JSONResponse(value,headers={'Cache-Control':'private, no-store','Content-Disposition':'attachment; filename="credx-private-account-snapshot.json"','X-Content-Type-Options':'nosniff','X-Credx-Scope':'partial-owned-account'})
+        except (BoundaryDenied,PermissionError):
+            raise HTTPException(409,'Owned export inventory or integrity could not be verified; no partial response released') from None
+        except DBAPIError:
+            raise HTTPException(503,'Account export storage unavailable; no snapshot released') from None
+        finally:
+            from app.uat2.policy_bindings import SESSION
+            db.sync_session.info.pop(SESSION,None)
+
 @router.post('/privacy-requests')
 async def privacy_request(body:PrivacyBody,user=Depends(get_current_user),db=Depends(get_async_db)):
     try:
@@ -60,9 +86,11 @@ async def privacy_export(id:str,user=Depends(get_current_user),db=Depends(get_as
 
 
 @router.get('/diagnostics')
-async def own_diagnostics(user=Depends(get_current_user),db=Depends(get_async_db)):
+async def own_diagnostics(request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
     from .monitoring import OperationalMonitor
-    return response(await db.run_sync(lambda s:OperationalMonitor(s).snapshot(user.id)))
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    return response(await db.run_sync(lambda s:binding.operations.snapshot(s,user.id) if binding is not None else OperationalMonitor(s).snapshot(user.id)))
 
 class ConsentBody(BaseModel):
     model_config=ConfigDict(extra='forbid')
@@ -89,9 +117,12 @@ async def support_revoke(id:str,user=Depends(get_current_user),db=Depends(get_as
         await db.rollback();raise HTTPException(404,'Owned consent required') from None
 
 @router.get('/support-consents/{id}/access')
-async def support_read(id:str,scope:str,user=Depends(get_current_user),db=Depends(get_async_db)):
+async def support_read(id:str,scope:str,request:Request,user=Depends(get_current_user),db=Depends(get_async_db)):
     from .support import SupportAccess
-    try:return response(await db.run_sync(lambda s:SupportAccess(s).read(user.id,id,scope)))
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    diagnostics=binding.operations.snapshot if binding is not None else None
+    try:return response(await db.run_sync(lambda s:SupportAccess(s,diagnostics=diagnostics).read(user.id,id,scope)))
     except BoundaryDenied:
         await db.rollback();raise HTTPException(403,'Support access denied') from None
 

@@ -11,7 +11,7 @@ for(const selected of [[],['zerodha_rebalance'],['indmoney_us'],['zerodha_rebala
  assert.equal(surfaceVisible(data,'/console/zerodha-other'),false);
 });
 test('unavailable versus selected-but-not-ready never grants operations',()=>{
- const data=policy(['bullpen_research','zerodha_rebalance']);assert.equal(surfaceVisible(data,'/console/bullpen-ai'),false);
+ const data=policy(['bullpen_research','zerodha_rebalance']);assert.equal(surfaceVisible(data,'/console/bullpen-ai'),true);
  data.modules[0].capabilities.view.allowed=false;assert.equal(surfaceVisible(data,'/console/zerodha'),true);assert.equal(surfaceAllowed(data,'/console/zerodha'),false);
  assert.equal(allowedModule(data,'sheets_export','export'),false);
 });
@@ -37,6 +37,9 @@ test('in-flight optional and aggregate reads abort on disable, failure and accou
   const next=gate.moduleRequestSignal('/backend-api/indmoney-us/portfolio');gate.clearModulePolicy();assert.equal(next.aborted,true);
   assert.throws(()=>gate.moduleRequestSignal('/backend-api/indmoney-us/portfolio'),{name:'AbortError'});
   assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/me/modules'));
+  assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/account/operations/diagnostics'));
+  assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/account/operations/privacy-requests'));
+
   assert.doesNotThrow(()=>gate.moduleRequestSignal('/backend-api/me/modules/safety-activity'));
   gate.installModulePolicy(policy([],2));assert.throws(()=>gate.moduleRequestSignal('/backend-api/indmoney-us/portfolio'),{name:'AbortError'});
  }finally{globalThis.window=previous;}

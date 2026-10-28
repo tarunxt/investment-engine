@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from app.core.uat2 import validate_uat2_startup, uat2_mode
 from app.domains.auth.router import router as auth_router
 from app.domains.modules.router import router as modules_router
-from app.domains.indmoney_us.router import router as us_router
 from app.uat2.router import router
 from app.domains.jobs.router import router as jobs_router
 from app.domains.runs.router import router as runs_router
@@ -29,26 +28,22 @@ app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
 app.include_router(auth_router)
 from app.domains.public_service.router import router as public_service_router
 app.include_router(public_service_router)
-# Management contract only; optional domain routers remain unavailable.
+# Management contract; availability comes only from the scoped simulation session.
 app.include_router(modules_router)
 # Masked owner connection metadata only; no setup writes or broker adapters.
 from app.domains.connections.router import router as connections_router
 app.include_router(connections_router)
-# Only portfolio read routes: price fetches and ingestion remain disabled.
-for route in us_router.routes:
-    if route.path in {'/indmoney-us/portfolio', '/indmoney-us/portfolio/{snapshot_id}'} and route.methods == {'GET'}:
-        app.include_router(APIRouter(routes=[route]))
+# Mount static /runs/analysis-workflows paths before legacy /runs/{run_id}.
+from app.uat2.workflow import install_workflow
+workflow_binding = install_workflow(app)
+# Read-only history must precede /runs/{run_id}; never mount its write siblings.
 # Read-only actual job/run handlers make Stage02 ownership reviewable without
 # mounting AI dispatch, exports, cancellations or production WebSocket relays.
 for private_router in (jobs_router, runs_router):
     for route in private_router.routes:
-        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}'} and route.methods == {'GET'}:
+        if route.path in {'/jobs', '/jobs/{job_id}', '/runs', '/runs/{run_id}',
+                          '/runs/auto-rebalance-history', '/runs/auto-rebalance-history/{portfolio}/{sequence}'} and route.methods == {'GET'}:
             app.include_router(APIRouter(routes=[route]))
-# Only owner safety reads; approval and financial writes remain unmounted.
-from app.domains.order_intents.router import router as order_review_router
-for route in order_review_router.routes:
-    if route.path in {'/order-intents/reviews','/order-intents/reviews/{id}','/order-intents/positions'} and route.methods == {'GET'}:
-        app.include_router(APIRouter(routes=[route]))
 app.include_router(router)
 
 

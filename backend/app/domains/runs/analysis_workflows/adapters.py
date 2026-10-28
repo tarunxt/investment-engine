@@ -34,6 +34,7 @@ class QueuedAI:
         if job.status in JobStatus.active():return None
         if job.status!=JobStatus.COMPLETED:
             error=PermanentAnalysisError('Persisted analysis job failed')
+            error.failure_kind=(job.runtime_metadata_json or {}).get('analysis_failure',{}).get('kind','failed')
             error.cost_usd=str(job.estimated_cost) if job.estimated_cost is not None else None;error.job_id=job.id;raise error
         if governed:
             from app.domains.ai_limits.jobs import validate_completed_job

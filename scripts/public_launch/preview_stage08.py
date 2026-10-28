@@ -31,16 +31,9 @@ def install(app):
     async def no_orders():return {'data':[],'synthetic':True,'direct_market_orders_enabled':False}
     @app.get('/dashboard/summary')
     async def summary(user=Depends(get_current_user),db=Depends(get_async_db)):
-        ids=await visible_module_ids(db,user.id)
-        data=await fake.dashboard()
-        if 'zerodha_rebalance' not in ids:data['zerodha']=None
-        if 'indmoney_us' in ids:
-            data['indmoney_us']={'snapshot':{'id':user.id,'snapshot_date':STAMP[:10],'captured_at':STAMP,'source':'synthetic-local','parse_status':'parsed','parse_warnings':['Synthetic local preview'],'holdings_count':2,'current_value':1050,'invested_value':1000,'wallet_balance':100,'total_return_value':50,'total_return_percent':5,'day_return_value':5,'day_return_percent':.48,'top_holdings':[],'history':[]}}
-        else:data['indmoney_us']=None
-        data['bullpen']=None
-        for name,module in [('zerodha','zerodha_rebalance'),('indmoney_us','indmoney_us')]:
-            if module not in ids:data['sections'][name]={'status':'unavailable','duration_ms':0,'error':'Module disabled'}
-        return data
+        # Delegate to the actual owner/selection-scoped projection. Never replace
+        # accepted manual data with a fixed preview balance.
+        return await fake.dashboard(current_user=user,db=db)
     @app.get('/zerodha/threats/latest',dependencies=[Depends(india)])
     async def no_india_threats():return {'analysis':None,'synthetic':True}
     @app.get('/indmoney-us/threats/latest')

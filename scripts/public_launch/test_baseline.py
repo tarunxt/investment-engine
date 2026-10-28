@@ -83,3 +83,17 @@ def test_fake_broker_cannot_submit_and_accounts_do_not_cross(fake_broker):
     with pytest.raises(RuntimeError, match="previews only"):
         fake_broker.submit(a)
     assert fake_broker.orders == []
+
+
+def test_generated_next_outputs_never_become_source_entrypoints(tmp_path):
+    from shutil import copyfile
+    (tmp_path/'backend/app/domains/modules').mkdir(parents=True)
+    (tmp_path/'backend/app/main.py').write_text('from fastapi import FastAPI\napp=FastAPI()\n')
+    copyfile(inventory.ROOT/'backend/app/domains/modules/coverage.py',tmp_path/'backend/app/domains/modules/coverage.py')
+    for directory in ('app/actual','.next/types/app/generated','.next-candidate/types/app/generated','.next-uat2-security/types/app/generated'):
+        target=tmp_path/'frontend'/directory/'route.ts';target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_text('export const GET = () => new Response("fixture");\n')
+    result=inventory.scan(tmp_path)
+    frontend=[entry for entry in result['entries'] if entry['module']=='frontend']
+    assert len(frontend)==1 and frontend[0]['route']=='/actual'
+    assert all('/.next' not in path for path in result['source_sha256'])

@@ -1,18 +1,24 @@
 """Explicit user confirmation APIs; no normal-runtime activation endpoint."""
-from fastapi import APIRouter,Depends,HTTPException,Response
+from fastapi import APIRouter,Depends,HTTPException,Response,Request
 from pydantic import BaseModel,ConfigDict,Field
 from app.domains.auth.dependencies import get_current_user
 from app.infrastructure.database.session import get_async_db
-from .service import Orders
+from .service import Orders,orders_for_runtime
 from .contracts import OrderDenied
 
 router=APIRouter(prefix='/order-intents',tags=['confirmed-orders'])
 
-def get_runtime():
+def get_runtime(request:Request=None):
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    if binding is not None and getattr(binding,'orders',None) is not None:return binding.orders
     # No configuration flag or registration API installs a financial runtime.
     raise HTTPException(503,'Order preparation is unavailable; financial runtime remains disabled')
 
-def get_read_runtime():
+def get_read_runtime(request:Request=None):
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    if binding is not None and getattr(binding,'orders',None) is not None:return binding.orders
     # Deliberately absent in the real application. Only a separately composed,
     # network-denied synthetic preview overrides this dependency in-process.
     return None
@@ -32,7 +38,7 @@ class Confirmation(BaseModel):
 async def invoke(db,user,runtime,method,*args,**kwargs):
     try:
         def work(session):
-            result=getattr(Orders(session,policy=runtime.policy,risk=runtime.risk),method)(user.id,*args,**kwargs)
+            result=getattr(orders_for_runtime(session,runtime),method)(user.id,*args,**kwargs)
             if isinstance(result,dict):return result
             return {'id':result.id,'state':result.state,'review_digest':result.review_digest,'approval_expires_at':result.expires_at.isoformat() if result.expires_at else None,'simulation_only':True}
         result=await db.run_sync(work);await db.commit();return result
@@ -40,8 +46,10 @@ async def invoke(db,user,runtime,method,*args,**kwargs):
         await db.rollback();raise HTTPException(409,'Current owned order, policy and explicit review required') from None
 
 @router.get('/status')
-async def status(user=Depends(get_current_user)):
-    return {'runtime_enabled':False,'real_financial_execution':False,'simulation_only':True,'approval_policy':'Exact authenticated order or basket confirmation; no standing consent'}
+async def status(request:Request,user=Depends(get_current_user)):
+    from app.uat2.http_bindings import request_binding
+    binding=request_binding(request)
+    return {'runtime_enabled':binding is not None,'real_financial_execution':False,'simulation_only':True,'approval_policy':'Exact authenticated order or basket confirmation; no standing consent'}
 
 @router.get('/positions')
 async def positions(response:Response,user=Depends(get_current_user),db=Depends(get_async_db)):
@@ -68,7 +76,7 @@ async def create(body:Draft,user=Depends(get_current_user),db=Depends(get_async_
     from app.domains.modules.lifecycle import WorkIdentity
     try:
         def work(session):
-            row=Orders(session,policy=runtime.policy,risk=runtime.risk).create(WorkIdentity(user.id,'zerodha_rebalance',body.module_version),body.operation_key,body.connection_id,body.order)
+            row=orders_for_runtime(session,runtime).create(WorkIdentity(user.id,'zerodha_rebalance',body.module_version),body.operation_key,body.connection_id,body.order)
             return {'id':row.id,'state':row.state,'simulation_only':True}
         result=await db.run_sync(work);await db.commit();return result
     except (OrderDenied,PermissionError):

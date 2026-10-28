@@ -1,0 +1,46 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import ts from 'typescript';
+const read=p=>readFileSync(new URL(p,import.meta.url),'utf8');const model={};new Function('exports',ts.transpileModule(read('../lib/workspaceTask.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(model);
+const base={module:'zerodha_rebalance',available:true,connected:true,orders:[],activityKnown:true};
+test('unresolved outcome takes precedence over reviews, completed analysis and unavailable module',()=>{const task=model.nextWorkspaceTask({...base,available:false,orders:[{module_id:base.module,state:'unknown',unresolved:true},{module_id:base.module,state:'awaiting_approval'}],run:{status:'completed'}});assert.equal(task.label,'Resolve recorded order outcome');assert.equal(task.href,'/console/profile/activity');});
+test('exact review takes precedence over a new research setup',()=>assert.equal(model.nextWorkspaceTask({...base,orders:[{module_id:base.module,state:'awaiting_approval'}]}).label,'Review exact instructions'));
+test('unavailable activity cannot suggest safe new research',()=>assert.equal(model.nextWorkspaceTask({...base,activityKnown:false}).label,'Check recorded activity'));
+test('interrupted and completed research are distinct and never imply execution',()=>{assert.equal(model.nextWorkspaceTask({...base,run:{status:'partial',stage:'review'}}).label,'Resume research activity');assert.match(model.nextWorkspaceTask({...base,run:{status:'completed'}}).reason,/not approval/);});
+test('source setup follows existing work and retains manual US language',()=>{assert.equal(model.nextWorkspaceTask({...base,connected:false}).label,'Review connection setup');assert.equal(model.nextWorkspaceTask({...base,module:'indmoney_us',connected:false}).label,'Review manual import');});
+test('personal dashboard replaces legacy duplicate overview without raw Bullpen calls or auto-effects',()=>{const source=read('../app/console/dashboard/PersonalDashboard.tsx');assert.doesNotMatch(source,/\/api\/bullpen-ai|method:\s*['"]POST|\.post\(|Combined INR|Portfolio Command Center/);assert.match(source,/selected_only=true/);assert.match(source,/setKnown\(false\)/);assert.match(source,/slice\(0,3\)/);assert.match(source,/'Not recorded'/);assert.match(read('../app/console/dashboard/DashboardInteractiveIsland.tsx'),/import\("\.\/PersonalDashboard"\)/);});
+
+test('manual import readiness and incomplete history remain explicit',()=>{const source=read('../app/console/dashboard/PersonalDashboard.tsx');assert.match(source,/\['ready','not_required'\]\.includes/);assert.match(source,/value\.has_more===false/);assert.match(source,/results\[1\]\.value===true/);assert.match(source,/available&&financial&&<dl/);assert.doesNotMatch(source,/summary\?\.bullpen/);});
+
+test('existing durable workflow links retain anchors outside UAT2',()=>{assert.match(read('../app/console/dashboard/PersonalDashboard.tsx'),/root\+'\/research'\+\(run\?`#analysis-workflow-/);assert.match(read('../app/console/automated-rebalance/_components/ServerAnalysis.tsx'),/id=\{`analysis-workflow-\$\{row.id\}`\}/);});
+function dashboardHarness(manifest){
+ const text=read('../app/console/dashboard/PersonalDashboard.tsx');const tree=ts.createSourceFile('dashboard.tsx',text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);const fn=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='OwnedDashboard');const js=ts.transpileModule(fn.getText(tree),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+ const effects=[],calls=[],updates=[];const create=(type,props)=>({type,props});const runtime={jsx:create,jsxs:create};
+ const render=new Function('useEffect','useState','apiService','allowedModule','acceptInitialDashboard','scopeDashboardSummary','nextWorkspaceTask','require','exports','Link','process',js+';return OwnedDashboard;')(effect=>effects.push(effect),initial=>[typeof initial==='function'?initial():initial,value=>updates.push(value)],{fetch(path,config){return new Promise(resolve=>calls.push({path,config,resolve}));}},(m,id)=>m.modules.some(row=>row.module_id===id&&row.selection.enabled&&row.availability.available&&row.capabilities.view?.allowed),()=>null,value=>value,model.nextWorkspaceTask,()=>runtime,{},'a',{env:{NEXT_PUBLIC_UAT2:'true'}});
+ render({initialSummary:null,initialScope:null,manifest,owner:7101,generation:'test'});const cleanup=effects[0]();return{calls,updates,cleanup};
+}
+test('actual dashboard effect never queries optional data when selected module is unavailable',async()=>{
+ const seed=JSON.parse(read('./fixtures/stage08-ready-manifest.json'));for(const m of seed.modules){m.selection.enabled=m.module_id==='zerodha_rebalance';m.availability.available=false;for(const c of Object.values(m.capabilities))c.allowed=false;}
+ const h=dashboardHarness(seed);assert.deepEqual(h.calls.map(x=>x.path),['/backend-api/order-intents/reviews']);h.cleanup();h.calls[0].resolve({owner_id:7101,has_more:false,intents:[]});await new Promise(resolve=>setImmediate(resolve));assert.equal(h.updates.length,0);
+});
+
+test('empty selection still mounts core safety reads without optional data',async()=>{const seed=JSON.parse(read('./fixtures/stage08-ready-manifest.json'));for(const m of seed.modules)m.selection.enabled=false;const h=dashboardHarness(seed);assert.deepEqual(h.calls.map(x=>x.path),['/backend-api/order-intents/reviews']);h.cleanup();h.calls[0].resolve({owner_id:7101,has_more:false,intents:[]});await new Promise(resolve=>setImmediate(resolve));assert.equal(h.updates.length,0);assert.doesNotMatch(read('../components/modules/ModuleRouteGate.tsx'),/\['\/console\/dashboard','\/console\/jobs'/);});
+
+// Exercise the actual rendered Activity link and the existing module-policy gate.
+test('activity history uses canonical module routes and preserves disabled-module fences',()=>{
+ const source=read('../components/workspace/ModuleWorkspace.tsx');
+ const tree=ts.createSourceFile('workspace.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const fn=tree.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='ModuleActivity');
+ const js=ts.transpileModule(fn.getText(tree),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+ const create=(type,props)=>({type,props}),runtime={jsx:create,jsxs:create};
+ const policy={};new Function('exports',ts.transpileModule(read('../lib/modulePolicy.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(policy);
+ function find(node){if(!node||typeof node!=='object')return null;if(node.props?.children==='Existing workflow history')return node.props.href;for(const child of [node.props?.children].flat(Infinity)){const value=find(child);if(value)return value;}return null;}
+ for(const [portfolio,route,moduleId] of [['india','zerodha','zerodha_rebalance'],['indmoney_us','indmoneyUs','indmoney_us']]){
+  const render=new Function('useModuleWorkspace','require','exports','Link',js+';return ModuleActivity;')(()=>({portfolio,facts:{loading:false,orders:[],known:true}}),()=>runtime,{},'a');
+  const href=find(render());assert.equal(href,'/console/auto-rebalance-runs/'+route);
+  const manifest=JSON.parse(read('./fixtures/stage08-ready-manifest.json'));
+  const selected=manifest.modules.find(m=>m.module_id===moduleId);selected.selection.enabled=true;selected.capabilities.view.allowed=true;
+  assert.equal(policy.surfaceFor(manifest,href).module_ids.includes(moduleId),true);
+  assert.equal(policy.surfaceAllowed(manifest,href),true);
+  manifest.modules.find(m=>m.module_id===moduleId).selection.enabled=false;
+  assert.equal(policy.surfaceAllowed(manifest,href),false);
+ }
+});

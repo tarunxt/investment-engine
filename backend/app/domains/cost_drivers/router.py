@@ -11,6 +11,12 @@ router = APIRouter(prefix="/api/admin/cost-drivers", tags=["cost-drivers"])
 
 _allowed_admin = require_cost_dashboard_admin
 
+
+@router.get('/access')
+def access(user: User = Depends(_allowed_admin)):
+    """Admission only; no cloud/provider/billing service is constructed."""
+    return {'allowed': True, 'scope': 'cost_dashboard', 'owner_id': user.id}
+
 def _month_param(month: str | None) -> str | None:
     if month is None or month == "":
         return None

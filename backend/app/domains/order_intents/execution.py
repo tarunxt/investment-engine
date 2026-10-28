@@ -17,6 +17,7 @@ from .models import OrderIntent, OrderLeg
 from .service import TOPIC
 from .execution_models import ExecutionFence, ExecutionRun, ExecutionAttempt
 from .execution_fake import ExecutionBrokerFake
+from .journal_fake import JournalBrokerFake
 from .execution_risk import ExecutionLimits, fresh_risk
 
 
@@ -31,7 +32,7 @@ class ExecutionWorker:
     RECONCILE_WINDOW = timedelta(minutes=10)
 
     def __init__(self, orders, broker, market, *, limits=None):
-        if type(broker) is not ExecutionBrokerFake:
+        if type(broker) not in {ExecutionBrokerFake, JournalBrokerFake}:
             raise OrderDenied('EXACT_SYNTHETIC_EXECUTION_BROKER_REQUIRED')
         if orders.db.get_bind() is broker.engine:
             raise OrderDenied('SEPARATE_SYNTHETIC_VENUE_REQUIRED')
@@ -292,6 +293,14 @@ class ExecutionWorker:
     def reconcile(self, owner, intent):
         row, legs, run = self.snapshot(owner, intent)
         now = self.now()
+        if row.state == 'submitting' and all(leg.state == 'draft' for leg in legs) and not any(
+                self.db.get(ExecutionAttempt, leg.id) is not None for leg in legs):
+            # Dispatch committed its one-use claim before any effect claim.
+            # The account/intent locks from snapshot serialize this against
+            # _advance. Invalidate rather than revive the consumed approval.
+            row.state = 'invalidated'
+            self.db.commit()
+            return row
         for i, leg in enumerate(legs):
             attempt = self.db.get(ExecutionAttempt, leg.id, populate_existing=True)
             if attempt is None or leg.state in {'filled', 'rejected'}:

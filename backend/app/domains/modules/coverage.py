@@ -36,6 +36,9 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         # the owned review/connection and fresh execute policy before persisting
         # approval. Never manufacture action_confirmed in generic HTTP policy.
         return ('zerodha_rebalance','analyze')
+    if (domain=='order_intents' and endpoint=='revoke' and methods=={'POST'}
+            and path=='/order-intents/{id}/revoke'):
+        return None # Owned pre-submission cancellation; service refuses uncertain/submitted work.
     if domain=='order_intents' and methods=={'GET'} and path in {'/order-intents/reviews','/order-intents/reviews/{id}','/order-intents/positions'}:
         return None # Authenticated owner safety observations; no execution exemption.
     if domain=='ai_limits' and methods=={'GET'} and path in {'/api-usage/limits','/api-usage/limits/private-artifacts/{artifact_id}'}:
@@ -59,7 +62,7 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         ('POST','/account/operations/disposable/monitor/owners/{owner_id}/alerts/{id}/escalate','escalate_monitor')}:
         return None # Current owner or appointed active operator, explicit disposable DB/sink only.
     if domain=='public_service' and len(methods)==1 and (next(iter(methods),''),path) in {
-        ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests/{id}'),
+        ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests'),('GET','/account/operations/private-account-download'),('GET','/account/operations/privacy-requests/{id}'),
         ('POST','/account/operations/privacy-requests/{id}/cancel'),('GET','/account/operations/privacy-requests/{id}/export'),
         ('GET','/account/operations/eligibility'),('POST','/account/operations/eligibility'),
         ('GET','/account/operations/diagnostics'),('POST','/account/operations/support-consents'),

@@ -13,7 +13,7 @@ type ActiveTab = 'swingTrade' | 'portfolio' | 'events' | 'threats' | 'rebalance'
 const ROUTES = {
   zerodha: {
     swingTrade: URLs.routes.console.zerodhaSwingTrade(),
-    portfolio: URLs.routes.console.zerodha(),
+    portfolio: '/console/zerodha/portfolio',
     events: URLs.routes.console.zerodhaEvents(),
     threats: URLs.routes.console.zerodhaThreats(),
     rebalance: URLs.routes.console.zerodhaRebalance(),
@@ -21,7 +21,7 @@ const ROUTES = {
   },
   indmoneyUs: {
     swingTrade: URLs.routes.console.indmoneyUsSwingTrade(),
-    portfolio: URLs.routes.console.indmoneyUs(),
+    portfolio: '/console/indmoney-us/portfolio',
     events: URLs.routes.console.indmoneyUsEvents(),
     threats: URLs.routes.console.indmoneyUsThreats(),
     rebalance: URLs.routes.console.indmoneyUsRebalance(),
@@ -30,12 +30,9 @@ const ROUTES = {
 } satisfies Record<PortfolioKey, Record<Exclude<ActiveTab, null>, string>>;
 
 const TABS = [
-  { key: 'portfolio', label: 'Portfolio' },
   { key: 'swingTrade', label: 'Swing Trade' },
   { key: 'threats', label: 'Threats' },
   { key: 'events', label: 'Events' },
-  { key: 'rebalance', label: 'Rebalance' },
-  { key: 'finalActionables', label: 'Final Actionables' },
 ] as const;
 
 export function PortfolioAnalysisNav({
@@ -49,7 +46,7 @@ export function PortfolioAnalysisNav({
 }) {
   const {manifest}=useModules();
   return (
-    <div className={cn('flex flex-wrap items-start gap-3', className)}>
+    <details className={className}><summary className="min-h-11 cursor-pointer text-sm">Additional research views</summary><div className={cn('flex flex-wrap items-start gap-3')}>
       {TABS.map((item) => (
         <div key={item.key} className="flex min-w-[112px] flex-col items-stretch gap-1.5">
           <Button
@@ -73,6 +70,6 @@ export function PortfolioAnalysisNav({
           </div>
         </div>
       ))}
-    </div>
+    </div></details>
   );
 }

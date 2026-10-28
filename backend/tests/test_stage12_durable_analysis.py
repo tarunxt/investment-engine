@@ -342,3 +342,67 @@ def test_missing_cost_is_visible_as_unknown_not_free(env):
     service(e,rt).consume(message(e).id,now=NOW);e.db.commit()
     receipt=service(e).detail(1,row.id)['stages'][0]['checkpoint']['attempts'][0]
     assert receipt['cost_usd'] is None
+
+@pytest.mark.asyncio
+async def test_workspace_readiness_read_never_dispatches_or_changes_frozen_work(env,monkeypatch):
+    from app.domains.runs.analysis_router import list_analysis_workflows
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr('app.domains.modules.visibility.visible_module_ids',AsyncMock(return_value=['indmoney_us']))
+    row=create(env,'readonly-workspace-readiness')
+    original=deepcopy(row.execution_json)
+    before=len(list(env.db.scalars(select(OutboxMessage))))
+    async def run_sync(fn):return fn(env.db)
+    result=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',include_readiness=True,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert result['items'][0]['input_readiness']['current'] is True
+    env.states[1]['version']=2
+    stale=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',include_readiness=True,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert stale['items'][0]['input_readiness']['current'] is False
+    assert len(list(env.db.scalars(select(OutboxMessage))))==before
+    assert row.execution_json==original and row.status=='queued'
+    assert not env.db.new and not env.db.dirty
+
+def test_reviewed_setup_hashes_are_checked_before_new_work_or_outbox(env):
+    source_hash=digest(env.states[1]);plan_hash=digest(env.plan)
+    for source,plan in [('0'*64,plan_hash),(source_hash,'0'*64),(digest(env.states[2]),plan_hash)]:
+        with pytest.raises(ConflictException):service(env).create(1,'indmoney_us','reviewed-hash-start',expected_source_hash=source,expected_plan_hash=plan,now=NOW)
+        assert not list(env.db.scalars(select(Workflow)))
+        assert not list(env.db.scalars(select(OutboxMessage)))
+    row=service(env).create(1,'indmoney_us','reviewed-hash-start',expected_source_hash=source_hash,expected_plan_hash=plan_hash,now=NOW)
+    assert row.execution_json['source_hash']==source_hash and row.execution_json['plan_hash']==plan_hash
+    assert row.execution_json['orders_authorized'] is False
+
+@pytest.mark.asyncio
+async def test_setup_context_is_owned_read_only_and_does_not_invent_candidate_support(env):
+    from app.domains.runs.analysis_router import setup_context
+    from fastapi import HTTPException
+    env.states[1]={'owner_id':1,'snapshot_id':12,'captured_at':NOW.isoformat(),'connection':None,'holdings':[]}
+    async def run_sync(fn):return fn(env.db)
+    context=await setup_context(portfolio='indmoney_us',db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert context['source_hash']==digest(env.states[1])
+    assert context['plan_hash']==digest(env.plan) and context['orders_authorized'] is False
+    assert context['candidate_preview_available'] is False
+    assert context['usage']['estimated_cost_usd'] is None
+    assert all(not value['editable'] for value in context['constraints'].values())
+    assert not list(env.db.scalars(select(Workflow))) and not list(env.db.scalars(select(OutboxMessage)))
+    env.states[1]['owner_id']=2
+    with pytest.raises(HTTPException) as denied:await setup_context(portfolio='indmoney_us',db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert denied.value.status_code==409
+
+def test_reviewed_module_version_rejects_stale_policy_before_enqueue(env):
+    with pytest.raises(ConflictException):service(env).create(1,'indmoney_us','old-policy-review',expected_module_version=2,now=NOW)
+    assert not list(env.db.scalars(select(Workflow))) and not list(env.db.scalars(select(OutboxMessage)))
+    row=service(env).create(1,'indmoney_us','current-policy-review',expected_module_version=1,now=NOW)
+    assert row.module_version==1
+
+@pytest.mark.asyncio
+async def test_owner_scoped_frozen_input_lookup_recovers_prior_key_before_limits(env,monkeypatch):
+    from app.domains.runs.analysis_router import list_analysis_workflows
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr('app.domains.modules.visibility.visible_module_ids',AsyncMock(return_value=['indmoney_us']))
+    first=create(env,'retained-owner-one')
+    other=service(env).create(2,'indmoney_us','retained-owner-two',now=NOW);env.db.commit()
+    async def run_sync(fn):return fn(env.db)
+    result=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',source_hash=first.execution_json['source_hash'],plan_hash=first.execution_json['plan_hash'],module_version=1,manual_only=True,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert [row['id'] for row in result['items']]==[first.id]
+    foreign=await list_analysis_workflows(selected_only=True,portfolio='indmoney_us',request_key=other.request_key,db=SimpleNamespace(run_sync=run_sync),user=SimpleNamespace(id=1),runtime=env.runtime)
+    assert foreign['items']==[]
