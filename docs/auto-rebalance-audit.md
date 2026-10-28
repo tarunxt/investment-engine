@@ -89,3 +89,25 @@ PYTHONPATH=backend python backend/scripts/report_historical_score_coverage.py \
 It reports metadata and ambiguity only, rolls back, and has no apply mode. No
 production coverage is implied by synthetic tests. A missing original formula
 cannot be recovered from today's configuration or from parameter cells alone.
+
+
+## Stock history chronology and displayed actions
+
+Captured Stock Details combines original saved summaries, explicitly labeled
+current-formula reconstructions, and all retained owned run/model observations.
+Source observation reads scan keyset pages from retained RunJob/Job records and
+immutable output captures, without queuing materialization or rerunning providers.
+A stable run/job/response revision/row identity deduplicates identical immutable
+copies while preserving different models, revisions and rows. Failed/partial
+sources retain their actual status. Unknown market identity and deleted uncaptured
+outputs cannot be reconstructed. The UI reports partial reads and scan progress.
+Saved summary reads follow every available page rather than requiring older-page
+clicks; the merged chronology sorts newest first.
+
+The score-based displayed action applies the existing matrix range evaluator to
+the exact stored score, before rounding. It is labeled as current rules; original
+recorded action, formula version, score, units and amounts remain unchanged.
+A positive score needs known historical holdings to distinguish Add more from
+Buy New. Current holdings never stand in for missing historical holdings. Missing,
+nonfinite or out-of-range scores stay undetermined. These display actions do not
+modify trading logic, executable orders, saved history or historical policy.

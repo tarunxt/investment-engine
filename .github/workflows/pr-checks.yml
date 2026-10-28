@@ -192,6 +192,7 @@ jobs:
           backend/tests/test_recommendation_audit.py
           backend/tests/test_recommendation_audit_integration.py
           backend/tests/test_historical_score_reader.py
+          backend/tests/test_stock_source_observations.py
           backend/tests/test_recommendation_audit_adapters.py
           backend/tests/test_recommendation_audit_queue.py
           backend/tests/test_recommendation_audit_outbox.py

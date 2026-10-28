@@ -1,4 +1,5 @@
 "use client";
+import type { StockSourceObservation } from "@/types/api";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
@@ -4093,6 +4094,51 @@ function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, ex
   );
 }
 
+export async function scanStockSourceObservations(market: SwingTradeMarket, symbol: string, onPage: (rows: StockSourceObservation[], examined: number, note: string) => void, active: () => boolean) {
+  let cursor: string | null = null;
+  const cursors = new Set<string>(), rows = new Map<string, StockSourceObservation>();
+  let examined = 0;
+  while (active()) {
+    const page = await apiService.getStockSourceObservations({ market, symbol, cursor });
+    if (!active()) return;
+    if (page.market !== market || normalizeStockSymbol(page.symbol) !== normalizeStockSymbol(symbol)) throw new Error("Stock source response does not match this selection.");
+    for (const row of page.items) if (!rows.has(row.id)) rows.set(row.id, row);
+    examined += page.examined_sources;
+    onPage([...rows.values()].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || b.job_id - a.job_id), examined, page.coverage_note);
+    if (!page.has_more) return;
+    if (!page.next_cursor || cursors.has(page.next_cursor)) throw new Error("Source pagination stopped because the cursor did not advance. Coverage is incomplete.");
+    cursor = page.next_cursor; cursors.add(cursor);
+  }
+}
+
+export function RetainedStockObservations({ market, symbol, saved, reconstructed }: { market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[] }) {
+  const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null }>({ rows: [], examined: 0, note: "", loading: true, error: null });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (typeof apiService.getStockSourceObservations !== "function") return;
+    let active = true;
+    void scanStockSourceObservations(market, symbol, (rows, examined, note) => { if (active) setState({ rows, examined, note, loading: true, error: null }); }, () => active).then(() => { if (active) setState(current => ({ ...current, loading: false })); }, (error: unknown) => { if (active) setState(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Retained sources could not be read." })); });
+    return () => { active = false; };
+  }, [market, symbol, attempt]);
+  const numeric = (value: unknown) => value !== null && value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Number(value) : null;
+  const rows = [
+    ...saved.map(item => ({ id: `saved:${item.id}`, run_id: item.rebalance_run_id, job_id: null, provider: null, model: null, created_at: item.covered_at, stage: "Saved summary", run_status: item.coverage_status, job_status: "", source: `Original saved summary · ${item.formula_version}`, cells: { "original action": item.action, "recorded score": item.score, "historical units": item.historical_current_units, "original amount": item.amount }, score: item.score, action: item.action, derived: historyScoreDerivedAction(item) })),
+    ...reconstructed.filter(row => !saved.some(item => item.rebalance_run_id === row.runId)).map(row => ({ id: `reconstructed:${row.runId}:${row.id}`, run_id: row.runId, job_id: null, provider: null, model: null, created_at: row.coveredAt, stage: "Rebalance reconstruction", run_status: "Original completion unavailable", job_status: "", source: "Reconstructed · current formula, not original saved decision", cells: { "current formula action": row.formulaAction, "current formula score": row.formulaScore, "captured units": row.detail.currentUnits }, score: row.formulaScore, action: null, derived: historyScoreDerivedAction({ score: row.formulaScore, historical_current_units: row.detail.currentUnits, coverage_status: "suggested" }) })),
+    ...state.rows.map(row => { const score = numeric(row.cells["recorded score"] ?? row.cells["final score"] ?? row.cells["calculated score"] ?? row.cells.score); const action = Object.entries(row.cells).find(([key]) => key === "action" || key.startsWith("action buy"))?.[1]; return { ...row, score, action: action == null ? null : String(action), derived: historyScoreDerivedAction({ score, historical_current_units: numeric(row.cells["current units"] ?? row.cells.current_units), coverage_status: ["completed", "partial"].includes(row.job_status) ? "suggested" : "run_failed" }) }; }),
+  ].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || (b.job_id ?? 0) - (a.job_id ?? 0));
+  return <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4"><h3 className="font-semibold">All retained runs containing {symbol} · original source observations</h3><p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">Scan complete: {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>Retry all retained sources</button></p> : null}<div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : formatScoreValue(row.score)}</td><td className="p-2"><details><summary className="cursor-pointer text-blue-700">View original scores, rationale and fields</summary><dl className="mt-2 space-y-2">{Object.entries(row.cells).map(([key, value]) => <div key={key}><dt className="font-semibold">{key}</dt><dd className="max-w-xl whitespace-pre-wrap break-words">{String(value ?? "Unavailable")}</dd></div>)}</dl></details></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}<p className="mt-3 text-xs text-slate-600">{state.note || "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed."}</p></section>;
+}
+
+export function historyScoreDerivedAction(item: Pick<FinalActionableHistoryItem, "score" | "historical_current_units" | "coverage_status">): { action: ActionCategory | null; note: string } {
+  if (item.coverage_status !== "suggested" || item.score === null || !Number.isFinite(item.score) || item.score < -3 || item.score > 3) return { action: null, note: "A valid saved score in [−3, 3] is required." };
+  const units = item.historical_current_units;
+  const knownUnits = units !== null && Number.isFinite(units) && units >= 0;
+  const rule = evaluateScoreMatrixRules({ currentUnits: knownUnits ? units : null, calculatedScore: item.score, meanScore: null, meanUnitsChange: null, modeAction: null, bullishVotes: 0, bearishVotes: 0, holdVotes: 0, totalVotes: 0, bullishMeanUnits: null, bearishMeanUnits: null }).find(rule => rule.matched);
+  if (!rule) return { action: null, note: "No current score rule matches this saved score." };
+  if (!knownUnits && (rule.action === "Buy New" || rule.action === "Add more")) return { action: null, note: "Bullish score: Buy New / Add more cannot be distinguished because historical holdings are unavailable." };
+  return { action: rule.action, note: `Current score-range rule ${rule.label}, applied to exact saved score ${item.score}. Display only; original action and historical policy are preserved.` };
+}
+
 function historyRationaleInputsPresent(item: FinalActionableHistoryItem): boolean | undefined {
   const rows = item.snapshot_json?.rows;
   if (!Array.isArray(rows) || !rows.length || !rows.every(row => row && typeof row === "object" && "score" in row && (row.score === null || (typeof row.score === "number" && Number.isFinite(row.score))))) return undefined;
@@ -4175,23 +4221,33 @@ function ScopedStockDetailsButton({
     ),
     [effectiveHistoricalRows, persistedRunIds, stock],
   );
+  const historyLoadGeneration = useRef(0);
+  useEffect(() => { if (!open) return; return () => { historyLoadGeneration.current += 1; }; }, [open]);
   const loadPersistedHistory = useCallback(async (cursor: string | null, append: boolean) => {
+    const generation = ++historyLoadGeneration.current;
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const response = await apiService.getFinalActionableHistory({
-        market,
-        symbol: stock.symbol,
-        limit: 50,
-        cursor,
-      });
-      setPersistedHistory((current) => append ? [...current, ...response.items] : response.items);
-      setHistoryCursor(response.next_cursor);
-      setHistoryHasMore(response.has_more);
+      let next = cursor;
+      const seen = new Set<string>();
+      let first = !append;
+      do {
+        const response = await apiService.getFinalActionableHistory({ market, symbol: stock.symbol, limit: 200, cursor: next });
+        if (generation !== historyLoadGeneration.current) return;
+        if (response.items.some(item => item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(stock.symbol))) throw new Error("Saved-history scope does not match this stock.");
+        const replacePage = first;
+        setPersistedHistory(current => { const merged = new Map((replacePage ? [] : current).map(item => [item.id, item])); for (const item of response.items) merged.set(item.id, item); return [...merged.values()].sort((a, b) => parseTimestampMs(b.covered_at) - parseTimestampMs(a.covered_at) || b.id - a.id); });
+        first = false;
+        setHistoryCursor(response.next_cursor); setHistoryHasMore(response.has_more);
+        if (!response.has_more) break;
+        if (!response.next_cursor || seen.has(response.next_cursor)) throw new Error("Saved-history pagination did not advance; coverage is incomplete.");
+        seen.add(response.next_cursor); next = response.next_cursor;
+      } while (next);
     } catch (error) {
+      if (generation !== historyLoadGeneration.current) return;
       setHistoryError(normalizeOperationalErrorMessage(error instanceof Error ? error.message : "Unable to load complete stock history."));
     } finally {
-      setHistoryLoading(false);
+      if (generation === historyLoadGeneration.current) setHistoryLoading(false);
     }
   }, [market, stock.symbol]);
 
@@ -4452,7 +4508,7 @@ function ScopedStockDetailsButton({
                     Show Run Failed / Not Mentioned
                   </button>
                 </div>
-                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">Legacy history is separate from the preceding frozen snapshot used by verification. Saved suggestions preserve their recorded values; reconstructed rows use current settings. Neither certifies missing original policy, holdings or source availability.</p>
+                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">Score-based action applies today’s score-range rules to the exact Recorded Score: [−3, −2) Sell All; [−2, −1) Trim; [−1, 1) Hold; [1, 3] Add more when historical units are positive, otherwise Buy New when known zero. Unknown historical holdings leave the bullish action undetermined. Original recorded action, score, units and amounts are preserved; the derived action changes no orders or saved history. Historical formula context may differ from today’s rules.</p>
                 {historyError ? (
                   <div className="mb-3">
                     <OperationalErrorNotice
@@ -4468,6 +4524,8 @@ function ScopedStockDetailsButton({
                     Loading available historical suggestions…
                   </div>
                 ) : null}
+                <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} />
+                <h4 className="mt-5 mb-2 text-sm font-semibold">Saved summary source rows</h4>
                 {displayedPersistedHistory.length ? (
                   <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
                     <table className="min-w-[72rem] text-xs">
@@ -4476,7 +4534,8 @@ function ScopedStockDetailsButton({
                           <th className="px-3 py-2 font-semibold">Stock</th>
                           <th className="px-3 py-2 font-semibold">Timestamp covered</th>
                           <th className="px-3 py-2 font-semibold">Coverage</th>
-                          <th className="px-3 py-2 font-semibold">Recorded action</th>
+                          <th className="px-3 py-2 font-semibold">Score-based action · current rules</th>
+                          <th className="px-3 py-2 font-semibold">Original recorded action</th>
                           <th className="px-3 py-2 font-semibold">Recorded score</th>
                           <th className="px-3 py-2 font-semibold">Consensus</th>
                           <th className="px-3 py-2 font-semibold">Historical value</th>
@@ -4492,8 +4551,9 @@ function ScopedStockDetailsButton({
                               <RunJobLink runId={item.rebalance_run_id}>{formatDateTime(item.covered_at)}</RunJobLink>
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 capitalize text-gray-600">{item.coverage_status.replaceAll("_", " ")}</td>
+                            <td className="px-3 py-2" title={historyScoreDerivedAction(item).note}>{historyScoreDerivedAction(item).action ? <FinalActionValue value={historyScoreDerivedAction(item).action} /> : <span className="text-slate-500">{historyScoreDerivedAction(item).note}</span>}</td>
                             <td className="px-3 py-2"><FinalActionValue value={item.action} /></td>
-                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{item.score === null ? "—" : <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setHistoricalMatrix({ item, coveredAt: item.covered_at, runId: item.rebalance_run_id })} aria-label={`Open ${item.stock_symbol} score matrix for ${formatDateTime(item.covered_at)}`}>{formatScoreValue(item.score)}</button>}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{item.score === null ? "—" : <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setHistoricalMatrix({ item, coveredAt: item.covered_at, runId: item.rebalance_run_id })} title={`Exact saved score: ${item.score}; action uses this value before display rounding.`} aria-label={`Open ${item.stock_symbol} score matrix for ${formatDateTime(item.covered_at)}`}>{formatScoreValue(item.score)}</button>}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
                               {item.consensus_numerator !== null && item.consensus_denominator !== null
                                 ? `${item.consensus_numerator}/${item.consensus_denominator}`

@@ -1,3 +1,4 @@
+import type { StockSourceObservationPage } from "@/types/api";
 import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
 import {
@@ -1018,6 +1019,12 @@ class apiServiceClass implements IApiService {
       `${URLs.runs.finalActionableHistory()}?${query.toString()}`,
       { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS },
     );
+  }
+
+  getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage> {
+    const query = new URLSearchParams({ market: params.market, symbol: params.symbol });
+    if (params.cursor) query.set("cursor", params.cursor);
+    return this.get<StockSourceObservationPage>(`${URLs.runs.create()}/final-actionables/stock-observations?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
   }
 
   getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse> {
