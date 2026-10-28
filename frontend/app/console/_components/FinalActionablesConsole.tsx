@@ -6801,6 +6801,9 @@ function OpenActionablesCalculationsModal({
   detailsData,
   onSetupClick,
   focusTarget,
+  loading = false,
+  loadError = null,
+  onRetry,
 }: {
   open: boolean;
   onClose: () => void;
@@ -6815,6 +6818,9 @@ function OpenActionablesCalculationsModal({
   detailsData?: StockDetailsData;
   onSetupClick?: (group: SetupStockGroup) => void;
   focusTarget?: ActionablesCalculationFocusTarget | null;
+  loading?: boolean;
+  loadError?: string | null;
+  onRetry?: () => void;
 }) {
   const [sortState, setSortState] = useState<ActionablesCalculationSortState>({ key: "Stock Info", direction: "asc" });
   const [columnLayout, setColumnLayout] = useState<ActionablesCalculationColumnLayout>(() => loadActionablesCalculationLayout(market));
@@ -7013,7 +7019,18 @@ function OpenActionablesCalculationsModal({
           <div className="border-b border-blue-100 bg-blue-50/50 px-5 py-3 text-sm text-blue-900">
             LLMs consolidated in this view: {Math.max(...displayedStocks.map((stock) => stock.rows.length), 0)}. Stocks: {displayedStocks.length}.
           </div>
-          <div className="max-h-[76vh] overflow-auto p-5">
+          <div className="max-h-[76vh] overflow-auto p-5" aria-busy={loading}>
+            {loading ? (
+              <div role="status" aria-live="polite" className="flex items-center justify-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-8 text-sm text-blue-800">
+                <RefreshCw aria-hidden="true" className="size-5 animate-spin motion-reduce:animate-none" />
+                Loading actionable calculations…
+              </div>
+            ) : loadError ? (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">
+                <p>Unable to load actionable calculations. {loadError}</p>
+                {onRetry ? <button type="button" onClick={onRetry} className="mt-3 rounded border border-red-300 px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500">Try again</button> : null}
+              </div>
+            ) : null}
             {rowGroups.length ? (
               <table className="w-max table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-100 text-left">
@@ -7124,9 +7141,9 @@ function OpenActionablesCalculationsModal({
                   ))}
                 </tbody>
               </table>
-            ) : (
+            ) : !loading && !loadError ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">No actionable calculation rows available.</div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -7587,7 +7604,7 @@ export function DashboardFinalActionablesTables() {
     india: ZerodhaPortfolioSnapshotDetail | null;
     us: IndMoneyUsPortfolioSnapshotDetail | null;
   }>(() => cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots ?? { india: null, us: null });
-  const [loading, setLoading] = useState(() => !cachedDashboardFinalActionablesOnFirstRender);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
   const loadRunsPromiseRef = useRef<Promise<void> | null>(null);
@@ -8212,6 +8229,9 @@ export function DashboardFinalActionablesTables() {
         runs={runs}
         detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
         focusTarget={calculationFocusTarget}
+        loading={loading}
+        loadError={error}
+        onRetry={() => void loadRuns()}
       />
       <ScoreMatrixModal
         detail={selectedMatrixDetail}
@@ -8229,7 +8249,15 @@ export function DashboardFinalActionablesTables() {
   );
 }
 
-export function FinalActionablesConsole({
+export function FinalActionablesConsole(props: {
+  portfolio: RebalancePortfolioKey;
+  market: SwingTradeMarket;
+  openCalculationsOnMount?: boolean;
+}) {
+  return <ScopedFinalActionablesConsole key={`${props.portfolio}:${props.market}`} {...props} />;
+}
+
+function ScopedFinalActionablesConsole({
   portfolio,
   market,
   openCalculationsOnMount = false,
@@ -8247,7 +8275,7 @@ export function FinalActionablesConsole({
     [runCacheKey],
   );
   const [runs, setRuns] = useState<RunResponse[]>(() => cachedRunsOnFirstRender ?? []);
-  const [loading, setLoading] = useState(() => !cachedRunsOnFirstRender);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
@@ -8265,58 +8293,38 @@ export function FinalActionablesConsole({
   });
   const usdInrRate = useUsdInrRate();
 
-  const loadRuns = useCallback(async (showLoading = true) => {
-    if (showLoading) {
-      setLoading(true);
-      setError(null);
-    }
+  const runsRequestRef = useRef(0);
+  const loadRuns = useCallback(async () => {
+    const request = ++runsRequestRef.current;
+    setLoading(true);
+    setError(null);
     try {
       const response = await fetchAllFullRuns();
+      if (request !== runsRequestRef.current) return;
       setRuns(response);
       cacheFinalActionablesRuns(runCacheKey, response, market);
+      return response;
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load rebalance runs.",
-      );
+      if (request !== runsRequestRef.current) return;
+      setError(err instanceof Error ? err.message : "Failed to load rebalance runs.");
     } finally {
-      setLoading(false);
+      if (request === runsRequestRef.current) setLoading(false);
     }
   }, [market, runCacheKey]);
 
   const loadTechnicalScanHistory = useCallback(async () => {
-    const response = await fetchAllFullRuns();
-    setRuns(response);
-    cacheFinalActionablesRuns(runCacheKey, response, market);
+    const response = await loadRuns();
+    if (!response) throw new Error("Unable to load technical scan history. Please try again.");
     return buildTechnicalScanHistory(response);
-  }, [market, runCacheKey]);
+  }, [loadRuns]);
 
   useEffect(() => {
-    let ignore = false;
-
-    fetchAllFullRuns()
-      .then((response) => {
-        if (!ignore) {
-          setRuns(response);
-          cacheFinalActionablesRuns(runCacheKey, response, market);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load rebalance runs.",
-          );
-        }
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-
+    const timeout = window.setTimeout(() => { void loadRuns(); }, 0);
     return () => {
-      ignore = true;
+      window.clearTimeout(timeout);
+      runsRequestRef.current += 1;
     };
-  }, [market, runCacheKey]);
+  }, [loadRuns]);
 
   useEffect(() => {
     let ignore = false;
@@ -8404,7 +8412,7 @@ export function FinalActionablesConsole({
     if (!technicalScanIsActive || technicalScanRunning) return;
 
     const interval = window.setInterval(() => {
-      void loadRuns(false);
+      void loadRuns();
     }, TECHNICAL_SCAN_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
@@ -8439,9 +8447,9 @@ export function FinalActionablesConsole({
         targets: [target],
         allow_parallel: true,
       });
-      await loadRuns(false);
+      await loadRuns();
       await waitForTechnicalScanRunCompletion(run.id);
-      await loadRuns(false);
+      await loadRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to queue technical scan.");
     } finally {
@@ -8689,6 +8697,9 @@ export function FinalActionablesConsole({
         detailsData={detailsData}
         onSetupClick={setSelectedSetupGroup}
         focusTarget={calculationFocusTarget}
+        loading={loading}
+        loadError={error}
+        onRetry={() => void loadRuns()}
       />
       <SetupStocksModal
         group={selectedSetupGroup}

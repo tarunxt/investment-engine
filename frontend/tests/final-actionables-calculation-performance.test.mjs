@@ -257,3 +257,89 @@ test('opening Calculations does not parse the historical cache for each closed s
   assert.equal((html.match(/Current formula/g) ?? []).length, 13);
   assert.equal((html.match(/captured details/g) ?? []).length, 26);
 });
+
+function calculationStateFixture(overrides = {}) {
+  const h = helpers({ RefreshCw: (props) => React.createElement("svg", props) });
+  return renderToStaticMarkup(React.createElement(h.ActionablesCalculationsModal, {
+    open: true, title: 'Delayed fixture', market: 'india', stocks: [], runs: [], technicalScans: {},
+    formulaConfig: h.DEFAULT_SCORE_MATRIX_FORMULA_CONFIG, onClose() {}, onFormulaConfigChange() {},
+    onRetry() {}, ...overrides,
+  }));
+}
+
+test('calculations distinguish initial pending, loaded empty and failed reads accessibly', () => {
+  const pending = calculationStateFixture({ loading: true });
+  assert.match(pending, /role="status"/);
+  assert.match(pending, /aria-busy="true"/);
+  assert.match(pending, /animate-spin/);
+  assert.match(pending, /Loading actionable calculations/);
+  assert.doesNotMatch(pending, /No actionable calculation rows available/);
+  const empty = calculationStateFixture({ loading: false });
+  assert.match(empty, /No actionable calculation rows available/);
+  assert.doesNotMatch(empty, /Loading actionable calculations|role="alert"/);
+  const failed = calculationStateFixture({ loadError: 'History request failed' });
+  assert.match(failed, /role="alert"/);
+  assert.match(failed, /Unable to load actionable calculations/);
+  assert.match(failed, /Try again/);
+  assert.doesNotMatch(failed, /No actionable calculation rows available/);
+  const retry = calculationStateFixture({ loading: true, loadError: 'Previous error' });
+  assert.match(retry, /Loading actionable calculations/);
+  assert.doesNotMatch(retry, /Previous error|No actionable calculation rows available/);
+});
+
+test('delayed calculation success replaces loading with real calculation rows', () => {
+  const h = helpers();
+  const selected = run(91, 'Rebalance', 1);
+  const resolved = calculationStateFixture({
+    loading: false, runs: [selected], stocks: h.buildConsensusRows([selected], 'india'),
+  });
+  assert.match(resolved, /Model consensus \(Mean and Mode\)/);
+  assert.doesNotMatch(resolved, /Loading actionable calculations|No actionable calculation rows available/);
+});
+
+test('actual run loader ignores stale success, stale errors and completion after navigation', async () => {
+  const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+  const scoped = source.slice(source.indexOf('function ScopedFinalActionablesConsole'));
+  const callback = scoped.slice(scoped.indexOf('  const loadRuns = useCallback('), scoped.indexOf('  const loadTechnicalScanHistory'));
+  const pending = [];
+  const state = { runs: [], loading: false, error: null, cache: [] };
+  const requests = { current: 0 };
+  const loader = load(sourcePath, {
+    useCallback: (fn) => fn, runsRequestRef: requests, market: 'india', runCacheKey: 'india',
+    setLoading: (value) => { state.loading = value; }, setError: (value) => { state.error = value; },
+    setRuns: (value) => { state.runs = value; },
+    cacheFinalActionablesRuns: (...args) => state.cache.push(args),
+    fetchAllFullRuns: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+  }, ["loadRuns"], () => callback).loadRuns;
+  const first = loader();
+  assert.equal(state.loading, true);
+  assert.deepEqual(state.runs, []);
+  const second = loader();
+  pending[0].resolve(['stale']); await first;
+  assert.equal(state.loading, true);
+  assert.deepEqual(state.runs, []);
+  pending[1].resolve(['current']); await second;
+  assert.equal(state.loading, false);
+  assert.deepEqual(state.runs, ['current']);
+  assert.equal(state.cache.length, 1);
+  const staleError = loader();
+  const latest = loader();
+  pending[2].reject(new Error('stale error')); await staleError;
+  assert.equal(state.error, null);
+  assert.equal(state.loading, true);
+  pending[3].reject(new Error('current failure')); await latest;
+  assert.equal(state.error, 'current failure');
+  assert.equal(state.loading, false);
+  const retry = loader();
+  assert.equal(state.error, null);
+  pending[4].resolve([]); await retry;
+  assert.deepEqual(state.runs, []);
+  assert.equal(state.loading, false);
+  const navigating = loader();
+  requests.current += 1; // The actual effect cleanup invalidates requests on unmount.
+  pending[5].resolve(['old portfolio']); await navigating;
+  assert.deepEqual(state.runs, []);
+  assert.match(source, /key=\{`\$\{props.portfolio\}:\$\{props.market\}`\}/);
+  assert.match(scoped, /window.clearTimeout\(timeout\);\s*runsRequestRef.current \+= 1;/);
+  assert.equal((source.match(/loading=\{loading\}\n        loadError=\{error\}/g) ?? []).length, 2);
+});
