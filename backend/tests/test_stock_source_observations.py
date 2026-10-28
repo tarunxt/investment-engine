@@ -79,3 +79,12 @@ def test_technical_rows_need_no_action_column_and_malformed_rows_keep_every_cell
     assert 'score' not in row and 'Malformed' in row['source contract status']
     assert matching_rows('HAL is mentioned in retained narrative.', 'HAL')[0][1]['original source text'].startswith('HAL')
     assert matching_rows(technical.replace('HAL', 'HALOTHER'), 'HAL') == []
+
+
+def test_nonfinite_json_and_missing_fields_preserve_source_without_invalid_response_json():
+    import json
+    from app.domains.runs.stock_observations import matching_rows
+    text = '[{"Stock Symbol":"HAL","Score":NaN}]'
+    rows = matching_rows(text, 'HAL')
+    assert rows[0][1]['original source fragment'] == text
+    json.dumps(rows, allow_nan=False)

@@ -1,5 +1,6 @@
 """Paged, owner-scoped original source observations; never backfill history."""
 import re
+import json
 from sqlalchemy import select
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
@@ -23,6 +24,8 @@ def matching_rows(text, symbol):
             if not any(position < len(cells) and normalize_stock_symbol(str(cells[position])) == normalize_stock_symbol(symbol) for position in positions): continue
             malformed = len(cells) != len(headers) or len(set(headers)) != len(headers) or bool(findings)
             values = {'source contract status': 'Malformed/ambiguous source row; financial fields are not mapped', 'original headers': list(block.headers), 'original cells': list(cells), 'original source fragment': block.text} if malformed else {header: cell for header, cell in zip(headers, cells) if cell is not MISSING}
+            try: json.dumps(values, allow_nan=False)
+            except (ValueError, TypeError): values = {'source contract status': 'Source contains non-JSON/missing values; financial fields are not mapped', 'original source fragment': block.text}
             matches.append((f'{block.index}.{index}', values))
     if not matches and re.search(r'(?<![A-Za-z0-9])' + re.escape(normalize_stock_symbol(symbol)) + r'(?![A-Za-z0-9])', text, re.IGNORECASE):
         matches.append(('unparsed', {'source contract status': 'Symbol mentioned in unparsed output; no financial fields inferred', 'original source text': text}))
