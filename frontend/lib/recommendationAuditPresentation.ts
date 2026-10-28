@@ -1,4 +1,4 @@
-import type { AuditComparison, AuditDecision, AuditFinding, AuditScoreInput } from "@/types/recommendationAudit";
+import type { AuditComparison, AuditDecision, AuditFinding, AuditScoreInput, AuditLegacySuggestion } from "@/types/recommendationAudit";
 import { getScoreMatrixRowEffectiveMultiplier } from "@/lib/scoreMatrixMath";
 
 export function auditNumber(value: unknown): number | null {
@@ -71,4 +71,27 @@ export function savedInputScore(decision: AuditDecision, id: string) {
 export function scoreInputContribution(row: AuditScoreInput) {
   if (row.score === null) return null;
   return row.score * getScoreMatrixRowEffectiveMultiplier(row);
+}
+
+
+export function describeSuggestionScoreContext(item: AuditLegacySuggestion) {
+  if (item.origin === "current_reconstruction") return {
+    actionLabel: "Reconstructed formula action", scoreLabel: "Reconstructed calculated score",
+    explanation: "Reconstructed with current settings and captured holdings; not an original frozen decision.",
+  };
+  if (item.formula_version === "score-matrix-v1") return {
+    actionLabel: "Saved calculated action", scoreLabel: "Saved calculated score",
+    explanation: "Saved formula result; interpret using its frozen matrix and holdings, rather than today's input weights.",
+  };
+  if (item.formula_version === "legacy-backfill-v1") return {
+    actionLabel: "Model-consensus action",
+    scoreLabel: item.rationale_scores_present === true ? "Average rationale score"
+      : item.rationale_scores_present === false ? "Legacy average action code" : "Legacy aggregate score",
+    explanation: item.rationale_scores_present === true
+      ? "The action is the mode of captured model recommendations. The score averages their rationale scores independently; it does not determine this action."
+      : item.rationale_scores_present === false
+        ? "Rationale scores were unavailable. The legacy projection averaged its original action codes; the action is model consensus. These are not today's formula input weights."
+        : "The saved legacy score method is unavailable. The model-consensus action and legacy aggregate are separate; no current-formula mapping is implied.",
+  };
+  return { actionLabel: "Saved action", scoreLabel: "Saved score (method unrecorded)", explanation: "Original score semantics are unavailable. Preserve this saved action and score without applying today's formula mapping." };
 }

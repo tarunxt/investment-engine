@@ -17,6 +17,7 @@ export type AuditCalculation = {
 export type AuditLegacySuggestion = {
   run_id: number; timestamp: string | null; action: string | null; score: number | null;
   coverage: string; origin: "saved_suggestion" | "current_reconstruction";
+  formula_version?: string; rationale_scores_present?: boolean;
 };
 export type AuditScoreInput = {
   id: string; parameter: string; score: number | null; multiplier: number;

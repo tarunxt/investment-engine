@@ -2089,8 +2089,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
   const rules: Array<Omit<ScoreMatrixRuleEvaluation, "matched"> & { matches: boolean }> = [
     {
       id: "score-2-to-3",
-      label: "2–3",
-      when: "Calculated Score is from 2 up to 3.",
+      label: "[2, 3]",
+      when: "Exact bounded Calculated Score is at least 2 and at most 3.",
       action: positiveAction,
       unitsStrategy: positiveUnitsStrategy,
       summary: `Strong bullish score resolves to ${ACTION_CATEGORY_LABEL[positiveAction]}.`,
@@ -2098,8 +2098,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-1-to-2",
-      label: "1–2",
-      when: "Calculated Score is from 1 up to 2.",
+      label: "[1, 2)",
+      when: "Exact bounded Calculated Score is at least 1 and less than 2.",
       action: positiveAction,
       unitsStrategy: positiveUnitsStrategy,
       summary: `Moderate bullish score resolves to ${ACTION_CATEGORY_LABEL[positiveAction]}.`,
@@ -2107,8 +2107,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-0-to-1",
-      label: "0–1",
-      when: "Calculated Score is from 0 up to 1.",
+      label: "[0, 1)",
+      when: "Exact bounded Calculated Score is at least 0 and less than 1.",
       action: "Hold",
       unitsStrategy: "Keep Units Change at 0.",
       summary: "Mildly positive score stays at Hold.",
@@ -2116,8 +2116,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-minus-1-to-0",
-      label: "(-1)–0",
-      when: "Calculated Score is from -1 up to 0.",
+      label: "[-1, 0)",
+      when: "Exact bounded Calculated Score is at least -1 and less than 0.",
       action: "Hold",
       unitsStrategy: "Keep Units Change at 0.",
       summary: "Mildly negative score stays at Hold.",
@@ -2125,8 +2125,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-minus-2-to-minus-1",
-      label: "(-2)–(-1)",
-      when: "Calculated Score is from -2 up to -1.",
+      label: "[-2, -1)",
+      when: "Exact bounded Calculated Score is at least -2 and less than -1.",
       action: "Trim",
       unitsStrategy: "Trim 50% of current units.",
       summary: "Moderate bearish score trims half of the current position.",
@@ -2134,8 +2134,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-minus-3-to-minus-2",
-      label: "(-3)–(-2)",
-      when: "Calculated Score is from -3 up to -2.",
+      label: "[-3, -2)",
+      when: "Exact bounded Calculated Score is at least -3 and less than -2.",
       action: "Sell All",
       unitsStrategy: "Sell 100% of current units.",
       summary: "Strong bearish score exits the full current position.",
@@ -4061,6 +4061,12 @@ function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, ex
   );
 }
 
+function historyRationaleInputsPresent(item: FinalActionableHistoryItem): boolean | undefined {
+  const rows = item.snapshot_json?.rows;
+  if (!Array.isArray(rows) || !rows.length || !rows.every(row => row && typeof row === "object" && "score" in row && (row.score === null || (typeof row.score === "number" && Number.isFinite(row.score))))) return undefined;
+  return rows.some(row => typeof row.score === "number");
+}
+
 export function StockDetailsButton(props: Parameters<typeof ScopedStockDetailsButton>[0]) {
   return <ScopedStockDetailsButton key={`${props.market}:${props.stock.key}`} {...props} />;
 }
@@ -4362,7 +4368,7 @@ function ScopedStockDetailsButton({
                 currentUnits={auditDetail.currentUnits} currentFormulaUnits={auditDetail.calculatedUnitsChange}
                 scoreInputs={auditDetail.detailedRationaleRows} scoreDenominator={auditDetail.detailedRationaleDenominator}
                 legacyHistory={[
-                  ...persistedHistory.map(item => ({ run_id: item.rebalance_run_id, timestamp: item.covered_at, action: item.action, score: item.score, coverage: item.coverage_status, origin: "saved_suggestion" as const })),
+                  ...persistedHistory.map(item => ({ run_id: item.rebalance_run_id, timestamp: item.covered_at, action: item.action, score: item.score, coverage: item.coverage_status, formula_version: item.formula_version, rationale_scores_present: historyRationaleInputsPresent(item), origin: "saved_suggestion" as const })),
                   ...matchingHistoricalRows.map(item => ({ run_id: item.runId, timestamp: item.coveredAt, action: item.formulaAction, score: item.formulaScore, coverage: "reconstructed", origin: "current_reconstruction" as const })),
                 ]}
                 legacyHistoryHasMore={historyHasMore} legacyHistoryError={historyError}
@@ -4438,8 +4444,8 @@ function ScopedStockDetailsButton({
                           <th className="px-3 py-2 font-semibold">Stock</th>
                           <th className="px-3 py-2 font-semibold">Timestamp covered</th>
                           <th className="px-3 py-2 font-semibold">Coverage</th>
-                          <th className="px-3 py-2 font-semibold">Action</th>
-                          <th className="px-3 py-2 font-semibold">Score</th>
+                          <th className="px-3 py-2 font-semibold">Recorded action</th>
+                          <th className="px-3 py-2 font-semibold">Recorded score</th>
                           <th className="px-3 py-2 font-semibold">Consensus</th>
                           <th className="px-3 py-2 font-semibold">Historical value</th>
                           <th className="px-3 py-2 font-semibold">Action/current units</th>
@@ -5332,14 +5338,15 @@ function ScoreReferenceTables({
     <section className="grid gap-4 lg:grid-cols-3">
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h3 className="font-semibold text-slate-950">Action (Buy/Add/Sell All/Trim/Hold/Buy New) &amp; Score</h3>
+          <h3 className="font-semibold text-slate-950">Model-action input weights</h3>
+          <p className="mt-1 text-xs text-slate-600">Action → score inputs for the weighted formula. Final actions follow the calculated-score ranges and holdings context. Legacy average rationale scores are a separate measure.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
-                <th className="px-4 py-2 font-semibold">Action (Buy/Add/Sell All/Trim/Hold/Buy New)</th>
-                <th className="px-4 py-2 text-right font-semibold">Score</th>
+                <th className="px-4 py-2 font-semibold">Model action</th>
+                <th className="px-4 py-2 text-right font-semibold">Formula input weight</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -5690,7 +5697,7 @@ export function ScoreMatrixModal({
               <span className="text-lg font-bold text-slate-800">{editedDetail.stockName}</span>
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · calculated score {formatActionScore(validationSummary.displayScore)} maps to{" "}
+              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · {frozen ? "saved calculated score" : "calculated score"} <span title={`Unrounded score: ${validationSummary.displayScore ?? "unavailable"}`}>{formatActionScore(validationSummary.displayScore)}</span> · {frozen ? "saved action" : "formula action"}{" "}
               <FinalActionTag action={editedDetail.calculatedAction} />
               {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
