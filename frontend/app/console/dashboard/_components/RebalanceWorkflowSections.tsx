@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
+import { portfolioParameterAssets } from "@/lib/portfolioParameters";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
 import { shouldSaveThresholds, thresholdSignature, type ThresholdPersistence } from "@/lib/buyThresholdPersistence";
@@ -3670,6 +3672,7 @@ function ZerodhaBasketPreviewDialog({
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
   const availableMargin =
     (detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null)?.available_margin ?? null;
+  const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
   const availableMarginToneClass = getZerodhaAvailableMarginToneClass(
     availableMargin,
     selectedBuyAmount,
@@ -3883,7 +3886,7 @@ function ZerodhaBasketPreviewDialog({
                 </div>
               </div>
 
-              <div className="mb-5 grid gap-3 md:grid-cols-4">
+              <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Orders</div>
                   <div className="mt-2 text-2xl font-black text-slate-950">{selectedOrders.length}/{orders.length}</div>
@@ -3922,6 +3925,7 @@ function ZerodhaBasketPreviewDialog({
                     Buy New and Buy More rows stay selected only when Final Score is greater than {buyThreshold.toFixed(2)}.
                   </p>
                 </div>
+                <PortfolioParametersTile key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-slate-200">
