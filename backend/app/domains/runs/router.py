@@ -473,6 +473,14 @@ async def _build_auto_rebalance_history(
     return sorted(result, key=lambda entry: (entry[0].sequence, entry[0].updated_at), reverse=True)
 
 
+@router.get("/final-actionables/stock-observations")
+async def stock_observations(market: str = Query(pattern="^(india|us)$"), symbol: str = Query(min_length=1, max_length=64), cursor: str | None = Query(default=None, max_length=100), limit: int = Query(default=50, ge=1, le=100), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    from .stock_observations import stock_observation_page
+    try:
+        return await db.run_sync(lambda session: stock_observation_page(session, user_id=current_user.id, market=market, symbol=symbol, cursor=cursor, limit=limit))
+    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
+
+
 @router.get(
     "/final-actionables/history",
     response_model=FinalActionableHistoryListResponse,

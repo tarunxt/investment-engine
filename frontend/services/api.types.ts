@@ -1,3 +1,4 @@
+import type { StockSourceObservationPage } from "@/types/api";
 import {
     LoginResponse,
     LlmPerformanceResponse,
@@ -154,6 +155,7 @@ export interface IApiService {
         limit?: number;
         cursor?: string | null;
     }): Promise<FinalActionableHistoryListResponse>;
+    getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage>;
     getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse>;
     saveFinalActionableHistory(
         data: FinalActionableHistoryBulkCreateRequest,

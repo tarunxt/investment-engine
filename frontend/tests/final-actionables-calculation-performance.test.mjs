@@ -711,3 +711,73 @@ test('missing matrix can open retained parameter observations without inventing 
   assert.equal(calls, 1);
   harness.dispose();
 });
+
+
+test('saved history score-based display reuses actual matrix rules and preserves original model actions', () => {
+  const exports = helpers();
+  const derive = (score, units = 10, action = 'Hold') => { const item = { score, historical_current_units: units, coverage_status: 'suggested', action }; const before = structuredClone(item); const result = exports.historyScoreDerivedAction(item); assert.deepEqual(item, before); return result; };
+  assert.equal(derive(2.83).action, 'Add more');
+  assert.equal(derive(2.83, 0).action, 'Buy New');
+  assert.equal(derive(0.11, 10, 'Sell All').action, 'Hold');
+  for (const [score, action] of [[-3, 'Sell All'], [-2.000001, 'Sell All'], [-2, 'Trim'], [-1.000001, 'Trim'], [-1, 'Hold'], [-0.25, 'Hold'], [0, 'Hold'], [0.999999, 'Hold'], [1, 'Add more'], [1.999999, 'Add more'], [2, 'Add more'], [3, 'Add more']]) assert.equal(derive(score).action, action, String(score));
+  assert.equal(derive(0.999999).action, 'Hold', 'rounding to 1.00 must not cross an exact boundary');
+  assert.equal(derive(-2.000001).action, 'Sell All', 'rounding to -2.00 must not cross an exact boundary');
+  for (const score of [null, NaN, Infinity, -3.01, 3.01]) assert.equal(derive(score).action, null);
+  for (const units of [null, NaN, -1]) { const result = derive(2.83, units); assert.equal(result.action, null); assert.match(result.note, /historical holdings are unavailable/); }
+  assert.equal(exports.historyScoreDerivedAction({ score: 2.83, historical_current_units: 10, coverage_status: 'run_failed' }).action, null);
+  const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+  assert.match(source, /Score-based action · current rules/); assert.match(source, /Original recorded action/); assert.match(source, /FinalActionValue value=\{item.action\}/); assert.match(source, /Exact saved score:/);
+});
+
+test('retained-source scan follows empty pages, keeps distinct LLM/revision rows, deduplicates immutable copies and ignores dismissed requests', async () => {
+  const first = { id: '438:1:hash:0', run_id: 438, job_id: 1, created_at: '2026-10-28T10:00:00Z' }, second = { ...first, id: '438:2:hash2:0', job_id: 2 };
+  const responses = [ { items: [first], next_cursor: 'jobs:9', has_more: true }, { items: [], next_cursor: 'audit:', has_more: true }, { items: [first, second], next_cursor: null, has_more: false } ];
+  const calls = [], updates = [];
+  const { scanStockSourceObservations } = helpers({ apiService: { getStockSourceObservations: async params => { calls.push(params.cursor); return { market: 'india', symbol: 'HAL', examined_sources: 1, coverage_note: 'retained only', ...responses.shift() }; } } });
+  await scanStockSourceObservations('india', 'HAL', rows => updates.push(rows), () => true);
+  assert.deepEqual(calls, [null, 'jobs:9', 'audit:']); assert.equal(updates.at(-1).length, 2); assert.equal(updates.at(-1)[0].run_id, 438);
+  let active = true, resolve; const pending = new Promise(r => { resolve = r; });
+  const stale = helpers({ apiService: { getStockSourceObservations: () => pending } });
+  let published = 0; const loading = stale.scanStockSourceObservations('india', 'HAL', () => published++, () => active);
+  active = false; resolve({ market: 'india', symbol: 'HAL', items: [first], has_more: false }); await loading; assert.equal(published, 0);
+  const wrong = helpers({ apiService: { getStockSourceObservations: async () => ({ market: 'us', symbol: 'HAL' }) } });
+  await assert.rejects(wrong.scanStockSourceObservations('india', 'HAL', () => {}, () => true), /does not match/);
+  const loop = helpers({ apiService: { getStockSourceObservations: async () => ({ market: 'india', symbol: 'HAL', items: [], examined_sources: 0, has_more: true, next_cursor: 'same' }) } });
+  await assert.rejects(loop.scanStockSourceObservations('india', 'HAL', () => {}, () => true), /did not advance/);
+});
+
+
+test('unified history puts newer reconstructions above old saved summaries while preserving original context and missing historical holdings', () => {
+  const { RetainedStockObservations } = helpers();
+  const saved = [{ id: 1, rebalance_run_id: 200, covered_at: '2026-10-05T03:58:00Z', stock_symbol: 'HAL', score: 2.83, action: 'Hold', historical_current_units: null, coverage_status: 'suggested', formula_version: 'legacy-backfill-v1' }, { id: 2, rebalance_run_id: 199, covered_at: '2026-10-03T11:04:00Z', stock_symbol: 'HAL', score: 0.11, action: 'Sell All', historical_current_units: 2, coverage_status: 'suggested', formula_version: 'legacy-backfill-v1' }];
+  const reconstructed = [{ id: 'HAL', runId: 438, coveredAt: '2026-10-28T03:50:00Z', formulaAction: 'Add more', formulaScore: 2.60, detail: { currentUnits: 2 } }];
+  const before = structuredClone(saved);
+  const html = renderToStaticMarkup(React.createElement(RetainedStockObservations, { market: 'india', symbol: 'HAL', saved, reconstructed }));
+  assert.ok(html.indexOf('Run #438') < html.indexOf('Run #200'));
+  assert.match(html, /Reconstructed · current formula, not original saved decision/);
+  assert.match(html, /historical holdings are unavailable/);
+  assert.match(html, /Sell All/); assert.match(html, /Hold/); assert.match(html, /2.83/); assert.match(html, /0.11/);
+  assert.deepEqual(saved, before);
+});
+
+
+test('reconstructed score opens its exact displayed source detail without guessing among immutable revisions', async () => {
+  let auditCalls = 0;
+  const api = helpers({ apiService: { getHistoricalScoreEvidence: async () => { auditCalls++; throw new Error('ambiguous'); } } });
+  const detail = api.buildScoreMatrixDetail(api.buildConsensusRows([run(438, 'Rebalance', 1)], 'india')[0]);
+  const actual = await api.fetchFrozenHistoricalMatrix(null, 'india', detail.stockSymbol, detail.stockExchange, { runId: 438, coveredAt: timestamp, reconstructedDetail: detail });
+  assert.equal(actual.calculatedScore, detail.calculatedScore); assert.deepEqual(actual.rows, detail.rows); assert.equal(auditCalls, 0);
+  assert.match(actual.historicalReadNotes[0], /not the original historical/);
+  await assert.rejects(api.fetchFrozenHistoricalMatrix(null, 'india', 'WRONG', detail.stockExchange, { runId: 438, coveredAt: timestamp, reconstructedDetail: detail }), /does not match/);
+});
+
+test('saved legacy parameter cells remain available without advisory-audit access, without inventing a historical matrix', async () => {
+  const api = helpers({ apiService: { getHistoricalScoreEvidence: async () => { throw { status: 404 }; }, getFinalActionableHistory: async () => ({ items: [], has_more: false }) } });
+  const item = { id: 5, rebalance_run_id: 200, market: 'india', stock_symbol: 'HAL', covered_at: timestamp, formula_version: 'legacy-backfill-v1', snapshot_json: { rows: [{ job_id: 1, provider: 'deepseek', model: 'original', raw: { 'exchange symbol': 'NSE', 'stock symbol': 'HAL', 'score rationale technical setup short term 1 3 months': '2.50', 'rationale technical setup short term 1 3 months': 'Original breakout rationale' } }] } };
+  const before = structuredClone(item);
+  const view = api.savedLegacyParameterEvidence(item, 'india', 'HAL', 'NSE');
+  assert.equal(view.matrix, null); assert.equal(view.parameters['technical-short'][0].score, 2.5); assert.equal(view.parameters['technical-short'][0].rationale, 'Original breakout rationale');
+  assert.equal(api.savedLegacyParameterEvidence(item, 'us', 'HAL', 'NSE'), null); assert.equal(api.savedLegacyParameterEvidence(item, 'india', 'HAL', 'BSE'), null);
+  const duplicate = structuredClone(item); duplicate.snapshot_json.rows.push(structuredClone(duplicate.snapshot_json.rows[0])); assert.equal(api.savedLegacyParameterEvidence(duplicate, 'india', 'HAL', 'NSE'), null);
+  assert.deepEqual(item, before);
+});

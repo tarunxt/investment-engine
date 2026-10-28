@@ -3980,3 +3980,6 @@ export type HistoricalScoreEvidenceResponse = {
   capture_id?: string;
   history_context?: { formula_version: string; score: number | null; action: string | null };
 };
+
+export type StockSourceObservation = { id: string; run_id: number; job_id: number; stage: string; run_status: string; job_status: string; provider: string | null; model: string | null; created_at: string | null; source: string; cells: Record<string, unknown> };
+export type StockSourceObservationPage = { market: "india" | "us"; symbol: string; items: StockSourceObservation[]; next_cursor: string | null; has_more: boolean; examined_sources: number; coverage_note: string };
