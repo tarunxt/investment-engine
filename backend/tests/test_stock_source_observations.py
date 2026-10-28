@@ -88,3 +88,53 @@ def test_nonfinite_json_and_missing_fields_preserve_source_without_invalid_respo
     rows = matching_rows(text, 'HAL')
     assert rows[0][1]['original source fragment'] == text
     json.dumps(rows, allow_nan=False)
+
+
+def test_first_page_and_bounded_cursor_compile_for_postgres_without_an_int4_overflow():
+    from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+    class Capture:
+        def execute(self, query): self.query = query; return self
+        def all(self): return []
+    session = Capture()
+    stock_observation_page(session, user_id=1, market='india', symbol='HAL')
+    compiled = session.query.compile(dialect=PGDialect_asyncpg())
+    assert 9223372036854775807 not in compiled.params.values()
+    assert 'run_jobs.id <' not in str(compiled)
+    stock_observation_page(session, user_id=1, market='india', symbol='HAL', cursor='jobs:10')
+    compiled = session.query.compile(dialect=PGDialect_asyncpg())
+    assert 'run_jobs.id <' in str(compiled) and 10 in compiled.params.values()
+    with pytest.raises(ValueError): stock_observation_page(session, user_id=1, market='india', symbol='HAL', cursor='jobs:2147483648')
+
+
+# This uses the existing disposable PostgreSQL fixture in the required CI audit
+# job. It never falls back to production configuration.
+import os
+from pathlib import Path
+from test_recommendation_audit_postgres import engine  # noqa: F401
+
+@pytest.mark.skipif(not os.getenv('CREDX_AUDIT_TEST_POSTGRES_URL') or os.getenv('CREDX_AUDIT_DISPOSABLE_DB') != '1' or not Path('/.dockerenv').exists(), reason='Disposable PostgreSQL Docker test environment not provided')
+def test_real_asyncpg_first_page_owner_and_next_cursor(engine):
+    import asyncio
+    import asyncpg
+    from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+    from app.domains.runs.models import RunJob
+    schema = engine.get_execution_options()['schema_translate_map'][None]
+    dsn = os.environ['CREDX_AUDIT_TEST_POSTGRES_URL'].replace('postgresql+psycopg2://', 'postgresql://')
+    class Capture:
+        def execute(self, query): self.query=query; return self
+        def all(self): return []
+    async def check():
+        connection = await asyncpg.connect(dsn)
+        try:
+            await connection.execute(f'SET search_path TO "{schema}"')
+            await connection.execute('CREATE TABLE runs (id INTEGER PRIMARY KEY, user_id INTEGER); CREATE TABLE jobs (id INTEGER PRIMARY KEY, user_id INTEGER); CREATE TABLE run_jobs (id INTEGER PRIMARY KEY, run_id INTEGER, job_id INTEGER); INSERT INTO runs VALUES (1, 1); INSERT INTO jobs VALUES (1, 1); INSERT INTO run_jobs VALUES (1, 1, 1)')
+            with pytest.raises(asyncpg.DataError): await connection.fetchval('SELECT $1::INTEGER', 9223372036854775807)
+            async def query(user, cursor=None):
+                session=Capture(); stock_observation_page(session,user_id=user,market='india',symbol='HAL',cursor=cursor)
+                compiled=session.query.with_only_columns(RunJob.id).compile(dialect=PGDialect_asyncpg())
+                return await connection.fetch(str(compiled), *(compiled.params[key] for key in compiled.positiontup))
+            assert len(await query(1)) == 1
+            assert len(await query(2)) == 0
+            assert len(await query(1, 'jobs:1')) == 0
+        finally: await connection.close()
+    asyncio.run(check())
