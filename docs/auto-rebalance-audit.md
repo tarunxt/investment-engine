@@ -53,3 +53,39 @@ request even when its completed outputs are still accessible.
 - The recommendation renderer identifies Rebalance from its position/action
   columns. Shared stock/price fields no longer misclassify the 31-column Swing
   schema as the 29-column Rebalance schema.
+
+
+## Historical score evidence reader
+
+`GET /runs/recommendation-audit/historical-score` reads the authenticated owner's
+exact run, market, symbol, exchange and historical timestamp. An optional history
+ID must match the same selection. It reuses retained immutable decision/input
+captures and per-job source samples, independently of raw Run/Job retention.
+Multiple matching revisions return ambiguity rather than selecting the newest.
+Existing audit enablement and authentication remain required.
+
+New terminal captures include an additive `stored-score-matrix-v1` snapshot in
+the existing decision JSON. Recorded calculations and original formula inputs
+are copied; the reader never calls the current scoring algorithm. Older captures
+can expose the same recorded values without a database migration. Missing rule
+annotations, means or original formulas remain explicitly unavailable.
+
+Legacy history snapshots may already retain original per-job parameter cells in
+`snapshot_json.rows[].raw`. These can populate parameter scores/rationales even
+when the original weighted matrix is absent. Duplicate rows for one job are
+ambiguous and excluded; independent jobs remain separate. The saved legacy score
+and action are preserved. No current settings or latest stock data substitute
+for missing evidence.
+
+Before any proposed historical backfill, run the read-only coverage reporter in
+an authorized runtime with a verified owner ID:
+
+```sh
+PYTHONPATH=backend python backend/scripts/report_historical_score_coverage.py \
+  --user-id VERIFIED_OWNER_ID --market india --symbol HAL --day 2026-10-05 \
+  --timezone Asia/Kolkata
+```
+
+It reports metadata and ambiguity only, rolls back, and has no apply mode. No
+production coverage is implied by synthetic tests. A missing original formula
+cannot be recovered from today's configuration or from parameter cells alone.

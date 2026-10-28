@@ -411,7 +411,7 @@ test('nested matrix delays, closes only top overlay, traps keys, restores focus 
   tree.props.ref.current = { focus() {}, querySelectorAll: () => [first, last] };
   harness.flush();
   // Dialog content must consume inside clicks; backdrop consumes outside clicks.
-  const dialog = tree.props.children;
+  const dialog = findMatching(tree, node => node.props?.role === "dialog");
   dialog.props.children.props.onClick({ stopPropagation() { stopped += 1; } });
   assert.equal(closed, 0);
   doc.activeElement = last;
@@ -438,9 +438,9 @@ test('historical modal renders saved detail through the existing frozen matrix c
   item = savedMatrixFixture(h);
   const props = { item, coveredAt: item.covered_at, runId: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', onClose() {} };
   const render = () => { harness.start(); return h.HistoricalScoreMatrixPopup(props); };
-  render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-  const matrix = render().props.children;
-  assert.equal(matrix.type, h.ScoreMatrixModal);
+  render(); harness.flush(); await new Promise(resolve => setImmediate(resolve));
+  const matrix = findMatching(render(), node => node.type === h.ScoreMatrixModal);
+  assert.ok(matrix);
   assert.equal(matrix.props.frozen, true);
   assert.deepEqual(matrix.props.detail, item.formula_inputs_json);
   assert.match(matrix.props.historicalLabel, /Run #90/);
@@ -457,12 +457,12 @@ test('historical popup distinguishes missing snapshots and errors and supports c
     item = savedMatrixFixture(h, { id: outcome === 'success' ? 19 : 17 });
     const props = { item, coveredAt: item.covered_at, runId: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', onClose() {} };
     const render = () => { harness.start(); return h.HistoricalScoreMatrixPopup(props); };
-    render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    render(); harness.flush(); await new Promise(resolve => setImmediate(resolve));
     const tree = render();
-    if (outcome === 'success') assert.equal(tree.props.children.props.detail, item.formula_inputs_json);
+    if (outcome === 'success') assert.equal(findMatching(tree, node => node.type === h.ScoreMatrixModal).props.detail, item.formula_inputs_json);
     else {
       const text = JSON.stringify(tree);
-      assert.match(text, outcome === 'error' ? /Unable to load historical score matrix/ : /No frozen score matrix/);
+      assert.match(text, outcome === 'error' ? /Unable to load historical score matrix/ : /No original weighted score matrix/);
       assert.doesNotMatch(text, /Loading historical score matrix/);
     }
     harness.dispose();
@@ -597,13 +597,13 @@ test('third popup loading, exact columns, inside/outside clicks, Escape, focus a
   tree.props.onClick({ stopPropagation() { stopped += 1; } }); assert.equal(closed, 1);
   tree.props.onKeyDown({ key: 'Escape', stopPropagation() { stopped += 1; }, preventDefault() {} }); assert.equal(closed, 2);
   harness.dispose(); assert.equal(restored, 1);
-  pending.shift()(selected); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  pending.shift()(selected); await new Promise(resolve => setImmediate(resolve));
   assert.match(JSON.stringify(render()), /Loading original scores/, 'dismissed completion cannot replace or reopen any layer');
   assert.equal(stopped, 4);
   const readyHarness = popupHarness();
   const ready = helpers({ ...readyHarness.hooks, document: { activeElement: { focus() {} } }, apiService: { getRun: async () => selected } });
   const readyRender = () => { readyHarness.start(); return ready.ParameterScoreEvidencePopup(props); };
-  readyRender(); readyHarness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  readyRender(); readyHarness.flush(); await new Promise(resolve => setImmediate(resolve)); await Promise.resolve();
   const text = JSON.stringify(readyRender());
   assert.match(text, /Run \/ LLM/); assert.match(text, /Rationale/); assert.match(text, /Score/);
   assert.match(text, /Original short rationale 90\/900/);
@@ -634,7 +634,7 @@ test('third layer distinguishes failed/absent evidence, traps focus and exposes 
     const fixture = parameterFixture(h);
     const parameter = failure ? fixture.parameter : { id: 'mean-mode-action', parameter: 'Consolidated action' };
     const render = () => { harness.start(); return h.ParameterScoreEvidencePopup({ detail: fixture.detail, parameter, onClose() {} }); };
-    render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    render(); harness.flush(); await new Promise(resolve => setImmediate(resolve));
     const text = JSON.stringify(render());
     assert.match(text, failure ? /Unable to load parameter evidence/ : /Original per-run score\/rationale provenance was not captured/);
     assert.doesNotMatch(text, /Loading original scores/);
@@ -650,4 +650,64 @@ test('third layer distinguishes failed/absent evidence, traps focus and exposes 
   assert.match(source, /onParameterScoreOpen=\{setSelectedParameter\}/);
   assert.match(source, /onKeyDown=\{event => \{\s*event.stopPropagation\(\);/);
   assert.equal(selectedParameter, undefined, 'rendering a score must never initiate a provider/job action');
+});
+
+function retainedEvidenceFixture(h, matrix = true) {
+  const item = savedMatrixFixture(h);
+  const observations = [{ id: 'frozen:900:short', runId: 90, jobId: 900, label: 'Run #90 (Rebalance Scan) · Job #900 · synthetic model · 2026-09-01', score: 2, rationale: 'Original captured short rationale' }];
+  return { item, view: { scope: { run_id: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', covered_at: timestamp, history_id: 17 }, status: matrix ? 'available' : 'partial', matrix: matrix ? item.formula_inputs_json : null, parameters: { 'technical-short': observations }, parameter_labels: { 'technical-short': 'Technical Setup Short Term' }, notes: matrix ? ['Saved immutable capture; current formulas were not applied.'] : ['The original weighted formula was not captured.'], candidates: [], coverage: { matching_captures: 1 } } };
+}
+
+test('historical reader uses retained exact-scope evidence without raw jobs or current recalculation', async () => {
+  let view; const requests = [];
+  const h = helpers({ apiService: { getHistoricalScoreEvidence: async params => { requests.push(params); return view; }, getRun: () => { throw new Error('raw job/run reads forbidden'); }, getFinalActionableHistory: () => { throw new Error('legacy scan forbidden'); } } });
+  const fixture = retainedEvidenceFixture(h); view = fixture.view;
+  const detail = await h.fetchFrozenHistoricalMatrix(fixture.item, 'india', 'TEST0', 'NSE');
+  assert.equal(detail.calculatedScore, fixture.item.formula_inputs_json.calculatedScore);
+  assert.equal(detail.calculatedAction, fixture.item.formula_inputs_json.calculatedAction);
+  assert.deepEqual(requests[0], { run_id: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', covered_at: timestamp, history_id: 17 });
+  assert.deepEqual(await h.fetchParameterScoreObservations(detail, { id: 'technical-short' }), view.parameters['technical-short']);
+  assert.deepEqual(await h.fetchParameterScoreObservations(detail, { id: 'technical-long' }), []);
+  for (const scope of [{ ...view.scope, symbol: 'OTHER' }, { ...view.scope, market: 'us' }, { ...view.scope, covered_at: '2026-09-01T10:00:01Z' }, { ...view.scope, history_id: 18 }]) {
+    view = { ...fixture.view, scope };
+    await assert.rejects(h.fetchFrozenHistoricalMatrix(fixture.item, 'india', 'TEST0', 'NSE'), /scope does not match/);
+  }
+});
+
+test('immutable ambiguity is not replaced with latest data; reader failures differ from disabled-reader fallback', async () => {
+  let fail = null, view; let nativeReads = 0; let item;
+  const h = helpers({ apiService: { getHistoricalScoreEvidence: async () => { if (fail) throw fail; return view; }, getFinalActionableHistory: async () => { nativeReads += 1; return { items: [item], has_more: false }; } } });
+  const fixture = retainedEvidenceFixture(h); item = fixture.item;
+  view = { ...fixture.view, status: 'ambiguous', matrix: null, parameters: {}, notes: ['Multiple exact revisions'] };
+  assert.equal(await h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), null);
+  assert.equal(nativeReads, 0);
+  fail = Object.assign(new Error('Reader disabled'), { status: 404 });
+  assert.deepEqual(await h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), item.formula_inputs_json);
+  assert.equal(nativeReads, 1);
+  fail = Object.assign(new Error('Storage unavailable'), { status: 503 });
+  await assert.rejects(h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), /Storage unavailable/);
+  assert.equal(nativeReads, 1);
+});
+
+test('missing matrix can open retained parameter observations without inventing a score/action', async () => {
+  const harness = popupHarness(); let view; let calls = 0;
+  const h = helpers({ ...harness.hooks, document: { activeElement: { focus() {} } }, apiService: { getHistoricalScoreEvidence: async () => { calls += 1; return view; } } });
+  const fixture = retainedEvidenceFixture(h, false); view = fixture.view;
+  const props = { item: fixture.item, coveredAt: timestamp, runId: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', onClose() {} };
+  const render = () => { harness.start(); return h.HistoricalScoreMatrixPopup(props); };
+  render(); harness.flush(); await new Promise(resolve => setImmediate(resolve));
+  let tree = render();
+  assert.match(JSON.stringify(tree), /original weighted formula was not captured/);
+  const button = findMatching(tree, node => node.type === 'button' && JSON.stringify(node.props.children).includes('View original'));
+  assert.ok(button); button.props.onClick(); tree = render();
+  const top = findMatching(tree, node => node.type === h.ParameterScoreEvidencePopup);
+  assert.ok(top);
+  assert.deepEqual(top.props.observations, view.parameters['technical-short']);
+  assert.equal(top.props.detail.calculatedScore, undefined);
+  assert.equal(top.props.detail.calculatedAction, undefined);
+  top.props.onClose(); tree = render();
+  assert.equal(findMatching(tree, node => node.type === h.ParameterScoreEvidencePopup), null);
+  assert.match(JSON.stringify(tree), /original weighted formula was not captured/);
+  assert.equal(calls, 1);
+  harness.dispose();
 });
