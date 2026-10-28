@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
-import { displayScoreAccepted } from "@/lib/basketDisplayCalculations";
+import { displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { auditResponseHashes } from "@/services/recommendationAudit";
@@ -3630,7 +3630,7 @@ function ScopedZerodhaBasketPreviewDialog({
   onClose: () => void;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
-  onToggleSection: (action: ActionCategory) => void;
+  onToggleSection: (action: ActionCategory, visibleIds?: string[]) => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
   onPercentChange: (id: string, percent: ZerodhaBasketOrderPercent) => void;
   onUnitsChange: (id: string, delta: number) => void;
@@ -3669,10 +3669,10 @@ function ScopedZerodhaBasketPreviewDialog({
 
   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);
   const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
-  const snapshotPrices = tradingViewMarket === "india" ? buildZerodhaSnapshotPriceMap(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null) : new Map((detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null)?.holdings.map(holding => [normalizeZerodhaBasketSymbol(holding.symbol), holding.market_price]) ?? []);
-  const displayStock = (row: DashboardActionRow) => ({ symbol: row.stock.symbol, exchange: row.stock.exchange, score: row.formulaScore, ltp: orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange)?.lastPrice ?? snapshotPrices.get(normalizeZerodhaBasketSymbol(row.stock.symbol)) ?? null });
+  const displayQuote = (symbol: string, exchange: string) => { const quote = verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange); return { ltp: quote?.price ?? null, ltpAsOf: quote?.asOf, ltpSource: quote?.source }; };
+  const displayStock = (row: DashboardActionRow) => ({ symbol: row.stock.symbol, exchange: row.stock.exchange, score: row.formulaScore, ...displayQuote(row.stock.symbol, row.stock.exchange) });
   const calculationStocks = allocationUniverse.map(displayStock);
-  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, ltpRefreshedAt);
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
   const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (score: number | null) => displayScoreAccepted(score, displayCalculations.lower, displayCalculations.upper, displayCalculations.showAll);
   if (!open) return null;
@@ -3691,7 +3691,8 @@ function ScopedZerodhaBasketPreviewDialog({
   );
   const safetyBufferAmount = selectedBuyAmount > 0 ? Math.max(50, selectedBuyAmount * 0.01) : 0;
   const projectedBuyPower = availableMargin === null ? null : Math.max(0, availableMargin + selectedSellAmount - safetyBufferAmount);
-  const allSelected = selectableOrders.length > 0 && selectableOrders.every((order) => selectedIds.has(order.id));
+  const hiddenSelectedCount = selectedOrders.filter(order => !visibleScore(order.detail.calculatedScore)).length;
+  const allSelected = selectableOrders.length > 0 && selectableOrders.every(order => selectedIds.has(order.id));
   const marketStatus = getIndiaMarketStatus();
   const canUseDirectMarket = directMarketAvailable && marketStatus.open;
   const submittedOrderIds = new Set(submission?.orders.map((order) => order.id) ?? []);
@@ -3943,6 +3944,7 @@ function ScopedZerodhaBasketPreviewDialog({
               </div>
 
               <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
+              {hiddenSelectedCount > 0 ? <p role="status" className="mb-3 text-amber-800">{hiddenSelectedCount} selected executable order(s) are hidden by the display filter and remain selected. Show all to review them. Group checkboxes affect only visible selectable orders; All Stocks controls all selectable orders, including hidden rows.</p> : null}
               {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="overflow-x-auto overscroll-x-contain">
@@ -3955,7 +3957,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               type="checkbox"
                               checked={allSelected}
                               onChange={onToggleAll}
-                              aria-label="Select or deselect all Zerodha basket orders"
+                              aria-label="Select or deselect all selectable basket orders, including hidden rows"
                               className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                             />
                             <span>All Stocks</span>
@@ -3978,8 +3980,9 @@ function ScopedZerodhaBasketPreviewDialog({
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {sectionGroups.map((group) => {
-                        const sectionSelected = group.orders.filter((order) => selectedIds.has(order.id)).length;
-                        const sectionAllSelected = sectionSelected === group.orders.length;
+                        const sectionSelectable = group.orders.filter(isWholeShareOrderSelectable);
+                        const sectionSelected = sectionSelectable.filter(order => selectedIds.has(order.id)).length;
+                        const sectionAllSelected = sectionSelectable.length > 0 && sectionSelected === sectionSelectable.length;
                         return (
                           <Fragment key={group.action}>
                             <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
@@ -3988,12 +3991,13 @@ function ScopedZerodhaBasketPreviewDialog({
                                   <input
                                     type="checkbox"
                                     checked={sectionAllSelected}
-                                    onChange={() => onToggleSection(group.action)}
+                                    onChange={() => onToggleSection(group.action, sectionSelectable.map(order => order.id))}
+                                    disabled={!sectionSelectable.length}
                                     aria-label={`Select or deselect ${group.label} Zerodha basket orders`}
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                   />
                                   <span>{group.label}</span>
-                                  <span className="text-xs font-semibold text-slate-500">{sectionSelected}/{group.orders.length} selected</span>
+                                  <span className="text-xs font-semibold text-slate-500">{sectionSelected}/{sectionSelectable.length} visible selectable selected</span>
                                 </label>
                               </td>
                             </tr>
@@ -4051,7 +4055,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                     {order.side}
                                   </span>
                                 </td>
-                                {displayCalculations.cells({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ltp: order.lastPrice ?? snapshotPrices.get(normalizeZerodhaBasketSymbol(order.symbol)) ?? null })}
+                                {displayCalculations.cells({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) })}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                                   <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
                                     <button
@@ -5741,7 +5745,15 @@ export function RebalanceWorkflowSections({
     setCostHistoryError(null);
   }, []);
 
+  const zerodhaPreparation = useRef(0);
+  const indmoneyPreparation = useRef(0);
   const openZerodhaBasketPreview = useCallback(async () => {
+    const generation = ++zerodhaPreparation.current;
+    setZerodhaAllocationUniverse([]);
+    setZerodhaBasketOrders([]);
+    setZerodhaBasketHistoryRuns([]);
+    setSelectedZerodhaBasketIds(new Set());
+    setZerodhaBasketDetailsData({ portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null });
     setZerodhaBasketOpen(true);
     setZerodhaBasketLoading(true);
     setZerodhaBasketError(null);
@@ -5756,6 +5768,7 @@ export function RebalanceWorkflowSections({
         apiService.zerodhaLoginUrl(),
       ]);
       if (stockFlowResult.status === "rejected") throw stockFlowResult.reason;
+      if (generation !== zerodhaPreparation.current) return;
       const { runs, portfolioSnapshot } = stockFlowResult.value;
       setZerodhaBasketHistoryRuns(runs);
       const status = statusResult.status === "fulfilled" ? statusResult.value : null;
@@ -5775,6 +5788,7 @@ export function RebalanceWorkflowSections({
         apiService.zerodhaEventsLatest(),
         apiService.zerodhaThreatsLatest(),
       ]);
+      if (generation !== zerodhaPreparation.current) return;
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "india"),
         "india",
@@ -5802,7 +5816,8 @@ export function RebalanceWorkflowSections({
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
-      setZerodhaAllocationUniverse(actionRows);
+      setZerodhaAllocationUniverse(stockFlowResult.value.warning ? [] : actionRows);
+      if (stockFlowResult.value.warning) setZerodhaBasketError(`Display calculations unavailable for cached source: ${stockFlowResult.value.warning}`);
       setZerodhaBasketOrders(orders);
       setSelectedZerodhaBasketIds(
         buildDefaultZerodhaBasketSelection(
@@ -5811,22 +5826,27 @@ export function RebalanceWorkflowSections({
         ),
       );
     } catch (error) {
+      if (generation !== zerodhaPreparation.current) return;
+      setZerodhaAllocationUniverse([]);
       setZerodhaBasketOrders([]);
       setZerodhaBasketHistoryRuns([]);
       setZerodhaDirectMarketAvailable(false);
-      setZerodhaBasketDetailsData((current) => ({
-        ...current,
-        error: normalizeError(error),
-      }));
+      setZerodhaBasketDetailsData({ portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: normalizeError(error) });
       setSelectedZerodhaBasketIds(new Set());
       setZerodhaBasketError(`Could not prepare Zerodha basket: ${normalizeError(error)}`);
     } finally {
-      setZerodhaBasketLoading(false);
+      if (generation === zerodhaPreparation.current) setZerodhaBasketLoading(false);
     }
   }, [scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold]);
 
 
   const openIndmoneyBasketPreview = useCallback(async () => {
+    const generation = ++indmoneyPreparation.current;
+    setIndmoneyAllocationUniverse([]);
+    setIndmoneyBasketOrders([]);
+    setIndmoneyBasketHistoryRuns([]);
+    setSelectedIndmoneyBasketIds(new Set());
+    setIndmoneyBasketDetailsData({ portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null });
     setIndmoneyBasketOpen(true);
     setIndmoneyBasketLoading(true);
     setIndmoneyBasketError(null);
@@ -5836,6 +5856,7 @@ export function RebalanceWorkflowSections({
         apiService.indmoneyUsEventsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
         apiService.indmoneyUsThreatsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
       ]);
+      if (generation !== indmoneyPreparation.current) return;
       const { runs, portfolioSnapshot } = stockFlowSource;
       setIndmoneyBasketHistoryRuns(runs);
       const stocks = buildConsensusRows(
@@ -5860,7 +5881,8 @@ export function RebalanceWorkflowSections({
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
-      setIndmoneyAllocationUniverse(actionRows);
+      setIndmoneyAllocationUniverse(stockFlowSource.warning ? [] : actionRows);
+      if (stockFlowSource.warning) setIndmoneyBasketError(`Display calculations unavailable for cached source: ${stockFlowSource.warning}`);
       setIndmoneyBasketOrders(orders);
       setSelectedIndmoneyBasketIds(
         buildDefaultZerodhaBasketSelection(
@@ -5869,16 +5891,15 @@ export function RebalanceWorkflowSections({
         ),
       );
     } catch (error) {
+      if (generation !== indmoneyPreparation.current) return;
+      setIndmoneyAllocationUniverse([]);
       setIndmoneyBasketOrders([]);
       setIndmoneyBasketHistoryRuns([]);
-      setIndmoneyBasketDetailsData((current) => ({
-        ...current,
-        error: normalizeError(error),
-      }));
+      setIndmoneyBasketDetailsData({ portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: normalizeError(error) });
       setSelectedIndmoneyBasketIds(new Set());
       setIndmoneyBasketError(`Could not prepare IndMoney basket: ${normalizeError(error)}`);
     } finally {
-      setIndmoneyBasketLoading(false);
+      if (generation === indmoneyPreparation.current) setIndmoneyBasketLoading(false);
     }
   }, [indmoneyBasketBuyThreshold, scoreMatrixFormulaConfig]);
 
@@ -5913,31 +5934,12 @@ export function RebalanceWorkflowSections({
 
   const toggleAllZerodhaBasketOrders = useCallback(() => {
     const selectable = zerodhaBasketOrders.filter(isWholeShareOrderSelectable);
-    setSelectedZerodhaBasketIds((current) => {
-      const allOrdersSelected = selectable.every((order) => current.has(order.id));
-      if (allOrdersSelected) return new Set();
-      return new Set(selectable.map((order) => order.id));
-    });
+    setSelectedZerodhaBasketIds(current => selectable.every(order => current.has(order.id)) ? new Set() : new Set(selectable.map(order => order.id)));
   }, [zerodhaBasketOrders]);
-
-  const toggleZerodhaBasketSection = useCallback(
-    (action: ActionCategory) => {
-      const sectionOrderIds = zerodhaBasketOrders
-        .filter(isWholeShareOrderSelectable)
-        .filter((order) => getZerodhaBasketActionForPercent(order) === action)
-        .map((order) => order.id);
-      setSelectedZerodhaBasketIds((current) => {
-        const next = new Set(current);
-        const sectionAllSelected = sectionOrderIds.every((id) => next.has(id));
-        sectionOrderIds.forEach((id) => {
-          if (sectionAllSelected) next.delete(id);
-          else next.add(id);
-        });
-        return next;
-      });
-    },
-    [zerodhaBasketOrders],
-  );
+  const toggleZerodhaBasketSection = useCallback((action: ActionCategory, visibleIds?: string[]) => {
+    const ids = zerodhaBasketOrders.filter(isWholeShareOrderSelectable).filter(order => getZerodhaBasketActionForPercent(order) === action && (!visibleIds || visibleIds.includes(order.id))).map(order => order.id);
+    setSelectedZerodhaBasketIds(current => toggleVisibleSelection(current, ids));
+  }, [zerodhaBasketOrders]);
 
   const updateZerodhaBasketOrderKind = useCallback(
     (id: string, orderKind: ZerodhaBasketOrderKind) => {
@@ -6000,39 +6002,15 @@ export function RebalanceWorkflowSections({
   }, [indmoneyBasketOrders]);
 
   const toggleIndmoneyBasketOrder = useCallback((id: string) => {
-    setSelectedIndmoneyBasketIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelectedIndmoneyBasketIds(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }, []);
-
   const toggleAllIndmoneyBasketOrders = useCallback(() => {
-    setSelectedIndmoneyBasketIds((current) => {
-      const allOrdersSelected = indmoneyBasketOrders.every((order) => current.has(order.id));
-      if (allOrdersSelected) return new Set();
-      return new Set(indmoneyBasketOrders.map((order) => order.id));
-    });
+    setSelectedIndmoneyBasketIds(current => indmoneyBasketOrders.every(order => current.has(order.id)) ? new Set() : new Set(indmoneyBasketOrders.map(order => order.id)));
   }, [indmoneyBasketOrders]);
-
-  const toggleIndmoneyBasketSection = useCallback(
-    (action: ActionCategory) => {
-      const sectionOrderIds = indmoneyBasketOrders
-        .filter((order) => getZerodhaBasketActionForPercent(order) === action)
-        .map((order) => order.id);
-      setSelectedIndmoneyBasketIds((current) => {
-        const next = new Set(current);
-        const sectionAllSelected = sectionOrderIds.every((id) => next.has(id));
-        sectionOrderIds.forEach((id) => {
-          if (sectionAllSelected) next.delete(id);
-          else next.add(id);
-        });
-        return next;
-      });
-    },
-    [indmoneyBasketOrders],
-  );
+  const toggleIndmoneyBasketSection = useCallback((action: ActionCategory, visibleIds?: string[]) => {
+    const ids = indmoneyBasketOrders.filter(isWholeShareOrderSelectable).filter(order => getZerodhaBasketActionForPercent(order) === action && (!visibleIds || visibleIds.includes(order.id))).map(order => order.id);
+    setSelectedIndmoneyBasketIds(current => toggleVisibleSelection(current, ids));
+  }, [indmoneyBasketOrders]);
 
   const updateIndmoneyBasketOrderKind = useCallback((id: string, orderKind: ZerodhaBasketOrderKind) => {
     setIndmoneyBasketOrders((current) =>
@@ -9059,7 +9037,7 @@ ${zerodhaExecutionMode === "direct_market"
         orders={zerodhaBasketOrders}
         allocationUniverse={zerodhaAllocationUniverse}
         selectedIds={selectedZerodhaBasketIds}
-        onClose={() => setZerodhaBasketOpen(false)}
+        onClose={() => { zerodhaPreparation.current += 1; setZerodhaBasketOpen(false); }}
         onToggle={toggleZerodhaBasketOrder}
         onToggleAll={toggleAllZerodhaBasketOrders}
         onToggleSection={toggleZerodhaBasketSection}
@@ -9094,7 +9072,7 @@ ${zerodhaExecutionMode === "direct_market"
         orders={indmoneyBasketOrders}
         allocationUniverse={indmoneyAllocationUniverse}
         selectedIds={selectedIndmoneyBasketIds}
-        onClose={() => setIndmoneyBasketOpen(false)}
+        onClose={() => { indmoneyPreparation.current += 1; setIndmoneyBasketOpen(false); }}
         onToggle={toggleIndmoneyBasketOrder}
         onToggleAll={toggleAllIndmoneyBasketOrders}
         onToggleSection={toggleIndmoneyBasketSection}

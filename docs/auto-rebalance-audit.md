@@ -144,3 +144,16 @@ margin shown in Buy Basket. Missing funds remain unavailable, never inferred
 from an inclusive wallet balance or treated as zero. Portfolio and quote source
 timestamps remain separate. Popups expose contributing history, formulas, inputs
 and intermediate values. No currency conversion or order placement occurs.
+
+
+Basket review corrections: group checkboxes act only on visible selectable order
+IDs; All Stocks retains its existing whole-basket semantics. Filtering itself does
+not change selection, and hidden selected executable orders are disclosed. New
+sizing displays use only a unique exact-venue positive broker last/market price
+with its captured source timestamp, never purchase average, prior close or a
+symbol-only lookup. An INDmoney snapshot without explicit venue cannot certify
+share sizing; its USD amount calculation remains independent of LTP. Existing
+executable pricing is unchanged. Reopening a basket clears the calculation
+universe and snapshot before preparation; failed/cached-source preparation leaves
+those calculations unavailable. Generation guards discard stale completions and
+responses after dismissal.

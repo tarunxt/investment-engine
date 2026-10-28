@@ -42,3 +42,35 @@ export function brokerDisplayAllocation(weight: number | undefined, assets: numb
 export function displayScoreAccepted(score: number | null, lower: number, upper: number, showAll: boolean) {
   return showAll || typeof score === 'number' && Number.isFinite(score) && score >= -3 && score <= 3 && (score <= lower || score >= upper);
 }
+
+export function toggleVisibleSelection(current: Set<string>, eligibleIds: string[]) {
+  const ids = [...new Set(eligibleIds)], next = new Set(current);
+  if (!ids.length) return next;
+  const allSelected = ids.every(id => current.has(id));
+  ids.forEach(id => { if (allSelected) next.delete(id); else next.add(id); });
+  return next;
+}
+export function verifiedDisplayQuote(snapshot: unknown, market: 'india' | 'us', symbol: string, exchange: string): { price: number; asOf: string; source: string } | null {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const data = snapshot as Record<string, unknown>;
+  if (typeof data.captured_at !== 'string' || !Number.isFinite(Date.parse(data.captured_at)) || !Array.isArray(data.holdings)) return null;
+  if (market === 'india' ? !('holdings_market_value' in data) : data.parse_status !== 'parsed') return null;
+  const venue = exchange.trim().toUpperCase();
+  const canonical = (value: unknown) => {
+    if (typeof value !== 'string') return '';
+    let text = value.trim().toUpperCase();
+    const prefix = /^([A-Z]+):(.+)$/.exec(text);
+    if (prefix) { if (prefix[1] !== venue) return ''; text = prefix[2]; }
+    if (market === 'india') {
+      if (text.endsWith('.NS') && venue !== 'NSE' || text.endsWith('.BO') && venue !== 'BSE') return '';
+      text = text.replace(/\.(?:NS|BO)$/, '');
+    }
+    return text;
+  };
+  if (!venue || !canonical(symbol)) return null;
+  const matches = data.holdings.filter(holding => holding && typeof holding === 'object' && canonical(market === 'india' ? holding.tradingsymbol : holding.symbol) === canonical(symbol) && typeof holding.exchange === 'string' && holding.exchange.trim().toUpperCase() === venue);
+  // No symbol-only fallback, purchase average, previous close, or guessed venue.
+  if (matches.length !== 1) return null;
+  const price = market === 'india' ? matches[0].last_price : matches[0].market_price;
+  return typeof price === 'number' && Number.isFinite(price) && price > 0 ? { price, asOf: data.captured_at, source: market === 'india' ? 'Zerodha holdings last_price · exact venue' : 'IndMoney holdings market_price · explicit exact venue' } : null;
+}
