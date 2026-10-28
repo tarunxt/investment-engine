@@ -3983,7 +3983,7 @@ function combineOperationalErrors(messages: Array<string | null>) {
   return present.length ? Array.from(new Set(present)).join("; ") : null;
 }
 
-async function fetchNativeHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
+async function fetchNativeHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string; reconstructedDetail?: ScoreMatrixDetail }): Promise<ScoreMatrixDetail | null> {
   if (item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return null;
   const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
   if (!target) return null;
@@ -4024,13 +4024,45 @@ async function fetchNativeHistoricalMatrix(item: FinalActionableHistoryItem | nu
   throw new Error("Historical lookup limit reached. Please try again.");
 }
 
-export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
+export function savedLegacyParameterEvidence(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string): HistoricalScoreEvidenceResponse | null {
+  if (!item || item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol) || item.formula_version !== "legacy-backfill-v1" || !Array.isArray(item.snapshot_json?.rows)) return null;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const fields: Record<string, [string, string]> = { cruxx: ["Score Rationale Cruxx", "Rationale Cruxx"], "technical-short": ["Score Rationale Technical Setup Short Term 1–3 Months", "Rationale Technical Setup Short Term 1–3 Months"], "technical-medium": ["Score Rationale - Technical Setup (Medium Term)", "Rationale - Technical Setup (Medium Term)"], "technical-long": ["Score Rationale - Technical Setup (Long Term)", "Rationale - Technical Setup (Long Term)"], "fundamentals-short": ["Score Rationale - Fundamentals Short Term", "Rationale - Fundamentals Short Term"], "fundamentals-medium-long": ["Score Rationale - Fundamentals Medium/Long Term", "Rationale - Fundamentals Medium/Long Term"] };
+  const candidates = item.snapshot_json.rows.flatMap(value => {
+    if (!value || typeof value !== "object") return [];
+    const source = value as Record<string, unknown>;
+    if (typeof source.job_id !== "number" || !Number.isSafeInteger(source.job_id) || !source.raw || typeof source.raw !== "object") return [];
+    const mapped = new Map<string, unknown>();
+    for (const [header, cell] of Object.entries(source.raw)) { const key = normalize(header); if (mapped.has(key)) return []; mapped.set(key, cell); }
+    if (normalizeStockSymbol(String(mapped.get("stocksymbol") ?? "")) !== normalizeStockSymbol(symbol) || String(mapped.get("exchangesymbol") ?? "").toUpperCase() !== exchange.toUpperCase()) return [];
+    return [{ source, mapped }];
+  });
+  const parameters: HistoricalScoreEvidenceResponse["parameters"] = {};
+  for (const { source, mapped } of candidates) {
+    if (candidates.filter(candidate => candidate.source.job_id === source.job_id).length !== 1) continue;
+    for (const [key, [scoreHeader, rationaleHeader]] of Object.entries(fields)) {
+      const rawScore = mapped.get(normalize(scoreHeader)), rawRationale = mapped.get(normalize(rationaleHeader));
+      if (rawScore === undefined && rawRationale === undefined) continue;
+      (parameters[key] ??= []).push({ id: `saved:${item.id}:${source.job_id}:${key}`, runId: item.rebalance_run_id, jobId: source.job_id as number, label: `Run #${item.rebalance_run_id} (Rebalance Scan) · Job #${source.job_id} · ${source.provider ?? "Provider unavailable"} ${source.model ?? "Model unavailable"} · original job timestamp unavailable`, score: parseStrictNumericCell(String(rawScore ?? "")), rationale: rawRationale == null || !String(rawRationale).trim() ? "Original parameter rationale unavailable." : String(rawRationale), rawScore, rawRationale, representation: "saved_legacy_source_row" });
+    }
+  }
+  if (!Object.values(parameters).some(rows => rows.length)) return null;
+  return { scope: { run_id: item.rebalance_run_id, market, symbol, exchange, covered_at: item.covered_at, history_id: item.id }, status: "partial", matrix: null, parameters, parameter_labels: Object.fromEntries(Object.entries(fields).map(([key, [header]]) => [key, header.replace(/^Score Rationale[ -]*/, "") || "Rationale Cruxx"])), notes: ["Original per-job parameter cells are retained in this saved history row. Its original weighted formula was not captured; no current matrix has been substituted."], coverage: { parameter_observations: Object.values(parameters).reduce((sum, rows) => sum + rows.length, 0) }, candidates: [], source: "saved_legacy_source_rows" };
+}
+
+export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string; reconstructedDetail?: ScoreMatrixDetail }): Promise<ScoreMatrixDetail | null> {
   return (await fetchHistoricalScoreSelection(item, market, symbol, exchange, source)).detail;
 }
 
-async function fetchHistoricalScoreSelection(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }) {
+async function fetchHistoricalScoreSelection(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string; reconstructedDetail?: ScoreMatrixDetail }) {
   const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
   if (!target || item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return { detail: null, evidence: null };
+  if (source?.reconstructedDetail && !item) {
+    const detail = source.reconstructedDetail;
+    if (normalizeStockSymbol(detail.stockSymbol) !== normalizeStockSymbol(symbol) || detail.stockExchange !== exchange || detail.rebalanceSourceRunId !== source.runId) throw new Error("Reconstructed matrix source identity does not match the selected row.");
+    return { detail: { ...detail, historicalReadNotes: ["This exact displayed row was reconstructed from its captured source jobs using current formula settings. It is not the original historical weighted policy or saved decision. Source run/job IDs are preserved for parameter drilldowns."] }, evidence: null };
+  }
+  const savedParameters = savedLegacyParameterEvidence(item, market, symbol, exchange);
   if (typeof apiService.getHistoricalScoreEvidence === "function") {
     let view: HistoricalScoreEvidenceResponse | null = null;
     try {
@@ -4041,16 +4073,17 @@ async function fetchHistoricalScoreSelection(item: FinalActionableHistoryItem | 
     }
     if (view) {
       if (!Number.isFinite(Date.parse(view.scope.covered_at)) || !Number.isFinite(Date.parse(target.coveredAt)) || view.scope.run_id !== target.runId || view.scope.market !== market || normalizeStockSymbol(view.scope.symbol) !== normalizeStockSymbol(symbol) || view.scope.exchange !== exchange || parseTimestampMs(view.scope.covered_at) !== parseTimestampMs(target.coveredAt) || (item && view.scope.history_id !== item.id)) throw new Error("Historical evidence scope does not match the selected stock, run and timestamp.");
+      if (!Object.values(view.parameters).some(rows => rows.length) && savedParameters && view.status !== "ambiguous") view = { ...view, parameters: savedParameters.parameters, notes: [...view.notes, ...savedParameters.notes] };
       const matrix = view.matrix;
       if (matrix && (matrix.stockSymbol !== symbol || matrix.stockExchange !== exchange || matrix.rebalanceSourceRunId !== target.runId || !Array.isArray(matrix.rows) || !Array.isArray(matrix.rules) || !Array.isArray(matrix.detailedRationaleRows))) throw new Error("Stored matrix identity or shape is invalid.");
       return { detail: matrix ? { ...matrix, historicalReadNotes: [...(Array.isArray(matrix.historicalReadNotes) ? matrix.historicalReadNotes.filter((note): note is string => typeof note === "string") : []), ...view.notes], historicalEvidence: view } as ScoreMatrixDetail : null, evidence: view };
     }
   }
-  return { detail: await fetchNativeHistoricalMatrix(item, market, symbol, exchange, source), evidence: null };
+  return { detail: await fetchNativeHistoricalMatrix(item, market, symbol, exchange, source), evidence: savedParameters };
 }
 
-function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, exchange, onClose }: {
-  item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; market: SwingTradeMarket; symbol: string; exchange: string; onClose: () => void;
+function HistoricalScoreMatrixPopup({ item, coveredAt, runId, reconstructedDetail, market, symbol, exchange, onClose }: {
+  item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail; market: SwingTradeMarket; symbol: string; exchange: string; onClose: () => void;
 }) {
   const [result, setResult] = useState<{ detail: ScoreMatrixDetail | null; evidence: HistoricalScoreEvidenceResponse | null; error: string | null; loading: boolean }>({ detail: null, evidence: null, error: null, loading: true });
   const [selectedEvidence, setSelectedEvidence] = useState<{ id: string; parameter: string } | null>(null);
@@ -4059,12 +4092,12 @@ function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, ex
     let active = true;
     const opener = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
-    void fetchHistoricalScoreSelection(item, market, symbol, exchange, { runId, coveredAt }).then(
+    void fetchHistoricalScoreSelection(item, market, symbol, exchange, { runId, coveredAt, reconstructedDetail }).then(
       (selection) => { if (active) setResult({ ...selection, error: null, loading: false }); },
       (error: unknown) => { if (active) setResult({ detail: null, evidence: null, error: error instanceof Error ? error.message : "Unable to load historical matrix.", loading: false }); },
     );
     return () => { active = false; opener?.focus(); };
-  }, [item, market, symbol, exchange, runId, coveredAt]);
+  }, [item, market, symbol, exchange, runId, coveredAt, reconstructedDetail]);
   return (
     <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[70]" onClick={(event) => { event.stopPropagation(); onClose(); }}
       onKeyDown={(event) => {
@@ -4111,7 +4144,7 @@ export async function scanStockSourceObservations(market: SwingTradeMarket, symb
   }
 }
 
-export function RetainedStockObservations({ market, symbol, saved, reconstructed }: { market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[] }) {
+export function RetainedStockObservations({ market, symbol, saved, reconstructed, onScoreOpen }: { market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[]; onScoreOpen?: (selection: { item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail }) => void }) {
   const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null }>({ rows: [], examined: 0, note: "", loading: true, error: null });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -4122,11 +4155,11 @@ export function RetainedStockObservations({ market, symbol, saved, reconstructed
   }, [market, symbol, attempt]);
   const numeric = (value: unknown) => value !== null && value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Number(value) : null;
   const rows = [
-    ...saved.map(item => ({ id: `saved:${item.id}`, run_id: item.rebalance_run_id, job_id: null, provider: null, model: null, created_at: item.covered_at, stage: "Saved summary", run_status: item.coverage_status, job_status: "", source: `Original saved summary · ${item.formula_version}`, cells: { "original action": item.action, "recorded score": item.score, "historical units": item.historical_current_units, "original amount": item.amount }, score: item.score, action: item.action, derived: historyScoreDerivedAction(item) })),
-    ...reconstructed.filter(row => !saved.some(item => item.rebalance_run_id === row.runId)).map(row => ({ id: `reconstructed:${row.runId}:${row.id}`, run_id: row.runId, job_id: null, provider: null, model: null, created_at: row.coveredAt, stage: "Rebalance reconstruction", run_status: "Original completion unavailable", job_status: "", source: "Reconstructed · current formula, not original saved decision", cells: { "current formula action": row.formulaAction, "current formula score": row.formulaScore, "captured units": row.detail.currentUnits }, score: row.formulaScore, action: null, derived: historyScoreDerivedAction({ score: row.formulaScore, historical_current_units: row.detail.currentUnits, coverage_status: "suggested" }) })),
-    ...state.rows.map(row => { const score = numeric(row.cells["recorded score"] ?? row.cells["final score"] ?? row.cells["calculated score"] ?? row.cells.score); const action = Object.entries(row.cells).find(([key]) => key === "action" || key.startsWith("action buy"))?.[1]; return { ...row, score, action: action == null ? null : String(action), derived: historyScoreDerivedAction({ score, historical_current_units: numeric(row.cells["current units"] ?? row.cells.current_units), coverage_status: ["completed", "partial"].includes(row.job_status) ? "suggested" : "run_failed" }) }; }),
+    ...saved.map(item => ({ id: `saved:${item.id}`, run_id: item.rebalance_run_id, job_id: null, provider: null, model: null, created_at: item.covered_at, stage: "Saved summary", run_status: item.coverage_status, job_status: "", source: `Original saved summary · ${item.formula_version}`, cells: { "original action": item.action, "recorded score": item.score, "historical units": item.historical_current_units, "original amount": item.amount }, score: item.score, action: item.action, derived: historyScoreDerivedAction(item), selection: { item, coveredAt: item.covered_at, runId: item.rebalance_run_id } })),
+    ...reconstructed.filter(row => !saved.some(item => item.rebalance_run_id === row.runId)).map(row => ({ id: `reconstructed:${row.runId}:${row.id}`, run_id: row.runId, job_id: null, provider: null, model: null, created_at: row.coveredAt, stage: "Rebalance reconstruction", run_status: "Original completion unavailable", job_status: "", source: "Reconstructed · current formula, not original saved decision", cells: { "current formula action": row.formulaAction, "current formula score": row.formulaScore, "captured units": row.detail.currentUnits }, score: row.formulaScore, action: null, derived: historyScoreDerivedAction({ score: row.formulaScore, historical_current_units: row.detail.currentUnits, coverage_status: "suggested" }), selection: { item: null, coveredAt: row.coveredAt, runId: row.runId, reconstructedDetail: row.detail } })),
+    ...state.rows.map(row => { const score = numeric(row.cells["recorded score"] ?? row.cells["final score"] ?? row.cells["calculated score"] ?? row.cells.score); const action = Object.entries(row.cells).find(([key]) => key === "action" || key.startsWith("action buy"))?.[1]; return { ...row, score, action: action == null ? null : String(action), derived: historyScoreDerivedAction({ score, historical_current_units: numeric(row.cells["current units"] ?? row.cells.current_units), coverage_status: ["completed", "partial"].includes(row.job_status) ? "suggested" : "run_failed" }), selection: null }; }),
   ].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || (b.job_id ?? 0) - (a.job_id ?? 0));
-  return <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4"><h3 className="font-semibold">All retained runs containing {symbol} · original source observations</h3><p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">Scan complete: {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>Retry all retained sources</button></p> : null}<div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : formatScoreValue(row.score)}</td><td className="p-2"><details><summary className="cursor-pointer text-blue-700">View original scores, rationale and fields</summary><dl className="mt-2 space-y-2">{Object.entries(row.cells).map(([key, value]) => <div key={key}><dt className="font-semibold">{key}</dt><dd className="max-w-xl whitespace-pre-wrap break-words">{String(value ?? "Unavailable")}</dd></div>)}</dl></details></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}<p className="mt-3 text-xs text-slate-600">{state.note || "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed."}</p></section>;
+  return <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4"><h3 className="font-semibold">All retained runs containing {symbol} · original source observations</h3><p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">Scan complete: {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>Retry all retained sources</button></p> : null}<div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{rows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : row.selection && onScoreOpen ? <button type="button" className="text-blue-700 underline" onClick={() => onScoreOpen(row.selection!)}>{formatScoreValue(row.score)}</button> : formatScoreValue(row.score)}</td><td className="p-2"><details><summary className="cursor-pointer text-blue-700">View original scores, rationale and fields</summary><dl className="mt-2 space-y-2">{Object.entries(row.cells).map(([key, value]) => <div key={key}><dt className="font-semibold">{key}</dt><dd className="max-w-xl whitespace-pre-wrap break-words">{String(value ?? "Unavailable")}</dd></div>)}</dl></details></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}<p className="mt-3 text-xs text-slate-600">{state.note || "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed."}</p></section>;
 }
 
 export function historyScoreDerivedAction(item: Pick<FinalActionableHistoryItem, "score" | "historical_current_units" | "coverage_status">): { action: ActionCategory | null; note: string } {
@@ -4170,7 +4203,7 @@ function ScopedStockDetailsButton({
 }) {
   const detailPanelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [historicalMatrix, setHistoricalMatrix] = useState<{ item: FinalActionableHistoryItem | null; coveredAt: string; runId: number } | null>(null);
+  const [historicalMatrix, setHistoricalMatrix] = useState<{ item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail } | null>(null);
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
@@ -4524,7 +4557,7 @@ function ScopedStockDetailsButton({
                     Loading available historical suggestions…
                   </div>
                 ) : null}
-                <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} />
+                <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} />
                 <h4 className="mt-5 mb-2 text-sm font-semibold">Saved summary source rows</h4>
                 {displayedPersistedHistory.length ? (
                   <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
@@ -4607,7 +4640,7 @@ function ScopedStockDetailsButton({
                           const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(historicalAction);
                           const renderHistoricalColumn = (column: Exclude<FinalActionableColumnKey, "stock">) => {
                             if (column === "score") {
-                              return <button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: historicalRow.coveredAt, runId: historicalRow.runId })}>{formatScoreValue(historicalRow.formulaScore)}</button>;
+                              return <button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: historicalRow.coveredAt, runId: historicalRow.runId, reconstructedDetail: historicalRow.detail })}>{formatScoreValue(historicalRow.formulaScore)}</button>;
                             }
                             if (column === "consensus") return <ConsensusBreakupButton stock={historicalStock} action={historicalAction} />;
                             if (column === "currentValue") return formatDisplayAmount(historicalEstimate.currentInvestmentAmount ?? getCurrentValueAmount(historicalStock.representative), market);

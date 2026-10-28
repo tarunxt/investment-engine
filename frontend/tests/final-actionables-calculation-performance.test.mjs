@@ -759,3 +759,25 @@ test('unified history puts newer reconstructions above old saved summaries while
   assert.match(html, /Sell All/); assert.match(html, /Hold/); assert.match(html, /2.83/); assert.match(html, /0.11/);
   assert.deepEqual(saved, before);
 });
+
+
+test('reconstructed score opens its exact displayed source detail without guessing among immutable revisions', async () => {
+  let auditCalls = 0;
+  const api = helpers({ apiService: { getHistoricalScoreEvidence: async () => { auditCalls++; throw new Error('ambiguous'); } } });
+  const detail = api.buildScoreMatrixDetail(api.buildConsensusRows([run(438, 'Rebalance', 1)], 'india')[0]);
+  const actual = await api.fetchFrozenHistoricalMatrix(null, 'india', detail.stockSymbol, detail.stockExchange, { runId: 438, coveredAt: timestamp, reconstructedDetail: detail });
+  assert.equal(actual.calculatedScore, detail.calculatedScore); assert.deepEqual(actual.rows, detail.rows); assert.equal(auditCalls, 0);
+  assert.match(actual.historicalReadNotes[0], /not the original historical/);
+  await assert.rejects(api.fetchFrozenHistoricalMatrix(null, 'india', 'WRONG', detail.stockExchange, { runId: 438, coveredAt: timestamp, reconstructedDetail: detail }), /does not match/);
+});
+
+test('saved legacy parameter cells remain available without advisory-audit access, without inventing a historical matrix', async () => {
+  const api = helpers({ apiService: { getHistoricalScoreEvidence: async () => { throw { status: 404 }; }, getFinalActionableHistory: async () => ({ items: [], has_more: false }) } });
+  const item = { id: 5, rebalance_run_id: 200, market: 'india', stock_symbol: 'HAL', covered_at: timestamp, formula_version: 'legacy-backfill-v1', snapshot_json: { rows: [{ job_id: 1, provider: 'deepseek', model: 'original', raw: { 'exchange symbol': 'NSE', 'stock symbol': 'HAL', 'score rationale technical setup short term 1 3 months': '2.50', 'rationale technical setup short term 1 3 months': 'Original breakout rationale' } }] } };
+  const before = structuredClone(item);
+  const view = api.savedLegacyParameterEvidence(item, 'india', 'HAL', 'NSE');
+  assert.equal(view.matrix, null); assert.equal(view.parameters['technical-short'][0].score, 2.5); assert.equal(view.parameters['technical-short'][0].rationale, 'Original breakout rationale');
+  assert.equal(api.savedLegacyParameterEvidence(item, 'us', 'HAL', 'NSE'), null); assert.equal(api.savedLegacyParameterEvidence(item, 'india', 'HAL', 'BSE'), null);
+  const duplicate = structuredClone(item); duplicate.snapshot_json.rows.push(structuredClone(duplicate.snapshot_json.rows[0])); assert.equal(api.savedLegacyParameterEvidence(duplicate, 'india', 'HAL', 'NSE'), null);
+  assert.deepEqual(item, before);
+});
