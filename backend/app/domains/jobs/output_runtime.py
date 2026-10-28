@@ -126,6 +126,23 @@ def reset_output_context(token: Token | None) -> None:
         _context.reset(token)
 
 
+def rebalance_serialization_instructions() -> str:
+    """Strengthen declared rebalance generation without changing saved inputs."""
+    context = current_output_context()
+    if context is None or context.kind != 'rebalance':
+        return ''
+    return (
+        '\n\n[REBALANCE_TABLE_SERIALIZATION]\n'
+        f'Return exactly {len(REBALANCE_COLUMNS)} cells per header, separator, and data row, '
+        'in the declared column order. Do not append source-table columns or metadata columns.\n'
+        'Use pipes only as column delimiters. Encode every literal pipe inside a cell as &#124; '
+        '(including rationale text, source names, and technical setup). '
+        'Backticks and quotes do not escape a Markdown pipe. Keep each row on one line.\n'
+        'Before returning, verify every row has exactly the declared cell count; '
+        'keep all rationale text inside its corresponding cell.\n'
+    )
+
+
 def active_contract_hash() -> str | None:
     context = current_output_context()
     return contract_hash(context.kind) if context else None
