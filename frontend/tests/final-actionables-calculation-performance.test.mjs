@@ -48,7 +48,7 @@ function helpers(overrides = {}, transform) {
     },
     technicalCalls,
     ...overrides,
-  }, ['buildScoreMatrixDetail', 'ScopedStockDetailsButton', 'fetchFrozenHistoricalMatrix', 'HistoricalScoreMatrixPopup', 'ActionablesCalculationsModal', 'DEFAULT_SCORE_MATRIX_FORMULA_CONFIG', 'RebalanceCell', 'buildActionablesCalculationRows'], (source) => {
+  }, ['formatTechnicalScanSourceLabel', 'parseTechnicalScanResponse', 'fetchParameterScoreObservations', 'ParameterScoreEvidencePopup', 'DetailedRationaleScoreSection', 'buildScoreMatrixDetail', 'ScopedStockDetailsButton', 'fetchFrozenHistoricalMatrix', 'HistoricalScoreMatrixPopup', 'ActionablesCalculationsModal', 'DEFAULT_SCORE_MATRIX_FORMULA_CONFIG', 'RebalanceCell', 'buildActionablesCalculationRows'], (source) => {
     const instrumented = source.replace('const lines = response.split(/\\r?\\n/);', 'technicalCalls.count += 1;\n  const lines = response.split(/\\r?\\n/);');
     return transform ? transform(instrumented) : instrumented;
   });
@@ -471,7 +471,7 @@ test('historical popup distinguishes missing snapshots and errors and supports c
   assert.match(source, /key=\{`\$\{props.market\}:\$\{props.stock.key\}`\}/);
   assert.match(source, /key=\{`\$\{historicalMatrix.runId\}:\$\{historicalMatrix.coveredAt\}`\}/);
   assert.match(source, /inert=\{historicalMatrix \? true : undefined\}/);
-  assert.match(source, /<fieldset disabled=\{frozen\}/);
+  assert.match(source, /readOnly=\{frozen\}/);
   assert.match(source, /return frozen \? detail : applyScoreMatrixFormulaConfig/);
 });
 
@@ -519,4 +519,135 @@ test('historical score clicks stack locally; outside top close preserves capture
   assert.equal(findMatching(tree, node => node.type === h.HistoricalScoreMatrixPopup), null);
   score.props.onClick(); tree = render();
   assert.ok(findMatching(tree, node => node.type === h.HistoricalScoreMatrixPopup));
+});
+
+function parameterFixture(h, id = 90) {
+  const selected = run(id, 'Rebalance', 1);
+  const headers = parser.REBALANCE_HEADER_ORDER;
+  selected.run_jobs.forEach((link, index) => {
+    const cells = Object.fromEntries(headers.map(header => [header, '—']));
+    Object.assign(cells, { 'Exchange Symbol': 'NSE', 'Stock Symbol': 'TEST0', [actionHeader]: 'Buy New',
+      'Current Units': '0', 'Units Change': '5', 'Final Units': '5', 'Units to Buy': '5', 'Price Per Unit': '100', 'Total Buy Amount': '500',
+      'Score Rationale Technical Setup Short Term 1–3 Months': String(index + 2),
+      'Rationale Technical Setup Short Term 1–3 Months': `Original short rationale ${id}/${link.job_id}`,
+      'Score Rationale - Technical Setup (Medium Term)': '-2',
+      'Rationale - Technical Setup (Medium Term)': 'Different medium-term rationale',
+    });
+    link.job.response = `| ${headers.join(' | ')} |\n| ${headers.map(() => '---').join(' | ')} |\n| ${headers.map(header => cells[header]).join(' | ')} |`;
+  });
+  const [stock] = h.buildConsensusRows([selected], 'india');
+  const detail = h.buildScoreMatrixDetail(stock);
+  return { selected, detail, parameter: detail.detailedRationaleRows.find(row => row.id === 'technical-short') };
+}
+
+test('parameter evidence shows each original job score and its own rationale, not the aggregate or another field', async () => {
+  let selected; const calls = [];
+  const h = helpers({ apiService: { getRun: async id => { calls.push(id); return selected; } } });
+  const fixture = parameterFixture(h); selected = fixture.selected;
+  assert.equal(fixture.parameter.score, 2.5);
+  const before = structuredClone(fixture.detail);
+  const rows = await h.fetchParameterScoreObservations(fixture.detail, fixture.parameter);
+  assert.deepEqual(rows.map(row => row.score), [2, 3]);
+  assert.deepEqual(rows.map(row => row.jobId), [900, 901]);
+  assert.deepEqual(rows.map(row => row.rationale), ['Original short rationale 90/900', 'Original short rationale 90/901']);
+  assert.ok(rows.every(row => row.label.includes('synthetic same-model') && row.label.includes('Rebalance Scan') && row.label.includes('2026')));
+  assert.deepEqual(calls, [90]);
+  assert.deepEqual(fixture.detail, before);
+  const medium = fixture.detail.detailedRationaleRows.find(row => row.id === 'technical-medium');
+  const mediumRows = await h.fetchParameterScoreObservations(fixture.detail, medium);
+  assert.deepEqual(mediumRows.map(row => row.score), [-2, -2]);
+  assert.ok(mediumRows.every(row => row.rationale === 'Different medium-term rationale'));
+});
+
+test('parameter provenance fails honestly for missing jobs, wrong stocks, markets, runs or saved contributor metadata', async () => {
+  let selected;
+  const h = helpers({ apiService: { getRun: async () => selected } });
+  const fixture = parameterFixture(h); selected = fixture.selected;
+  selected.run_jobs[0].job.response = selected.run_jobs[0].job.response.replaceAll('TEST0', 'OTHER');
+  let rows = await h.fetchParameterScoreObservations(fixture.detail, fixture.parameter);
+  assert.equal(rows[0].score, null); assert.match(rows[0].rationale, /exact original stock row/);
+  assert.equal(rows[1].score, 3);
+  selected.run_jobs[1].job.model = 'different-model';
+  rows = await h.fetchParameterScoreObservations(fixture.detail, fixture.parameter);
+  assert.equal(rows[1].score, null); assert.match(rows[1].rationale, /identity/);
+  selected.id = 91;
+  await assert.rejects(h.fetchParameterScoreObservations(fixture.detail, fixture.parameter), /identity/);
+  selected.id = 90; selected.auto_rebalance_portfolio = 'indmoney_us'; selected.auto_rebalance_label = 'IndMoney US Run #90 (Rebalance Scan)'; selected.prompt = '[REBALANCE_FLOW:us]';
+  await assert.rejects(h.fetchParameterScoreObservations(fixture.detail, fixture.parameter), /identity/);
+  assert.deepEqual(await h.fetchParameterScoreObservations(fixture.detail, { id: 'mean-mode-action' }), []);
+  assert.deepEqual(await h.fetchParameterScoreObservations(fixture.detail, { id: 'technical-scan-confidence' }), []);
+});
+
+test('third popup loading, exact columns, inside/outside clicks, Escape, focus and stale dismissal stay local', async () => {
+  const harness = popupHarness(); const pending = []; let selected; let restored = 0; let closed = 0; let stopped = 0;
+  const doc = { activeElement: { focus() { restored += 1; } } };
+  const h = helpers({ ...harness.hooks, document: doc, apiService: { getRun: () => new Promise(resolve => pending.push(resolve)) } });
+  const fixture = parameterFixture(h); selected = fixture.selected;
+  const props = { detail: fixture.detail, parameter: fixture.parameter, onClose() { closed += 1; } };
+  const render = () => { harness.start(); return h.ParameterScoreEvidencePopup(props); };
+  let tree = render(); assert.match(JSON.stringify(tree), /Loading original scores/);
+  let firstFocus = 0;
+  const first = { focus() { firstFocus += 1; } }; const last = { focus() {} };
+  tree.props.ref.current = { focus() {}, querySelectorAll: () => [first, last] };
+  harness.flush();
+  doc.activeElement = last;
+  tree.props.onKeyDown({ key: 'Tab', stopPropagation() { stopped += 1; }, preventDefault() {} });
+  assert.equal(firstFocus, 1);
+  tree.props.children.props.onClick({ stopPropagation() { stopped += 1; } }); assert.equal(closed, 0);
+  tree.props.onClick({ stopPropagation() { stopped += 1; } }); assert.equal(closed, 1);
+  tree.props.onKeyDown({ key: 'Escape', stopPropagation() { stopped += 1; }, preventDefault() {} }); assert.equal(closed, 2);
+  harness.dispose(); assert.equal(restored, 1);
+  pending.shift()(selected); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.match(JSON.stringify(render()), /Loading original scores/, 'dismissed completion cannot replace or reopen any layer');
+  assert.equal(stopped, 4);
+  const readyHarness = popupHarness();
+  const ready = helpers({ ...readyHarness.hooks, document: { activeElement: { focus() {} } }, apiService: { getRun: async () => selected } });
+  const readyRender = () => { readyHarness.start(); return ready.ParameterScoreEvidencePopup(props); };
+  readyRender(); readyHarness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const text = JSON.stringify(readyRender());
+  assert.match(text, /Run \/ LLM/); assert.match(text, /Rationale/); assert.match(text, /Score/);
+  assert.match(text, /Original short rationale 90\/900/);
+  readyHarness.dispose();
+});
+
+test('technical parameter evidence uses the captured technical job only and labels missing rationale', async () => {
+  let selected;
+  const h = helpers({ apiService: { getRun: async () => selected } });
+  selected = technicalRun(92, 5);
+  const fixture = parameterFixture(h);
+  const link = selected.run_jobs[0];
+  const parsed = h.parseTechnicalScanResponse(link.job.response, { runId: 92, jobId: link.job_id, provider: link.job.provider, model: link.job.model, runLabel: selected.auto_rebalance_label, createdAt: link.job.updated_at });
+  const detail = { ...fixture.detail, technicalScanSourceRunId: 92, technicalScanSourceJobId: link.job_id, technicalScanSourceLabel: h.formatTechnicalScanSourceLabel(parsed[0]) };
+  const rows = await h.fetchParameterScoreObservations(detail, { id: 'technical-scan-confidence' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].jobId, 920);
+  assert.equal(rows[0].score, 90);
+  assert.match(rows[0].rationale, /parameter-specific rationale was not captured/);
+  const legacy = { ...detail, technicalScanSourceJobId: undefined };
+  assert.deepEqual(await h.fetchParameterScoreObservations(legacy, { id: 'technical-scan-confidence' }), []);
+});
+
+test('third layer distinguishes failed/absent evidence, traps focus and exposes accessible parameter score links', async () => {
+  for (const failure of [false, true]) {
+    const harness = popupHarness();
+    const h = helpers({ ...harness.hooks, document: { activeElement: { focus() {} } }, apiService: { getRun: async () => { throw new Error('Source API failed'); } } });
+    const fixture = parameterFixture(h);
+    const parameter = failure ? fixture.parameter : { id: 'mean-mode-action', parameter: 'Consolidated action' };
+    const render = () => { harness.start(); return h.ParameterScoreEvidencePopup({ detail: fixture.detail, parameter, onClose() {} }); };
+    render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const text = JSON.stringify(render());
+    assert.match(text, failure ? /Unable to load parameter evidence/ : /Original per-run score\/rationale provenance was not captured/);
+    assert.doesNotMatch(text, /Loading original scores/);
+    harness.dispose();
+  }
+  let selectedParameter;
+  const h = helpers(); const fixture = parameterFixture(h);
+  const section = h.DetailedRationaleScoreSection;
+  const html = renderToStaticMarkup(React.createElement(section, { detail: fixture.detail, readOnly: true, onParameterScoreOpen: row => { selectedParameter = row; } }));
+  assert.match(html, /Show original scores and rationale for Average of Score Rationale - Technical Setup/);
+  const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+  assert.match(source, /inert=\{selectedParameter \? true : undefined\}/);
+  assert.match(source, /onParameterScoreOpen=\{setSelectedParameter\}/);
+  assert.match(source, /onKeyDown=\{event => \{\s*event.stopPropagation\(\);/);
+  assert.equal(selectedParameter, undefined, 'rendering a score must never initiate a provider/job action');
 });
