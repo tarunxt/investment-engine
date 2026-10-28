@@ -48,7 +48,7 @@ function helpers(overrides = {}, transform) {
     },
     technicalCalls,
     ...overrides,
-  }, ['ActionablesCalculationsModal', 'DEFAULT_SCORE_MATRIX_FORMULA_CONFIG', 'RebalanceCell', 'buildActionablesCalculationRows'], (source) => {
+  }, ['formatTechnicalScanSourceLabel', 'parseTechnicalScanResponse', 'fetchParameterScoreObservations', 'ParameterScoreEvidencePopup', 'DetailedRationaleScoreSection', 'buildScoreMatrixDetail', 'ScopedStockDetailsButton', 'fetchFrozenHistoricalMatrix', 'HistoricalScoreMatrixPopup', 'ActionablesCalculationsModal', 'DEFAULT_SCORE_MATRIX_FORMULA_CONFIG', 'RebalanceCell', 'buildActionablesCalculationRows'], (source) => {
     const instrumented = source.replace('const lines = response.split(/\\r?\\n/);', 'technicalCalls.count += 1;\n  const lines = response.split(/\\r?\\n/);');
     return transform ? transform(instrumented) : instrumented;
   });
@@ -217,7 +217,7 @@ test('closed detail buttons skip cache work; opening, closing during a request, 
   });
   const [stock] = h.buildConsensusRows([run(90, 'Rebalance', 1)], 'india');
   const props = { stock, market: 'india', technicalScan: null, detailsData: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null } };
-  const render = () => { harness.start(); return h.StockDetailsButton(props); };
+  const render = () => { harness.start(); return h.ScopedStockDetailsButton(props); };
   const click = (node) => node.props.onClick({ stopPropagation() {} });
   let tree = render();
   assert.equal(reads, 0);
@@ -342,4 +342,312 @@ test('actual run loader ignores stale success, stale errors and completion after
   assert.match(source, /key=\{`\$\{props.portfolio\}:\$\{props.market\}`\}/);
   assert.match(scoped, /window.clearTimeout\(timeout\);\s*runsRequestRef.current \+= 1;/);
   assert.equal((source.match(/loading=\{loading\}\n        loadError=\{error\}/g) ?? []).length, 2);
+});
+
+function savedMatrixFixture(h, overrides = {}) {
+  const [stock] = h.buildConsensusRows([run(90, 'Rebalance', 1)], 'india');
+  const detail = h.buildScoreMatrixDetail(stock);
+  return { id: 17, workflow_id: 8, rebalance_run_id: 90, market: 'india', stock_symbol: 'TEST0',
+    coverage_status: 'suggested', action: 'Buy New', consensus_numerator: 1, consensus_denominator: 1, historical_current_value: null, historical_current_units: 0, action_units: 5, amount: 500, covered_at: timestamp, score: detail.calculatedScore, formula_version: 'score-matrix-v1', formula_inputs_json: detail, ...overrides };
+}
+
+test('historical fetch maps exact saved stock/date/workflow/run and never falls back to latest', async () => {
+  let items = [];
+  const calls = [];
+  const h = helpers({ apiService: { getFinalActionableHistory: async (params) => { calls.push(params); return { items, has_more: false }; } } });
+  const item = savedMatrixFixture(h);
+  items = [{ ...item, id: 18, covered_at: '2026-10-28T10:00:00Z' }, item];
+  assert.deepEqual(await h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), item.formula_inputs_json);
+  assert.deepEqual(calls[0], { market: 'india', symbol: 'TEST0', limit: 50, cursor: null });
+  for (const patch of [{ covered_at: 'another day' }, { workflow_id: 9 }, { rebalance_run_id: 99 },
+    { market: 'us' }, { stock_symbol: 'OTHER' }, { formula_version: 'legacy-backfill-v1' }, { formula_inputs_json: null },
+    { formula_inputs_json: { ...item.formula_inputs_json, stockExchange: 'NYSE' } }]) {
+    items = [{ ...item, ...patch }];
+    assert.equal(await h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), null);
+  }
+  items = [{ ...item, id: 18 }];
+  assert.equal(await h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), null);
+});
+
+test('historical lookup handles pagination and propagates transport errors separately', async () => {
+  let count = 0;
+  let item;
+  const h = helpers({ apiService: { getFinalActionableHistory: async ({ cursor }) => {
+    count += 1;
+    if (!cursor) return { items: [], has_more: true, next_cursor: 'older' };
+    return { items: [item], has_more: false };
+  } } });
+  item = savedMatrixFixture(h);
+  assert.deepEqual(await h.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), item.formula_inputs_json);
+  assert.equal(count, 2);
+  const failed = helpers({ apiService: { getFinalActionableHistory: async () => { throw new Error('network failed'); } } });
+  await assert.rejects(failed.fetchFrozenHistoricalMatrix(item, 'india', 'TEST0', 'NSE'), /network failed/);
+});
+
+function popupHarness() {
+  const slots = []; let cursor = 0; let effects = []; let cleanup = [];
+  return {
+    start() { cursor = 0; }, flush() { const pending = effects; effects = []; pending.forEach(fn => { const f = fn(); if (f) cleanup.push(f); }); },
+    dispose() { cleanup.forEach(fn => fn()); cleanup = []; },
+    hooks: {
+      useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = typeof value === 'function' ? value(slots[i]) : value; }]; },
+      useRef(initial) { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
+      useEffect(fn) { if (!cleanup.length && !effects.length) effects.push(fn); }, useMemo: fn => fn(), useCallback: fn => fn,
+    },
+  };
+}
+
+test('nested matrix delays, closes only top overlay, traps keys, restores focus and ignores dismissed fetch', async () => {
+  const harness = popupHarness(); const pending = []; let restored = 0; let closed = 0; let stopped = 0; let firstFocus = 0; let lastFocus = 0;
+  const opener = { focus() { restored += 1; } };
+  const doc = { activeElement: opener };
+  const h = helpers({ ...harness.hooks, document: doc, apiService: { getFinalActionableHistory: () => new Promise(resolve => pending.push(resolve)) } });
+  const item = savedMatrixFixture(h);
+  const props = { item, coveredAt: item.covered_at, runId: item.rebalance_run_id, market: 'india', symbol: 'TEST0', exchange: 'NSE', onClose() { closed += 1; } };
+  const render = () => { harness.start(); return h.HistoricalScoreMatrixPopup(props); };
+  let tree = render();
+  assert.match(JSON.stringify(tree), /Loading historical score matrix/);
+  const first = { focus() { firstFocus += 1; } }; const last = { focus() { lastFocus += 1; } };
+  tree.props.ref.current = { focus() {}, querySelectorAll: () => [first, last] };
+  harness.flush();
+  // Dialog content must consume inside clicks; backdrop consumes outside clicks.
+  const dialog = tree.props.children;
+  dialog.props.children.props.onClick({ stopPropagation() { stopped += 1; } });
+  assert.equal(closed, 0);
+  doc.activeElement = last;
+  tree.props.onKeyDown({ key: 'Tab', preventDefault() {}, stopPropagation() {} });
+  assert.equal(firstFocus, 1);
+  doc.activeElement = first;
+  tree.props.onKeyDown({ key: 'Tab', shiftKey: true, preventDefault() {}, stopPropagation() {} });
+  assert.equal(lastFocus, 1);
+  tree.props.onClick({ stopPropagation() { stopped += 1; } });
+  assert.equal(closed, 1); assert.equal(stopped, 2);
+  harness.dispose();
+  assert.equal(restored, 1);
+  pending.shift()({ items: [item], has_more: false });
+  await Promise.resolve(); await Promise.resolve();
+  tree = render();
+  assert.match(JSON.stringify(tree), /Loading historical score matrix/, 'dismissed requests cannot install a matrix');
+  tree.props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() { stopped += 1; } });
+  assert.equal(closed, 2);
+});
+
+test('historical modal renders saved detail through the existing frozen matrix contract', async () => {
+  const harness = popupHarness(); let item;
+  const h = helpers({ ...harness.hooks, document: { activeElement: { focus() {} } }, apiService: { getFinalActionableHistory: async () => ({ items: [item], has_more: false }) } });
+  item = savedMatrixFixture(h);
+  const props = { item, coveredAt: item.covered_at, runId: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', onClose() {} };
+  const render = () => { harness.start(); return h.HistoricalScoreMatrixPopup(props); };
+  render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const matrix = render().props.children;
+  assert.equal(matrix.type, h.ScoreMatrixModal);
+  assert.equal(matrix.props.frozen, true);
+  assert.deepEqual(matrix.props.detail, item.formula_inputs_json);
+  assert.match(matrix.props.historicalLabel, /Run #90/);
+  harness.dispose();
+});
+
+test('historical popup distinguishes missing snapshots and errors and supports clean reopen', async () => {
+  for (const outcome of ['missing', 'error', 'success']) {
+    const harness = popupHarness(); let item;
+    const h = helpers({ ...harness.hooks, document: { activeElement: { focus() {} } }, apiService: { getFinalActionableHistory: async () => {
+      if (outcome === 'error') throw new Error('Historical service unavailable');
+      return { items: outcome === 'missing' ? [] : [item], has_more: false };
+    } } });
+    item = savedMatrixFixture(h, { id: outcome === 'success' ? 19 : 17 });
+    const props = { item, coveredAt: item.covered_at, runId: 90, market: 'india', symbol: 'TEST0', exchange: 'NSE', onClose() {} };
+    const render = () => { harness.start(); return h.HistoricalScoreMatrixPopup(props); };
+    render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const tree = render();
+    if (outcome === 'success') assert.equal(tree.props.children.props.detail, item.formula_inputs_json);
+    else {
+      const text = JSON.stringify(tree);
+      assert.match(text, outcome === 'error' ? /Unable to load historical score matrix/ : /No frozen score matrix/);
+      assert.doesNotMatch(text, /Loading historical score matrix/);
+    }
+    harness.dispose();
+  }
+  const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+  assert.match(source, /key=\{`\$\{props.market\}:\$\{props.stock.key\}`\}/);
+  assert.match(source, /key=\{`\$\{historicalMatrix.runId\}:\$\{historicalMatrix.coveredAt\}`\}/);
+  assert.match(source, /inert=\{historicalMatrix \? true : undefined\}/);
+  assert.match(source, /readOnly=\{frozen\}/);
+  assert.match(source, /return frozen \? detail : applyScoreMatrixFormulaConfig/);
+});
+
+test('reconstructed dates require one exact historical run/date match without guessing workflows', async () => {
+  let items = [];
+  const h = helpers({ apiService: { getFinalActionableHistory: async () => ({ items, has_more: false }) } });
+  const item = savedMatrixFixture(h);
+  const target = { runId: 90, coveredAt: timestamp };
+  items = [item];
+  assert.equal(await h.fetchFrozenHistoricalMatrix(null, 'india', 'TEST0', 'NSE', target), item.formula_inputs_json);
+  items = [item, { ...item, id: 18, workflow_id: 9 }];
+  assert.equal(await h.fetchFrozenHistoricalMatrix(null, 'india', 'TEST0', 'NSE', target), null);
+  items = [{ ...item, covered_at: '2026-10-28T00:00:00Z' }];
+  assert.equal(await h.fetchFrozenHistoricalMatrix(null, 'india', 'TEST0', 'NSE', target), null);
+});
+
+function findMatching(node, predicate) {
+  if (!node || typeof node !== 'object') return null;
+  if (predicate(node)) return node;
+  return React.Children.toArray(node.props?.children).map(child => findMatching(child, predicate)).find(Boolean) ?? null;
+}
+
+test('historical score clicks stack locally; outside top close preserves captured details and reopen', async () => {
+  const harness = hookHarness(); let item;
+  const h = helpers({ ...harness.hooks, apiService: { getFinalActionableHistory: async () => ({ items: [item], has_more: false }) } });
+  item = savedMatrixFixture(h);
+  const [stock] = h.buildConsensusRows([run(90, 'Rebalance', 1)], 'india');
+  const props = { stock, market: 'india', technicalScan: null, detailsData: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null } };
+  const render = () => { harness.start(); return h.ScopedStockDetailsButton(props); };
+  findElement(render(), 'Open TEST0 captured details').props.onClick({ stopPropagation() {} });
+  await Promise.resolve(); await Promise.resolve();
+  let tree = render();
+  const score = findMatching(tree, node => node.props?.['aria-label']?.startsWith('Open TEST0 score matrix for'));
+  assert.ok(score);
+  score.props.onClick(); tree = render();
+  const top = findMatching(tree, node => node.type === h.HistoricalScoreMatrixPopup);
+  assert.ok(top);
+  assert.equal(top.props.item.id, item.id);
+  const underneath = findMatching(tree, node => node.props?.['aria-labelledby'] === `stock-details-${stock.key}`);
+  assert.equal(underneath.props.inert, true);
+  underneath.props.onClick({ stopPropagation() {} }); // No click-through even if invoked programmatically.
+  assert.ok(findElement(render(), 'Close stock details'));
+  top.props.onClose(); tree = render();
+  assert.ok(findElement(tree, 'Close stock details'));
+  assert.equal(findMatching(tree, node => node.type === h.HistoricalScoreMatrixPopup), null);
+  score.props.onClick(); tree = render();
+  assert.ok(findMatching(tree, node => node.type === h.HistoricalScoreMatrixPopup));
+});
+
+function parameterFixture(h, id = 90) {
+  const selected = run(id, 'Rebalance', 1);
+  const headers = parser.REBALANCE_HEADER_ORDER;
+  selected.run_jobs.forEach((link, index) => {
+    const cells = Object.fromEntries(headers.map(header => [header, '—']));
+    Object.assign(cells, { 'Exchange Symbol': 'NSE', 'Stock Symbol': 'TEST0', [actionHeader]: 'Buy New',
+      'Current Units': '0', 'Units Change': '5', 'Final Units': '5', 'Units to Buy': '5', 'Price Per Unit': '100', 'Total Buy Amount': '500',
+      'Score Rationale Technical Setup Short Term 1–3 Months': String(index + 2),
+      'Rationale Technical Setup Short Term 1–3 Months': `Original short rationale ${id}/${link.job_id}`,
+      'Score Rationale - Technical Setup (Medium Term)': '-2',
+      'Rationale - Technical Setup (Medium Term)': 'Different medium-term rationale',
+    });
+    link.job.response = `| ${headers.join(' | ')} |\n| ${headers.map(() => '---').join(' | ')} |\n| ${headers.map(header => cells[header]).join(' | ')} |`;
+  });
+  const [stock] = h.buildConsensusRows([selected], 'india');
+  const detail = h.buildScoreMatrixDetail(stock);
+  return { selected, detail, parameter: detail.detailedRationaleRows.find(row => row.id === 'technical-short') };
+}
+
+test('parameter evidence shows each original job score and its own rationale, not the aggregate or another field', async () => {
+  let selected; const calls = [];
+  const h = helpers({ apiService: { getRun: async id => { calls.push(id); return selected; } } });
+  const fixture = parameterFixture(h); selected = fixture.selected;
+  assert.equal(fixture.parameter.score, 2.5);
+  const before = structuredClone(fixture.detail);
+  const rows = await h.fetchParameterScoreObservations(fixture.detail, fixture.parameter);
+  assert.deepEqual(rows.map(row => row.score), [2, 3]);
+  assert.deepEqual(rows.map(row => row.jobId), [900, 901]);
+  assert.deepEqual(rows.map(row => row.rationale), ['Original short rationale 90/900', 'Original short rationale 90/901']);
+  assert.ok(rows.every(row => row.label.includes('synthetic same-model') && row.label.includes('Rebalance Scan') && row.label.includes('2026')));
+  assert.deepEqual(calls, [90]);
+  assert.deepEqual(fixture.detail, before);
+  const medium = fixture.detail.detailedRationaleRows.find(row => row.id === 'technical-medium');
+  const mediumRows = await h.fetchParameterScoreObservations(fixture.detail, medium);
+  assert.deepEqual(mediumRows.map(row => row.score), [-2, -2]);
+  assert.ok(mediumRows.every(row => row.rationale === 'Different medium-term rationale'));
+});
+
+test('parameter provenance fails honestly for missing jobs, wrong stocks, markets, runs or saved contributor metadata', async () => {
+  let selected;
+  const h = helpers({ apiService: { getRun: async () => selected } });
+  const fixture = parameterFixture(h); selected = fixture.selected;
+  selected.run_jobs[0].job.response = selected.run_jobs[0].job.response.replaceAll('TEST0', 'OTHER');
+  let rows = await h.fetchParameterScoreObservations(fixture.detail, fixture.parameter);
+  assert.equal(rows[0].score, null); assert.match(rows[0].rationale, /exact original stock row/);
+  assert.equal(rows[1].score, 3);
+  selected.run_jobs[1].job.model = 'different-model';
+  rows = await h.fetchParameterScoreObservations(fixture.detail, fixture.parameter);
+  assert.equal(rows[1].score, null); assert.match(rows[1].rationale, /identity/);
+  selected.id = 91;
+  await assert.rejects(h.fetchParameterScoreObservations(fixture.detail, fixture.parameter), /identity/);
+  selected.id = 90; selected.auto_rebalance_portfolio = 'indmoney_us'; selected.auto_rebalance_label = 'IndMoney US Run #90 (Rebalance Scan)'; selected.prompt = '[REBALANCE_FLOW:us]';
+  await assert.rejects(h.fetchParameterScoreObservations(fixture.detail, fixture.parameter), /identity/);
+  assert.deepEqual(await h.fetchParameterScoreObservations(fixture.detail, { id: 'mean-mode-action' }), []);
+  assert.deepEqual(await h.fetchParameterScoreObservations(fixture.detail, { id: 'technical-scan-confidence' }), []);
+});
+
+test('third popup loading, exact columns, inside/outside clicks, Escape, focus and stale dismissal stay local', async () => {
+  const harness = popupHarness(); const pending = []; let selected; let restored = 0; let closed = 0; let stopped = 0;
+  const doc = { activeElement: { focus() { restored += 1; } } };
+  const h = helpers({ ...harness.hooks, document: doc, apiService: { getRun: () => new Promise(resolve => pending.push(resolve)) } });
+  const fixture = parameterFixture(h); selected = fixture.selected;
+  const props = { detail: fixture.detail, parameter: fixture.parameter, onClose() { closed += 1; } };
+  const render = () => { harness.start(); return h.ParameterScoreEvidencePopup(props); };
+  let tree = render(); assert.match(JSON.stringify(tree), /Loading original scores/);
+  let firstFocus = 0;
+  const first = { focus() { firstFocus += 1; } }; const last = { focus() {} };
+  tree.props.ref.current = { focus() {}, querySelectorAll: () => [first, last] };
+  harness.flush();
+  doc.activeElement = last;
+  tree.props.onKeyDown({ key: 'Tab', stopPropagation() { stopped += 1; }, preventDefault() {} });
+  assert.equal(firstFocus, 1);
+  tree.props.children.props.onClick({ stopPropagation() { stopped += 1; } }); assert.equal(closed, 0);
+  tree.props.onClick({ stopPropagation() { stopped += 1; } }); assert.equal(closed, 1);
+  tree.props.onKeyDown({ key: 'Escape', stopPropagation() { stopped += 1; }, preventDefault() {} }); assert.equal(closed, 2);
+  harness.dispose(); assert.equal(restored, 1);
+  pending.shift()(selected); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.match(JSON.stringify(render()), /Loading original scores/, 'dismissed completion cannot replace or reopen any layer');
+  assert.equal(stopped, 4);
+  const readyHarness = popupHarness();
+  const ready = helpers({ ...readyHarness.hooks, document: { activeElement: { focus() {} } }, apiService: { getRun: async () => selected } });
+  const readyRender = () => { readyHarness.start(); return ready.ParameterScoreEvidencePopup(props); };
+  readyRender(); readyHarness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const text = JSON.stringify(readyRender());
+  assert.match(text, /Run \/ LLM/); assert.match(text, /Rationale/); assert.match(text, /Score/);
+  assert.match(text, /Original short rationale 90\/900/);
+  readyHarness.dispose();
+});
+
+test('technical parameter evidence uses the captured technical job only and labels missing rationale', async () => {
+  let selected;
+  const h = helpers({ apiService: { getRun: async () => selected } });
+  selected = technicalRun(92, 5);
+  const fixture = parameterFixture(h);
+  const link = selected.run_jobs[0];
+  const parsed = h.parseTechnicalScanResponse(link.job.response, { runId: 92, jobId: link.job_id, provider: link.job.provider, model: link.job.model, runLabel: selected.auto_rebalance_label, createdAt: link.job.updated_at });
+  const detail = { ...fixture.detail, technicalScanSourceRunId: 92, technicalScanSourceJobId: link.job_id, technicalScanSourceLabel: h.formatTechnicalScanSourceLabel(parsed[0]) };
+  const rows = await h.fetchParameterScoreObservations(detail, { id: 'technical-scan-confidence' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].jobId, 920);
+  assert.equal(rows[0].score, 90);
+  assert.match(rows[0].rationale, /parameter-specific rationale was not captured/);
+  const legacy = { ...detail, technicalScanSourceJobId: undefined };
+  assert.deepEqual(await h.fetchParameterScoreObservations(legacy, { id: 'technical-scan-confidence' }), []);
+});
+
+test('third layer distinguishes failed/absent evidence, traps focus and exposes accessible parameter score links', async () => {
+  for (const failure of [false, true]) {
+    const harness = popupHarness();
+    const h = helpers({ ...harness.hooks, document: { activeElement: { focus() {} } }, apiService: { getRun: async () => { throw new Error('Source API failed'); } } });
+    const fixture = parameterFixture(h);
+    const parameter = failure ? fixture.parameter : { id: 'mean-mode-action', parameter: 'Consolidated action' };
+    const render = () => { harness.start(); return h.ParameterScoreEvidencePopup({ detail: fixture.detail, parameter, onClose() {} }); };
+    render(); harness.flush(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const text = JSON.stringify(render());
+    assert.match(text, failure ? /Unable to load parameter evidence/ : /Original per-run score\/rationale provenance was not captured/);
+    assert.doesNotMatch(text, /Loading original scores/);
+    harness.dispose();
+  }
+  let selectedParameter;
+  const h = helpers(); const fixture = parameterFixture(h);
+  const section = h.DetailedRationaleScoreSection;
+  const html = renderToStaticMarkup(React.createElement(section, { detail: fixture.detail, readOnly: true, onParameterScoreOpen: row => { selectedParameter = row; } }));
+  assert.match(html, /Show original scores and rationale for Average of Score Rationale - Technical Setup/);
+  const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+  assert.match(source, /inert=\{selectedParameter \? true : undefined\}/);
+  assert.match(source, /onParameterScoreOpen=\{setSelectedParameter\}/);
+  assert.match(source, /onKeyDown=\{event => \{\s*event.stopPropagation\(\);/);
+  assert.equal(selectedParameter, undefined, 'rendering a score must never initiate a provider/job action');
 });

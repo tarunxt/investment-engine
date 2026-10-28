@@ -254,6 +254,7 @@ export type ScoreMatrixDetail = {
   rebalanceSourceRunId: number | null;
   technicalScanSourceLabel: string | null;
   technicalScanSourceRunId: number | null;
+  technicalScanSourceJobId?: number | null;
 };
 
 export type SetupStockDetail = {
@@ -2275,6 +2276,7 @@ function buildScoreMatrixDetail(
     rebalanceSourceRunId: rebalanceSourceMeta?.runId ?? null,
     technicalScanSourceLabel: technicalScanSourceLabelForStock,
     technicalScanSourceRunId: technicalScan?.runId ?? technicalScanSourceRunId ?? null,
+    technicalScanSourceJobId: technicalScan?.jobId ?? null,
     rows: [
       ...entries,
       {
@@ -3976,7 +3978,94 @@ function combineOperationalErrors(messages: Array<string | null>) {
   return present.length ? Array.from(new Set(present)).join("; ") : null;
 }
 
-export function StockDetailsButton({
+export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
+  if (item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return null;
+  const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
+  if (!target) return null;
+  const decode = (saved: FinalActionableHistoryItem): ScoreMatrixDetail | null => {
+      if (saved.market !== market || normalizeStockSymbol(saved.stock_symbol) !== normalizeStockSymbol(symbol) || saved.covered_at !== target.coveredAt
+          || saved.rebalance_run_id !== target.runId || (item && saved.workflow_id !== item.workflow_id)
+          || saved.formula_version !== "score-matrix-v1") return null;
+      const detail = saved.formula_inputs_json;
+      if (!detail || normalizeStockSymbol(String(detail.stockSymbol ?? "")) !== normalizeStockSymbol(symbol)
+          || detail.rebalanceSourceRunId !== saved.rebalance_run_id
+          || typeof detail.stockKey !== "string" || detail.stockExchange !== exchange
+          || typeof detail.stockName !== "string"
+          || !Array.isArray(detail.rows) || !Array.isArray(detail.rules) || !Array.isArray(detail.detailedRationaleRows)
+          || typeof detail.detailedRationaleDenominator !== "number"
+          || detail.calculatedScore !== saved.score
+          || !detail.rows.every((row) => row && typeof row === "object")
+          || !detail.rules.every((row) => row && typeof row === "object")
+          || !detail.detailedRationaleRows.every((row) => row && typeof row === "object")) return null;
+      return detail as unknown as ScoreMatrixDetail;
+  };
+  let cursor: string | null = null;
+  const cursors = new Set<string>();
+  const matches: FinalActionableHistoryItem[] = [];
+  for (let page = 0; page < 100; page += 1) {
+    const response = await apiService.getFinalActionableHistory({ market, symbol, limit: 50, cursor });
+    if (item) {
+      const saved = response.items.find((row) => row.id === item.id);
+      if (saved) return decode(saved);
+    } else {
+      matches.push(...response.items.filter((row) => row.rebalance_run_id === target.runId && row.covered_at === target.coveredAt));
+      if (matches.length > 1) return null; // Unknown workflow cannot be guessed.
+    }
+    if (!response.has_more || !response.next_cursor) return matches.length === 1 ? decode(matches[0]) : null;
+    if (cursors.has(response.next_cursor)) throw new Error("Historical pagination did not advance.");
+    cursor = response.next_cursor;
+    cursors.add(cursor);
+  }
+  throw new Error("Historical lookup limit reached. Please try again.");
+}
+
+function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, exchange, onClose }: {
+  item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; market: SwingTradeMarket; symbol: string; exchange: string; onClose: () => void;
+}) {
+  const [result, setResult] = useState<{ detail: ScoreMatrixDetail | null; error: string | null; loading: boolean }>({ detail: null, error: null, loading: true });
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    void fetchFrozenHistoricalMatrix(item, market, symbol, exchange, { runId, coveredAt }).then(
+      (detail) => { if (active) setResult({ detail, error: null, loading: false }); },
+      (error: unknown) => { if (active) setResult({ detail: null, error: error instanceof Error ? error.message : "Unable to load historical matrix.", loading: false }); },
+    );
+    return () => { active = false; opener?.focus(); };
+  }, [item, market, symbol, exchange, runId, coveredAt]);
+  return (
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[70]" onClick={(event) => { event.stopPropagation(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
+        if (event.key === "Tab") {
+          const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? []);
+          const first = nodes[0]; const last = nodes[nodes.length - 1];
+          if (!first) { event.preventDefault(); return; }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) { event.preventDefault(); first.focus(); }
+        }
+      }}>
+      {result.detail ? <ScoreMatrixModal detail={result.detail} frozen historicalLabel={`${symbol} · ${formatDateTime(coveredAt)} · Run #${runId}`} onClose={onClose} /> : (
+        <div role="dialog" aria-modal="true" aria-label={`Historical score matrix for ${symbol}`} className="flex h-full items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h2 className="font-bold">{symbol} · {formatDateTime(coveredAt)}</h2>
+            {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading historical score matrix…</p>
+              : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load historical score matrix: {result.error}</p>
+              : <p className="mt-4">No frozen score matrix is available for this stock and timestamp. Latest data has not been substituted.</p>}
+            <button type="button" onClick={onClose} className="mt-4 rounded border px-3 py-2">Back to captured stock details</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function StockDetailsButton(props: Parameters<typeof ScopedStockDetailsButton>[0]) {
+  return <ScopedStockDetailsButton key={`${props.market}:${props.stock.key}`} {...props} />;
+}
+
+function ScopedStockDetailsButton({
   stock,
   market,
   technicalScan,
@@ -3995,7 +4084,15 @@ export function StockDetailsButton({
   formulaConfig?: ScoreMatrixFormulaConfig;
   onMatrixDetailOpen?: (detail: ScoreMatrixDetail) => void;
 }) {
+  const detailPanelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [historicalMatrix, setHistoricalMatrix] = useState<{ item: FinalActionableHistoryItem | null; coveredAt: string; runId: number } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    detailPanelRef.current?.focus();
+    return () => { opener?.focus(); };
+  }, [open]);
   const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
   const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
   const [persistedHistory, setPersistedHistory] = useState<FinalActionableHistoryItem[]>([]);
@@ -4177,10 +4274,23 @@ export function StockDetailsButton({
       {open ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
+          ref={detailPanelRef}
+          tabIndex={-1}
+          inert={historicalMatrix ? true : undefined}
           role="dialog"
-          aria-modal="true"
+          aria-modal={!historicalMatrix}
+          onKeyDown={(event) => {
+            if (historicalMatrix) return;
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); }
+            if (event.key === "Tab") {
+              const nodes = Array.from(detailPanelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') ?? []);
+              const first = nodes[0]; const last = nodes[nodes.length - 1];
+              if (event.shiftKey && (document.activeElement === first || document.activeElement === detailPanelRef.current)) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && (document.activeElement === last || document.activeElement === detailPanelRef.current)) { event.preventDefault(); first?.focus(); }
+            }
+          }}
           aria-labelledby={`stock-details-${stock.key}`}
-          onClick={() => setOpen(false)}
+          onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) setOpen(false); }}
         >
           <div
             className="min-w-0 w-full max-w-5xl rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
@@ -4221,7 +4331,7 @@ export function StockDetailsButton({
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) setOpen(false); }}
                   className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   aria-label="Close stock details"
                 >
@@ -4345,7 +4455,7 @@ export function StockDetailsButton({
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 capitalize text-gray-600">{item.coverage_status.replaceAll("_", " ")}</td>
                             <td className="px-3 py-2"><FinalActionValue value={item.action} /></td>
-                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatScoreValue(item.score)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{item.score === null ? "—" : <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setHistoricalMatrix({ item, coveredAt: item.covered_at, runId: item.rebalance_run_id })} aria-label={`Open ${item.stock_symbol} score matrix for ${formatDateTime(item.covered_at)}`}>{formatScoreValue(item.score)}</button>}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
                               {item.consensus_numerator !== null && item.consensus_denominator !== null
                                 ? `${item.consensus_numerator}/${item.consensus_denominator}`
@@ -4399,11 +4509,7 @@ export function StockDetailsButton({
                           const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(historicalAction);
                           const renderHistoricalColumn = (column: Exclude<FinalActionableColumnKey, "stock">) => {
                             if (column === "score") {
-                              return onMatrixDetailOpen ? (
-                                <ScoreMatrixButton detail={historicalRow.detail} formulaConfig={formulaConfig} onOpenDetail={onMatrixDetailOpen} />
-                              ) : (
-                                formatScoreValue(historicalRow.formulaScore)
-                              );
+                              return <button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: historicalRow.coveredAt, runId: historicalRow.runId })}>{formatScoreValue(historicalRow.formulaScore)}</button>;
                             }
                             if (column === "consensus") return <ConsensusBreakupButton stock={historicalStock} action={historicalAction} />;
                             if (column === "currentValue") return formatDisplayAmount(historicalEstimate.currentInvestmentAmount ?? getCurrentValueAmount(historicalStock.representative), market);
@@ -4478,7 +4584,7 @@ export function StockDetailsButton({
                               <td className="px-3 py-2 align-top"><FinalActionValue value={row.action} /></td>
                               <td className="px-3 py-2 align-top text-gray-700">{row.units}</td>
                               <td className="px-3 py-2 align-top text-gray-700">{row.amount}</td>
-                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">{row.score}</td>
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700"><button type="button" className="text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: row.createdAt, runId: row.runId })}>{row.score}</button></td>
                               <td className="min-w-80 px-3 py-2 align-top text-gray-700">{row.rationale}</td>
                             </tr>
                           ))}
@@ -4572,6 +4678,7 @@ export function StockDetailsButton({
           </div>
         </div>
       ) : null}
+      {open && historicalMatrix ? <HistoricalScoreMatrixPopup key={`${historicalMatrix.runId}:${historicalMatrix.coveredAt}`} {...historicalMatrix} market={market} symbol={stock.symbol} exchange={stock.exchange} onClose={() => setHistoricalMatrix(null)} /> : null}
     </>
   );
 }
@@ -4970,8 +5077,12 @@ function DetailedRationaleScoreSection({
   onMultiplierChange,
   onDenominatorChange,
   onFocusCalculation,
+  onParameterScoreOpen,
+  readOnly = false,
 }: {
   detail: ScoreMatrixDetail;
+  onParameterScoreOpen?: (row: DetailedRationaleScoreRow) => void;
+  readOnly?: boolean;
   multiplierDrafts?: Record<string, string>;
   denominatorDraft?: string;
   onMultiplierChange?: (rowId: string, value: string) => void;
@@ -5031,7 +5142,9 @@ function DetailedRationaleScoreSection({
           ) : null}
         </td>
         <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-          {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+          {onParameterScoreOpen ? (
+            <button type="button" className="cursor-pointer rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 focus:ring-2 focus:ring-blue-500" onClick={() => onParameterScoreOpen(row)} aria-label={`Show original scores and rationale for ${row.parameter}`}>{formatScoreValue(row.score)}</button>
+          ) : onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
             <button
               type="button"
               className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -5045,6 +5158,7 @@ function DetailedRationaleScoreSection({
         <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
           {onMultiplierChange ? (
             <input
+              disabled={readOnly}
               type="number"
               step="0.1"
               value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
@@ -5158,6 +5272,7 @@ function DetailedRationaleScoreSection({
               <div className="inline-flex items-center justify-end gap-1">
                 <span>/</span>
                 <input
+              disabled={readOnly}
                   type="number"
                   step="0.1"
                   value={denominatorDraft ?? String(detail.detailedRationaleDenominator)}
@@ -5397,19 +5512,115 @@ function PopupDragHint() {
   );
 }
 
+type ParameterScoreObservation = {
+  id: string; runId: number; jobId: number; label: string; score: number | null; rationale: string;
+};
+
+export async function fetchParameterScoreObservations(detail: ScoreMatrixDetail, parameter: DetailedRationaleScoreRow): Promise<ParameterScoreObservation[]> {
+  const headers: Record<string, [RebalanceHeader, RebalanceHeader]> = {
+    cruxx: ["Score Rationale Cruxx", "Rationale Cruxx"],
+    "technical-short": ["Score Rationale Technical Setup Short Term 1–3 Months", "Rationale Technical Setup Short Term 1–3 Months"],
+    "technical-medium": ["Score Rationale - Technical Setup (Medium Term)", "Rationale - Technical Setup (Medium Term)"],
+    "technical-long": ["Score Rationale - Technical Setup (Long Term)", "Rationale - Technical Setup (Long Term)"],
+    "fundamentals-short": ["Score Rationale - Fundamentals Short Term", "Rationale - Fundamentals Short Term"],
+    "fundamentals-medium-long": ["Score Rationale - Fundamentals Medium/Long Term", "Rationale - Fundamentals Medium/Long Term"],
+  };
+  const technical = ["technical-scan-confidence", "premarket-trend", "last-5-candles-trend"].includes(parameter.id);
+  if (!headers[parameter.id] && !technical) return [];
+  const exchange = detail.stockExchange.toUpperCase();
+  const market: SwingTradeMarket | null = ["NSE", "BSE"].includes(exchange) ? "india" : ["US", "NASDAQ", "NYSE", "AMEX", "NYSEARCA", "NYSEAMERICAN"].includes(exchange) ? "us" : null;
+  if (!market) return [];
+  const sources = technical
+    ? (detail.technicalScanSourceRunId && detail.technicalScanSourceJobId ? [{ runId: detail.technicalScanSourceRunId, jobId: detail.technicalScanSourceJobId, source: detail.technicalScanSourceLabel ?? "Technical Scan", note: null }] : [])
+    : detail.rows.filter(row => !row.isSummary).flatMap(row => {
+      const match = /^(\d+)-(\d+)-matrix$/.exec(row.id);
+      return match ? [{ runId: Number(match[1]), jobId: Number(match[2]), source: row.source, note: row.note }] : [];
+    });
+  // Only explicit contributing run/job IDs are fetched. Never query latest/all runs.
+  const runs = new Map<number, RunResponse>();
+  for (const runId of new Set(sources.map(source => source.runId))) {
+    const run = await apiService.getRun(runId);
+    if (run.id !== runId || !isAnalysisRunForStage(run, technical ? "technical" : "rebalance", market)) throw new Error("Source run identity does not match the selected matrix.");
+    runs.set(runId, run);
+  }
+  return sources.map(source => {
+    const run = runs.get(source.runId)!;
+    const job = run.run_jobs?.find(link => link.job_id === source.jobId)?.job;
+    const missing = (reason: string): ParameterScoreObservation => ({ id: `${source.runId}:${source.jobId}`, runId: source.runId, jobId: source.jobId, label: `${source.source} · Run #${source.runId} · Job #${source.jobId}`, score: null, rationale: reason });
+    if (!job?.response || !isUsableModelOutputStatus(job.status)) return missing("Original contributing job output is unavailable.");
+    const label = `${getRunDisplayLabelForBreakup(run)} · Run #${run.id} · Job #${source.jobId} · ${job.provider} ${job.model} · ${formatDateTime(job.created_at)}`;
+    if (source.note && source.note !== `${job.provider} ${job.model} · ${formatDateTime(job.created_at)}`) return missing("Saved contributor identity no longer matches the source job; provenance cannot be verified.");
+    if (technical) {
+      const meta = { runId: run.id, jobId: source.jobId, runLabel: getAutoRebalanceRunDisplayLabel(run), provider: job.provider, model: job.model, createdAt: job.updated_at ?? job.created_at };
+      const rows = parseTechnicalScanResponse(job.response, meta).filter(row => getStockIdentityKey(row.exchangeSymbol, row.stockSymbol) === getStockIdentityKey(detail.stockExchange, detail.stockSymbol));
+      if (rows.length !== 1 || formatTechnicalScanSourceLabel(rows[0]) !== detail.technicalScanSourceLabel) return missing("Original technical stock/job/timestamp provenance could not be verified.");
+      const raw = parameter.id === "technical-scan-confidence" ? rows[0].confidenceScore : parameter.id === "premarket-trend" ? rows[0].premarketTrend : rows[0].last5CandlesTrend;
+      return { id: `${run.id}:${source.jobId}`, runId: run.id, jobId: source.jobId, label, score: parseStrictNumericCell(raw), rationale: "A parameter-specific rationale was not captured in this technical output." };
+    }
+    const parsed = parseInvestmentRecommendationContent(job.response, { provider: job.provider, model: job.model, runNumber: run.id, runCreatedAt: run.created_at });
+    const rows = parsed?.rows.filter(row => getStockIdentityKey(row["Exchange Symbol"], row["Stock Symbol"]) === getStockIdentityKey(detail.stockExchange, detail.stockSymbol)) ?? [];
+    if (rows.length !== 1) return missing("The exact original stock row is missing or ambiguous in this contributing job.");
+    const [scoreHeader, rationaleHeader] = headers[parameter.id];
+    return { id: `${run.id}:${source.jobId}`, runId: run.id, jobId: source.jobId, label, score: parseStrictNumericCell(rows[0][scoreHeader]), rationale: !rows[0][rationaleHeader]?.trim() || ["—", "-", "n/a", "na", "null"].includes(rows[0][rationaleHeader].trim().toLowerCase()) ? "The original rationale for this parameter was not captured." : rows[0][rationaleHeader] };
+  });
+}
+
+function ParameterScoreEvidencePopup({ detail, parameter, onClose }: { detail: ScoreMatrixDetail; parameter: DetailedRationaleScoreRow; onClose: () => void }) {
+  const [result, setResult] = useState<{ rows: ParameterScoreObservation[]; loading: boolean; error: string | null }>({ rows: [], loading: true, error: null });
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    void fetchParameterScoreObservations(detail, parameter).then(
+      rows => { if (active) setResult({ rows, loading: false, error: null }); },
+      (error: unknown) => { if (active) setResult({ rows: [], loading: false, error: error instanceof Error ? error.message : "Unable to load source evidence." }); },
+    );
+    return () => { active = false; opener?.focus(); };
+  }, [detail, parameter]);
+  return (
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[90] flex items-start justify-center overflow-auto bg-slate-950/55 px-4 py-12" role="dialog" aria-modal="true" aria-labelledby="parameter-evidence-title"
+      onClick={event => { event.stopPropagation(); onClose(); }}
+      onKeyDown={event => {
+        event.stopPropagation();
+        if (event.key === "Escape") { event.preventDefault(); onClose(); }
+        if (event.key === "Tab") {
+          const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') ?? []);
+          const first = nodes[0]; const last = nodes[nodes.length - 1];
+          if (!first) { event.preventDefault(); return; }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) { event.preventDefault(); first.focus(); }
+        }
+      }}>
+      <div className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4"><h2 id="parameter-evidence-title" className="font-bold">{detail.stockSymbol} · {parameter.parameter}</h2><button type="button" onClick={onClose} aria-label="Close parameter score details" className="rounded border px-3 py-2">Close</button></div>
+        {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading original scores and rationale…</p>
+          : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load parameter evidence: {result.error}</p>
+          : !result.rows.length ? <p className="mt-4">Original per-run score/rationale provenance was not captured for this parameter. No aggregate or latest-source value has been substituted.</p>
+          : <div className="mt-4 overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-3">Run / LLM</th><th className="p-3">Score</th><th className="p-3">Rationale</th></tr></thead><tbody>{result.rows.map(row => <tr key={row.id} className="border-t"><td className="p-3">{row.label}</td><td className="p-3">{formatScoreValue(row.score)}</td><td className="whitespace-pre-wrap p-3">{row.rationale}</td></tr>)}</tbody></table></div>}
+      </div>
+    </div>
+  );
+}
+
 export function ScoreMatrixModal({
   detail,
   formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   onFormulaConfigChange,
   onClose,
   onFocusCalculation,
+  frozen = false,
+  historicalLabel,
 }: {
   detail: ScoreMatrixDetail | null;
+  frozen?: boolean;
+  historicalLabel?: string;
   formulaConfig?: ScoreMatrixFormulaConfig;
   onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   onClose: () => void;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
+  const [selectedParameter, setSelectedParameter] = useState<DetailedRationaleScoreRow | null>(null);
   const [editState, setEditState] = useState<{
     stockKey: string;
     multiplierDrafts: Record<string, string>;
@@ -5431,12 +5642,12 @@ export function ScoreMatrixModal({
 
   const configuredDetail = useMemo(() => {
     if (!detail) return null;
-    return applyScoreMatrixFormulaConfig(detail, formulaConfig);
-  }, [detail, formulaConfig]);
+    return frozen ? detail : applyScoreMatrixFormulaConfig(detail, formulaConfig);
+  }, [detail, formulaConfig, frozen]);
 
   const editedDetail = useMemo(
-    () => (configuredDetail ? applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
-    [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts],
+    () => (configuredDetail ? (frozen ? configuredDetail : applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts)) : null),
+    [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts, frozen],
   );
   const validationSummary = useMemo(
     () => (editedDetail ? getScoreMatrixValidationSummary(editedDetail) : null),
@@ -5450,12 +5661,14 @@ export function ScoreMatrixModal({
   const sourceRows = editedDetail.rows.filter((row) => !row.isSummary);
 
   return (
+    <>
     <div
+      inert={selectedParameter ? true : undefined}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
-      aria-modal="true"
-      aria-labelledby="score-matrix-modal-title"
-      onClick={onClose}
+      aria-modal={!selectedParameter}
+      aria-labelledby={frozen ? "historical-score-matrix-title" : "score-matrix-modal-title"}
+      onClick={(event) => { event.stopPropagation(); if (!selectedParameter) onClose(); }}
     >
       <div
         className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
@@ -5469,8 +5682,8 @@ export function ScoreMatrixModal({
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               Consolidated score matrix
             </p>
-            <h2 id="score-matrix-modal-title" className="mt-1 text-xl font-bold text-slate-950">
-              Final Action Rule
+            <h2 id={frozen ? "historical-score-matrix-title" : "score-matrix-modal-title"} className="mt-1 text-xl font-bold text-slate-950">
+              {historicalLabel ?? "Final Action Rule"}
             </h2>
             <div className="mt-2 flex flex-wrap items-baseline gap-2 text-slate-950">
               <span className="text-2xl font-extrabold tracking-tight">{editedDetail.stockSymbol}</span>
@@ -5528,6 +5741,8 @@ export function ScoreMatrixModal({
             </Alert>
           ) : null}
           <DetailedRationaleScoreSection
+            readOnly={frozen}
+            onParameterScoreOpen={setSelectedParameter}
             detail={editedDetail}
             multiplierDrafts={multiplierDrafts}
             denominatorDraft={denominatorDraft || String(editedDetail.detailedRationaleDenominator)}
@@ -5583,10 +5798,9 @@ export function ScoreMatrixModal({
             onFocusCalculation={onFocusCalculation}
           />
 
-          <ScoreReferenceTables
-            formulaConfig={formulaConfig}
-            onFormulaConfigChange={onFormulaConfigChange}
-          />
+          {frozen ? <p className="text-sm text-slate-600">Saved historical matrix. Values are read-only; live formula reference settings are not applied to this snapshot.</p> : (
+            <ScoreReferenceTables formulaConfig={formulaConfig} onFormulaConfigChange={onFormulaConfigChange} />
+          )}
 
           {matchedRule ? (
             <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
@@ -5647,6 +5861,7 @@ export function ScoreMatrixModal({
                         <div className="flex items-center gap-2">
                           <FinalActionTag action={rule.action} />
                           <select
+                            disabled={frozen}
                             value={ruleDrafts[rule.id]?.action ?? rule.action}
                             onChange={(event) =>
                               setEditState((current) => {
@@ -5676,6 +5891,7 @@ export function ScoreMatrixModal({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-slate-800">
                         <input
+                          disabled={frozen}
                           type="number"
                           step="0.01"
                           placeholder={rule.action === "Hold"
@@ -5758,6 +5974,8 @@ export function ScoreMatrixModal({
         </div>
       </div>
     </div>
+    {selectedParameter ? <ParameterScoreEvidencePopup key={`${detail?.stockKey}:${historicalLabel ?? "current"}:${selectedParameter.id}`} detail={detail!} parameter={selectedParameter} onClose={() => setSelectedParameter(null)} /> : null}
+    </>
   );
 }
 
