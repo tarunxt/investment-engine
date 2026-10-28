@@ -25,7 +25,7 @@ from app.domains.jobs.usage_identity import resolve_job_usage_identity
 from app.domains.jobs.output_runtime import (
     OutputPreflightError, active_contract_hash, configure_output_context, contract_issue,
     current_output_context, merge_swing_fragments, normalize_runtime_output,
-    output_validation_metadata, reset_output_context,
+    output_validation_metadata, rebalance_serialization_instructions, reset_output_context,
 )
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
@@ -454,6 +454,7 @@ def _validate_rebalance_table_content(content: str, prompt: str = "") -> tuple[s
 
 
 def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    prompt += rebalance_serialization_instructions()
     return (
         f"{prompt}\n\n"
         "[REBALANCE_TABLE_REPAIR]\n"
@@ -1264,7 +1265,7 @@ def execute_ai_job(self, job_id: int) -> None:
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
 
-        prompt_to_execute = job.prompt
+        prompt_to_execute = job.prompt + rebalance_serialization_instructions()
         polymarket_event_context: PolymarketEventRunContext | None = None
         request_context_json = getattr(job, "request_context_json", None)
         if isinstance(request_context_json, dict):

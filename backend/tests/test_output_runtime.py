@@ -264,3 +264,35 @@ def test_rebalance_repair_keeps_existing_holding_overlap_explicit(scoped):
     assert 'Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot' in prompt
     assert 'snapshot labeled US, a matching symbol at a known US venue is the same existing holding' in prompt
     assert prompt.endswith('Original invalid output')
+
+
+def test_rebalance_serialization_rules_are_scoped_and_used_for_repairs(scoped):
+    from app.domains.jobs.output_runtime import rebalance_serialization_instructions
+    assert rebalance_serialization_instructions() == ''
+    scoped(make_job('swing'))
+    assert rebalance_serialization_instructions() == ''
+    job = scoped(make_job('rebalance'))
+    original = job.prompt
+    rules = rebalance_serialization_instructions()
+    assert 'exactly 29 cells' in rules
+    assert '&#124;' in rules
+    assert 'Backticks and quotes do not escape' in rules
+    assert rules in tasks._build_rebalance_table_repair_prompt(original, 'raw invalid output', 'row_width')
+    assert job.prompt == original
+
+
+def test_worker_superset_rebalance_needs_no_paid_format_retry():
+    from app.domains.jobs.output_contracts.schemas import Column
+    job = make_job('rebalance')
+    original_prompt = job.prompt
+    raw = table((Column('evidence', 'Evidence'), *reversed(REBALANCE_COLUMNS)),
+                [rebalance_row(evidence='preserved extra')])
+    result = AIProviderResponse(content=raw, tokens_in=1, tokens_out=2, cost=.001,
+                               provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, [result])
+    failed.assert_not_called()
+    provider.generate.assert_called_once()
+    assert 'exactly 29 cells' in provider.generate.call_args.kwargs['prompt']
+    assert job.prompt == original_prompt
+    assert job.status == JobStatus.COMPLETED
+    assert 'preserved extra' in job.response

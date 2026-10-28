@@ -83,6 +83,14 @@ def normalize_output(
             findings.append(Finding("duplicate_columns", "Headers map to duplicate fields; no source column may be overwritten.", source=Provenance(block.index, 0, block.line)))
         canonical_keys = {column.key for column in columns}
         extra_columns = tuple(Column(key, header) for key, header in zip(keys, block.headers) if key not in canonical_keys)
+        if (kind == "rebalance" and extra_columns and not duplicate_keys
+                and canonical_keys.issubset(keys)):
+            findings.append(Finding(
+                "named_superset_mapping",
+                "All required rebalance fields map uniquely by header; extra named columns are preserved. "
+                "Acceptance still requires matching row widths and full validation.",
+                "info", Provenance(block.index, 0, block.line),
+            ))
         table_columns = (*columns, *extra_columns)
         rows: list[CanonicalRow] = []
         for index, cells in enumerate(block.rows, 1):

@@ -395,3 +395,89 @@ def test_extreme_json_exponent_is_blocked_without_exception_or_replacement():
     source=json.dumps([swing_row()]).replace('"upside_horizon": 20','"upside_horizon": 1e99999999999999999999999')
     result=normalize_output(source,'swing')
     assert not result.safe_to_replace and result.content==source
+
+
+@pytest.mark.parametrize('extra_cells', [4, 6])
+def test_rebalance_extra_cells_preserve_original_and_block(extra_cells):
+    # Synthetic reproduction of screenshot widths, not job 2221 raw evidence.
+    original = table(REBALANCE_COLUMNS, [rebalance_row()])
+    original = original + ' extra |' * extra_cells
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+    assert any(f.code == 'row_width' and f'received {29 + extra_cells}' in f.message
+               for f in result.findings)
+
+
+@pytest.mark.parametrize('literal', [r'bull \| bear', 'bull &#124; bear'])
+def test_rebalance_escaped_pipe_remains_in_one_of_29_cells(literal):
+    original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks=literal)])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace, result.findings
+    assert result.rows[0].values['rationale_remarks'] == 'bull | bear'
+    assert normalize_output(result.content, 'rebalance', holdings=[holding()]).safe_to_replace
+
+
+@pytest.mark.parametrize('literal', ['bull | bear', '`bull | bear`', '"bull | bear"'])
+def test_rebalance_unescaped_pipe_is_never_guessed_or_truncated(literal):
+    original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks=literal)])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+    assert 'row_width' in codes(result)
+
+
+def test_rebalance_separator_must_match_29_column_header():
+    original = table(REBALANCE_COLUMNS, [rebalance_row()])
+    lines = original.splitlines()
+    lines[1] += ' --- |'
+    original = '\n'.join(lines)
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+    assert 'separator_width' in codes(result)
+
+
+@pytest.mark.parametrize('extra_count', [4, 6])
+def test_rebalance_named_superset_maps_reordered_required_fields(extra_count):
+    from app.domains.jobs.output_contracts.schemas import Column
+    extras = tuple(Column(f'extra_{i}', f'Evidence {i}') for i in range(extra_count))
+    columns = (*extras[:2], *reversed(REBALANCE_COLUMNS), *extras[2:])
+    row = rebalance_row(**{c.key: f'original {c.key}' for c in extras})
+    original = table(columns, [row])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace, result.findings
+    assert result.original == original
+    assert any(f.code == 'named_superset_mapping' for f in result.findings)
+    for c in REBALANCE_COLUMNS:
+        assert str(result.rows[0].values[c.key]) == str(row[c.key])
+    for c in extras:
+        assert result.rows[0].values['extra:' + c.label] == row[c.key]
+    assert len(export_tables(result)[0].headers) == 29 + extra_count
+
+
+def test_rebalance_superset_duplicate_required_header_blocks():
+    from app.domains.jobs.output_contracts.schemas import Column
+    original = table((*REBALANCE_COLUMNS, Column('stock_symbol', 'Stock Symbol')), [rebalance_row()])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+    assert 'duplicate_columns' in codes(result)
+
+
+@pytest.mark.parametrize('defect', ['missing', 'invalid'])
+def test_rebalance_named_superset_does_not_bypass_required_field_validation(defect):
+    from app.domains.jobs.output_contracts.schemas import Column
+    columns = tuple(c for c in REBALANCE_COLUMNS if defect != 'missing' or c.key != 'stop_loss')
+    original = table((*columns, Column('evidence', 'Evidence')),
+                     [rebalance_row(stop_loss='not a number', evidence='extra')])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+
+
+def test_rebalance_commas_inside_cells_are_data():
+    original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks='earnings, volume, trend')])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace, result.findings
+    assert result.rows[0].values['rationale_remarks'] == 'earnings, volume, trend'
