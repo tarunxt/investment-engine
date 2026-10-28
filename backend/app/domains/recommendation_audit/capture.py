@@ -143,6 +143,10 @@ def build_decisions(session, run, input_record, outputs, *, formula=None, techni
             "source_hashes": [o.content_hash for o in outputs], "output_ids": [o.id for o in outputs], "technical": technical,
             "provider_families": calc["provider_families"], "calculation": calc, "sizing": sizing_layer(calc, payload["market"]),
             "samples": samples, "coverage": {"successful": sum(o.payload["status"] == "completed" for o in outputs), "attempted": len(payload["jobs"]), "captured_terminal": len(outputs)}}
+        # Additive immutable UI snapshot: copy the just-recorded decision, never recalculate it.
+        from .historical_score_reader import MATRIX_VERSION, stored_matrix
+        data["matrix_snapshot_version"] = MATRIX_VERSION
+        data["matrix_snapshot"] = stored_matrix(data)
         checksum = digest(data)
         record = session.scalar(select(DecisionRecord).where(DecisionRecord.user_id == run.user_id, DecisionRecord.content_hash == checksum))
         if not record:

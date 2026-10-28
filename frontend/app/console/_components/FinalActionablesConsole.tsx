@@ -56,6 +56,8 @@ import type {
   IndMoneyUsThreatAnalysis,
   FinalActionableHistoryCreateItem,
   FinalActionableHistoryItem,
+  HistoricalScoreEvidenceResponse,
+  HistoricalScoreObservation,
   PortfolioAnalysisHistoryItem,
   ProviderModelTarget,
   RunListItem,
@@ -255,6 +257,8 @@ export type ScoreMatrixDetail = {
   technicalScanSourceLabel: string | null;
   technicalScanSourceRunId: number | null;
   technicalScanSourceJobId?: number | null;
+  historicalReadNotes?: string[];
+  historicalEvidence?: HistoricalScoreEvidenceResponse;
 };
 
 export type SetupStockDetail = {
@@ -3978,7 +3982,7 @@ function combineOperationalErrors(messages: Array<string | null>) {
   return present.length ? Array.from(new Set(present)).join("; ") : null;
 }
 
-export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
+async function fetchNativeHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
   if (item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return null;
   const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
   if (!target) return null;
@@ -4019,18 +4023,44 @@ export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryIt
   throw new Error("Historical lookup limit reached. Please try again.");
 }
 
+export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
+  return (await fetchHistoricalScoreSelection(item, market, symbol, exchange, source)).detail;
+}
+
+async function fetchHistoricalScoreSelection(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }) {
+  const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
+  if (!target || item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return { detail: null, evidence: null };
+  if (typeof apiService.getHistoricalScoreEvidence === "function") {
+    let view: HistoricalScoreEvidenceResponse | null = null;
+    try {
+      view = await apiService.getHistoricalScoreEvidence({ run_id: target.runId, market, symbol, exchange, covered_at: target.coveredAt, ...(item ? { history_id: item.id } : {}) });
+    } catch (error) {
+      // Preserve native history support when audit reads are disabled or not deployed.
+      if (!(error && typeof error === "object" && "status" in error && error.status === 404)) throw error;
+    }
+    if (view) {
+      if (!Number.isFinite(Date.parse(view.scope.covered_at)) || !Number.isFinite(Date.parse(target.coveredAt)) || view.scope.run_id !== target.runId || view.scope.market !== market || normalizeStockSymbol(view.scope.symbol) !== normalizeStockSymbol(symbol) || view.scope.exchange !== exchange || parseTimestampMs(view.scope.covered_at) !== parseTimestampMs(target.coveredAt) || (item && view.scope.history_id !== item.id)) throw new Error("Historical evidence scope does not match the selected stock, run and timestamp.");
+      const matrix = view.matrix;
+      if (matrix && (matrix.stockSymbol !== symbol || matrix.stockExchange !== exchange || matrix.rebalanceSourceRunId !== target.runId || !Array.isArray(matrix.rows) || !Array.isArray(matrix.rules) || !Array.isArray(matrix.detailedRationaleRows))) throw new Error("Stored matrix identity or shape is invalid.");
+      return { detail: matrix ? { ...matrix, historicalReadNotes: [...(Array.isArray(matrix.historicalReadNotes) ? matrix.historicalReadNotes.filter((note): note is string => typeof note === "string") : []), ...view.notes], historicalEvidence: view } as ScoreMatrixDetail : null, evidence: view };
+    }
+  }
+  return { detail: await fetchNativeHistoricalMatrix(item, market, symbol, exchange, source), evidence: null };
+}
+
 function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, exchange, onClose }: {
   item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; market: SwingTradeMarket; symbol: string; exchange: string; onClose: () => void;
 }) {
-  const [result, setResult] = useState<{ detail: ScoreMatrixDetail | null; error: string | null; loading: boolean }>({ detail: null, error: null, loading: true });
+  const [result, setResult] = useState<{ detail: ScoreMatrixDetail | null; evidence: HistoricalScoreEvidenceResponse | null; error: string | null; loading: boolean }>({ detail: null, evidence: null, error: null, loading: true });
+  const [selectedEvidence, setSelectedEvidence] = useState<{ id: string; parameter: string } | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     let active = true;
     const opener = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
-    void fetchFrozenHistoricalMatrix(item, market, symbol, exchange, { runId, coveredAt }).then(
-      (detail) => { if (active) setResult({ detail, error: null, loading: false }); },
-      (error: unknown) => { if (active) setResult({ detail: null, error: error instanceof Error ? error.message : "Unable to load historical matrix.", loading: false }); },
+    void fetchHistoricalScoreSelection(item, market, symbol, exchange, { runId, coveredAt }).then(
+      (selection) => { if (active) setResult({ ...selection, error: null, loading: false }); },
+      (error: unknown) => { if (active) setResult({ detail: null, evidence: null, error: error instanceof Error ? error.message : "Unable to load historical matrix.", loading: false }); },
     );
     return () => { active = false; opener?.focus(); };
   }, [item, market, symbol, exchange, runId, coveredAt]);
@@ -4047,16 +4077,18 @@ function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, ex
         }
       }}>
       {result.detail ? <ScoreMatrixModal detail={result.detail} frozen historicalLabel={`${symbol} · ${formatDateTime(coveredAt)} · Run #${runId}`} onClose={onClose} /> : (
-        <div role="dialog" aria-modal="true" aria-label={`Historical score matrix for ${symbol}`} className="flex h-full items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10">
+        <div inert={selectedEvidence ? true : undefined} role="dialog" aria-modal={!selectedEvidence} aria-label={`Historical score matrix for ${symbol}`} className="flex h-full items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10">
           <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
             <h2 className="font-bold">{symbol} · {formatDateTime(coveredAt)}</h2>
             {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading historical score matrix…</p>
               : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load historical score matrix: {result.error}</p>
-              : <p className="mt-4">No frozen score matrix is available for this stock and timestamp. Latest data has not been substituted.</p>}
+              : <div className="mt-4 space-y-2"><p>{result.evidence?.status === "ambiguous" ? "Multiple saved revisions match this selection. An exact captured revision is required." : "No original weighted score matrix is available for this stock and timestamp."}</p>{result.evidence?.notes.map((note, index) => <p key={index}>{note}</p>)}<p>Latest data has not been substituted.</p></div>}
+            {!result.loading && !result.error && result.evidence ? <div className="mt-4 flex flex-wrap gap-2">{Object.entries(result.evidence.parameters).filter(([, rows]) => rows.length > 0).map(([id]) => <button key={id} type="button" className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700" onClick={() => setSelectedEvidence({ id, parameter: result.evidence?.parameter_labels?.[id] ?? id })}>View original {result.evidence?.parameter_labels?.[id] ?? id}</button>)}</div> : null}
             <button type="button" onClick={onClose} className="mt-4 rounded border px-3 py-2">Back to captured stock details</button>
           </div>
         </div>
       )}
+      {selectedEvidence && result.evidence ? <ParameterScoreEvidencePopup key={selectedEvidence.id} detail={{ stockKey: symbol, stockSymbol: symbol }} parameter={selectedEvidence} observations={result.evidence.parameters[selectedEvidence.id] ?? []} onClose={() => setSelectedEvidence(null)} /> : null}
     </div>
   );
 }
@@ -5523,7 +5555,8 @@ type ParameterScoreObservation = {
   id: string; runId: number; jobId: number; label: string; score: number | null; rationale: string;
 };
 
-export async function fetchParameterScoreObservations(detail: ScoreMatrixDetail, parameter: DetailedRationaleScoreRow): Promise<ParameterScoreObservation[]> {
+export async function fetchParameterScoreObservations(detail: ScoreMatrixDetail, parameter: Pick<DetailedRationaleScoreRow, "id" | "parameter">): Promise<ParameterScoreObservation[]> {
+  if (detail.historicalEvidence) return detail.historicalEvidence.parameters[parameter.id] ?? [];
   const headers: Record<string, [RebalanceHeader, RebalanceHeader]> = {
     cruxx: ["Score Rationale Cruxx", "Rationale Cruxx"],
     "technical-short": ["Score Rationale Technical Setup Short Term 1–3 Months", "Rationale Technical Setup Short Term 1–3 Months"],
@@ -5572,19 +5605,19 @@ export async function fetchParameterScoreObservations(detail: ScoreMatrixDetail,
   });
 }
 
-function ParameterScoreEvidencePopup({ detail, parameter, onClose }: { detail: ScoreMatrixDetail; parameter: DetailedRationaleScoreRow; onClose: () => void }) {
+function ParameterScoreEvidencePopup({ detail, parameter, observations, onClose }: { detail: ScoreMatrixDetail | Pick<ScoreMatrixDetail, "stockKey" | "stockSymbol">; parameter: Pick<DetailedRationaleScoreRow, "id" | "parameter">; observations?: HistoricalScoreObservation[]; onClose: () => void }) {
   const [result, setResult] = useState<{ rows: ParameterScoreObservation[]; loading: boolean; error: string | null }>({ rows: [], loading: true, error: null });
   const panelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     let active = true;
     const opener = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
-    void fetchParameterScoreObservations(detail, parameter).then(
+    void (observations ? Promise.resolve(observations) : "rows" in detail ? fetchParameterScoreObservations(detail, parameter) : Promise.resolve([])).then(
       rows => { if (active) setResult({ rows, loading: false, error: null }); },
       (error: unknown) => { if (active) setResult({ rows: [], loading: false, error: error instanceof Error ? error.message : "Unable to load source evidence." }); },
     );
     return () => { active = false; opener?.focus(); };
-  }, [detail, parameter]);
+  }, [detail, parameter, observations]);
   return (
     <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[90] flex items-start justify-center overflow-auto bg-slate-950/55 px-4 py-12" role="dialog" aria-modal="true" aria-labelledby="parameter-evidence-title"
       onClick={event => { event.stopPropagation(); onClose(); }}
@@ -5727,6 +5760,7 @@ export function ScoreMatrixModal({
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+          {editedDetail.historicalReadNotes?.map((note, index) => <p key={`historical-note-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{note}</p>)}
           {validationSummary.hasIssues ? (
             <Alert className="border-rose-300 bg-rose-50 text-rose-950">
               <AlertTriangle className="size-4" />

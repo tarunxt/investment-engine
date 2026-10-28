@@ -44,6 +44,16 @@ async def get_comparison(run_id: int = Query(ge=1), market: str = Query(pattern=
     return view
 
 
+@router.get("/historical-score")
+async def historical_score(run_id: int = Query(ge=1), market: str = Query(pattern="^(india|us)$"), symbol: str = Query(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9&_.-]+$"), exchange: str = Query(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9_.-]+$"), covered_at: str = Query(min_length=1, max_length=64), history_id: int | None = Query(default=None, ge=1), db: AsyncSession = Depends(get_async_db), user: User = Depends(get_current_user)):
+    enabled()
+    from .historical_score_reader import historical_score_view
+    try:
+        return await db.run_sync(lambda session: historical_score_view(session, user_id=user.id, run_id=run_id, market=market, symbol=symbol, exchange=exchange, covered_at=covered_at, history_id=history_id))
+    except LookupError as exc: raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
+
+
 @router.post("/calculations")
 async def calculation(body: CalculationCapture, db: AsyncSession = Depends(get_async_db), user: User = Depends(get_current_user)):
     write_enabled()

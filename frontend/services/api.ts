@@ -108,6 +108,7 @@ import {
   FinalActionableHistoryBulkCreateRequest,
   FinalActionableHistoryBulkCreateResponse,
   FinalActionableHistoryListResponse,
+  HistoricalScoreEvidenceResponse,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -1017,6 +1018,11 @@ class apiServiceClass implements IApiService {
       `${URLs.runs.finalActionableHistory()}?${query.toString()}`,
       { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS },
     );
+  }
+
+  getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse> {
+    const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
+    return this.get<HistoricalScoreEvidenceResponse>(`${URLs.runs.create()}/recommendation-audit/historical-score?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
   }
 
   saveFinalActionableHistory(

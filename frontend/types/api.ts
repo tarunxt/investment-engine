@@ -3964,3 +3964,19 @@ export type FinalActionableHistoryBackfillResponse = {
   status: "queued" | "already_queued";
   task_id: string | null;
 };
+
+
+export type HistoricalScoreObservation = { id: string; runId: number; jobId: number; label: string; score: number | null; rationale: string; rawScore?: unknown; rawRationale?: unknown; sourceHash?: string | null; representation?: string };
+export type HistoricalScoreEvidenceResponse = {
+  scope: { run_id: number; market: string; symbol: string; exchange: string; covered_at: string; history_id: number | null };
+  status: "available" | "partial" | "missing" | "ambiguous";
+  matrix: Record<string, unknown> | null;
+  parameters: Record<string, HistoricalScoreObservation[]>;
+  parameter_labels?: Record<string, string>;
+  notes: string[];
+  coverage: Record<string, number>;
+  candidates: Array<{ id: string; captured_at: string; provenance: string }>;
+  source?: string;
+  capture_id?: string;
+  history_context?: { formula_version: string; score: number | null; action: string | null };
+};

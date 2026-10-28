@@ -108,6 +108,7 @@ import {
     FinalActionableHistoryBulkCreateRequest,
     FinalActionableHistoryBulkCreateResponse,
     FinalActionableHistoryListResponse,
+    HistoricalScoreEvidenceResponse,
 } from '@/types/api';
 
 export type ApiRequestControl = {
@@ -153,6 +154,7 @@ export interface IApiService {
         limit?: number;
         cursor?: string | null;
     }): Promise<FinalActionableHistoryListResponse>;
+    getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse>;
     saveFinalActionableHistory(
         data: FinalActionableHistoryBulkCreateRequest,
     ): Promise<FinalActionableHistoryBulkCreateResponse>;
