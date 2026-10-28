@@ -33,7 +33,7 @@ test('inclusive outer-range visibility, Show all and unknown scores do not chang
 function hooks() {
  const slots=[],effects=[];let cursor=0;return { start(){cursor=0;}, unmount(){for(const slot of slots)slot?.cleanup?.();}, flush(){for(const effect of effects.splice(0))effect();}, bindings:{
  useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],next=>{slots[i]=typeof next==='function'?next(slots[i]):next;}];},
- useRef(initial){const i=cursor++;if(!(i in slots))slots[i]={current:initial};return slots[i];},useMemo(fn){cursor++;return fn();},
+ useRef(initial){const i=cursor++;if(!(i in slots))slots[i]={current:initial};return slots[i];},useMemo(fn,deps){const i=cursor++;if(!slots[i]||deps.some((value,index)=>value!==slots[i].deps[index]))slots[i]={deps,value:fn()};return slots[i].value;},
  useEffect(fn,deps){const i=cursor++,prior=slots[i];if(!prior||deps.some((d,n)=>d!==prior.deps[n])){effects.push(()=>{prior?.cleanup?.();slots[i]={deps,cleanup:fn()};});}}
  }};
 }
@@ -139,5 +139,22 @@ test('actual preparation callbacks clear prior display scope on reopen/failure a
   const stale=prepare(),old=pending.shift(),fresh=prepare(),latest=pending.shift();latest.resolve({runs:[{id:'new-scope'}],portfolioSnapshot:{captured_at:'2026-10-29T12:00:00Z',market}});await fresh;old.resolve({runs:[{id:'stale'}],portfolioSnapshot:{captured_at:end,market}});await stale;assert.equal(state[`set${cap}AllocationUniverse`][0].id,'new-scope');
   const cached=prepare();pending.shift().resolve({runs:[{id:'cached'}],portfolioSnapshot:{captured_at:end,market},warning:'fresh source unavailable'});await cached;assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);assert.match(state[`set${cap}BasketError`],/cached source/);
   const closing=prepare(),last=pending.shift();generation.current++;last.resolve({runs:[{id:'dismissed'}],portfolioSnapshot:{captured_at:end,market}});await closing;assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);
+ }
+});
+
+
+test('same-scope reopen hides prior-generation scores and allocations until deferred success or failure',async()=>{
+ for(const outcome of ['success','failure']){
+  const h=hooks(),pending=[];
+  const {useBasketDisplayCalculations: calculate}=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:params=>new Promise((resolve,reject)=>pending.push({params,resolve,reject}))},createPortal:n=>n,document:{body:{},activeElement:null}});
+  const stock={symbol:'HAL',exchange:'NSE',score:2,ltp:243},stocks=[stock];
+  const render=(open=true,scope=stocks)=>{h.start();return calculate(open,'india',scope,67545,end,'Zerodha');};
+  let state=render();h.flush();pending.shift().resolve(history([observation(1,2)]));await tick();state=render();assert.equal(state.loading,false);assert.match(JSON.stringify(state.cells(stock)),/6318|6,318/);
+  render(false);h.flush();render(true,[]);h.flush();state=render();
+  assert.equal(state.loading,true,'returning identical scope must not match prior request');
+  assert.doesNotMatch(JSON.stringify(state.cells(stock)),/6318|6,318|9\.5%/);assert.match(JSON.stringify(state.cells(stock)),/Loading/);
+  h.flush();state=render();assert.equal(pending.length,1);assert.equal(state.loading,true);assert.equal(state.error,undefined);
+  if(outcome==='success'){pending.shift().resolve(history([observation(2,1)]));await tick();state=render();assert.equal(state.loading,false);const score=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Historical Weighted Score calculation');assert.equal(score.props.children,'1');}
+  else {pending.shift().reject(new Error('reopen source failed'));await tick();state=render();assert.equal(state.loading,false);assert.equal(state.error,'reopen source failed');assert.doesNotMatch(JSON.stringify(state.cells(stock)),/6318|6,318|9\.5%/);assert.match(JSON.stringify(state.cells(stock)),/Unavailable/);}
  }
 });

@@ -17,23 +17,26 @@ export function CalculationPopup({ title, children, onClose }: { title: string; 
 const number = (value: number | null | undefined) => value === null || value === undefined ? "Unavailable" : value.toLocaleString("en-IN", { maximumFractionDigits: 12 });
 export function useBasketDisplayCalculations(open: boolean, market: "india" | "us", stocks: Stock[], totalAssets: number | null, snapshot: string | null, broker: string) {
   const [parameters, setParameters] = useState(defaultDisplayParameters);
-  const [result, setResult] = useState<{ signature: string; data?: BasketScoreHistory; error?: string }>({ signature: "" });
+  const [result, setResult] = useState<{ request: object | null; data?: BasketScoreHistory; error?: string }>({ request: null });
   const [retry, setRetry] = useState(0);
   const [popup, setPopup] = useState<{ stock: Stock; kind: string } | null>(null);
   const [lower, setLower] = useState(-2), [upper, setUpper] = useState(1.5), [showAll, setShowAll] = useState(true);
   const symbols = [...new Set(stocks.map(s => s.symbol))].sort().join(",");
   const signature = `${market}:${symbols}:${parameters.days}:${retry}:${snapshot ?? "missing"}`;
+  // A scope may return to the same signature after close/empty preparation.
+  // Bind results to this request cycle, not just its reusable scope string.
+  const request = useMemo(() => ({ open, signature, valid: parameters.valid }), [open, signature, parameters.valid]);
   useEffect(() => {
     if (!open || !symbols || !parameters.valid) return;
     let active = true;
     void apiService.getBasketScoreHistory({ market, symbols: symbols.split(","), days: parameters.days }).then(data => {
       if (data.market !== market || data.days !== parameters.days || !Array.isArray(data.symbols) || data.symbols.slice().sort().join(",") !== symbols || !Array.isArray(data.observations) || typeof data.truncated !== "boolean" || !Number.isFinite(Date.parse(data.as_of)) || !Number.isFinite(Date.parse(data.window_start)) || Date.parse(data.as_of) - Date.parse(data.window_start) !== parameters.days * 86400000) throw new Error("Historical score response scope does not match this basket.");
-      if (active) setResult({ signature, data });
-    }).catch((error: unknown) => { if (active) setResult({ signature, error: error instanceof Error ? error.message : "Historical scores could not be loaded." }); });
+      if (active) setResult({ request, data });
+    }).catch((error: unknown) => { if (active) setResult({ request, error: error instanceof Error ? error.message : "Historical scores could not be loaded." }); });
     return () => { active = false; };
-  }, [open, market, symbols, parameters.days, parameters.valid, signature]);
-  const data = result.signature === signature && parameters.valid ? result.data : undefined;
-  const error = result.signature === signature ? result.error : undefined;
+  }, [open, market, symbols, parameters.days, parameters.valid, request]);
+  const data = open && result.request === request && parameters.valid ? result.data : undefined;
+  const error = open && result.request === request ? result.error : undefined;
   const means = useMemo(() => new Map(stocks.map(stock => [stockIdentity(stock.symbol, stock.exchange), data ? historicalMean(data, stock.symbol, stock.exchange) : { rows: [], sum: 0, score: null }])), [stocks, data]);
   const allocation = allocateDisplayScores(stocks.map(stock => ({ key: stockIdentity(stock.symbol, stock.exchange), score: means.get(stockIdentity(stock.symbol, stock.exchange))?.score ?? null })), parameters);
   const loading = Boolean(open && symbols && parameters.valid && !data && !error);
