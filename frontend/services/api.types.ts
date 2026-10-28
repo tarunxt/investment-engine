@@ -1,4 +1,6 @@
 import type { StockSourceObservationPage } from "@/types/api";
+
+import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
 import {
     LoginResponse,
     LlmPerformanceResponse,
@@ -156,6 +158,8 @@ export interface IApiService {
         cursor?: string | null;
     }): Promise<FinalActionableHistoryListResponse>;
     getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage>;
+
+    getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory>;
     getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse>;
     saveFinalActionableHistory(
         data: FinalActionableHistoryBulkCreateRequest,

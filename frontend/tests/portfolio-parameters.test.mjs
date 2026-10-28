@@ -132,3 +132,14 @@ test('history window field defaults to five days and renamed labels preserve per
   for (const value of ['', '-1', '2.5']) { input().props.onChange({ target: { value } }); assert.equal(input().props['aria-invalid'], true); }
   const text = JSON.stringify(render()); for (const label of ['Min Cash in Portfolio', 'Max Weight per Stock', 'Normalised Max Weight per Stock']) assert.ok(text.includes(label));
 });
+
+
+test('broker margin stays in its selected snapshot currency; INDmoney parsed wallet is cash separate from holdings',()=>{
+  assert.equal(math.portfolioParameterMargin(india,'india'),123);
+  assert.equal(math.portfolioParameterMargin({...us,wallet_balance:10},'us'),10);
+  assert.equal(math.portfolioParameterMargin({...us,wallet_balance:10},'india'),null);
+  assert.equal(math.portfolioParameterMargin(india,'us'),null);
+  assert.equal(math.portfolioParameterMargin({...us,parse_status:'failed',wallet_balance:10},'us'),null);
+  assert.equal(math.portfolioParameterMargin({...us,wallet_balance:null},'us'),null);
+  assert.equal(math.portfolioParameterAssets(us,'us',math.portfolioParameterMargin({...us,wallet_balance:10},'us')).totalAssets,210);
+});

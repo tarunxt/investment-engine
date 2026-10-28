@@ -481,6 +481,14 @@ async def stock_observations(market: str = Query(pattern="^(india|us)$"), symbol
     except ValueError as exc: raise HTTPException(422, str(exc)) from exc
 
 
+@router.get("/final-actionables/score-history")
+async def basket_score_history(market: str = Query(pattern="^(india|us)$"), symbols: list[str] = Query(), days: int = Query(default=5, ge=1, le=3650), as_of: datetime | None = Query(default=None), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    from .basket_score_history import score_history_view
+    try:
+        return await db.run_sync(lambda session: score_history_view(session, user_id=current_user.id, market=market, symbols=symbols, days=days, as_of=as_of or datetime.now(timezone.utc), timezone_name=current_user.timezone))
+    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
+
+
 @router.get(
     "/final-actionables/history",
     response_model=FinalActionableHistoryListResponse,

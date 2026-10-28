@@ -111,3 +111,36 @@ A positive score needs known historical holdings to distinguish Add more from
 Buy New. Current holdings never stand in for missing historical holdings. Missing,
 nonfinite or out-of-range scores stay undetermined. These display actions do not
 modify trading logic, executable orders, saved history or historical policy.
+
+## Basket display calculations
+
+Portfolio Parameters supplies local display inputs only. Executable orders,
+selections, thresholds, quantity controls and payload builders do not consume
+these derived weights or broker sizes. Ranking uses the full captured stock
+universe, including Hold rows displayed without executable controls.
+
+Historical Weighted Score is the arithmetic mean of every valid saved completed
+run score in the rolling interval `(as_of − N × 24 hours, as_of]`, never daily
+averages. The authenticated profile timezone is returned for presentation. Owner,
+market, venue, completed-run identity and bounded scores are checked. Complete
+immutable captured decisions can supply a recorded score absent from saved
+summaries. Disagreeing complete captures are excluded rather than selecting the
+latest. Missing venue, deleted/unknown run status and invalid scores are excluded.
+A truncated read produces no allocation.
+
+The denominator sums the top editable Maximum Stocks strictly positive scores.
+Only those stocks receive weights; ties use canonical exchange:symbol order.
+Weight is `MIN(score × (1 − cash/100) / denominator, normalisedMax/100)`, without
+cap redistribution. Missing/zero denominator produces blank weights. Visibility
+uses the current displayed Score, inclusive outer ranges, independently of the
+ranking universe. Show all defaults on because the existing basket had no numeric
+visibility filter; action eligibility and buy selection thresholds are separate.
+
+Zerodha display stocks are `ROUND(weight × INR totalAssets / LTP, 0)` and amount
+is stocks × LTP. IndMoney amount is `ROUND(weight × USD totalAssets, 0)` and stocks
+are amount/LTP, allowing fractions. ROUND uses nearest integer with halves away
+from zero. Total assets reuse selected portfolio value plus the same available
+margin shown in Buy Basket. Missing funds remain unavailable, never inferred
+from an inclusive wallet balance or treated as zero. Portfolio and quote source
+timestamps remain separate. Popups expose contributing history, formulas, inputs
+and intermediate values. No currency conversion or order placement occurs.

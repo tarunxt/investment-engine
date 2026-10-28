@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
+import { displayScoreAccepted } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
-import { portfolioParameterAssets } from "@/lib/portfolioParameters";
+import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
 import { shouldSaveThresholds, thresholdSignature, type ThresholdPersistence } from "@/lib/buyThresholdPersistence";
@@ -3572,10 +3574,14 @@ function WorkflowStageTile({
     </>
   );
 }
-function ZerodhaBasketPreviewDialog({
+function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasketPreviewDialog>[0]) {
+  return <ScopedZerodhaBasketPreviewDialog key={`${props.basketBrokerLabel ?? "Zerodha"}:${props.tradingViewMarket ?? "india"}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} />;
+}
+function ScopedZerodhaBasketPreviewDialog({
   open,
   loading,
   error,
+  allocationUniverse = [],
   orders,
   selectedIds,
   onClose,
@@ -3619,6 +3625,7 @@ function ZerodhaBasketPreviewDialog({
   loading: boolean;
   error: string | null;
   orders: ZerodhaBasketPreviewOrder[];
+  allocationUniverse?: DashboardActionRow[];
   selectedIds: Set<string>;
   onClose: () => void;
   onToggle: (id: string) => void;
@@ -3660,6 +3667,14 @@ function ZerodhaBasketPreviewDialog({
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
 
+  const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);
+  const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
+  const snapshotPrices = tradingViewMarket === "india" ? buildZerodhaSnapshotPriceMap(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null) : new Map((detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null)?.holdings.map(holding => [normalizeZerodhaBasketSymbol(holding.symbol), holding.market_price]) ?? []);
+  const displayStock = (row: DashboardActionRow) => ({ symbol: row.stock.symbol, exchange: row.stock.exchange, score: row.formulaScore, ltp: orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange)?.lastPrice ?? snapshotPrices.get(normalizeZerodhaBasketSymbol(row.stock.symbol)) ?? null });
+  const calculationStocks = allocationUniverse.map(displayStock);
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, ltpRefreshedAt);
+  const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
+  const visibleScore = (score: number | null) => displayScoreAccepted(score, displayCalculations.lower, displayCalculations.upper, displayCalculations.showAll);
   if (!open) return null;
 
   const selectableOrders = orders.filter(isWholeShareOrderSelectable);
@@ -3670,9 +3685,6 @@ function ZerodhaBasketPreviewDialog({
   const selectedSellAmount = selectedOrders
     .filter((order) => order.side === "SELL")
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
-  const availableMargin =
-    (detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null)?.available_margin ?? null;
-  const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
   const availableMarginToneClass = getZerodhaAvailableMarginToneClass(
     availableMargin,
     selectedBuyAmount,
@@ -3696,7 +3708,7 @@ function ZerodhaBasketPreviewDialog({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
     orders: orders
-      .filter((order) => getZerodhaBasketActionForPercent(order) === action)
+      .filter((order) => getZerodhaBasketActionForPercent(order) === action && visibleScore(order.detail.calculatedScore))
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0);
 
@@ -3717,7 +3729,8 @@ function ZerodhaBasketPreviewDialog({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
+    <>
+    <div inert={displayCalculations.popupOpen ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="flex max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
@@ -3786,7 +3799,7 @@ function ZerodhaBasketPreviewDialog({
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}
             </div>
-          ) : orders.length ? (
+          ) : orders.length || allocationUniverse.length ? (
             <>
               {error ? (
                 <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -3886,7 +3899,7 @@ function ZerodhaBasketPreviewDialog({
                 </div>
               </div>
 
-              <div className="mb-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Orders</div>
                   <div className="mt-2 text-2xl font-black text-slate-950">{selectedOrders.length}/{orders.length}</div>
@@ -3924,10 +3937,13 @@ function ZerodhaBasketPreviewDialog({
                   <p className="mt-2 text-xs leading-5 text-blue-800">
                     Buy New and Buy More rows stay selected only when Final Score is greater than {buyThreshold.toFixed(2)}.
                   </p>
+                  {displayCalculations.controls}
                 </div>
-                <PortfolioParametersTile key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
+                <PortfolioParametersTile onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
               </div>
 
+              <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
+              {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="overflow-x-auto overscroll-x-contain">
                   <table className="min-w-[92rem] w-full text-sm">
@@ -3950,6 +3966,7 @@ function ZerodhaBasketPreviewDialog({
                         <th className="px-4 py-3 font-semibold">Consensus</th>
                         <th className="px-4 py-3 font-semibold">Action</th>
                         <th className="px-4 py-3 font-semibold">Side</th>
+                        {displayCalculations.headers}
                         <th className="px-4 py-3 font-semibold">Units</th>
                         <th className="px-4 py-3 font-semibold">%</th>
                         <th className="px-4 py-3 font-semibold">Quoted LTP</th>
@@ -3966,7 +3983,7 @@ function ZerodhaBasketPreviewDialog({
                         return (
                           <Fragment key={group.action}>
                             <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                              <td className="px-4 py-3" colSpan={13}>
+                              <td className="px-4 py-3" colSpan={17}>
                                 <label className="inline-flex items-center gap-3 text-sm font-black">
                                   <input
                                     type="checkbox"
@@ -4034,6 +4051,7 @@ function ZerodhaBasketPreviewDialog({
                                     {order.side}
                                   </span>
                                 </td>
+                                {displayCalculations.cells({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ltp: order.lastPrice ?? snapshotPrices.get(normalizeZerodhaBasketSymbol(order.symbol)) ?? null })}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                                   <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
                                     <button
@@ -4111,7 +4129,7 @@ function ZerodhaBasketPreviewDialog({
                               </tr>
                               {order.wholeShareReview && (
                                 <tr className="bg-amber-50/40">
-                                  <td colSpan={13} className="px-4 pb-4 pt-2">
+                                  <td colSpan={17} className="px-4 pb-4 pt-2">
                                     <WholeShareTrimChoice
                                       symbol={order.symbol}
                                       choice={order.wholeShareReview}
@@ -4127,6 +4145,7 @@ function ZerodhaBasketPreviewDialog({
                           </Fragment>
                         );
                       })}
+                      {displayOnlyRows.filter(row => visibleScore(row.formulaScore)).map(row => <tr key={`display-only:${row.id}`}><td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.symbol} display only`} /></td><td className="px-4 py-3">{row.stock.exchange}:{row.stock.symbol}</td><td className="px-4 py-3"><ScoreMatrixButton detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td><td className="px-4 py-3">—</td><td className="px-4 py-3">{row.formulaAction}</td><td className="px-4 py-3">Display only</td>{displayCalculations.cells(displayStock(row))}<td colSpan={7} className="px-4 py-3 text-slate-500">No executable order</td></tr>)}
                     </tbody>
                   </table>
                 </div>
@@ -4162,6 +4181,8 @@ function ZerodhaBasketPreviewDialog({
         />
       </div>
     </div>
+    {displayCalculations.popup}
+    </>
   );
 }
 
@@ -5442,6 +5463,7 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
   const [zerodhaOrderSubmissionBlockedReason, setZerodhaOrderSubmissionBlockedReason] = useState<string | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
+  const [zerodhaAllocationUniverse, setZerodhaAllocationUniverse] = useState<DashboardActionRow[]>([]);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
   const [zerodhaBasketHistoryRuns, setZerodhaBasketHistoryRuns] = useState<RunResponse[]>([]);
   const [zerodhaExecutionMode, setZerodhaExecutionMode] = useState<ZerodhaExecutionMode>("publisher_limit");
@@ -5471,6 +5493,7 @@ export function RebalanceWorkflowSections({
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
   const [indmoneyBasketError, setIndmoneyBasketError] = useState<string | null>(null);
+  const [indmoneyAllocationUniverse, setIndmoneyAllocationUniverse] = useState<DashboardActionRow[]>([]);
   const [indmoneyBasketOrders, setIndmoneyBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
   const [indmoneyBasketHistoryRuns, setIndmoneyBasketHistoryRuns] = useState<RunResponse[]>([]);
   const [indmoneyBasketDetailsData, setIndmoneyBasketDetailsData] = useState<StockDetailsData>({
@@ -5779,6 +5802,7 @@ export function RebalanceWorkflowSections({
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
+      setZerodhaAllocationUniverse(actionRows);
       setZerodhaBasketOrders(orders);
       setSelectedZerodhaBasketIds(
         buildDefaultZerodhaBasketSelection(
@@ -5836,6 +5860,7 @@ export function RebalanceWorkflowSections({
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
+      setIndmoneyAllocationUniverse(actionRows);
       setIndmoneyBasketOrders(orders);
       setSelectedIndmoneyBasketIds(
         buildDefaultZerodhaBasketSelection(
@@ -9032,6 +9057,7 @@ ${zerodhaExecutionMode === "direct_market"
         loading={zerodhaBasketLoading}
         error={zerodhaBasketError}
         orders={zerodhaBasketOrders}
+        allocationUniverse={zerodhaAllocationUniverse}
         selectedIds={selectedZerodhaBasketIds}
         onClose={() => setZerodhaBasketOpen(false)}
         onToggle={toggleZerodhaBasketOrder}
@@ -9066,6 +9092,7 @@ ${zerodhaExecutionMode === "direct_market"
         loading={indmoneyBasketLoading}
         error={indmoneyBasketError}
         orders={indmoneyBasketOrders}
+        allocationUniverse={indmoneyAllocationUniverse}
         selectedIds={selectedIndmoneyBasketIds}
         onClose={() => setIndmoneyBasketOpen(false)}
         onToggle={toggleIndmoneyBasketOrder}

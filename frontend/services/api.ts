@@ -1,4 +1,6 @@
 import type { StockSourceObservationPage } from "@/types/api";
+
+import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
 import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
 import {
@@ -1025,6 +1027,13 @@ class apiServiceClass implements IApiService {
     const query = new URLSearchParams({ market: params.market, symbol: params.symbol });
     if (params.cursor) query.set("cursor", params.cursor);
     return this.get<StockSourceObservationPage>(`${URLs.runs.create()}/final-actionables/stock-observations?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
+  getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory> {
+    const query = new URLSearchParams({ market: params.market, days: String(params.days) });
+    params.symbols.forEach(symbol => query.append("symbols", symbol));
+    if (params.as_of) query.set("as_of", params.as_of);
+    return this.get<BasketScoreHistory>(`${URLs.runs.create()}/final-actionables/score-history?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
   }
 
   getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse> {
