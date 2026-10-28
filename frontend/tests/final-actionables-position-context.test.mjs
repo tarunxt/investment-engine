@@ -29,7 +29,7 @@ const bindings = {
   ...load('../lib/runPresentation.ts'),
 };
 const helpers = load('../app/console/_components/FinalActionablesConsole.tsx', bindings,
-  'export { buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
+  'export { historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
 const actionHeader = 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)';
 const timestamp = '2026-09-01T10:00:00Z';
 
@@ -190,4 +190,28 @@ test('historical reconstruction ignores today holdings and scans, retaining capt
     const reconstructed = helpers.buildHistoricalDashboardActionRows([run, lateOrUnknownOutput], 'india', snapshot(60), {}, helpers.DEFAULT_SCORE_MATRIX_FORMULA_CONFIG);
     assert.equal(reconstructed[0].detail.technicalScanSourceRunId, null, 'old run metadata cannot admit a future or undated job output');
   }
+});
+
+
+test('existing exact score ranges and holdings actions remain unchanged at every boundary', () => {
+  const cases = [[-4, 'Sell All'], [-3, 'Sell All'], [-2.00000001, 'Sell All'], [-2, 'Trim'], [-1.00000001, 'Trim'], [-1, 'Hold'], [-0.00000001, 'Hold'], [0, 'Hold'], [0.99999999, 'Hold'], [1, 'positive'], [1.99999999, 'positive'], [2, 'positive'], [3, 'positive'], [4, 'positive'], [null, 'Hold'], [NaN, 'Hold']];
+  for (const currentUnits of [0, null, 0.5, 10]) {
+    for (const [score, expected] of cases) {
+      const rules = helpers.evaluateScoreMatrixRules({ currentUnits, calculatedScore: score, meanScore: null });
+      const matched = rules.filter(rule => rule.matched);
+      assert.equal(matched.length, 1);
+      assert.equal(matched[0].action, expected === 'positive' ? (currentUnits > 0 ? 'Add more' : 'Buy New') : expected);
+    }
+  }
+  const nearBoundary = helpers.evaluateScoreMatrixRules({ currentUnits: 3, calculatedScore: 0.99999999, meanScore: null }).find(rule => rule.matched);
+  assert.equal(nearBoundary.action, 'Hold', 'rounding to 1.00 must not move the decision across a boundary');
+  assert.equal(nearBoundary.label, '[0, 1)');
+});
+
+
+test('history score basis is identified from saved inputs only and remains unknown for incomplete records', () => {
+  const check = snapshot_json => helpers.historyRationaleInputsPresent({ snapshot_json });
+  assert.equal(check({ rows: [{ score: 2.83 }, { score: null }] }), true);
+  assert.equal(check({ rows: [{ score: null }] }), false);
+  for (const value of [null, {}, { rows: [] }, { rows: [null] }, { rows: [{}] }, { rows: [{ score: '2.83' }] }]) assert.equal(check(value), undefined);
 });

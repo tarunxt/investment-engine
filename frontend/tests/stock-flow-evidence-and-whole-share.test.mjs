@@ -132,3 +132,27 @@ test('unknown current quantities do not silently borrow saved whole-share contex
   const output=renderToStaticMarkup(React.createElement(evidence.RecommendationAuditEvidence,{comparison:{current,previous:null,coverage:{},comparison:null},verification:null,runId:10,runCount:1,market:'india',currentScore:-1.4,currentAction:'Trim',currentUnits:null,currentFormulaUnits:null}));
   assert.doesNotMatch(output,/Whole-share choice required|Selling one share would exit the entire position/);
 });
+
+
+test('legacy HAL-style history labels consensus actions and rationale averages independently without rewriting values', () => {
+  const examples = [['Hold', 2.83], ['Sell All', 0.11], ['Sell All', -0.25], ['Trim', 1.42], ['Hold', 2.08]];
+  const rows = examples.map(([action, score], index) => ({ run_id: index + 1, timestamp, action, score, formula_version: 'legacy-backfill-v1', rationale_scores_present: true, coverage: 'suggested', origin: 'saved_suggestion' }));
+  const before = structuredClone(rows);
+  const current = { calculation: { score: 0, findings: [] }, sizing: { findings: [] }, coverage: { successful: 1, attempted: 1 } };
+  const html = renderToStaticMarkup(React.createElement(evidence.RecommendationAuditEvidence, { comparison: { current, previous: null, coverage: {}, comparison: null }, verification: null, runId: 99, runCount: 1, market: 'india', currentScore: 0, currentAction: 'Hold', legacyHistory: rows }));
+  for (const [action, score] of examples) {
+    assert.ok(html.includes('Model-consensus action: ' + action));
+    assert.ok(html.includes('Average rationale score: ' + presentation.formatAuditNumber(score)));
+  }
+  assert.match(html, /score averages their rationale scores independently/);
+  assert.deepEqual(rows, before);
+});
+
+test('score context distinguishes saved formulas, current reconstructions, legacy fallback and unrecorded methods', () => {
+  const base = { origin: 'saved_suggestion' };
+  assert.equal(presentation.describeSuggestionScoreContext({ ...base, formula_version: 'score-matrix-v1' }).scoreLabel, 'Saved calculated score');
+  assert.equal(presentation.describeSuggestionScoreContext({ ...base, formula_version: 'legacy-backfill-v1', rationale_scores_present: false }).scoreLabel, 'Legacy average action code');
+  assert.equal(presentation.describeSuggestionScoreContext({ ...base, formula_version: 'legacy-backfill-v1' }).scoreLabel, 'Legacy aggregate score');
+  assert.equal(presentation.describeSuggestionScoreContext(base).scoreLabel, 'Saved score (method unrecorded)');
+  assert.equal(presentation.describeSuggestionScoreContext({ origin: 'current_reconstruction' }).scoreLabel, 'Reconstructed calculated score');
+});

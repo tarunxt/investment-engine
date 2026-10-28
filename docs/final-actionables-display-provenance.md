@@ -34,3 +34,19 @@ zero versus unknown holdings, India/US rounding, historical temporal isolation,
 cache quota/session isolation, and valid Markdown versus terminal malformed
 JSON. These changes do not promise faster cold history hydration or validate
 historical model research. No production trading action is performed.
+
+## Historical action and score labels
+
+Legacy backfill stores model-consensus actions independently of an average of
+captured rationale scores. If rationale scores were absent, that legacy writer
+used its original action-code average instead. Neither is the weighted Calculated
+Score or an inverse of today's model-action input weights. The audit history now
+labels the recorded score method using `formula_version` and the saved legacy
+inputs; incomplete method evidence stays explicitly unknown. Original actions and
+scores are never changed to fit current formula settings.
+
+The model-action weight table is labeled as an input table. Current formula range
+labels now show inclusive/exclusive endpoints explicitly; matching conditions and
+holdings-dependent Buy New/Add More behavior are unchanged. Historical frozen
+matrices continue to display saved actions and rules, with the unrounded saved
+score available in the score tooltip.
