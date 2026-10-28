@@ -61,3 +61,11 @@ export function portfolioParameterAssets(snapshot: ZerodhaPortfolioSnapshotDetai
   const total = portfolioValue === null || availableMargin === null ? null : portfolioValue + availableMargin;
   return { portfolioValue, availableMargin, totalAssets: total !== null && Number.isFinite(total) ? total : null };
 }
+
+// A local display preference only; no selection or allocation consumers.
+export const DEFAULT_MAXIMUM_STOCKS = 20;
+export function parseMaximumStocks(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
