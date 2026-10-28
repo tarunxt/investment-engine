@@ -6,16 +6,17 @@ export const stockIdentity = (symbol: string, exchange: string) => `${exchange.t
 export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string) {
   const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
   const seen = new Set<number>();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || !Array.isArray(history.observations)) return { rows: [], sum: 0, score: null };
   const rows = history.observations.filter(row => {
     const time = Date.parse(row.covered_at);
-    if (seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || row.exchange?.toUpperCase() !== exchange.toUpperCase() || !row.completed || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
+    if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string' || !Number.isSafeInteger(row.run_id) || seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || row.exchange?.toUpperCase() !== exchange.toUpperCase() || row.completed !== true || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
     seen.add(row.run_id); return true;
   });
   const sum = rows.reduce((sum, row) => sum + row.score!, 0);
   return { rows, sum, score: history.truncated || !rows.length ? null : sum / rows.length };
 }
 export function allocateDisplayScores(stocks: { key: string; score: number | null }[], parameters: DisplayParameters) {
-  const selected = parameters.valid ? stocks.filter(row => typeof row.score === 'number' && Number.isFinite(row.score) && row.score > 0).sort((a, b) => b.score! - a.score! || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, parameters.maximumStocks) : [];
+  const selected = parameters.valid && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 ?  stocks.filter(row => typeof row.score === 'number' && Number.isFinite(row.score) && row.score > 0).sort((a, b) => b.score! - a.score! || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, parameters.maximumStocks) : [];
   const denominator = selected.reduce((sum, row) => sum + row.score!, 0);
   const weights = new Map<string, number>();
   if (Number.isFinite(denominator) && denominator > 0 && parameters.cash >= 0 && parameters.cash <= 100 && parameters.normalised >= 0 && parameters.normalised <= 100) {

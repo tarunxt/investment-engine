@@ -47,8 +47,8 @@ test('delayed history, day/scope changes, stale responses and nested calculation
  const historyButton=find(state.cells(stocks[0]),n=>n.props?.['aria-label']==='HAL Historical Weighted Score calculation');historyButton.props.onClick();state=render();assert.equal(state.popupOpen,true);
  const popup=state.popup.type(state.popup.props);assert.equal(popup.props.role,'dialog');h.flush();let stopped=0;popup.props.onClick({stopPropagation(){stopped++;}});state=render();assert.equal(state.popupOpen,false);assert.equal(stopped,1);
  state.setParameters({...state.parameters,days:10});state=render();h.flush();const old=pending.shift();assert.equal(old.params.days,10);
- render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);h.flush();old.resolve({...history([observation(2,99)]),days:10});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,true);
- const current=pending.shift();current.resolve({...history([]),market:'us',days:10});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,false);
+ render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);h.flush();old.resolve({...history([observation(2,99)]),days:10,window_start:'2026-10-18T12:00:00Z'});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,true);
+ const current=pending.shift();current.resolve({...history([]),market:'us',days:10,window_start:'2026-10-18T12:00:00Z'});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,false);
  render(false,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);h.flush();assert.equal(pending.length,0);
  assert.equal(restored,0);
 });
@@ -79,4 +79,12 @@ test('actual parameter edits feed only display inputs, reject invalid drafts and
  find(render(),n=>n.props?.id==='portfolio-history-days').props.onChange({target:{value:''}});render();h.flush();assert.equal(updates.at(-1).valid,false);
  const other=hooks(),otherUpdates=[];const isolated=load('../components/PortfolioParametersTile.tsx',{...parameterMath,...other.bindings,createPortal:n=>n,document:{body:{},activeElement:null}}).PortfolioParametersTile;
  other.start();isolated({...props,onDisplayParametersChange:value=>otherUpdates.push(value)});other.flush();assert.equal(otherUpdates.at(-1).maximumStocks,20);assert.equal(otherUpdates.at(-1).days,5);
+});
+
+
+test('invalid windows, untrusted completion flags and fractional cutoffs never create allocations',()=>{
+ assert.equal(math.historicalMean({...history([observation(1,2)]),window_start:'invalid'},'HAL','NSE').score,null);
+ assert.equal(math.historicalMean(history([observation(1,2,{completed:'false'})]),'HAL','NSE').score,null);
+ assert.equal(math.historicalMean(history([observation(1,4)]),'HAL','NSE').score,null);
+ assert.equal(math.allocateDisplayScores([{key:'HAL',score:2}],{...math.defaultDisplayParameters(),maximumStocks:1.5}).weights.size,0);
 });

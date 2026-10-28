@@ -27,7 +27,7 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
     if (!open || !symbols || !parameters.valid) return;
     let active = true;
     void apiService.getBasketScoreHistory({ market, symbols: symbols.split(","), days: parameters.days }).then(data => {
-      if (data.market !== market || data.days !== parameters.days || data.symbols.slice().sort().join(",") !== symbols) throw new Error("Historical score response scope does not match this basket.");
+      if (data.market !== market || data.days !== parameters.days || !Array.isArray(data.symbols) || data.symbols.slice().sort().join(",") !== symbols || !Array.isArray(data.observations) || typeof data.truncated !== "boolean" || !Number.isFinite(Date.parse(data.as_of)) || !Number.isFinite(Date.parse(data.window_start)) || Date.parse(data.as_of) - Date.parse(data.window_start) !== parameters.days * 86400000) throw new Error("Historical score response scope does not match this basket.");
       if (active) setResult({ signature, data });
     }).catch((error: unknown) => { if (active) setResult({ signature, error: error instanceof Error ? error.message : "Historical scores could not be loaded." }); });
     return () => { active = false; };
