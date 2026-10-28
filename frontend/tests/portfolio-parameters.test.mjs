@@ -98,3 +98,25 @@ test('local modal edits, readonly totals, vertical steppers, outside/inside clos
   assert.doesNotMatch(componentSource, /localStorage|apiService|onPlaceOrder|onToggle|onBuyThreshold/);
   assert.match(componentSource, /max-h-\[85vh\].*w-full max-w-lg overflow-auto/);
 });
+
+
+test('Maximum Stocks defaults to 20, accepts only safe positive integers and stays scoped local state', () => {
+  assert.equal(math.DEFAULT_MAXIMUM_STOCKS, 20);
+  for (const text of ['1', '25', '100']) assert.equal(math.parseMaximumStocks(text), Number(text));
+  for (const text of ['', '0', '-1', '1.5', '1e2', 'Infinity', '9007199254740992']) assert.equal(math.parseMaximumStocks(text), null);
+  const h = harness();
+  const component = load('../components/PortfolioParametersTile.tsx', { ...math, ...h.hooks, createPortal: node => node, document: { body: {} } }).PortfolioParametersTile;
+  const render = () => { h.start(); return component({ currency: 'INR', portfolioValue: null, availableMargin: null, totalAssets: null, capturedAt: null }); };
+  const open = () => find(render(), node => node.props?.['aria-haspopup'] === 'dialog').props.onClick();
+  const input = () => find(render(), node => node.props?.id === 'portfolio-maximum-stocks');
+  open(); assert.equal(input().props.value, 20); assert.equal(input().props.type, 'number'); assert.equal(input().props.step, '1'); assert.equal(input().props.min, '1');
+  input().props.onChange({ target: { value: '27' } }); input().props.onBlur(); assert.equal(input().props.value, 27);
+  for (const value of ['1.5', '-2', '']) { input().props.onChange({ target: { value } }); assert.equal(input().props['aria-invalid'], true); input().props.onBlur(); assert.equal(input().props.value, value); assert.ok(find(render(), node => node.props?.id === 'portfolio-maximum-stocks-error')); }
+  input().props.onChange({ target: { value: '30' } }); assert.equal(input().props['aria-invalid'], false); input().props.onBlur();
+  find(render(), node => node.props?.['aria-label'] === 'Close Portfolio Parameters').props.onClick(); open(); assert.equal(input().props.value, 30);
+  assert.equal(find(render(), node => node.props?.id === 'portfolio-parameter-normalised').props.value, '9.50');
+  const other = harness(); const isolated = load('../components/PortfolioParametersTile.tsx', { ...math, ...other.hooks, createPortal: node => node, document: { body: {} } }).PortfolioParametersTile;
+  other.start(); isolated({ currency: "USD", portfolioValue: null, availableMargin: null, totalAssets: null }).props.children[0].props.onClick(); other.start(); assert.equal(find(isolated({ currency: "USD", portfolioValue: null, availableMargin: null, totalAssets: null }), node => node.props?.id === 'portfolio-maximum-stocks').props.value, 20);
+  const source = readFileSync(new URL('../components/PortfolioParametersTile.tsx', import.meta.url), 'utf8');
+  assert.ok(source.indexOf('htmlFor="portfolio-maximum-stocks"') < source.indexOf('Object.keys(labels)'));
+});
