@@ -3976,7 +3976,94 @@ function combineOperationalErrors(messages: Array<string | null>) {
   return present.length ? Array.from(new Set(present)).join("; ") : null;
 }
 
-export function StockDetailsButton({
+export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string }): Promise<ScoreMatrixDetail | null> {
+  if (item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return null;
+  const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
+  if (!target) return null;
+  const decode = (saved: FinalActionableHistoryItem): ScoreMatrixDetail | null => {
+      if (saved.market !== market || normalizeStockSymbol(saved.stock_symbol) !== normalizeStockSymbol(symbol) || saved.covered_at !== target.coveredAt
+          || saved.rebalance_run_id !== target.runId || (item && saved.workflow_id !== item.workflow_id)
+          || saved.formula_version !== "score-matrix-v1") return null;
+      const detail = saved.formula_inputs_json;
+      if (!detail || normalizeStockSymbol(String(detail.stockSymbol ?? "")) !== normalizeStockSymbol(symbol)
+          || detail.rebalanceSourceRunId !== saved.rebalance_run_id
+          || typeof detail.stockKey !== "string" || detail.stockExchange !== exchange
+          || typeof detail.stockName !== "string"
+          || !Array.isArray(detail.rows) || !Array.isArray(detail.rules) || !Array.isArray(detail.detailedRationaleRows)
+          || typeof detail.detailedRationaleDenominator !== "number"
+          || detail.calculatedScore !== saved.score
+          || !detail.rows.every((row) => row && typeof row === "object")
+          || !detail.rules.every((row) => row && typeof row === "object")
+          || !detail.detailedRationaleRows.every((row) => row && typeof row === "object")) return null;
+      return detail as unknown as ScoreMatrixDetail;
+  };
+  let cursor: string | null = null;
+  const cursors = new Set<string>();
+  const matches: FinalActionableHistoryItem[] = [];
+  for (let page = 0; page < 100; page += 1) {
+    const response = await apiService.getFinalActionableHistory({ market, symbol, limit: 50, cursor });
+    if (item) {
+      const saved = response.items.find((row) => row.id === item.id);
+      if (saved) return decode(saved);
+    } else {
+      matches.push(...response.items.filter((row) => row.rebalance_run_id === target.runId && row.covered_at === target.coveredAt));
+      if (matches.length > 1) return null; // Unknown workflow cannot be guessed.
+    }
+    if (!response.has_more || !response.next_cursor) return matches.length === 1 ? decode(matches[0]) : null;
+    if (cursors.has(response.next_cursor)) throw new Error("Historical pagination did not advance.");
+    cursor = response.next_cursor;
+    cursors.add(cursor);
+  }
+  throw new Error("Historical lookup limit reached. Please try again.");
+}
+
+function HistoricalScoreMatrixPopup({ item, coveredAt, runId, market, symbol, exchange, onClose }: {
+  item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; market: SwingTradeMarket; symbol: string; exchange: string; onClose: () => void;
+}) {
+  const [result, setResult] = useState<{ detail: ScoreMatrixDetail | null; error: string | null; loading: boolean }>({ detail: null, error: null, loading: true });
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    void fetchFrozenHistoricalMatrix(item, market, symbol, exchange, { runId, coveredAt }).then(
+      (detail) => { if (active) setResult({ detail, error: null, loading: false }); },
+      (error: unknown) => { if (active) setResult({ detail: null, error: error instanceof Error ? error.message : "Unable to load historical matrix.", loading: false }); },
+    );
+    return () => { active = false; opener?.focus(); };
+  }, [item, market, symbol, exchange, runId, coveredAt]);
+  return (
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[70]" onClick={(event) => { event.stopPropagation(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
+        if (event.key === "Tab") {
+          const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? []);
+          const first = nodes[0]; const last = nodes[nodes.length - 1];
+          if (!first) { event.preventDefault(); return; }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) { event.preventDefault(); first.focus(); }
+        }
+      }}>
+      {result.detail ? <ScoreMatrixModal detail={result.detail} frozen historicalLabel={`${symbol} · ${formatDateTime(coveredAt)} · Run #${runId}`} onClose={onClose} /> : (
+        <div role="dialog" aria-modal="true" aria-label={`Historical score matrix for ${symbol}`} className="flex h-full items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h2 className="font-bold">{symbol} · {formatDateTime(coveredAt)}</h2>
+            {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading historical score matrix…</p>
+              : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load historical score matrix: {result.error}</p>
+              : <p className="mt-4">No frozen score matrix is available for this stock and timestamp. Latest data has not been substituted.</p>}
+            <button type="button" onClick={onClose} className="mt-4 rounded border px-3 py-2">Back to captured stock details</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function StockDetailsButton(props: Parameters<typeof ScopedStockDetailsButton>[0]) {
+  return <ScopedStockDetailsButton key={`${props.market}:${props.stock.key}`} {...props} />;
+}
+
+function ScopedStockDetailsButton({
   stock,
   market,
   technicalScan,
@@ -3995,7 +4082,15 @@ export function StockDetailsButton({
   formulaConfig?: ScoreMatrixFormulaConfig;
   onMatrixDetailOpen?: (detail: ScoreMatrixDetail) => void;
 }) {
+  const detailPanelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [historicalMatrix, setHistoricalMatrix] = useState<{ item: FinalActionableHistoryItem | null; coveredAt: string; runId: number } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    detailPanelRef.current?.focus();
+    return () => { opener?.focus(); };
+  }, [open]);
   const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
   const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
   const [persistedHistory, setPersistedHistory] = useState<FinalActionableHistoryItem[]>([]);
@@ -4177,10 +4272,23 @@ export function StockDetailsButton({
       {open ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
+          ref={detailPanelRef}
+          tabIndex={-1}
+          inert={historicalMatrix ? true : undefined}
           role="dialog"
-          aria-modal="true"
+          aria-modal={!historicalMatrix}
+          onKeyDown={(event) => {
+            if (historicalMatrix) return;
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); }
+            if (event.key === "Tab") {
+              const nodes = Array.from(detailPanelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') ?? []);
+              const first = nodes[0]; const last = nodes[nodes.length - 1];
+              if (event.shiftKey && (document.activeElement === first || document.activeElement === detailPanelRef.current)) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && (document.activeElement === last || document.activeElement === detailPanelRef.current)) { event.preventDefault(); first?.focus(); }
+            }
+          }}
           aria-labelledby={`stock-details-${stock.key}`}
-          onClick={() => setOpen(false)}
+          onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) setOpen(false); }}
         >
           <div
             className="min-w-0 w-full max-w-5xl rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
@@ -4221,7 +4329,7 @@ export function StockDetailsButton({
                 ) : null}
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) setOpen(false); }}
                   className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   aria-label="Close stock details"
                 >
@@ -4345,7 +4453,7 @@ export function StockDetailsButton({
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 capitalize text-gray-600">{item.coverage_status.replaceAll("_", " ")}</td>
                             <td className="px-3 py-2"><FinalActionValue value={item.action} /></td>
-                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatScoreValue(item.score)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{item.score === null ? "—" : <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setHistoricalMatrix({ item, coveredAt: item.covered_at, runId: item.rebalance_run_id })} aria-label={`Open ${item.stock_symbol} score matrix for ${formatDateTime(item.covered_at)}`}>{formatScoreValue(item.score)}</button>}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
                               {item.consensus_numerator !== null && item.consensus_denominator !== null
                                 ? `${item.consensus_numerator}/${item.consensus_denominator}`
@@ -4399,11 +4507,7 @@ export function StockDetailsButton({
                           const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(historicalAction);
                           const renderHistoricalColumn = (column: Exclude<FinalActionableColumnKey, "stock">) => {
                             if (column === "score") {
-                              return onMatrixDetailOpen ? (
-                                <ScoreMatrixButton detail={historicalRow.detail} formulaConfig={formulaConfig} onOpenDetail={onMatrixDetailOpen} />
-                              ) : (
-                                formatScoreValue(historicalRow.formulaScore)
-                              );
+                              return <button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: historicalRow.coveredAt, runId: historicalRow.runId })}>{formatScoreValue(historicalRow.formulaScore)}</button>;
                             }
                             if (column === "consensus") return <ConsensusBreakupButton stock={historicalStock} action={historicalAction} />;
                             if (column === "currentValue") return formatDisplayAmount(historicalEstimate.currentInvestmentAmount ?? getCurrentValueAmount(historicalStock.representative), market);
@@ -4478,7 +4582,7 @@ export function StockDetailsButton({
                               <td className="px-3 py-2 align-top"><FinalActionValue value={row.action} /></td>
                               <td className="px-3 py-2 align-top text-gray-700">{row.units}</td>
                               <td className="px-3 py-2 align-top text-gray-700">{row.amount}</td>
-                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">{row.score}</td>
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700"><button type="button" className="text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: row.createdAt, runId: row.runId })}>{row.score}</button></td>
                               <td className="min-w-80 px-3 py-2 align-top text-gray-700">{row.rationale}</td>
                             </tr>
                           ))}
@@ -4572,6 +4676,7 @@ export function StockDetailsButton({
           </div>
         </div>
       ) : null}
+      {open && historicalMatrix ? <HistoricalScoreMatrixPopup key={`${historicalMatrix.runId}:${historicalMatrix.coveredAt}`} {...historicalMatrix} market={market} symbol={stock.symbol} exchange={stock.exchange} onClose={() => setHistoricalMatrix(null)} /> : null}
     </>
   );
 }
@@ -5403,8 +5508,12 @@ export function ScoreMatrixModal({
   onFormulaConfigChange,
   onClose,
   onFocusCalculation,
+  frozen = false,
+  historicalLabel,
 }: {
   detail: ScoreMatrixDetail | null;
+  frozen?: boolean;
+  historicalLabel?: string;
   formulaConfig?: ScoreMatrixFormulaConfig;
   onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   onClose: () => void;
@@ -5431,12 +5540,12 @@ export function ScoreMatrixModal({
 
   const configuredDetail = useMemo(() => {
     if (!detail) return null;
-    return applyScoreMatrixFormulaConfig(detail, formulaConfig);
-  }, [detail, formulaConfig]);
+    return frozen ? detail : applyScoreMatrixFormulaConfig(detail, formulaConfig);
+  }, [detail, formulaConfig, frozen]);
 
   const editedDetail = useMemo(
-    () => (configuredDetail ? applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
-    [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts],
+    () => (configuredDetail ? (frozen ? configuredDetail : applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts)) : null),
+    [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts, frozen],
   );
   const validationSummary = useMemo(
     () => (editedDetail ? getScoreMatrixValidationSummary(editedDetail) : null),
@@ -5454,8 +5563,8 @@ export function ScoreMatrixModal({
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="score-matrix-modal-title"
-      onClick={onClose}
+      aria-labelledby={frozen ? "historical-score-matrix-title" : "score-matrix-modal-title"}
+      onClick={(event) => { event.stopPropagation(); onClose(); }}
     >
       <div
         className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
@@ -5469,8 +5578,8 @@ export function ScoreMatrixModal({
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               Consolidated score matrix
             </p>
-            <h2 id="score-matrix-modal-title" className="mt-1 text-xl font-bold text-slate-950">
-              Final Action Rule
+            <h2 id={frozen ? "historical-score-matrix-title" : "score-matrix-modal-title"} className="mt-1 text-xl font-bold text-slate-950">
+              {historicalLabel ?? "Final Action Rule"}
             </h2>
             <div className="mt-2 flex flex-wrap items-baseline gap-2 text-slate-950">
               <span className="text-2xl font-extrabold tracking-tight">{editedDetail.stockSymbol}</span>
@@ -5506,7 +5615,7 @@ export function ScoreMatrixModal({
           </div>
         </div>
 
-        <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+        <fieldset disabled={frozen} className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
           {validationSummary.hasIssues ? (
             <Alert className="border-rose-300 bg-rose-50 text-rose-950">
               <AlertTriangle className="size-4" />
@@ -5583,10 +5692,9 @@ export function ScoreMatrixModal({
             onFocusCalculation={onFocusCalculation}
           />
 
-          <ScoreReferenceTables
-            formulaConfig={formulaConfig}
-            onFormulaConfigChange={onFormulaConfigChange}
-          />
+          {frozen ? <p className="text-sm text-slate-600">Saved historical matrix. Values are read-only; live formula reference settings are not applied to this snapshot.</p> : (
+            <ScoreReferenceTables formulaConfig={formulaConfig} onFormulaConfigChange={onFormulaConfigChange} />
+          )}
 
           {matchedRule ? (
             <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
@@ -5755,7 +5863,7 @@ export function ScoreMatrixModal({
               </table>
             </div>
           </section>
-        </div>
+        </fieldset>
       </div>
     </div>
   );
