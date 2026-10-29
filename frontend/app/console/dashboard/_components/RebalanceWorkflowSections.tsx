@@ -3666,7 +3666,7 @@ function ScopedZerodhaBasketPreviewDialog({
 
   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);
   const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
-  const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}` : null);
+  const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
   const displayQuote = (symbol: string, exchange: string) => { const quote = verifiedFetchedDisplayQuote(quoteRead.quotes, symbol, exchange) ?? verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange); return { ltp: quote?.price ?? null, ltpAsOf: quote?.asOf, ltpSource: quote?.source, quoteLoading: quoteRead.loading && !quote }; };
   const displayStock = (row: DashboardActionRow) => {
     const currentOrder = orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange);
