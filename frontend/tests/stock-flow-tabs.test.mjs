@@ -63,7 +63,7 @@ test("summary view uses scrollable stage tables and standard action colours", ()
   assert.match(stockFlowSource, /sticky top-0/);
   assert.match(stockFlowSource, /overflow-auto overscroll-contain/);
   assert.match(stockFlowSource, /getStandardActionBadgeClass/);
-  assert.match(stockFlowSource, /action=\{stock\.consensusAction\}/);
+  assert.match(stockFlowSource, /action=\{row\.disposition\}/);
   assert.match(stockFlowSource, /<ActionBadge action=\{row\.formulaAction\}/);
 });
 
@@ -72,7 +72,7 @@ test("summary preserves each LLM job output instead of only showing consensus", 
   assert.match(stockFlowSource, /SwingJobOutputsStage/);
   assert.match(stockFlowSource, /RebalanceJobOutputsStage/);
   assert.match(stockFlowSource, /Job #\{output\.jobId\}/);
-  assert.match(stockFlowSource, /output\.actions\.get\(stock\.key\)/);
+  assert.match(stockFlowSource, /stock\.actions\[output\.key\]/);
   assert.match(stockFlowSource, /Not covered/);
 });
 
