@@ -100,3 +100,28 @@ export function displaySizingPrice(quoted: number | null | undefined, limit: num
   const quote = validDisplayPrice(quoted), estimate = validDisplayPrice(limit);
   return quote !== null ? { price: quote, basis: 'quoted_ltp', label: 'Quoted LTP shown in this row' } : estimate !== null ? { price: estimate, basis: 'limit_estimate', label: 'Estimate using Limit Price; not live LTP' } : { price: null, basis: 'unavailable', label: 'No valid Quoted LTP or Limit Price is available' };
 }
+
+/** Current Kite exposure includes unsettled T1 units, valued at the saved holding LTP. */
+export function kiteWeightContext(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number; t1_quantity: number; last_price: number }[]; holdings_count: number; captured_at: string; available_margin: number | null } | null) {
+  const values = new Map<string, number>();
+  if (!snapshot || snapshot.holdings_count !== snapshot.holdings.length || !Number.isFinite(Date.parse(snapshot.captured_at)) || snapshot.available_margin === null || !Number.isFinite(snapshot.available_margin)) return { values, totalAssets: null, valid: false };
+  let portfolioValue = 0;
+  for (const holding of snapshot.holdings) {
+    const units = holding.quantity + holding.t1_quantity;
+    if (![holding.quantity, holding.t1_quantity, holding.last_price].every(Number.isFinite) || units < 0 || (units > 0 && holding.last_price <= 0)) return { values: new Map<string, number>(), totalAssets: null, valid: false };
+    const value = Math.round(units * holding.last_price * 100) / 100;
+    const key = stockIdentity(holding.tradingsymbol.trim(), holding.exchange.trim());
+    values.set(key, (values.get(key) ?? 0) + value);
+    portfolioValue += value;
+  }
+  const totalAssets = portfolioValue + snapshot.available_margin;
+  return { values, totalAssets: Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null, valid: Number.isFinite(totalAssets) && totalAssets > 0 };
+}
+
+export function weightComparison(currentValue: number | null | undefined, totalAssets: number | null, target: number | null | undefined) {
+  const current = typeof currentValue === 'number' && Number.isFinite(currentValue) && currentValue >= 0 && totalAssets !== null && Number.isFinite(totalAssets) && totalAssets > 0 ? currentValue / totalAssets : null;
+  const difference = current !== null && typeof target === 'number' && Number.isFinite(target) && target >= 0 ? target - current : null;
+  const delta = difference !== null && Math.abs(difference) < 1e-12 ? 0 : difference;
+  const action = delta === null ? null : current! > 0 && target === 0 ? 'Sell All' : delta > 0 ? current === 0 ? 'Buy New' : 'Add More' : delta < 0 ? 'Trim' : 'Hold';
+  return { current, difference: delta, action };
+}
