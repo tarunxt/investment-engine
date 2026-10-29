@@ -502,6 +502,9 @@ export default function RunDetailPage() {
                 </div>
                 <div className="max-w-full p-5">
                   <OutputConsistencyNotice metadata={job.runtime_metadata_json} />
+                  {job.status === 'partial' && job.error_message ? (
+                    <p className="mb-3 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{job.error_message}</p>
+                  ) : null}
                   {job.status === 'failed' && job.error_message ? (
                     <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                       <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>

@@ -963,12 +963,12 @@ def _refresh_run_status(db, job_id: int) -> None:
             if statuses & active:
                 # At least one child job is still running
                 new_status = JobStatus.PROCESSING
+            elif any(j.status == JobStatus.PARTIAL for j in stage_jobs):
+                # Usable but incomplete output remains visible at the run level.
+                new_status = JobStatus.PARTIAL
             elif any(j.status == JobStatus.COMPLETED for j in stage_jobs):
                 # All terminal, at least one succeeded
                 new_status = JobStatus.COMPLETED
-            elif any(j.status == JobStatus.PARTIAL for j in stage_jobs):
-                # All terminal and at least one usable-but-incomplete model output exists.
-                new_status = JobStatus.PARTIAL
             else:
                 # All terminal, all failed
                 new_status = JobStatus.FAILED
@@ -1605,10 +1605,14 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.info("Skipping completion update for cancelled job %s", job_id)
             return
 
+        from app.domains.jobs.partial_output import has_partial_output, PARTIAL_NOTICE
+        completion_metadata = with_output_validation(runtime_metadata_json)
+        partial_usage = has_partial_output(completion_metadata)
         _update_job_status(
             repo,
             job,
-            JobStatus.COMPLETED,
+            JobStatus.PARTIAL if partial_usage else JobStatus.COMPLETED,
+            error_message=PARTIAL_NOTICE if partial_usage else None,
             response=content,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -1616,7 +1620,7 @@ def execute_ai_job(self, job_id: int) -> None:
             web_search_used=web_search_used,
             web_search_queries=web_search_queries,
             web_sources=web_sources,
-            runtime_metadata_json=with_output_validation(runtime_metadata_json),
+            runtime_metadata_json=completion_metadata,
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)

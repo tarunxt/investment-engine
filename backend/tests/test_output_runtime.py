@@ -359,3 +359,42 @@ def test_new_union_contract_requires_authoritative_frozen_sources_before_provide
     job.prompt = '[REBALANCE_UNIVERSE_V1]\n' + job.prompt
     with pytest.raises(OutputPreflightError, match='frozen selected source'):
         configure_output_context(job,{})
+
+
+def test_worker_retains_incomplete_rebalance_as_partial_without_retry():
+    from app.domains.jobs.partial_output import PARTIAL_NOTICE
+    job = make_job('rebalance')
+    result = AIProviderResponse(content=json.dumps([rebalance_row(score_rationale_cruxx='-')]),
+        tokens_in=1, tokens_out=2, cost=.001, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, [result])
+    assert job.status == JobStatus.PARTIAL
+    assert job.error_message == PARTIAL_NOTICE
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.runtime_metadata_json['deterministic_output']['usage_status'] == 'partial'
+
+
+def test_legacy_missing_cell_failure_projects_partial_without_rewriting_job():
+    from app.domains.jobs.schemas import JobResponse
+    job = make_job('rebalance', status=JobStatus.FAILED, updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
+    job.error_message = 'invalid output contract (row_width: Expected 29 cells; received 27)'
+    lines = table(REBALANCE_COLUMNS, [rebalance_row()]).splitlines()
+    cells = lines[-1].strip('| ').split(' | ')
+    del cells[23:25]
+    lines[-1] = '| ' + ' | '.join(cells) + ' |'
+    job.response = '\n'.join(lines)
+    view = JobResponse.model_validate(job)
+    assert view.status == JobStatus.PARTIAL
+    assert 'Unaligned source cells (not scored)' in view.response
+    assert view.runtime_metadata_json['partial_recovery']['original_status'] == 'failed'
+    assert job.status == JobStatus.FAILED
+    assert 'row_width' in job.error_message
+    assert JobResponse.model_validate(view.model_dump()).status == JobStatus.PARTIAL
+
+
+@pytest.mark.parametrize('error, response', [('provider timeout', 'text'), ('invalid output contract', json.dumps([rebalance_row(current_units=999)])), ('invalid output contract', '')])
+def test_nonrecoverable_failures_stay_failed(error, response):
+    from app.domains.jobs.schemas import JobResponse
+    job = make_job('rebalance', status=JobStatus.FAILED, error_message=error, response=response,
+                   updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
+    assert JobResponse.model_validate(job).status == JobStatus.FAILED

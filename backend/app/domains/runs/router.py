@@ -226,6 +226,8 @@ def _timestamp_sort_key(value: datetime) -> float:
 
 
 def _serialize_auto_rebalance_job(job: Job) -> AutoRebalanceJobDetailResponse:
+    from app.domains.jobs.schemas import JobResponse
+    job = JobResponse.model_validate(job)
     return AutoRebalanceJobDetailResponse(
         id=job.id,
         provider=job.provider,
@@ -276,6 +278,8 @@ def _stage_response(
         for link in run.run_jobs
         if (job := link.job) is not None
     ] + standalone_jobs
+    from app.domains.jobs.schemas import JobResponse
+    jobs = [JobResponse.model_validate(job) for job in jobs]
     failed_jobs = [job for job in jobs if _status_value(job.status) == "failed"]
     event_status = event.status.lower() if event else None
     status = event_status or _derive_stage_status(jobs)
@@ -285,16 +289,31 @@ def _stage_response(
         derived_status = _derive_stage_status(jobs)
         if _is_terminal_auto_rebalance_status(derived_status):
             status = derived_status
+    partial_count = sum(_status_value(job.status) == "partial" for job in jobs)
+    summary = dict(event.summary_json or {}) if event else {}
+    if partial_count:
+        summary.update(
+            completed_llms=sum(_status_value(job.status) in {"completed", "partial", "failed"} for job in jobs),
+            passed_llms=sum(_status_value(job.status) == "completed" for job in jobs),
+            partial_llms=partial_count, failed_llms=len(failed_jobs), total_llms=len(jobs),
+        )
+    if partial_count:
+        from app.domains.jobs.partial_output import PARTIAL_NOTICE
+        summary["partial_notice"] = PARTIAL_NOTICE
+        if not any(_status_value(job.status) in {"pending", "processing", "scheduled"} for job in jobs):
+            status = "partial"
+            summary["run_status"] = "partial"
     return AutoRebalanceStageResponse(
         stage=stage,
         status=status,
         run_id=event.run_id if event and event.run_id else (runs[-1].id if runs else None),
         job_id=event.job_id if event and event.job_id else (standalone_jobs[-1].id if standalone_jobs else None),
-        summary=dict(event.summary_json or {}) if event else {},
+        summary=summary,
         error_message=(
-            event.error_message
-            if event and event.error_message
-            else (failed_jobs[-1].error_message if failed_jobs else None)
+            None if partial_count and not failed_jobs else (
+                event.error_message if event and event.error_message
+                else (failed_jobs[-1].error_message if failed_jobs else None)
+            )
         ),
         started_at=(
             event.started_at
@@ -315,6 +334,7 @@ def _stage_response(
         completed_provider_count=sum(
             _status_value(job.status) in {"completed", "partial"} for job in jobs
         ),
+        partial_provider_count=sum(_status_value(job.status) == "partial" for job in jobs),
         failed_provider_count=len(failed_jobs),
         estimated_cost=round(sum(job.estimated_cost or 0 for job in jobs), 8),
     )

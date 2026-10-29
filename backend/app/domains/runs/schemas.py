@@ -198,6 +198,7 @@ class AutoRebalanceStageResponse(BaseModel):
     completed_at: datetime | None = None
     provider_count: int = 0
     completed_provider_count: int = 0
+    partial_provider_count: int = 0
     failed_provider_count: int = 0
     estimated_cost: float = 0
 
@@ -435,6 +436,13 @@ class RunResponse(BaseModel):
     auto_rebalance_label: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def reflect_partial_jobs(self):
+        statuses = {link.job.status for link in self.run_jobs}
+        if self.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.PARTIAL} and JobStatus.PARTIAL in statuses and not statuses.intersection({JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}):
+            self.status = JobStatus.PARTIAL
+        return self
 
     model_config = {"from_attributes": True}
 
