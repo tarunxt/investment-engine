@@ -92,3 +92,11 @@ export function verifiedFetchedDisplayQuote(quotes: { instrument: string; price:
   const quote = matches[0];
   return typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0 && Number.isFinite(Date.parse(quote.as_of)) && typeof quote.source === 'string' && quote.source ? { price: quote.price, asOf: quote.as_of, source: quote.source } : null;
 }
+
+export function validDisplayPrice(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+export function displaySizingPrice(quoted: number | null | undefined, limit: number | null | undefined) {
+  const quote = validDisplayPrice(quoted), estimate = validDisplayPrice(limit);
+  return quote !== null ? { price: quote, basis: 'quoted_ltp', label: 'Quoted LTP shown in this row' } : estimate !== null ? { price: estimate, basis: 'limit_estimate', label: 'Estimate using Limit Price; not live LTP' } : { price: null, basis: 'unavailable', label: 'No valid Quoted LTP or Limit Price is available' };
+}

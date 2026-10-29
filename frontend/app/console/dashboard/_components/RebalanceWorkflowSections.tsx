@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
-import { verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
+import { validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { auditResponseHashes } from "@/services/recommendationAudit";
@@ -3667,7 +3667,12 @@ function ScopedZerodhaBasketPreviewDialog({
   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);
   const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
   const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
-  const displayQuote = (symbol: string, exchange: string) => { const quote = verifiedFetchedDisplayQuote(quoteRead.quotes, symbol, exchange) ?? verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange); return { ltp: quote?.price ?? null, ltpAsOf: quote?.asOf, ltpSource: quote?.source, quoteLoading: quoteRead.loading && !quote }; };
+  const displayQuote = (symbol: string, exchange: string) => {
+    const quote = verifiedFetchedDisplayQuote(quoteRead.quotes, symbol, exchange) ?? verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange);
+    const order = orders.find(row => row.symbol === symbol && row.exchange === exchange);
+    const rowQuote = tradingViewMarket === "india" ? validDisplayPrice(order?.lastPrice) : null;
+    return { ltp: quote?.price ?? rowQuote, limitPrice: tradingViewMarket === "india" ? validDisplayPrice(order?.price) : null, ltpAsOf: quote?.asOf ?? (rowQuote !== null ? ltpRefreshedAt ?? undefined : undefined), ltpSource: quote?.source ?? (rowQuote !== null ? "Quoted LTP shown in this exact row; freshness not independently verified" : undefined), quoteLoading: quoteRead.loading && !quote && rowQuote === null };
+  };
   const displayStock = (row: DashboardActionRow) => {
     const currentOrder = orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange);
     const currentDetail = currentOrder?.detail ?? row.detail;
@@ -3956,9 +3961,9 @@ function ScopedZerodhaBasketPreviewDialog({
                 <PortfolioParametersTile onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
               </div>
 
-              <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
+              <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. {tradingViewMarket === "india" ? "If Quoted LTP is unavailable, a positive row Limit Price may be used for sizing with an Estimate label; Quoted LTP and executable order fields are not replaced. " : ""}They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
               {hiddenSelectedCount > 0 ? <p role="status" className="mb-3 text-amber-800">{hiddenSelectedCount} selected executable order(s) are hidden by the display filter and remain selected. Show all to review them. Group checkboxes affect only visible selectable orders; All Stocks controls all selectable orders, including hidden rows.</p> : null}
-              {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading read-only broker quotes for displayed calculations…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">Display quotes unavailable: {quoteRead.error}. No limit price, previous close or purchase average is substituted. <button type="button" className="underline" onClick={quoteRead.retry}>Retry display quotes</button></p> : null}
+              {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading read-only broker quotes for displayed calculations…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">Display quotes unavailable: {quoteRead.error}. No live quote is fabricated. Where labelled, sizing uses the row Limit Price as an estimate; it is not live LTP. <button type="button" className="underline" onClick={quoteRead.retry}>Retry display quotes</button></p> : null}
               {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="overflow-x-auto overscroll-x-contain">
@@ -4112,7 +4117,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                     </span>
                                   )}
                                 </td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(displayQuote(order.symbol, order.exchange).ltp ?? order.lastPrice, basketCurrency)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(tradingViewMarket === "india" ? displayQuote(order.symbol, order.exchange).ltp : displayQuote(order.symbol, order.exchange).ltp ?? order.lastPrice, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount, basketCurrency)}</td>
                                 <td className="px-4 py-3">
