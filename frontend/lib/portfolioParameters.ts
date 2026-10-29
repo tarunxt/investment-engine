@@ -69,3 +69,11 @@ export function parseMaximumStocks(value: string): number | null {
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
+
+export function portfolioParameterMargin(snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null, market: "india" | "us"): number | null {
+  if (!snapshot) return null;
+  // INDmoney's parsed USD wallet is separate cash, as in the existing dashboard
+  // portfolio-plus-cash contract. Never apply this to an inclusive other wallet.
+  const value = market === "india" && "available_margin" in snapshot ? snapshot.available_margin : market === "us" && "parse_status" in snapshot && snapshot.parse_status === "parsed" ? snapshot.wallet_balance : null;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}

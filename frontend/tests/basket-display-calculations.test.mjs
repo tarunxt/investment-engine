@@ -1,0 +1,160 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import ts from 'typescript';
+import * as React from 'react';
+const require = createRequire(import.meta.url);
+function load(path, bindings={}) { const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
+const math=load('../lib/basketDisplayCalculations.ts');
+const end='2026-10-28T12:00:00Z', start='2026-10-23T12:00:00Z';
+const observation=(run,score,overrides={})=>({id:run,run_id:run,symbol:'HAL',exchange:'NSE',covered_at:end,score,completed:true,coverage_status:'suggested',...overrides});
+const history=(rows)=>({market:'india',symbols:['HAL'],as_of:end,window_start:start,timezone:'Asia/Kolkata',days:5,truncated:false,observations:rows,notes:[]});
+test('history mean uses all valid completed-run observations, exact venue and half-open rolling window',()=>{
+ const rows=[observation(1,3),observation(2,1),observation(3,-1,{covered_at:'2026-10-27T12:00:00Z'}),observation(4,99,{completed:false}),observation(5,null),observation(6,9,{exchange:'BSE'}),observation(7,5,{covered_at:start}),observation(8,5,{covered_at:'2026-10-28T12:00:01Z'}),observation(1,3)];
+ const mean=math.historicalMean(history(rows),'HAL','NSE');assert.equal(mean.rows.length,3);assert.equal(mean.sum,3);assert.equal(mean.score,1);assert.equal(math.historicalMean(history(rows),'OTHER','NSE').score,null);assert.equal(math.historicalMean({...history(rows),truncated:true},'HAL','NSE').score,null);
+});
+test('top editable N positives include Hold names, deterministic ties, cap without redistribution and filter-independent denominator',()=>{
+ const stocks=[{key:'NSE:C',score:2},{key:'NSE:B',score:2},{key:'NSE:A',score:3},{key:'NSE:D',score:-1},{key:'NSE:E',score:0},{key:'NSE:F',score:null}];
+ const p={...math.defaultDisplayParameters(),maximumStocks:2};const result=math.allocateDisplayScores(stocks,p);assert.deepEqual(result.selected.map(s=>s.key),['NSE:A','NSE:B']);assert.equal(result.denominator,5);assert.equal(result.weights.get('NSE:A'),.095);assert.equal(result.weights.has('NSE:C'),false);assert.equal([...result.weights.values()].reduce((a,b)=>a+b,0),.19);
+ assert.equal(math.allocateDisplayScores(stocks.map(s=>({...s,score:0})),p).weights.size,0);assert.equal(math.allocateDisplayScores(stocks,{...p,valid:false}).weights.size,0);
+});
+test('Excel reference examples, nearest whole rounding, fractional USD shares and unavailable assets/LTP',()=>{
+ const weight=Math.min(2.39*.95/19.78,.095);const z=math.brokerDisplayAllocation(weight,67545,243,'india');assert.equal(z.stocks,26);assert.equal(z.amount,6318);const us=math.brokerDisplayAllocation(weight,67545,243,'us');assert.equal(us.amount,6417);assert.equal(us.stocks,6417/243);
+ const sofi=math.brokerDisplayAllocation(1.87*.95/19.78,67545,625,'us');assert.equal(sofi.amount,6066);assert.equal(math.brokerDisplayAllocation(1.87*.95/19.78,67545,625,'india').amount,6250);
+ assert.equal(math.excelRound(2.5),3);assert.equal(math.excelRound(-2.5),-3);assert.equal(math.brokerDisplayAllocation(undefined,67545,243,'india'),null);assert.equal(math.brokerDisplayAllocation(.1,null,243,'us'),null);assert.equal(math.brokerDisplayAllocation(.1,100,0,'india').stocks,null);assert.equal(math.brokerDisplayAllocation(.1,100,null,'us').amount,10);assert.equal(math.brokerDisplayAllocation(.1,0,100,'india').stocks,0);
+});
+test('inclusive outer-range visibility, Show all and unknown scores do not change financial calculations',()=>{
+ for(const score of [-3,-2.5,1.5,3])assert.equal(math.displayScoreAccepted(score,-2.5,1.5,false),true);
+ for(const score of [-2.49,0,1.49,null,NaN])assert.equal(math.displayScoreAccepted(score,-2.5,1.5,false),false);assert.equal(math.displayScoreAccepted(null,-2.5,1.5,true),true);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/lg:grid-cols-5/);assert.match(source,/displayOnlyRows/);assert.match(source,/No executable order/);assert.match(source,/useBasketDisplayCalculations/);
+});
+
+function hooks() {
+ const slots=[],effects=[];let cursor=0;return { start(){cursor=0;}, unmount(){for(const slot of slots)slot?.cleanup?.();}, flush(){for(const effect of effects.splice(0))effect();}, bindings:{
+ useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],next=>{slots[i]=typeof next==='function'?next(slots[i]):next;}];},
+ useRef(initial){const i=cursor++;if(!(i in slots))slots[i]={current:initial};return slots[i];},useMemo(fn,deps){const i=cursor++;if(!slots[i]||deps.some((value,index)=>value!==slots[i].deps[index]))slots[i]={deps,value:fn()};return slots[i].value;},
+ useEffect(fn,deps){const i=cursor++,prior=slots[i];if(!prior||deps.some((d,n)=>d!==prior.deps[n])){effects.push(()=>{prior?.cleanup?.();slots[i]={deps,cleanup:fn()};});}}
+ }};
+}
+function find(node,predicate){if(!node||typeof node!=='object')return null;if(predicate(node))return node;return React.Children.toArray(node.props?.children).map(n=>find(n,predicate)).find(Boolean)??null;}
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+test('delayed history, day/scope changes, stale responses and nested calculation dismissal preserve parent state',async()=>{
+ const h=hooks(),pending=[];let restored=0;const document={body:{},activeElement:{focus(){restored++;}}};
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:params=>new Promise((resolve,reject)=>pending.push({params,resolve,reject}))},createPortal:n=>n,document});
+ const stocks=[{symbol:'HAL',exchange:'NSE',score:2.5,ltp:243,ltpAsOf:end,ltpSource:'Zerodha holdings last_price · exact venue'}], render=(open=true,market='india',scope=stocks)=>{h.start();return component.useBasketDisplayCalculations(open,market,scope,67545,end,'Zerodha');};
+ let state=render();assert.equal(state.loading,true);h.flush();assert.equal(pending.length,1);pending.shift().resolve(history([observation(1,2)]));await tick();state=render();assert.equal(state.loading,false);
+ const historyButton=find(state.cells(stocks[0]),n=>n.props?.['aria-label']==='HAL Historical Weighted Score calculation');historyButton.props.onClick();state=render();assert.equal(state.popupOpen,true);
+ assert.match(JSON.stringify(state.popup.props.children), /Zerodha holdings last_price · exact venue/); assert.match(JSON.stringify(state.popup.props.children), /LTP as of/);
+ const popup=state.popup.type(state.popup.props);assert.equal(popup.props.role,'dialog');h.flush();let stopped=0;popup.props.onClick({stopPropagation(){stopped++;}});state=render();assert.equal(state.popupOpen,false);assert.equal(stopped,1);
+ state.setParameters({...state.parameters,days:10});state=render();h.flush();const old=pending.shift();assert.equal(old.params.days,10);
+ render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);h.flush();old.resolve({...history([observation(2,99)]),days:10,window_start:'2026-10-18T12:00:00Z'});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,true);
+ const current=pending.shift();current.resolve({...history([]),market:'us',days:10,window_start:'2026-10-18T12:00:00Z'});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,false);
+ render(false,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);h.flush();assert.equal(pending.length,0);
+ assert.equal(restored,0);
+});
+
+
+test('calculation popup traps focus, closes only its own layer and restores its opener',()=>{
+ const h=hooks();let closed=0,restored=0,focused=0,firstFocused=0,lastFocused=0;
+ const opener={focus(){restored++;}},first={focus(){firstFocused++;}},last={focus(){lastFocused++;}},document={body:{},activeElement:opener};
+ const {CalculationPopup}=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,apiService:{},createPortal:n=>n,document});
+ h.start();const popup=CalculationPopup({title:'HAL ZerodhaStocks',children:'actual inputs',onClose(){closed++;}});const panel={focus(){focused++;},querySelectorAll(){return[first,last];}};popup.props.ref.current=panel;h.flush();assert.equal(focused,1);
+ let stopped=0,prevented=0;popup.props.children.props.onClick({stopPropagation(){stopped++;}});assert.equal(closed,0);
+ document.activeElement=last;popup.props.onKeyDown({key:'Tab',shiftKey:false,preventDefault(){prevented++;},stopPropagation(){stopped++;}});assert.equal(firstFocused,1);
+ document.activeElement=first;popup.props.onKeyDown({key:'Tab',shiftKey:true,preventDefault(){prevented++;},stopPropagation(){stopped++;}});assert.equal(lastFocused,1);
+ popup.props.onKeyDown({key:'Escape',preventDefault(){prevented++;},stopPropagation(){stopped++;}});assert.equal(closed,1);
+ popup.props.onClick({stopPropagation(){stopped++;}});assert.equal(closed,2);h.unmount();assert.equal(restored,1);assert.equal(prevented,3);assert.equal(stopped,5);
+});
+
+test('actual parameter edits feed only display inputs, reject invalid drafts and reset with a new scoped instance',()=>{
+ const parameterMath=load('../lib/portfolioParameters.ts'),h=hooks(),updates=[];
+ const {PortfolioParametersTile}=load('../components/PortfolioParametersTile.tsx',{...parameterMath,...h.bindings,createPortal:n=>n,document:{body:{},activeElement:null}});
+ const props={currency:'INR',portfolioValue:100,availableMargin:50,totalAssets:150,capturedAt:end,onDisplayParametersChange:value=>updates.push(value)};
+ const render=()=>{h.start();return PortfolioParametersTile(props);};
+ render();h.flush();assert.equal(updates.at(-1).maximumStocks,20);assert.equal(updates.at(-1).days,5);
+ find(render(),n=>n.props?.['aria-haspopup']==='dialog').props.onClick();render();h.flush();
+ find(render(),n=>n.props?.id==='portfolio-parameter-cash').props.onChange({target:{value:'10'}});render();h.flush();assert.equal(updates.at(-1).cash,10);assert.equal(updates.at(-1).normalised,9);
+ find(render(),n=>n.props?.id==='portfolio-history-days').props.onChange({target:{value:'10'}});render();h.flush();assert.equal(updates.at(-1).days,10);
+ find(render(),n=>n.props?.id==='portfolio-maximum-stocks').props.onChange({target:{value:'30'}});render();h.flush();assert.equal(updates.at(-1).maximumStocks,30);
+ find(render(),n=>n.props?.id==='portfolio-history-days').props.onChange({target:{value:''}});render();h.flush();assert.equal(updates.at(-1).valid,false);
+ const other=hooks(),otherUpdates=[];const isolated=load('../components/PortfolioParametersTile.tsx',{...parameterMath,...other.bindings,createPortal:n=>n,document:{body:{},activeElement:null}}).PortfolioParametersTile;
+ other.start();isolated({...props,onDisplayParametersChange:value=>otherUpdates.push(value)});other.flush();assert.equal(otherUpdates.at(-1).maximumStocks,20);assert.equal(otherUpdates.at(-1).days,5);
+});
+
+
+test('invalid windows, untrusted completion flags and fractional cutoffs never create allocations',()=>{
+ assert.equal(math.historicalMean({...history([observation(1,2)]),window_start:'invalid'},'HAL','NSE').score,null);
+ assert.equal(math.historicalMean(history([observation(1,2,{completed:'false'})]),'HAL','NSE').score,null);
+ assert.equal(math.historicalMean(history([observation(1,4)]),'HAL','NSE').score,null);
+ assert.equal(math.allocateDisplayScores([{key:'HAL',score:2}],{...math.defaultDisplayParameters(),maximumStocks:1.5}).weights.size,0);
+});
+
+test('display quotes require positive last/market price, exact venue, unique identity and timestamp',()=>{
+ const snapshot={captured_at:end,holdings_market_value:100,holdings:[{tradingsymbol:'HAL',exchange:'NSE',last_price:243,average_price:100,close_price:240},{tradingsymbol:'HAL',exchange:'BSE',last_price:245}]};
+ assert.deepEqual(math.verifiedDisplayQuote(snapshot,'india','HAL','NSE'),{price:243,asOf:end,source:'Zerodha holdings last_price · exact venue'});
+ assert.equal(math.verifiedDisplayQuote(snapshot,'india','HAL','BSE').price,245);
+ assert.equal(math.verifiedDisplayQuote({...snapshot,holdings:[{tradingsymbol:'NSE:HAL',exchange:'BSE',last_price:245}]},'india','HAL','BSE'),null);
+ assert.equal(math.verifiedDisplayQuote(snapshot,'india','HAL.NS','BSE'),null);
+ for(const holding of [{tradingsymbol:'HAL',exchange:'NSE',average_price:100},{tradingsymbol:'HAL',exchange:'NSE',close_price:240},{tradingsymbol:'HAL',exchange:'NSE',last_price:0}]) assert.equal(math.verifiedDisplayQuote({...snapshot,holdings:[holding]},'india','HAL','NSE'),null);
+ assert.equal(math.verifiedDisplayQuote({...snapshot,holdings:[snapshot.holdings[0]]},'india','HAL','BSE'),null);
+ assert.equal(math.verifiedDisplayQuote({...snapshot,captured_at:null},'india','HAL','NSE'),null);
+ assert.equal(math.verifiedDisplayQuote({...snapshot,holdings:[snapshot.holdings[0],snapshot.holdings[0]]},'india','HAL','NSE'),null);
+ const usd={captured_at:end,parse_status:'parsed',holdings:[{symbol:'ABC',exchange:'NYSE',market_price:40,average_price:20}]};
+ assert.equal(math.verifiedDisplayQuote(usd,'us','ABC','NYSE').price,40);
+ assert.equal(math.verifiedDisplayQuote(usd,'us','ABC','NASDAQ'),null);
+ assert.equal(math.verifiedDisplayQuote({...usd,holdings:[{symbol:'ABC',market_price:40}]},'us','ABC','NYSE'),null);
+ assert.equal(math.verifiedDisplayQuote({...usd,holdings:[{symbol:'ABC',exchange:'NYSE',market_price:0,average_price:20}]},'us','ABC','NYSE'),null);
+ const workflow=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');
+ const dialog=workflow.slice(workflow.indexOf('function ScopedZerodhaBasketPreviewDialog'),workflow.indexOf('function IndMoneySnapshotDialog'));
+ assert.doesNotMatch(dialog,/snapshotPrices|order\.lastPrice \?\?/);assert.match(dialog,/verifiedDisplayQuote/);
+});
+
+function callback(name,bindings){const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8'),ast=ts.createSourceFile('workflow.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let initializer;function visit(n){if(ts.isVariableDeclaration(n)&&n.name.getText(ast)===name)initializer=n.initializer.getText(ast);ts.forEachChild(n,visit);}visit(ast);assert.ok(initializer,name);const output=ts.transpileModule(`export const value=${initializer}`,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;const result={exports:{}};new Function('exports','module',...Object.keys(bindings),output)(result.exports,result,...Object.values(bindings));return result.exports.value;}
+test('actual filtered-group handlers toggle only visible selectable IDs and preserve hidden selections for both brokers',()=>{
+ for(const [broker,cap]of[['zerodha','Zerodha'],['indmoney','Indmoney']]){
+  const orders=[{id:'A',action:'Buy New',selectable:true},{id:'B',action:'Buy New',selectable:true},{id:'locked',action:'Buy New',selectable:false},{id:'other',action:'Trim',selectable:true}];let selected=new Set(['A']);
+  const fn=callback(`toggle${cap}BasketSection`,{useCallback:fn=>fn,[`${broker}BasketOrders`]:orders,[`setSelected${cap}BasketIds`]:fn=>{selected=fn(selected);},getZerodhaBasketActionForPercent:row=>row.action,isWholeShareOrderSelectable:row=>row.selectable,...math});
+  fn('Buy New',['A']);assert.deepEqual([...selected],[]);assert.equal(selected.has('B'),false);
+  selected=new Set(['B']);fn('Buy New',['A','locked','display-only','other']);assert.deepEqual([...selected].sort(),['A','B']);
+  fn('Buy New',[]);assert.deepEqual([...selected].sort(),['A','B']);
+  const all=callback(`toggleAll${cap}BasketOrders`,{useCallback:fn=>fn,[`${broker}BasketOrders`]:orders.filter(o=>o.selectable),[`setSelected${cap}BasketIds`]:fn=>{selected=fn(selected);},isWholeShareOrderSelectable:row=>row.selectable});
+  all();assert.deepEqual([...selected].sort(),['A','B','other']);all();assert.equal(selected.size,0);
+ }
+});
+
+test('actual preparation callbacks clear prior display scope on reopen/failure and ignore stale completions for both brokers',async()=>{
+ for(const [broker,cap,market]of[['zerodha','Zerodha','india'],['indmoney','Indmoney','us']]){
+  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');
+  const begin=source.indexOf(`  const open${cap}BasketPreview =`),endIndex=source.indexOf('\n  }, [',begin),body=source.slice(begin,endIndex);
+  const state={},pending=[],generation={current:0},bindings={useCallback:fn=>fn,[`${broker}Preparation`]:generation,scoreMatrixFormulaConfig:{},zerodhaBasketBuyThreshold:2.5,indmoneyBasketBuyThreshold:2.5,
+   fetchRebalanceStockFlowSource:()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),apiService:{zerodhaStatus:async()=>({}),zerodhaLoginUrl:async()=>({}),zerodhaEventsLatest:async()=>({analysis:null}),zerodhaThreatsLatest:async()=>({analysis:null}),indmoneyUsEventsLatest:async()=>({analysis:null}),indmoneyUsThreatsLatest:async()=>({analysis:null})},
+   getIndiaMarketStatus:()=>({open:false}),getLatestMatchingRebalanceRuns:runs=>runs,buildConsensusRows:runs=>runs,buildTechnicalScanMap:()=>({}),parseTimestampMs:Date.parse,buildDashboardActionRows:stocks=>stocks,buildZerodhaBasketPreviewOrders:rows=>rows.map(row=>({...row,id:`zerodha:${row.id}`})),getZerodhaBasketSelectableOrders:rows=>rows,buildDefaultZerodhaBasketSelection:rows=>new Set(rows.map(row=>row.id)),normalizeError:error=>error.message};
+  for(const setter of new Set(body.match(/set[A-Z]\w+/g)))bindings[setter]=value=>{state[setter]=typeof value==='function'?value(state[setter]):value;};
+  const prepare=callback(`open${cap}BasketPreview`,bindings);
+  const success=prepare();pending.shift().resolve({runs:[{id:'first'}],portfolioSnapshot:{captured_at:end,market}});await success;
+  assert.equal(state[`set${cap}AllocationUniverse`][0].id,'first');
+  const failed=prepare();assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);assert.equal(state[`set${cap}BasketDetailsData`].portfolioSnapshot,null);pending.shift().reject(new Error('new source failed'));await failed;
+  assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);assert.deepEqual(state[`set${cap}BasketOrders`],[]);assert.equal(state[`set${cap}BasketDetailsData`].portfolioSnapshot,null);assert.match(state[`set${cap}BasketError`],/new source failed/);
+  const stale=prepare(),old=pending.shift(),fresh=prepare(),latest=pending.shift();latest.resolve({runs:[{id:'new-scope'}],portfolioSnapshot:{captured_at:'2026-10-29T12:00:00Z',market}});await fresh;old.resolve({runs:[{id:'stale'}],portfolioSnapshot:{captured_at:end,market}});await stale;assert.equal(state[`set${cap}AllocationUniverse`][0].id,'new-scope');
+  const cached=prepare();pending.shift().resolve({runs:[{id:'cached'}],portfolioSnapshot:{captured_at:end,market},warning:'fresh source unavailable'});await cached;assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);assert.match(state[`set${cap}BasketError`],/cached source/);
+  const closing=prepare(),last=pending.shift();generation.current++;last.resolve({runs:[{id:'dismissed'}],portfolioSnapshot:{captured_at:end,market}});await closing;assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);
+ }
+});
+
+
+test('same-scope reopen hides prior-generation scores and allocations until deferred success or failure',async()=>{
+ for(const outcome of ['success','failure']){
+  const h=hooks(),pending=[];
+  const {useBasketDisplayCalculations: calculate}=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:params=>new Promise((resolve,reject)=>pending.push({params,resolve,reject}))},createPortal:n=>n,document:{body:{},activeElement:null}});
+  const stock={symbol:'HAL',exchange:'NSE',score:2,ltp:243},stocks=[stock];
+  const render=(open=true,scope=stocks)=>{h.start();return calculate(open,'india',scope,67545,end,'Zerodha');};
+  let state=render();h.flush();pending.shift().resolve(history([observation(1,2)]));await tick();state=render();assert.equal(state.loading,false);assert.match(JSON.stringify(state.cells(stock)),/6318|6,318/);
+  render(false);h.flush();render(true,[]);h.flush();state=render();
+  assert.equal(state.loading,true,'returning identical scope must not match prior request');
+  assert.doesNotMatch(JSON.stringify(state.cells(stock)),/6318|6,318|9\.5%/);assert.match(JSON.stringify(state.cells(stock)),/Loading/);
+  h.flush();state=render();assert.equal(pending.length,1);assert.equal(state.loading,true);assert.equal(state.error,undefined);
+  if(outcome==='success'){pending.shift().resolve(history([observation(2,1)]));await tick();state=render();assert.equal(state.loading,false);const score=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Historical Weighted Score calculation');assert.equal(score.props.children,'1');}
+  else {pending.shift().reject(new Error('reopen source failed'));await tick();state=render();assert.equal(state.loading,false);assert.equal(state.error,'reopen source failed');assert.doesNotMatch(JSON.stringify(state.cells(stock)),/6318|6,318|9\.5%/);assert.match(JSON.stringify(state.cells(stock)),/Unavailable/);}
+ }
+});

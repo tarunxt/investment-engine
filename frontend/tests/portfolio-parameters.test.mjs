@@ -80,8 +80,8 @@ test('local modal edits, readonly totals, vertical steppers, outside/inside clos
   const cleanup = h.effect();
   const max = find(tree, node => node.props?.id === 'portfolio-parameter-max'); max.props.onChange({ target: { value: '20' } });
   tree = render(); assert.equal(find(tree, node => node.props?.id === 'portfolio-parameter-normalised').props.value, '19.00');
-  assert.ok(find(tree, node => node.props?.['aria-label'] === 'Increase Min Cash'));
-  assert.ok(find(tree, node => node.props?.['aria-label'] === 'Decrease Min Cash'));
+  assert.ok(find(tree, node => node.props?.['aria-label'] === 'Increase Min Cash in Portfolio'));
+  assert.ok(find(tree, node => node.props?.['aria-label'] === 'Decrease Min Cash in Portfolio'));
   assert.equal(find(tree, node => node.type === 'input' && /Value|Margin|Assets/.test(node.props?.id ?? '')), null);
   let stopped = 0; modal.props.children.props.onClick({ stopPropagation() { stopped += 1; } }); assert.ok(find(render(), node => node.props?.role === 'dialog'));
   modal.props.onClick({ stopPropagation() { stopped += 1; } }); assert.equal(find(render(), node => node.props?.role === 'dialog'), null); assert.equal(stopped, 2);
@@ -119,4 +119,27 @@ test('Maximum Stocks defaults to 20, accepts only safe positive integers and sta
   other.start(); isolated({ currency: "USD", portfolioValue: null, availableMargin: null, totalAssets: null }).props.children[0].props.onClick(); other.start(); assert.equal(find(isolated({ currency: "USD", portfolioValue: null, availableMargin: null, totalAssets: null }), node => node.props?.id === 'portfolio-maximum-stocks').props.value, 20);
   const source = readFileSync(new URL('../components/PortfolioParametersTile.tsx', import.meta.url), 'utf8');
   assert.ok(source.indexOf('htmlFor="portfolio-maximum-stocks"') < source.indexOf('Object.keys(labels)'));
+});
+
+
+test('history window field defaults to five days and renamed labels preserve percentage linkage', () => {
+  const h = harness(); const component = load('../components/PortfolioParametersTile.tsx', { ...math, ...h.hooks, createPortal: node => node, document: { body: {} } }).PortfolioParametersTile;
+  const render = () => { h.start(); return component({ currency: 'INR', portfolioValue: null, availableMargin: null, totalAssets: null, capturedAt: null }); };
+  find(render(), n => n.props?.['aria-haspopup'] === 'dialog').props.onClick();
+  const input = () => find(render(), n => n.props?.id === 'portfolio-history-days');
+  assert.equal(input().props.value, '5'); assert.equal(input().props.step, '1');
+  input().props.onChange({ target: { value: '10' } }); assert.equal(input().props['aria-invalid'], false);
+  for (const value of ['', '-1', '2.5']) { input().props.onChange({ target: { value } }); assert.equal(input().props['aria-invalid'], true); }
+  const text = JSON.stringify(render()); for (const label of ['Min Cash in Portfolio', 'Max Weight per Stock', 'Normalised Max Weight per Stock']) assert.ok(text.includes(label));
+});
+
+
+test('broker margin stays in its selected snapshot currency; INDmoney parsed wallet is cash separate from holdings',()=>{
+  assert.equal(math.portfolioParameterMargin(india,'india'),123);
+  assert.equal(math.portfolioParameterMargin({...us,wallet_balance:10},'us'),10);
+  assert.equal(math.portfolioParameterMargin({...us,wallet_balance:10},'india'),null);
+  assert.equal(math.portfolioParameterMargin(india,'us'),null);
+  assert.equal(math.portfolioParameterMargin({...us,parse_status:'failed',wallet_balance:10},'us'),null);
+  assert.equal(math.portfolioParameterMargin({...us,wallet_balance:null},'us'),null);
+  assert.equal(math.portfolioParameterAssets(us,'us',math.portfolioParameterMargin({...us,wallet_balance:10},'us')).totalAssets,210);
 });
