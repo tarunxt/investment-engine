@@ -243,3 +243,9 @@ wins over its reconstruction; gap records do not hide usable retained output.
 Reconstructed scores have a separate column and are never relabelled as original
 recorded scores or substituted into the saved-score average. Historic rows without
 an original saved overall score cannot retroactively provide one.
+
+### Stock Flow listing coverage and saved Swing sources
+
+Stock Flow retains every exchange/symbol from the Rebalance universe in Final Actionables. Formula decisions retain their existing eligibility rules. Listings excluded from that calculation remain visible as No trade (all available model actions are Hold) or Not actionable, with recorded reasons and a missing score. Display-only rows never become basket orders or allocations. Counts distinguish formula decisions from retained non-executable coverage, and venues remain separate.
+
+The Swing tile groups the exact selected job responses embedded in the saved Rebalance prompt by Swing run, with the saved Created timestamp and newest run first. This includes historical inputs outside the recent-run fetch window without substituting newer responses or unselected jobs. Historical prompts, outputs, and frozen final artifacts are unchanged.

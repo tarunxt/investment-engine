@@ -37,6 +37,7 @@ import type {
 } from "@/types/api";
 import { rebalanceUniverse, type UniverseRow } from "@/lib/rebalanceUniverse";
 import { cn } from "@/lib/utils";
+import { savedSwingInputs, uncoveredFinalListings } from "@/lib/stockFlowCoverage";
 
 export type RebalanceStockFlowPortfolio = "zerodha" | "indmoneyUs";
 
@@ -529,6 +530,8 @@ function RebalanceStockFlowSubwidget({
       swingJobOutputs,
       rebalanceJobOutputs,
       universe,
+      savedSwing: savedSwingInputs(matchingRebalanceRuns),
+      uncovered: uncoveredFinalListings(universe.rows, actionables),
       inputSwingRuns: [...new Set(matchingRebalanceRuns.flatMap(run => [...(run.prompt ?? "").matchAll(/^## Swing Trade Run #(\d+)/gm)].map(match => Number(match[1]))))],
       rebalanceRun,
       swingRun,
@@ -561,7 +564,7 @@ function RebalanceStockFlowSubwidget({
 
           {!loading && !error && <div className="mt-4 space-y-2 text-xs text-slate-700">
             <p>Sources: Swing {flow.swingJobOutputs.length ? [...new Set(flow.swingJobOutputs.map(output => output.runId))].map(id => "#" + id).join(", ") : "unavailable"}; Rebalance {flow.rebalanceJobOutputs.length ? [...new Set(flow.rebalanceJobOutputs.map(output => output.runId))].map(id => "#" + id).join(", ") : "unavailable"}; Technical #{flow.technicalRun?.id ?? "unavailable"} ({formatAuditTime(flow.technicalRun?.created_at)}). Final Actionables is a current-formula calculation, not a separately saved scan.</p>
-            <p>Actual saved Rebalance Swing inputs: {flow.inputSwingRuns.length ? flow.inputSwingRuns.map(id => `#${id}`).join(", ") : "unavailable in saved prompt"}. The Swing stage above shows its own output; this input list may also contain explicitly selected historical scans.</p>
+            <p>Actual saved Rebalance Swing inputs: {flow.inputSwingRuns.length ? flow.inputSwingRuns.map(id => `#${id}`).join(", ") : "unavailable in saved prompt"}. The Swing tile shows the exact saved input jobs, grouped by run with the latest first.</p>
             <p className={flow.sequenceLinked ? "text-blue-900" : "rounded border border-amber-300 bg-amber-50 p-2 text-amber-950"}>{flow.sequenceLinked ? "All selected stages share the recorded workflow sequence; this does not certify source quality." : "⚠ Stages selected independently. A shared workflow sequence is not established; do not read this as one verified run."}</p>
             {flow.swingSelection.newerIncomplete && <p className="text-amber-950">⚠ Newer Swing run #{flow.swingSelection.newerIncomplete.id} is {flow.swingSelection.newerIncomplete.status}; showing explicitly labeled older completed output.</p>}
             {flow.technicalSelection.newerIncomplete && <p className="text-amber-950">⚠ Newer technical run #{flow.technicalSelection.newerIncomplete.id} is {flow.technicalSelection.newerIncomplete.status}; selected older technical coverage may be stale.</p>}
@@ -574,11 +577,7 @@ function RebalanceStockFlowSubwidget({
           : error ? <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>
           : detailed ? (
             <div className="mt-5 grid min-h-0 min-w-0 gap-4 xl:grid-cols-[repeat(3,minmax(0,1fr))]">
-              <Stage title="Swing Scan" count={flow.swing.length} meta={flow.swingMeta}>
-                {flow.swing.length ? flow.swing.map((stock) => (
-                  <StockRow key={stock.key} name={stock.symbol} detailed details={[`Exchange: ${stock.exchange || "—"}`, `Suggestions: ${stock.totalSuggestions}`]} />
-                )) : <EmptyStage />}
-              </Stage>
+              <SavedSwingStage groups={flow.savedSwing} fallback={<SwingJobOutputsStage count={flow.swing.length} meta={flow.swingMeta} outputs={flow.swingJobOutputs} />} />
               <Stage title="Rebalance Scan" count={flow.universe.rows.length} meta={flow.rebalanceMeta}>
                 {flow.universe.rows.length ? flow.universe.rows.map((stock) => (
                   <StockRow key={stock.key} name={stock.key} action={Object.values(stock.actions).join(" / ") || "Missing analysis — no decision recorded"} detailed details={stock.sources} />
@@ -586,7 +585,7 @@ function RebalanceStockFlowSubwidget({
               </Stage>
               <Stage
                 title="Final Actionables"
-                count={flow.actionables.length}
+                count={flow.actionables.length + flow.uncovered.length}
                 meta={flow.rebalanceMeta}
                 toolbar={(
                   <BuyThresholdEditor
@@ -599,20 +598,18 @@ function RebalanceStockFlowSubwidget({
                   />
                 )}
               >
+                <p className="px-4 py-2 text-xs text-slate-600">{flow.actionables.length} formula decisions · {flow.uncovered.length} retained without an executable action.</p>
                 {flow.actionables.length ? flow.actionables.map((row) => (
-                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${flow.rebalanceRun && isAnalysisRunForStage(flow.rebalanceRun, "rebalance", flow.portfolio.market) ? "Latest rebalance scan" : "Rebalance scan"}`]} />
+                  <StockRow key={row.id} name={`${row.stock.exchange}:${row.stock.symbol}`} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${flow.rebalanceRun && isAnalysisRunForStage(flow.rebalanceRun, "rebalance", flow.portfolio.market) ? "Latest rebalance scan" : "Rebalance scan"}`]} />
                 )) : <EmptyStage />}
+                {flow.uncovered.map(row => <StockRow key={row.key} name={row.key} action={row.disposition} score={null} detailed details={[row.explanation, ...Object.values(row.reasons)]} />)}
               </Stage>
             </div>
           ) : (
             <div className="mt-5">
               <h3 className="mb-4 text-center text-xl font-bold uppercase tracking-[0.08em] text-slate-950">Summary View</h3>
               <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.08fr)_minmax(0,1.4fr)]">
-                <SwingJobOutputsStage
-                  count={flow.swing.length}
-                  meta={flow.swingMeta}
-                  outputs={flow.swingJobOutputs}
-                />
+                <SavedSwingStage groups={flow.savedSwing} fallback={<SwingJobOutputsStage count={flow.swing.length} meta={flow.swingMeta} outputs={flow.swingJobOutputs} />} />
 
                 <RebalanceJobOutputsStage
                   count={flow.universe.rows.length}
@@ -623,17 +620,17 @@ function RebalanceStockFlowSubwidget({
 
                 <SummaryStage
                   title="Final Actionables"
-                  count={flow.actionables.length}
+                  count={flow.actionables.length + flow.uncovered.length}
                   meta={flow.rebalanceMeta}
                   toolbar={(
-                    <BuyThresholdEditor
+                    <><p className="px-4 py-2 text-xs text-slate-600">{flow.actionables.length} formula decisions · {flow.uncovered.length} retained without an executable action.</p><BuyThresholdEditor
                       portfolio={portfolioId}
                       value={buyThresholdDraft}
                       threshold={buyThreshold}
                       onChange={onBuyThresholdDraftChange}
                       saveError={buyThresholdSaveError}
                       persistence={buyThresholdPersistence}
-                    />
+                    /></>
                   )}
                 >
                   <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
@@ -651,7 +648,7 @@ function RebalanceStockFlowSubwidget({
                         data-buy-threshold-eligible={isAboveBuyThreshold(row, buyThreshold) ? "true" : undefined}
                         className={isAboveBuyThreshold(row, buyThreshold) ? "bg-emerald-50" : undefined}
                       >
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.symbol}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.exchange}:{row.stock.symbol}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <ActionBadge action={row.formulaAction} />
@@ -663,7 +660,9 @@ function RebalanceStockFlowSubwidget({
                         <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-slate-700">{row.formulaScore === null ? "—" : row.formulaScore.toFixed(2)}</td>
                         <td className="px-4 py-3 text-center text-sm font-semibold tabular-nums text-slate-700">{consensusLabel(row.stock)}</td>
                       </tr>
-                    )) : <EmptyTableRow colSpan={4} />}
+                    )) : null}
+                    {flow.uncovered.map(row => <tr key={row.key}><td className="px-4 py-3 text-sm font-semibold">{row.key}</td><td className="max-w-80 whitespace-normal px-4 py-3"><ActionBadge action={row.disposition} /><p className="mt-1 text-xs text-slate-600">{row.explanation}{Object.values(row.reasons).join(" / ")}</p></td><td className="px-4 py-3 text-right">-</td><td className="px-4 py-3 text-center">{Object.values(row.actions).length || "-"}</td></tr>)}
+                    {!flow.actionables.length && !flow.uncovered.length && <EmptyTableRow colSpan={4} />}
                   </tbody>
                 </SummaryStage>
               </div>
@@ -932,4 +931,19 @@ function ActionBadge({ action }: { action: string }) {
 
 function EmptyTableRow({ colSpan }: { colSpan: number }) {
   return <tr><td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-slate-500">No stock rows available in this selection. Check source coverage above.</td></tr>;
+}
+
+function SavedSwingStage({ groups, fallback }: { groups: ReturnType<typeof savedSwingInputs>; fallback: ReactNode }) {
+  if (!groups.length) return <>{fallback}</>;
+  const count = new Set(groups.flatMap(group => group.jobs.flatMap(job => job.symbols))).size;
+  return <article className="min-w-0 overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
+    <StageHeader title="Swing Scan" count={count} meta={{ models: "Saved selected jobs below", timestamp: groups.map(group => `#${group.runId}`).join(", ") }} />
+    <p className="px-4 py-2 text-xs text-slate-600">Saved inputs to Rebalance · latest run first</p>
+    <div role="region" aria-label="Saved Swing input runs" tabIndex={0} className="max-h-[min(58vh,36rem)] overflow-auto overscroll-contain space-y-3 p-3">
+      {groups.map((group, index) => <section key={group.runId} aria-label={`Swing input Run #${group.runId}`} className="overflow-hidden rounded-xl border border-blue-200">
+        <header className="bg-blue-50 px-3 py-3"><h4 className="font-bold">Run #{group.runId} · {index === 0 ? 'Latest input' : 'Older input'}</h4><time className="text-xs">{formatAuditTime(group.createdAt)}</time></header>
+        {group.jobs.map(job => <div key={job.jobId} className="border-t border-slate-200 p-3"><p className="text-xs font-semibold text-blue-800">{job.label}</p><ul className="mt-2 space-y-2 text-sm">{job.symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>{!job.symbols.length && <p className="text-xs text-amber-800">Saved stock rows could not be parsed; inspect this run's input.</p>}</div>)}
+      </section>)}
+    </div>
+  </article>;
 }
