@@ -85,3 +85,10 @@ export function formatBasketDisplayCurrency(value: number | null | undefined, cu
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   return new Intl.NumberFormat(currency === 'USD' ? 'en-US' : 'en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
 }
+
+export function verifiedFetchedDisplayQuote(quotes: { instrument: string; price: number; as_of: string; source: string }[], symbol: string, exchange: string) {
+  const matches = quotes.filter(quote => quote.instrument === `${exchange.toUpperCase()}:${symbol.toUpperCase()}`);
+  if (matches.length !== 1) return null;
+  const quote = matches[0];
+  return typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0 && Number.isFinite(Date.parse(quote.as_of)) && typeof quote.source === 'string' && quote.source ? { price: quote.price, asOf: quote.as_of, source: quote.source } : null;
+}

@@ -4,7 +4,36 @@ import { createPortal } from "react-dom";
 import { apiService } from "@/services/api";
 import { allocateDisplayScores, formatBasketDisplayCurrency, brokerDisplayAllocation, defaultDisplayParameters, historicalMean, stockIdentity, type BasketScoreHistory, type CurrentScoreCalculation } from "@/lib/basketDisplayCalculations";
 
-type Stock = { symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; ltpAsOf?: string; ltpSource?: string; scoreSources?: CurrentScoreCalculation['sources'] };
+type Stock = { symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };
+export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", instruments: string[], scope: string | null = null) {
+  const keys = [...new Set(instruments)].sort().join(",");
+  const [attempt, setAttempt] = useState(0);
+  const request = useMemo(() => ({ open, market, keys, scope, attempt }), [open, market, keys, scope, attempt]);
+  const [state, setState] = useState<{ request: object | null; quotes: { instrument: string; price: number; as_of: string; source: string }[]; error?: string }>({ request: null, quotes: [] });
+  useEffect(() => {
+    if (!open || market !== "india" || !keys) return;
+    let active = true;
+    const requested = keys.split(",");
+    void (async () => {
+      const quotes: { instrument: string; price: number; as_of: string; source: string }[] = [];
+      if (requested.length > 500) throw new Error("Display quote batch exceeds 500 instruments.");
+      for (let offset = 0; offset < requested.length; offset += 50) {
+        if (!active) return null;
+        const batch = requested.slice(offset, offset + 50);
+        const data = await apiService.zerodhaDisplayQuotes(batch);
+        if (!Array.isArray(data.quotes) || !Array.isArray(data.missing) || data.quotes.some(quote => !batch.includes(quote.instrument))) throw new Error("Quote response does not match this basket.");
+        quotes.push(...data.quotes);
+      }
+      return quotes;
+    })().then(quotes => {
+      if (active && quotes) setState({ request, quotes });
+    }).catch((error: unknown) => { if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." }); });
+    return () => { active = false; };
+  }, [open, market, keys, request]);
+  const current = open && market === "india" && state.request === request;
+  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], error: current ? state.error : undefined, loading: Boolean(open && market === "india" && keys && !current) };
+}
+
 export function CalculationPopup({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => { const opener = document.activeElement as HTMLElement | null; panel.current?.focus(); return () => opener?.focus(); }, []);
@@ -43,8 +72,8 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
   const loading = Boolean(open && symbols && parameters.valid && !data && !error);
   const cells = (stock: Stock) => {
     const key = stockIdentity(stock.symbol, stock.exchange), mean = means.get(key), weight = allocation.weights.get(key), amount = brokerDisplayAllocation(weight, totalAssets, stock.ltp, market);
-    const button = (kind: string, value: number | null | undefined, text?: string) => <button type="button" className="text-blue-700 underline decoration-dotted underline-offset-4" aria-label={`${stock.symbol} ${kind} calculation`} onClick={() => setPopup({ stock, kind })}>{loading ? <span role="status">Loading…</span> : text ?? number(value)}</button>;
-    return <><td className="whitespace-nowrap px-4 py-3">{button("Historical Weighted Score", mean?.score)}</td><td className="whitespace-nowrap px-4 py-3">{weight === undefined ? "—" : button("Final Weight", weight, `${number(weight * 100)}%`)}</td>{market === "india" ? <><td className="px-4 py-3">{weight === undefined ? "—" : button("ZerodhaStocks", amount?.stocks)}</td><td className="px-4 py-3">{weight === undefined ? "—" : button("Zerodha Amount", amount?.amount, formatBasketDisplayCurrency(amount?.amount, "INR"))}</td></> : <><td className="px-4 py-3">{weight === undefined ? "—" : button("IndMoney Amount (USD)", amount?.amount, formatBasketDisplayCurrency(amount?.amount, "USD"))}</td><td className="px-4 py-3">{weight === undefined ? "—" : button("IndMoney Stocks", amount?.stocks)}</td></>}</>;
+    const button = (kind: string, value: number | null | undefined, text?: string) => <button type="button" className="text-blue-700 underline decoration-dotted underline-offset-4" aria-label={`${stock.symbol} ${kind} calculation`} onClick={() => setPopup({ stock, kind })}>{loading || stock.quoteLoading && (kind === "ZerodhaStocks" || kind === "Zerodha Amount") ? <span role="status">Loading…</span> : text ?? number(value)}</button>;
+    return <><td className="whitespace-nowrap px-4 py-3">{button("Historical Weighted Score", mean?.score, mean?.score == null ? "Unavailable" : mean.score.toLocaleString("en-IN", { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</td><td className="whitespace-nowrap px-4 py-3">{weight === undefined ? "—" : button("Final Weight", weight, `${(weight * 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`)}</td>{market === "india" ? <><td className="px-4 py-3">{weight === undefined ? "—" : button("ZerodhaStocks", amount?.stocks)}</td><td className="px-4 py-3">{weight === undefined ? "—" : button("Zerodha Amount", amount?.amount, amount?.amount == null ? "Unavailable" : formatBasketDisplayCurrency(amount.amount, "INR"))}</td></> : <><td className="px-4 py-3">{weight === undefined ? "—" : button("IndMoney Amount (USD)", amount?.amount, amount?.amount == null ? "Unavailable" : formatBasketDisplayCurrency(amount.amount, "USD"))}</td><td className="px-4 py-3">{weight === undefined ? "—" : button("IndMoney Stocks", amount?.stocks)}</td></>}</>;
   };
   const headers = <><th className="px-4 py-3">Historical Weighted Score</th><th className="px-4 py-3">Final Weight</th><th className="px-4 py-3">{market === "india" ? "ZerodhaStocks" : "IndMoney Amount (USD)"}</th><th className="px-4 py-3">{market === "india" ? "Zerodha Amount" : "IndMoney Stocks"}</th></>;
   const controls = <div className="mt-4 space-y-2 border-t border-blue-200 pt-3"><label className="block text-xs font-bold text-blue-800">Display Stocks (Score range)</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} />Show all</label><div className="relative h-7"><input type="range" min="-3" max="3" step="0.01" value={lower} disabled={showAll} aria-label="Display score lower outer boundary" onChange={e => setLower(Math.min(Number(e.target.value), upper))} className="absolute inset-x-0 top-1 w-full accent-blue-600 disabled:opacity-40" /><input type="range" min="-3" max="3" step="0.01" value={upper} disabled={showAll} aria-label="Display score upper outer boundary" onChange={e => setUpper(Math.max(Number(e.target.value), lower))} className="pointer-events-none absolute inset-x-0 top-1 w-full accent-blue-600 disabled:opacity-40 [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto" /></div><p className="text-xs text-blue-800">Current displayed Score: {showAll ? "all scores, including unavailable scores" : `−3 to ${lower} or ${upper} to +3 (inclusive)`}. Display only; selection and ranking are unchanged.</p></div>;

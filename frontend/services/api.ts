@@ -1,3 +1,4 @@
+import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
 import type { StockSourceObservationPage } from "@/types/api";
 
 import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
@@ -1263,6 +1264,12 @@ class apiServiceClass implements IApiService {
       validate: isZerodhaStatusResponse,
       timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
     });
+  }
+
+  zerodhaDisplayQuotes(instruments: string[]): Promise<ZerodhaDisplayQuoteResponse> {
+    const query = new URLSearchParams();
+    instruments.forEach(instrument => query.append("instruments", instrument));
+    return this.get<ZerodhaDisplayQuoteResponse>(`${URLs.zerodha.portfolio()}/quotes?${query}`, { skipUnauthorizedRefresh: true });
   }
 
   zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
