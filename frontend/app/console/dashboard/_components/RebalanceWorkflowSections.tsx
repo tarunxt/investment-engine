@@ -1541,6 +1541,13 @@ function getZerodhaBasketExchange(
   return rawExchange.trim().toUpperCase() || "NSE";
 }
 
+function isExplicitNonBuyDecision(stock: StockConsensus) {
+  return stock.rows.length > 0 && stock.rows.every(row =>
+    row.cells["Action (Buy/Add/Sell All/Trim/Hold/Buy New)"]?.trim() === "Hold"
+    && ["Current Units", "Units Change", "Final Units", "Units to Buy", "Total Buy Amount"].every(key => /^[-+]?0(?:\.0+)?$/.test((row.cells[key] ?? "").trim()))
+  );
+}
+
 function buildZerodhaBasketPreviewOrders(
   rows: DashboardActionRow[],
   technicalScans: Record<string, TechnicalScanResult>,
@@ -1552,6 +1559,9 @@ function buildZerodhaBasketPreviewOrders(
   const snapshotPriceBySymbol = buildZerodhaSnapshotPriceMap(snapshot);
   const availableBalance = snapshot?.available_margin ?? null;
   const basketRows = rows
+    // Keep explicit zero-position non-buy decisions visible in allocationUniverse,
+    // without converting them into executable orders through a later formula.
+    .filter(row => !isExplicitNonBuyDecision(row.stock))
     .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
     .filter((row) => {
       if (row.formulaAction !== "Sell All" && row.formulaAction !== "Trim") return true;
@@ -3968,7 +3978,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 <PortfolioParametersTile onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
               </div>
 
-              <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. {tradingViewMarket === "india" ? "If Quoted LTP is unavailable, a positive row Limit Price may be used for sizing with an Estimate label; Quoted LTP and executable order fields are not replaced. " : ""}They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
+              <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. {tradingViewMarket === "india" ? "If Quoted LTP is unavailable, a positive row Limit Price may be used for sizing; the calculation tooltip identifies the price source and Quoted LTP and executable order fields are not replaced. " : ""}They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
               {hiddenSelectedCount > 0 ? <p role="status" className="mb-3 text-amber-800">{hiddenSelectedCount} selected executable order(s) are hidden by the display filter and remain selected. Show all to review them. Group checkboxes affect only visible selectable orders; All Stocks controls all selectable orders, including hidden rows.</p> : null}
               {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading read-only broker quotes for displayed calculations…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">Display quotes unavailable: {quoteRead.error}. No live quote is fabricated. Where labelled, sizing uses the row Limit Price as an estimate; it is not live LTP. <button type="button" className="underline" onClick={quoteRead.retry}>Retry display quotes</button></p> : null}
               {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}

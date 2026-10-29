@@ -7792,12 +7792,9 @@ export function buildDashboardActionRows(
 ): DashboardActionRow[] {
   const technicalScanSourceMeta = getLatestTechnicalScanSourceMeta(technicalScans);
 
-  // An explicit all-model, zero-position non-buy is visible in Rebalance, but
-  // must not acquire an executable action or allocation from a later formula.
-  return stocks.filter(stock => !(stock.rows.length > 0 && stock.rows.every(row =>
-    row.cells[ACTION_HEADER]?.trim() === "Hold"
-    && ["Current Units", "Units Change", "Final Units", "Units to Buy", "Total Buy Amount"].every(key => parseNumericCell(row.cells[key]) === 0)
-  ))).map((stock) => {
+  // Score every analysed listing, including zero-position Hold decisions.
+  // Order eligibility is enforced separately by the basket builder.
+  return stocks.map((stock) => {
     const detail = buildScoreMatrixDetail(
       stock,
       getTechnicalScanForStock(technicalScans, stock),

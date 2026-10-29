@@ -218,12 +218,12 @@ test('history score basis is identified from saved inputs only and remains unkno
 
 test('explicit unheld zero-quantity non-buy decisions stay visible as evidence but never gain formula allocation or orders',()=>{
  const original={ 'Exchange Symbol':'NSE','Stock Symbol':'KAYNES',[actionHeader]:'Hold','Current Units':'0','Units Change':'0','Final Units':'0','Units to Buy':'0','Total Buy Amount':'0','Rationale Cruxx':'Original non-buy reason' };
- const source=runWithRows([original]);const stocks=helpers.buildConsensusRows([source],'india',{holdings:[]});assert.equal(stocks.length,1);assert.equal(stocks[0].consensusAction,'Hold');assert.deepEqual(helpers.buildDashboardActionRows(stocks,'india',{}),[]);
+ const source=runWithRows([original]);const stocks=helpers.buildConsensusRows([source],'india',{holdings:[]});assert.equal(stocks.length,1);assert.equal(stocks[0].consensusAction,'Hold');const actions=helpers.buildDashboardActionRows(stocks,'india',{});assert.equal(actions.length,1);assert.equal(actions[0].formulaScore,helpers.buildScoreMatrixDetail(stocks[0],undefined).calculatedScore);
  assert.equal(helpers.buildConsensusRows([source],'india',{holdings:[]})[0].rows[0].cells['Rationale Cruxx'],'Original non-buy reason');
 });
 
 test('same-symbol Indian venues remain separate decisions and cannot inherit another venue holding',()=>{
  const base={ 'Stock Symbol':'CGPOWER',[actionHeader]:'Hold','Units Change':'0','Units to Buy':'0','Total Buy Amount':'0' };
  const source=runWithRows([{...base,'Exchange Symbol':'BSE','Current Units':'13','Final Units':'13'},{...base,'Exchange Symbol':'NSE','Current Units':'0','Final Units':'0'}]);
- const stocks=helpers.buildConsensusRows([source],'india',{holdings:[{exchange:'BSE',tradingsymbol:'CGPOWER',quantity:13,market_value:7403.85}]});assert.equal(stocks.length,2);assert.equal(stocks.find(stock=>stock.exchange==='BSE').positionContext.currentUnits,13);assert.equal(stocks.find(stock=>stock.exchange==='NSE').positionContext.currentUnits,0);assert.equal(helpers.buildDashboardActionRows(stocks,'india',{}).length,1);
+ const stocks=helpers.buildConsensusRows([source],'india',{holdings:[{exchange:'BSE',tradingsymbol:'CGPOWER',quantity:13,market_value:7403.85}]});assert.equal(stocks.length,2);assert.equal(stocks.find(stock=>stock.exchange==='BSE').positionContext.currentUnits,13);assert.equal(stocks.find(stock=>stock.exchange==='NSE').positionContext.currentUnits,0);assert.equal(helpers.buildDashboardActionRows(stocks,'india',{}).length,2);
 });

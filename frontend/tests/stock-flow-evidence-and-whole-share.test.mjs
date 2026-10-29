@@ -194,3 +194,13 @@ test('LLM completion separates passed, partial and failed and partial notices ar
   assert.match(summary.partialNotice, /partially used/);
   assert.equal(ui.formatLlmCompletion(ui.getRunProgress(mixed)), '2/2 (Passed: 1 | Partial: 1 | Failed: 0)');
 });
+
+test('zero-position non-buy rows remain displayable but cannot enter executable basket',()=>{
+ const b=load(workflowPath,{ZERODHA_BASKET_ACTIONS:new Set(['Buy New','Add more','Trim','Sell All'])},['isExplicitNonBuyDecision','buildZerodhaBasketPreviewOrders'],true);
+ const cells={'Action (Buy/Add/Sell All/Trim/Hold/Buy New)':'Hold','Current Units':'0','Units Change':'0','Final Units':'0','Units to Buy':'0','Total Buy Amount':'0'};
+ assert.equal(b.isExplicitNonBuyDecision({rows:[{cells}]}),true);
+ assert.deepEqual(b.buildZerodhaBasketPreviewOrders([{stock:{symbol:'OIL',exchange:'BSE',rows:[{cells}]},formulaAction:'Buy New',formulaEstimate:{amount:500,units:5}}],{},null),[]);
+ for(const value of ['-','', '1']) assert.equal(b.isExplicitNonBuyDecision({rows:[{cells:{...cells,'Current Units':value}}]}),false);
+ const source=readFileSync(new URL(workflowPath,import.meta.url),'utf8');
+ assert.match(source,/filter\(row => !isExplicitNonBuyDecision\(row.stock\)\)/);
+});
