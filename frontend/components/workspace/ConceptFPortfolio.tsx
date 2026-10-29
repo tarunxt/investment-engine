@@ -23,6 +23,9 @@ export function ConceptFPortfolio(){
  const india=portfolio==='india',root=moduleRoot(portfolio),masked=display?.value.masked??true;
  const tabs=india?['holdings','positions','day positions','orders','cash & margin','snapshot history']:['portfolio','import snapshot','wallet','reconciliation','analytics','snapshot history','raw snapshot'];
  const requested=search.get('view')??tabs[0],view=tabs.includes(requested)?requested:tabs[0];
+ // Retire pending review callbacks when navigation selects a different exact review.
+ // The recovery request key is excluded: inserting it must not cancel its own preview.
+ const reviewScope=JSON.stringify([owner,search.get('sourceReview')]);
  const positionsMode=india&&['positions','day positions','orders'].includes(view);
  const selectedVersion=search.get('snapshotVersion'),selectedId=search.get('snapshot'),latest=facts.latest as Record<string,unknown>|null;
  const historical=!!selectedId&&(selectedId!==String(latest?.source_receipt_id??latest?.id??latest?.snapshot_date??'')||!!selectedVersion&&selectedVersion!==(india?latest?.source_hash:latest?.content_hash));
@@ -81,7 +84,7 @@ export function ConceptFPortfolio(){
  <div className={holding?'grid min-w-0 gap-6 xl:grid-cols-2':'space-y-6'}><section className="concept-f-card"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2>{view==='analytics'?'Allocation, gainers and laggards':'Your holdings'}</h2><p className="mt-2 text-sm text-muted-foreground">Open a stock for recorded values and source context.</p></div><div className="flex flex-wrap gap-3">{india&&<a className="concept-f-secondary" href="#simulation-snapshot-review">Review sync</a>}<button className="concept-f-secondary" onClick={refresh} disabled={facts.loading}>Read recorded status</button></div></div>{!source&&!facts.loading?<p className="my-8">No verified snapshot is shown. Use the existing deliberate source or import review; no automatic refresh is performed.</p>:<HoldingsTable rows={source?.holdings??[]} masked={masked} money={money} onOpen={key=>navigate({stock:key,snapshot:source?.id??null})}/>}<p className="mt-4 text-xs text-muted-foreground">Source: {source?.source??'unavailable'} · {source?.id??'unverified'}</p></section>{stockPanel}</div>}
  {search.has('stock')&&!holding&&source&&<p role="status">This stock is not present in the selected snapshot. No other stock is substituted.</p>}
  {positionsMode&&<ConceptFPositionOrders records={facts.orders} known={facts.known} loading={facts.loading} plansHref={root+'/plans'}/>}
- {india&&<div id="simulation-snapshot-review" className="scroll-mt-6">{positionsMode?<details><summary className="concept-f-text-link min-h-11 cursor-pointer">Preview a different simulation source</summary><ConceptFSnapshotReview key={owner} owner={owner} onAccepted={()=>{refresh();navigate({snapshot:null,snapshotVersion:null,stock:null,stockView:null});}} masked={masked}/></details>:<ConceptFSnapshotReview key={owner} owner={owner} onAccepted={()=>{refresh();navigate({snapshot:null,snapshotVersion:null,stock:null,stockView:null});}} masked={masked}/>}</div>}
+ {india&&<div id="simulation-snapshot-review" className="scroll-mt-6">{positionsMode?<details><summary className="concept-f-text-link min-h-11 cursor-pointer">Preview a different simulation source</summary><ConceptFSnapshotReview key={reviewScope} owner={owner} onAccepted={()=>{refresh();navigate({snapshot:null,snapshotVersion:null,stock:null,stockView:null});}} masked={masked}/></details>:<ConceptFSnapshotReview key={reviewScope} owner={owner} onAccepted={()=>{refresh();navigate({snapshot:null,snapshotVersion:null,stock:null,stockView:null});}} masked={masked}/>}</div>}
  </section>;
 }
 

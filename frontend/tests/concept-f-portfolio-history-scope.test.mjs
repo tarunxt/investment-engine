@@ -15,3 +15,13 @@ test('captured India metrics retain all five entry fields and actual zero/negati
 test('dedicated recorded orders view is navigable and never renders holdings as positions',async()=>{const{h,workspace,routes,setQuery}=view('view=positions');workspace.portfolio='india';await h.flush();const button=h.button('Today’s orders');assert.ok(button);button.props.onClick();assert.equal(new URL(routes.at(-1),'http://fixture').searchParams.get('view'),'orders');setQuery('view=orders');await h.flush();assert.match(h.text(),/Positions and orders stay separate/);assert.equal(nodes(h.tree()).filter(n=>n.type==='position-orders').length,1);assert.equal(nodes(h.tree()).filter(n=>n.type==='positions'||n.type==='holdings').length,0);assert.equal(h.requests.length,0);});
 
 test('analytics snapshot selection preserves view and pins exact ID/hash while closing stale stock context',async()=>{const{h,routes}=view('view=analytics&stock=older&stockView=Source');const child=nodes(h.tree()).find(n=>n.type==='analytics');assert.ok(child);child.props.onSnapshot(7,'d'.repeat(64));const url=new URL(routes.at(-1),'http://fixture');assert.equal(url.searchParams.get('view'),'analytics');assert.equal(url.searchParams.get('snapshot'),'7');assert.equal(url.searchParams.get('snapshotVersion'),'d'.repeat(64));assert.equal(url.searchParams.has('stock'),false);assert.equal(url.searchParams.has('stockView'),false);});
+
+
+test('F12 exact review identity owns its component lifetime while recovery-key insertion preserves it',async()=>{
+ const {h,workspace,setQuery}=view('view=holdings');workspace.portfolio='india';await h.flush();
+ const review=()=>nodes(h.tree()).find(n=>n.type==='review');const initial=review().key;
+ setQuery('view=holdings&sourceReviewKey=synthetic-recovery-key');await h.flush();assert.equal(review().key,initial,'preview recovery key must not interrupt its own in-flight request');
+ setQuery('view=holdings&sourceReview=10000000-0000-4000-8000-000000000001');await h.flush();const first=review().key;assert.notEqual(first,initial);
+ setQuery('view=holdings&sourceReview=10000000-0000-4000-8000-000000000002');await h.flush();assert.notEqual(review().key,first,'new exact review must retire old callback lifetime');
+ setQuery('view=holdings');await h.flush();assert.equal(review().key,initial);
+});
