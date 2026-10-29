@@ -48,3 +48,20 @@ test('coverage retains all excluded listings without synthesizing formula scores
  assert.deepEqual(result.map(x=>x.disposition),['No trade','Not actionable']);
  assert.ok(result.every(x=>!('formulaScore' in x)&&!('units' in x)));
 });
+
+test('legacy saved inputs without job IDs retain both same-model outputs',()=>{
+ const prompt=`## 2. Completed Swing Trade Runs After Previous Market Close
+## Swing Trade Run #446 Zerodha
+Created: 2026-10-29T09:12:55.082414; export sheet: test
+### #446 Zerodha | deepseek/model | completed
+## Generated output title
+${table('TCS')}
+### #446 Zerodha | deepseek/model | completed
+## Generated output title
+${table('BEL')}
+## 3. Latest Threats Report`;
+ const groups=coverage.savedSwingInputs([{prompt},{prompt}]);
+ assert.equal(groups.length,1);assert.equal(groups[0].jobs.length,2);
+ assert.deepEqual(groups[0].jobs.map(x=>x.symbols),[['NSE:TCS'],['NSE:BEL']]);
+ assert.ok(groups[0].jobs.every(x=>x.jobId===null));
+});

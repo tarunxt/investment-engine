@@ -4,18 +4,21 @@ import type { UniverseRow } from '@/lib/rebalanceUniverse';
 
 /** Use exactly the saved input text, including the selected jobs, never a newer response. */
 export function savedSwingInputs(runs: RunResponse[]) {
-  const groups = new Map<number, { runId: number; createdAt: string; jobs: { jobId: number; label: string; symbols: string[] }[] }>();
+  const groups = new Map<number, { runId: number; createdAt: string; jobs: { key: string; jobId: number | null; label: string; symbols: string[] }[] }>();
   for (const run of runs) {
     const section = /##\s*2\.\s*Completed Swing Trade Runs[^\n]*([\s\S]*?)(?=\n##\s*3\.|$)/i.exec(run.prompt ?? '')?.[1] ?? '';
     for (const match of section.matchAll(/^## Swing Trade Run #(\d+)[^\n]*\n([\s\S]*?)(?=^## Swing Trade Run |$(?![\s\S]))/gm)) {
       const runId = Number(match[1]), body = match[2];
       const group = groups.get(runId) ?? { runId, createdAt: /^Created:\s*([^;\n]+)/m.exec(body)?.[1]?.trim() ?? '', jobs: [] };
+      let sourceIndex = 0;
       for (const block of body.split(/(?=^### )/m)) {
         const heading = /^### (.+)/m.exec(block)?.[1];
-        const jobId = Number(/Job #(\d+)/.exec(heading ?? '')?.[1]);
-        if (!heading || !jobId || group.jobs.some(job => job.jobId === jobId)) continue;
+        if (!heading) continue;
+        const jobId = Number(/Job #(\d+)/.exec(heading)?.[1]) || null;
+        const key = jobId ? `job:${jobId}` : `saved-output:${++sourceIndex}`;
+        if (group.jobs.some(job => job.key === key)) continue;
         const parsed = parseInvestmentRecommendationContent(block);
-        group.jobs.push({ jobId, label: heading, symbols: [...new Set((parsed?.rows ?? []).map(row => `${row['Exchange Symbol'] || '-'}:${row['Stock Symbol'] || '-'}`))].sort() });
+        group.jobs.push({ key, jobId, label: jobId ? heading : `${heading} · Saved output ${sourceIndex} (job ID not recorded)`, symbols: [...new Set((parsed?.rows ?? []).map(row => `${row['Exchange Symbol'] || '-'}:${row['Stock Symbol'] || '-'}`))].sort() });
       }
       groups.set(runId, group);
     }
