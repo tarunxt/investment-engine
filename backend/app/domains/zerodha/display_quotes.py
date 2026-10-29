@@ -24,3 +24,19 @@ async def read_display_quotes(service, token, instruments):
             continue
         quotes.append({"instrument": instrument, "price": price, "as_of": received, "source": "Zerodha broker /quote last_price · exact venue · server receipt time"})
     return {"quotes": quotes, "missing": missing}
+
+
+def quote_failure_detail(error):
+    """Expose a safe broker category, never raw bodies, tokens or arbitrary text."""
+    kind = getattr(error, 'error_type', None)
+    message = str(getattr(error, 'message', '')).lower()
+    if kind == 'PermissionException' or 'insufficient permission' in message:
+        return 403, 'Zerodha denied market-data access (PermissionException). This connection cannot provide live quotes.'
+    if kind == 'TokenException':
+        return 409, 'Zerodha rejected the broker session (TokenException). Broker reconnection is required for quotes.'
+    if kind == 'InputException':
+        return 422, 'Zerodha rejected the quote instruments (InputException).'
+    if kind == 'RateLimitException':
+        return 429, 'Zerodha rate-limited quote reads (RateLimitException). Wait before retrying.'
+    safe_kind = kind if kind in {'NetworkException', 'DataException', 'GeneralException'} else 'UnclassifiedBrokerError'
+    return 502, f'Zerodha could not supply quotes ({safe_kind}).'

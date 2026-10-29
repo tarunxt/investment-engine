@@ -381,7 +381,7 @@ async def get_status(
 @router.get("/portfolio/quotes")
 async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, max_length=500), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
     """Authenticated read-only quote batch; never prepare, modify or submit orders."""
-    from .display_quotes import validate_instruments, read_display_quotes
+    from .display_quotes import validate_instruments, read_display_quotes, quote_failure_detail
     try:
         keys = validate_instruments(instruments)
     except ValueError as exc:
@@ -392,7 +392,9 @@ async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, 
     try:
         return await read_display_quotes(_svc, token, keys)
     except KiteError as exc:
-        raise HTTPException(400, "Live broker quotes are unavailable for this connection") from exc
+        status_code, detail = quote_failure_detail(exc)
+        logger.warning("Read-only portfolio quote rejected for user %s: %s", current_user.id, detail)
+        raise HTTPException(status_code, detail) from exc
     except Exception as exc:
         logger.exception("Read-only portfolio quote retrieval failed for user %s", current_user.id)
         raise HTTPException(502, "Live broker quotes could not be retrieved") from exc
