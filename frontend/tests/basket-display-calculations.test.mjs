@@ -176,3 +176,26 @@ test('actual broker preview renders US copy and labels without India routing con
  const india=result.exports.ScopedZerodhaBasketPreviewDialog({...props,tradingViewMarket:'india',basketBrokerLabel:'Zerodha',onPlaceOrder});
  const indiaHtml=renderToStaticMarkup(india);assert.match(indiaHtml,/NSE\/BSE closed/);assert.match(indiaHtml,/Kite/);assert.match(indiaHtml,/Protected LIMIT/);assert.equal(executions,0);
 });
+
+test('current displayed calculation is counted once with complete source-run overlap dedup and eligible other runs',()=>{
+ const current={symbol:'HAL',exchange:'NSE',market:'india',score:2.4,calculatedAt:end,sources:[{runId:20,createdAt:end,completed:true,market:'india'},{runId:21,createdAt:'2026-10-28T11:00:00Z',completed:true,market:'india'}]};
+ let mean=math.historicalMean(history([]),'HAL','NSE',current);assert.equal(mean.score,2.4);assert.equal(mean.rows.length,1);assert.deepEqual(mean.rows[0].source_run_ids,[20,21]);assert.match(mean.rows[0].formula_version,/Current calculation/);
+ const saved=[observation(20,1),observation(21,3),observation(22,1.2),observation(23,2,{covered_at:'2026-10-25T12:00:00Z'}),observation(24,3,{covered_at:start}),observation(25,3,{exchange:'BSE'}),observation(22,1.2)];
+ const original=structuredClone(saved);mean=math.historicalMean(history(saved),'HAL','NSE',current);assert.equal(mean.rows.length,3);assert.deepEqual(mean.rows.map(row=>row.run_id),[21,22,23]);assert.ok(Math.abs(mean.score-(2.4+1.2+2)/3)<1e-12);assert.deepEqual(saved,original);
+ for(const change of [{score:NaN},{score:4},{symbol:'OTHER'},{exchange:'BSE'},{market:'us'},{calculatedAt:start},{calculatedAt:'2026-10-28T12:00:01Z'},{sources:[]},{sources:[{...current.sources[0],completed:false}]},{sources:[{...current.sources[0],market:'us'}]},{sources:[{...current.sources[0],createdAt:start}]},{sources:[{...current.sources[0],createdAt:'bad'}]}]){
+  const read=math.historicalMean(history([observation(20,1)]),'HAL','NSE',{...current,...change});assert.equal(read.score,1,'invalid current context must retain original score without overlap suppression');
+ }
+ assert.equal(math.historicalMean({...history([]),timezone:'America/New_York'},'HAL','NSE',{...current,calculatedAt:'2026-10-28T08:00:00-04:00'}).score,2.4);
+});
+
+test('modern basket current Score appears after saved-history read and disappears on navigation or error',async()=>{
+ const h=hooks(),pending=[];
+ class FixedDate extends Date { constructor(...args){super(...(args.length?args:['2026-10-28T11:59:59Z']));} }
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,Date:FixedDate,apiService:{getBasketScoreHistory:params=>new Promise((resolve,reject)=>pending.push({params,resolve,reject}))},createPortal:n=>n});
+ const stock={symbol:'HAL',exchange:'NSE',score:2.55,ltp:40,scoreSources:[{runId:100,createdAt:'2026-10-28T10:00:00Z',completed:true,market:'india'}]};
+ const render=(open=true,market='india',stocks=[stock])=>{h.start();return component.useBasketDisplayCalculations(open,market,stocks,1000,end,'Zerodha');};
+ let state=render();assert.equal(state.loading,true);h.flush();pending.shift().resolve(history([]));await tick();state=render();
+ const score=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Historical Weighted Score calculation');assert.equal(score.props.children,'2.55');score.props.onClick();state=render();assert.match(JSON.stringify(state.popup.props.children),/Current calculation/);assert.match(JSON.stringify(state.popup.props.children),/#100/);
+ render(false);h.flush();state=render(true,'us',[{...stock,exchange:'NYSE'}]);h.flush();assert.equal(state.loading,true);pending.shift().reject(new Error('different owner/scope read failed'));await tick();state=render(true,'us',[{...stock,exchange:'NYSE'}]);assert.equal(state.error,'different owner/scope read failed');assert.doesNotMatch(JSON.stringify(state.cells({...stock,exchange:'NYSE'})),/2\.55|9\.5%/);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/scoreSourceRuns=\{zerodhaBasketHistoryRuns\}/);assert.match(source,/scoreSourceRuns=\{indmoneyBasketHistoryRuns\}/);assert.match(source,/row\.stock\.rows\.map\(source => source\.meta\.runId\)/);
+});

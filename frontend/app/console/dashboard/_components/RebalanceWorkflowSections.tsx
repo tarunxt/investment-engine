@@ -3582,6 +3582,7 @@ function ScopedZerodhaBasketPreviewDialog({
   loading,
   error,
   allocationUniverse = [],
+  scoreSourceRuns = [],
   orders,
   selectedIds,
   onClose,
@@ -3626,6 +3627,7 @@ function ScopedZerodhaBasketPreviewDialog({
   error: string | null;
   orders: ZerodhaBasketPreviewOrder[];
   allocationUniverse?: DashboardActionRow[];
+  scoreSourceRuns?: RunResponse[];
   selectedIds: Set<string>;
   onClose: () => void;
   onToggle: (id: string) => void;
@@ -3670,7 +3672,17 @@ function ScopedZerodhaBasketPreviewDialog({
   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);
   const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
   const displayQuote = (symbol: string, exchange: string) => { const quote = verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange); return { ltp: quote?.price ?? null, ltpAsOf: quote?.asOf, ltpSource: quote?.source }; };
-  const displayStock = (row: DashboardActionRow) => ({ symbol: row.stock.symbol, exchange: row.stock.exchange, score: row.formulaScore, ...displayQuote(row.stock.symbol, row.stock.exchange) });
+  const displayStock = (row: DashboardActionRow) => {
+    const currentOrder = orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange);
+    const currentDetail = currentOrder?.detail ?? row.detail;
+    const ids = [...new Set([...row.stock.rows.map(source => source.meta.runId), ...(currentDetail.technicalScanSourceRunId ? [currentDetail.technicalScanSourceRunId] : [])])];
+    const scoreSources = ids.map(runId => {
+      const run = scoreSourceRuns.find(source => source.id === runId);
+      const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
+      return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", market: sameMarket ? tradingViewMarket : null };
+    });
+    return { symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+  };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
   const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
@@ -9042,6 +9054,7 @@ ${zerodhaExecutionMode === "direct_market"
         error={zerodhaBasketError}
         orders={zerodhaBasketOrders}
         allocationUniverse={zerodhaAllocationUniverse}
+        scoreSourceRuns={zerodhaBasketHistoryRuns}
         selectedIds={selectedZerodhaBasketIds}
         onClose={() => { zerodhaPreparation.current += 1; setZerodhaBasketOpen(false); }}
         onToggle={toggleZerodhaBasketOrder}
@@ -9077,6 +9090,7 @@ ${zerodhaExecutionMode === "direct_market"
         error={indmoneyBasketError}
         orders={indmoneyBasketOrders}
         allocationUniverse={indmoneyAllocationUniverse}
+        scoreSourceRuns={indmoneyBasketHistoryRuns}
         selectedIds={selectedIndmoneyBasketIds}
         onClose={() => { indmoneyPreparation.current += 1; setIndmoneyBasketOpen(false); }}
         onToggle={toggleIndmoneyBasketOrder}
