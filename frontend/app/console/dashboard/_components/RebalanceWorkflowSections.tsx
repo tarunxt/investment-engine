@@ -4485,7 +4485,7 @@ function InputSelectionDialog({
     swing:
       "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
     rebalance:
-      "Default: only the upcoming Swing output from this workflow. Saved Swing jobs are included only when you explicitly select them. Opening this picker never changes your choices. Recent eligible runs are shown below.",
+      "Default: only the upcoming Swing output from this workflow. Saved Swing jobs are included only when you explicitly select them. Opening this picker never changes your choices. Latest saved stage outputs are shown with their timestamps, including scans from before the latest market close.",
     technical:
       "Default: only the upcoming Rebalance output from this workflow. Select saved Rebalance jobs explicitly if needed; no latest-run fallback is added.",
     actionables:
@@ -6985,16 +6985,10 @@ ${zerodhaExecutionMode === "direct_market"
         } else if (stage !== "actionables") {
           const runs = await fetchDashboardRecentFullRuns();
           if (stage === "rebalance") {
-            const previousClose = getPreviousMarketClose(market);
             candidates = candidates.concat(
               buildRunJobCandidates(
                 sortRunsByLatestTimestamp(
                   runs
-                    .filter(
-                      (run) =>
-                        parseTimestampMs(run.created_at) >
-                        previousClose.getTime(),
-                    )
                     .filter((run) =>
                       isAnalysisRunForStage(run, "swing", market),
                     ),

@@ -444,7 +444,7 @@ test('snapshot drift fails before paid Rebalance', async () => {
 });
 
 
-test('opening the Rebalance picker exposes recent jobs without rewriting any selection', async () => {
+test('opening the Rebalance picker exposes saved jobs even after market close without rewriting selections', async () => {
   let candidates = [], reads = 0;
   const callback = declarations.get('loadInputCandidates').initializer.arguments[0].getText(ast);
   const { openPicker } = load(`export const openPicker = ${callback};`, {
@@ -453,7 +453,7 @@ test('opening the Rebalance picker exposes recent jobs without rewriting any sel
     buildNextCandidate: stage => ({ id: `${stage}:next`, source: 'next' }),
     fetchAllFullRuns: () => { throw new Error('Unbounded history fetch'); },
     fetchDashboardRecentFullRuns: async () => { reads++; return [run(446, [2232,2233]), run(443, [2226,2227])]; },
-    getPreviousMarketClose: () => new Date('2026-10-01'), parseTimestampMs: Date.parse,
+    getPreviousMarketClose: () => new Date('2026-10-03'), parseTimestampMs: Date.parse,
     isAnalysisRunForStage: () => true, sortRunsByLatestTimestamp: value => value,
     buildRunJobCandidates: runs => runs.flatMap(r => r.run_jobs.map(j => ({ id: `run:${r.id}:job:${j.job_id}` }))),
   });
