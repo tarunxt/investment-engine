@@ -207,3 +207,14 @@ test('modern basket current Score appears after saved-history read and disappear
  render(false);h.flush();state=render(true,'us',[{...stock,exchange:'NYSE'}]);h.flush();assert.equal(state.loading,true);pending.shift().reject(new Error('different owner/scope read failed'));await tick();state=render(true,'us',[{...stock,exchange:'NYSE'}]);assert.equal(state.error,'different owner/scope read failed');assert.doesNotMatch(JSON.stringify(state.cells({...stock,exchange:'NYSE'})),/2\.55|9\.5%/);
  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/scoreSourceRuns=\{zerodhaBasketHistoryRuns\}/);assert.match(source,/scoreSourceRuns=\{indmoneyBasketHistoryRuns\}/);assert.match(source,/row\.stock\.rows\.map\(source => source\.meta\.runId\)/);
 });
+
+test('current calculation retains actual displayed action and finite currency display suppresses binary tails without changing arithmetic',()=>{
+ for(const action of ['Sell All','Trim','Hold','Add more','Buy New',null,'Invented']){
+  const current={symbol:'HAL',exchange:'NSE',market:'india',score:-1.966666666667,action,calculatedAt:end,sources:[{runId:444,createdAt:end,completed:true,market:'india'}]};
+  const mean=math.historicalMean(history([]),'HAL','NSE',current);assert.equal(mean.score,current.score);assert.equal(mean.rows[0].action,action==='Invented'?null:action);
+ }
+ assert.equal(math.formatBasketDisplayCurrency(7403.849999999999,'INR'),'₹7,403.85');assert.equal(math.formatBasketDisplayCurrency(17865.899999999998,'INR'),'₹17,865.90');assert.equal(math.formatBasketDisplayCurrency(-1.25,'USD'),'-$1.25');assert.equal(math.formatBasketDisplayCurrency(0,'USD'),'$0.00');
+ for(const value of [null,undefined,NaN,Infinity,-Infinity])assert.equal(math.formatBasketDisplayCurrency(value,'INR'),'—');
+ const amount=68*367.95;const before=amount;math.formatBasketDisplayCurrency(amount,'INR');assert.equal(amount,before);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/action: currentOrder \? getZerodhaBasketActionForPercent\(currentOrder\) : row.formulaAction/);assert.match(source,/return formatBasketDisplayCurrency\(value, currency\)/);
+});
