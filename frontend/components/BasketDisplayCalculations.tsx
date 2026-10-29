@@ -38,7 +38,7 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
   }, [open, market, symbols, parameters.days, parameters.valid, request]);
   const data = open && result.request === request && parameters.valid ? result.data : undefined;
   const error = open && result.request === request ? result.error : undefined;
-  const means = useMemo(() => new Map(stocks.map(stock => [stockIdentity(stock.symbol, stock.exchange), data ? historicalMean(data, stock.symbol, stock.exchange, { symbol: stock.symbol, exchange: stock.exchange, market, score: stock.score, action: stock.action, calculatedAt: data.as_of, sources: stock.scoreSources ?? [] }) : { rows: [], sum: 0, score: null }])), [stocks, data, market, request]);
+  const means = useMemo(() => new Map(stocks.map(stock => [stockIdentity(stock.symbol, stock.exchange), data ? historicalMean(data, stock.symbol, stock.exchange, { symbol: stock.symbol, exchange: stock.exchange, market, score: stock.score, action: stock.action, calculatedAt: data.as_of, sources: stock.scoreSources ?? [] }) : { rows: [], sum: 0, score: null }])), [stocks, data, market]);
   const allocation = allocateDisplayScores(stocks.map(stock => ({ key: stockIdentity(stock.symbol, stock.exchange), score: means.get(stockIdentity(stock.symbol, stock.exchange))?.score ?? null })), parameters);
   const loading = Boolean(open && symbols && parameters.valid && !data && !error);
   const cells = (stock: Stock) => {
