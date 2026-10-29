@@ -942,7 +942,7 @@ function SavedSwingStage({ groups, fallback }: { groups: ReturnType<typeof saved
     <div role="region" aria-label="Saved Swing input runs" tabIndex={0} className="max-h-[min(58vh,36rem)] overflow-auto overscroll-contain space-y-3 p-3">
       {groups.map((group, index) => <section key={group.runId} aria-label={`Swing input Run #${group.runId}`} className="overflow-hidden rounded-xl border border-blue-200">
         <header className="bg-blue-50 px-3 py-3"><h4 className="font-bold">Run #{group.runId} · {index === 0 ? 'Latest input' : 'Older input'}</h4><time className="text-xs">{formatAuditTime(group.createdAt)}</time></header>
-        {group.jobs.map(job => <div key={job.jobId} className="border-t border-slate-200 p-3"><p className="text-xs font-semibold text-blue-800">{job.label}</p><ul className="mt-2 space-y-2 text-sm">{job.symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>{!job.symbols.length && <p className="text-xs text-amber-800">Saved stock rows could not be parsed; inspect this run's input.</p>}</div>)}
+        {group.jobs.map(job => <div key={job.key} className="border-t border-slate-200 p-3"><p className="text-xs font-semibold text-blue-800">{job.label}</p><ul className="mt-2 space-y-2 text-sm">{job.symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>{!job.symbols.length && <p className="text-xs text-amber-800">Saved stock rows could not be parsed; inspect this run's input.</p>}</div>)}
       </section>)}
     </div>
   </article>;
