@@ -29,7 +29,7 @@ const auditAst = ts.createSourceFile('audit.ts', read('../services/recommendatio
 const auditHasher = load(auditAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'auditResponseHashes').getText(auditAst), { crypto: webcrypto }).auditResponseHashes;
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
-const portfolioSnapshot = { parse_status: 'parsed', reported_holdings_count: 1,
+const portfolioSnapshot = { captured_at: '2026-10-02T20:30:00Z', parse_status: 'parsed', reported_holdings_count: 1,
   holdings: [{ symbol: 'ABC', quantity: 0.125 }] };
 const swing = load(read('../lib/swingTrade.ts'));
 const scope = { market: 'us', stage: 'swing' };
@@ -285,12 +285,14 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     reserveAutoRebalanceRunMetadata: async () => ({ auto_rebalance_portfolio: 'indmoney_us', auto_rebalance_sequence: 100, auto_rebalance_label: 'IndMoney US Run #100' }),
     retryWorkflowRead: async (read) => read(), getSavedStageTargets: () => targets,
     waitForThreatCompletion: async () => threat(99, 'generated').analysis,
-    waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70 },
+    waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70, run_jobs: [] },
     summarizeThreat: () => ({}), summarizeRun: () => ({}), getRunProgress: () => ({}), countUniqueStocksFromRun: () => 2,
     parseTimestampMs: (date) => Date.parse(date), getPreviousMarketClose: () => new Date('2026-10-02T20:00:00Z'),
     getLatestMatchingRebalanceRuns: (runs) => runs.filter((r) => modules['@/lib/rebalanceRunIdentity'].isAnalysisRunForStage(r, 'rebalance', 'us')),
     fetchAllFullRuns: async () => [generatedRebalance],
     buildConsensusRows: (runs) => { consensusInputs.push(runs); return runs.map((r) => ({ id: r.id, jobs: r.run_jobs.map((link) => link.job.response) })); },
+    buildTechnicalScanMap: () => ({}),
+    buildDashboardActionRows: (rows) => rows.map(row => ({ stock: { exchange: 'NASDAQ', symbol: 'TEST', totalSuggestions: 1 }, formulaAction: 'Hold', formulaScore: 0, formulaEstimate: {}, detail: {} })),
     buildTechnicalScanPrompt: (rows) => JSON.stringify(rows), getStageTileLabel: (stage) => stage,
     window: { setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
     WORKFLOW_COMPLETION_RESET_DELAY_MS: 0, normalizeError: (error) => error.message,
@@ -369,13 +371,14 @@ test('offline workflow rejects stale/conflicting and out-of-scope sources before
   }
 });
 
-test('offline latest fallback deduplicates generated runs without changing selected stages or model samples', async () => {
+test('Next uses only generated runs without historical fallback', async () => {
   const result = await executeWorkflow({ selected: {
     rebalance: new Set(['rebalance:next']), technical: new Set(['technical:next']),
   } });
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['threats', 1], ['swing', 2], ['rebalance', 2], ['technical', 1]]);
   assert.deepEqual(keys(result.consensusInputs[1]), ['60:601', '60:602']);
+  assert.deepEqual(result.runReads, [], 'Next does not fetch any historical scan');
   const prompt = result.created.find((call) => call.stage === 'rebalance').prompt;
   for (const jobId of [501, 502]) assert.equal(prompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
 });
@@ -426,4 +429,16 @@ test('manual rebalance shows actionable validation errors and blocks submit with
     if (reason) assert.equal(findElement(tree, (node) => node.props?.role === 'alert').props.children, reason);
   }
   assert.equal(submissions, 1, 'only the valid form invokes the original submit handler');
+});
+
+ test('Next cannot silently substitute history when Swing was skipped', async () => {
+  const result = await executeWorkflow({ stages: ['rebalance'], selected: { rebalance: new Set(['rebalance:next']) } });
+  assert.deepEqual(result.created, []);
+  assert.match(result.errors[0].error, /Next Swing output is unavailable/);
+});
+
+test('snapshot drift fails before paid Rebalance', async () => {
+  const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, captured_at: '2026-10-02T21:30:00Z' } });
+  assert.deepEqual(result.created.map(call => call.stage), ['threats', 'swing']);
+  assert.match(result.errors[0].error, /different snapshots/);
 });

@@ -153,22 +153,23 @@ def test_no_rationale_score_inference_or_relaxed_integer_contract(score):
     assert result.content == original
 
 
-def test_authoritative_metadata_fills_missing_fields_but_preserves_existing_provenance():
+def test_authoritative_metadata_replaces_model_identity_and_preserves_source_values():
     row = swing_row()
     del row["run_number"]
     del row["llm"]
     row["run_time"] = ""
     result = normalize_output(json.dumps([row]), "swing", metadata={"run_number": 7, "llm": "persisted model",
-                                                                               "run_time": "01:00", "llm_name_model": "do not overwrite"})
+                                                                               "run_time": "01:00", "llm_name_model": "actual/provider"})
     assert result.safe_to_replace, result.findings
     assert result.rows[0].values["run_number"] == 7
     assert result.rows[0].values["llm"] == "persisted model"
-    assert result.rows[0].values["llm_name_model"] == "Provider / Model 1"
-    assert set(result.rows[0].filled_fields) == {"run_number", "llm", "run_time"}
+    assert result.rows[0].values["llm_name_model"] == "actual/provider"
+    assert result.rows[0].source_values["llm_name_model"] == "Provider / Model 1"
+    assert set(result.rows[0].filled_fields) == {"run_number", "llm", "run_time", "llm_name_model"}
     assert "run_number" not in result.rows[0].source_values
     null = normalize_output(json.dumps([swing_row(run_number=None)]), "swing", metadata={"run_number": 7})
-    assert not null.safe_to_replace
-    assert null.rows[0].values["run_number"] is None
+    assert null.safe_to_replace
+    assert null.rows[0].values["run_number"] == 7
 
 
 def test_metadata_cannot_fill_price_stop_score_or_judgment():
@@ -358,7 +359,7 @@ def test_technical_eight_column_table_and_unknown_levels_are_preserved():
 
 
 def test_hashes_are_stable_and_distinguish_schema_and_source():
-    assert CONTRACT_VERSION == "credx-output-v1"
+    assert CONTRACT_VERSION == "credx-output-v2"
     assert contract_hash("swing") == contract_hash("swing")
     assert len({contract_hash(kind) for kind in ("swing", "rebalance", "technical", "threat")}) == 4
     assert source_hash("one") != source_hash("two")

@@ -51,7 +51,7 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot, selection = ["swing", "actionables"] } = {}) {
+function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
@@ -91,6 +91,9 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     },
     getProviders: async () => [{ provider: "existing", model: "chosen" }],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
+    zerodhaPortfolioOverview: async () => ({ latest: { captured_at: "2026-10-29T09:17:00Z" } }),
+    zerodhaThreatsLatest: async () => ({ analysis: { captured_at: "2026-10-29T09:17:00Z" } }),
+    zerodhaDisplayQuotes: async () => ({ quotes: [], missing: [] }),
     indmoneyUsCreatePortfolioSnapshot: async () => snapshot,
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
@@ -110,10 +113,19 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
     setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
-    onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed" }),
+    onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
     retryWorkflowRead: (read) => read(),
     getSavedStageTargets: () => [{ provider: "existing", model: "chosen", sample_count: 3 }],
     buildSwingTradePrompt: () => "unchanged strategy", getSwingTradeDefaultInvestmentAmount: () => "existing amount", getSwingTradeDefaultExportSheetName: () => "existing sheet",
+    getLatestMatchingRebalanceRuns: runs => runs,
+    getSelectedStageRunIds: () => [], selectStageRunInputs: () => [], deduplicateStageRunInputs: runs => runs,
+    buildOutputSourceJobs: async () => [], getPreviousMarketClose: () => new Date(),
+    buildRebalanceInputBundle: () => "snapshot", ensureRebalanceFlowMarker: p => p,
+    buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
+    scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
+    buildConsensusRows: () => [{ exchange: "NSE", symbol: "TEST" }],
+    buildTechnicalScanMap: () => ({}), technicalPriceEvidence: () => "", buildTechnicalScanPrompt: () => "technical",
+    buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore: 0, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
     buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1,
     getStageTileLabel: (stage) => stage, normalizeError: (error) => error.message,
@@ -132,7 +144,7 @@ for (const rejectedStage of ["sync", "actionables"]) {
     } });
     await h.runWorkflow("zerodha");
     assert.equal(h.view.audits.zerodha.status, "failed");
-    assert.equal(h.modelCalls.length, 1, "audit failure must not repeat paid model work");
+    assert.equal(h.modelCalls.length, 3, JSON.stringify(h.updates.filter(x => x.info.error)));
     assert.deepEqual(h.modelCalls[0].targets, [{ provider: "existing", model: "chosen", sample_count: 3 }]);
     assert.equal(h.modelCalls[0].prompt, "unchanged strategy");
     assert.equal(h.view.states.zerodha.swing.state, "completed");
@@ -176,7 +188,7 @@ test("actual workflow waits for last stage and durable history before email", as
   assert.equal(h.emails.length, 1);
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.timers.length, 1);
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 test("actual workflow retries only identical metadata and queues email once after recovery", async () => {
@@ -186,7 +198,7 @@ test("actual workflow retries only identical metadata and queues email once afte
   } });
   await h.runWorkflow("zerodha");
   assert.equal(attempts, 3);
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
   assert.equal(h.emails.length, 1);
   assert.deepEqual(h.delays, [500, 1000]);
 });
@@ -202,7 +214,7 @@ test("a lost final response reconciles committed audit without repeating model w
   await h.runWorkflow("zerodha");
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.emails.length, 1);
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 for (const mismatch of ["sequence", "portfolio", "parent", "stage", "run", "summary"]) {
@@ -216,7 +228,7 @@ for (const mismatch of ["sequence", "portfolio", "parent", "stage", "run", "summ
     await h.runWorkflow("zerodha");
     assert.equal(h.emails.length, 0);
     assert.equal(h.view.audits.zerodha.status, "failed");
-    assert.equal(h.modelCalls.length, 1);
+    assert.equal(h.modelCalls.length, 3);
   });
 }
 
@@ -229,7 +241,7 @@ test("exhausted history reads preserve outputs and withhold completion email", a
   assert.equal(h.view.audits.zerodha.status, "failed");
   assert.match(h.view.audits.zerodha.message, /history unavailable/);
   assert.equal(h.view.states.zerodha.actionables.state, "completed");
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 test("late old-run persistence cannot update a newer run or another portfolio", async () => {
@@ -297,7 +309,7 @@ test("a second start and a previous run's reset timer cannot mutate an active ru
   h.execution.current = true;
   h.view.running = null; // Kill clears this while the original work unwinds.
   await h.runWorkflow("indmoneyUs");
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
   h.timers[0]();
   assert.deepEqual(h.view.states, before);
 });
@@ -308,7 +320,7 @@ test("email failure is visible and does not turn completed model work into a fai
   assert.match(h.view.warnings.zerodha, /Completion email was not confirmed/);
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.view.states.zerodha.actionables.state, "completed");
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 test("actual workflow card renders pending and failed history independently of output controls", () => {
@@ -391,11 +403,11 @@ test("pause after a completed swing records the next selected unstarted stage wi
   await h.runWorkflow("zerodha");
   const paused = h.auditWrites.filter(({ payload }) => payload.status === "paused");
   assert.equal(paused.length, 1, "the valid pause does not retry a terminal-stage conflict");
-  assert.equal(paused[0].stage, "actionables");
+  assert.equal(paused[0].stage, "rebalance");
   assert.equal(h.durable.get("india:42:swing").status, "completed");
-  assert.equal(h.durable.get("india:42:actionables").status, "paused");
+  assert.equal(h.durable.get("india:42:rebalance").status, "paused");
   assert.equal(h.view.states.zerodha.swing.state, "completed");
-  assert.equal(h.view.states.zerodha.actionables.runStatus, "Paused before this stage");
+  assert.equal(h.view.states.zerodha.rebalance.runStatus, "Paused before this stage");
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.modelCalls.length, 1);
   assert.equal(h.emails.length, 0);

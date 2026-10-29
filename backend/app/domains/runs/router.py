@@ -732,6 +732,12 @@ async def update_auto_rebalance_stage(
         stage=stage, run_id=effective_run_id, job_id=effective_job_id,
         expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
+    if "frozen_final" in body.summary:
+        if stage != "actionables":
+            raise HTTPException(422, detail="Final capture belongs only to the actionables stage")
+        from .frozen_final import validate_frozen_final
+        await validate_frozen_final(db, body.summary["frozen_final"], user_id=current_user.id,
+                                   portfolio=portfolio, sequence=sequence)
     if stage_record is None:
         # Defaults run at flush; linking the relationship also keeps the
         # loaded stages collection current for first-write serialization.

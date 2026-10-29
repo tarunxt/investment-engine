@@ -157,3 +157,36 @@ executable pricing is unchanged. Reopening a basket clears the calculation
 universe and snapshot before preparation; failed/cached-source preparation leaves
 those calculations unavailable. Generation guards discard stale completions and
 responses after dismissal.
+
+## Workflow input lineage and final capture (workflow-final-v1)
+
+The automated Rebalance handoff uses only its generated Swing output and jobs
+explicitly selected in Select Inputs. An empty explicit selection never expands
+into a market-close window or latest-run fallback. Technical uses the same rule.
+A requested Next source that was not generated fails before another paid call.
+Rebalance reuses its workflow portfolio snapshot and rejects a Threat report from
+a different captured timestamp. Saved prompts identify each Swing run and job.
+The Stock Flow header separately lists the actual saved Rebalance Swing inputs.
+
+India holdings prompts include all records, settled and T1 units separately, and
+use settled plus T1 for investment exposure. This does not authorize or increase
+sellable order quantities. Historical saved prompts are never rewritten.
+Technical receives timestamped exact-venue broker quotes (at most 15 minutes old)
+and rejects missing/ambiguous anchors. Opt-in worker validation requires every
+listing exactly once and numeric trigger/invalidation prices within 25% of the
+anchor. A different corporate-action price basis must be reconciled before a new
+scan; no automatic scale correction or invented setup is applied.
+
+Mixed successful/failed provider jobs record a partial stage even when an older
+aggregate Run status says completed. Listing counts are parsed by table headers,
+not fixed column positions, and are no longer divided by an arbitrary target.
+Output contract v2 sets model/run/time identity from runtime metadata while
+retaining the original cells in normalization provenance.
+
+Before Final Actionables completion, the exact final rows, excluded non-buy
+listings, formula, per-row inputs, source run IDs and response hashes are frozen
+in the existing durable stage summary as `frozen_final`. The backend verifies
+owned terminal source revisions and technical workflow identity. Its first
+terminal summary wins on retry; current-formula previews never rewrite it.
+The workflow audit page exposes this saved snapshot. Old runs without a snapshot
+remain explicitly unavailable; this release does not backfill historical scores.

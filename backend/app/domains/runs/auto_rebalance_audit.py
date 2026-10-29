@@ -42,9 +42,17 @@ async def validate_execution(
     if expected_status is None:
         return
     aggregate = records.get("run") or records.get("job")
+    aggregate_status = _status(aggregate) if aggregate is not None else None
+    if "run" in records:
+        children = list((await db.execute(select(Job).join(RunJob, RunJob.job_id == Job.id).where(
+            RunJob.run_id == run_id, Job.user_id == user_id,
+        ))).scalars())
+        statuses = {_status(child) for child in children}
+        if statuses and statuses <= {"completed", "partial", "failed", "cancelled"} and "completed" in statuses and statuses != {"completed"}:
+            aggregate_status = "partial"
     child_statuses = {"completed", "partial", "failed"} if expected_status == "partial" else {"completed"}
     if (
-        aggregate is None or _status(aggregate) != expected_status
+        aggregate is None or aggregate_status != expected_status
         or ("run" in records and "job" in records and _status(records["job"]) not in child_statuses)
     ):
         raise HTTPException(

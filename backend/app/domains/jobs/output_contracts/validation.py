@@ -140,9 +140,9 @@ def validate_row(
         findings.append(Finding("authoritative_fill", reason, "info", source, key))
 
     for key in METADATA_KEYS.intersection(c.key for c in columns):
-        # Explicit null/unknown stays unknown. Only absent or empty metadata is filled.
-        if (row.get(key, MISSING) is MISSING or row.get(key) == "") and key in metadata:
-            fill(key, metadata[key], "Filled from caller-supplied run/model/time metadata.")
+        # Runtime identity is authoritative; model-authored identity is not evidence.
+        if key in metadata and row.get(key, MISSING) != metadata[key]:
+            fill(key, metadata[key], "Set from authoritative runtime run/model/time metadata.")
     key = holding_identity(row, holdings)
     holding = holdings.get(key) if key is not None else None
     if kind == "rebalance" and holding is not None:
