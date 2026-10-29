@@ -1,4 +1,5 @@
 'use client';
+import {ConceptFEvents} from '@/components/workspace/ConceptFEvents';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -110,7 +111,8 @@ function isJobActive(status: string | null | undefined) {
   return status === 'pending' || status === 'processing' || status === 'scheduled';
 }
 
-export default function ZerodhaEventsPage() {
+export default function ZerodhaEventsPage() {return process.env.NEXT_PUBLIC_UAT2==='true'?<ConceptFEvents/>:<LegacyEventsPage/>;}
+function LegacyEventsPage() {
   const [status, setStatus] = useState<ZerodhaStatusResponse | null>(null);
   const [overview, setOverview] = useState<ZerodhaPortfolioOverviewResponse | null>(null);
   const [analysis, setAnalysis] = useState<ZerodhaEventsAnalysis | null>(null);

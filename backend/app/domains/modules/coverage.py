@@ -61,6 +61,9 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         ('POST','/account/operations/disposable/monitor/owners/{owner_id}/alerts/{id}/acknowledge','acknowledge_monitor'),
         ('POST','/account/operations/disposable/monitor/owners/{owner_id}/alerts/{id}/escalate','escalate_monitor')}:
         return None # Current owner or appointed active operator, explicit disposable DB/sink only.
+    if (domain=='public_service' and source_module=='app.domains.public_service.router'
+            and endpoint=='cost_fx' and methods=={'GET'} and path=='/account/operations/cost-fx'):
+        return ('__analysis_metadata__','view') # Existing selected-consumer read capability; no billing or effect permission.
     if domain=='public_service' and len(methods)==1 and (next(iter(methods),''),path) in {
         ('POST','/account/operations/privacy-requests'),('GET','/account/operations/privacy-requests'),('GET','/account/operations/private-account-download'),('GET','/account/operations/privacy-requests/{id}'),
         ('POST','/account/operations/privacy-requests/{id}/cancel'),('GET','/account/operations/privacy-requests/{id}/export'),
@@ -68,10 +71,30 @@ def classify_route(domain,endpoint,path,methods,source_module=''):
         ('GET','/account/operations/diagnostics'),('POST','/account/operations/support-consents'),
         ('POST','/account/operations/support-consents/{id}/revoke'),('GET','/account/operations/support-consents/{id}/access')}:
         return None # Authenticated owned account requests; no approval/effect endpoint.
+    if source_module=='app.uat2.threat_history' and methods=={'GET'} and path in {'/uat2/simulation/threat-history/{portfolio}','/uat2/simulation/threat-history/{portfolio}/{job_id}'}:
+        return None # exact installed owner scope + dynamic current module view + SQL owner predicates in handler
+    if source_module=='app.uat2.recommendation_history' and methods=={'GET'} and path=='/uat2/simulation/recommendation-history/{portfolio}':
+        return None # Installed scope, selected market and all referenced source ownership verified in projection.
+    if source_module=='app.uat2.buy_threshold' and path=='/uat2/simulation/buy-threshold/{portfolio}' and methods in ({'GET'},{'PUT'}):
+        return None # Exact installed simulation owner + selected-market guard and owner lock enforced by handler; advisory preference only.
+    if source_module=='app.uat2.event_history' and methods=={'GET'} and path in {'/uat2/simulation/event-history/{portfolio}','/uat2/simulation/event-history/{portfolio}/{job_id}'}:
+        return None # Exact installed scope + current dynamic module view policy and owner SQL predicates in handler.
+    if source_module=='app.uat2.activity_history' and methods=={'GET'} and path=='/uat2/simulation/activity-history':
+        return None # Core owner records remain readable; handler gates each optional store by current policy.
+    if source_module=='app.uat2.journal_history' and methods=={'GET'} and path in {'/uat2/simulation/journal-history','/uat2/simulation/journal-history/{receipt_id}'}:
+        return ('zerodha_rebalance','view') # handler additionally requires exact installed scope and captured owner/lineage
+    if source_module=='app.uat2.combined_history' and methods=={'GET'} and path=='/uat2/simulation/combined-history':
+        return None # Exact installed scope; handler requires BOTH current module views and owner-filtered source queries.
     if domain in CORE_DOMAINS:return None
     if domain=='runs' and methods=={'GET'} and endpoint in {'list_runs','get_run','list_auto_rebalance_history','get_auto_rebalance_history_detail','get_final_actionable_history'}:return None
     if domain=='zerodha' and endpoint in {'get_login_url','callback','get_status','disconnect'}:return None
     if domain is None:
+        if source_module=='app.uat2.workflow_router' and path in {
+                '/uat2/simulation/journal-portfolio',
+                '/uat2/simulation/snapshot-reviews',
+                '/uat2/simulation/snapshot-reviews/{review_id}',
+                '/uat2/simulation/snapshot-reviews/{review_id}/accept'}:
+            return ('zerodha_rebalance','view' if methods<={'GET','HEAD'} else 'analyze')
         if source_module=='app.uat2.router':
             # Existing synthetic read-only fixtures and status remain reviewable;
             # queue/order/email/export operations have the same optional policy.

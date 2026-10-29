@@ -66,23 +66,27 @@ async def load_persisted_usd_inr_rate(
     now: datetime | None = None,
 ) -> PersistedFxAssessment:
     async with AsyncSessionLocal() as db:
-        row = (
-            await db.execute(
-                select(
-                    FxRate.rate,
-                    FxRate.source,
-                    FxRate.source_as_of,
-                )
-                .where(
-                    FxRate.base_currency == USD_INR_BASE_CURRENCY,
-                    FxRate.quote_currency == USD_INR_QUOTE_CURRENCY,
-                    FxRate.verified.is_(True),
-                )
-                .order_by(desc(FxRate.source_as_of), desc(FxRate.id))
-                .limit(1)
-            )
-        ).one_or_none()
+        return await read_persisted_usd_inr_rate(db, now=now)
 
+
+async def read_persisted_usd_inr_rate(db, *, now: datetime | None = None) -> PersistedFxAssessment:
+    """Same persisted read, using the caller's request session; never fetch a provider."""
+    row = (
+        await db.execute(
+            select(
+                FxRate.rate,
+                FxRate.source,
+                FxRate.source_as_of,
+            )
+            .where(
+                FxRate.base_currency == USD_INR_BASE_CURRENCY,
+                FxRate.quote_currency == USD_INR_QUOTE_CURRENCY,
+                FxRate.verified.is_(True),
+            )
+            .order_by(desc(FxRate.source_as_of), desc(FxRate.id))
+            .limit(1)
+        )
+    ).one_or_none()
     if row is None:
         return assess_persisted_fx_rate(
             value=None,

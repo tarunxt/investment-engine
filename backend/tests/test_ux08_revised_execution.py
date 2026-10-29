@@ -6,7 +6,7 @@ from sqlalchemy import select
 from test_hosted_order_composition import order_env,worker_env,linked_env
 from app.domains.runs.analysis_workflows.service import Workflows
 from app.domains.runs.analysis_workflows.action_plan import project
-from app.domains.runs.analysis_workflows.plan_revisions import revise
+from app.domains.runs.analysis_workflows.plan_revisions import revise,select_plan
 from app.domains.order_intents.models import OrderIntent
 from app.domains.order_intents.service import orders_for_runtime,TOPIC
 from app.domains.order_intents.authority import authenticated_confirmation
@@ -37,6 +37,14 @@ def test_amended_fake_review_has_new_digest_funds_and_one_actual_submission(orde
         assert id!=original_id and row.review_digest!=old_digest and row.approved_at is None
         assert row.payload_json['legs'][0]['side']==side and row.payload_json['legs'][0]['quantity']==1
         assert worker.orders.prepare(db,1,flow_id,revision_version=version,now=clock[0]).id==id
+        from app.domains.order_intents.presentation import owned_reviews
+        views=owned_reviews(db,1,now=clock[0],runtime=worker.orders)['intents']
+        by_id={view['id']:view for view in views}
+        assert by_id[original_id]['actions']['confirm'] is False
+        assert by_id[original_id]['review_digest'] is None
+        assert by_id[id]['actions']['confirm'] is True
+        assert by_id[id]['review_digest']==row.review_digest
+        assert owned_reviews(db,2,now=clock[0],runtime=worker.orders)['intents']==[]
         service=orders_for_runtime(db,worker.orders)
         with authenticated_confirmation(db.get(User,1),row.id,old_digest):
             with pytest.raises(OrderDenied):service.approve(1,id,old_digest,action='confirm_exact_order_or_basket',now=clock[0])
@@ -121,3 +129,63 @@ def test_revision_partial_unknown_restart_reconciles_without_resubmission(order_
     with analysis.session() as db:
         assert db.get(OrderIntent,id).state==('partial' if outcome=='partial' else 'filled')
         assert len(list(db.scalars(select(ExecutionAttempt).where(ExecutionAttempt.intent_id==id))))==1
+
+@pytest.mark.parametrize('worker_env',['journal'],indirect=True)
+def test_saved_revision_blocks_older_base_review_and_new_base_preparation(order_env):
+    e,analysis,worker,factory,app,deliveries,clock,flow_id,original_id=order_env
+    with analysis.session() as db:
+        original=db.get(OrderIntent,original_id)
+        assert original.state=='awaiting_approval' and original.approved_at is None
+        original_digest=original.review_digest
+        plan=revision(db,analysis.analysis,1,flow_id,'4');db.commit()
+        assert plan.get('revision_parent')
+        with pytest.raises(OrderDenied,match='CURRENT_SAVED_BASE_PLAN_REQUIRED'):
+            orders_for_runtime(db,worker.orders).review(1,original_id,now=clock[0])
+        with pytest.raises(OrderDenied,match='CURRENT_SAVED_BASE_PLAN_REQUIRED'):
+            worker.orders.prepare(db,1,flow_id,now=clock[0])
+        from app.domains.order_intents.authority import authenticated_confirmation
+        with authenticated_confirmation(db.get(User,1),original_id,original_digest):
+            with pytest.raises(OrderDenied,match='CURRENT_SAVED_BASE_PLAN_REQUIRED'):
+                orders_for_runtime(db,worker.orders).approve(1,original_id,original_digest,action='confirm_exact_order_or_basket',now=clock[0])
+        assert original.review_digest==original_digest and original.approved_at is None
+
+@pytest.mark.parametrize('worker_env',['journal'],indirect=True)
+def test_unconsumed_base_approval_cannot_dispatch_after_saved_amendment(order_env):
+    from app.domains.order_intents.authority import authenticated_confirmation
+    from app.domains.order_intents.execution_models import ExecutionRun
+    from sqlalchemy import func
+    e,analysis,worker,factory,app,deliveries,clock,flow_id,original_id=order_env
+    with analysis.session() as db:
+        row=db.get(OrderIntent,original_id)
+        with authenticated_confirmation(db.get(User,1),row.id,row.review_digest):
+            orders_for_runtime(db,worker.orders).approve(1,row.id,row.review_digest,action='confirm_exact_order_or_basket',now=clock[0])
+        db.commit()
+        event=db.scalar(select(OutboxMessage.id).where(OutboxMessage.topic==TOPIC,OutboxMessage.payload['intent_id'].as_string()==row.id))
+        assert event is not None
+        revision(db,analysis.analysis,1,flow_id,'4');db.commit()
+    with pytest.raises(OrderDenied,match='CURRENT_SAVED_BASE_PLAN_REQUIRED'):
+        worker.dispatch(event)
+    with analysis.session() as db:
+        assert db.get(ExecutionRun,original_id) is None
+    with worker.venue_engine.connect() as connection:
+        assert connection.scalar(select(func.count()).select_from(OutboxMessage))==0
+
+@pytest.mark.parametrize('worker_env',['journal'],indirect=True)
+def test_past_base_receipt_remains_inspectable_when_a_new_advisory_revision_is_saved(order_env):
+    from app.domains.order_intents.authority import authenticated_confirmation
+    e,analysis,worker,factory,app,deliveries,clock,flow_id,original_id=order_env
+    with analysis.session() as db:
+        row=db.get(OrderIntent,original_id)
+        with authenticated_confirmation(db.get(User,1),row.id,row.review_digest):
+            orders_for_runtime(db,worker.orders).approve(1,row.id,row.review_digest,action='confirm_exact_order_or_basket',now=clock[0])
+        db.commit();event=db.scalar(select(OutboxMessage.id).where(OutboxMessage.topic==TOPIC,OutboxMessage.payload['intent_id'].as_string()==row.id))
+    worker.dispatch(event)
+    with analysis.session() as db:
+        row=db.get(OrderIntent,original_id);assert row.state=='filled'
+        proof=worker.orders.provenance(db,row,clock[0])
+        plan=revision(db,analysis.analysis,1,flow_id,'4');db.commit()
+        assert worker.orders.provenance(db,row,clock[0])==proof
+        base=select_plan(Workflows(db,analysis.analysis.runtime).stages(Workflows(db,analysis.analysis.runtime).owned(1,flow_id))[-1],
+            project(analysis.analysis.completed_analysis(db,1,flow_id),workflow=Workflows(db,analysis.analysis.runtime).owned(1,flow_id),
+                    source=Workflows(db,analysis.analysis.runtime).owned(1,flow_id).execution_json['source']),plan['revision_parent'])
+        assert annotate(db,analysis.analysis,base)['review_available'] is False

@@ -11,7 +11,8 @@ async def test_native_aggregate_scopes_before_load_and_ignores_role_grants(monke
     from app.uat2 import router
     from app.domains.modules import visibility
     from app.domains.dashboard import service
-    calls=[];db=object()
+    from app.domains.fx_rates import cost_read
+    calls=[];fx_calls=[];db=object()
     async def visible(session,subject):
         assert session is db and subject==owner
         return selected
@@ -20,11 +21,17 @@ async def test_native_aggregate_scopes_before_load_and_ignores_role_grants(monke
     async def us(session,subject):
         assert session is db and subject==owner
         calls.append('indmoney_us');return DashboardIndMoneySection()
+    async def fx(session,subject,*,now):
+        assert session is db and subject==owner and now.tzinfo is not None
+        fx_calls.append(subject)
+        return {'fx':{'pair':'USD/INR','value':None,'source':None,'as_of':None,'age_seconds':None,'stale_after_seconds':129600,'status':'unavailable'}}
     monkeypatch.setattr(visibility,'visible_module_ids',visible)
     monkeypatch.setattr(router.broker,'portfolio',india)
     monkeypatch.setattr(service,'_load_indmoney_with_session',us)
+    monkeypatch.setattr(cost_read,'read_cost_fx',fx)
     result=await router.dashboard(current_user=SimpleNamespace(id=owner,role=role),db=db)
     assert set(calls)==set(selected)
+    assert fx_calls==([owner] if 'indmoney_us' in selected else [])
     assert ('zerodha' in result['sections'])==('zerodha_rebalance' in selected)
     assert ('indmoney_us' in result['sections'])==('indmoney_us' in selected)
     assert 'bullpen' not in result['sections'] and 'bullpen' not in result

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { harness, nodes } from "./helpers/workspace-hooks.mjs";
 
 const card = readFileSync(
   new URL("../app/console/trading-bots/_components/UniversalScanAutoRunCard.tsx", import.meta.url),
@@ -39,8 +40,8 @@ test("Universal Scan renders its isolated Bullpen-style auto-run controls", () =
   assert.doesNotMatch(shared, /One Full Universe capture/);
   assert.match(shared, /Last Universal Scan/);
   assert.doesNotMatch(shared, /Last stage run/);
-  assert.match(shared, /Started: \{dateLabel\(snapshot\.scannedAt\)\}/);
-  assert.match(shared, /Completed\/Failed:/);
+  assert.match(shared, /Started:/);
+  assert.match(shared, /Completed:/);
   assert.doesNotMatch(shared, />Original<\/button>/);
   assert.match(shared, /status\.last_completed_at/);
   assert.match(shared, /border-emerald-200 bg-emerald-50/);
@@ -94,4 +95,26 @@ test("queueing stays fast and reuses the prior completed total for progress", ()
     scheduler.indexOf("def update_schedule"),
   );
   assert.doesNotMatch(statusBody, /latest_completed_universal_export/);
+});
+
+
+test("scan timestamps retain saved snapshot evidence or exact durable completion history", async () => {
+  for (const useSnapshot of [true, false]) {
+    const snapshot = useSnapshot ? { scannedAt: "2026-10-01T01:00:00Z", sourceScanCompletedAt: "2026-10-01T02:00:00Z", totalCandidates: 5, scanExportId: "saved", questions: [] } : null;
+    const h = harness(new URL("../app/console/trading-bots/_components/UniversalPolymarketScan.tsx", import.meta.url), "UniversalPolymarketScan", {}, {
+      useCallback: fn => fn, fetchUniversalSnapshot: async () => ({ snapshot }),
+      waitForRetry: async () => {}, window: { setInterval: () => 1, clearInterval: () => {} },
+      dateLabel: value => value, durationLabel: value => String(value),
+      UniversalScanAutoRunCard: "AutoRunCard", FileSpreadsheet: "Icon", Menu: "Icon", X: "Icon",
+    });
+    await h.flush();
+    if (!useSnapshot) {
+      nodes(h.tree()).find(n => n.type === "AutoRunCard").props.onStatusChange({ running: false, last_completed_at: "2026-10-02T02:00:00Z", last_completed_run_started_at: "2026-10-02T01:00:00Z", last_total_events: 7 });
+      await h.flush();
+    }
+    assert.match(h.text(), new RegExp("Started: 2026-10-0" + (useSnapshot ? "1" : "2") + "T01:00:00Z"));
+    assert.match(h.text(), new RegExp("Completed: 2026-10-0" + (useSnapshot ? "1" : "2") + "T02:00:00Z"));
+    if (!useSnapshot) assert.match(h.text(), /No replacement scan was started/);
+    assert.equal(h.requests.length, 0);h.cleanup();
+  }
 });

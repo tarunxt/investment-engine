@@ -41,6 +41,8 @@ def test_profile_read_reports_capability_without_performing_a_write(monkeypatch,
         async def execute(self, query):
             return SimpleNamespace(scalar_one_or_none=lambda: profile)
     result = asyncio.run(get_profile(SimpleNamespace(id=1, full_name="Fixture User"), ReadOnlyDb()))
+    assert result.owner_id == 1
     assert result.preferences_writable is writable
     assert result.zerodha_buy_threshold == result.indmoney_buy_threshold == 2.5
     assert "preferences_writable" not in UpdateProfileRequest.model_fields
+    assert "owner_id" not in UpdateProfileRequest.model_fields

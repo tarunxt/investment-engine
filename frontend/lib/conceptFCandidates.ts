@@ -1,0 +1,15 @@
+import {stockStageOutput,type FlowStage} from './conceptFStockFlow';
+import type {Workflow} from '@/app/console/automated-rebalance/_components/ServerAnalysis';
+/** Frozen research facts only. Ordering is never converted into a claimed rank. */
+export function savedCandidates(row:Workflow,stage:FlowStage|undefined){
+ const output=stockStageOutput(stage?.stage==='swing'?stage:undefined,row.inputs.source_hash,row.portfolio==='india'?'INR':'USD');
+ const setup=row.inputs.research_setup,hash=row.inputs.research_setup_hash;
+ const prefix=row.portfolio==='india'?['NSE','BSE']:['US','NYSE','NASDAQ','NYSEARCA','NYSEAMERICAN','AMEX'];
+ const valid=!!setup&&(setup as typeof setup&{source_hash?:unknown}).source_hash===row.inputs.source_hash&&setup.owner_id===row.owner_id&&setup.portfolio===row.portfolio&&typeof hash==='string'&&/^[a-f0-9]{64}$/.test(hash)&&Array.isArray(setup.accepted_instruments)&&setup.accepted_instruments.length<=200&&new Set(setup.accepted_instruments).size===setup.accepted_instruments.length&&setup.accepted_instruments.every(value=>typeof value==='string'&&/^[A-Z]+:[A-Z0-9&_.-]{1,64}$/.test(value)&&prefix.includes(value.split(':')[0]));
+ const accepted=valid?new Set(setup.accepted_instruments):null;
+ const provenance=valid?setup as typeof setup&{rows?:unknown;discovery_receipt?:unknown}:null;
+ const shortlist=Array.isArray(provenance?.rows)&&provenance.rows.length<=1000&&provenance.rows.every(item=>item&&typeof item==='object'&&item.state==='resolved'&&accepted?.has(item.instrument_id)&&typeof item.duplicate==='boolean'&&typeof item.holdings_overlap==='boolean')?provenance.rows:null;
+ const discovery=provenance?.discovery_receipt as {provider?:unknown;live_provider_called?:unknown;instruments?:unknown;hash?:unknown}|undefined;
+ const discovered=discovery?.provider==='fake'&&discovery.live_provider_called===false&&typeof discovery.hash==='string'&&/^[a-f0-9]{64}$/.test(discovery.hash)&&Array.isArray(discovery.instruments)&&discovery.instruments.length<=200&&new Set(discovery.instruments).size===discovery.instruments.length&&discovery.instruments.every(item=>typeof item==='string'&&accepted?.has(item))?new Set(discovery.instruments):null;
+ return{state:output.state,receipt:output.hash,job:output.job,mode:valid&&['holdings_only','llm_discovery','shortlist_only','combined'].includes(setup.mode??'')?setup.mode:null,accepted:accepted?[...accepted]:null,rows:output.rows.map(item=>({instrument:item.instrument,action:item.action,universe:accepted?(accepted.has(item.instrument)?'Accepted candidate':'Not in accepted candidate list; holding membership not supplied'):'Candidate membership unavailable',source:shortlist?.some(record=>record.instrument_id===item.instrument)?discovered?.has(item.instrument)?'Offline discovery + shortlist':'Shortlist':discovered?.has(item.instrument)?'Offline discovery':'Not supplied',overlap:shortlist?.some(record=>record.instrument_id===item.instrument&&(record.duplicate||record.holdings_overlap))??false,rank:typeof item.rank==='number'&&Number.isSafeInteger(item.rank)&&item.rank>0&&item.rank<=200?item.rank:null}))};
+}

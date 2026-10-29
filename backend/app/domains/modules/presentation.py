@@ -31,6 +31,10 @@ SURFACES = (
 # API prefixes used to stop browser polling before optional requests are issued.
 # Server route/effect enforcement remains authoritative, including safety reads.
 API_PREFIXES = (
+ ('/uat2/simulation/buy-threshold/india',('zerodha_rebalance',)),
+ ('/uat2/simulation/buy-threshold/indmoney_us',('indmoney_us',)),
+ ('/uat2/simulation/recommendation-history/india',('zerodha_rebalance',)),
+ ('/uat2/simulation/recommendation-history/indmoney_us',('indmoney_us',)),
  ('/zerodha',('zerodha_rebalance',)),('/indmoney-us',('indmoney_us',)),
  ('/bullpen-ai-auto-live',('bullpen_live',)),('/polymarket-auto-live',('bullpen_live',)),
  ('/bullpen-ai',('bullpen_research',)),('/bullpen008',('bullpen_research',)),

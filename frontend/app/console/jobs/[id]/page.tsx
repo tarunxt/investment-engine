@@ -2,6 +2,9 @@
 
 import { use, useEffect, useRef, useState, type ElementType } from 'react';
 import { useRouter } from 'next/navigation';
+import {useSession} from 'next-auth/react';
+import {useWorkspaceDisplay} from '@/components/workspace/WorkspaceDisplay';
+import {ConceptFSavedText} from '@/components/workspace/ConceptFSavedText';
 import {
   AlertCircle,
   ArrowLeft,
@@ -45,59 +48,88 @@ function normalizeError(error: unknown) {
 export default function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const {data:session,status:sessionStatus}=useSession();
+  const display=useWorkspaceDisplay(),uat2=process.env.NEXT_PUBLIC_UAT2==='true',masked=display?.value.masked??true;
+  const scope=`${sessionStatus}:${session?.user?.id}:${session?.generation}:${id}`;
+  const [jobScope,setJobScope]=useState('');
   const [job, setJob] = useState<JobResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
+  const [revision, setRevision] = useState(0);
   const isActive = job && !TERMINAL_STATUSES.has(job.status);
+  const readController = useRef<AbortController | null>(null);
+  const ownerId = session?.user?.id;
 
-  const wsClientRef = useRef<WSClient | null>(null);
-
-  async function loadJob({ silent = false }: { silent?: boolean } = {}) {
-    if (!silent) setLoading(true);
-    try {
-      const data = await apiService.getJob(Number(id));
-      setJob(data);
-      setError(null);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      if (!silent) setLoading(false);
-    }
+  function loadJob() {
+    readController.current?.abort();
+    setLoading(true);
+    setJob(null);
+    setError(null);
+    setRevision(value => value + 1);
   }
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadJob();
+    if (uat2 && (sessionStatus !== 'authenticated' || !ownerId)) return;
+    let active = true;
+    const controller = new AbortController();
+    readController.current = controller;
+    async function readJob() {
+      try {
+        if (uat2 && !/^[1-9][0-9]{0,12}$/.test(String(id))) {
+          throw new Error('Exact job identity required');
+        }
+        const data = uat2
+          ? await apiService.get<JobResponse>(URLs.jobs.get(Number(id)), {
+              signal: controller.signal, cache: "no-store", timeoutMs: 8000,
+            })
+          : await apiService.getJob(Number(id));
+        if (!active || controller.signal.aborted) return;
+        if (uat2 && (!data || data.id !== Number(id) || typeof data.prompt !== 'string' ||
+          typeof data.provider !== 'string' || typeof data.model !== 'string' || typeof data.status !== 'string' ||
+          data.response !== null && data.response !== undefined && typeof data.response !== 'string' ||
+          data.error_message !== null && data.error_message !== undefined && typeof data.error_message !== 'string')) {
+          throw new Error('Exact saved job response required');
+        }
+        setJob(data);
+        setJobScope(scope);
+        setError(null);
+      } catch (err) {
+        if (!active || controller.signal.aborted) return;
+        setError(uat2 ? 'Requested saved job could not be verified. No other record or successful outcome is inferred.' : normalizeError(err));
+        setJobScope(scope);
+      } finally {
+        if (active && !controller.signal.aborted) setLoading(false);
+      }
+    }
+    void readJob();
+    // Native UAT2 mounts owned GETs, not the legacy job WebSocket relay.
+    // A read must not mint a ticket or require Redis merely to view history.
+    return () => { active = false; controller.abort(); };
+  }, [id, uat2, scope, sessionStatus, ownerId, revision]);
 
+  useEffect(() => {
+    if (uat2) return;
+    let active = true;
     const client = new WSClient({
       url: URLs.jobs.wsJob(Number(id)),
       onMessage: (data) => {
-        if (data.type !== 'job.updated') return;
-        const { ...patch } = data as {
-          type: string;
-          job_id: number;
-          [key: string]: unknown;
-        };
+        if (!active || data.type !== 'job.updated') return;
+        const { ...patch } = data as { type: string; job_id: number; [key: string]: unknown };
         setJob((prev) => (prev ? { ...prev, ...patch } : prev));
         const newStatus = patch.status as string | undefined;
-        if (newStatus && TERMINAL_STATUSES.has(newStatus)) {
-          wsClientRef.current?.close();
-        }
+        if (newStatus && TERMINAL_STATUSES.has(newStatus)) client.close();
       },
     });
-    wsClientRef.current = client;
     client.connect();
-
     return () => {
-      wsClientRef.current?.close();
-      wsClientRef.current = null;
+      active = false;
+      client.close();
     };
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, uat2]);
 
-  if (loading) {
+  if (loading||uat2&&jobScope!==scope) {
     return (
-      <div className="mx-auto flex flex-col gap-6">
+      <div data-uat2-recorded-job={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
         <div className="flex items-center gap-3 text-sm text-gray-500">
           <Loader2 className="size-4 animate-spin" />
           Loading job…
@@ -108,7 +140,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
 
   if (error || !job) {
     return (
-      <div className="mx-auto flex flex-col gap-6">
+      <div data-uat2-recorded-job={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
         <button
           onClick={() => router.back()}
           className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900"
@@ -128,7 +160,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
   const hasResponse = Boolean(job.response?.trim());
 
   return (
-    <div className="mx-auto flex flex-col gap-6">
+    <div data-uat2-recorded-job={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <Button
@@ -168,7 +200,8 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
         </div>
       </div>
 
-      {isActive && (
+      {uat2&&<p role="status" className="rounded border p-3 text-sm">Saved job record only. Use Refresh to read its current recorded state. This UAT2 view does not subscribe to a live job stream or authorize a provider call.</p>}
+      {isActive && !uat2 && (
         <div className="flex items-center gap-2 border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-medium text-blue-700">
           <span className="inline-block size-1.5 rounded-full bg-blue-500" />
           Live — updates will appear automatically.
@@ -193,7 +226,7 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
             </span>
           </div>
           <div className="p-5">
-            <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">{job.prompt.slice(0, 100)}...</p>
+            <>{uat2?<ConceptFSavedText value={job.prompt} label={`Job ${job.id} prompt`} masked={masked}/>:<p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">{job.prompt.slice(0, 100)}...</p>}</>
           </div>
         </div>
 
@@ -205,22 +238,18 @@ export default function JobDetailPage({ params }: { params: Promise<{ id: string
           </div>
 
           <div className="p-5 max-w-full">
-            <OutputConsistencyNotice metadata={job.runtime_metadata_json} />
+            {(!uat2||!masked)&&<OutputConsistencyNotice metadata={job.runtime_metadata_json} />}
             {job.status === 'failed' && job.error_message ? (
               <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>
+                <>{uat2?<ConceptFSavedText value={job.error_message} label={`Job ${job.id} saved error`} masked={masked}/>:<p className="whitespace-pre-wrap leading-6">{job.error_message}</p>}</>
               </div>
             ) : null}
 
             {hasResponse ? (
-              <InvestmentRecommendationTable
-                content={job.response ?? ''}
-                provider={job.provider}
-                model={job.model}
-              />
+              <>{uat2&&masked?<p>Saved output is masked. Reveal deliberately in Profile before inspecting it.</p>:<><InvestmentRecommendationTable content={job.response ?? ''} provider={job.provider} model={job.model}/>{uat2&&<details className="mt-4"><summary className="min-h-11 cursor-pointer">Full saved output · inert text</summary><ConceptFSavedText value={job.response} label={`Job ${job.id} output`} masked={false}/></details>}</>}</>
             ) : job.status === 'failed' && job.error_message ? null : (
               <p className="text-sm italic text-gray-400">
-                {isActive ? 'Response pending…' : 'No response.'}
+                {uat2?'No saved response supplied. No successful empty result or current provider state is inferred.':isActive ? 'Response pending…' : 'No response.'}
               </p>
             )}
           </div>

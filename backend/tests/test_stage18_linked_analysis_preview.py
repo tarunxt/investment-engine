@@ -86,7 +86,7 @@ def linked_env(tmp_path, monkeypatch):
         engine.dispose()
 
 
-def imported_source(env, owner=1, *, accept=True):
+def imported_source(env, owner=1, *, accept=True, raw_text=None):
     """Use the real preview/digest-acceptance service, not an accepted-row seed."""
     env.db.commit()
     async def run():
@@ -95,7 +95,7 @@ def imported_source(env, owner=1, *, accept=True):
             async with AsyncSession(engine, expire_on_commit=False) as db:
                 service = ManualImportService(db)
                 row = await service.preview(owner, IndMoneyUsPortfolioSnapshotCreateRequest(
-                    raw_text=CSV_TEMPLATE, captured_at=env.now, format='csv'))
+                    raw_text=CSV_TEMPLATE if raw_text is None else raw_text, captured_at=env.now, format='csv'))
                 await db.commit()
                 if accept:
                     row = await service.accept(owner, row.id, row.content_hash)

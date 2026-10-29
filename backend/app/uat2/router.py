@@ -69,11 +69,17 @@ async def dashboard(current_user=Depends(get_current_user), db=Depends(get_async
                              invested_value=h['quantity']*h['average_price'], pnl=h['pnl'])
                          for h in portfolio['holdings']], 'history': []}
     us = (await _load_indmoney_with_session(db, current_user.id)).model_dump(mode='json') if us_allowed else None
-    fx = {'value': 84 if us_allowed else None, 'source': 'synthetic' if us_allowed else None,
-          'as_of': STAMP if us_allowed else None, 'age_seconds': 0 if us_allowed else None,
-          'stale_after_seconds': 86400, 'status': 'valid' if us_allowed else 'unavailable'}
-    return {'generated_at': STAMP, 'fx': fx,
-            'usd_inr_rate': fx['value'], 'usd_inr_status': fx['status'], 'usd_inr_source': fx['source'],
+    from datetime import datetime, timezone
+    from app.domains.fx_rates.cost_read import read_cost_fx
+    from app.domains.fx_rates.service import USD_INR_STALE_AFTER
+    now = datetime.now(timezone.utc)
+    fx = (await read_cost_fx(db, current_user.id, now=now))['fx'] if us_allowed else {
+        'pair': 'USD/INR', 'value': None, 'source': None, 'as_of': None,
+        'age_seconds': None, 'stale_after_seconds': int(USD_INR_STALE_AFTER.total_seconds()), 'status': 'unavailable'}
+    return {'generated_at': now.isoformat(), 'fx': fx,
+            'usd_inr_rate': fx['value'] if fx['status']=='valid' else None,
+            'usd_inr_status': fx['status'], 'usd_inr_source': fx['source'],
+            'usd_inr_as_of': fx['as_of'], 'usd_inr_age_seconds': fx['age_seconds'],
             'zerodha': {'connected': True, 'snapshot': india} if india_allowed else None,
             'indmoney_us': us,
             'sections': {name: {'status': 'ok', 'duration_ms': 0, 'error': None}

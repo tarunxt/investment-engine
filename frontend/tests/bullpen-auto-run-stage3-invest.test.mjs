@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
+import {harness,nodes,text} from "./helpers/workspace-hooks.mjs";
 
 test("Stage 3 working status exposes a retry that reuses Stage 2 output for both steps", () => {
   const source = readFileSync(
@@ -1330,10 +1331,6 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /CheckCircle2/);
   assert.match(source, /Open Stage 3 \$\{counter\.label\.toLowerCase\(\)\} details/);
   assert.match(source, /Explain Stage 2 to Stage 3 planned strategy/);
-  assert.match(source, /formatOddsPercent\(candidate\.llmYesOdds\)/);
-  assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
-  assert.match(source, /formatReturnsPerDay\(candidate\.returnsPerDay\)/);
-  assert.match(source, /formatInvestAmount\(candidate\.amountToBeInvested\)/);
   assert.match(source, />LLM Yes Odds<\/th>/);
   assert.match(source, />LLM No Odds<\/th>/);
   assert.match(source, />Returns\/day<\/th>/);
@@ -1475,4 +1472,58 @@ test("Stage 3 Planned queue consumes backend-persisted Stage 2 actionables", () 
   assert.match(source, /accepted_stage2_actionable_exit_market_id_order/);
   assert.match(source, /accepted_stage2_actionable_buy_market_id_order/);
   assert.match(source, /if stage2_actionable_handoff_used:/);
+});
+
+
+test("Stage 3 handoff table delegates financial columns and preserves source rows and execution diagnostics", () => {
+  const file = new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url);
+  const source = readFileSync(file,"utf8"), ast = ts.createSourceFile("card.tsx",source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+  const fn = ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==="buildStage2TopTenEventsSummaryRows");
+  assert.ok(fn);
+  const js = ts.transpileModule(fn.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+  const buildRows = new Function(js+";return buildStage2TopTenEventsSummaryRows;")();
+  const rows = [
+    {question:{id:"planned",amountToBeInvested:2},displayDecision:{decision:"BUY_NEW",target_exposure_usd:4,order_plan:{order_size_usd:6}}},
+    {question:{id:"target",amountToBeInvested:2},displayDecision:{decision:"HOLD",target_exposure_usd:4}},
+    {question:{id:"fallback",amountToBeInvested:2},displayDecision:{decision:"EXIT",target_exposure_usd:0}},
+  ];
+  const original=structuredClone(rows), run={id:"saved",completed_at:"2026-07-16T18:45:07Z"};
+  const h=harness(file,"Stage2TopTenEventsSummaryTable",{rows,run,emptyMessage:"No exact rows",testId:"handoff"},{buildStage2TopTenEventsSummaryRows:buildRows,BullpenQuestionsTable:"SharedQuestionsTable"});
+  const table=nodes(h.tree()).find(node=>node.type==="SharedQuestionsTable");
+  assert.ok(table);
+  for(const column of ["llmYesOdds","returnsPerDay","amountToBeInvested"])assert.ok(table.props.visibleColumnIds.includes(column));
+  assert.deepEqual(table.props.rowsOverride.map(row=>row.amountToBeInvested),[6,4,2]);
+  assert.deepEqual(table.props.rowsOverride.map(row=>row.id),["planned","target","fallback"]);
+  assert.deepEqual(table.props.historicalDecisions,rows.map(row=>row.displayDecision));
+  assert.equal(table.props.updatedAt,run.completed_at);
+  assert.ok(table.props.extraColumns.some(column=>column.id==="stage3-status"));
+  assert.ok(table.props.extraColumns.some(column=>column.id==="order-blocker"));
+  assert.equal(table.props.showPresetFilters,false);assert.equal(table.props.persistColumnPreferences,false);
+  assert.deepEqual(rows,original);assert.equal(h.requests.length,0);h.cleanup();
+});
+
+
+test("Stage 3 shared financial cells render both recorded LLM sides, returns and amount with source-linked drilldowns", () => {
+  const source = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx", import.meta.url), "utf8");
+  const ast = ts.createSourceFile("table.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = ["formatOdds", "formatReturnsPerDay", "formatMoney", "getLlmOddsCellClass", "LlmOddsDisplay", "renderBullpenTableCell"];
+  const extracted = names.map(name => {
+    const fn = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.ok(fn, name); return fn.getText(ast);
+  }).join("\n");
+  const js = ts.transpileModule(extracted, {compilerOptions:{module:ts.ModuleKind.CommonJS, jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+  const jsx = (type, props, key) => typeof type === "function" ? type(props) : ({type,props,key});
+  const render = new Function("exports", "require", "cn", "getBullpenLlmReviewState", "AlertTriangle", "BullpenReturnsPerDayValueButton", js + ";return renderBullpenTableCell;")(
+    {}, () => ({jsx,jsxs:jsx}), (...values) => values.filter(Boolean).join(" "), () => null, "warning", "returns-button",
+  );
+  const question = {id:"saved-event",question:"Saved event",llmYesOdds:87.5,llmNoOdds:12.5,returnsPerDay:3.42,amountToBeInvested:6,llmNotes:null};
+  const original = structuredClone(question), opened = [];
+  const cell = columnId => render({columnId,question,rowIndex:0,hasLlmAnalysis:true,displayDensity:"default",selectedQuestionIds:new Set(),selectionEnabled:false,onToggleQuestion:()=>assert.fail("unexpected selection"),setBreakdownQuestion:row=>opened.push(["odds",row]),setReturnsPerDayQuestion:row=>opened.push(["returns",row]),setShortlistReasonQuestion:()=>assert.fail("unexpected shortlist"),isActivePosition:false});
+  const odds = cell("llmYesOdds");
+  assert.match(text(odds), /Yes:\s*87\.5%/);assert.match(text(odds), /No:\s*12\.5%/);
+  nodes(odds).find(node=>node.type==="button").props.onClick();
+  const returns = cell("returnsPerDay");assert.equal(text(returns),"3.42%");
+  nodes(returns).find(node=>node.type==="returns-button").props.onOpen();
+  assert.equal(text(cell("amountToBeInvested")),"6.00");
+  assert.deepEqual(opened,[["odds",question],["returns",question]]);assert.equal(opened[0][1],question);assert.equal(opened[1][1],question);assert.deepEqual(question,original);
 });

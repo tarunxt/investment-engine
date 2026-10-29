@@ -20,6 +20,7 @@ from app.domains.runs.models import (
     RunJob,
 )
 from app.domains.runs.repository import PostgresRunRepository
+from app.domains.modules.registry import ModuleId
 from app.domains.runs.auto_rebalance_audit import LLM_STAGES, validate_execution
 from app.domains.runs.run_identity import analysis_run_identity
 from app.domains.runs.schemas import (
@@ -152,6 +153,8 @@ def _provider_uses_model_side_search(provider_name: str) -> bool:
 def _serialize_run_list_item(run) -> RunListItem:
     return RunListItem(
         id=run.id,
+        module_id=run.module_id,
+        module_version=run.module_version,
         prompt_preview=run.prompt_preview,
         prompt_id=run.prompt_id,
         status=run.status,
@@ -317,7 +320,15 @@ def _stage_response(
         ),
         failed_provider_count=len(failed_jobs),
         estimated_cost=round(sum(job.estimated_cost or 0 for job in jobs), 8),
+        **_estimated_cost_coverage(jobs),
     )
+
+
+def _estimated_cost_coverage(jobs):
+    """Coverage of saved estimates, never billing or a provider-price lookup."""
+    import math
+    known=sum(type(job.estimated_cost) in (int,float) and math.isfinite(job.estimated_cost) and job.estimated_cost>=0 for job in jobs)
+    return {'cost_coverage':'unavailable' if not jobs else 'complete' if known==len(jobs) else 'incomplete','priced_provider_count':known}
 
 
 async def _build_auto_rebalance_history(
@@ -476,6 +487,7 @@ async def _build_auto_rebalance_history(
                     workflow.completed_at if workflow else _latest_timestamp([stage.completed_at for stage in stage_responses])
                 ),
                 total_estimated_cost=round(sum(job.estimated_cost or 0 for job in all_jobs), 8),
+                **_estimated_cost_coverage(all_jobs),
                 stages=stage_responses,
             ),
             group_runs,
@@ -599,27 +611,26 @@ async def list_auto_rebalance_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    recent_sequences = set(
-        (
-            await db.execute(
-                select(AutoRebalanceWorkflow.sequence)
-                .where(
-                    AutoRebalanceWorkflow.user_id == current_user.id,
-                    AutoRebalanceWorkflow.portfolio == portfolio,
-                )
-                .order_by(
-                    AutoRebalanceWorkflow.sequence.desc(),
-                    AutoRebalanceWorkflow.updated_at.desc(),
-                )
-                .limit(limit)
-            )
-        ).scalars().all()
-    )
+    # A workflow row is not guaranteed for historical runs or standalone jobs.
+    # Bound the union of all owned sequence sources before loading nested data.
+    workflow_sequences = select(AutoRebalanceWorkflow.sequence.label('sequence')).where(
+        AutoRebalanceWorkflow.user_id == current_user.id,
+        AutoRebalanceWorkflow.portfolio == portfolio)
+    run_sequences = PostgresRunRepository(db)._owned_query(current_user.id).with_only_columns(
+        Run.auto_rebalance_sequence.label('sequence')).where(
+            Run.auto_rebalance_portfolio == portfolio,
+            Run.auto_rebalance_sequence.is_not(None))
+    job_sequences = select(Job.auto_rebalance_sequence.label('sequence')).where(
+        Job.user_id == current_user.id, Job.auto_rebalance_portfolio == portfolio,
+        Job.auto_rebalance_sequence.is_not(None))
+    sequence_sources = workflow_sequences.union(run_sequences, job_sequences).subquery()
+    recent_sequences = set((await db.execute(select(sequence_sources.c.sequence)
+        .order_by(sequence_sources.c.sequence.desc()).limit(limit))).scalars().all())
     history = await _build_auto_rebalance_history(
         db,
         user_id=current_user.id,
         portfolio=portfolio,
-        sequences=recent_sequences or None,
+        sequences=recent_sequences,
     )
     return AutoRebalanceHistoryListResponse(
         items=[item for item, _, _ in history[:limit]],
@@ -983,11 +994,16 @@ async def list_runs(
     limit: int = Query(20, ge=1, le=100),
     summary: bool = Query(False),
     selected_only: bool = Query(False),
+    module_id: ModuleId | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     from app.domains.modules.visibility import visible_module_ids
-    module_ids=await visible_module_ids(db,current_user.id) if selected_only is True else None
+    module_ids=await visible_module_ids(db,current_user.id) if selected_only is True or isinstance(module_id, ModuleId) else None
+    # An explicit module narrows a selected-capable read; it never grants access.
+    # Legacy null attribution remains excluded rather than inferred from prompt text.
+    if isinstance(module_id, ModuleId):
+        module_ids = [module_id.value] if module_id.value in module_ids else []
     repo = PostgresRunRepository(db)
     result = await repo.list(
         PagedQuery(page=page, limit=limit),

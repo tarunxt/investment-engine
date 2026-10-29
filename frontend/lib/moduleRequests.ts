@@ -12,6 +12,9 @@ export function moduleRequestSignal(url:string,caller?:AbortSignal|null){
   const path=parsed.pathname.replace(/^\/(backend-api|api)(?=\/)/,'');
   if(!current&&!['/auth','/me','/account','/profile','/users','/jobs','/runs','/mails','/uat2','/api-usage','/cost-drivers','/health'].some(p=>path===p||path.startsWith(p+'/')))throw new DOMException('Module policy unavailable','AbortError');
   const rule=current?.presentation.api_rules.filter(rule=>pathMatch(path,rule.path)&&Object.entries(rule.query_params??{}).every(([key,value])=>parsed.searchParams.get(key)===value)).sort((a,b)=>b.path.length-a.path.length)[0];
+  // These market-scoped optional surfaces must not inherit the broad core
+  // /uat2 fixture fallback when a manifest is missing or predates the route.
+  if(/^\/uat2\/simulation\/(?:buy-threshold|recommendation-history)\/(?:india|indmoney_us)$/.test(path)&&!rule)throw new DOMException('Market module policy unavailable','AbortError');
   // Core account/safety reads are independent. Optional rules are server-owned.
   if(rule&&!rule.module_ids.some(id=>allowedModule(current,id,rule.capability))){
     throw new DOMException('Module unavailable or disabled. Open Preferences.','AbortError');

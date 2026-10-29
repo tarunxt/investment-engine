@@ -79,6 +79,7 @@ export interface UpdatePasswordRequest {
 }
 
 export interface ProfilePreferencesResponse extends UpdateProfileRequest {
+  owner_id?: number | null;
   preferences_writable?: boolean;
 }
 
@@ -854,6 +855,8 @@ export interface AutoRebalanceStageResponse {
   completed_provider_count: number;
   failed_provider_count: number;
   estimated_cost: number;
+  cost_coverage?: 'complete'|'incomplete'|'unavailable';
+  priced_provider_count?: number;
 }
 
 export interface AutoRebalanceJobDetailResponse {
@@ -895,6 +898,8 @@ export interface AutoRebalanceHistoryItemResponse {
   updated_at: string;
   completed_at?: string | null;
   total_estimated_cost: number;
+  cost_coverage?: 'complete'|'incomplete'|'unavailable';
+  priced_provider_count?: number;
   stages: AutoRebalanceStageResponse[];
 }
 
@@ -974,6 +979,8 @@ export interface RunListJobLinkResponse {
 
 export interface RunResponse {
   id: number;
+  module_id?: string | null;
+  module_version?: number | null;
   prompt: string;
   prompt_id: number | null;
   status: string;
@@ -1248,6 +1255,14 @@ export interface DashboardSectionMeta {
 export interface DashboardHistoryPoint {
   captured_at: string;
   value: number;
+  metric?: 'accepted_us_portfolio_value_v1' | null;
+  currency?: 'USD' | null;
+  owner_id?: number | null;
+  snapshot_id?: number | null;
+  supersedes_id?: number | null;
+  import_source_hash?: string | null;
+  recorded_value?: number | null;
+  recorded_value_known?: boolean;
 }
 
 export interface DashboardHolding {

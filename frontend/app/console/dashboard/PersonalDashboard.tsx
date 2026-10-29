@@ -8,6 +8,7 @@ import {moduleScopeKey,allowedModule,type ModuleCollection} from '@/lib/modulePo
 import {acceptInitialDashboard,scopeDashboardSummary,type InitialDashboardScope} from '@/lib/dashboardScope';
 import {nextWorkspaceTask,type WorkspaceRun,type WorkspaceOrder} from '@/lib/workspaceTask';
 import type {DashboardSummaryResponse} from '@/types/api';
+import {ConceptFJournalDashboard} from '@/components/workspace/ConceptFJournalDashboard';
 type Props={initialSummary:DashboardSummaryResponse|null;initialScope:InitialDashboardScope|null};
 export function PersonalDashboard(props:Props){const {data:session,status}=useSession();const {manifest}=useModules();return status==='authenticated'&&session?.user?.id&&manifest?.owner_id===Number(session.user.id)?<OwnedDashboard key={`${session.user.id}:${session.generation}:${moduleScopeKey(manifest)}`} {...props} manifest={manifest} owner={Number(session.user.id)} generation={session.generation}/>:<p role="status">Verifying your workspace…</p>;}
 function OwnedDashboard({initialSummary,initialScope,manifest,owner,generation}:Props&{manifest:ModuleCollection;owner:number;generation:string|undefined}){
@@ -23,6 +24,7 @@ function OwnedDashboard({initialSummary,initialScope,manifest,owner,generation}:
  },[owner,manifest,revision]);
  const money=(value:number|null|undefined,currency:string)=>masked?'••••':typeof value==='number'&&Number.isFinite(value)?new Intl.NumberFormat(undefined,{style:'currency',currency}).format(value):'Not recorded';
  const selected=manifest.modules.filter(m=>m.selection.enabled);const attention=orders.filter(o=>o.unresolved||o.state==='awaiting_approval').slice(0,3);
+ if(process.env.NEXT_PUBLIC_UAT2==='true')return <ConceptFJournalDashboard owner={owner} manifest={manifest} summary={summary} orders={orders} runs={runs} known={known} error={error} busy={busy} masked={masked} onMask={()=>setMasked(v=>!v)} onRefresh={()=>{setBusy(true);setKnown(false);setRevision(v=>v+1);}}/>;
  return <section className="space-y-6"><header className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-3xl font-semibold">Your workspace</h1><p>{process.env.NEXT_PUBLIC_UAT2==='true'?'UAT2 simulation · fake data and orders only':'Private account workspace'} · Selected modules only</p></div><div className="flex flex-wrap gap-3"><button className="min-h-11 rounded border px-3" onClick={()=>setMasked(v=>!v)}>{masked?'Show balances':'Hide balances'}</button><button className="min-h-11 rounded border px-3" disabled={busy} onClick={()=>{setBusy(true);setKnown(false);setRevision(v=>v+1);}}>Refresh status</button></div></header>
  {summary?.sections?.portfolio_history?.status==='unavailable'&&<p className="text-sm">Chart history was not supplied. No empty historical portfolio is inferred.</p>}
  <p className="text-sm text-muted-foreground">Refresh reads recorded status. It never starts research or submits orders. Broker positions require separate reconciliation.</p>

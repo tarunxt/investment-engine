@@ -1,5 +1,5 @@
 'use client';
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {useSession} from 'next-auth/react';
 import {ModulesContext} from './ModuleContext';
 import {usePathname} from 'next/navigation';
@@ -8,7 +8,7 @@ import {apiService} from '@/services/api';
 import {validCollection,type ModuleCollection} from '@/lib/modulePolicy';
 import {installModulePolicy,clearModulePolicy} from '@/lib/moduleRequests';
 import {closePrivateWebSockets} from '@/services/privateSocketRegistry';
-import {purgeBrowserPrivateDashboardCaches} from '@/lib/privateDashboardCache';
+import {purgeBrowserPrivateModuleCaches} from '@/lib/privateDashboardCache';
 
 type Scope={identity:string|null;epoch:number;floor:number};
 type Mutation={scope:Scope;epoch:number};
@@ -16,13 +16,13 @@ export function ModuleProvider({children}:{children:React.ReactNode}){
  const {user}=useAuth();const {data:session,status}=useSession();const path=usePathname();
  const owner=status==='unauthenticated'?null:user?.id??null;
  const identity=owner===null?null:`${owner}:${session?.generation??'bootstrap'}`;
- const scope=useRef<Scope>({identity,epoch:0,floor:0});
- // A distinct lifetime also rejects A -> B -> A and same-owner new-session callbacks.
- if(scope.current.identity!==identity)scope.current={identity,epoch:0,floor:0};
- const boundary=scope.current;
+ // Each committed identity gets a distinct lifetime, including A -> B -> A.
+ // Render only derives the boundary; refs are installed during layout commit.
+ const boundary=useMemo<Scope>(()=>({identity,epoch:0,floor:0}),[identity]);
+ const scope=useRef<Scope>(boundary);
  const [state,setState]=useState<{scope:Scope|null;manifest:ModuleCollection|null;loading:boolean;error:string|null}>({scope:null,manifest:null,loading:true,error:null});
- const request=useRef<AbortController|null>(null);const sequence=useRef(0);const liveOwner=useRef(owner);liveOwner.current=owner;
- const current=state.scope===boundary?state.manifest:null;const latest=useRef(current);latest.current=current;
+ const request=useRef<AbortController|null>(null);const sequence=useRef(0);const liveOwner=useRef(owner);
+ const current=state.scope===boundary?state.manifest:null;const latest=useRef<ModuleCollection|null>(null);
  const channel=useRef<BroadcastChannel|null>(null);const saving=useRef<Mutation|null>(null);
  const replace=useCallback((data:ModuleCollection|null,error:string|null=null)=>{
    const active=scope.current;
@@ -31,7 +31,7 @@ export function ModuleProvider({children}:{children:React.ReactNode}){
    }
    if(data)active.floor=Math.max(active.floor,data.version);
    const changed=!data||JSON.stringify(latest.current)!==JSON.stringify(data);
-   if(changed){installModulePolicy(data);closePrivateWebSockets();purgeBrowserPrivateDashboardCaches();}
+   if(changed){installModulePolicy(data);closePrivateWebSockets();purgeBrowserPrivateModuleCaches(liveOwner.current);}
    latest.current=data;setState({scope:active,manifest:data,loading:false,error});
  },[]);
  const refresh=useCallback(async()=>{
@@ -47,8 +47,9 @@ export function ModuleProvider({children}:{children:React.ReactNode}){
    replace(data);
   }catch(e){if(currentRequest())replace(null,e instanceof Error?e.message:'Module preferences unavailable');}
  },[replace]);
- useEffect(()=>{
-  saving.current=null;clearModulePolicy();setState({scope:boundary,manifest:null,loading:true,error:null});void refresh();
+ useLayoutEffect(()=>{
+  scope.current=boundary;liveOwner.current=owner;latest.current=null;
+  saving.current=null;clearModulePolicy();void refresh();
   const focus=()=>{void refresh();};const timer=window.setInterval(focus,15000);window.addEventListener('focus',focus);
   const bus=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel('credx-module-invalidations');channel.current=bus;
   if(bus)bus.onmessage=(event)=>{
@@ -59,8 +60,8 @@ export function ModuleProvider({children}:{children:React.ReactNode}){
    boundary.epoch++;sequence.current++;request.current?.abort();saving.current=null;
    replace(null);void refresh();
   };
-  return()=>{boundary.epoch++;request.current?.abort();sequence.current++;saving.current=null;clearModulePolicy();window.clearInterval(timer);window.removeEventListener('focus',focus);bus?.close();};
- },[boundary,refresh,replace]);
+  return()=>{boundary.epoch++;request.current?.abort();saving.current=null;clearModulePolicy();window.clearInterval(timer);window.removeEventListener('focus',focus);bus?.close();};
+ },[boundary,owner,refresh,replace]);
  useEffect(()=>{void refresh();},[path,refresh]);
  const save=useCallback(async(id:string,enabled:boolean)=>{
   const before=latest.current;const identity=liveOwner.current;const origin=scope.current;

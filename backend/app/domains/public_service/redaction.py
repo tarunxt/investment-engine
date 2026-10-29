@@ -51,8 +51,8 @@ def _clean(value,depth):
     return _REDACTED
 
 
-def _text(value,depth):
-    if len(value)>_MAX_CHARS or depth>_MAX_DEPTH:return _REDACTED
+def _text(value,depth,max_chars=_MAX_CHARS):
+    if len(value)>max_chars or depth>_MAX_DEPTH:return _REDACTED
     stripped=value.strip()
     if stripped.startswith(('{','[','"',"'")):
         for parse in (json.loads,ast.literal_eval):
@@ -89,6 +89,20 @@ def redact(value):
         return json.dumps(_clean(value,0),ensure_ascii=True,allow_nan=False)
     except (ValueError,TypeError,RecursionError,OverflowError):
         return _REDACTED
+
+
+def redact_source_text(value):
+    """Same conservative rules for a bounded owned-source projection, not logs.
+
+    Existing log/diagnostic calls retain their 65,536-character bound. This
+    separate read-only source contract permits at most 256,000 UTF-8 bytes.
+    It is not a detector for arbitrary unlabeled sensitive data.
+    """
+    if not isinstance(value,str):return None
+    try:
+        if len(value.encode('utf-8'))>256000:return None
+    except UnicodeError:return None
+    return _text(value,0,256000)
 
 
 class RedactingFormatter(logging.Formatter):

@@ -864,3 +864,19 @@ export function ThreatsReportTable({
     </Card>
   );
 }
+
+/** Existing source-only sorting rules, without injected current holdings/quotes.
+ * Stable original indices bind row drilldowns after sorting and filtering. */
+export function sortSavedThreatRows(section: ZerodhaThreatTableSection, requested: SortState = null) {
+  const active = requested && section.columns.includes(requested.column)
+    ? requested : resolveDefaultSortState(section.key, section.columns, section.rows);
+  const entries = section.rows.map((cells, sourceIndex) => ({ cells, sourceIndex }));
+  if (active) entries.sort((left, right) => {
+    const primary = compareRowsByColumn(left.cells, right.cells, section.rows, active);
+    const fallback = section.key === 'urgent_actionables'
+      ? compareRowsByDefault(left.cells, right.cells)
+      : compareRowsByFallback(left.cells, right.cells, section.columns);
+    return primary || fallback || left.sourceIndex - right.sourceIndex;
+  });
+  return { entries, sort: active };
+}

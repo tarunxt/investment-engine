@@ -258,6 +258,16 @@ function getCapturedPortfolioAnalysisReadScope(method: string, path: string) {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
+/** Fixed read-only workspace scopes: unavailable optional reads must not pause
+ * profile/module recovery. No new destinations, retries, deadlines or authority. */
+function getCoreWorkspaceReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  return ["auth/me", "auth/profile", "me/modules", "me/connections",
+    "dashboard/summary", "uat2/simulation/journal-portfolio",
+    "order-intents/reviews", "order-intents/status"].includes(path)
+    ? `workspace/${path}` : undefined;
+}
+
 function getResearchHistoryReadScope(method: string, path: string) {
   if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
   // Full stored run details and model cost estimates read historical model
@@ -505,7 +515,8 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       : SAFE_FALLBACK_METHODS.has(request.method) && isZerodhaSyncRequest(request.method, path)
       ? "zerodha/sync"
       : getCapturedPortfolioAnalysisReadScope(request.method, path)
-        ?? getResearchHistoryReadScope(request.method, path);
+        ?? getResearchHistoryReadScope(request.method, path)
+        ?? getCoreWorkspaceReadScope(request.method, path);
   const resolvedCandidates = resolveBackendApiCandidates(request).map(
     (candidate) => ({ ...candidate, circuitScope: readCircuitScope }),
   );

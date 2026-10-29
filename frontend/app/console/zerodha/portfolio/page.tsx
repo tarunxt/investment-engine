@@ -20,6 +20,7 @@ import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink
 import { Button } from '@/components/ui/button';
 import {useModules} from '@/providers/ModuleContext';
 import {allowedModule} from '@/lib/modulePolicy';
+import {ConceptFPortfolio} from '@/components/workspace/ConceptFPortfolio';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -489,7 +490,9 @@ function ManualTokenForm({ onConnected }: { onConnected: () => void }) {
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-export default function ZerodhaPage() {
+export default function ZerodhaPage(){return process.env.NEXT_PUBLIC_UAT2==='true'?<ConceptFPortfolio/>:<LegacyZerodhaPortfolio/>;}
+
+function LegacyZerodhaPortfolio() {
   const {manifest}=useModules();const canExecute=allowedModule(manifest,'zerodha_rebalance','execute');
   const [status, setStatus] = useState<ZerodhaStatusResponse | null>(null);
   const [loginUrl, setLoginUrl] = useState('');

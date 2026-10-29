@@ -1,16 +1,10 @@
 "use client";
-
-import { useParams } from "next/navigation";
-
-import {
-  AutoRebalanceHistoryDetailClient,
-  type AutoRebalanceHistoryPortfolio,
-} from "../../_components/AutoRebalanceHistoryClient";
-
-export default function AutoRebalanceRunDetailPage() {
-  const params = useParams<{ portfolio: string; sequence: string }>();
-  const portfolio: AutoRebalanceHistoryPortfolio =
-    params.portfolio === "indmoneyUs" ? "indmoneyUs" : "zerodha";
-  const sequence = Number.parseInt(params.sequence, 10);
-  return <AutoRebalanceHistoryDetailClient portfolio={portfolio} sequence={Number.isFinite(sequence) ? sequence : 0} />;
+import {useParams} from 'next/navigation';
+import {admittedHistoryRoute} from '@/lib/historyRoute';
+import {AutoRebalanceHistoryDetailClient} from '../../_components/AutoRebalanceHistoryClient';
+export default function AutoRebalanceRunDetailPage(){
+ const params=useParams<{portfolio:string;sequence:string}>();
+ const route=admittedHistoryRoute(params.portfolio,params.sequence);
+ if(!route)return <p role="alert">Exact canonical history route required. No alternative market or record requested.</p>;
+ return <AutoRebalanceHistoryDetailClient key={`${route.portfolio}:${route.sequence}`} portfolio={route.portfolio} sequence={route.sequence}/>;
 }

@@ -1,4 +1,5 @@
 'use client';
+import {ConceptFEvents} from '@/components/workspace/ConceptFEvents';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -110,7 +111,8 @@ function isJobActive(status: string | null | undefined) {
   return status === 'pending' || status === 'processing' || status === 'scheduled';
 }
 
-export default function IndMoneyUsEventsPage() {
+export default function IndMoneyUsEventsPage() {return process.env.NEXT_PUBLIC_UAT2==='true'?<ConceptFEvents/>:<LegacyEventsPage/>;}
+function LegacyEventsPage() {
   const [overview, setOverview] = useState<IndMoneyUsPortfolioOverviewResponse | null>(null);
   const [analysis, setAnalysis] = useState<IndMoneyUsEventsAnalysis | null>(null);
   const [loadingPage, setLoadingPage] = useState(true);

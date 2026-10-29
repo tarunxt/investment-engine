@@ -200,6 +200,8 @@ class AutoRebalanceStageResponse(BaseModel):
     completed_provider_count: int = 0
     failed_provider_count: int = 0
     estimated_cost: float = 0
+    cost_coverage: Literal["complete", "incomplete", "unavailable"] = "unavailable"
+    priced_provider_count: int = 0
 
 
 class AutoRebalanceJobDetailResponse(BaseModel):
@@ -243,6 +245,8 @@ class AutoRebalanceHistoryItemResponse(BaseModel):
     updated_at: datetime
     completed_at: datetime | None = None
     total_estimated_cost: float = 0
+    cost_coverage: Literal["complete", "incomplete", "unavailable"] = "unavailable"
+    priced_provider_count: int = 0
     stages: list[AutoRebalanceStageResponse] = Field(default_factory=list)
 
 
@@ -414,6 +418,9 @@ class RunJobResponse(BaseModel):
 
 class RunResponse(BaseModel):
     id: int
+    # Recorded server-derived attribution only; legacy nulls remain unknown.
+    module_id: Optional[str] = None
+    module_version: Optional[int] = None
     prompt: str
     prompt_id: Optional[int] = None
     status: JobStatus
@@ -475,6 +482,8 @@ class RunListJobLinkResponse(BaseModel):
 
 class RunListItem(BaseModel):
     id: int
+    module_id: Optional[str] = None
+    module_version: Optional[int] = None
     prompt_preview: str
     prompt_id: Optional[int] = None
     status: JobStatus

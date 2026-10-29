@@ -191,3 +191,5 @@ test('historical reconstruction ignores today holdings and scans, retaining capt
     assert.equal(reconstructed[0].detail.technicalScanSourceRunId, null, 'old run metadata cannot admit a future or undated job output');
   }
 });
+
+test('recorded rationale diagnostic uses the existing -3..3 parser without changing averages or admitting malformed values',()=>{for(const score of ['-3','0','3'])assert.deepEqual(helpers.inspectRecordedRationaleScore(score),{state:'accepted',score:Number(score)});assert.deepEqual(helpers.inspectRecordedRationaleScore('200'),{state:'out-of-range',score:200,min:-3,max:3});for(const text of ['', 'Unavailable','1e0','3abc'])assert.equal(helpers.inspectRecordedRationaleScore(text).state,'unavailable');const run=runWithRows([modelRow(0,{'Score Rationale Cruxx':'200'})]);const stock=helpers.buildConsensusRows([run],'india')[0];assert.ok(stock);assert.equal(stock.rows[0].cells['Score Rationale Cruxx'],'200');assert.equal(helpers.buildScoreMatrixDetail(stock).detailedRationaleRows.find(row=>row.id==='cruxx').score,null,'existing average continues to exclude the rejected source');});

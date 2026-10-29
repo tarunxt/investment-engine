@@ -84,3 +84,28 @@ def test_hosted_composition_requires_journal_and_missing_key_cannot_acquire(link
     first = composition.acquire(e.db, 1, key='source-journal-key'); e.db.commit()
     assert first['snapshot_id'] is None and first['source_receipt_id']
     assert composition.acquire(e.db, 1, key='source-journal-key') == first
+
+def test_prior_source_without_price_study_remains_byte_identical_and_is_not_backfilled(linked_env):
+    from copy import deepcopy
+    e=linked_env;scope,composition=setup(e)
+    acquire(e.db,1,scope=scope,authorize=composition.authorize,key='legacy-source-study-compat',now=e.now);e.db.commit()
+    row=e.db.scalar(select(OutboxMessage).where(OutboxMessage.topic==TOPIC))
+    # Disposable fixture reconstructs the exact prior source format; no repair API.
+    legacy=deepcopy(row.payload['source']);legacy.pop('price_history')
+    legacy['content_hash']=digest({key:value for key,value in legacy.items() if key!='content_hash'})
+    row.payload={**deepcopy(row.payload),'source':legacy,'source_hash':digest(legacy)};e.db.commit()
+    before=deepcopy(row.payload)
+    assert latest(e.db,1,scope=scope,now=e.now)==legacy
+    assert row.payload==before and 'price_history' not in row.payload['source']
+
+
+def test_rehashed_tampered_study_cannot_become_an_accepted_source_claim(linked_env):
+    from copy import deepcopy
+    e=linked_env;scope,composition=setup(e)
+    acquire(e.db,1,scope=scope,authorize=composition.authorize,key='tampered-source-study',now=e.now);e.db.commit()
+    row=e.db.scalar(select(OutboxMessage).where(OutboxMessage.topic==TOPIC))
+    altered=deepcopy(row.payload['source']);altered['price_history']['study']['rsi_14']='99.00'
+    history=altered['price_history'];history['history_hash']=digest({key:value for key,value in history.items() if key!='history_hash'})
+    altered['content_hash']=digest({key:value for key,value in altered.items() if key!='content_hash'})
+    row.payload={**deepcopy(row.payload),'source':altered,'source_hash':digest(altered)};e.db.commit()
+    with pytest.raises(WorkflowDenied):latest(e.db,1,scope=scope,now=e.now)

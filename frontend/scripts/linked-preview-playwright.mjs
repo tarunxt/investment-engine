@@ -126,7 +126,7 @@ async function analyze(page,base,owner){
   await shot(page,`owner-${owner}-research-options-${width}px`);
  }
  const consent=page.getByRole('checkbox',{name:/I reviewed this exact source, candidate coverage, constraints and usage/});
- await consent.check();await until(()=>start.isEnabled());
+ await consent.check();await page.getByRole('checkbox',{name:/I confirm this is simulation-only research/}).check();await until(()=>start.isEnabled());
  assert.equal(count(),before,'Source acquisition and setup consent must not start research');
  const posted=page.waitForRequest(r=>r.method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows');
  await start.click();const body=(await posted).postDataJSON();
@@ -217,7 +217,7 @@ try{
  await a.page.goto(base+'/console/profile/activity');await a.page.getByRole('article',{name:'Order '+first.row.id}).waitFor();assert.equal(venueCount(),1);
  receipt.checks.push('cancelled_disable_preserves_selection_actual_disable_preserves_order_history');save();
  await a.page.goto(base+'/console/profile/privacy');
- await a.page.getByRole('heading',{name:'Your privacy requests',exact:true}).waitFor();
+ await a.page.getByRole('heading',{name:'Request history',exact:true}).waitFor();
  await a.page.getByText('No privacy requests were returned in these account records.',{exact:true}).waitFor();
  await a.page.getByRole('button',{name:'Download partial account snapshot',exact:true}).click();
  await a.page.getByText('Account download is unavailable because its runtime inventory, storage or integrity could not be verified.',{exact:false}).waitFor();

@@ -1,8 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ElementType } from 'react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter } from 'next/navigation';
+import {useSession} from 'next-auth/react';
+import {useWorkspaceDisplay} from '@/components/workspace/WorkspaceDisplay';
+import {ConceptFSavedText} from '@/components/workspace/ConceptFSavedText';
+import {recordedTokenCount} from '@/lib/recordedTokenDisplay';
+import {admitRecordedRun,recordedRunUsage} from '@/lib/recordedRun';
+import {safeResearchData} from '@/lib/conceptFResearch';
 import {
   AlertCircle,
   ArrowLeft,
@@ -129,7 +135,13 @@ export default function RunDetailPage() {
   const pathname = usePathname();
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const runId = Number(idParam);
-  const hasValidRunId = Number.isInteger(runId) && runId > 0;
+  const uat2=process.env.NEXT_PUBLIC_UAT2==='true';
+  const {data:session,status:sessionStatus}=useSession();const display=useWorkspaceDisplay(),masked=display?.value.masked??true;
+  const scope=uat2?`${sessionStatus}:${session?.user?.id}:${session?.generation}:${idParam}`:'legacy';
+  const mayRead=!uat2||(sessionStatus==='authenticated'&&Boolean(session?.user?.id));
+  const activeScope=useRef<string|null>(null),readController=useRef<AbortController|null>(null);
+  const [readScope,setReadScope]=useState('');
+  const hasValidRunId = uat2?/^[1-9][0-9]{0,12}$/.test(String(idParam)):Number.isInteger(runId) && runId > 0;
   const [run, setRun] = useState<RunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +153,16 @@ export default function RunDetailPage() {
   const wsClientRef = useRef<WSClient | null>(null);
   const lastHashScrollRef = useRef<string | null>(null);
 
+  useLayoutEffect(() => {
+    if (!uat2) return;
+    activeScope.current = scope;
+    return () => {
+      activeScope.current = null;
+      generationRef.current += 1;
+      readController.current?.abort();
+    };
+  }, [scope, uat2]);
+
   const loadRun = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
       if (!hasValidRunId) {
@@ -149,12 +171,15 @@ export default function RunDetailPage() {
         return;
       }
 
-      const gen = ++generationRef.current;
-      if (!silent) setLoading(true);
+      if(uat2&&scope!==activeScope.current)return;
+      const gen = ++generationRef.current,controller=uat2?new AbortController():null;
+      if(uat2){readController.current?.abort();readController.current=controller;setRun(null);setError(null);}
+      if (!silent||uat2) setLoading(true);
       try {
-        const data = await apiService.getRun(runId);
-        if (gen !== generationRef.current) return;
-        setRun(data);
+        const raw = uat2?await apiService.get<RunResponse>(URLs.runs.get(runId),{signal:controller!.signal,cache:'no-store',timeoutMs:8000}):await apiService.getRun(runId);
+        if (gen !== generationRef.current||uat2&&scope!==activeScope.current) return;
+        const data=uat2?admitRecordedRun(raw,runId):raw;
+        setRun(data);setReadScope(scope);
         setError(null);
 
         const canonicalPath = getRunDetailPathFromPrompt(data.id, data.prompt);
@@ -164,19 +189,20 @@ export default function RunDetailPage() {
         }
       } catch (err) {
         if (gen !== generationRef.current) return;
-        setError(normalizeError(err));
+        if(uat2&&scope!==activeScope.current)return;setError(uat2?'Requested saved run could not be verified. No other run or successful empty outcome is inferred.':normalizeError(err));setReadScope(scope);
       } finally {
         if (gen === generationRef.current && !silent) setLoading(false);
       }
     },
-    [hasValidRunId, pathname, router, runId],
+    [hasValidRunId, pathname, router, runId, scope, uat2],
   );
 
   useEffect(() => {
-    if (!hasValidRunId) return;
+    if (!hasValidRunId || !mayRead) return;
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadRun();
+    if(uat2)return()=>{generationRef.current++;readController.current?.abort();};
     apiService
       .getApiUsageSummary()
       .then((summary) => {
@@ -234,7 +260,7 @@ export default function RunDetailPage() {
       wsClientRef.current?.close();
       wsClientRef.current = null;
     };
-  }, [hasValidRunId, loadRun, runId]);
+  }, [hasValidRunId, loadRun, runId, mayRead, uat2]);
 
   useEffect(() => {
     if (loading || !run || typeof window === 'undefined') return;
@@ -248,7 +274,7 @@ export default function RunDetailPage() {
 
   if (!hasValidRunId) {
     return (
-      <div className="mx-auto flex flex-col gap-6">
+      <div data-uat2-recorded-run={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
         <button
           onClick={() => router.back()}
           className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900"
@@ -264,9 +290,9 @@ export default function RunDetailPage() {
     );
   }
 
-  if (loading) {
+  if (loading||uat2&&readScope!==scope) {
     return (
-      <div className="mx-auto flex flex-col gap-6">
+      <div data-uat2-recorded-run={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
         <div className="flex items-center gap-3 text-sm text-gray-500">
           <Loader2 className="size-4 animate-spin" />
           Loading run…
@@ -277,7 +303,7 @@ export default function RunDetailPage() {
 
   if (error || !run) {
     return (
-      <div className="mx-auto flex flex-col gap-6">
+      <div data-uat2-recorded-run={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
         <button
           onClick={() => router.back()}
           className="inline-flex items-center gap-1.5 text-sm text-gray-600 hover:text-gray-900"
@@ -303,12 +329,13 @@ export default function RunDetailPage() {
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
   const missingCostCount = runJobs.length - knownCostJobs.length;
   const hasAnyKnownCost = knownCostJobs.length > 0;
-  const formatCostWithInr = (value?: number | null) => formatCostInr(value, usdInrRate);
+  const usage=uat2?recordedRunUsage(run):null;
+  const formatCostWithInr = (value?: number | null) => uat2?typeof value==='number'&&Number.isFinite(value)&&value>=0?(masked?'USD •••':'USD '+String(value)):'Not captured':formatCostInr(value, usdInrRate);
   const totalTokensIn = runJobs.reduce((sum, rj) => sum + (rj.job.tokens_in ?? 0), 0);
   const totalTokensOut = runJobs.reduce((sum, rj) => sum + (rj.job.tokens_out ?? 0), 0);
 
   return (
-    <div className="mx-auto flex flex-col gap-6">
+    <div data-uat2-recorded-run={uat2?"true":undefined} className="mx-auto flex flex-col gap-6">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -344,7 +371,9 @@ export default function RunDetailPage() {
         </Button>
       </div>
 
-      {isActive && (
+      {uat2&&<p role="status" className="rounded border p-3 text-sm">Saved run record only. Refresh reads current recorded state; this view does not subscribe to a live stream, query platform billing, start providers or authorize orders. Recorded estimates remain USD; no verified INR conversion or settled bill is inferred.</p>}
+      {uat2&&usage?.duplicate&&<p role="alert">Repeated saved job references make complete usage totals ambiguous. No duplicated cost or token count is inferred.</p>}
+      {isActive && !uat2 && (
         <div className="flex items-center gap-2 border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-medium text-blue-700">
           <span
             className={cn(
@@ -362,16 +391,16 @@ export default function RunDetailPage() {
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">Stage</div>
           <div className="mt-2 font-medium text-gray-950">S{run.current_stage}</div>
           <div className="mt-0.5 text-xs text-gray-500">
-            {runJobs.length} model{runJobs.length !== 1 ? 's' : ''}
+            {runJobs.length} {uat2?'recorded job link':'model'}{runJobs.length !== 1 ? 's' : ''}
           </div>
         </div>
         <div className="border border-gray-200 bg-white px-4 py-4 shadow-sm">
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-500">Tokens</div>
           <div className="mt-2 font-medium text-gray-950">
-            {formatTokens(totalTokensIn + totalTokensOut)}
+            {uat2?usage?.tokensTotal??'Not captured':formatTokens(totalTokensIn + totalTokensOut)}
           </div>
           <div className="mt-0.5 text-xs text-gray-500">
-            {formatTokens(totalTokensIn)} in / {formatTokens(totalTokensOut)} out
+            {uat2?usage?.tokensIn??'Unknown':formatTokens(totalTokensIn)} in / {uat2?usage?.tokensOut??'Unknown':formatTokens(totalTokensOut)} out
           </div>
         </div>
         <div className="border border-gray-200 bg-white px-4 py-4 shadow-sm">
@@ -379,14 +408,14 @@ export default function RunDetailPage() {
             Est. Cost
           </div>
           <div className="mt-2 font-medium text-gray-950">
-            {missingCostCount > 0
+            {uat2?usage?.subtotal===null?'Not captured':masked?'USD •••':'USD '+usage?.subtotal:missingCostCount > 0
               ? hasAnyKnownCost
                 ? `At least ${formatCostWithInr(totalKnownCost)}`
                 : 'Not captured'
               : formatCostWithInr(totalKnownCost)}
           </div>
           <div className="mt-0.5 text-xs text-gray-500">
-            {missingCostCount > 0
+            {uat2?usage?.incomplete?'Known estimate subtotal only; complete coverage unavailable. Not provider billing.':'Complete recorded estimate coverage; not provider billing.':missingCostCount > 0
               ? hasAnyKnownCost
                 ? `${missingCostCount} model cost${missingCostCount === 1 ? '' : 's'} not captured`
                 : `No model cost${missingCostCount === 1 ? '' : 's'} captured`
@@ -403,10 +432,8 @@ export default function RunDetailPage() {
           </span>
         </div>
         <div className="p-5">
-          <p className={`whitespace-pre-wrap text-sm leading-6 text-gray-800 ${!isExpanded ? 'line-clamp-3' : ''}`}>
-            {run.prompt}
-          </p>
-          {run.prompt?.split('\n').length > 3 && (
+          {uat2?<ConceptFSavedText value={run.prompt} label={`Run ${run.id} prompt`} masked={masked}/>:<p className={`whitespace-pre-wrap text-sm leading-6 text-gray-800 ${!isExpanded ? 'line-clamp-3' : ''}`}>{run.prompt}</p>}
+          {!uat2&&run.prompt?.split('\n').length > 3 && (
             <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="mt-3 text-sm text-blue-600 hover:text-blue-800 focus:outline-none"
@@ -420,7 +447,7 @@ export default function RunDetailPage() {
       {/* Per-model responses */}
       <div>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">
-          Stage 1 — Model Responses
+          {uat2?'Recorded model job responses':'Stage 1 — Model Responses'}
         </h2>
         <div className="grid gap-4">
           {runJobs.map((rj) => {
@@ -448,11 +475,12 @@ export default function RunDetailPage() {
                       {job.provider}
                     </span>
                     <span className="text-xs text-gray-400">{job.model}</span>
+                    {uat2&&<span className="text-xs text-muted-foreground">Recorded stage {rj.stage} · job {job.id}</span>}
                   </div>
                   <div className="flex items-center gap-3">
-                    {job.tokens_in || job.tokens_out ? (
+                    {(uat2 || job.tokens_in || job.tokens_out) ? (
                       <span className="text-xs text-gray-400">
-                        {formatTokens(job.tokens_in)}↑ {formatTokens(job.tokens_out)}↓
+                        {uat2?recordedTokenCount(job.tokens_in):formatTokens(job.tokens_in)}↑ {uat2?recordedTokenCount(job.tokens_out):formatTokens(job.tokens_out)}↓
                       </span>
                     ) : null}
                     {showJobCost ? (
@@ -501,32 +529,29 @@ export default function RunDetailPage() {
                   </div>
                 </div>
                 <div className="max-w-full p-5">
-                  <OutputConsistencyNotice metadata={job.runtime_metadata_json} />
+                  {uat2&&<details><summary className="min-h-11 cursor-pointer">Exact saved job prompt</summary><ConceptFSavedText value={job.prompt} label={`Run ${run.id} job ${job.id} prompt`} masked={masked}/></details>}
+                  {(!uat2||!masked)&&<OutputConsistencyNotice metadata={job.runtime_metadata_json} />}
                   {job.status === 'failed' && job.error_message ? (
                     <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                      <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>
+                      <>{uat2?<ConceptFSavedText value={job.error_message} label={`Job ${job.id} saved error`} masked={masked}/>:<p className="whitespace-pre-wrap leading-6">{job.error_message}</p>}</>
                     </div>
                   ) : null}
 
                   {hasResponse ? (
-                    <InvestmentRecommendationTable
-                      content={job.response ?? ''}
-                      provider={job.provider}
-                      model={job.model}
-                      runNumber={run.id}
-                      runCreatedAt={run.created_at}
-                    />
+                    <>{uat2&&masked?<p>Saved output is masked. Reveal deliberately in Profile before inspecting it.</p>:<><InvestmentRecommendationTable content={job.response ?? ''} provider={job.provider} model={job.model} runNumber={run.id} runCreatedAt={run.created_at}/>{uat2&&<details><summary className="min-h-11 cursor-pointer">Full saved job output · inert text</summary><ConceptFSavedText value={job.response} label={`Run ${run.id} job ${job.id} output`} masked={false}/></details>}</>}</>
                   ) : job.status === 'failed' && job.error_message ? null : (
                     <p className="text-sm italic text-gray-400">
-                      {jobIsActive ? 'Waiting for response…' : 'No response.'}
+                      {uat2?'No saved response supplied. No successful empty result or current provider state is inferred.':jobIsActive ? 'Waiting for response…' : 'No response.'}
                     </p>
                   )}
+                  {uat2&&<details className="mt-4"><summary className="min-h-11 cursor-pointer">Recorded job metadata · bounded and sanitized</summary>{masked?<p>Private saved fields are masked. Reveal deliberately in Profile before inspecting this metadata.</p>:<pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(safeResearchData({...job,prompt:undefined,response:undefined,error_message:undefined}),null,2)}</pre>}</details>}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+      {uat2&&<section className="space-y-4"><details><summary className="min-h-11 cursor-pointer">Saved synthesis response</summary><ConceptFSavedText value={run.synthesis_response} label={`Run ${run.id} synthesis`} masked={masked}/></details><details><summary className="min-h-11 cursor-pointer">Saved decision response</summary><ConceptFSavedText value={run.decision_response} label={`Run ${run.id} decision`} masked={masked}/></details></section>}
     </div>
   );
 }

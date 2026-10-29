@@ -32,6 +32,7 @@ def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("action", choices=["build", "start", "stop", "status"])
     parser.add_argument("--foreground", action="store_true", help="Keep owned child handles; Ctrl-C stops this preview")
+    parser.add_argument("--concept-f-ui", action="store_true", help="Render UAT2-only UI from a committed source.json archive in this disposable synthetic/network-denied preview")
     args = parser.parse_args()
     if args.action not in {"build", "start"}:
         if not STATE.exists():
@@ -107,10 +108,15 @@ def main():
                 "NEXT_PUBLIC_FRONTEND_URL": url, "NEXT_PUBLIC_DISABLE_AUTH": "false",
                 "STAGE01_ALLOWED_PORTS": f"{api_port},{ui_port}",
                 "NODE_OPTIONS": f'--require="{ROOT / "scripts/public_launch/preview_network.cjs"}"'}
+    if args.concept_f_ui:
+        frontend["NEXT_PUBLIC_UAT2"] = "true"
     if args.action == "build":
         frontend.pop("NODE_OPTIONS")
         subprocess.run([node, "node_modules/next/dist/bin/next", "build", "--webpack"],
                        cwd=ROOT / "frontend", env=frontend, check=True)
+        if args.concept_f_ui:
+            from concept_f_build_receipt import write_receipt
+            write_receipt(ROOT)
         build_ports.write_text(json.dumps({"frontend_port": ui_port, "backend_port": api_port}) + "\n")
         return
     if not (ROOT / "frontend/.next/BUILD_ID").exists():

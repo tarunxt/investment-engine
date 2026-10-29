@@ -34,7 +34,7 @@ export default function RootLayout({
           }}
         />
         {process.env.NEXT_PUBLIC_UAT2 === "true" && (
-          <aside className="border-b border-amber-400 bg-amber-50 px-4 py-1 text-xs text-amber-950">
+          <aside data-uat2-environment className="border-b border-amber-400 bg-amber-50 px-4 py-1 text-xs text-amber-950">
             <a href="/console/uat2" className="underline">UAT2 / SIMULATION</a>
             {" · Synthetic data · Build "}{process.env.NEXT_PUBLIC_UAT2_COMMIT?.slice(0, 12) || "unbuilt"}
           </aside>

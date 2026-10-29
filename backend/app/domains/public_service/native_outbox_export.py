@@ -23,6 +23,7 @@ from app.domains.order_intents.execution import venue_binding
 from app.domains.order_intents.journal_fake import TOPIC as VENUE,JournalBrokerFake
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.uat2.synthetic_connections import TOPIC as CONNECTION
+from app.uat2.snapshot_reviews import TOPIC as SNAPSHOT_REVIEW
 from app.uat2.synthetic_orders import TOPIC as BASKET,PROVENANCE
 from .monitoring import TOPIC as MONITOR
 from .monitor_dispatch import FIELDS,MonitorDispatch
@@ -30,7 +31,7 @@ from .redaction import redact
 from .sql_account import _json_value,_value,_private_value
 from .store import owner
 
-TOPICS=frozenset({SOURCE,CONNECTION,STAGE,APPROVAL,BASKET,VENUE,ARTIFACT,MONITOR})
+TOPICS=frozenset({SOURCE,SNAPSHOT_REVIEW,CONNECTION,STAGE,APPROVAL,BASKET,VENUE,ARTIFACT,MONITOR})
 MAX_ROWS=1000
 MAX_VALUE=65536
 MAX_BYTES=8*1024*1024
@@ -78,10 +79,28 @@ class NativeOutboxExport:
     def project(self,identifier,topic,p,subject):
         require(type(p) is dict)
         if topic!=VENUE:require(type(p.get('owner_id')) is int and p['owner_id']==subject)
+        if topic==SNAPSHOT_REVIEW:
+            from app.uat2.snapshot_reviews import SnapshotReviews
+            from app.domains.runs.analysis_workflows.synthetic_composition import SyntheticAnalysis
+            from app.domains.runs.analysis_workflows.runtime import policy
+            from app.domains.runs.analysis_workflows.contracts import WorkflowDenied
+            try:
+                row=SnapshotReviews(SyntheticAnalysis(scope=self.scope,policy=policy,source_storage='journal'))._load(self.db,subject,identifier)
+                require(row.payload==p)
+                self.connection(p['review']['proposed']['connection']['id'],subject)
+                if p['review']['base_receipt'] is not None:
+                    base=self.db.get(OutboxMessage,UUID(p['review']['base_receipt']))
+                    require(base is not None and base.topic==SOURCE and base.payload.get('owner_id')==subject
+                        and base.payload.get('source_hash')==p['review']['base_hash']
+                        and digest(base.payload.get('source'))==p['review']['base_hash'])
+                return {'kind':'synthetic_snapshot_review','review':p['review'],
+                    'review_digest':p['review_digest'],'accepted_receipt':p['accepted_receipt']}
+            except (WorkflowDenied,KeyError,TypeError,ValueError):
+                raise BoundaryDenied('NATIVE_ACCOUNT_EVIDENCE_BINDING_REQUIRED') from None
         if topic==SOURCE:
             require(set(p)=={'schema_version','simulation_only','owner_id','sequence','source','source_hash'})
             source=p['source'];require(type(source) is dict and type(source.get('owner_id')) is int)
-            require(set(source)=={'owner_id','portfolio','snapshot_id','source_receipt_id','captured_at','currency',
+            require(set(source)-{'price_history'}=={'owner_id','portfolio','snapshot_id','source_receipt_id','captured_at','currency',
                 'holdings','net_positions','day_positions','connection','simulation_only','content_hash'})
             conn=self.connection(source['connection']['id'],subject)
             capture=datetime.fromisoformat(source['captured_at']);require(capture.tzinfo is not None)

@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+import {harness,nodes} from './helpers/workspace-hooks.mjs';
+function compile(file){const out={};new Function('exports',ts.transpileModule(readFileSync(new URL(file,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(out);return out;}
+const {portfolioView}=compile('../lib/conceptFPortfolio.ts'),history=compile('../lib/indmoneyHistory.ts');
+const number=x=>typeof x==='number'&&Number.isFinite(x)?x:null;
+const snapshot=portfolioView({holdings:[{symbol:'GAIN',company_name:'Known Gain',quantity:1,current_value:2,total_pnl_percent:10},{symbol:'LOSS',company_name:'Known Loss',total_pnl_percent:-5},{symbol:'GAP',company_name:'Missing Return',total_pnl_percent:null}]},'indmoney_us');
+const file=new URL('../components/workspace/ConceptFPortfolioAnalytics.tsx',import.meta.url);
+test('gainers and laggards use recorded values and never treat missing return as zero',async()=>{const opened=[];const h=harness(file,'ConceptFPortfolioAnalytics',{source:snapshot,history:[],money:n=>n===null?'Unavailable':String(n),onOpen:key=>opened.push(key)},{...history,number});h.button('gainers').props.onClick();await h.flush();assert.match(h.text(),/Known Gain/);assert.doesNotMatch(h.text(),/Known Loss|Missing Return/);h.button('Open GAIN →').props.onClick();assert.equal(opened[0],snapshot.holdings[0].key);h.button('laggards').props.onClick();await h.flush();assert.match(h.text(),/Known Loss/);assert.doesNotMatch(h.text(),/Known Gain|Missing Return/);assert.equal(h.requests.length,0);});
+test('unaccepted observations make chart gaps while actual zero is retained',()=>{const rows=[0,100,20].map((value,i)=>({id:i+1,captured_at:`2026-10-${21+i}T00:00:00Z`,current_value:value,acceptance_state:i===1?'quarantined':'accepted',parser_current:true,import_provenance:{currency:'USD'}}));const h=harness(file,'ConceptFPortfolioAnalytics',{source:snapshot,history:rows,money:n=>n===null?'Unavailable':String(n),onOpen(){}},{...history,number});const paths=nodes(h.tree()).filter(n=>n.type==='path');assert.equal(paths.length,2);assert.ok(paths.every(p=>!p.props.d.includes('L')));assert.equal(nodes(h.tree()).filter(n=>n.type==='circle').length,2);assert.doesNotMatch(JSON.stringify(paths),/NaN|Infinity/);assert.match(h.text(),/Unavailable/);});

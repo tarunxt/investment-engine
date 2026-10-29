@@ -1,6 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ElementType } from 'react';
+import Link from 'next/link';
+import {useSession} from 'next-auth/react';
+import {savedJobPromptPreview} from '@/lib/savedJobPromptPreview';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -62,7 +65,14 @@ function formatTimestamp(value?: string | null) {
 
 export default function JobsPage() {
   const router = useRouter();
+  const {data:session,status:sessionStatus}=useSession();
+  const uat2=process.env.NEXT_PUBLIC_UAT2==='true';
   const searchParams = useSearchParams();
+  const routeQuery=searchParams.toString();
+  const scope=`${sessionStatus}:${session?.user?.id}:${session?.generation}:${routeQuery}`;
+  const activeScope=useRef(scope),epoch=useRef(0),controller=useRef<AbortController|null>(null),mounted=useRef(false);
+  useLayoutEffect(()=>{activeScope.current=scope;},[scope]);
+  const [resultScope,setResultScope]=useState('');
   const [jobs, setJobs] = useState<JobResponse[]>([]);
   const [total, setTotal] = useState(0);
   const [pages, setPages] = useState(1);
@@ -124,24 +134,30 @@ export default function JobsPage() {
     s = statusFilter,
     q = search,
   }: { silent?: boolean; p?: number; s?: StatusFilter; q?: string } = {}) {
-    if (!silent) setLoading(true);
+    const ticket=++epoch.current,capturedScope=scope;
+    controller.current?.abort();const abort=new AbortController();controller.current=abort;
+    if (!silent){setLoading(true);setJobs([]);}
+    if(!mounted.current||capturedScope!==activeScope.current||(uat2&&(sessionStatus!=='authenticated'||!session?.user?.id)))return;
     try {
-      const data = await apiService.getJobs({
+      const params = {
         page: p,
         limit: PAGE_SIZE,
         status: s !== 'all' ? s : undefined,
         q: q.trim() || undefined,
-      });
-      setJobs(data.items);
+      };
+      const data=await apiService.getJobs(params,abort.signal);
+      if(!mounted.current||ticket!==epoch.current||capturedScope!==activeScope.current)return;
+      if(!Array.isArray(data.items)||!Number.isSafeInteger(data.total)||data.total<0||data.page!==p||!Number.isSafeInteger(data.pages)||data.pages<0||new Set(data.items.map(job=>job.id)).size!==data.items.length||data.items.some(job=>!Number.isSafeInteger(job.id)||job.id<=0||typeof job.prompt!=='string'||typeof job.status!=='string'||typeof job.provider!=='string'||typeof job.model!=='string'))throw new Error('Exact saved job list required');
+      setResultScope(capturedScope);setJobs(data.items);
       setTotal(data.total);
       setPage(data.page);
       setPages(data.pages);
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
-      setError(normalizeError(err));
+      if(mounted.current&&ticket===epoch.current&&capturedScope===activeScope.current){setJobs([]);setResultScope(capturedScope);setError(normalizeError(err));}
     } finally {
-      if (!silent) setLoading(false);
+      if(mounted.current&&ticket===epoch.current&&capturedScope===activeScope.current&&!silent)setLoading(false);
     }
   }
 
@@ -154,6 +170,7 @@ export default function JobsPage() {
     const client = new WSClient({
       url: URLs.jobs.ws(),
       onMessage: (data) => {
+        if(!mounted.current||scope!==activeScope.current)return;
         if (data.type !== 'job.updated') return;
         const { job_id, ...patch } = data as {
           type: string;
@@ -201,33 +218,33 @@ export default function JobsPage() {
     });
     wsClientRef.current = client;
     client.connect();
-  }, []);  
+  }, [scope]);
 
-  // Initial load and setup
+  // Reads are scoped to the current identity and URL, including back/forward navigation.
+  useEffect(()=>{
+    mounted.current=true;
+    const rawPage=searchParams.get('page'),rawStatus=searchParams.get('status');
+    const nextPage=rawPage&&/^[1-9][0-9]*$/.test(rawPage)&&Number.isSafeInteger(Number(rawPage))?Number(rawPage):1;
+    const nextStatus=ALL_STATUSES.includes(rawStatus as StatusFilter)?rawStatus as StatusFilter:'all';
+    const nextSearch=searchParams.get('search')??'';
+    queueMicrotask(()=>{if(!mounted.current||scope!==activeScope.current)return;setPage(nextPage);setStatusFilter(nextStatus);setSearch(nextSearch);void loadJobs({p:nextPage,s:nextStatus,q:nextSearch});});
+    // Native UAT2 list reads do not create WebSocket tickets or notification effects.
+    if(!uat2)initWS();
+    return()=>{mounted.current=false;epoch.current++;controller.current?.abort();if(debounceRef.current)clearTimeout(debounceRef.current);wsClientRef.current?.close();wsClientRef.current=null;};
+  },[scope]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
-     
-    loadJobs({ p: page, s: statusFilter, q: search });
-    initWS();
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      wsClientRef.current?.close();
-      wsClientRef.current = null;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (uat2||typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission === 'default') {
       Notification.requestPermission().catch(() => undefined);
     }
-  }, []);
+  }, [uat2]);
 
   function handleStatusChange(s: StatusFilter) {
     setStatusFilter(s);
     setPage(1);
     updateURLParams({ status: s, page: 1 });
-    loadJobs({ p: 1, s });
+
   }
 
   function handleSearchChange(q: string) {
@@ -236,16 +253,17 @@ export default function JobsPage() {
     debounceRef.current = setTimeout(() => {
       setPage(1);
       updateURLParams({ search: q, page: 1 });
-      loadJobs({ p: 1, q });
+
     }, 300);
   }
 
   function handlePageChange(next: number) {
     setPage(next);
     updateURLParams({ page: next });
-    loadJobs({ p: next });
+
   }
 
+  const currentList=resultScope===scope;
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
 
@@ -255,7 +273,7 @@ export default function JobsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">All Jobs</h1>
           <p className="mt-1 text-sm text-gray-600">
-            {lastUpdated
+            {currentList&&lastUpdated
               ? `Last updated ${lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })}`
               : 'Loading…'}
             {wsConnected && (
@@ -278,7 +296,7 @@ export default function JobsPage() {
         </Button>
       </div>
 
-      {error && (
+      {error && resultScope===scope && (
         <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span>{error}</span>
@@ -335,7 +353,7 @@ export default function JobsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
-              {loading ? (
+              {loading||resultScope!==scope ? (
                 <tr>
                   <td colSpan={5} className="px-5 py-12 text-center text-sm text-gray-500">
                     <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
@@ -357,13 +375,12 @@ export default function JobsPage() {
                   return (
                     <tr
                       key={job.id}
-                      onClick={() => router.push(URLs.routes.console.jobDetail(job.id))}
-                      className="cursor-pointer align-top hover:bg-gray-50"
+                      className="align-top hover:bg-gray-50"
                     >
                       <td className="max-w-90 px-5 py-4">
-                        <div className="font-medium text-gray-950">#{job.id}</div>
+                        <Link className="inline-flex min-h-11 items-center font-medium text-gray-950 underline focus-visible:outline" href={URLs.routes.console.jobDetail(job.id)} prefetch={false}>Open job #{job.id}</Link>
                         <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
-                          {job.prompt}
+                          {savedJobPromptPreview(job.prompt)}
                         </div>
                       </td>
                       <td className="px-5 py-4">
@@ -405,22 +422,22 @@ export default function JobsPage() {
         {/* Footer: count + pagination */}
         <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
           <span className="text-xs text-gray-500">
-            {total === 0 ? 'No results' : `${from}–${to} of ${total} job${total !== 1 ? 's' : ''}`}
+            {!currentList?'Verifying current saved jobs…':total === 0 ? 'No results' : `${from}–${to} of ${total} job${total !== 1 ? 's' : ''}`}
           </span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => handlePageChange(page - 1)}
-              disabled={page <= 1 || loading}
+              disabled={!currentList || page <= 1 || loading}
               className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
             >
               <ChevronLeft className="size-4" />
             </button>
             <span className="min-w-16 text-center text-xs text-gray-600">
-              {page} / {pages}
+              {currentList?`${page} / ${pages}`:'—'}
             </span>
             <button
               onClick={() => handlePageChange(page + 1)}
-              disabled={page >= pages || loading}
+              disabled={!currentList || page >= pages || loading}
               className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
             >
               <ChevronRight className="size-4" />

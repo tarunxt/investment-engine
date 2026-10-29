@@ -930,6 +930,7 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
   assert.deepEqual(view.stages[0].scanCandidates[0], {
     questionId: null,
     marketId: null,
+    conditionId: null,
     question: "Will the event resolve No?",
     marketUrl: "https://polymarket.com/event/no",
     slug: "event-no",
@@ -939,7 +940,18 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
     currentNoOdds: 67.5,
     volumeUsd: 1200.5,
     liquidityUsd: 450,
+    bestBidCents: null,
+    bestAskCents: null,
+    spreadCents: null,
+    returnsPerDay: null,
     forceInclude: true,
+    forceIncludedPosition: false,
+    selected: null,
+    rules: null,
+    eventDescription: null,
+    marketContext: null,
+    resolutionSource: null,
+    preflightEvidenceBlock: null,
     scanStatus: "passed",
     filterReasons: [],
   });
@@ -1016,6 +1028,7 @@ test("Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions", 
       "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     isClaimable: false,
     classification: null,
+    returnsPerDay: null,
   });
 });
 

@@ -967,8 +967,9 @@ export function buildStageTwoEventsSummaryRows({
       ) ??
       pickLatestTimestamp(llmOutputs.map((output) => readStageTwoLlmTimestamp(output, row))) ??
       readStageTwoRowAnyTimestamp(row);
+    const recordedReturnsPerDay = readFirstNumber(row.returns_per_day);
     const persistedReturnsPerDay =
-      readFirstNumber(row.returns_per_day, getDecisionReturnsPerDay(decision)) ?? null;
+      recordedReturnsPerDay ?? readFirstNumber(getDecisionReturnsPerDay(decision));
 
     const summaryRow = createBullpenQuestionRow({
       id: fallbackId,
@@ -1075,7 +1076,11 @@ export function buildStageTwoEventsSummaryRows({
       llmBreakdown: normalizedBreakdown,
     });
 
-    const finalReturnsPerDay = summaryRow.returnsPerDay ?? persistedReturnsPerDay;
+    // The saved reviewed-row scalar uses this run's formula and units. Preserve
+    // it even when consensus reconstruction can calculate a different default.
+    // The decision approximation is not persisted evidence: keep it last.
+    const finalReturnsPerDay =
+      recordedReturnsPerDay ?? summaryRow.returnsPerDay ?? persistedReturnsPerDay;
     const finalAmountToBeInvested =
       readFirstNumber(row.amount_to_be_invested) ??
       getBullpenAmountToBeInvestedBreakdown({

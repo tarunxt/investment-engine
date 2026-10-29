@@ -1,0 +1,12 @@
+/** Read-only governed-budget observations, never provider billing or a spend grant. */
+export type PersonalUsageRecord={owner_id:number;runtime_enabled:false;day_utc:string;pricing_status:string;account:null|{spent_usd:string;reserved_usd:string;cap_usd:string};attempts:{id:string;module_id:string;status:string;notice:string;reserved_upper_usd:string;actual_usd:string|null}[]};
+function money(value:unknown):value is string{return typeof value==='string'&&value.length<=80&&/^\d+(?:\.\d+)?(?:e[+-]?\d{1,2})?$/i.test(value)&&Number.isFinite(Number(value));}
+function object(value:unknown):Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Object required');return value as Record<string,unknown>;}
+export function ownedPersonalUsage(value:unknown,owner:number):PersonalUsageRecord {
+ const r=object(value);if(r.owner_id!==owner||r.runtime_enabled!==false||typeof r.day_utc!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(r.day_utc)||!Number.isFinite(Date.parse(r.day_utc+'T00:00:00Z'))||new Date(r.day_utc+'T00:00:00Z').toISOString().slice(0,10)!==r.day_utc||typeof r.pricing_status!=='string'||!r.pricing_status||r.pricing_status.length>2000||!Array.isArray(r.attempts)||r.attempts.length>50)throw new Error('Owned bounded budget record required');
+ let account:PersonalUsageRecord['account']=null;
+ if(r.account!==null){const a=object(r.account);if(!money(a.spent_usd)||!money(a.reserved_usd)||!money(a.cap_usd))throw new Error('Explicit recorded budget amounts required');account={spent_usd:a.spent_usd,reserved_usd:a.reserved_usd,cap_usd:a.cap_usd};}
+ const attempts=r.attempts.map(value=>{const a=object(value);if(typeof a.id!=='string'||!a.id||a.id.length>128||a.owner_id!==undefined&&a.owner_id!==owner||typeof a.module_id!=='string'||!a.module_id||a.module_id.length>80||typeof a.status!=='string'||!a.status||a.status.length>80||typeof a.notice!=='string'||a.notice.length>2000||!money(a.reserved_upper_usd)||a.actual_usd!==null&&!money(a.actual_usd))throw new Error('Owned receipt shape required');return {id:a.id,module_id:a.module_id,status:a.status,notice:a.notice,reserved_upper_usd:a.reserved_upper_usd,actual_usd:a.actual_usd as string|null};});
+ if(new Set(attempts.map(a=>a.id)).size!==attempts.length)throw new Error('Ambiguous receipt identities');
+ return {owner_id:owner,runtime_enabled:false,day_utc:r.day_utc,pricing_status:r.pricing_status,account,attempts};
+}

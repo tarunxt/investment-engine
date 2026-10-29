@@ -96,3 +96,19 @@ test("cache owner changes purge global private caches before adoption", () => {
     globalThis.window = previousWindow;
   }
 });
+
+test('same-owner policy refresh retains exact inert navigation keys, while identity purge still removes them',()=>{
+ const {purgePrivateModuleDashboardCache,purgePrivateDashboardCache}=loadModule();
+ const own=['names:user:1:v1','child-order:user:1:v1','order:user:1:v2'].map(suffix=>'investment-engine:private:v1:1:investment-engine:console-sidebar-'+suffix);
+ const storage=fakeStorage([...own,'investment-engine:private:v1:2:investment-engine:console-sidebar-names:user:2:v1','investment-engine:private:v1:1:investment-engine:console-sidebar-names:user:2:v1','investment-engine:private:v1:1:financial-source-cache']);
+ assert.equal(purgePrivateModuleDashboardCache(storage,1),3);
+ assert.deepEqual(storage.keys(),own);
+ assert.equal(purgePrivateDashboardCache(storage),3);
+ assert.deepEqual(storage.keys(),[]);
+});
+
+test("pending review identity survives only same-owner module invalidation and full identity purge removes it", () => {
+ const {purgePrivateModuleDashboardCache,purgePrivateDashboardCache}=loadModule();
+ const own="investment-engine:private:v1:1:investment-engine:privacy-review-pending:v1",foreign="investment-engine:private:v1:2:investment-engine:privacy-review-pending:v1";
+ const storage=fakeStorage([own,foreign]);assert.equal(purgePrivateModuleDashboardCache(storage,1),1);assert.deepEqual(storage.keys(),[own]);assert.equal(purgePrivateDashboardCache(storage),1);assert.deepEqual(storage.keys(),[]);
+});

@@ -1,4 +1,5 @@
 'use client';
+import {ConceptFSavedThreats} from '@/components/workspace/ConceptFSavedThreats';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -166,7 +167,8 @@ function BottomLineCards({ items }: { items: ZerodhaThreatKeyValueItem[] }) {
   );
 }
 
-export default function ZerodhaThreatsPage() {
+export default function ZerodhaThreatsPage() {return process.env.NEXT_PUBLIC_UAT2==='true'?<ConceptFSavedThreats/>:<LegacyZerodhaThreatsPage/>;}
+function LegacyZerodhaThreatsPage() {
   const [status, setStatus] = useState<ZerodhaStatusResponse | null>(null);
   const [overview, setOverview] = useState<ZerodhaPortfolioOverviewResponse | null>(null);
   const [analysis, setAnalysis] = useState<ZerodhaThreatAnalysis | null>(null);

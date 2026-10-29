@@ -2,17 +2,19 @@
 
 import { useModules } from '@/providers/ModuleContext';
 import { surfaceVisible } from '@/lib/modulePolicy';
-import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+import { privateLocalStorage,isPrivateStorageEvent } from "@/lib/privateBrowserStorage";
 
 import {
     useEffect,
     useMemo,
+    useRef,
     useState,
     useSyncExternalStore,
     type FormEvent,
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
+import {createPortal} from 'react-dom';
 import {
     DndContext,
     KeyboardSensor,
@@ -237,7 +239,7 @@ function subscribeToNavigationOrder(storageKey: string, onStoreChange: () => voi
     }
 
     const handleStorage = (event: StorageEvent) => {
-        if (event.key === storageKey || event.key === null) {
+        if (event.key === storageKey || isPrivateStorageEvent(event,storageKey) || event.key === null) {
             onStoreChange();
         }
     };
@@ -277,8 +279,8 @@ function persistNavigationOrder(
         return;
     }
 
-    navigationOrderSnapshotCache.set(storageKey, { raw, value: normalized });
     privateLocalStorage.setItem(storageKey, raw);
+    navigationOrderSnapshotCache.set(storageKey, { raw, value: normalized });
     window.dispatchEvent(new CustomEvent(SIDEBAR_ORDER_UPDATED_EVENT, { detail: storageKey }));
 }
 
@@ -788,8 +790,12 @@ export function SidebarNavigation({
 }: SidebarNavigationProps) {
     const {manifest}=useModules();
     const [isReordering, setIsReordering] = useState(false);
+    const [preferenceError,setPreferenceError]=useState<string|null>(null);
+    const renameTrigger=useRef<HTMLElement|null>(null);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
+    const renaming=renameEditor!==null;
+    useEffect(()=>{if(!renaming)return;const target=renameTrigger.current;return()=>{if(target?.isConnected)target.focus();};},[renaming]);
     const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
     const defaultChildOrder = useMemo(() => createDefaultChildOrder(), []);
     const entrySectionById = useMemo(() => collectEntrySectionIds(SIDEBAR_SECTIONS), []);
@@ -914,7 +920,7 @@ export function SidebarNavigation({
     );
 
     const persistNameOverrides = (next: NavigationNameOverrides) => {
-        persistNavigationNameOverrides(namesStorageKey, next);
+        try{persistNavigationNameOverrides(namesStorageKey,next);setPreferenceError(null);return true;}catch{setPreferenceError('Navigation preferences were not saved. Browser storage may be unavailable; current saved choices remain authoritative.');return false;}
     };
 
     const openContextMenu = (
@@ -923,10 +929,11 @@ export function SidebarNavigation({
     ) => {
         event.preventDefault();
         event.stopPropagation();
+        renameTrigger.current=event.currentTarget;
         setContextMenu({
             ...target,
-            x: Math.min(event.clientX, window.innerWidth - 220),
-            y: Math.min(event.clientY, window.innerHeight - 180),
+            x: Math.max(8,Math.min(event.clientX, window.innerWidth - 220)),
+            y: Math.max(8,Math.min(event.clientY, window.innerHeight - 180)),
         });
     };
 
@@ -955,10 +962,10 @@ export function SidebarNavigation({
             return;
         }
 
-        persistNameOverrides({
+        if(!persistNameOverrides({
             ...nameOverrides,
             [getNavigationNameKey(renameEditor)]: nextName.slice(0, 48),
-        });
+        }))return;
         setRenameEditor(null);
     };
 
@@ -969,11 +976,13 @@ export function SidebarNavigation({
 
         const next = { ...nameOverrides };
         delete next[getNavigationNameKey(contextMenu)];
-        persistNameOverrides(next);
+        if(!persistNameOverrides(next))return;
         setContextMenu(null);
     };
 
     const handleDragEnd = ({ active, over }: DragEndEvent) => {
+        try {
+            setPreferenceError(null);
         if (!over || active.id === over.id) {
             return;
         }
@@ -1031,11 +1040,13 @@ export function SidebarNavigation({
             defaultOrder,
             entrySectionById,
         );
+        } catch {setPreferenceError('Navigation order was not saved. Reload before another change.');}
     };
 
     return (
         <div className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 px-3">
+                {preferenceError&&<p role="alert" className="my-3 text-xs">{preferenceError}</p>}
                 <div className="flex items-center justify-between gap-3">
                     <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                         Navigation
@@ -1045,9 +1056,11 @@ export function SidebarNavigation({
                             <button
                                 type="button"
                                 onClick={() => {
-                                    persistNavigationOrder(storageKey, cloneSidebarOrder(defaultOrder), defaultOrder, entrySectionById);
-                                    persistNavigationChildOrder(childOrderStorageKey, defaultChildOrder, defaultChildOrder);
-                                    persistNameOverrides({});
+                                    try {
+                                        persistNavigationOrder(storageKey, cloneSidebarOrder(defaultOrder), defaultOrder, entrySectionById);
+                                        persistNavigationChildOrder(childOrderStorageKey, defaultChildOrder, defaultChildOrder);
+                                        persistNameOverrides({});
+                                    } catch {setPreferenceError('Navigation reset may be partial. Reload saved choices before another change.');}
                                 }}
                                 className="text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                             >
@@ -1118,8 +1131,8 @@ export function SidebarNavigation({
                 />
             </div>
 
-            {contextMenu ? (
-                <>
+            {contextMenu ? createPortal(
+                <div data-navigation-layer data-concept-f={process.env.NEXT_PUBLIC_UAT2==='true'?'true':undefined}>
                     <button
                         type="button"
                         aria-label="Close navigation options"
@@ -1165,11 +1178,11 @@ export function SidebarNavigation({
                             Reorder this section
                         </button>
                     </div>
-                </>
+                </div>, document.body
             ) : null}
 
-            {renameEditor ? (
-                <div className="fixed inset-0 z-60 flex items-center justify-center px-4">
+            {renameEditor ? createPortal(
+                <div data-navigation-layer data-concept-f={process.env.NEXT_PUBLIC_UAT2==='true'?'true':undefined} className="fixed inset-0 z-60 flex items-center justify-center px-4">
                     <button
                         type="button"
                         aria-label="Close rename dialog"
@@ -1181,6 +1194,7 @@ export function SidebarNavigation({
                         aria-modal="true"
                         aria-labelledby="sidebar-rename-title"
                         onSubmit={saveRenamedTarget}
+                        onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setRenameEditor(null);}if(event.key==='Tab'){const controls=Array.from(event.currentTarget.querySelectorAll<HTMLInputElement|HTMLButtonElement>('input:not(:disabled),button:not(:disabled)'));const first=controls[0],last=controls.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}}}
                         className="relative w-full max-w-sm rounded-2xl border border-sidebar-border bg-sidebar p-5 text-sidebar-foreground shadow-2xl"
                     >
                         <h2 id="sidebar-rename-title" className="text-base font-semibold">
@@ -1189,6 +1203,7 @@ export function SidebarNavigation({
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
                             This changes only the label in your sidebar. The destination and route stay unchanged.
                         </p>
+                        {preferenceError&&<p role="alert" className="mt-3 text-sm">{preferenceError}</p>}
                         <label
                             htmlFor="sidebar-rename-input"
                             className="mt-4 block text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
@@ -1222,7 +1237,7 @@ export function SidebarNavigation({
                             </button>
                         </div>
                     </form>
-                </div>
+                </div>, document.body
             ) : null}
         </div>
     );

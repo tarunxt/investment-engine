@@ -74,7 +74,8 @@ class UpdateProfileRequest(BaseModel):
 
 
 class ProfilePreferencesResponse(UpdateProfileRequest):
-    """Read-only capability metadata; never accepted as a profile update."""
+    """Read-only owner/capability metadata; never accepted as a profile update."""
+    owner_id: Optional[int] = None
     preferences_writable: bool
 
 

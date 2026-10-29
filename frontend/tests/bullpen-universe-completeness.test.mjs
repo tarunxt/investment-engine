@@ -2,16 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 const source = readFileSync(new URL('../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx', import.meta.url), 'utf8');
-const start = source.indexOf('              const isIncompleteUniverse =');
+const start = source.indexOf('              const scanProgressPercent =');
 const end = source.indexOf('              const showStageSpinner', start);
 assert.ok(start > 0 && end > start);
 // Exercise the production display expressions with finished/running/legacy evidence.
-const display = new Function('stage', 'isStageOneActive', `
+const display = new Function('stage', 'isStageOneActive', 'scanProgressTotal = null', `
 const selectedRunSummaryTile = 'last';
 const runIsActive = isStageOneActive;
 const immediateSuccess = false, investPreviewFinished = false;
 const workflowRunForMonitor = {}, stageOneResultSource = 'auto', independentStageOneView = null;
 const displayedScanProgress = {scannedMarkets: 32502, currentPage: 30};
+const scanProgressScanned = displayedScanProgress.scannedMarkets;
 const getWorkflowToneClasses = tone => tone;
 ${source.slice(start, end)}
 return {label:stageStatusLabel, progress:stageProgressLabel, percent:stageProgressPercent, tone:toneClasses};
@@ -29,5 +30,7 @@ test('partial or unverified universe never claims full completion',()=>{
 test('verified final cursor keeps completion and active scan keeps progress',()=>{
   assert.equal(display({...stage,outputs:{...stage.outputs,scan_completeness:'complete'}},false).label,'Finished');
   assert.equal(display(stage,true).label,'Working');
+  assert.equal(display(stage,true).percent,0);
+  assert.equal(display(stage,true,65004).percent,50);
   assert.equal(display({...stage,outputs:{scan_scope:'trending'}},false).label,'Finished');
 });
