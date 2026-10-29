@@ -29,6 +29,7 @@ const imported = {
   ...load('../lib/technicalSetups.ts'), ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'), ...load('../lib/runPresentation.ts'),
   ...load('../lib/actionableQuantityDisplay.ts'),
+  ...load('../lib/summarySourceRows.ts'),
 };
 const ui = Object.fromEntries([
   'Link', 'AlertTriangle', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'ChevronDown', 'ChevronRight', 'ChevronUp',
