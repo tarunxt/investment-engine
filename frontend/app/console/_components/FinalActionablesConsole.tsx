@@ -235,6 +235,7 @@ type ScoreMatrixContext = {
 };
 
 export type ScoreMatrixDetail = {
+  calculationPolicy?: string;
   stockKey: string;
   stockSymbol: string;
   stockName: string;
@@ -2283,6 +2284,7 @@ function buildScoreMatrixDetail(
     detailedRationaleDenominator,
     rebalanceSourceLabel,
     rebalanceSourceRunId: rebalanceSourceMeta?.runId ?? null,
+    calculationPolicy: "missing-score-exclusion-v2",
     technicalScanSourceLabel: technicalScanSourceLabelForStock,
     technicalScanSourceRunId: technicalScan?.runId ?? technicalScanSourceRunId ?? null,
     technicalScanSourceJobId: technicalScan?.jobId ?? null,
@@ -7749,7 +7751,7 @@ export function buildFinalActionableHistoryItems(
       action_units: estimate.units,
       amount: estimate.amount,
       technical_scan_run_id: row.detail.technicalScanSourceRunId,
-      formula_version: "score-matrix-v2-missing-excluded",
+      formula_version: "score-matrix-v1",
       formula_inputs_json: row.detail as unknown as Record<string, unknown>,
       source_run_ids_json: sourceRunIds,
       snapshot_json: {

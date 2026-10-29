@@ -206,5 +206,6 @@ Frontend weighted scores and new recommendation audit calculations exclude missi
 samples from averages and missing components from numerator/denominator. Explicit
 zero remains a valid observation. Formula overrides remove unavailable weights;
 the editor operates on its displayed effective denominator. New calculations carry
-`missing-score-exclusion-v2`; final captures use `score-matrix-v2-missing-excluded`.
+`missing-score-exclusion-v2`; final matrix captures include `calculationPolicy: missing-score-exclusion-v2`
+while retaining the compatible `score-matrix-v1` envelope.
 Existing immutable history and terminal job statuses are not rewritten.
