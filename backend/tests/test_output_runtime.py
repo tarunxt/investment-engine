@@ -374,13 +374,17 @@ def test_worker_retains_incomplete_rebalance_as_partial_without_retry():
     assert job.runtime_metadata_json['deterministic_output']['usage_status'] == 'partial'
 
 
-def test_legacy_missing_cell_failure_projects_partial_without_rewriting_job():
+@pytest.mark.parametrize("extra_cells", [0, 4, 6])
+def test_legacy_missing_cell_failure_projects_partial_without_rewriting_job(extra_cells):
     from app.domains.jobs.schemas import JobResponse
     job = make_job('rebalance', status=JobStatus.FAILED, updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
     job.error_message = 'invalid output contract (row_width: Expected 29 cells; received 27)'
     lines = table(REBALANCE_COLUMNS, [rebalance_row()]).splitlines()
     cells = lines[-1].strip('| ').split(' | ')
-    del cells[23:25]
+    if extra_cells:
+        cells[23:23] = ["unmapped rationale"] * extra_cells
+    else:
+        del cells[23:25]
     lines[-1] = '| ' + ' | '.join(cells) + ' |'
     job.response = '\n'.join(lines)
     view = JobResponse.model_validate(job)

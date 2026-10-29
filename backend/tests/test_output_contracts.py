@@ -399,13 +399,15 @@ def test_extreme_json_exponent_is_blocked_without_exception_or_replacement():
 
 
 @pytest.mark.parametrize('extra_cells', [4, 6])
-def test_rebalance_extra_cells_preserve_original_and_block(extra_cells):
+def test_rebalance_extra_cells_preserve_original_and_retain_usable_prefix(extra_cells):
     # Synthetic reproduction of screenshot widths, not job 2221 raw evidence.
     original = table(REBALANCE_COLUMNS, [rebalance_row()])
     original = original + ' extra |' * extra_cells
     result = normalize_output(original, 'rebalance', holdings=[holding()])
-    assert not result.safe_to_replace
-    assert result.content == original
+    assert result.safe_to_replace
+    assert result.original == original
+    assert result.rows[0].values['unaligned_source_cells'].count('extra') == extra_cells
+    assert result.rows[0].values['score_rationale_cruxx'] == '-'
     assert any(f.code == 'row_width' and f'received {29 + extra_cells}' in f.message
                for f in result.findings)
 
@@ -423,9 +425,11 @@ def test_rebalance_escaped_pipe_remains_in_one_of_29_cells(literal):
 def test_rebalance_unescaped_pipe_is_never_guessed_or_truncated(literal):
     original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks=literal)])
     result = normalize_output(original, 'rebalance', holdings=[holding()])
-    assert not result.safe_to_replace
-    assert result.content == original
-    assert 'row_width' in codes(result)
+    assert result.safe_to_replace
+    assert result.original == original
+    assert literal in result.rows[0].values['unaligned_source_cells']
+    assert result.rows[0].values['score_rationale_cruxx'] == '-'
+    assert normalize_output(result.content, 'rebalance', holdings=[holding()]).safe_to_replace
 
 
 def test_rebalance_separator_must_match_29_column_header():
