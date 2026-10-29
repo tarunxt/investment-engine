@@ -1,7 +1,7 @@
 import { parseInvestmentRecommendationContent } from "@/components/InvestmentRecommendationTable";
 import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
-import type { RunResponse } from "@/types/api";
+import type { RunResponse,JobResponse } from "@/types/api";
 
 export type StockOutputState = "populated" | "empty" | "unparseable" | "missing" | "incomplete" | "failed" | "partial";
 export type SwingFlowStock = { key: string; symbol: string; exchange: string; totalSuggestions: number };
@@ -34,17 +34,21 @@ function explicitEmpty(content: string) {
   return lines.length === 2 && /Stock Symbol/i.test(lines[0]) && /^\s*\|?[\s:|\-]+\|?\s*$/.test(lines[1]);
 }
 
-export function inspectStockJob(run: RunResponse, link: RunResponse["run_jobs"][number], requireAction = false) {
-  const job = link.job, status = (job?.status ?? "unknown").toLowerCase();
+export function inspectSavedStockJob(job: Pick<JobResponse,"status"|"provider"|"model">&Partial<Pick<JobResponse,"response">>|undefined, context:{runNumber?:number;runCreatedAt?:string}={}, requireAction=false) {
+  const status = (job?.status ?? "unknown").toLowerCase();
   if (["failed", "canceled", "cancelled"].includes(status)) return { state: "failed" as const, rows: [] };
   if (!["completed", "partial"].includes(status)) return { state: "incomplete" as const, rows: [] };
   if (!job?.response?.trim()) return { state: "missing" as const, rows: [] };
-  const parsed = parseInvestmentRecommendationContent(job.response, { provider: job.provider, model: job.model, runNumber: run.id, runCreatedAt: run.created_at });
+  const parsed = parseInvestmentRecommendationContent(job.response, { provider: job.provider, model: job.model,...context });
   if (!parsed || !parsed.headers.includes("Stock Symbol") || (requireAction && !parsed.headers.includes("Action (Buy/Add/Sell All/Trim/Hold/Buy New)"))) {
     return { state: status === "partial" ? "partial" as const : explicitEmpty(job.response) ? "empty" as const : "unparseable" as const, rows: [] };
   }
   const rows = parsed.rows.filter(row => row["Stock Symbol"]?.trim());
-  return { state: status === "partial" ? "partial" as const : rows.length ? "populated" as const : explicitEmpty(job.response) ? "empty" as const : "unparseable" as const, rows };
+  return { state: status === "partial" ? "partial" as const : rows.length ? "populated" as const : explicitEmpty(job.response) ? "empty" as const : "unparseable" as const, rows, headers:parsed.headers };
+}
+
+export function inspectStockJob(run: RunResponse, link: RunResponse["run_jobs"][number], requireAction = false) {
+  return inspectSavedStockJob(link.job,{runNumber:run.id,runCreatedAt:run.created_at},requireAction);
 }
 
 export function buildSwingFlow(runs: RunResponse[]) {

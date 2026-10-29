@@ -18,32 +18,35 @@ function manifest(version,enabled=false,owner=fixture.owner_id){
 const tick=()=>new Promise(setImmediate);
 function harness(){
  const previous={window:globalThis.window,BroadcastChannel:globalThis.BroadcastChannel};
- let slots=[],cursor=0,pending=[],dirty=false,owner=fixture.owner_id,generation='session-a',status='authenticated',bus;
+ let slots=[],cursor=0,pending=[],layouts=[],dirty=false,owner=fixture.owner_id,generation='session-a',status='authenticated',bus;
  const calls=[],installed=[];let requestsPolicy;
  globalThis.window={location:{origin:'http://synthetic.invalid'},setInterval:()=>1,clearInterval(){},addEventListener(){},removeEventListener(){}};
  requestsPolicy=compile('../lib/moduleRequests.ts',{'./modulePolicy':policy});
- globalThis.BroadcastChannel=class{constructor(){bus=this;}postMessage(){}close(){}};
+ globalThis.BroadcastChannel=class{constructor(){bus={postMessage(){},close(){}};return bus;}};
  const same=(a,b)=>a?.length===b?.length&&a.every((v,i)=>Object.is(v,b[i]));
  const react={
   useState(initial){const i=cursor++;if(!(i in slots))slots[i]=initial;return[slots[i],v=>{slots[i]=typeof v==='function'?v(slots[i]):v;dirty=true;}];},
   useRef(value){const i=cursor++;return slots[i]??(slots[i]={current:value});},
+  useMemo(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps))slots[i]={deps,value:fn()};return slots[i].value;},
   useCallback(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps))slots[i]={deps,fn};return slots[i].fn;},
   useEffect(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps)){const old=slots[i];slots[i]={deps,cleanup:old?.cleanup};pending.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}},
  };
+ react.useLayoutEffect=(fn,deps)=>{const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps)){const old=slots[i];slots[i]={deps,cleanup:old?.cleanup};layouts.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}};
  const api={fetch(url,options={}){return new Promise((resolve,reject)=>calls.push({url,options,resolve,reject}));}};
  const {ModuleProvider}=compile('../providers/ModuleProvider.tsx',{
   react,'react/jsx-runtime':{jsx:(type,props)=>({type,props})},'next-auth/react':{useSession:()=>({data:{generation},status})},
   './ModuleContext':{ModulesContext:{Provider:'Provider'}},'next/navigation':{usePathname:()=>'/console/profile/preferences'},
   '@/hooks/useAuth':{useAuth:()=>({user:owner===null?null:{id:owner}})},'@/services/api':{apiService:api},'@/lib/modulePolicy':policy,
   '@/lib/moduleRequests':{...requestsPolicy,installModulePolicy:data=>{installed.push(data);requestsPolicy.installModulePolicy(data);},clearModulePolicy:()=>{installed.push(null);requestsPolicy.clearModulePolicy();}},
-  '@/services/privateSocketRegistry':{closePrivateWebSockets(){}},'@/lib/privateDashboardCache':{purgeBrowserPrivateDashboardCaches(){}},
+  '@/services/privateSocketRegistry':{closePrivateWebSockets(){}},'@/lib/privateDashboardCache':{purgeBrowserPrivateModuleCaches(){}},
  });
  let value;
  function render(){cursor=0;dirty=false;value=ModuleProvider({children:null}).props.value;return value;}
- async function flush(){for(let i=0;i<10;i++){if(dirty||!value)render();const effects=pending.splice(0);effects.forEach(f=>f());await tick();if(!dirty&&!pending.length)return value;}throw Error('Hooks did not settle');}
+ function commitLayout(){layouts.splice(0).forEach(f=>f());}
+ async function flush(){for(let i=0;i<10;i++){if(dirty||!value)render();commitLayout();const effects=pending.splice(0);effects.forEach(f=>f());await tick();if(!dirty&&!pending.length)return value;}throw Error('Hooks did not settle');}
  async function start(){render();await flush();calls.filter(c=>!c.options.method).forEach(c=>c.resolve(manifest(1)));await flush();assert.equal(value.manifest.version,1);return value;}
  function save(){const promise=value.save('zerodha_rebalance',true);promise.catch(()=>{});return promise;}
- return {calls,installed,get value(){return value;},get gate(){return requestsPolicy;},start,save,flush,render,
+ return {calls,installed,get value(){return value;},get gate(){return requestsPolicy;},start,save,flush,render,commitLayout,
   invalidate(version){bus.onmessage({data:{owner,version}});},
   switchIdentity(nextOwner,nextGeneration=generation,nextStatus='authenticated'){owner=nextOwner;generation=nextGeneration;status=nextStatus;render();},
   close(){slots.forEach(slot=>slot?.cleanup?.());globalThis.window=previous.window;globalThis.BroadcastChannel=previous.BroadcastChannel;},
@@ -93,4 +96,14 @@ for(const kind of ['account ABA','logout/login same owner','same-owner new sessi
 });
 test('unmounted provider rejects late read/mutation without installing policy',async()=>{
  const h=harness();await h.start();const saving=h.save();const old=patch(h);h.close();const count=h.installed.length;old.resolve(manifest(2,true));await assert.rejects(saving);await tick();assert.equal(h.installed.length,count);
+});
+
+ test('identity layout commit rejects old callbacks before passive effects and hides old render data',async()=>{
+ const h=harness();try{await h.start();const reading=h.value.refresh();const oldRead=get(h);const saving=h.save();const oldPatch=patch(h);
+  h.switchIdentity(fixture.owner_id,'session-b');assert.equal(h.value.manifest,null);
+  h.commitLayout();const installed=h.installed.length;
+  oldRead.resolve(manifest(8,true));oldPatch.resolve(manifest(9,true));await reading;await assert.rejects(saving);
+  assert.equal(h.installed.length,installed,'stale callbacks cannot install policy after layout commit');
+  await h.flush();closed(h);get(h).resolve(manifest(1));await h.flush();assert.equal(h.value.manifest.version,1);
+ }finally{h.close();}
 });

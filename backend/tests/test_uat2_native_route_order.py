@@ -57,7 +57,7 @@ async def test_shadowing_reproduces_exact_observed_validation_response_without_a
     assert (detail['type'],detail['loc'],detail['input'])==('int_parsing',['path','run_id'],'analysis-workflows')
 
 
-@pytest.mark.parametrize('path',['/runs/analysis-workflows','/runs/analysis-workflows/config','/runs/7'])
+@pytest.mark.parametrize('path',['/runs/analysis-workflows','/runs/analysis-workflows/config','/runs/7','/uat2/simulation/activity-history'])
 def test_native_routes_keep_authentication_without_disposable_bindings(path,monkeypatch):
     monkeypatch.setenv('CREDX_UAT2','1')
     client=TestClient(app,raise_server_exceptions=False)
@@ -128,3 +128,33 @@ def test_native_history_http_uses_owned_legacy_read_handlers(private_api,portfol
     assert first(f'/runs/auto-rebalance-history/{portfolio}/41')[0].name=='get_auto_rebalance_history_detail'
     assert first('/runs/7')[0].name=='get_run'
     assert getattr(app.state,STATE).scope.mode=='hosted' and app.dependency_overrides=={}
+
+
+def test_native_saved_library_does_not_mount_ai_studio_authoring_or_expand_availability():
+    from app.domains.modules.registry import REGISTRY,ModuleId,SimulationAvailability,platform_available
+    for path,method in [('/prompts','POST'),('/prompts/7','PUT'),('/prompts/7','DELETE')]:
+        route,_=first(path,method)
+        assert route.name=='unavailable' and route.endpoint.__module__=='app.uat2.main'
+    for path in ['/uat2/simulation/prompt-library','/uat2/simulation/prompt-library/7']:
+        route,_=first(path)
+        assert route.methods=={'GET'} and route.endpoint.__module__=='app.uat2.prompt_library'
+    available,reason=platform_available(REGISTRY[ModuleId.AI_STUDIO],uat2=True,simulation=SimulationAvailability(1),owner_id=1)
+    assert available is False and 'not mounted' in reason
+    assert app.dependency_overrides=={}
+
+
+@pytest.mark.parametrize('path,method',[
+    ('/uat2/simulation/journal-portfolio','GET'),
+    ('/uat2/simulation/snapshot-reviews','POST'),
+    ('/uat2/simulation/snapshot-reviews/example','GET'),
+    ('/uat2/simulation/snapshot-reviews/example/accept','POST'),
+])
+def test_selected_journal_and_review_routes_retain_private_no_store_dependency(path,method):
+    from fastapi import Response
+    from app.uat2.workflow_router import private
+    import asyncio
+    route,_=first(path,method)
+    assert private in [dependency.call for dependency in route.dependant.dependencies]
+    response=Response()
+    asyncio.run(private(response))
+    assert response.headers['cache-control']=='private, no-store'

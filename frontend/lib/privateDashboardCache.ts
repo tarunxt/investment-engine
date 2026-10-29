@@ -13,13 +13,29 @@ const PRIVATE_DASHBOARD_CACHE_PREFIXES = [
   "bullpenAi.ec2Commands",
 ] as const;
 
-export function purgePrivateDashboardCache(storage: StorageLike | null) {
+const DURABLE_UI_RESOURCES = [
+  'investment-engine:model-mixes:v1',
+  // Inert pending review identity must survive same-owner module refresh,
+  // while full logout/identity purge still removes it. No request payload.
+  'investment-engine:privacy-review-pending:v1',
+  'investment-engine:concept-f:recommendation-layout:v1',
+  'investment-engine:final-actionables:score-matrix-formula-config:v1',
+] as const;
+
+function purge(storage: StorageLike | null, preserveTemplateOwner?: number) {
   if (!storage) return 0;
+  const preserve = new Set(Number.isSafeInteger(preserveTemplateOwner) && preserveTemplateOwner! > 0
+    ? [...DURABLE_UI_RESOURCES,
+      `investment-engine:console-sidebar-names:user:${preserveTemplateOwner}:v1`,
+      `investment-engine:console-sidebar-child-order:user:${preserveTemplateOwner}:v1`,
+      `investment-engine:console-sidebar-order:user:${preserveTemplateOwner}:v2`,
+    ].map(resource => `investment-engine:private:v1:${preserveTemplateOwner}:${resource}`) : []);
   const keys: string[] = [];
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index);
     if (
       key &&
+      !preserve.has(key) &&
       PRIVATE_DASHBOARD_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix))
     ) {
       keys.push(key);
@@ -29,11 +45,32 @@ export function purgePrivateDashboardCache(storage: StorageLike | null) {
   return keys.length;
 }
 
+export function purgePrivateDashboardCache(storage: StorageLike | null) {
+  return purge(storage);
+}
+
+// Module-policy refresh invalidates data caches, not this same owner's existing
+// inert model-template, column-layout, advisory-formula and exact same-owner
+// navigation-label/order preferences. Identity/logout still
+// use the full purge. This allowlist contains no cached financial/source data.
+export function purgePrivateModuleDashboardCache(storage: StorageLike | null, owner: number | null) {
+  return purge(storage, owner ?? undefined);
+}
+
 export function purgeBrowserPrivateDashboardCaches() {
   if (typeof window === "undefined") return 0;
   let removed = 0;
   for (const kind of ["localStorage", "sessionStorage"] as const) {
     try { removed += purgePrivateDashboardCache(window[kind]); } catch { /* Storage may be disabled. */ }
+  }
+  return removed;
+}
+
+export function purgeBrowserPrivateModuleCaches(owner: number | null) {
+  if (typeof window === "undefined") return 0;
+  let removed = 0;
+  for (const kind of ["localStorage", "sessionStorage"] as const) {
+    try { removed += purgePrivateModuleDashboardCache(window[kind], owner); } catch { /* Storage may be disabled. */ }
   }
   return removed;
 }

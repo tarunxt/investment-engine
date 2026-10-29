@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import "../concept-f.css";
 import type { Session } from "next-auth";
 
 import { auth } from "@/auth";

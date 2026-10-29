@@ -36,7 +36,7 @@ function encodeModule(source) {
   return `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 }
 
-async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
+async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl, operator = { role: "admin", is_active: true }) {
   const routePath = path.join(BULLPEN_API_ROOT, "positions", "route.ts");
   const routeSource = readFileSync(routePath, "utf8");
 
@@ -68,9 +68,10 @@ async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
   `);
   const serverBackendSessionStubUrl = encodeModule(`
     export async function createBackendSessionContext() {
-      return { responseCookies: [] };
+      return { responseCookies: [], hasAuthJsSession: true, accessToken: "synthetic-test-token" };
     }
     export async function fetchBackendJsonWithSession(_context, path, options = {}) {
+      if (path === "/auth/me") return ${JSON.stringify(operator)};
       return globalThis.__bullpenFetchBackendJsonWithSession(path, options);
     }
     export function backendSessionJson(_context, body, init = {}) {
@@ -153,7 +154,19 @@ async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
     }
   `);
 
+  // Execute the actual operator-admission guard in this route harness. Its backend
+  // session and transport are synthetic; production authorization is not removed.
+  const runtimeErrorStubUrl = encodeModule(`export class BackendRuntimeHttpError extends Error {}`);
+  const admissionSource = readFileSync(path.join(BULLPEN_API_ROOT, "_lib", "operatorAdmission.ts"), "utf8")
+    .replace(/from "next\/server"/g, `from "${nextServerStubUrl}"`)
+    .replace(/from "\.\/backendBullpenRuntime"/g, `from "${runtimeErrorStubUrl}"`)
+    .replace(/from "\.\/serverBackendSession"/g, `from "${serverBackendSessionStubUrl}"`);
+  const admissionModuleUrl = encodeModule(ts.transpileModule(admissionSource, {
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 },
+  }).outputText);
+
   const rewrittenSource = routeSource
+    .replace(/from "@\/app\/api\/bullpen-ai\/_lib\/operatorAdmission"/g, `from "${admissionModuleUrl}"`)
     .replace(/from "next\/server"/g, `from "${nextServerStubUrl}"`)
     .replace(
       /from "\.\.\/_lib\/serverBackendSession"/g,
@@ -363,4 +376,12 @@ test("legacy frontend Bullpen runtime helper was removed", () => {
   );
 
   assert.throws(() => statSync(legacyHelperPath));
+});
+
+test("positions harness preserves actual operator denial before any positions runtime read", async () => {
+  let calls = 0;
+  const { GET } = await loadBullpenPositionsRoute(async () => { calls += 1; throw new Error("must not fetch positions"); }, { role: "user", is_active: true });
+  const response = await GET({ nextUrl: new URL("http://localhost/api/bullpen-ai/positions") });
+  assert.equal(response.status, 403);
+  assert.equal(calls, 0);
 });

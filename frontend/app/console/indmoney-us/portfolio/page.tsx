@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {useAuth} from '@/hooks/useAuth';
+import {ConceptFPortfolio} from '@/components/workspace/ConceptFPortfolio';
 import {useSession} from 'next-auth/react';
 
 import { AlertCircle, Copy, Loader2 } from 'lucide-react';
@@ -26,7 +27,7 @@ function normalizeError(error: unknown) {
 
 export default function IndMoneyUsPage(){
  const {user}=useAuth();const {data:session,status}=useSession();
- return status==='authenticated'&&user?<IndMoneyUsPageBody key={`${user.id}:${session?.generation}`}/>:<p>Sign in to view your private imports.</p>;
+ return status==='authenticated'&&user?(process.env.NEXT_PUBLIC_UAT2==='true'?<ConceptFPortfolio/>:<IndMoneyUsPageBody key={`${user.id}:${session?.generation}`}/>):<p>Sign in to view your private imports.</p>;
 }
 
 function IndMoneyUsPageBody() {

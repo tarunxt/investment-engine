@@ -1,0 +1,58 @@
+{
+  "source": "Licensed embedded subsets from user-supplied Concept F visual reference; no document pages or personal data included",
+  "reference_pdf_sha256": "3062c14005f97af7f0a9d0beb346d6a93719944d63bf16dabbdbb45e8bd89479",
+  "source_fonts_verified_from_vector_resources": true,
+  "fonts": {
+    "DejaVuSans-Bold": {
+      "filename": "DejaVuSans-Bold-ascii-reference.ttf",
+      "sha256": "936d21551479138c7941995c2acbda21308111c8cc2276a0f103694db7e708cf",
+      "bytes": 35092,
+      "source_pdf_page": 1,
+      "ascii_identity_mapping_verified": true,
+      "embedding_fs_type": 0,
+      "unicode_range": "U+0020-007E",
+      "family": "DejaVu Sans",
+      "style": "Bold",
+      "source_subset_sha256": "2476faa289dae246a1e9dcd83cd0176d866bd973ee8269e22ba6e7131b860192",
+      "glyph_table_sha256": "5d5593acbf0c0239244c9b0a74fba6937996f6bc64a8eb1564756a030dc2a965",
+      "glyph_outlines_unchanged": true,
+      "normalization": "Unicode BMP format4 cmap for verified ASCII only; offsets/checksums rebuilt"
+    },
+    "DejaVuSans": {
+      "filename": "DejaVuSans-ascii-reference.ttf",
+      "sha256": "70fae8c727178098d65c68e361dac29d546b1d0fa4f844daa71f0ef1f4c2298c",
+      "bytes": 35528,
+      "source_pdf_page": 1,
+      "ascii_identity_mapping_verified": true,
+      "embedding_fs_type": 0,
+      "unicode_range": "U+0020-007E",
+      "family": "DejaVu Sans",
+      "style": "Book",
+      "source_subset_sha256": "f56c3cd0e5472e46f8dbf586d7dcaa29e849f18e45dd57df8e67ae741a5899f4",
+      "glyph_table_sha256": "6c29ff3933656cc50308df6bf551a26bf76041fd86de28b9ddf5d2a4541e8fc2",
+      "glyph_outlines_unchanged": true,
+      "normalization": "Unicode BMP format4 cmap for verified ASCII only; offsets/checksums rebuilt"
+    },
+    "DejaVuSansMono": {
+      "filename": "DejaVuSansMono-ascii-reference.ttf",
+      "sha256": "42d41c28c163fbcf1ab65c62b5221c0f219a02e13666a3b35ea7631efe6f678b",
+      "bytes": 25928,
+      "source_pdf_page": 7,
+      "ascii_identity_mapping_verified": true,
+      "embedding_fs_type": 0,
+      "unicode_range": "U+0020-007E",
+      "family": "DejaVu Sans Mono",
+      "style": "Book",
+      "source_subset_sha256": "bf03824645d438837da8e7cae346bf8e165a1d963a9526c8a048e340d11e5214",
+      "glyph_table_sha256": "d0d1c30665fed3ffaacb8dd6aca291b466cf8401e1a87e0a7843ce5903cd6aad",
+      "glyph_outlines_unchanged": true,
+      "normalization": "Unicode BMP format4 cmap for verified ASCII only; offsets/checksums rebuilt"
+    }
+  },
+  "limits": [
+    "Only ASCII identity mapping is admitted. Non-ASCII characters use the existing licensed system fallback stack.",
+    "Full-font public binary fetch was unsupported by web tool; no alternate network download attempted.",
+    "Original embedded subset failed actual Chrome loading. Unicode cmap normalization changes no glyph outlines or license; browser verification still required."
+  ],
+  "license_url": "https://dejavu-fonts.github.io/License.html"
+}

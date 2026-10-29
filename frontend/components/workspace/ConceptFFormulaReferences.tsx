@@ -20,6 +20,7 @@ export function ConceptFFormulaReferences({config,onSave,onView,sourceLabel,vali
  const value=(number:unknown)=>typeof number==='number'&&Number.isFinite(number)?number:'Not verified';
  const label=(key:string,group:string)=>group==='scoreSymbolThresholds'?symbolLabels?.find(row=>row.key===key)?.label??key:group==='actionScores'?actionLabels?.find(row=>row.category===key)?.label??key:key;
  const thresholdRows=symbolLabels?.length?symbolLabels.map(row=>({...row,value:(config.scoreSymbolThresholds as Record<string,number>)[row.key]})):Object.entries(config.scoreSymbolThresholds).map(([key,value])=>({key,label:key,value,range:undefined as string|undefined}));
+ const actionKeys=[...new Set([...(actionLabels??[]).map(row=>row.category),...Object.keys(config.actionScores)])];
  const confidenceKnown=technicalConfidenceBounds&&Number.isFinite(technicalConfidenceBounds.min)&&Number.isFinite(technicalConfidenceBounds.max)&&technicalConfidenceBounds.min<=technicalConfidenceBounds.max;
  function begin(){setDraft(formulaDraft(config));setDenominator(config.detailedRationaleDenominator===null?'':String(config.detailedRationaleDenominator));setError(null);setEditing(true);}
  function save(){try{const next=applyFormulaDraft(config,draft,denominator);if(onSave(next))setEditing(false);}catch(error){setError(error instanceof Error?error.message:'Formula draft is invalid');}}
@@ -36,7 +37,7 @@ export function ConceptFFormulaReferences({config,onSave,onView,sourceLabel,vali
    <div className="grid gap-5 lg:grid-cols-2" aria-label="Active advisory reference tables">
     <section className="concept-f-card min-w-0 space-y-3" aria-label="Action score mapping">
      <h4 className="font-bold">Action score mapping</h4><p className="text-sm">Exact source action categories and aliases; zero is retained. Saved-Run numeric mappings are not recorded by this contract.</p>
-     <div tabIndex={0} role="region" aria-label="Scrollable formula reference table" className="overflow-x-auto outline-none focus-visible:ring-2 focus-visible:ring-primary"><table className="concept-f-table"><thead><tr><th scope="col">Action</th><th scope="col">Score</th><th scope="col">Value status</th></tr></thead><tbody>{Object.entries(config.actionScores).map(([key,number])=><tr key={key}><th scope="row">{label(key,'actionScores')}</th><td>{value(number)}</td><td>{value(number)==='Not verified'?'Not verified':'Current advisory'}</td></tr>)}</tbody></table></div>
+     <div tabIndex={0} role="region" aria-label="Scrollable formula reference table" className="overflow-x-auto outline-none focus-visible:ring-2 focus-visible:ring-primary"><table className="concept-f-table"><thead><tr><th scope="col">Action</th><th scope="col">Score</th><th scope="col">Value status</th></tr></thead><tbody>{actionKeys.map(key=>{const number=(config.actionScores as Record<string,number>)[key];return <tr key={key}><th scope="row">{label(key,'actionScores')}</th><td>{value(number)}</td><td>{value(number)==='Not verified'?'Not verified':'Current advisory'}</td></tr>;})}</tbody></table></div>
     </section>
     <section className="concept-f-card min-w-0 space-y-3" aria-label="Confidence multiplier reference">
      <h4 className="font-bold">Confidence multiplier reference</h4>

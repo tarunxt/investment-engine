@@ -19,6 +19,14 @@ class ResidencyBody(BaseModel):
     model_config=ConfigDict(extra='forbid')
     country:str=Field(max_length=2)
 def response(value):return JSONResponse(value,headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+@router.get('/cost-fx')
+async def cost_fx(user=Depends(get_current_user),db=Depends(get_async_db)):
+    # Same non-private persisted FX metadata as the authenticated dashboard;
+    # no provider request or billing/admin permission is added.
+    from app.domains.fx_rates.cost_read import read_cost_fx
+    try:return response(await read_cost_fx(db,user.id))
+    except DBAPIError:raise HTTPException(503,'Persisted FX storage unavailable; original currency remains separate') from None
+
 @router.get('/privacy-requests')
 async def privacy_history(user=Depends(get_current_user),db=Depends(get_async_db)):
     try:return response(await db.run_sync(lambda s:PrivacyRequests(s).history(user.id)))

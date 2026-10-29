@@ -9,8 +9,10 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import Any, TypeVar
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, and_
+from sqlalchemy.orm import aliased
 
+from app.domains.indmoney_us.import_validation import utc
 from app.domains.dashboard.schemas import (
     DashboardBullpenSection,
     DashboardFxRate,
@@ -229,13 +231,21 @@ async def _load_indmoney_with_session(db, user_id: int) -> DashboardIndMoneySect
             .limit(1)
         )
     ).one_or_none()
+    from .native_history import owned_us_history_point
+    parent=aliased(IndMoneyUsPortfolioSnapshot)
     history_rows = (
         await db.execute(
             select(
+                IndMoneyUsPortfolioSnapshot.id,
+                IndMoneyUsPortfolioSnapshot.supersedes_id,
+                IndMoneyUsPortfolioSnapshot.import_provenance,
+                parent.id.label('owned_supersedes_id'),
                 IndMoneyUsPortfolioSnapshot.captured_at,
                 IndMoneyUsPortfolioSnapshot.current_value,
                 IndMoneyUsPortfolioSnapshot.wallet_balance,
             )
+            .select_from(IndMoneyUsPortfolioSnapshot)
+            .outerjoin(parent,and_(parent.id==IndMoneyUsPortfolioSnapshot.supersedes_id,parent.user_id==user_id))
             .where(IndMoneyUsPortfolioSnapshot.user_id == user_id,accepted_snapshot_predicate())
             .order_by(
                 desc(IndMoneyUsPortfolioSnapshot.captured_at),
@@ -251,7 +261,7 @@ async def _load_indmoney_with_session(db, user_id: int) -> DashboardIndMoneySect
     return DashboardIndMoneySection(
         snapshot=DashboardIndMoneySnapshot(
             snapshot_date=latest.snapshot_date,
-            captured_at=latest.captured_at,
+            captured_at=utc(latest.captured_at),
             source=latest.source,
             parse_status=latest.parse_status,
             holdings_count=latest.holdings_count,
@@ -267,10 +277,7 @@ async def _load_indmoney_with_session(db, user_id: int) -> DashboardIndMoneySect
                 total_value=latest.current_value or 0,
             ),
             history=[
-                DashboardHistoryPoint(
-                    captured_at=row.captured_at,
-                    value=(row.current_value or 0) + (row.wallet_balance or 0),
-                )
+                owned_us_history_point(row,user_id)
                 for row in reversed(history_rows)
             ],
         )

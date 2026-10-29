@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {useSession} from "next-auth/react";
 import { ModulePreferences } from "@/components/modules/ModulePreferences";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiService } from "@/services/api";
+import {savedPreferences,preferencesReady,type PreferencesDraft} from '@/lib/conceptFPreferences';
+import {recordedTimeZone} from '@/lib/conceptFProfile';
 import { FormAlert } from "@/components/auth/FormAlert";
 import {
   applyThemePreference,
@@ -18,11 +20,8 @@ import {
   type ThemePreference,
 } from "@/lib/theme";
 
-type PreferencesFormData = {
-  timezone: string;
-  notification_preferences: string;
-  theme_preference: ThemePreference;
-};
+type PreferencesFormData=PreferencesDraft;
+const timezones=[['UTC','UTC'],['America/New_York','Eastern Time (US & Canada)'],['America/Chicago','Central Time (US & Canada)'],['America/Denver','Mountain Time (US & Canada)'],['America/Los_Angeles','Pacific Time (US & Canada)'],['Europe/London','London'],['Europe/Paris','Paris'],['Asia/Tokyo','Tokyo'],['Asia/Kolkata','India Standard Time'],['Asia/Calcutta','India Standard Time (saved alias)']];
 
 export default function PreferencesPage(){
   const {data:session,status}=useSession();
@@ -31,39 +30,36 @@ export default function PreferencesPage(){
 }
 function OwnedPreferencesPage() {
   const [loading, setLoading] = useState(false);
+  const [loaded,setLoaded]=useState(false),[reload,setReload]=useState(0);
+  const [readError,setReadError]=useState<string|null>(null);
+  const saving=useRef(false),alive=useRef(true);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<PreferencesFormData>({
-    timezone: "UTC",
-    notification_preferences: "all",
-    theme_preference: getStoredThemePreference() ?? "light",
+    timezone: "",
+    notification_preferences: "",
+    theme_preference: "",
   });
 
   useEffect(() => {
     let active=true;
     async function loadPreferences() {
+      setLoaded(false);setReadError(null);
       try {
-        const profile = await apiService.getProfile();
+        const profile=await apiService.getProfile();
         if(!active)return;
-        const themePreference = isThemePreference(profile.theme_preference)
-          ? profile.theme_preference
-          : "light";
-
-        setFormData({
-          timezone: profile.timezone || "UTC",
-          notification_preferences: profile.notification_preferences || "all",
-          theme_preference: themePreference,
-        });
-        persistThemePreference(themePreference);
-        applyThemePreference(themePreference);
-      } catch (err) {
-        console.error("Failed to load preferences:", err);
+        const saved=savedPreferences(profile);
+        setFormData(saved);setLoaded(true);setError(null);
+        if(isThemePreference(saved.theme_preference)){persistThemePreference(saved.theme_preference);applyThemePreference(saved.theme_preference);}
+      } catch {
+        if(active)setReadError('Saved ordinary preferences could not be verified. Reload before editing this form.');
       }
     }
     loadPreferences();
     return()=>{active=false;};
-  }, []);
+  }, [reload]);
 
   useEffect(()=>{
     const changed=(event:Event)=>{if(event instanceof StorageEvent&&event.key!==null&&event.key!==THEME_STORAGE_KEY)return;const value=event instanceof CustomEvent?event.detail:getStoredThemePreference();if(isThemePreference(value))setFormData(previous=>({...previous,theme_preference:value}));};
@@ -90,22 +86,25 @@ function OwnedPreferencesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setSuccess(false);
-
+    if(saving.current)return;
+    const draft={...formData};
+    if(!loaded||!preferencesReady(draft)){setError('Choose valid explicit preference values before saving.');return;}
+    saving.current=true;setLoading(true);setError(null);setSuccess(false);
+    let acknowledged=false;
     try {
-      await apiService.updateProfile({
-        timezone: formData.timezone,
-        notification_preferences: formData.notification_preferences,
-        theme_preference: formData.theme_preference,
-      });
+      await apiService.updateProfile(draft);acknowledged=true;
+      if(!alive.current)return;
+      const verified=savedPreferences(await apiService.getProfile());
+      if(!alive.current)return;
+      if(!preferencesReady(verified))throw new Error('Saved values are unverified');
+      setFormData(verified);
+      persistThemePreference(verified.theme_preference);applyThemePreference(verified.theme_preference);
+      if(JSON.stringify(verified)!==JSON.stringify(draft)){setError('Server preferences differ from this submitted draft. Review these current values before another deliberate save.');return;}
       setSuccess(true);
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Failed to update preferences";
-      setError(errorMsg);
+    } catch {
+      if(alive.current){setLoaded(false);setReadError(acknowledged?'Your update was accepted, but saved preferences could not be verified. Reload before another save.':'The preference update outcome is unverified. Reload saved preferences before another save.');}
     } finally {
-      setLoading(false);
+      saving.current=false;if(alive.current)setLoading(false);
     }
   };
 
@@ -137,7 +136,10 @@ function OwnedPreferencesPage() {
         />
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      {!loaded&&!readError&&<p role="status">Loading saved ordinary preferences…</p>}
+      {readError&&<div role="alert" className="space-y-3 rounded-lg border p-3"><p>{readError}</p><button type="button" className="underline" onClick={()=>setReload(value=>value+1)}>Reload saved preferences</button></div>}
+      {loaded&&!preferencesReady(formData)&&<p role="status">Some saved preferences are missing or unsupported. Choose explicit values before saving.</p>}
+      <form onSubmit={handleSubmit}><fieldset disabled={!loaded||loading} className="space-y-8">
         <div className="space-y-2">
           <Label htmlFor="theme_preference">Theme</Label>
           <select
@@ -147,6 +149,7 @@ function OwnedPreferencesPage() {
             onChange={handleChange}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
+            <option value="">Choose a theme</option>
             <option value="light">Light</option>
             <option value="dark">Dark</option>
             <option value="system">System</option>
@@ -165,15 +168,9 @@ function OwnedPreferencesPage() {
             onChange={handleChange}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <option value="UTC">UTC</option>
-            <option value="America/New_York">Eastern Time (US & Canada)</option>
-            <option value="America/Chicago">Central Time (US & Canada)</option>
-            <option value="America/Denver">Mountain Time (US & Canada)</option>
-            <option value="America/Los_Angeles">Pacific Time (US & Canada)</option>
-            <option value="Europe/London">London</option>
-            <option value="Europe/Paris">Paris</option>
-            <option value="Asia/Tokyo">Tokyo</option>
-            <option value="Asia/Calcutta">India Standard Time</option>
+            <option value="">Choose a time zone</option>
+            {timezones.map(([value,label])=><option key={value} value={value}>{label}</option>)}
+            {recordedTimeZone(formData.timezone)&&!timezones.some(([value])=>value===formData.timezone)&&<option value={formData.timezone}>Saved: {formData.timezone}</option>}
           </select>
         </div>
 
@@ -187,16 +184,17 @@ function OwnedPreferencesPage() {
             onChange={handleChange}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
+            <option value="">Choose notification categories</option>
             <option value="all">All notifications</option>
             <option value="important">Important only</option>
             <option value="none">None</option>
           </select>
         </div>
 
-        <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+        <Button type="submit" disabled={loading||!loaded||!preferencesReady(formData)} className="bg-indigo-600 hover:bg-indigo-700 text-white">
           {loading ? "Saving..." : "Update preferences"}
         </Button>
-      </form>
+      </fieldset></form>
       <ModulePreferences />
     </div>
   );

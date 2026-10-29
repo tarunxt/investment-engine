@@ -17,6 +17,22 @@ def install_workflow(app, *, scope=None, source_storage=None):
     app.include_router(limits_router)
     app.include_router(analysis_router)
     app.include_router(controls_router)
+    from .prompt_library import router as prompt_library_router
+    app.include_router(prompt_library_router)
+    from .threat_history import router as threat_history_router
+    app.include_router(threat_history_router)
+    from .recommendation_history import router as recommendation_history_router
+    app.include_router(recommendation_history_router)
+    from .buy_threshold import router as buy_threshold_router
+    app.include_router(buy_threshold_router)
+    from .event_history import router as event_history_router
+    app.include_router(event_history_router)
+    from .journal_history import router as journal_history_router
+    app.include_router(journal_history_router)
+    from .combined_history import router as combined_history_router
+    app.include_router(combined_history_router)
+    from .activity_history import router as activity_history_router
+    app.include_router(activity_history_router)
     allowed_imports = {('GET', '/indmoney-us/portfolio'), ('GET', '/indmoney-us/portfolio/{snapshot_id}'),
         ('GET', '/indmoney-us/imports/template'), ('POST', '/indmoney-us/imports/preview'),
         ('POST', '/indmoney-us/imports/{snapshot_id}/accept')}

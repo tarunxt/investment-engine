@@ -92,6 +92,9 @@ class SyntheticOrders:
         if current:
             try: evidence = self.analysis.completed_analysis(db, row.owner_id, provenance['workflow_id'], now=now)
             except (KeyError, TypeError, ValueError): raise OrderDenied('GOVERNED_ANALYSIS_RECEIPT_INVALID') from None
+            if value['schema']==1 and row.state in {'draft','validated','awaiting_approval','approved'}:
+                from .revision_baskets import require_current_base
+                require_current_base(db,self.analysis,row.owner_id,provenance['workflow_id'],evidence)
             expected_order=derived(evidence) if value['schema']==1 else None
             if value['schema']==2:
                 from .revision_baskets import assess,selected,derived as revised_order
@@ -109,6 +112,9 @@ class SyntheticOrders:
     def prepare(self, db, owner, workflow_id, *, now=None,revision_version=None):
         now = now or datetime.now(timezone.utc)
         evidence = self.analysis.completed_analysis(db, owner, workflow_id, now=now)
+        if revision_version is None:
+            from .revision_baskets import require_current_base
+            require_current_base(db,self.analysis,owner,workflow_id,evidence)
         order = derived(evidence) if revision_version is None else None
         provenance = {k: evidence[k] for k in PROVENANCE}
         schema=1

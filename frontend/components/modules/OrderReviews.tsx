@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
 import {useSession} from 'next-auth/react';
+import {useSearchParams} from 'next/navigation';
 import {apiService} from '@/services/api';
 
 type Leg={position:number;symbol:string;exchange:string;side:string;quantity:number;limit_price:string;product:string;order_type:string;state:string;filled_quantity:number};
@@ -8,23 +9,26 @@ type Intent={simulation_scenario?:string|null;id:string;state:string;module_id:s
 type Reviews={schema_version:1;owner_id:number;runtime_enabled:boolean;simulation_only:true;observed_at:string;has_more:boolean;complete_positions_reconciliation:false;intents:Intent[]};
 
 export function OrderReviews(){
- const {data:session,status}=useSession();
+ const {data:session,status}=useSession();const query=useSearchParams(),intentId=query.get('intent');
  if(status!=='authenticated'||!session?.user?.id)return <p role="status">Sign in again to view private order activity. No order is submitted by signing in.</p>;
- return <OrderReviewsSession key={`${session.user.id}:${session.generation}`} owner={Number(session.user.id)}/>;
+ return <OrderReviewsSession key={`${session.user.id}:${session.generation}:${intentId??'all'}`} owner={Number(session.user.id)} intentId={intentId}/>;
 }
-export function OrderReviewsSession({owner}:{owner:number}){
+export function OrderReviewsSession({owner,intentId=null}:{owner:number;intentId?:string|null}){
+ const invalidIntent=intentId!==null&&!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(intentId);
  const [data,setData]=useState<Reviews|null>(null),[error,setError]=useState(false),[refresh,setRefresh]=useState(0);
  const generation=useRef(0),inflight=useRef(false);
  const [reviewed,setReviewed]=useState<Record<string,string>>({});
  const [pending,setPending]=useState<string|null>(null),[outcomes,setOutcomes]=useState<Record<string,string>>({});
  useEffect(()=>{
   const ticket=++generation.current,controller=new AbortController();
-  void apiService.fetch<Reviews>('/backend-api/order-intents/reviews',{cache:'no-store',signal:controller.signal,timeoutMs:8000}).then(value=>{
+  if(invalidIntent)return()=>controller.abort();
+  void apiService.fetch<Reviews>('/backend-api/order-intents/reviews'+(intentId?'/'+encodeURIComponent(intentId):''),{cache:'no-store',signal:controller.signal,timeoutMs:8000}).then(value=>{
+   if(intentId!==null&&(value.intents?.length!==1||value.intents[0]?.id!==intentId))throw new Error('Exact owned order record required');
    if(value.schema_version!==1||value.owner_id!==owner||typeof value.runtime_enabled!=='boolean'||value.simulation_only!==true||!Array.isArray(value.intents)||value.intents.length>50||value.intents.some(row=>!row||typeof row.id!=='string'||!Array.isArray(row.legs)||!Array.isArray(row.warnings)||!row.actions||Object.entries(row.actions).some(([key,allowed])=>typeof allowed!=='boolean'||(key!=='confirm'&&allowed))||(row.actions.confirm&&(!value.runtime_enabled||row.state!=='awaiting_approval'||!row.integrity_checked||!row.review_digest||!/^[a-f0-9]{64}$/.test(row.review_digest)))))throw new Error('Invalid private order view');
    if(!controller.signal.aborted&&ticket===generation.current){setData(value);setError(false);}
   }).catch(()=>{if(!controller.signal.aborted&&ticket===generation.current){setData(null);setError(true);}});
   return()=>{controller.abort();generation.current=ticket+1;};
- },[owner,refresh]);
+ },[owner,intentId,invalidIntent,refresh]);
  async function confirm(row:Intent){
   if(inflight.current||outcomes[row.id]||!row.actions.confirm||!row.review_digest||reviewed[row.id]!==row.review_digest)return;
   inflight.current=true;setPending(row.id);const ticket=generation.current;
@@ -37,13 +41,14 @@ export function OrderReviewsSession({owner}:{owner:number}){
  }
  return <section aria-labelledby="order-review-heading" className="space-y-4 min-w-0 rounded-xl border p-5">
   <h2 id="order-review-heading" className="text-lg font-semibold">Order review and unresolved activity</h2>
+  {intentId&&<p role="status">Exact recorded intent {intentId}. Missing or foreign records never fall back to a different basket.</p>}
   <p>Recorded instructions stay visible when a product module is disabled. Live execution is disabled. An explicitly installed owner simulation can offer exact fake-order confirmation. Status refresh never grants consent.</p>
   <p className="text-sm text-muted-foreground">Disable stops new module work; disconnect revokes a connection. Neither cancels broker orders nor liquidates holdings. Positions require separate authoritative reconciliation.</p>
   <button type="button" className="min-h-11 underline focus-visible:ring-2" disabled={pending!==null} onClick={()=>{if(!inflight.current)setRefresh(v=>v+1);}}>Refresh recorded order status</button>
 
-  {error&&<p role="alert">Order status unavailable. A timeout does not mean an order safely failed. Do not resubmit; refresh status after restoring your session.</p>}
-  {!data&&!error&&<p role="status">Loading private order records…</p>}
-  {data&&<><p className="text-sm">Records observed <time dateTime={data.observed_at}>{new Date(data.observed_at).toLocaleString()}</time>. This is not a live broker check.</p>
+  {(error||invalidIntent)&&<p role="alert">Order status unavailable. A timeout does not mean an order safely failed. Do not resubmit; refresh status after restoring your session.</p>}
+  {!data&&!error&&!invalidIntent&&<p role="status">Loading private order records…</p>}
+  {data&&!invalidIntent&&<><p className="text-sm">Records observed <time dateTime={data.observed_at}>{new Date(data.observed_at).toLocaleString()}</time>. This is not a live broker check.</p>
    {data.has_more&&<p role="status">Only 50 records are shown, prioritizing unresolved orders. This is not a complete account history.</p>}
    {!data.intents.length&&<p>No persisted order intents in these account records. This does not establish that your broker has no orders or positions.</p>}
    {data.intents.map(row=><article key={row.id} className="space-y-3 rounded-lg border p-4 break-words" aria-label={`Order ${row.id}`}>

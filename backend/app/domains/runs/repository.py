@@ -20,6 +20,8 @@ def run_summary_columns():
 
     return (
         Run.id,
+        Run.module_id,
+        Run.module_version,
         Run.prompt_preview,
         Run.prompt_id,
         Run.status,

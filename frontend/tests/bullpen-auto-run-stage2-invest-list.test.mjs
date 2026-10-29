@@ -163,9 +163,7 @@ test("Stage 2 invest list reuses the saved Stage 2 top-10 events summary and kee
     "utf8",
   );
 
-  assert.match(source, /if \(decision\.decision === "BUY_NEW"\) \{\s*return true;/);
   assert.match(source, /buildStageTwoInvestEventsDialogState/);
-  assert.match(source, /getBullpenTopTenStrongestLlmOddsRows/);
   assert.match(source, /Stage 2 Top 10 events ranked by Returns\/day\./);
   assert.match(source, /rowsOverride=\{state\.rows\}/);
   assert.match(source, /updatedAt=\{state\.updatedAt\}/);
@@ -198,7 +196,7 @@ test("Stage 2 invest list can collapse into a compact Events Summary view", () =
   assert.match(source, /displayDensity=\{isCompactRows \? "compact" : "default"\}/);
 });
 
-test("Stage 2 handoff fallback reuses the canonical strongest-odds Top 10 selector", () => {
+test("Legacy Stage 2 handoff fallback derives market IDs from reviewed candidate rows", () => {
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/bullpenStage2TopTenHandoff.ts",
@@ -279,4 +277,38 @@ test("Stage 3 Step 2 transfer queue summary cards open metric info popups for ea
   assert.match(source, /kind="submitted-buy-plans"/);
   assert.match(source, /kind="waiting-blocked"/);
   assert.match(source, /aria-label=\{`Show \$\{label\} details`\}/);
+});
+
+
+test("Stage 2 invest dialog uses only exact saved buy IDs in their order, never a fresh top-ten or BUY_NEW inference", () => {
+  const source = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url), "utf8");
+  const ast = ts.createSourceFile("card.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = ["readStageTwoActionableDisplayContract", "buildStageTwoInvestEventsDialogState"];
+  const functions = names.map(name => {
+    const fn = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.ok(fn, name); return fn.getText(ast);
+  }).join("\n");
+  const summaries = [{marketId:"A",returnsPerDay:100}, {marketId:"C",returnsPerDay:999}, {marketId:"B",returnsPerDay:1}];
+  const dependencies = {
+    buildBullpenAutoRunWorkflowView: run => run.workflow,
+    getRunWorkflowStageResult: () => null,
+    getStageTwoLlmReviewedRows: () => summaries,
+    buildHistoricalStageTwoEventsSummaryRows: ({reviewedRows}) => reviewedRows,
+    resolveStageTwoHistoricalAsOfTimestamp: () => "2026-07-16T18:45:07Z",
+    resolveStageTwoEventsSummaryUpdatedAt: () => null,
+    readStageOutputStringList: value => Array.isArray(value) ? value.filter(v => typeof v === "string") : [],
+    readStageOutputBoolean: value => value === true,
+    readStageOutputNumber: value => typeof value === "number" ? value : null,
+    normalizeMatchKey: value => value,
+    getStageTwoSummaryRowMatchKeys: row => [row.marketId],
+  };
+  const js = ts.transpileModule(functions, {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+  const build = new Function(...Object.keys(dependencies), js + ";return buildStageTwoInvestEventsDialogState;")(...Object.values(dependencies));
+  const decisions = [{market_id:"C",decision:"BUY_NEW"}];
+  const call = outputs => build({run:{id:"saved",workflow:{stages:[{key:"llm",outputs}]}},decisions});
+  assert.deepEqual(call({stage2_actionable_exit_market_ids:[],stage2_actionable_buy_market_ids:["B","A"]}).rows.map(r=>r.marketId), ["B","A"]);
+  assert.deepEqual(call({stage2_actionable_exit_market_ids:[],stage2_actionable_buy_market_ids:["missing","B"]}).rows.map(r=>r.marketId), ["B"]);
+  for (const outputs of [{}, {stage2_actionable_buy_count:3}, {stage2_actionable_buy_market_ids:["A"]}, {stage2_actionable_exit_market_ids:[],stage2_actionable_buy_market_ids:[]}]) assert.deepEqual(call(outputs).rows, []);
+  assert.equal(build({run:null,decisions}), null);
+  assert.deepEqual(summaries.map(r=>r.marketId),["A","C","B"]);
 });

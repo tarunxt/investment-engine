@@ -38,7 +38,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
+    <div className={process.env.NEXT_PUBLIC_UAT2==='true'?'mx-auto flex w-full max-w-7xl flex-col gap-6':'mx-auto flex w-full max-w-7xl flex-col gap-6 p-6'}>
       <DashboardInteractiveIsland initialSummary={initialSummary} initialScope={initialScope} />
     </div>
   );

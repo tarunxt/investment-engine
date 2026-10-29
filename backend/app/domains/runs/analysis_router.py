@@ -97,11 +97,16 @@ def synthetic_setup(runtime):
 
 @router.get('/config')
 async def analysis_config(user=Depends(get_current_user),runtime=Depends(optional_analysis_runtime)):
+    offline=synthetic_setup(runtime)
     return {'enabled':runtime is not None,'analysis_only':True,'orders_authorized':False,
-        'candidate_preview_available':synthetic_setup(runtime),'candidate_modes':{
-            'llm_discovery':{'available':False,'reason':'No approved candidate-discovery contract is installed'},
-            'shortlist_only':{'available':synthetic_setup(runtime),'reason':'Explicit reviewed synthetic shortlist only; holdings remain required'},
-            'combined':{'available':False,'reason':'No approved combined-universe/batch contract is installed'}}}
+        'candidate_preview_available':offline,'live_discovery_available':False,'candidate_modes':{
+            'llm_discovery':{'available':offline,'simulation_only':True,
+                'reason':'Offline fake catalogue only; no live provider' if offline else 'No installed offline discovery contract'},
+            'shortlist_only':{'available':offline,'simulation_only':True,
+                'reason':'Explicit reviewed synthetic shortlist only; holdings remain required' if offline else 'No installed synthetic shortlist contract'},
+            'combined':{'available':offline,'simulation_only':True,
+                'reason':'Reviewed shortlist plus offline fake discovery within the explicit universe bound' if offline else 'No installed offline combined-universe contract'}}}
+
 
 @router.get('/setup-context')
 async def setup_context(portfolio:Literal['india','indmoney_us'],db=Depends(get_async_db),user=Depends(get_current_user),runtime=Depends(analysis_runtime)):

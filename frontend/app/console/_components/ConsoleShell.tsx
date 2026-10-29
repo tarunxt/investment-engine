@@ -11,6 +11,8 @@ import {
 import { URLs } from '@/lib/urls';
 import {workspaceFocusable} from '@/lib/workspaceFocus';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
+import {ConceptFHeader,ConceptFMobileNavigation} from '@/components/workspace/ConceptFNavigation';
+import {WorkspaceDisplayProvider} from '@/components/workspace/WorkspaceDisplay';
 import dynamic from 'next/dynamic';
 const ModuleRouteGate = dynamic(() => import('@/components/modules/ModuleRouteGate').then(m=>m.ModuleRouteGate), {ssr:false,loading:()=> <p role="status">Loading workspace access…</p>});
 const SidebarNavigation = dynamic(() => import('./WorkspaceNavigation').then(m=>m.WorkspaceNavigation), {ssr:false,loading:()=> <nav aria-label="Core navigation" className="space-y-3 px-4"><Link href="/console/dashboard">Dashboard</Link><Link href="/console/profile/preferences">My modules</Link><Link href="/console/help">Help</Link></nav>});
@@ -21,12 +23,18 @@ export function ConsoleShell({
     children: React.ReactNode;
 }) {
     const consoleSidebarStyle = {
-        '--console-sidebar-width': '16rem',
+        '--console-sidebar-width': process.env.NEXT_PUBLIC_UAT2==='true'?'13.875rem':'16rem',
     } as CSSProperties;
+    const conceptF=process.env.NEXT_PUBLIC_UAT2==='true';
     const { user, logout, loading, error } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
+    const mobilePortfolioHeader=conceptF&&pathname==='/console/dashboard';
     const searchParams = useSearchParams();
+    const researchHistory=conceptF&&(/^\/console\/auto-rebalance-runs\/(zerodha|indmoneyUs)\/[1-9][0-9]*$/.test(pathname)&&['model-history','rationale-detail','stock-evidence','calculation-sheet','formula-references'].includes(searchParams.get('workspace')??'')||/^\/console\/(zerodha|indmoney-us)\/final-actionables$/.test(pathname)&&['stock-flow','calculation-sheet','formula-references'].includes(searchParams.get('workspace')??''));
+    const usResearchSummary=conceptF&&pathname==='/console/indmoney-us/research'&&searchParams.get('workspace')==='us-summary'&&/^[1-9][0-9]*$/.test(searchParams.get('research')??'');
+    const diagnosticHistory=conceptF&&/^\/console\/auto-rebalance-runs\/(zerodha|indmoneyUs)\/[1-9][0-9]*$/.test(pathname)&&searchParams.get('workspace')==='model-history'&&searchParams.get('jobView')==='Diagnostics';
+    const planCalculation=conceptF&&/^\/console\/(zerodha|indmoney-us)\/final-actionables$/.test(pathname)&&!['stock-flow','calculation-sheet','formula-references'].includes(searchParams.get('workspace')??'');
     const searchParamString = searchParams.toString();
     const hasRedirectToParam = searchParams.has('redirectTo');
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -63,7 +71,7 @@ export function ConsoleShell({
         }
     }, [hasRedirectToParam, pathname, router, searchParamString]);
     return (
-        <div data-workspace-shell="authenticated" className="min-h-screen bg-background text-foreground" style={consoleSidebarStyle}>
+        <WorkspaceDisplayProvider owner={conceptF?user?.id??null:null}><div data-workspace-shell="authenticated" data-concept-f={conceptF?'true':undefined} className="min-h-screen bg-background text-foreground" style={consoleSidebarStyle}>
             <a href="#workspace-main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-2 focus:z-50 focus:rounded-lg focus:bg-background focus:p-3">Skip to main content</a>
             {/* Mobile sidebar backdrop */}
             {sidebarOpen && (
@@ -86,7 +94,7 @@ export function ConsoleShell({
             >
                 <div className="flex flex-col h-full">
                     <div className="flex h-16 shrink-0 items-center justify-between border-b border-sidebar-border px-5">
-                      <Link href="/console/dashboard" prefetch={false} className="flex min-h-11 items-center gap-2.5 rounded-lg font-semibold tracking-tight text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"><span aria-hidden="true" className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white shadow-sm"><span className="console-brand-letters">CX</span><svg className="console-brand-trend hidden" aria-hidden="true" focusable="false" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17 9 11l4 3 8-10M3 21h18"/></svg></span><span className="text-lg">Cred-X</span></Link>
+                      <Link href="/console/dashboard" prefetch={false} className="flex min-h-11 items-center gap-2.5 rounded-lg font-semibold tracking-tight text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"><span aria-hidden="true" data-brand-mark className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white shadow-sm">{conceptF?<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 18 9 11l5 3 7-10M3 21h18"/></svg>:"CX"}</span><span className="text-lg">Cred-X</span></Link>
                       <button type="button" onClick={()=>setSidebarOpen(false)} aria-label="Close navigation" className="min-h-11 min-w-11 rounded-lg lg:hidden"><HiOutlineX/></button>
                     </div>
 
@@ -94,6 +102,8 @@ export function ConsoleShell({
                     <div className="flex-1 min-h-0 pt-3">
                         <SidebarNavigation
                             pathname={pathname}
+                            researchHistory={researchHistory&&!diagnosticHistory} diagnosticHistory={diagnosticHistory} usResearchSummary={usResearchSummary}
+                            planCalculation={planCalculation}
                             user={user}
                             onLogout={logout}
                             onNavigate={() => setSidebarOpen(false)}
@@ -105,18 +115,19 @@ export function ConsoleShell({
 
             {/* Main content area */}
             <div className="lg:pl-[var(--console-sidebar-width)]">
-                <div className="sticky top-0 z-10 flex h-16 items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
+                {conceptF&&<ConceptFHeader pathname={pathname} researchHistory={researchHistory&&!diagnosticHistory} diagnosticHistory={diagnosticHistory} usResearchSummary={usResearchSummary} planCalculation={planCalculation}/>}
+                <div data-mobile-workspace-header data-portfolio-mobile-header={mobilePortfolioHeader?true:undefined} className="sticky top-0 z-10 flex h-16 data-[portfolio-mobile-header=true]:h-[4.75rem] items-center gap-3 border-b border-border bg-background px-4 lg:hidden">
                 <button
                     type="button"
                     ref={triggerRef}
-                    onClick={() => setSidebarOpen(true)}
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
+                    onClick={event => {triggerRef.current=event.currentTarget;setSidebarOpen(true);}}
+                    data-brand-navigation={mobilePortfolioHeader?true:undefined} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary data-[brand-navigation=true]:rounded-xl data-[brand-navigation=true]:border-transparent data-[brand-navigation=true]:bg-teal-600 data-[brand-navigation=true]:text-white lg:hidden"
                     aria-label="Open navigation"
                     aria-expanded={sidebarOpen}
                     aria-controls="console-sidebar"
                 >
-                    <HiOutlineMenu />
-                </button><span className="font-medium">Workspace</span></div>
+                    <>{mobilePortfolioHeader?<svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 18 9 11l5 3 7-10M3 21h18"/></svg>:<HiOutlineMenu />}</>
+                </button><span className={mobilePortfolioHeader?"text-2xl font-bold":"font-medium"}>{conceptF?'Cred-X':'Workspace'}</span>{mobilePortfolioHeader?<Link href="/console/profile" prefetch={false} aria-label="Open your profile" className="ml-auto inline-flex min-h-11 min-w-11 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-primary"><span aria-hidden="true" className="inline-flex size-8 items-center justify-center rounded-full bg-slate-600 text-xs font-bold text-white">{user?.username?.trim().slice(0,2).toUpperCase()||'U'}</span></Link>:conceptF&&<span className="ml-auto text-[10px] font-semibold uppercase tracking-wider">Simulation</span>}</div>
 
                 {/* Page content */}
                 <main
@@ -136,6 +147,7 @@ export function ConsoleShell({
                     <ModuleRouteGate>{children}</ModuleRouteGate>
                 </main>
             </div>
-        </div>
+            {conceptF&&<ConceptFMobileNavigation pathname={pathname} expanded={sidebarOpen} onMore={trigger=>{if(trigger)triggerRef.current=trigger;setSidebarOpen(true);}}/>}
+        </div></WorkspaceDisplayProvider>
     );
 }

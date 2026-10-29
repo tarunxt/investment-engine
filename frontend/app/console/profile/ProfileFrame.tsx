@@ -44,6 +44,13 @@ export function ProfileFrame({ children, costAccessOwner }: SettingsLayoutProps 
   const pathname = usePathname();
   const {user}=useAuth();
 
+  if(process.env.NEXT_PUBLIC_UAT2==='true'){
+    if(pathname==='/console/profile/get-started'||pathname==='/console/profile/modules'||pathname==='/console/profile/activity')return <>{children}</>;
+    const privacyReview=pathname.startsWith('/console/profile/privacy/requests');
+    const tabs=pathname==='/console/profile/privacy'?[['Modules','/console/profile/modules'],['Appearance','/console/profile/preferences'],['Connections','/console/profile/connections'],['Privacy & utilities','/console/profile/privacy']]:pathname==='/console/profile/research-library'?[['Prompt library','/console/profile/research-library'],['Usage & costs','/console/profile/usage'],['Connections','/console/profile/connections'],['Help','/console/help']]:[['Profile','/console/profile'],['Modules','/console/profile/modules'],['Appearance','/console/profile/preferences'],['Account utilities','/console/profile/privacy']];
+    return <section className={pathname==='/console/profile'?'concept-f-account-page space-y-6':pathname.startsWith('/console/profile/privacy')||pathname==='/console/profile/research-library'?'concept-f-account-utility-page space-y-6':'space-y-6'}><header><h1 className="text-3xl font-bold">{pathname.startsWith('/console/profile/privacy/requests')?'Privacy scope is explicit':pathname==='/console/profile/privacy'?'Account utilities, with honest limits':pathname==='/console/profile/research-library'?'Your research library and usage':'A workspace that feels like yours'}</h1><p className="mt-2 text-sm text-muted-foreground">{privacyReview?'Profile / Privacy / coverage, review requests and history':pathname==='/console/profile/privacy'?'Profile / account utilities / no hidden admin navigation':'Profile and preferences / controls stay easy to find'}</p></header>{!privacyReview&&<nav aria-label="Profile settings" className="concept-f-account-tabs">{tabs.map(([title,href])=><Link key={href} href={href} prefetch={false} aria-current={pathname===href?'page':undefined}>{title}</Link>)}<details><summary>More account tools</summary><div className="concept-f-card mt-3 flex flex-wrap gap-4">{[{title:'Research library',href:'/console/profile/research-library'},...sidebarNavItems].filter(item=>item.title!=='Platform Cost Drivers'||costAccessOwner===user?.id).map(item=><Link key={item.href} href={item.href} prefetch={false}>{item.title}</Link>)}</div></details></nav>}{children}</section>;
+  }
+
   return (
     <div className="space-y-6 pb-16 md:block">
       <div className="space-y-0.5">

@@ -975,7 +975,7 @@ export const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
   scoreSymbolThresholds: DEFAULT_SCORE_SYMBOL_THRESHOLDS,
 };
 
-const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investment-engine:final-actionables:score-matrix-formula-config:v1";
+export const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investment-engine:final-actionables:score-matrix-formula-config:v1";
 
 const DASHBOARD_WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
 
@@ -1252,6 +1252,16 @@ function parseStrictNumericCell(value?: string | null) {
 function parseRationaleScoreCell(value?: string | null) {
   const parsed = parseStrictNumericCell(value);
   return parsed !== null && parsed >= -3 && parsed <= 3 ? parsed : null;
+}
+
+/** Diagnostic only: the existing strict parser and score range remain authoritative. */
+export function inspectRecordedRationaleScore(value?: string | null) {
+  const numeric = parseStrictNumericCell(value);
+  if (numeric === null) return { state: "unavailable" as const };
+  const accepted = parseRationaleScoreCell(value);
+  return accepted === null
+    ? { state: "out-of-range" as const, score: numeric, min: SCORE_GUARDRAIL_MIN, max: SCORE_GUARDRAIL_MAX }
+    : { state: "accepted" as const, score: accepted };
 }
 
 function average(values: number[]) {
@@ -1994,7 +2004,7 @@ function buildDetailedRationaleScoreRows(
   ];
 }
 
-function getSignedUnitsChange(
+export function getSignedUnitsChange(
   row: CanonicalRow,
   actionOverride?: ActionCategory | null,
 ) {
@@ -2328,7 +2338,7 @@ function getEditableRuleSummary(
   return `${rule.label} manually resolves to ${ACTION_CATEGORY_LABEL[action]}. ${unitsText}`;
 }
 
-function applyScoreMatrixEdits(
+export function applyScoreMatrixEdits(
   detail: ScoreMatrixDetail,
   multiplierDrafts: Record<string, string>,
   denominatorDraft: string,
@@ -3727,7 +3737,7 @@ const RATIONALE_TEXT_HEADERS: RebalanceHeader[] = [
   "Rationale - Fundamentals Medium/Long Term",
 ];
 
-const RATIONALE_SCORE_HEADERS: RebalanceHeader[] = [
+export const RATIONALE_SCORE_HEADERS: RebalanceHeader[] = [
   "Score Rationale Cruxx",
   "Score Rationale Technical Setup Short Term 1–3 Months",
   "Score Rationale - Technical Setup (Medium Term)",
@@ -3745,7 +3755,7 @@ const RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER: Partial<Record<RebalanceHeader
   "Rationale - Fundamentals Medium/Long Term": "Score Rationale - Fundamentals Medium/Long Term",
 };
 
-function getRowRationaleDisplayScore(row: CanonicalRow) {
+export function getRowRationaleDisplayScore(row: CanonicalRow) {
   return average(
     RATIONALE_SCORE_HEADERS.map((header) => parseNumericCell(row[header])).filter(
       (value): value is number => value !== null,

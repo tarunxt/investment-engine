@@ -1,4 +1,5 @@
 'use client';
+import {ConceptFSavedThreats} from '@/components/workspace/ConceptFSavedThreats';
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -261,7 +262,8 @@ function BottomLineCards({ items }: { items: IndMoneyUsThreatKeyValueItem[] }) {
   );
 }
 
-export default function IndMoneyUsThreatsPage() {
+export default function IndMoneyUsThreatsPage() {return process.env.NEXT_PUBLIC_UAT2==='true'?<ConceptFSavedThreats/>:<LegacyIndMoneyUsThreatsPage/>;}
+function LegacyIndMoneyUsThreatsPage() {
   const [overview, setOverview] = useState<IndMoneyUsPortfolioOverviewResponse | null>(null);
   const [analysis, setAnalysis] = useState<IndMoneyUsThreatAnalysis | null>(null);
   const [lastReportAnalysis, setLastReportAnalysis] = useState<IndMoneyUsThreatAnalysis | null>(null);

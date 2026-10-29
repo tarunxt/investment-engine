@@ -126,7 +126,7 @@ async function analyze(page,base,owner){
   await shot(page,`owner-${owner}-research-options-${width}px`);
  }
  const consent=page.getByRole('checkbox',{name:/I reviewed this exact source, candidate coverage, constraints and usage/});
- await consent.check();await until(()=>start.isEnabled());
+ await consent.check();await page.getByRole('checkbox',{name:/I confirm this is simulation-only research/}).check();await until(()=>start.isEnabled());
  assert.equal(count(),before,'Source acquisition and setup consent must not start research');
  const posted=page.waitForRequest(r=>r.method()==='POST'&&new URL(r.url()).pathname==='/backend-api/runs/analysis-workflows');
  await start.click();const body=(await posted).postDataJSON();

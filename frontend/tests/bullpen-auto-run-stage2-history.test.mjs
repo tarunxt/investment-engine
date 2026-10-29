@@ -163,7 +163,9 @@ test("Stage 2 historical summary rows rebuild consensus from persisted event dat
   assert.equal(rows[0].noOdds, 46);
   assert.equal(rows[0].llmYesOdds, 88);
   assert.equal(rows[0].llmNoOdds, 12);
-  assert.equal(rows[0].returnsPerDay, 11.5);
+  // The backend serializes the run's saved formula result without conversion.
+  // Rebuilding consensus must not replace that historical metric with a default.
+  assert.equal(rows[0].returnsPerDay, 40);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].volume, "123,456");
   assert.equal(rows[0].liquidity, "7,890");
@@ -325,7 +327,8 @@ test("Stage 2 historical summary rows normalize yes_odds/no_odds aliases into ca
   assert.equal(rows.length, 1);
   assert.equal(rows[0].llmYesOdds, 12.5);
   assert.equal(rows[0].llmNoOdds, 87.5);
-  assert.equal(rows[0].returnsPerDay, 11.47);
+  // 19.5 / (1.7 + 4), rounded to two decimals.
+  assert.equal(rows[0].returnsPerDay, 3.42);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].isAmountToBeInvestedHighlighted, true);
   assert.equal(rows[0].llmBreakdown[0].invalidReason, null);
@@ -469,7 +472,8 @@ test("Stage 2 historical summary rows build consensus from completed and partial
   );
   assert.equal(rows[0].llmYesOdds, 84);
   assert.equal(rows[0].llmNoOdds, 16);
-  assert.equal(rows[0].returnsPerDay, 10);
+  // 40 / (4 + 4), following the registered default formula.
+  assert.equal(rows[0].returnsPerDay, 5);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].isAmountToBeInvestedHighlighted, true);
 });
@@ -690,5 +694,34 @@ test("completed historical runs keep days left and money fields stable regardles
     );
   } finally {
     Date.now = originalNow;
+  }
+});
+
+
+test("Stage 2 historical summary preserves finite saved run returns including zero and negative values", async () => {
+  const historyModule = await loadStageTwoHistoryModule();
+  for (const saved of [40, 0, -2.25, 7.123]) {
+    const stage = createStage({llm_reviewed_candidates:[createReviewedRow({close_time:HISTORICAL_CLOSE_TIME,returns_per_day:saved})]});
+    const before = structuredClone(stage);
+    const reviewedRows = historyModule.getStageTwoLlmReviewedRows(stage,[createScanCandidate({closeTime:HISTORICAL_CLOSE_TIME})]);
+    assert.equal(reviewedRows[0].returns_per_day,saved);
+    for (const asOfTimestamp of [HISTORICAL_AS_OF,"2026-07-18T18:45:07Z"]) {
+      const rows = historyModule.buildStageTwoEventsSummaryRows({reviewedRows,decisions:[],runId:"saved",asOfTimestamp});
+      assert.equal(rows[0].returnsPerDay,saved,"saved run value wins over recalculated default/time");
+      assert.equal(rows[0].llmYesOdds,88);assert.equal(rows[0].llmNoOdds,12);
+    }
+    assert.deepEqual(stage,before,"historical stage payload remains unchanged");
+  }
+});
+
+test("Stage 2 legacy missing or invalid saved return keeps default reconstruction ahead of decision approximation", async () => {
+  const historyModule = await loadStageTwoHistoryModule();
+  for (const value of [undefined,null,NaN,Infinity,-Infinity,"not-a-number"]) {
+    const row=createReviewedRow({close_time:HISTORICAL_CLOSE_TIME,returns_per_day:value});
+    if(value===undefined)delete row.returns_per_day;
+    const reviewedRows=historyModule.getStageTwoLlmReviewedRows(createStage({llm_reviewed_candidates:[row]}),[createScanCandidate({closeTime:HISTORICAL_CLOSE_TIME})]);
+    const decision={run_id:"saved",market_id:"market-1",side:"YES",current_yes_odds:54,current_no_odds:46,fair_yes_probability_pct:88,fair_no_probability_pct:12,hours_remaining:96};
+    const rows=historyModule.buildStageTwoEventsSummaryRows({reviewedRows,decisions:[decision],runId:"saved",asOfTimestamp:HISTORICAL_AS_OF});
+    assert.equal(rows[0].returnsPerDay,5.75,"46/(4+4), not the decision approximation34/4");
   }
 });

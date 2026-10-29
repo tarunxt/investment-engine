@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+const read=path=>readFileSync(new URL('../'+path,import.meta.url),'utf8');
+const compile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,target:ts.ScriptTarget.ES2022}}).outputText;
+function module(path,imports={}){const result={};new Function('require','exports',compile(read(path)))(key=>imports[key]??{},result);return result;}
+function functions(path,names){const source=read(path),ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);return ast.statements.filter(node=>ts.isFunctionDeclaration(node)&&names.includes(node.name?.text)).map(node=>node.getText(ast)).join('\n');}
+const identity=module('lib/rebalanceRunIdentity.ts');
+const parser=module('components/InvestmentRecommendationTable.tsx');
+const evidence=module('lib/stockFlowEvidence.ts',{'@/components/InvestmentRecommendationTable':parser,'@/lib/rebalanceRunIdentity':identity});
+const technicalSource=functions('app/console/_components/FinalActionablesConsole.tsx',['stripMarkdownLinks','stripInlineCitations','normalizeScanCell','normalizeScanHeader','splitMarkdownRow','isMarkdownSeparator','parseTechnicalScanResponse']);
+const technical=new Function(compile(technicalSource)+';return parseTechnicalScanResponse;')();
+// Execute the actual component inputStates expression with its production classification helper.
+// Technical parser and generic recommendation parser are real; map metadata/indexing is irrelevant to classification.
+const componentSource=read('components/workspace/ConceptFLegacyFormula.tsx');
+const ast=ts.createSourceFile('component.tsx',componentSource,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let expression;
+function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='inputStates')expression=node.initializer.getText(ast);ts.forEachChild(node,visit);}visit(ast);
+const helper=functions('components/workspace/ConceptFLegacyFormula.tsx',['formulaSourceOutputState']);
+const classify=new Function('projected','market','useMemo','inspectSavedStockJob','isAnalysisRunForStage','buildTechnicalScanMap','const exports={};'+compile(helper)+';return '+compile('const result='+expression).replace(/^const result = /,'').replace(/;\s*$/,''));
+const response='| Exchange | Ticker | Setup |\n| --- | --- | --- |\n| NSE | SYNTHETIC | Higher-low pullback |';
+const run=(status='completed',body=response,portfolio='india',stage='Technical')=>({id:1,auto_rebalance_portfolio:portfolio,auto_rebalance_label:(portfolio==='india'?'India':'IndMoney US')+' Run #7 ('+stage+' Scan)',run_jobs:[{job_id:7,job:{id:7,status,response:body,provider:'synthetic',model:'saved'}}]});
+function states(rows,market='india'){return classify(rows,market,fn=>fn(),evidence.inspectSavedStockJob,identity.isAnalysisRunForStage,runs=>Object.fromEntries(runs.flatMap(row=>row.run_jobs.flatMap(link=>technical(link.job.response,{}))).map((row,i)=>[i,row])));}
+test('valid Technical aliases use the actual Technical parser rather than generic recommendation classification',()=>{assert.equal(parser.parseInvestmentRecommendationContent(response,{}),null);assert.equal(technical(response,{}).length,1);const source=run(),before=JSON.stringify(source);assert.equal(states([source])[0].state,'populated');assert.equal(JSON.stringify(source),before);assert.equal(states([run('completed',response,'indmoney_us')],'us')[0].state,'populated');});
+test('Technical status truth stays missing incomplete failed or partial even with parseable text',()=>{for(const [status,body,expected] of [['completed',null,'missing'],['processing',response,'incomplete'],['queued',response,'incomplete'],['unknown',response,'incomplete'],['failed',response,'failed'],['cancelled',response,'failed'],['canceled',response,'failed'],['partial',null,'missing'],['partial',response,'partial']])assert.equal(states([run(status,body)])[0].state,expected);});
+test('malformed or explicit-empty Technical response is not invented as parsed Technical success',()=>{for(const body of ['malformed','[]','| Exchange | Ticker | Setup |\n| --- | --- | --- |'])assert.equal(states([run('completed',body)])[0].state,'unparseable');});
+test('foreign or unclassified sources cannot borrow Technical parsing authority',()=>{assert.equal(states([run('completed',response,'indmoney_us')])[0].state,'unparseable');assert.equal(states([run('completed',response,'india','Rebalance')])[0].state,'unparseable');const conflict={...run(),prompt:'[REBALANCE_FLOW:india]'};assert.equal(states([conflict])[0].state,'unparseable');});
+
+const matrix=module('lib/conceptFStockMatrix.ts',{'./stockFlowEvidence':evidence,'./rebalanceRunIdentity':identity,'./savedJobPresentation':module('lib/savedJobPresentation.ts'),'./recordedTiming':module('lib/recordedTiming.ts'),'@/app/console/_components/FinalActionablesConsole':{buildTechnicalScanMap:runs=>Object.fromEntries(runs.flatMap(row=>row.run_jobs.flatMap(link=>technical(link.job.response,{}))).flatMap((row,i)=>[[i,row],['SYMBOL:'+row.stockSymbol,row]]))}});
+test('selected stock matrix uses actual Technical aliases and deduplicates parser index aliases',()=>{for(const [portfolio,market] of [['india','india'],['indmoney_us','us']]){const source=run('completed',response,portfolio),before=JSON.stringify(source),result=matrix.selectedStockMatrix([source],market);assert.equal(result.sources[0].state,'populated');assert.deepEqual(result.sources[0].stocks,['NSE:SYNTHETIC']);assert.equal(result.stocks.length,1);assert.equal(JSON.stringify(source),before);}});
+test('Technical matrix preserves failed missing incomplete and malformed states without invented stocks',()=>{for(const [status,body,expected] of [['completed',null,'missing'],['processing',response,'incomplete'],['failed',response,'failed'],['cancelled',response,'failed'],['partial',response,'partial'],['completed','malformed','unparseable'],['completed','[]','unparseable']]){const result=matrix.selectedStockMatrix([run(status,body)],'india');assert.equal(result.sources[0].state,expected);assert.deepEqual(result.stocks,[]);}assert.deepEqual(matrix.selectedStockMatrix([run('completed',response,'indmoney_us')],'india'),{sources:[],stocks:[]});});

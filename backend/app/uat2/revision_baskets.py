@@ -11,6 +11,22 @@ from app.domains.runs.analysis_workflows.plan_revisions import select_plan,recor
 REVISION_PROVENANCE=('revision_version','revision_math_hash','revision_risk_basis_hash')
 
 
+def require_current_base(db,analysis,owner,workflow_id,evidence):
+    """A saved amendment supersedes unconsumed base-plan authority.
+
+    completed_analysis/Workflows.owned already use the workflow row fence;
+    this adds no new lock order or permission. Past effects keep their receipt.
+    """
+    from app.domains.runs.analysis_workflows.contracts import WorkflowDenied
+    try:
+        service=Workflows(db,analysis.runtime);row=service.owned(owner,workflow_id)
+        original=project(evidence,workflow=row,source=row.execution_json['source'])
+        if select_plan(service.stages(row)[-1],original)['version']!=original['version']:
+            raise OrderDenied('CURRENT_SAVED_BASE_PLAN_REQUIRED')
+    except (WorkflowDenied,KeyError,TypeError,ValueError):
+        raise OrderDenied('CURRENT_SAVED_BASE_PLAN_REQUIRED') from None
+
+
 def selected(db,analysis,owner,workflow_id,version,*,latest=True,now=None):
     service=Workflows(db,analysis.runtime);row=service.owned(owner,workflow_id)
     evidence=analysis.completed_analysis(db,owner,workflow_id,now=now)
@@ -77,7 +93,11 @@ def annotate(db,analysis,plan):
         require_recommendation_snapshot(snapshot)
         if snapshot.content_hash!=source['content_hash']:raise OrderDenied('MANUAL_CASH_SOURCE_CHANGED')
         return project_cash(plan,snapshot.wallet_balance,snapshot_hash=snapshot.content_hash,policy=execution.get('research_setup',{}).get('constraints'))
-    if not plan.get('revision_parent'):return plan
+    if not plan.get('revision_parent'):
+        versions=plan.get('versions') or []
+        if versions and versions[-1]['version']!=plan['version']:
+            return {**plan,'review_available':False}
+        return plan
     from .synthetic_orders import SyntheticOrders
     from app.domains.ai_limits.contracts import BoundaryDenied
     try:

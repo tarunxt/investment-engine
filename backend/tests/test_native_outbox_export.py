@@ -90,3 +90,23 @@ def test_native_export_cannot_adopt_hosted_scope_or_untyped_scope(order_env):
     with analysis.session() as db:
         with pytest.raises(BoundaryDenied):NativeOutboxExport(db,scope=object())
         with pytest.raises(PermissionError):NativeOutboxExport(db,scope=SimulationSourceScope('hosted')).export(1)
+
+
+@pytest.mark.parametrize('worker_env',['journal'],indirect=True)
+def test_optional_saved_technical_study_export_retains_exact_owned_contract(order_env):
+    from app.domains.runs.analysis_workflows.synthetic_journal import TOPIC as SOURCE
+    from app.domains.runs.analysis_workflows.contracts import digest,WorkflowDenied
+    e,analysis,*_=order_env
+    with analysis.session() as db:
+        row=db.scalar(select(OutboxMessage).where(OutboxMessage.topic==SOURCE))
+        packet=deepcopy(row.payload)
+        exporter=NativeOutboxExport(db,scope=analysis.scope)
+        result=exporter.project(row.id,SOURCE,packet,1)
+        assert result['source']['price_history']==packet['source']['price_history']
+        assert result['source']['price_history']['provider']=='offline-fixed-samples-v1'
+        changed=deepcopy(packet);changed['source']['price_history']['study']['rsi_14']='99.99'
+        history=changed['source']['price_history'];history['history_hash']=digest({k:v for k,v in history.items() if k!='history_hash'})
+        changed['source']['content_hash']=digest({k:v for k,v in changed['source'].items() if k!='content_hash'})
+        changed['source_hash']=digest(changed['source'])
+        with pytest.raises((BoundaryDenied,WorkflowDenied)):
+            exporter.project(row.id,SOURCE,changed,1)

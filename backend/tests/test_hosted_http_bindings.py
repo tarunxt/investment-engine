@@ -48,10 +48,9 @@ async def test_installed_http_binding_uses_owned_session_and_clears_it(linked_en
             assert {key: config[key] for key in ('enabled', 'analysis_only', 'orders_authorized')} == {
                 'enabled': True, 'analysis_only': True, 'orders_authorized': False}
             assert config['candidate_preview_available'] is True
-            assert config['candidate_modes'] == {
-                'llm_discovery': {'available': False, 'reason': 'No approved candidate-discovery contract is installed'},
-                'shortlist_only': {'available': True, 'reason': 'Explicit reviewed synthetic shortlist only; holdings remain required'},
-                'combined': {'available': False, 'reason': 'No approved combined-universe/batch contract is installed'}}
+            assert set(config['candidate_modes']) == {'llm_discovery','shortlist_only','combined'}
+            assert all(mode['available'] is True and mode['simulation_only'] is True and mode['reason'] for mode in config['candidate_modes'].values())
+            assert config['live_discovery_available'] is False
             assert response.headers['cache-control'] == 'private, no-store'
         assert sessions and all(SESSION not in db.info for db in sessions)
         assert configured_runtime() is None

@@ -170,6 +170,7 @@ export function UniversalPolymarketScan() {
     }
   }
 
+  const completedAt = summary?.completedAt ?? snapshot?.sourceScanCompletedAt ?? recordedScan?.completedAt;
   const scanActive = running || autoRunRunning;
   const sectionClass = scanActive
     ? "rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm"
@@ -191,7 +192,7 @@ export function UniversalPolymarketScan() {
       <UniversalScanAutoRunCard onStatusChange={handleAutoRunStatus} />
       {(snapshot || recordedScan) && <>
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot?.scannedAt ?? recordedScan!.startedAt)}</span><span className="block">Completed: {dateLabel(summary?.completedAt ?? snapshot?.sourceScanCompletedAt ?? recordedScan!.completedAt)}</span></dd></div>
+          <div className={tileClass}><dt className={labelClass}>Last Universal Scan</dt><dd className={`${valueClass} space-y-1`}><span className="block">Started: {dateLabel(snapshot?.scannedAt ?? recordedScan!.startedAt)}</span><span className="block">Completed: {completedAt ? dateLabel(completedAt) : "Unavailable"}</span></dd></div>
           <div className={tileClass}><dt className={labelClass}>Time taken</dt><dd className={valueClass}>{summary ? durationLabel(summary.durationMs) : recordedScan ? durationLabel(new Date(recordedScan.completedAt).getTime() - new Date(recordedScan.startedAt).getTime()) : "Preparing…"}</dd></div>
           <div className={tileClass}><dt className={labelClass}>Total Events Scanned</dt><dd className={valueClass}>{(snapshot?.totalCandidates ?? recordedScan!.totalEvents).toLocaleString("en-IN")}</dd></div>
         </dl>

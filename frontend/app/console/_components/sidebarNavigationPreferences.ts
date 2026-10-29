@@ -1,4 +1,4 @@
-import { privateLocalStorage } from "@/lib/privateBrowserStorage";
+import { privateLocalStorage,isPrivateStorageEvent } from "@/lib/privateBrowserStorage";
 import { SIDEBAR_SECTIONS } from './sidebarNavigationConfig';
 
 export type NavigationNameOverrides = Record<string, string>;
@@ -130,7 +130,7 @@ export function subscribeToNavigationNames(storageKey: string, onStoreChange: ()
     }
 
     const handleStorage = (event: StorageEvent) => {
-        if (event.key === storageKey || event.key === null) {
+        if (event.key === storageKey || isPrivateStorageEvent(event,storageKey) || event.key === null) {
             onStoreChange();
         }
     };
@@ -158,8 +158,8 @@ export function persistNavigationNameOverrides(
     }
 
     const raw = JSON.stringify(value);
-    navigationNamesSnapshotCache.set(storageKey, { raw, value });
     privateLocalStorage.setItem(storageKey, raw);
+    navigationNamesSnapshotCache.set(storageKey, { raw, value });
     window.dispatchEvent(new CustomEvent(SIDEBAR_NAMES_UPDATED_EVENT, { detail: storageKey }));
 }
 
@@ -200,7 +200,7 @@ export function subscribeToNavigationChildOrder(
     }
 
     const handleStorage = (event: StorageEvent) => {
-        if (event.key === storageKey || event.key === null) {
+        if (event.key === storageKey || isPrivateStorageEvent(event,storageKey) || event.key === null) {
             onStoreChange();
         }
     };
@@ -230,7 +230,7 @@ export function persistNavigationChildOrder(
 
     const value = reconcileChildOrder(order, defaultOrder);
     const raw = JSON.stringify(value);
-    navigationChildOrderSnapshotCache.set(storageKey, { raw, value });
     privateLocalStorage.setItem(storageKey, raw);
+    navigationChildOrderSnapshotCache.set(storageKey, { raw, value });
     window.dispatchEvent(new CustomEvent(SIDEBAR_CHILD_ORDER_UPDATED_EVENT, { detail: storageKey }));
 }

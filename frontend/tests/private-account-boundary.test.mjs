@@ -8,9 +8,9 @@ function load(path, bindings = {}) {
   const output = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
   }}).outputText;
-  const module = { exports: {} };
-  new Function('exports', 'module', ...Object.keys(bindings), output)(module.exports, module, ...Object.values(bindings));
-  return module.exports;
+  const loadedModule = { exports: {} };
+  new Function('exports', 'module', ...Object.keys(bindings), output)(loadedModule.exports, loadedModule, ...Object.values(bindings));
+  return loadedModule.exports;
 }
 function memoryStorage() {
   const values = new Map();
@@ -128,12 +128,18 @@ test('current HTTP session loss clears the private boundary; stale A failures ca
   const method = cls.members.find(node => node.name?.getText(ast) === 'handleSessionLoss');
   const output = ts.transpileModule(`class Harness { constructor(cache){this.readDeduplicator=cache;} ${method.getText(ast)} } exports.Harness=Harness;`,
     {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-  const events = [], module = {exports:{}};
-  new Function('exports','window',output)(module.exports,{dispatchEvent:event=>events.push(event.type)});
-  const instance = new module.exports.Harness({getSessionGeneration:()=> 'B'});
+  const events = [], loadedModule = {exports:{}};
+  new Function('exports','window',output)(loadedModule.exports,{dispatchEvent:event=>events.push(event.type)});
+  const instance = new loadedModule.exports.Harness({getSessionGeneration:()=> 'B'});
   instance.handleSessionLoss(401,'Session is no longer active','A');
   instance.handleSessionLoss(401,'Google Sheets not connected. Please connect first.','B');
   assert.equal(events.length,0);
   instance.handleSessionLoss(401,'Session is no longer active','B');
   assert.deepEqual(events,['private-session-revoked']);
 });
+
+test('module invalidation preserves only the current owner model-template preference; logout still purges it',()=>{const storage=memoryStorage();const cache=load('../lib/privateDashboardCache.ts');const own='investment-engine:private:v1:1:investment-engine:model-mixes:v1',foreign='investment-engine:private:v1:2:investment-engine:model-mixes:v1';storage.setItem(own,'owned inert template');storage.setItem(foreign,'foreign template');storage.setItem('investment-engine:private:v1:1:portfolio','cached balances');assert.equal(cache.purgePrivateModuleDashboardCache(storage,1),2);assert.equal(storage.getItem(own),'owned inert template');assert.equal(storage.getItem(foreign),null);assert.equal(cache.purgePrivateDashboardCache(storage),1);assert.equal(storage.getItem(own),null);storage.setItem(own,'owned template');assert.equal(cache.purgePrivateModuleDashboardCache(storage,null),1);});
+
+test('module refresh retains only known current-owner nonfinancial column preferences',()=>{const storage=memoryStorage();const cache=load('../lib/privateDashboardCache.ts');const own='investment-engine:private:v1:1:investment-engine:concept-f:recommendation-layout:v1',foreign='investment-engine:private:v1:2:investment-engine:concept-f:recommendation-layout:v1';storage.setItem(own,'column names');storage.setItem(foreign,'foreign columns');storage.setItem('investment-engine:private:v1:1:investment-engine:concept-f:recommendation-layout:v1:portfolio','financial cache');assert.equal(cache.purgePrivateModuleDashboardCache(storage,1),2);assert.equal(storage.getItem(own),'column names');assert.equal(cache.purgePrivateDashboardCache(storage),1);});
+
+test('known current-owner advisory formula settings survive module invalidation while full identity purge still removes them',()=>{const storage=memoryStorage();const cache=load('../lib/privateDashboardCache.ts');const key='investment-engine:private:v1:1:investment-engine:final-actionables:score-matrix-formula-config:v1';storage.setItem(key,'numeric formula settings');storage.setItem('investment-engine:private:v1:2:investment-engine:final-actionables:score-matrix-formula-config:v1','foreign settings');assert.equal(cache.purgePrivateModuleDashboardCache(storage,1),1);assert.equal(storage.getItem(key),'numeric formula settings');assert.equal(cache.purgePrivateDashboardCache(storage),1);});

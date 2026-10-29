@@ -298,6 +298,7 @@ async def get_profile(
     if not profile:
         raise NotFoundException("User profile not found")
     return ProfilePreferencesResponse(
+        owner_id=current_user.id,
         preferences_writable=not recovery_mode(),
         full_name=current_user.full_name,
         avatar_url=profile.avatar_url,
