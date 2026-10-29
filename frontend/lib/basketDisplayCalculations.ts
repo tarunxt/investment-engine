@@ -1,5 +1,5 @@
 export type SavedScoreObservation = { id: number | string; run_id: number; symbol: string; exchange: string | null; covered_at: string; score: number | null; action: string | null; formula_version: string; completed: boolean; coverage_status: string; source_run_ids?: number[] };
-export type CurrentScoreCalculation = { symbol: string; exchange: string; market: 'india' | 'us'; score: number | null; calculatedAt: string; sources: { runId: number; createdAt: string; completed: boolean; market: 'india' | 'us' | null }[] };
+export type CurrentScoreCalculation = { symbol: string; exchange: string; market: 'india' | 'us'; score: number | null; action?: string | null; calculatedAt: string; sources: { runId: number; createdAt: string; completed: boolean; market: 'india' | 'us' | null }[] };
 export type BasketScoreHistory = { market: 'india' | 'us'; symbols: string[]; as_of: string; window_start: string; timezone: string; days: number; truncated: boolean; observations: SavedScoreObservation[]; notes: string[] };
 export type DisplayParameters = { maximumStocks: number; days: number; cash: number; normalised: number; valid: boolean };
 export const defaultDisplayParameters = (): DisplayParameters => ({ maximumStocks: 20, days: 5, cash: 5, normalised: 9.5, valid: true });
@@ -17,7 +17,7 @@ export function historicalMean(history: BasketScoreHistory, symbol: string, exch
     if (currentIds.has(row.run_id)) return false;
     seen.add(row.run_id); return true;
   });
-  if (validCurrent) rows.unshift({ id: `current:${[...currentIds].sort((a,b)=>a-b).join(',')}`, run_id: Math.max(...currentIds), source_run_ids: [...currentIds].sort((a,b)=>a-b), symbol, exchange, covered_at: current.calculatedAt, score: current.score, action: null, formula_version: 'Current calculation · displayed basket Score; not an original saved decision', completed: true, coverage_status: 'suggested' });
+  if (validCurrent) rows.unshift({ id: `current:${[...currentIds].sort((a,b)=>a-b).join(',')}`, run_id: Math.max(...currentIds), source_run_ids: [...currentIds].sort((a,b)=>a-b), symbol, exchange, covered_at: current.calculatedAt, score: current.score, action: ['Sell All', 'Trim', 'Hold', 'Add more', 'Buy New'].includes(current.action ?? '') ? current.action! : null, formula_version: 'Current calculation · displayed basket Score; not an original saved decision', completed: true, coverage_status: 'suggested' });
   const sum = rows.reduce((sum, row) => sum + row.score!, 0);
   return { rows, sum, score: history.truncated || !rows.length ? null : sum / rows.length };
 }
@@ -79,4 +79,9 @@ export function verifiedDisplayQuote(snapshot: unknown, market: 'india' | 'us', 
   if (matches.length !== 1) return null;
   const price = market === 'india' ? matches[0].last_price : matches[0].market_price;
   return typeof price === 'number' && Number.isFinite(price) && price > 0 ? { price, asOf: data.captured_at, source: market === 'india' ? 'Zerodha holdings last_price · exact venue' : 'IndMoney holdings market_price · explicit exact venue' } : null;
+}
+
+export function formatBasketDisplayCurrency(value: number | null | undefined, currency: 'INR' | 'USD' = 'INR') {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat(currency === 'USD' ? 'en-US' : 'en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
 }

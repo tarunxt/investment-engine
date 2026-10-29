@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
-import { displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
+import { formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { auditResponseHashes } from "@/services/recommendationAudit";
@@ -1466,12 +1466,7 @@ function formatBasketQuantity(value: number | null) {
 }
 
 function formatBasketCurrency(value: number | null, currency: "INR" | "USD" = "INR") {
-  if (value === null) return "—";
-  return new Intl.NumberFormat(currency === "USD" ? "en-US" : "en-IN", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(value);
+  return formatBasketDisplayCurrency(value, currency);
 }
 
 function getZerodhaAvailableMarginToneClass(
@@ -3681,7 +3676,7 @@ function ScopedZerodhaBasketPreviewDialog({
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
       return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", market: sameMarket ? tradingViewMarket : null };
     });
-    return { symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    return { symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
