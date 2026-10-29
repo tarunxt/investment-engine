@@ -265,6 +265,13 @@ export function AutoRebalanceHistoryDetailClient({
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
       {run ? <>
         <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <CheckCircle2 className="size-5 text-emerald-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><StatusBadge status={run.status} /></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Current stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
+        {run.stages.filter(stage => stage.stage === "actionables" && stage.summary.frozen_final).map(stage => (
+          <details key="frozen-final" className="rounded-xl border bg-white p-4">
+            <summary className="cursor-pointer font-semibold">Saved final calculation — original formula and source evidence</summary>
+            <p className="my-2 text-sm">Captured when this workflow completed. Current formula changes do not alter these rows.</p>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(stage.summary.frozen_final, null, 2)}</pre>
+          </details>
+        ))}
         <div><h2 className="text-xl font-bold text-slate-950">Stage timeline</h2><p className="mt-1 text-sm text-slate-600">Color indicates completion (green), active work (blue), warnings (amber), and the exact failure point (red).</p><div className="mt-4 grid gap-3 lg:grid-cols-2">{run.stages.map((stage) => <StageSummary key={stage.stage} stage={stage} />)}</div></div>
         <div><h2 className="text-xl font-bold text-slate-950">LLM diagnostics and saved output</h2><p className="mt-1 text-sm text-slate-600">Outputs are preserved per provider/model; failed work remains visible with its error rather than disappearing from the audit trail.</p><div className="mt-4 space-y-3">{jobs.length ? jobs.map((job) => <JobDetails key={job.id} job={job} />) : <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">No LLM job was created for this run yet.</div>}</div></div>
       </> : null}

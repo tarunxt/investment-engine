@@ -12,7 +12,7 @@ from .schemas import (
 )
 from .validation import aliases, header_key, holding_identity, prepare_holdings, validate_row
 
-CONTRACT_VERSION = "credx-output-v1"
+CONTRACT_VERSION = "credx-output-v2"
 _CONTRACTS = {"swing": SWING_COLUMNS, "rebalance": REBALANCE_COLUMNS}
 _PRESERVATION_KINDS = {"document", "technical", "threat"}
 
@@ -42,7 +42,7 @@ def normalize_output(
 ) -> NormalizationResult:
     """Return replacement content only for a fully validated, preserving result.
 
-    metadata may only supply llm_name_model, llm, run_number, run_date, run_time.
+    Authoritative runtime metadata replaces model-authored identity. metadata may only supply llm_name_model, llm, run_number, run_date, run_time.
     holdings must use exchange_symbol, stock_symbol, current_units, optional currency.
     `minimum_rows` is caller policy, never a row cap. No semantic repairs are made.
     Technical/threat/document kinds preserve original bytes and never certify semantics.

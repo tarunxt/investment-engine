@@ -136,3 +136,12 @@ class ZerodhaThreatsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_zero_settled_t1_holding_is_included_with_total_exposure():
+    from app.domains.zerodha.threats import _build_holdings_markdown_table
+    snapshot = SimpleNamespace(holdings=[{'exchange':'BSE','tradingsymbol':'OIL','quantity':0,'t1_quantity':19,'last_price':450,'average_price':400}], holdings_market_value=0)
+    table = _build_holdings_markdown_table(snapshot)
+    assert '| BSE | OIL | OIL | 19 |' in table
+    assert '8,550.00' in table or '8550.00' in table
+    assert 'Settled Units' in table

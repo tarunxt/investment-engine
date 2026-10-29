@@ -397,14 +397,16 @@ function formatPortfolioSnapshot(
     const rows = indiaSnapshot.holdings.map((holding) => [
       holding.exchange,
       holding.tradingsymbol,
-      holding.quantity,
+      holding.quantity + holding.t1_quantity,
       holding.average_price,
       holding.last_price,
-      holding.market_value,
+      (holding.quantity + holding.t1_quantity) * holding.last_price,
       holding.pnl,
       holding.day_change_percentage,
+      holding.t1_quantity,
+      holding.quantity,
     ]);
-    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\n\n${asMarkdownTable(
+    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\nCurrent Units includes settled + T1 exposure. T1 is not automatically sellable; order eligibility is separately checked. Market Value is total exposure times the captured last price.\n\n${asMarkdownTable(
       [
         "Exchange",
         "Stock Symbol",
@@ -414,6 +416,8 @@ function formatPortfolioSnapshot(
         "Market Value",
         "PnL",
         "Day Change %",
+        "T1 Units",
+        "Settled Units",
       ],
       rows,
     )}`;
@@ -508,7 +512,7 @@ function formatSwingRuns(
       const jobs = run.run_jobs
         .map((link) => {
           const job = link.job;
-          return `### ${getSwingRunLabel(run, market)} | ${job.provider}/${job.model} | ${job.status}\n${preserveSwingRecommendationResponse(
+          return `### ${getSwingRunLabel(run, market)} | Job #${job.id} | ${job.provider}/${job.model} | ${job.status}\n${preserveSwingRecommendationResponse(
             job.response,
           )}`;
         })
@@ -553,7 +557,7 @@ Generated at: ${new Date().toISOString()}
 ## 1. Latest Portfolio Snapshot
 ${formatPortfolioSnapshot(market, portfolio)}
 
-## 2. Completed Swing Trade Runs After Previous Market Close
+## 2. Completed Swing Trade Runs Explicitly Selected
 ${formatSwingRuns(uniqueSwingRuns, previousClose, market, swingDisplayMode)}
 
 ## 3. Latest Threats Report

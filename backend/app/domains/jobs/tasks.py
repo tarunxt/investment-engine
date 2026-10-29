@@ -1402,6 +1402,8 @@ def execute_ai_job(self, job_id: int) -> None:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
+        from app.domains.jobs.technical_prices import validate_technical_prices
+        validate_technical_prices(job.prompt, content)
         if _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)

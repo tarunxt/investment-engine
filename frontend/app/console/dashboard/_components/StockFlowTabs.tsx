@@ -529,6 +529,7 @@ function RebalanceStockFlowSubwidget({
       swingJobOutputs,
       rebalanceJobOutputs,
       universe,
+      inputSwingRuns: [...new Set(matchingRebalanceRuns.flatMap(run => [...(run.prompt ?? "").matchAll(/^## Swing Trade Run #(\d+)/gm)].map(match => Number(match[1]))))],
       rebalanceRun,
       swingRun,
       technicalRun,
@@ -560,6 +561,7 @@ function RebalanceStockFlowSubwidget({
 
           {!loading && !error && <div className="mt-4 space-y-2 text-xs text-slate-700">
             <p>Sources: Swing {flow.swingJobOutputs.length ? [...new Set(flow.swingJobOutputs.map(output => output.runId))].map(id => "#" + id).join(", ") : "unavailable"}; Rebalance {flow.rebalanceJobOutputs.length ? [...new Set(flow.rebalanceJobOutputs.map(output => output.runId))].map(id => "#" + id).join(", ") : "unavailable"}; Technical #{flow.technicalRun?.id ?? "unavailable"} ({formatAuditTime(flow.technicalRun?.created_at)}). Final Actionables is a current-formula calculation, not a separately saved scan.</p>
+            <p>Actual saved Rebalance Swing inputs: {flow.inputSwingRuns.length ? flow.inputSwingRuns.map(id => `#${id}`).join(", ") : "unavailable in saved prompt"}. The Swing stage above shows its own output; this input list may also contain explicitly selected historical scans.</p>
             <p className={flow.sequenceLinked ? "text-blue-900" : "rounded border border-amber-300 bg-amber-50 p-2 text-amber-950"}>{flow.sequenceLinked ? "All selected stages share the recorded workflow sequence; this does not certify source quality." : "⚠ Stages selected independently. A shared workflow sequence is not established; do not read this as one verified run."}</p>
             {flow.swingSelection.newerIncomplete && <p className="text-amber-950">⚠ Newer Swing run #{flow.swingSelection.newerIncomplete.id} is {flow.swingSelection.newerIncomplete.status}; showing explicitly labeled older completed output.</p>}
             {flow.technicalSelection.newerIncomplete && <p className="text-amber-950">⚠ Newer technical run #{flow.technicalSelection.newerIncomplete.id} is {flow.technicalSelection.newerIncomplete.status}; selected older technical coverage may be stale.</p>}

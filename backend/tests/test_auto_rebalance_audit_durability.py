@@ -776,3 +776,42 @@ async def test_history_keeps_legacy_fallback_for_records_without_canonical_ident
     assert (stages["threats"].job_id, stages["threats"].provider_count, stages["threats"].estimated_cost) == (702, 1, 0.5)
     assert detail.total_estimated_cost == 2.5
     assert (detail.status, detail.current_stage, detail.completed_at) == ("queued", "sync", None)
+
+@pytest.mark.anyio
+async def test_completed_parent_with_failed_provider_is_partial(audit_db):
+    from app.domains.runs.auto_rebalance_audit import validate_execution
+    async with audit_db.sessions() as db:
+        db.add(Run(id=800, user_id=7, prompt='scan', prompt_preview='scan', status=JobStatus.COMPLETED,
+                   auto_rebalance_portfolio='india', auto_rebalance_sequence=42,
+                   auto_rebalance_label='India Run #42 (Rebalance Scan)'))
+        for i, status in [(801, JobStatus.COMPLETED), (802, JobStatus.FAILED)]:
+            db.add(Job(id=i, user_id=7, prompt='scan', provider='test', model='test', status=status))
+        await db.flush()
+        db.add_all([RunJob(run_id=800, job_id=i, stage=1) for i in (801,802)])
+        await db.commit()
+        await validate_execution(db,user_id=7,portfolio='india',sequence=42,stage='rebalance',run_id=800,job_id=None,expected_status='partial')
+        with pytest.raises(HTTPException):
+            await validate_execution(db,user_id=7,portfolio='india',sequence=42,stage='rebalance',run_id=800,job_id=None,expected_status='completed')
+
+@pytest.mark.anyio
+async def test_final_capture_validates_revisions_and_preserves_first_snapshot(audit_db):
+    import hashlib
+    async with audit_db.sessions() as db:
+        for i, stage in [(810,'Rebalance'),(820,'Technical')]:
+            db.add(Run(id=i,user_id=7,prompt='scan',prompt_preview='scan',status=JobStatus.COMPLETED,
+                       auto_rebalance_portfolio='india',auto_rebalance_sequence=42,
+                       auto_rebalance_label=f'India Run #42 ({stage} Scan)'))
+            db.add(Job(id=i+1,user_id=7,prompt='scan',response='saved output',provider='test',model='test',status=JobStatus.COMPLETED))
+        await db.flush()
+        db.add_all([RunJob(run_id=i,job_id=i+1,stage=1) for i in (810,820)])
+        await db.commit()
+    payload = {'schema':'workflow-final-v1','rebalance_run_id':810,'technical_run_id':820,
+               'response_hashes':{str(i+1):hashlib.sha256(b'saved output').hexdigest() for i in (810,820)},
+               'rows':[{'exchange':'NSE','symbol':'BEL','score':1.5,'action':'Hold'}]}
+    bad = {**payload, 'response_hashes':{}}
+    with pytest.raises(HTTPException):
+        await write(audit_db,'actionables','completed',summary={'frozen_final':bad})
+    first = await write(audit_db,'actionables','completed',summary={'frozen_final':payload})
+    changed = {**payload,'rows':[{'exchange':'NSE','symbol':'BEL','score':3,'action':'Buy New'}]}
+    replay = await write(audit_db,'actionables','completed',summary={'frozen_final':changed})
+    assert replay.summary['frozen_final'] == first.summary['frozen_final'] == payload
