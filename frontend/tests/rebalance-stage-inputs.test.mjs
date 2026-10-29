@@ -221,7 +221,7 @@ const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkf
 const ast = ts.createSourceFile('workflow.tsx', workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = new Map();
 function visit(node) {
-  if (node.name && ['runWorkflow', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure'].includes(node.name.getText(ast))) {
+  if (node.name && ['runWorkflow', 'loadInputCandidates', 'resetDefaultInputCandidates', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure'].includes(node.name.getText(ast))) {
     declarations.set(node.name.getText(ast), node);
   }
   ts.forEachChild(node, visit);
@@ -441,4 +441,39 @@ test('snapshot drift fails before paid Rebalance', async () => {
   const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, captured_at: '2026-10-02T21:30:00Z' } });
   assert.deepEqual(result.created.map(call => call.stage), ['threats', 'swing']);
   assert.match(result.errors[0].error, /different snapshots/);
+});
+
+
+test('opening the Rebalance picker exposes recent jobs without rewriting any selection', async () => {
+  let candidates = [], reads = 0;
+  const callback = declarations.get('loadInputCandidates').initializer.arguments[0].getText(ast);
+  const { openPicker } = load(`export const openPicker = ${callback};`, {
+    setInputCandidatesLoading: () => {}, setInputCandidates: value => { candidates = value; },
+    setSelectedInputs: () => { throw new Error('Opening a picker must not alter selection'); },
+    buildNextCandidate: stage => ({ id: `${stage}:next`, source: 'next' }),
+    fetchAllFullRuns: () => { throw new Error('Unbounded history fetch'); },
+    fetchDashboardRecentFullRuns: async () => { reads++; return [run(446, [2232,2233]), run(443, [2226,2227])]; },
+    getPreviousMarketClose: () => new Date('2026-10-01'), parseTimestampMs: Date.parse,
+    isAnalysisRunForStage: () => true, sortRunsByLatestTimestamp: value => value,
+    buildRunJobCandidates: runs => runs.flatMap(r => r.run_jobs.map(j => ({ id: `run:${r.id}:job:${j.job_id}` }))),
+  });
+  await openPicker('indmoneyUs','rebalance');
+  assert.equal(reads, 1);
+  assert.deepEqual(candidates.map(c => c.id), ['rebalance:next','run:446:job:2232','run:446:job:2233','run:443:job:2226','run:443:job:2227']);
+  await openPicker('indmoneyUs','actionables');
+  assert.equal(reads, 1, 'Final uses this workflow sources without a historical picker fetch');
+  assert.deepEqual(candidates.map(c => c.id), ['actionables:next']);
+});
+
+test('Reset Defaults selects only the upcoming output for every stage', () => {
+  const callback = declarations.get('resetDefaultInputCandidates').initializer.arguments[0].getText(ast);
+  for (const stage of ['threats','swing','rebalance','technical','actionables']) {
+    let state = { zerodha: { [stage]: new Set(['run:443:job:2227']) } };
+    const { reset } = load(`export const reset = ${callback};`, {
+      inputDialog: { portfolio: 'zerodha', stage }, inputCandidates: [{id:'run:443:job:2227',source:'run-job'}],
+      setSelectedInputs: update => { state = update(state); },
+    });
+    reset();
+    assert.deepEqual([...state.zerodha[stage]], [`${stage}:next`]);
+  }
 });

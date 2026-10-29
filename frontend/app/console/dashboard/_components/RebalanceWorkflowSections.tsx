@@ -4485,11 +4485,11 @@ function InputSelectionDialog({
     swing:
       "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
     rebalance:
-      "Select all Swing Scan outputs run after the previous market close by default, plus the upcoming Swing Scan output when this workflow generates one, so Rebalance reviews the full fresh consensus candidate pool.",
+      "Default: only the upcoming Swing output from this workflow. Saved Swing jobs are included only when you explicitly select them. Opening this picker never changes your choices. Recent eligible runs are shown below.",
     technical:
-      "Use the upcoming Rebalance Scan output plus the latest completed rebalance output so Technical Scan validates the freshest proposed adds, trims, exits, and holds.",
+      "Default: only the upcoming Rebalance output from this workflow. Select saved Rebalance jobs explicitly if needed; no latest-run fallback is added.",
     actionables:
-      "Use the upcoming Technical Scan output plus the latest completed Rebalance Scan and Technical Scan outputs so final actionables can combine portfolio rebalance intent with current chart validation.",
+      "Final Actionables freezes the Technical output generated in this workflow and its exact Rebalance inputs. Run Technical and Final Actionables together; saved historical outputs are not substituted.",
   };
 
   const toggleRunGroup = (groupCandidates: InputSelectionCandidate[]) => {
@@ -6982,8 +6982,8 @@ ${zerodhaExecutionMode === "direct_market"
               market,
             });
           }
-        } else {
-          const runs = await fetchAllFullRuns();
+        } else if (stage !== "actionables") {
+          const runs = await fetchDashboardRecentFullRuns();
           if (stage === "rebalance") {
             const previousClose = getPreviousMarketClose(market);
             candidates = candidates.concat(
@@ -7013,61 +7013,12 @@ ${zerodhaExecutionMode === "direct_market"
                 market,
               ),
             );
-          } else {
-            const rebalanceCandidates = buildRunJobCandidates(
-              sortRunsByLatestTimestamp(
-                runs.filter((run) => isCompletedRebalanceRun(run, market)),
-              ),
-              "Rebalance Scan",
-              market,
-            );
-            const technicalCandidates = buildRunJobCandidates(
-              sortRunsByLatestTimestamp(
-                runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
-              ),
-              "Technical Scan",
-              market,
-            );
-            candidates = candidates.concat(
-              rebalanceCandidates,
-              technicalCandidates,
-            );
           }
         }
 
         setInputCandidates(candidates);
-        setSelectedInputs((current) => {
-          const currentSet = current[portfolio][stage];
-          const onlyReservedNext =
-            currentSet.size === 1 && currentSet.has(nextCandidate.id);
-          const defaultIds =
-            stage === "rebalance"
-              ? candidates.map((candidate) => candidate.id)
-              : stage === "actionables"
-                ? ([
-                    nextCandidate.id,
-                    candidates.find((candidate) =>
-                      candidate.label.startsWith("Rebalance Scan"),
-                    )?.id,
-                    candidates.find((candidate) =>
-                      candidate.label.startsWith("Technical Scan"),
-                    )?.id,
-                  ].filter(Boolean) as string[])
-                : ([
-                    nextCandidate.id,
-                    candidates.find((candidate) => candidate.source !== "next")
-                      ?.id,
-                  ].filter(Boolean) as string[]);
-          if (stage !== "rebalance" && currentSet.size > 0 && !onlyReservedNext)
-            return current;
-          return {
-            ...current,
-            [portfolio]: {
-              ...current[portfolio],
-              [stage]: new Set(defaultIds),
-            },
-          };
-        });
+        // Loading options is read-only: retain Next, explicit jobs, and empty selections.
+
       } finally {
         setInputCandidatesLoading(false);
       }
@@ -7139,13 +7090,7 @@ ${zerodhaExecutionMode === "direct_market"
   const resetDefaultInputCandidates = useCallback(() => {
     if (!inputDialog) return;
     const nextCandidateId = `${inputDialog.stage}:next`;
-    const defaultIds =
-      inputDialog.stage === "rebalance"
-        ? inputCandidates.map((candidate) => candidate.id)
-        : ([
-            nextCandidateId,
-            inputCandidates.find((candidate) => candidate.source !== "next")?.id,
-          ].filter(Boolean) as string[]);
+    const defaultIds = [nextCandidateId];
     setSelectedInputs((current) => ({
       ...current,
       [inputDialog.portfolio]: {
