@@ -3693,6 +3693,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const projectedBuyPower = availableMargin === null ? null : Math.max(0, availableMargin + selectedSellAmount - safetyBufferAmount);
   const hiddenSelectedCount = selectedOrders.filter(order => !visibleScore(order.detail.calculatedScore)).length;
   const allSelected = selectableOrders.length > 0 && selectableOrders.every(order => selectedIds.has(order.id));
+  const isZerodhaPreview = tradingViewMarket === "india";
   const marketStatus = getIndiaMarketStatus();
   const canUseDirectMarket = directMarketAvailable && marketStatus.open;
   const submittedOrderIds = new Set(submission?.orders.map((order) => order.id) ?? []);
@@ -3808,9 +3809,9 @@ function ScopedZerodhaBasketPreviewDialog({
                 </div>
               ) : null}
 
-              <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm font-semibold", marketStatus.open ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")}>
+              {isZerodhaPreview ? <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm font-semibold", marketStatus.open ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800")}>
                 {marketStatus.label}
-              </div>
+              </div> : <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p>}
 
               {submission ? (
                 <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm", submission.executionMode === "direct_market" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-800")}>
@@ -3835,6 +3836,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 </div>
               ) : null}
 
+              {isZerodhaPreview ? (
               <div className="mb-5 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Execution Mode</div>
@@ -3899,6 +3901,8 @@ function ScopedZerodhaBasketPreviewDialog({
                   </div>
                 </div>
               </div>
+
+              ) : <p className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Review selected US stock quantities and USD amounts before confirming the final basket.</p>}
 
               <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -3993,7 +3997,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                     checked={sectionAllSelected}
                                     onChange={() => onToggleSection(group.action, sectionSelectable.map(order => order.id))}
                                     disabled={!sectionSelectable.length}
-                                    aria-label={`Select or deselect ${group.label} Zerodha basket orders`}
+                                    aria-label={`Select or deselect ${group.label} ${basketBrokerLabel} basket orders`}
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                   />
                                   <span>{group.label}</span>
@@ -4162,7 +4166,7 @@ function ScopedZerodhaBasketPreviewDialog({
               </div>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-12 text-center text-sm text-slate-500">
-                No Sell All, Trim, Add more, or Buy New Zerodha actionables are available yet.
+                No Sell All, Trim, Add more, or Buy New {basketBrokerLabel} actionables are available yet.
               </div>
             )
           )}
@@ -4170,7 +4174,9 @@ function ScopedZerodhaBasketPreviewDialog({
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {executionMode === "direct_market"
+            {!isZerodhaPreview
+              ? "Review selected US stock quantities and USD amounts before confirming the final basket."
+              : executionMode === "direct_market"
               ? "Protected MARKET mode submits selected SELL orders first through the backend with market_protection=-1, waits for execution status, refreshes margin, then submits only affordable BUY orders. Access tokens never reach the browser; execution is not atomic or guaranteed."
               : "Publisher-safe fallback uses /connect/basket only for protected LIMIT orders. With mixed sides it opens SELL trays first; after you place the sell basket in Kite, click Refresh & Open Buy Basket to reprice and clamp affordable BUY rows. Kite can still show a newer live LTP after the basket page opens."}
           </div>
