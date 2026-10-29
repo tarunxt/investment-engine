@@ -140,6 +140,7 @@ def rebalance_serialization_instructions() -> str:
         'Use pipes only as column delimiters. Encode every literal pipe inside a cell as &#124; '
         '(including rationale text, source names, and technical setup). '
         'Backticks and quotes do not escape a Markdown pipe. Keep each row on one line.\n'
+        'If a value is unavailable, write - in that cell; never omit the cell or shift later values.\n'
         'Before returning, verify every row has exactly the declared cell count; '
         'keep all rationale text inside its corresponding cell.\n'
     )

@@ -148,7 +148,7 @@ def validate_row(
     if kind == "rebalance" and holding is not None:
         if row.get("current_units", MISSING) is MISSING or row.get("current_units") == "":
             fill("current_units", holding["current_units"], "Copied current units from the supplied snapshot.")
-        elif number(row.get("current_units")) != number(holding["current_units"]):
+        elif not unknown(row.get("current_units")) and number(row.get("current_units")) != number(holding["current_units"]):
             error("holding_units_mismatch", "Current units contradict the supplied snapshot.", "current_units")
         if "currency" in holding and "currency" in row and row["currency"] != holding["currency"]:
             error("currency_mismatch", "Row currency contradicts the supplied snapshot.", "currency")
@@ -162,6 +162,10 @@ def validate_row(
     for column in columns:
         field, value = column.key, row.get(column.key, MISSING)
         if unknown(value):
+            if kind == "rebalance" and field not in {"exchange_symbol", "stock_symbol"}:
+                row[field] = "-"
+                findings.append(Finding("missing_field_excluded", f"{column.label} unavailable; retained as '-' and excluded from arithmetic.", "warning", source, field))
+                continue
             error("required_field_unknown", f"Required field {column.label!r} is missing or unknown.", field)
             continue
         if field in NUMERIC_KEYS:
@@ -207,6 +211,8 @@ def validate_row(
 def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, error: Any, non_buy_candidates: frozenset[tuple[str, str]] = frozenset()) -> None:
     action = row.get("action")
     allowed = {"Buy", "Add", "Buy/Add", "Add more", "Buy New", "Sell All", "Trim", "Hold"}
+    if unknown(action):
+        return
     if not isinstance(action, str) or action not in allowed:
         error("invalid_action", "Action must be an explicit supported decision label.", "action")
         return

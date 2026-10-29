@@ -76,17 +76,18 @@ def calculate(samples, formula: Formula | None, technical=None):
     averages = {}
     for field, key in zip(SCORE_FIELDS, WEIGHT_KEYS):
         vals = [number(s.get("row", {}).get(field)) for s in samples]
-        if not vals or any(v is None or not -3 <= v <= 3 for v in vals):
-            averages[key] = None
-            findings.append(finding("missing_or_invalid_score", f"{field} is missing or invalid; no neutral zero is substituted.", "error"))
-        else:
-            averages[key] = sum(vals) / len(vals)
+        valid_vals = [v for v in vals if v is not None and -3 <= v <= 3]
+        if any(v is not None and not -3 <= v <= 3 for v in vals):
+            findings.append(finding("invalid_score", f"{field} has out-of-range data.", "error"))
+        if len(valid_vals) != len(vals) or not vals:
+            findings.append(finding("missing_or_invalid_score", f"{field}: unavailable values excluded from its mean and weight."))
+        averages[key] = sum(valid_vals) / len(valid_vals) if valid_vals else None
     numerator, denominator, score = None, None, None
     if formula is None:
         findings.append(finding("formula_not_recorded", "Original formula is unavailable; legacy rationale mean is not a final score.", "error"))
-    elif all(v is not None for v in averages.values()) and mode:
+    elif mode:
         weights = formula.detailedRationaleMultipliers
-        contributions = [(averages[k], weights[k], abs(weights[k])) for k in WEIGHT_KEYS]
+        contributions = [(averages[k], weights[k], abs(weights[k])) for k in WEIGHT_KEYS if averages[k] is not None]
         contributions.append((formula.actionScores[mode], weights["mean-mode-action"], abs(weights["mean-mode-action"])))
         if technical:
             if technical.get("policy_error"): findings.append(finding("technical_setup_policy_unknown", technical["policy_error"], "error"))
@@ -106,7 +107,9 @@ def calculate(samples, formula: Formula | None, technical=None):
         else:
             findings.append(finding("technical_not_available", "No frozen matching technical evidence; its contribution is excluded."))
         numerator = sum(v * w for v, w, _ in contributions)
-        denominator = formula.detailedRationaleDenominator or sum(d for _, _, d in contributions)
+        missing_weight = sum(abs(weights[k]) for k in WEIGHT_KEYS if averages[k] is None)
+        denominator = (max(Decimal(0), formula.detailedRationaleDenominator - missing_weight)
+                       if formula.detailedRationaleDenominator is not None else sum(d for _, _, d in contributions))
         if denominator:
             score = numerator / denominator
         if score is not None and not -3 <= score <= 3:
@@ -121,7 +124,7 @@ def calculate(samples, formula: Formula | None, technical=None):
         else:
             increases = [number(s["row"].get("units_change")) for s in samples if normalize_action(s["row"].get("action")) in {"Buy New", "Add more"}]
             units = sum(abs(v) for v in increases) / len(increases) if increases and all(v is not None for v in increases) else None
-    return {"raw_action": mode, "raw_action_counts": dict(counts), "covered_samples": len(samples), "provider_families": [list(v) for v in families], "current_units": str(current) if current is not None else None,
+    return {"calculation_policy": "missing-score-exclusion-v2", "raw_action": mode, "raw_action_counts": dict(counts), "covered_samples": len(samples), "provider_families": [list(v) for v in families], "current_units": str(current) if current is not None else None,
             "rationale_mean": str(sum(averages.values()) / len(averages)) if averages and all(v is not None for v in averages.values()) else None,
             "averages": {k: str(v) if v is not None else None for k, v in averages.items()},
             "numerator": str(numerator) if numerator is not None else None, "denominator": str(denominator) if denominator is not None else None,
