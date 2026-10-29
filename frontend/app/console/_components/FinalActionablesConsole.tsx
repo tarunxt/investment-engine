@@ -4697,11 +4697,11 @@ function ScopedStockDetailsButton({
                       </table>
                     </div>
                   </div>
-                ) : (
+                ) : !summarySourceRows.length && !historyLoading ? (
                   <p className="rounded-lg border border-slate-200 bg-white/75 p-3 text-slate-600">
                     No prior Final Actionables suggestions were found for this stock after checking both the Final Actionables history rows and the captured LLM output rows.
                   </p>
-                )}
+                ) : null}
               </section>
 
               <section className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
