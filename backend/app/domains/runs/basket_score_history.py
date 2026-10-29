@@ -43,7 +43,11 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
     # An immutable completed decision is also a recorded score. Never choose a
     # latest revision: disagreeing complete captures for one run remain ambiguous.
     represented = {(row['symbol'], row['exchange'], row['run_id']) for row in observations}
-    captures = session.execute(select(DecisionRecord, Run).join(Run, and_(Run.id == DecisionRecord.run_id, Run.user_id == user_id)).where(DecisionRecord.user_id == user_id, DecisionRecord.market == market, DecisionRecord.symbol.in_(symbols), Run.created_at > start, Run.created_at <= end).order_by(DecisionRecord.id).limit(10001)).all()
+    # Run inherits TimestampMixin's naive UTC DateTime storage. asyncpg cannot
+    # bind aware datetimes to TIMESTAMP WITHOUT TIME ZONE. Keep history bounds
+    # aware (covered_at is TIMESTAMPTZ), but adapt these UTC binds to Run storage.
+    run_start, run_end = start.replace(tzinfo=None), end.replace(tzinfo=None)
+    captures = session.execute(select(DecisionRecord, Run).join(Run, and_(Run.id == DecisionRecord.run_id, Run.user_id == user_id)).where(DecisionRecord.user_id == user_id, DecisionRecord.market == market, DecisionRecord.symbol.in_(symbols), Run.created_at > run_start, Run.created_at <= run_end).order_by(DecisionRecord.id).limit(10001)).all()
     groups = {}
     for capture, run in captures[:10000]:
         identity = analysis_run_identity(run)

@@ -61,3 +61,56 @@ def test_original_complete_immutable_scores_are_read_without_history_writes_or_l
     db.add(DecisionRecord(user_id=1, run_id=run.id, market='india', symbol='FIXTUREEQ', exchange='NSE', decision_at=decision.decision_at, provenance=decision.provenance, content_hash='a'*64, payload=payload)); db.commit()
     assert read()['observations'] == []
     assert read()['ambiguous_complete_runs'] == 1
+
+
+def captured_queries(as_of=AS_OF):
+    class Capture:
+        def __init__(self): self.queries = []
+        def execute(self, query): self.queries.append(query); return self
+        def all(self): return []
+    session = Capture()
+    score_history_view(session, user_id=1, market='india', symbols=['HAL'], days=5, as_of=as_of, timezone_name='Asia/Kolkata')
+    return session.queries
+
+
+def test_window_bindings_match_aware_history_and_naive_utc_run_storage():
+    from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+    offset = timezone(timedelta(hours=5, minutes=30))
+    queries = captured_queries(AS_OF.astimezone(offset))
+    bounds = [[value for value in query.compile(dialect=PGDialect_asyncpg()).params.values() if isinstance(value, datetime)] for query in queries]
+    assert bounds[0] == [AS_OF-timedelta(days=5), AS_OF]
+    assert all(value.tzinfo is not None for value in bounds[0])
+    assert bounds[1] == [(AS_OF-timedelta(days=5)).replace(tzinfo=None), AS_OF.replace(tzinfo=None)]
+    assert all(value.tzinfo is None for value in bounds[1])
+
+
+import os
+from pathlib import Path
+from test_recommendation_audit_postgres import engine  # noqa: F401
+
+@pytest.mark.skipif(not os.getenv('CREDX_AUDIT_TEST_POSTGRES_URL') or os.getenv('CREDX_AUDIT_DISPOSABLE_DB') != '1' or not Path('/.dockerenv').exists(), reason='Disposable PostgreSQL Docker test environment not provided')
+def test_real_asyncpg_window_queries_keep_boundary_and_owner_semantics(engine):
+    import asyncio
+    import asyncpg
+    from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+    from app.domains.recommendation_audit.models import DecisionRecord
+    schema = engine.get_execution_options()['schema_translate_map'][None]
+    dsn = os.environ['CREDX_AUDIT_TEST_POSTGRES_URL'].replace('postgresql+psycopg2://','postgresql://')
+    async def check():
+        connection = await asyncpg.connect(dsn)
+        try:
+            await connection.execute(f'SET search_path TO "{schema}"')
+            await connection.execute('CREATE TABLE runs (id INTEGER PRIMARY KEY, user_id INTEGER, created_at TIMESTAMP WITHOUT TIME ZONE); CREATE TABLE final_actionable_history (id INTEGER PRIMARY KEY, user_id INTEGER, market VARCHAR(16), stock_symbol VARCHAR(64), rebalance_run_id INTEGER, covered_at TIMESTAMP WITH TIME ZONE)')
+            with pytest.raises(asyncpg.DataError):
+                await connection.fetchval('SELECT $1::TIMESTAMP WITHOUT TIME ZONE', AS_OF)
+            start = AS_OF-timedelta(days=5)
+            await connection.executemany('INSERT INTO runs VALUES ($1,$2,$3)', [(1,1,AS_OF.replace(tzinfo=None)), (2,1,start.replace(tzinfo=None)), (3,2,AS_OF.replace(tzinfo=None))])
+            await connection.executemany('INSERT INTO final_actionable_history VALUES ($1,$2,$3,$4,$5,$6)', [(1,1,'india','HAL',1,AS_OF), (2,1,'india','HAL',2,start), (3,2,'india','HAL',3,AS_OF)])
+            await connection.execute("INSERT INTO recommendation_decisions (id,user_id,run_id,market,symbol,exchange,decision_at,captured_at,provenance,content_hash,payload) SELECT 'decision-'||id::text,user_id,id,'india','HAL','NSE',now(),now(),'prospective',md5(id::text)||md5(id::text),'{}'::json FROM runs")
+            for query, column in zip(captured_queries(AS_OF.astimezone(timezone(timedelta(hours=5,minutes=30)))), [FinalActionableHistory.id,DecisionRecord.id]):
+                compiled = query.with_only_columns(column).compile(dialect=PGDialect_asyncpg(), compile_kwargs={'render_postcompile':True})
+                rows = await connection.fetch(str(compiled), *(compiled.params[key] for key in compiled.positiontup))
+                assert len(rows) == 1
+                assert rows[0][0] in (1,'decision-1')
+        finally: await connection.close()
+    asyncio.run(check())
