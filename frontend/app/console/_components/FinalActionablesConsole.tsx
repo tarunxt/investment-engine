@@ -40,6 +40,7 @@ import {
 } from "@/lib/fxPresentation";
 import {
   calculateWeightedRationaleScore,
+  getMissingScoreDenominatorWeight,
   getScoreMatrixRowOutOfBoundsDenominatorWeight,
   isScoreMatrixRowOutOfBounds,
   type ScoreMatrixWeightedRow,
@@ -2445,6 +2446,9 @@ function applyScoreMatrixFormulaConfig(
     detailedRationaleDenominator: formulaConfig.detailedRationaleDenominator ?? detail.detailedRationaleDenominator,
   };
 
+  configuredDetail.detailedRationaleDenominator = calculateWeightedRationaleScore(
+    configuredDetail.detailedRationaleRows, formulaConfig.detailedRationaleDenominator,
+  ).denominator;
   return applyScoreMatrixEdits(configuredDetail, {}, "", {});
 }
 
@@ -5936,7 +5940,7 @@ export function ScoreMatrixModal({
               const parsed = parseFiniteDraft(value);
               onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
                 ...current,
-                detailedRationaleDenominator: parsed,
+                detailedRationaleDenominator: parsed === null ? null : parsed + getMissingScoreDenominatorWeight(editedDetail.detailedRationaleRows),
               }));
               setEditState((current) => ({
                 stockKey: editedDetail.stockKey,

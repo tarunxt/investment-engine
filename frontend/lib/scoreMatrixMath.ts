@@ -43,14 +43,18 @@ export function getScoreMatrixRowOutOfBoundsDenominatorWeight(row: ScoreMatrixWe
   return row.outOfBoundsDenominatorWeight ?? getScoreMatrixRowDenominatorWeight(row);
 }
 
+export function getMissingScoreDenominatorWeight(rows: ScoreMatrixWeightedRow[]) {
+  return rows
+    .filter((row) => row.multiplier !== 0 && (row.score === null || !Number.isFinite(row.score)))
+    .reduce((sum, row) => sum + getScoreMatrixRowDenominatorWeight(row), 0);
+}
+
 export function calculateWeightedRationaleScore(
   rows: ScoreMatrixWeightedRow[],
   denominatorOverride?: number | null,
   denominatorAlreadyEffective = false,
 ) {
-  const missingWeight = rows
-    .filter((row) => row.multiplier !== 0 && (row.score === null || !Number.isFinite(row.score)))
-    .reduce((sum, row) => sum + getScoreMatrixRowDenominatorWeight(row), 0);
+  const missingWeight = getMissingScoreDenominatorWeight(rows);
   const availableRows = rows.filter((row) => row.score !== null && Number.isFinite(row.score));
   const defaultDenominatorBase = availableRows
     .filter((row) => row.multiplier !== 0)
