@@ -127,3 +127,14 @@ test("calculateWeightedRationaleScore keeps the current denominator when all row
   assert.equal(denominator, 10);
   assert.equal(finalScore?.toFixed(4), "2.3000");
 });
+
+
+test("missing scores are excluded from numerator and denominator, including overrides", async () => {
+  const { calculateWeightedRationaleScore: calc } = await loadModule("../lib/scoreMatrixMath.ts", "missing.mjs");
+  const rows = [{ score: 3, multiplier: 2 }, { score: null, multiplier: 3 }];
+  assert.deepEqual(calc(rows), { finalScore: 3, denominator: 2 });
+  assert.deepEqual(calc(rows, 5), { finalScore: 3, denominator: 2 });
+  assert.deepEqual(calc([{ score: null, multiplier: 3 }]), { finalScore: null, denominator: 0 });
+  assert.deepEqual(calc([{ score: NaN, multiplier: 3 }]), { finalScore: null, denominator: 0 });
+  assert.deepEqual(calc([{ score: 0, multiplier: 3 }]), { finalScore: 0, denominator: 3 });
+});

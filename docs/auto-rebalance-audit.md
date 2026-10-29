@@ -190,3 +190,21 @@ owned terminal source revisions and technical workflow identity. Its first
 terminal summary wins on retry; current-formula previews never rewrite it.
 The workflow audit page exposes this saved snapshot. Old runs without a snapshot
 remain explicitly unavailable; this release does not backfill historical scores.
+
+## Missing Rebalance cells (output v3 / score matrix v2)
+
+Rebalance preserves rows with unavailable non-identity fields as `-`; missing
+numbers do not become zero. Named missing fields and explicit placeholders are
+accepted with warnings; conflicting quantities, invalid numeric values, duplicate
+identities and missing exchange/symbol still fail validation. Canonical short
+rows with the first 17 typed fields present retain those fields. Because omitted
+rationale cells cannot be located reliably, their entire uncertain suffix is
+preserved in `Unaligned source cells (not scored)` and rationale fields become
+`-`. Wider/structurally ambiguous tables are still rejected.
+
+Frontend weighted scores and new recommendation audit calculations exclude missing
+samples from averages and missing components from numerator/denominator. Explicit
+zero remains a valid observation. Formula overrides remove unavailable weights;
+the editor operates on its displayed effective denominator. New calculations carry
+`missing-score-exclusion-v2`; final captures use `score-matrix-v2-missing-excluded`.
+Existing immutable history and terminal job statuses are not rewritten.

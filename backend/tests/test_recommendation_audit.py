@@ -74,7 +74,7 @@ def test_synthetic_arithmetic_and_rounding_are_distinct():
 def test_threshold_boundaries(score,current,action): assert action_for_score(Decimal(score), Decimal(current)) == action
 
 
-@pytest.mark.parametrize("corrupt", [lambda s:s["row"].pop(SCORE_FIELDS[0]),lambda s:s["row"].update(current_units=None),lambda s:s["row"].update(final_units=1),lambda s:s.update(valid=False),lambda s:s["row"].update(units_change=float("nan"))])
+@pytest.mark.parametrize("corrupt", [lambda s:s["row"].update(current_units=None),lambda s:s["row"].update(final_units=1),lambda s:s.update(valid=False),lambda s:s["row"].update(units_change=float("nan"))])
 def test_missing_and_invalid_inputs_never_become_hold(corrupt):
     s=sample();corrupt(s);result=calculate([s],formula());assert result["formula_action"] is None
 
@@ -244,3 +244,15 @@ def test_approved_setup_direction_uses_captured_registry_and_unknown_fallback_fa
     missing=agreed_technical([output],prompt)[("FIXTUREEQ","NSE")]
     assert "missing or blank" in missing["policy_error"]
     assert calculate([sample()],formula(),missing)["formula_action"] is None
+
+
+def test_missing_scores_use_available_samples_and_remove_unavailable_weight():
+    first, second = sample(), sample()
+    first['row'][SCORE_FIELDS[0]] = '-'
+    both = calculate([first, second], formula())
+    assert both['averages']['cruxx'] == str(second['row'][SCORE_FIELDS[0]])
+    second['row'][SCORE_FIELDS[0]] = '-'
+    missing = calculate([first, second], formula())
+    assert missing['averages']['cruxx'] is None
+    assert Decimal(both['denominator']) - Decimal(missing['denominator']) == formula().detailedRationaleMultipliers['cruxx']
+    assert missing['score'] is not None

@@ -2338,6 +2338,7 @@ function applyScoreMatrixEdits(
     calculateWeightedRationaleScore(
       detailedRationaleRows,
       typeof denominatorOverride === "number" && Number.isFinite(denominatorOverride) ? denominatorOverride : null,
+      true, // The editor displays the effective denominator after missing-value exclusion.
     );
   const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
   const context: ScoreMatrixContext = {
@@ -7744,7 +7745,7 @@ export function buildFinalActionableHistoryItems(
       action_units: estimate.units,
       amount: estimate.amount,
       technical_scan_run_id: row.detail.technicalScanSourceRunId,
-      formula_version: "score-matrix-v1",
+      formula_version: "score-matrix-v2-missing-excluded",
       formula_inputs_json: row.detail as unknown as Record<string, unknown>,
       source_run_ids_json: sourceRunIds,
       snapshot_json: {

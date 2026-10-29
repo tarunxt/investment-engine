@@ -3,6 +3,7 @@
 import hashlib
 import json
 from collections import Counter
+from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
 from .document import MISSING, cell_text, parse_json, parse_markdown, render_document
@@ -12,7 +13,7 @@ from .schemas import (
 )
 from .validation import aliases, header_key, holding_identity, prepare_holdings, validate_row
 
-CONTRACT_VERSION = "credx-output-v2"
+CONTRACT_VERSION = "credx-output-v3"
 _CONTRACTS = {"swing": SWING_COLUMNS, "rebalance": REBALANCE_COLUMNS}
 _PRESERVATION_KINDS = {"document", "technical", "threat"}
 
@@ -22,7 +23,7 @@ def contract_hash(kind: str) -> str:
         raise ValueError(f"Unsupported output kind: {kind}")
     payload = {"version": CONTRACT_VERSION, "kind": kind,
                "columns": [(column.key, column.label) for column in _CONTRACTS.get(kind, ())],
-               "validation": "strict-fields-snapshot-identity-action-arithmetic-v1" if kind in _CONTRACTS else "preservation-only"}
+               "validation": "missing-rebalance-cells-excluded-v1" if kind in _CONTRACTS else "preservation-only"}
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -92,20 +93,37 @@ def normalize_output(
                 "Acceptance still requires matching row widths and full validation.",
                 "info", Provenance(block.index, 0, block.line),
             ))
+        recoverable = kind == "rebalance" and not duplicate_keys and tuple(keys) == tuple(c.key for c in columns)
+        short_rows = {i for i, cells in enumerate(block.rows, 1) if recoverable and 17 <= len(cells) < len(keys)}
+        if short_rows:
+            findings = [replace(f, severity="warning") if f.code == "row_width" and f.source
+                        and f.source.fragment == block.index and f.source.row in short_rows else f for f in findings]
+            extra_columns = (*extra_columns, Column("unaligned_source_cells", "Unaligned source cells (not scored)"))
         table_columns = (*columns, *extra_columns)
         rows: list[CanonicalRow] = []
         for index, cells in enumerate(block.rows, 1):
             source = Provenance(block.index, index, block.line + 1 + index if block.line else None)
             source_values = {key: value for key, value in zip(keys, cells) if value is not MISSING}
+            validation_values = dict(source_values)
+            if index in short_rows:
+                # A positional omission cannot identify which rationale pair was lost.
+                # Keep the unambiguous typed prefix and preserve the entire uncertain
+                # rationale suffix as evidence, never as scores under guessed headers.
+                validation_values["unaligned_source_cells"] = " | ".join(cell_text(c) for c in cells[17:])
+                for key in keys[17:]:
+                    validation_values[key] = "-"
+                findings.append(Finding("unaligned_rationale", "Short row retained; ambiguous rationale cells preserved separately and excluded from scoring.", "warning", source))
+            elif short_rows:
+                validation_values["unaligned_source_cells"] = ""
             try:
-                values, filled, row_findings = validate_row(source_values, columns, source, supplied_metadata, snapshot,
+                values, filled, row_findings = validate_row(validation_values, columns, source, supplied_metadata, snapshot,
                                                            kind, derive_arithmetic=derive_arithmetic, non_buy_candidates=non_buy_candidates)
             except ArithmeticError:
                 values, filled = dict(source_values), ()
                 row_findings = [Finding("unsupported_arithmetic", "Numeric representation cannot be validated safely; preserve the source values.", source=source)]
             findings.extend(row_findings)
             rows.append(CanonicalRow(values, source_values, source, filled,
-                                     not duplicate_keys and len(cells) == len(keys) and not any(f.severity == "error" for f in row_findings)))
+                                     not duplicate_keys and (len(cells) == len(keys) or index in short_rows) and not any(f.severity == "error" for f in row_findings)))
         tables.append(CanonicalTable(block.index, tuple(table_columns), tuple(rows)))
     rows = tuple(row for table in tables for row in table.rows)
     if len(rows) < minimum_rows:
