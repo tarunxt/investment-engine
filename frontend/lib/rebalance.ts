@@ -289,13 +289,16 @@ Inputs you will receive in this prompt:
 2. Consolidated LLM swing-trade recommendation tables from all completed ${copy.label} swing-trade runs created after the previous market close.
 3. Latest Threats report output.
 
+[REBALANCE_UNIVERSE_V1]
 Capital / Portfolio Rules:
 - MANDATORY coverage: output exactly one decision row for EVERY stock currently present in the Latest Portfolio Snapshot, even if the decision is Hold. Never omit a current holding because it is weak, unchanged, small, low-conviction, or already discussed in threats.
 - Review existing holdings and decide whether each one is Hold, Buy/Add, Trim, or Sell All.
 - Evaluate EVERY stock appearing in the attached swing-trade recommendation tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate.
 - Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot.
 - Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
-- If a swing-trade candidate is not selected for fresh buy, exclude it; but all current holdings must still have one row.
+- Output one decision row for EVERY exact exchange/symbol identity in the union of current holdings and ALL supplied Swing tables, including candidates not selected for fresh buy. Never omit a candidate.
+- For an unheld candidate not selected for purchase, use Hold with Current Units, Units Change, Final Units, Units to Buy and Total Buy Amount all 0; provide your actual non-buy reason in Rationale Cruxx. This is a non-buy decision, not a holding or executable order.
+- Preserve each source exchange/symbol identity. NSE and BSE listings remain separate; an association to a held company is context only, never permission to reuse another venue’s quote.
 - Use aggressive but sensible swing-trade logic.
 - Prefer liquid ${exchangeExamples} stocks with strong volume, momentum, catalyst, and relative strength.
 - Do not recommend too many names just for diversification.
@@ -339,7 +342,7 @@ Formatting Rules:
 - Rationale Score rule: every row MUST include a non-blank numeric value in every Score Rationale / rationale-score column. Use only one of these 7 integer choices: -3 (minus three)=very bearish, -2 (minus two)=bearish, -1 (minus one)=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Do not return blanks, dashes, N/A, decimals, ranges, percentages, words, or values outside these integers. Each rationale score must justify its adjacent rationale.
 - Before finalizing the table, audit every Score Rationale cell; if any score is missing, infer the best -3 to 3 score from the adjacent rationale and fill it. A table with blank rationale scores is invalid.
 
-- Before writing the final table, internally build the complete current-holding symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
+- Before writing the final table, internally build the complete holdings-plus-all-Swing exact exchange/symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
 - Rank rows by action priority: Sell All / Trim first, then Buy New / Add, then Hold.
 - Keep rationale concise but meaningful.
 - Put the action label only in Action; put the signed numeric unit delta only in Units Change; never swap these two columns.

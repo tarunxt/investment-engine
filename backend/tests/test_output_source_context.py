@@ -168,7 +168,7 @@ def test_runtime_reports_precise_frozen_mismatch_without_gating_valid_output():
     token = configure_output_context(job, {})
     try:
         content = json.dumps([rebalance_row(analyst_source="Swing job #11", price_per_unit=124.2,
-                                           rationale_remarks="Weak setup. Current price is below 120.")])
+                                           rationale_remarks="Weak setup. Current price is below 120."), rebalance_row("OTHER", current_units=0, final_units=0)])
         report = output_validation_metadata(content)
         assert report["safe_to_render"] is True and report["status"] == "valid"
         assert report["consistency"]["status"] == "issues_found"
@@ -231,7 +231,7 @@ def test_advisory_conflicts_never_regenerate_or_change_completed_rows():
     context, _ = freeze([source()])
     job = make_job("rebalance", request_context_json=context)
     content = json.dumps([rebalance_row(analyst_source="Swing Trade Run #5", price_per_unit=124.2,
-                                       rationale_remarks="Current price is below 120.")])
+                                       rationale_remarks="Current price is below 120."), rebalance_row("OTHER", current_units=0, final_units=0)])
     response = AIProviderResponse(content=content, tokens_in=1, tokens_out=2, cost=0.001,
                                   provider=job.provider, model=job.model)
     _, provider, _, failed = execute_mocked(job, [response])

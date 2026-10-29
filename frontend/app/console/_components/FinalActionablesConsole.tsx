@@ -1306,6 +1306,7 @@ function buildCurrentValueSnapshotMap(
       };
       indexCurrentValueSnapshot(map, holding.tradingsymbol, value);
       indexCurrentValueSnapshot(map, `${holding.exchange}:${holding.tradingsymbol}`, value);
+      map.set(`@VENUE:${holding.exchange.trim().toUpperCase()}:${holding.tradingsymbol.trim().toUpperCase()}`, value);
     });
     return map;
   }
@@ -1328,6 +1329,8 @@ function getCurrentValueSnapshotForRow(
 ) {
   if (!snapshotMap?.size) return null;
   const symbol = normalizeStockSymbol(row["Stock Symbol"] || row["Stock Name"]);
+  const exchange = row["Exchange Symbol"]?.trim().toUpperCase();
+  if (exchange === "NSE" || exchange === "BSE") return snapshotMap.get(`@VENUE:${exchange}:${symbol}`) ?? null;
   const exchangeSymbol = normalizeStockSymbol(row["Exchange Symbol"]);
   return snapshotMap.get(symbol) ?? snapshotMap.get(exchangeSymbol) ?? null;
 }
@@ -3472,8 +3475,11 @@ export function buildConsensusRows(
   const outputLlmMetas = llmMetas.filter((meta) => outputMetaKeys.has(getMetaKey(meta)));
   const consensusDenominator = outputMetaKeys.size || parsedRows.length;
 
+  const venuesBySymbol = new Map<string, Set<string>>();
+  parsedRows.forEach(row => { const symbol = getStockKey(row.cells); const venues = venuesBySymbol.get(symbol) ?? new Set<string>(); venues.add(row.cells["Exchange Symbol"]?.trim().toUpperCase() ?? ""); venuesBySymbol.set(symbol, venues); });
   parsedRows.forEach((row) => {
-    const key = getStockKey(row.cells);
+    const symbol = getStockKey(row.cells);
+    const key = (venuesBySymbol.get(symbol)?.size ?? 0) > 1 ? `${row.cells["Exchange Symbol"]?.trim().toUpperCase()}:${symbol}` : symbol;
     const rows = grouped.get(key) ?? [];
     rows.push(row);
     grouped.set(key, rows);
@@ -7827,7 +7833,12 @@ export function buildDashboardActionRows(
 ): DashboardActionRow[] {
   const technicalScanSourceMeta = getLatestTechnicalScanSourceMeta(technicalScans);
 
-  return stocks.map((stock) => {
+  // An explicit all-model, zero-position non-buy is visible in Rebalance, but
+  // must not acquire an executable action or allocation from a later formula.
+  return stocks.filter(stock => !(stock.rows.length > 0 && stock.rows.every(row =>
+    row.cells[ACTION_HEADER]?.trim() === "Hold"
+    && ["Current Units", "Units Change", "Final Units", "Units to Buy", "Total Buy Amount"].every(key => parseNumericCell(row.cells[key]) === 0)
+  ))).map((stock) => {
     const detail = buildScoreMatrixDetail(
       stock,
       getTechnicalScanForStock(technicalScans, stock),
