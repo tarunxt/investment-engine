@@ -781,3 +781,33 @@ test('saved legacy parameter cells remain available without advisory-audit acces
   const duplicate = structuredClone(item); duplicate.snapshot_json.rows.push(structuredClone(duplicate.snapshot_json.rows[0])); assert.equal(api.savedLegacyParameterEvidence(duplicate, 'india', 'HAL', 'NSE'), null);
   assert.deepEqual(item, before);
 });
+
+test('large retained history mounts only 25 rows and defers original field rendering until expanded', () => {
+  let fieldReads = 0;
+  const originals = Array.from({ length: 400 }, (_, index) => ({ id: `synthetic:${index}`, run_id: index + 1, job_id: index + 1, stage: 'technical', run_status: 'completed', job_status: 'completed', provider: 'fixture', model: 'fixture', created_at: timestamp, source: 'retained_job', cells: { get rationale() { fieldReads++; return 'Synthetic original rationale '.repeat(1000); } } }));
+  let selectedPage = 0;
+  const renderPage = () => {
+    let hook = 0;
+    const { RetainedStockObservations } = helpers({ useState: initial => {
+      const index = hook++;
+      const value = index === 0 ? { rows: originals, examined: 2099, note: 'fixture', loading: false, error: null } : index === 2 ? selectedPage : typeof initial === 'function' ? initial() : initial;
+      return [value, () => {}];
+    } });
+    return renderToStaticMarkup(React.createElement(RetainedStockObservations, { market: 'india', symbol: 'HAL', saved: [], reconstructed: [] }));
+  };
+  const first = renderPage();
+  assert.match(first, /Showing 1–25 of 400 observations/);
+  assert.equal((first.match(/<tr /g) ?? []).length, 25);
+  assert.equal(fieldReads, 0);
+  assert.ok(first.length < 100000);
+  selectedPage = 15;
+  const last = renderPage();
+  assert.match(last, /Showing 376–400 of 400 observations/);
+  assert.match(last, /Run #1/);
+  assert.equal(fieldReads, 0);
+  assert.equal(originals.length, 400);
+  const { RetainedSourceFields } = helpers({ useState: () => [true, () => {}] });
+  const opened = renderToStaticMarkup(React.createElement(RetainedSourceFields, { cells: originals[0].cells }));
+  assert.match(opened, /Synthetic original rationale/);
+  assert.equal(fieldReads, 1);
+});
