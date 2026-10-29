@@ -209,3 +209,18 @@ the editor operates on its displayed effective denominator. New calculations car
 `missing-score-exclusion-v2`; final matrix captures include `calculationPolicy: missing-score-exclusion-v2`
 while retaining the compatible `score-matrix-v1` envelope.
 Existing immutable history and terminal job statuses are not rewritten.
+
+## Partial LLM usage classification
+
+Accepted Rebalance outputs with missing or unaligned values finish as `partial`,
+with a partial-use notice and `deterministic_output.usage_status`. Completed counts
+include terminal attempts; Passed, Partial and Failed are separate counts in stage
+tiles and saved summaries (`partial_llms`). History APIs expose an additive
+`partial_provider_count`. Partial notices are amber and do not open failure dialogs.
+
+Legacy invalid-contract failures are recovered only when the current normalizer
+can validate the complete output against the saved holdings and input identities.
+Job response DTOs expose canonical partial output; ORM jobs, original errors and
+frozen workflow snapshots are unchanged. Original failure details remain under
+`partial_recovery` metadata. Stage read summaries use the projected counts. Genuine
+provider failures, contradictions and unparseable outputs remain failed.

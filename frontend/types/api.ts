@@ -852,6 +852,7 @@ export interface AutoRebalanceStageResponse {
   completed_at?: string | null;
   provider_count: number;
   completed_provider_count: number;
+  partial_provider_count?: number;
   failed_provider_count: number;
   estimated_cost: number;
 }

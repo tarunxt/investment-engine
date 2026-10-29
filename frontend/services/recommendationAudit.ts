@@ -5,6 +5,10 @@ import type { RunResponse } from "@/types/api";
 
 export async function auditResponseHashes(runs: RunResponse[]) {
   const pairs = await Promise.all(runs.flatMap(run => run.run_jobs).map(async link => {
+    const recovery = (link.job.runtime_metadata_json as Record<string, unknown> | null)?.partial_recovery as { original_response_hash?: string } | undefined;
+    if (recovery?.original_response_hash && /^[a-f0-9]{64}$/.test(recovery.original_response_hash)) {
+      return [link.job_id, recovery.original_response_hash] as const;
+    }
     const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(link.job.response ?? ""));
     return [link.job_id, Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("")] as const;
   }));

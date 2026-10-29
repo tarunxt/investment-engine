@@ -173,3 +173,24 @@ test('rebalance saved-input union preserves both Swing jobs, missing candidates,
  const original=JSON.stringify(source);universe.rebalanceUniverse([source]);assert.equal(JSON.stringify(source),original);
  const ui=readFileSync(new URL('../app/console/dashboard/_components/StockFlowTabs.tsx',import.meta.url),'utf8');assert.match(ui,/Missing analysis — no decision recorded/);assert.match(ui,/stocks=\{flow.universe.rows\}/);assert.match(ui,/buildDashboardActionRows\(\s*rebalance,/);
 });
+
+
+test('LLM completion separates passed, partial and failed and partial notices are not errors', () => {
+  const ui = load('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx', {
+    parseTimestampMs: v => Date.parse(v || '') || 0,
+    readFailureDiagnostics: () => ({}),
+  }, ['getRunProgress', 'formatLlmCompletion', 'summarizeRun'], true);
+  const mixed = run(json);
+  mixed.run_jobs = ['completed', 'partial', 'failed'].map((status, i) => ({job: {
+    id: i, status, response: json, created_at: timestamp, provider: 'test', model: 'test',
+    error_message: status === 'partial' ? 'LLM output is partially used' : status === 'failed' ? 'Provider timeout' : null,
+  }}));
+  const progress = ui.getRunProgress(mixed);
+  assert.equal(ui.formatLlmCompletion(progress), '3/3 (Passed: 1 | Partial: 1 | Failed: 1)');
+  assert.equal(ui.summarizeRun(mixed).error, 'Provider timeout');
+  mixed.run_jobs.pop();
+  const summary = ui.summarizeRun(mixed);
+  assert.equal(summary.error, null);
+  assert.match(summary.partialNotice, /partially used/);
+  assert.equal(ui.formatLlmCompletion(ui.getRunProgress(mixed)), '2/2 (Passed: 1 | Partial: 1 | Failed: 0)');
+});

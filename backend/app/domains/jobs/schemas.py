@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from app.shared.types import JobStatus
 
@@ -39,5 +39,10 @@ class JobResponse(BaseModel):
     scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def partial_usage_projection(self):
+        from .partial_output import project_partial_output
+        return project_partial_output(self)
 
     model_config = {"from_attributes": True}

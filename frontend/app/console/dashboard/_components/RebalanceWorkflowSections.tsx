@@ -243,6 +243,8 @@ type StageInfo = {
   lastRunId?: number | null;
   completedLlms?: number | null;
   passedLlms?: number | null;
+  partialLlms?: number | null;
+  partialNotice?: string | null;
   failedLlms?: number | null;
   totalLlms?: number | null;
   recommendedStocks?: number | null;
@@ -713,7 +715,7 @@ function summarizeRun(run: RunResponse) {
     0,
   );
   const failedJobs = jobs.filter(
-    (job) => (job.status || "").toLowerCase() === "failed" || Boolean(job.error_message),
+    (job) => classifyRunOutputJob(job) === "failed",
   );
   const failedJob = failedJobs[0];
   const errorDetails: StageErrorDetail[] = failedJobs
@@ -752,6 +754,8 @@ function summarizeRun(run: RunResponse) {
     exportStatus: run.export_status ?? firstJob?.export_status,
     costUsd: costUsd || null,
     error: primaryError,
+    partialNotice: jobs.some(job => classifyRunOutputJob(job) === "partial")
+      ? "LLM output is partially used: available rows and values are retained; missing or unaligned values are excluded from calculations." : null,
     errorDetails,
   };
 }
@@ -1808,8 +1812,9 @@ function getRunProgress(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
   const classifications = jobs.map(classifyRunOutputJob);
   const passedLlms = classifications.filter(
-    (state) => state === "completed" || state === "partial",
+    (state) => state === "completed",
   ).length;
+  const partialLlms = classifications.filter((state) => state === "partial").length;
   const failedLlms = classifications.filter((state) => state === "failed").length;
   const activeLlms = jobs.filter((job) => {
     const status = (job.status || "").toLowerCase();
@@ -1821,11 +1826,12 @@ function getRunProgress(run: RunResponse) {
     runStatus === "processing" ||
     activeLlms > 0;
   return {
-    completedLlms: passedLlms + failedLlms,
+    completedLlms: passedLlms + partialLlms + failedLlms,
     passedLlms,
+    partialLlms,
     failedLlms,
     totalLlms: jobs.length,
-    runStatus: isActiveRun ? run.status || "processing" : run.status,
+    runStatus: isActiveRun ? run.status || "processing" : partialLlms ? "partial" : run.status,
     endedAt: isActiveRun ? null : getLatestRunTimestamp(run),
   };
 }
@@ -2117,7 +2123,9 @@ function summarizeAutoRebalanceHistoryStage(
       error: item.error_message ?? null,
       lastRunId: item.run_id ?? null,
       completedLlms,
-      passedLlms: completedLlms,
+      passedLlms: getAutoRebalanceSummaryNumber(summary, "passed_llms") ?? Math.max(0, (item.completed_provider_count ?? 0) - (item.partial_provider_count ?? 0)),
+      partialLlms: getAutoRebalanceSummaryNumber(summary, "partial_llms") ?? item.partial_provider_count ?? 0,
+      partialNotice: typeof summary.partial_notice === "string" ? summary.partial_notice : null,
       failedLlms,
       totalLlms,
       recommendedStocks: getAutoRebalanceSummaryNumber(
@@ -2261,9 +2269,10 @@ function getRunOutputSummary(run: RunResponse) {
 function formatLlmCompletion(info: StageInfo) {
   if (!info.totalLlms) return "Not available";
   const completed = info.completedLlms ?? 0;
-  const passed = info.passedLlms ?? completed;
-  const failed = info.failedLlms ?? Math.max(0, info.totalLlms - passed);
-  return `${completed}/${info.totalLlms} (Passed: ${passed} | Failed: ${failed})`;
+  const partial = info.partialLlms ?? 0;
+  const failed = info.failedLlms ?? 0;
+  const passed = info.passedLlms ?? Math.max(0, completed - partial - failed);
+  return `${completed}/${info.totalLlms} (Passed: ${passed} | Partial: ${partial} | Failed: ${failed})`;
 }
 
 function formatRecommendedStockProgress(info: StageInfo) {
@@ -2303,6 +2312,7 @@ function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
     { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    ...(info.partialNotice ? [{ label: "Partial use", value: info.partialNotice }] : []),
     { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error), errorDetails: info.errorDetails },
   ];
 }
@@ -2312,6 +2322,7 @@ function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
     { label: "Last update", value: formatTimestamp(info.completedAt ?? info.startedAt) },
     { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
+    ...(info.partialNotice ? [{ label: "Partial use", value: info.partialNotice }] : []),
     { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error), errorDetails: info.errorDetails },
   ];
 }
@@ -2957,7 +2968,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
           </div>
         </div>
         <p className="mt-4 text-xs text-slate-500">
-          Malformed table outputs with any stored LLM table response are counted as Partial.
+          Partially usable LLM outputs are counted separately. Missing or unaligned values are excluded from calculations.
         </p>
       </section>
 
@@ -2991,7 +3002,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
               </div>
             </div>
             {job.error_message ? (
-              <div className="m-5 rounded-none border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+              <div className={cn("m-5 rounded-none border p-4 text-sm leading-6", state === "partial" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-700")}>
                 {job.error_message}
               </div>
             ) : null}
@@ -3277,7 +3288,7 @@ function WorkflowStageTile({
         className={
           row.label === "Error" && row.value !== "None"
             ? "text-red-700"
-            : undefined
+            : row.label === "Partial use" ? "text-amber-700" : undefined
         }
       >
         <span
@@ -6593,6 +6604,9 @@ ${zerodhaExecutionMode === "direct_market"
           model: info.model ?? null,
           completed_llms: info.completedLlms ?? null,
           total_llms: info.totalLlms ?? null,
+          passed_llms: info.passedLlms ?? null,
+          partial_llms: info.partialLlms ?? null,
+          partial_notice: info.partialNotice ?? null,
           failed_llms: info.failedLlms ?? null,
           recommended_stocks: info.recommendedStocks ?? null,
           rebalance_inputs: info.rebalanceInputs ?? null,
@@ -6808,7 +6822,8 @@ ${zerodhaExecutionMode === "direct_market"
             updateStage(runningPortfolio, stage, {
               ...withInrCost(summarizeThreat(analysis), usdInrRate),
               completedLlms: ["completed", "partial", "failed"].includes(status) ? 1 : 0,
-              passedLlms: status === "completed" || status === "partial" ? 1 : 0,
+              passedLlms: status === "completed" ? 1 : 0,
+              partialLlms: status === "partial" ? 1 : 0,
               failedLlms: status === "failed" ? 1 : 0,
               totalLlms: 1,
             });

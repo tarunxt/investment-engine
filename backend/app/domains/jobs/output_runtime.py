@@ -210,6 +210,7 @@ def output_validation_metadata(content: str | None) -> dict[str, Any] | None:
         'response_hash': source_hash(content),
         'status': result.status,
         'safe_to_render': result.safe_to_replace,
+        'usage_status': 'partial' if result.safe_to_replace and any(f.code in {'missing_field_excluded', 'unaligned_rationale'} for f in result.findings) else result.status,
         'coverage': asdict(result.coverage),
         'finding_counts': dict(Counter(f.code for f in result.findings)),
         'semantic_research_quality': 'not_evaluated',

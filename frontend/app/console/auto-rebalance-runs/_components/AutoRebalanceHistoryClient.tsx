@@ -112,8 +112,11 @@ function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
         <span>Started: {formatTime(stage.started_at)}</span>
         <span>Finished: {formatTime(stage.completed_at)}</span>
         <span>LLM cost: {formatCost(stage.estimated_cost)}</span>
+        <span>Passed LLMs: {Math.max(0, stage.completed_provider_count - (stage.partial_provider_count ?? 0))}</span>
+        <span>Partial LLMs: {stage.partial_provider_count ?? 0}</span>
         <span>Failed LLMs: {stage.failed_provider_count}</span>
       </div>
+      {typeof stage.summary?.partial_notice === "string" ? <p className="mt-3 text-xs text-amber-800">{stage.summary.partial_notice}</p> : null}
       {stage.error_message ? (
         <div className="mt-3 flex gap-2 rounded-lg border border-rose-200 bg-white/70 p-3 text-xs leading-5 text-rose-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
@@ -219,7 +222,7 @@ function JobDetails({ job }: { job: AutoRebalanceJobDetailResponse }) {
         <div><p className="font-semibold text-slate-950">{job.provider} / {job.model}</p><p className="mt-1 text-xs text-slate-600">Job #{job.id} · {formatTime(job.updated_at)} · {formatCost(job.estimated_cost)}</p></div>
         <StatusBadge status={job.status} />
       </div>
-      {job.error_message ? <div className="mt-3 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{job.error_message}</div> : null}
+      {job.error_message ? <div className={`mt-3 rounded-lg border bg-white/70 p-3 text-sm ${job.status === "partial" ? "border-amber-200 text-amber-800" : "border-rose-200 text-rose-800"}`}>{job.error_message}</div> : null}
       <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-3"><span>Input tokens: {job.tokens_in ?? "—"}</span><span>Output tokens: {job.tokens_out ?? "—"}</span><span>Web search: {job.web_search_used ? "used" : "not used"}</span></div>
       <details className="mt-3 rounded-lg border border-slate-200 bg-white"><summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-800">Prompt and response</summary><div className="space-y-3 border-t border-slate-200 p-3"><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 text-xs leading-5 text-slate-100">{job.prompt}</pre><pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 text-xs leading-5 text-slate-100">{job.response || "No model output was saved."}</pre></div></details>
       {job.runtime_metadata_json ? <details className="mt-2 rounded-lg border border-slate-200 bg-white"><summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-800">Runtime metadata</summary><pre className="max-h-72 overflow-auto border-t border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">{JSON.stringify(job.runtime_metadata_json, null, 2)}</pre></details> : null}
