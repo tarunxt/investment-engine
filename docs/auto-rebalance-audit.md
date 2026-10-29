@@ -196,11 +196,13 @@ remain explicitly unavailable; this release does not backfill historical scores.
 Rebalance preserves rows with unavailable non-identity fields as `-`; missing
 numbers do not become zero. Named missing fields and explicit placeholders are
 accepted with warnings; conflicting quantities, invalid numeric values, duplicate
-identities and missing exchange/symbol still fail validation. Canonical short
+identities and missing exchange/symbol still fail validation. Canonical irregular-width
 rows with the first 17 typed fields present retain those fields. Because omitted
 rationale cells cannot be located reliably, their entire uncertain suffix is
 preserved in `Unaligned source cells (not scored)` and rationale fields become
-`-`. Wider/structurally ambiguous tables are still rejected.
+`-`. Rows shorter than the typed prefix and tables with ambiguous headers are still rejected.
+Over-wide rationale suffixes are preserved as unscored source cells too; typed
+prefix validation must still pass.
 
 Frontend weighted scores and new recommendation audit calculations exclude missing
 samples from averages and missing components from numerator/denominator. Explicit
