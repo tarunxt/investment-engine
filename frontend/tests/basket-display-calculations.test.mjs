@@ -218,3 +218,15 @@ test('current calculation retains actual displayed action and finite currency di
  const amount=68*367.95;const before=amount;math.formatBasketDisplayCurrency(amount,'INR');assert.equal(amount,before);
  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/action: currentOrder \? getZerodhaBasketActionForPercent\(currentOrder\) : row.formulaAction/);assert.match(source,/return formatBasketDisplayCurrency\(value, currency\)/);
 });
+
+test('current score uses authoritative server observation time despite client clock skew and preserves original window timestamps',async()=>{
+ for(const offset of [1,-1,1000,-1000,60000,-60000,0]){
+  const h=hooks(),pending=[];class ClientDate extends Date {constructor(...args){super(...(args.length?args:[Date.parse(end)+offset]));}}
+  const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,Date:ClientDate,apiService:{getBasketScoreHistory:()=>new Promise(resolve=>pending.push(resolve))},createPortal:node=>node});
+  const stock={symbol:'HAL',exchange:'NSE',score:2.4,action:'Add more',ltp:100,scoreSources:[{runId:444,createdAt:'2026-10-28T10:00:00Z',completed:true,market:'india'}]};
+  const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],1000,end,'Zerodha');};
+  let state=render();h.flush();pending.shift()(history([observation(444,3),observation(445,1.2,{covered_at:'2026-10-27T12:00:00Z'}),observation(446,2,{covered_at:start})]));await tick();state=render();
+  const score=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Historical Weighted Score calculation');assert.equal(score.props.children,'1.8',`client offset ${offset}ms`);score.props.onClick();state=render();const text=JSON.stringify(state.popup.props.children);assert.match(text,/server response/);assert.match(text,/#444/);assert.match(text,/#445/);assert.doesNotMatch(text,/#446/);
+  state.retry();state=render();h.flush();pending.shift()(history([]));await tick();state=render();assert.equal(find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Historical Weighted Score calculation').props.children,'2.4');
+ }
+});
