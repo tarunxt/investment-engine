@@ -1,3 +1,4 @@
+import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
 import type { StockSourceObservationPage } from "@/types/api";
 
 import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
@@ -207,6 +208,7 @@ export interface IApiService {
     zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse>;
     zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse>;
     zerodhaStatus(): Promise<ZerodhaStatusResponse>;
+    zerodhaDisplayQuotes(instruments: string[]): Promise<ZerodhaDisplayQuoteResponse>;
     zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse>;
     zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail>;
     zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse>;

@@ -378,6 +378,26 @@ async def get_status(
     )
 
 
+@router.get("/portfolio/quotes")
+async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, max_length=500), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    """Authenticated read-only quote batch; never prepare, modify or submit orders."""
+    from .display_quotes import validate_instruments, read_display_quotes
+    try:
+        keys = validate_instruments(instruments)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    token = await ZerodhaCredentialRepository(db).get_plaintext_token(current_user.id)
+    if not token:
+        raise HTTPException(401, "Not connected to Zerodha. Please login first.")
+    try:
+        return await read_display_quotes(_svc, token, keys)
+    except KiteError as exc:
+        raise HTTPException(400, "Live broker quotes are unavailable for this connection") from exc
+    except Exception as exc:
+        logger.exception("Read-only portfolio quote retrieval failed for user %s", current_user.id)
+        raise HTTPException(502, "Live broker quotes could not be retrieved") from exc
+
+
 @router.get("/portfolio", response_model=ZerodhaPortfolioOverviewResponse)
 async def get_portfolio_overview(
     limit: int = Query(default=30, ge=1, le=120),
