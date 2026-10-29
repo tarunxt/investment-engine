@@ -8,3 +8,11 @@ const row=s=>({id:1,owner_id:1,portfolio:'india',inputs:{source:s,source_hash:'c
 const extra={...model,stockStageOutput:()=>({rows:[],hash:null}),ConceptFDetailPanel:'panel'};
 test('masked study reveals no values chart or drilldown and makes no request',()=>{const h=harness(new URL('../components/workspace/ConceptFTechnicalSummary.tsx',import.meta.url),'ConceptFTechnicalSummary',{row:row(source()),masked:true,onInspect:()=>assert.fail()},extra);assert.doesNotMatch(h.text(),/10.00/);assert.equal(nodes(h.tree()).filter(n=>n.type==='svg'||n.type==='button').length,0);assert.equal(h.requests.length,0);});
 test('formula and actual fifteen inputs remain separate inspectable backend facts',async()=>{const h=harness(new URL('../components/workspace/ConceptFTechnicalSummary.tsx',import.meta.url),'ConceptFTechnicalSummary',{row:row(source()),masked:false,onInspect:()=>assert.fail()},extra);assert.match(h.text(),/not market observations/);assert.match(h.text(),/Undefined for flat samples/);h.button('Formula →').props.onClick();await h.flush();assert.match(h.text(),/100 × gain sum/);h.button('Inputs →').props.onClick();await h.flush();assert.equal(nodes(nodes(h.tree()).find(n=>n.props?.['aria-label']==='Persisted technical samples')).find(n=>n.type==='tbody').props.children.length,15);assert.equal(h.requests.length,0);});
+
+test('F16 missing study source review stays in its saved research portfolio without inventing a US synthetic source',()=>{
+ for(const portfolio of ['india','indmoney_us']){
+  const h=harness(new URL('../components/workspace/ConceptFTechnicalSummary.tsx',import.meta.url),'ConceptFTechnicalSummary',{row:{...row({}),portfolio},masked:false,onInspect:()=>assert.fail()},extra);
+  const link=nodes(h.tree()).find(n=>n.type==='a');assert.ok(link);assert.equal(link.props.href,portfolio==='india'?'/console/zerodha/portfolio':'/console/indmoney-us/portfolio');
+  assert.match(h.text(),portfolio==='india'?/Review a new synthetic source separately/:/Review the imported source separately/);assert.equal(h.requests.length,0);assert.equal(nodes(h.tree()).filter(n=>n.type==='svg').length,0);
+ }
+});

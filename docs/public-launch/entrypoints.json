@@ -14844,7 +14844,7 @@
       "registration": "unmounted",
       "route": "/uat2/simulation/journal-history",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/journal_history.py:71"
+      "source": "backend/app/uat2/journal_history.py:72"
     },
     {
       "calls": [
@@ -14870,7 +14870,7 @@
       "registration": "unmounted",
       "route": "/uat2/simulation/journal-history/{receipt_id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/journal_history.py:75"
+      "source": "backend/app/uat2/journal_history.py:76"
     },
     {
       "calls": [
@@ -18614,7 +18614,7 @@
     "backend/app/uat2/event_holding_targets.py": "17559d6a7f107a28801b53d40da065f8ebd13e1fba4ebe516e0e971a5edb87f5",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/http_bindings.py": "0c4e8502eb31db87715726db22566007e20a121908e237e523a14aadca2797f2",
-    "backend/app/uat2/journal_history.py": "f32369c04ffbc8f1ec98c8dbcd6f67fdaa41fc38c80cf95f0b668e4d0147bff7",
+    "backend/app/uat2/journal_history.py": "05da7c82b993f3fec45d96f24ded7d4bbb71b832d7a2829cefde6730b43cd7af",
     "backend/app/uat2/journal_portfolio.py": "51ba8ebf00e7776f6a8bc3393010ba2a45ff4f96b16018f1af775f50b328bbe4",
     "backend/app/uat2/main.py": "1cc36856f4acdc177a13fcbed744fd7fcd21e37ee62ebd1bb0d63703e53c45e9",
     "backend/app/uat2/operations.py": "bd613e122f26911ce3ab3f5e7c0c181a94e83b42e248add14a9ca08bacef0618",
