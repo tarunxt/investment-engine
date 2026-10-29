@@ -45,7 +45,8 @@ def history(db,owner,binding,*,limit=100,before=None):
         try:
             source=historical_source(db,message,owner);sequence=message.payload['sequence']
             if sequence in sequences:raise WorkflowDenied('Ambiguous receipt sequence')
-            sequences.add(sequence);items.append({'id':str(message.id),'sequence':sequence,'captured_at':source['captured_at'],'source_hash':digest(source),'currency':'INR'})
+            projected=project_snapshot(source,historical=True)
+            sequences.add(sequence);items.append({'id':str(message.id),'sequence':sequence,'captured_at':source['captured_at'],'source_hash':digest(source),'currency':'INR','holdings_market_value':projected['holdings_market_value'],'holdings_market_value_exact':projected['holdings_market_value_exact']})
         except WorkflowDenied:rejected+=1
     cursor=page[-1].payload.get('sequence') if page else None
     if len(messages)>limit and (type(cursor) is not int or cursor<1):raise WorkflowDenied('Verified pagination cursor unavailable')

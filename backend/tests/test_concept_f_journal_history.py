@@ -51,3 +51,26 @@ def test_missing_foreign_corrupt_or_credential_authority_lineage_never_substitut
     with pytest.raises(WorkflowDenied):snapshot(e.db,1,binding,identifier)
     connection.credential_ref=None;connection.version+=1;e.db.commit()
     with pytest.raises(WorkflowDenied):snapshot(e.db,1,binding,identifier)
+
+@pytest.mark.parametrize('prices,expected', [(['10.01', '2.50'], 40.03), (['0', '0'], 0.0), (['10.01', None], None)])
+def test_history_value_matches_exact_captured_projection_without_mutation(linked_env, prices, expected):
+    from copy import deepcopy
+    from app.domains.runs.analysis_workflows.contracts import digest
+    e=linked_env;scope,analysis=setup(e);binding=SimpleNamespace(scope=scope,analysis=analysis)
+    receipt=acquire(e.db,1,scope=scope,authorize=analysis.authorize,key='history-value-projection');e.db.commit()
+    message=e.db.get(OutboxMessage,UUID(receipt['source_receipt_id']))
+    # Disposable prior-format source fixtures; no runtime repair/backfill path.
+    source=deepcopy(message.payload['source']);source.pop('price_history',None)
+    source['holdings']=[{'exchange':'NSE','tradingsymbol':'FIRST','quantity':3,'last_price':prices[0]},
+                        {'exchange':'BSE','tradingsymbol':'SECOND','quantity':4,'last_price':prices[1]}]
+    source['content_hash']=digest({k:v for k,v in source.items() if k!='content_hash'})
+    message.payload={**deepcopy(message.payload),'source':source,'source_hash':digest(source)};e.db.commit()
+    original=deepcopy(message.payload);count=e.db.scalar(select(func.count()).select_from(OutboxMessage))
+    listed=history(e.db,1,binding)['items'][0]
+    exact=snapshot(e.db,1,binding,message.id)['snapshot']
+    assert listed['holdings_market_value']==exact['holdings_market_value']==expected
+    assert listed['holdings_market_value_exact']==exact['holdings_market_value_exact']
+    assert listed['currency']=='INR' and listed['source_hash']==exact['source_hash']
+    assert history(e.db,2,binding)['items']==[]
+    assert message.payload==original
+    assert e.db.scalar(select(func.count()).select_from(OutboxMessage))==count

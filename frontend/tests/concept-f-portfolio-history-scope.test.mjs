@@ -25,3 +25,8 @@ test('F12 exact review identity owns its component lifetime while recovery-key i
  setQuery('view=holdings&sourceReview=10000000-0000-4000-8000-000000000002');await h.flush();assert.notEqual(review().key,first,'new exact review must retire old callback lifetime');
  setQuery('view=holdings');await h.flush();assert.equal(review().key,initial);
 });
+
+
+test('F03 receipt history receives the workspace financial visibility rather than a chart-specific default',async()=>{
+ const {h,workspace}=view('view=snapshot%20history');workspace.portfolio='india';await h.flush();const history=nodes(h.tree()).find(n=>n.type==='history');assert.ok(history);assert.equal(history.props.masked,false);assert.equal(h.requests.length,0);
+});
