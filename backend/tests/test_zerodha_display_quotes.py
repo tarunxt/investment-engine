@@ -59,10 +59,29 @@ def test_quote_permission_failure_never_becomes_requested_limit_price(monkeypatc
         def __init__(self, db): pass
         async def get_plaintext_token(self, user_id): return 'synthetic-token'
     class Service:
-        async def get_quotes(self, token, instruments): raise router.KiteError('Synthetic quote permission unavailable')
+        async def get_quotes(self, token, instruments): raise router.KiteError('Insufficient permission for that call.', 'PermissionException')
     monkeypatch.setattr(router, 'ZerodhaCredentialRepository', Repo)
     monkeypatch.setattr(router, '_svc', Service())
     with pytest.raises(HTTPException) as exc:
         asyncio.run(router.portfolio_display_quotes(['NSE:CDSL'], object(), SimpleNamespace(id=73)))
-    assert exc.value.status_code == 400
-    assert 'unavailable' in exc.value.detail
+    assert exc.value.status_code == 403
+    assert 'PermissionException' in exc.value.detail
+
+
+@pytest.mark.parametrize('kind,status', [('PermissionException',403), ('TokenException',409), ('InputException',422), ('RateLimitException',429), ('NetworkException',502), ('DataException',502), ('GeneralException',502), ('unexpected-sensitive-type',502)])
+def test_quote_failure_category_preserves_cause_without_raw_sensitive_message(kind, status):
+    from app.domains.zerodha.display_quotes import quote_failure_detail
+    error = router.KiteError('synthetic-secret-body-value', kind)
+    code, detail = quote_failure_detail(error)
+    assert code == status
+    assert 'synthetic-secret-body-value' not in detail
+    assert 'unexpected-sensitive-type' not in detail
+    if kind != 'TokenException': assert 'reconnection' not in detail
+
+
+def test_permission_error_without_explicit_type_is_still_not_an_expired_login():
+    from app.domains.zerodha.display_quotes import quote_failure_detail
+    code, detail = quote_failure_detail(router.KiteError('Insufficient permission for that call.'))
+    assert code == 403
+    assert 'PermissionException' in detail
+    assert 'reconnection' not in detail
