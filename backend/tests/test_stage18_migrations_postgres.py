@@ -411,7 +411,7 @@ async def test_actual_concurrent_google_signup_preserves_independent_defaults(re
 @pytest.mark.parametrize('expression', [
     "value::text = ANY (ARRAY['user_owned'::character varying, 'platform_managed'::character varying]::text[])",
     "value::text = ANY (ARRAY['user_owned'::character varying::text, 'platform_managed'::character varying::text])",
-])
+], ids=str)
 def test_actual_check_cast_forms_preserve_constraint_semantics(rehearsal, expression):
     """Execute both cast forms in PostgreSQL, including SQL CHECK's NULL rule."""
     engine, _ = rehearsal

@@ -5,9 +5,9 @@
     "background": 31,
     "export": 56,
     "frontend": 25,
-    "http": 327,
+    "http": 345,
     "lifecycle": 9,
-    "page": 83,
+    "page": 90,
     "scheduler": 20,
     "websocket": 5,
     "worker": 53
@@ -849,7 +849,7 @@
       "registration": "mounted",
       "route": "/auth/profile",
       "side_effects": "user/session DB; transactional email; Google identity verification",
-      "source": "backend/app/domains/auth/router.py:314"
+      "source": "backend/app/domains/auth/router.py:315"
     },
     {
       "calls": [
@@ -10054,7 +10054,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/native_outbox_export.py:173"
+      "source": "backend/app/domains/public_service/native_outbox_export.py:192"
     },
     {
       "calls": [
@@ -10165,7 +10165,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:103"
+      "source": "backend/app/domains/public_service/router.py:111"
     },
     {
       "calls": [
@@ -10196,7 +10196,7 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents/{id}/revoke",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:112"
+      "source": "backend/app/domains/public_service/router.py:120"
     },
     {
       "calls": [
@@ -10227,7 +10227,34 @@
       "registration": "mounted",
       "route": "/account/operations/support-consents/{id}/access",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:120"
+      "source": "backend/app/domains/public_service/router.py:128"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "read_cost_fx",
+        "response",
+        "router.get"
+      ],
+      "capability": "cost_fx",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "public_service",
+      "module_lifecycle_gate": "unknown / view via modules.transports.install_route_policy",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/cost-fx')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "mounted",
+      "route": "/account/operations/cost-fx",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/domains/public_service/router.py:23"
     },
     {
       "calls": [
@@ -10256,7 +10283,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:23"
+      "source": "backend/app/domains/public_service/router.py:31"
     },
     {
       "calls": [
@@ -10287,7 +10314,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:28"
+      "source": "backend/app/domains/public_service/router.py:36"
     },
     {
       "calls": [
@@ -10319,7 +10346,7 @@
       "registration": "mounted",
       "route": "/account/operations/private-account-download",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:28"
+      "source": "backend/app/domains/public_service/router.py:36"
     },
     {
       "calls": [
@@ -10351,7 +10378,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:49"
+      "source": "backend/app/domains/public_service/router.py:57"
     },
     {
       "calls": [
@@ -10381,7 +10408,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests/{id}",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:56"
+      "source": "backend/app/domains/public_service/router.py:64"
     },
     {
       "calls": [
@@ -10414,7 +10441,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests/{id}/cancel",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:60"
+      "source": "backend/app/domains/public_service/router.py:68"
     },
     {
       "calls": [
@@ -10440,7 +10467,7 @@
       "registration": "mounted",
       "route": "/account/operations/eligibility",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:70"
+      "source": "backend/app/domains/public_service/router.py:78"
     },
     {
       "calls": [
@@ -10469,7 +10496,7 @@
       "registration": "mounted",
       "route": "/account/operations/eligibility",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:73"
+      "source": "backend/app/domains/public_service/router.py:81"
     },
     {
       "calls": [
@@ -10497,7 +10524,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:81"
+      "source": "backend/app/domains/public_service/router.py:89"
     },
     {
       "calls": [
@@ -10526,7 +10553,7 @@
       "registration": "mounted",
       "route": "/account/operations/privacy-requests/{id}/export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:81"
+      "source": "backend/app/domains/public_service/router.py:89"
     },
     {
       "calls": [
@@ -10556,7 +10583,7 @@
       "registration": "mounted",
       "route": "/account/operations/diagnostics",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/domains/public_service/router.py:89"
+      "source": "backend/app/domains/public_service/router.py:97"
     },
     {
       "calls": [
@@ -10959,7 +10986,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/setup-context",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:107"
+      "source": "backend/app/domains/runs/analysis_router.py:112"
     },
     {
       "calls": [
@@ -10992,7 +11019,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/options-preview",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:130"
+      "source": "backend/app/domains/runs/analysis_router.py:135"
     },
     {
       "calls": [
@@ -11027,7 +11054,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/candidate-preview",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:150"
+      "source": "backend/app/domains/runs/analysis_router.py:155"
     },
     {
       "calls": [
@@ -11078,7 +11105,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:170"
+      "source": "backend/app/domains/runs/analysis_router.py:175"
     },
     {
       "calls": [
@@ -11106,7 +11133,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/calculation-inputs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:224"
+      "source": "backend/app/domains/runs/analysis_router.py:229"
     },
     {
       "calls": [
@@ -11135,7 +11162,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/calculation-inputs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:232"
+      "source": "backend/app/domains/runs/analysis_router.py:237"
     },
     {
       "calls": [
@@ -11168,7 +11195,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:243"
+      "source": "backend/app/domains/runs/analysis_router.py:248"
     },
     {
       "calls": [
@@ -11206,7 +11233,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/action-plan",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:255"
+      "source": "backend/app/domains/runs/analysis_router.py:260"
     },
     {
       "calls": [
@@ -11246,7 +11273,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/action-plan/revisions",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:284"
+      "source": "backend/app/domains/runs/analysis_router.py:289"
     },
     {
       "calls": [
@@ -11279,7 +11306,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:306"
+      "source": "backend/app/domains/runs/analysis_router.py:311"
     },
     {
       "calls": [
@@ -11311,7 +11338,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/synthetic-source",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:313"
+      "source": "backend/app/domains/runs/analysis_router.py:318"
     },
     {
       "calls": [
@@ -11343,7 +11370,7 @@
       "registration": "mounted",
       "route": "/runs/analysis-workflows/{workflow_id}/controls",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/analysis_router.py:325"
+      "source": "backend/app/domains/runs/analysis_router.py:330"
     },
     {
       "calls": [
@@ -11389,7 +11416,7 @@
       "registration": "",
       "route": "",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/repository.py:180"
+      "source": "backend/app/domains/runs/repository.py:182"
     },
     {
       "calls": [
@@ -11416,7 +11443,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1018"
+      "source": "backend/app/domains/runs/router.py:1034"
     },
     {
       "calls": [
@@ -11464,7 +11491,7 @@
       "registration": "mounted",
       "route": "/runs/{run_id}/cancel",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:1031"
+      "source": "backend/app/domains/runs/router.py:1047"
     },
     {
       "calls": [
@@ -11493,7 +11520,7 @@
       "registration": "mounted",
       "route": "/runs/final-actionables/history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:491"
+      "source": "backend/app/domains/runs/router.py:503"
     },
     {
       "calls": [
@@ -11522,7 +11549,7 @@
       "registration": "mounted",
       "route": "/runs/final-actionables/history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:521"
+      "source": "backend/app/domains/runs/router.py:533"
     },
     {
       "calls": [
@@ -11551,7 +11578,7 @@
       "registration": "mounted",
       "route": "/runs/final-actionables/history/backfill",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:546"
+      "source": "backend/app/domains/runs/router.py:558"
     },
     {
       "calls": [
@@ -11585,26 +11612,37 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-label",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:565"
+      "source": "backend/app/domains/runs/router.py:577"
     },
     {
       "calls": [
-        "(await db.execute(select(AutoRebalanceWorkflow.sequence).where(AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio).order_by(AutoRebalanceWorkflow.sequence.desc(), AutoRebalanceWorkflow.updated_at.desc()).limit(limit))).scalars",
-        "(await db.execute(select(AutoRebalanceWorkflow.sequence).where(AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio).order_by(AutoRebalanceWorkflow.sequence.desc(), AutoRebalanceWorkflow.updated_at.desc()).limit(limit))).scalars().all",
+        "(await db.execute(select(sequence_sources.c.sequence).order_by(sequence_sources.c.sequence.desc()).limit(limit))).scalars",
+        "(await db.execute(select(sequence_sources.c.sequence).order_by(sequence_sources.c.sequence.desc()).limit(limit))).scalars().all",
         "AutoRebalanceHistoryListResponse",
-        "AutoRebalanceWorkflow.sequence.desc",
-        "AutoRebalanceWorkflow.updated_at.desc",
+        "AutoRebalanceWorkflow.sequence.label",
         "Depends",
+        "Job.auto_rebalance_sequence.is_not",
+        "Job.auto_rebalance_sequence.label",
+        "PostgresRunRepository",
+        "PostgresRunRepository(db)._owned_query",
+        "PostgresRunRepository(db)._owned_query(current_user.id).with_only_columns",
+        "PostgresRunRepository(db)._owned_query(current_user.id).with_only_columns(Run.auto_rebalance_sequence.label('sequence')).where",
         "Query",
+        "Run.auto_rebalance_sequence.is_not",
+        "Run.auto_rebalance_sequence.label",
         "_build_auto_rebalance_history",
         "db.execute",
         "len",
         "router.get",
         "select",
-        "select(AutoRebalanceWorkflow.sequence).where",
-        "select(AutoRebalanceWorkflow.sequence).where(AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio).order_by",
-        "select(AutoRebalanceWorkflow.sequence).where(AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio).order_by(AutoRebalanceWorkflow.sequence.desc(), AutoRebalanceWorkflow.updated_at.desc()).limit",
-        "set"
+        "select(AutoRebalanceWorkflow.sequence.label('sequence')).where",
+        "select(Job.auto_rebalance_sequence.label('sequence')).where",
+        "select(sequence_sources.c.sequence).order_by",
+        "select(sequence_sources.c.sequence).order_by(sequence_sources.c.sequence.desc()).limit",
+        "sequence_sources.c.sequence.desc",
+        "set",
+        "workflow_sequences.union",
+        "workflow_sequences.union(run_sequences, job_sequences).subquery"
       ],
       "capability": "list_auto_rebalance_history",
       "classification": "owner-private",
@@ -11623,7 +11661,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:596"
+      "source": "backend/app/domains/runs/router.py:608"
     },
     {
       "calls": [
@@ -11656,7 +11694,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history/{portfolio}/{sequence}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:634"
+      "source": "backend/app/domains/runs/router.py:645"
     },
     {
       "calls": [
@@ -11709,7 +11747,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-history/{portfolio}/{sequence}/stages/{stage}",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:681"
+      "source": "backend/app/domains/runs/router.py:692"
     },
     {
       "calls": [
@@ -11754,7 +11792,7 @@
       "registration": "mounted",
       "route": "/runs/auto-rebalance-completion-email",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:815"
+      "source": "backend/app/domains/runs/router.py:826"
     },
     {
       "calls": [
@@ -11792,7 +11830,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:910"
+      "source": "backend/app/domains/runs/router.py:921"
     },
     {
       "calls": [
@@ -11804,6 +11842,7 @@
         "RunResponse.model_validate",
         "_full_run_list_size_bytes",
         "_serialize_run_list_item",
+        "isinstance",
         "repo.list",
         "result.to_dict",
         "router.get",
@@ -11826,7 +11865,7 @@
       "registration": "mounted",
       "route": "/runs",
       "side_effects": "run DB; Redis; queued AI; notifications and exports",
-      "source": "backend/app/domains/runs/router.py:981"
+      "source": "backend/app/domains/runs/router.py:992"
     },
     {
       "calls": [
@@ -14492,6 +14531,35 @@
     },
     {
       "calls": [
+        "Depends",
+        "HTTPException",
+        "Query",
+        "db.run_sync",
+        "project",
+        "request_binding",
+        "router.get"
+      ],
+      "capability": "recent",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/activity-history",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/activity_history.py:84"
+    },
+    {
+      "calls": [
         "app.task",
         "self.stage"
       ],
@@ -14621,6 +14689,188 @@
       "route": "",
       "side_effects": "Dedicated simulation PostgreSQL/Redis; bounded fake AI; no broker, mail or external export",
       "source": "backend/app/uat2/analysis_worker.py:164"
+    },
+    {
+      "calls": [
+        "Depends",
+        "apply",
+        "router.get"
+      ],
+      "capability": "read",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{portfolio}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/buy-threshold/{portfolio}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/buy_threshold.py:79"
+    },
+    {
+      "calls": [
+        "Depends",
+        "apply",
+        "router.put"
+      ],
+      "capability": "save",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "PUT",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.put('/{portfolio}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/buy-threshold/{portfolio}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/buy_threshold.py:84"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "db.run_sync",
+        "project",
+        "request_binding",
+        "router.get"
+      ],
+      "capability": "combined_history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/combined-history",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/combined_history.py:182"
+    },
+    {
+      "calls": [
+        "Depends",
+        "Query",
+        "read",
+        "router.get"
+      ],
+      "capability": "history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{portfolio}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/event-history/{portfolio}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/event_history.py:63"
+    },
+    {
+      "calls": [
+        "Depends",
+        "read",
+        "router.get"
+      ],
+      "capability": "detail",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{portfolio}/{job_id}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/event-history/{portfolio}/{job_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/event_history.py:67"
+    },
+    {
+      "calls": [
+        "Depends",
+        "Query",
+        "history",
+        "read",
+        "router.get"
+      ],
+      "capability": "list_history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/journal-history",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/journal_history.py:71"
+    },
+    {
+      "calls": [
+        "Depends",
+        "read",
+        "router.get",
+        "snapshot"
+      ],
+      "capability": "get_history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{receipt_id}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/journal-history/{receipt_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/journal_history.py:75"
     },
     {
       "calls": [
@@ -14977,6 +15227,134 @@
     },
     {
       "calls": [
+        "(await db.execute(query.order_by(Prompt.id.desc()).limit(limit + 1))).scalars",
+        "(await db.execute(query.order_by(Prompt.id.desc()).limit(limit + 1))).scalars().all",
+        "Depends",
+        "Prompt.id.desc",
+        "Prompt.name.ilike",
+        "Query",
+        "db.execute",
+        "len",
+        "owned",
+        "project",
+        "query.order_by",
+        "query.order_by(Prompt.id.desc()).limit",
+        "query.where",
+        "require",
+        "router.get",
+        "select",
+        "select(Prompt).where"
+      ],
+      "capability": "library",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "require",
+        "router.get('')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/prompt-library",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/prompt_library.py:21"
+    },
+    {
+      "calls": [
+        "(await db.execute(select(Prompt).where(Prompt.id == id, owned(user)))).scalar_one_or_none",
+        "Depends",
+        "HTTPException",
+        "db.execute",
+        "owned",
+        "project",
+        "require",
+        "router.get",
+        "select",
+        "select(Prompt).where"
+      ],
+      "capability": "detail",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "require",
+        "router.get('/{id}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/prompt-library/{id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/prompt_library.py:28"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "Query",
+        "db.run_sync",
+        "project",
+        "request_binding",
+        "router.get"
+      ],
+      "capability": "history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{portfolio}')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/recommendation-history/{portfolio}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/recommendation_history.py:85"
+    },
+    {
+      "calls": [
+        "HTTPException",
+        "celery.AsyncResult",
+        "len",
+        "result.successful",
+        "router.get"
+      ],
+      "capability": "read_fake_ai",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "[Depends(get_current_user)]",
+        "router.get('/uat2/ai/{task_id}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/ai/{task_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/router.py:102"
+    },
+    {
+      "calls": [
         "EmailSink",
         "EmailSink(artifact_directory() + '/email-sink').send",
         "artifact_directory",
@@ -14998,7 +15376,7 @@
       "registration": "unmounted",
       "route": "/uat2/email",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:111"
+      "source": "backend/app/uat2/router.py:117"
     },
     {
       "calls": [
@@ -15020,7 +15398,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:118"
+      "source": "backend/app/uat2/router.py:124"
     },
     {
       "calls": [
@@ -15043,7 +15421,7 @@
       "registration": "unmounted",
       "route": "/uat2/export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:118"
+      "source": "backend/app/uat2/router.py:124"
     },
     {
       "calls": [
@@ -15186,11 +15564,16 @@
       "calls": [
         "(await _load_indmoney_with_session(db, current_user.id)).model_dump",
         "Depends",
+        "USD_INR_STALE_AFTER.total_seconds",
         "_load_indmoney_with_session",
         "broker.portfolio",
+        "datetime.now",
         "dict",
+        "int",
+        "now.isoformat",
         "os.getenv",
         "portfolio.items",
+        "read_cost_fx",
         "router.get",
         "set",
         "visible_module_ids"
@@ -15236,33 +15619,7 @@
       "registration": "unmounted",
       "route": "/uat2/ai",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:89"
-    },
-    {
-      "calls": [
-        "HTTPException",
-        "celery.AsyncResult",
-        "len",
-        "result.successful",
-        "router.get"
-      ],
-      "capability": "read_fake_ai",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "GET",
-      "module": "platform",
-      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
-      "observed_guards": [
-        "[Depends(get_current_user)]",
-        "router.get('/uat2/ai/{task_id}')"
-      ],
-      "owner_source": [
-        "not established in local function; inspect callers/repository"
-      ],
-      "registration": "unmounted",
-      "route": "/uat2/ai/{task_id}",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/router.py:96"
+      "source": "backend/app/uat2/router.py:95"
     },
     {
       "calls": [],
@@ -15282,6 +15639,57 @@
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
       "source": "backend/app/uat2/scheduler.py:20"
+    },
+    {
+      "calls": [
+        "Depends",
+        "Query",
+        "read",
+        "router.get"
+      ],
+      "capability": "history",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{portfolio}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/threat-history/{portfolio}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/threat_history.py:61"
+    },
+    {
+      "calls": [
+        "Depends",
+        "read",
+        "router.get"
+      ],
+      "capability": "detail",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/{portfolio}/{job_id}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/threat-history/{portfolio}/{job_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/threat_history.py:65"
     },
     {
       "calls": [
@@ -15313,38 +15721,6 @@
       "calls": [
         "Depends",
         "HTTPException",
-        "body.model_dump",
-        "connect",
-        "db.commit",
-        "db.rollback",
-        "db.run_sync",
-        "describe",
-        "request_binding",
-        "router.post"
-      ],
-      "capability": "simulate_connection",
-      "classification": "owner-private",
-      "kind": "http",
-      "method": "POST",
-      "module": "platform",
-      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
-      "observed_guards": [
-        "Depends(get_async_db)",
-        "Depends(get_current_user)",
-        "router.post('/connections')"
-      ],
-      "owner_source": [
-        "user.id"
-      ],
-      "registration": "unmounted",
-      "route": "/uat2/simulation/connections",
-      "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/workflow_router.py:28"
-    },
-    {
-      "calls": [
-        "Depends",
-        "HTTPException",
         "binding.orders.prepare",
         "db.commit",
         "db.rollback",
@@ -15369,7 +15745,7 @@
       "registration": "unmounted",
       "route": "/uat2/simulation/analysis/{workflow_id}/prepare-basket",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/workflow_router.py:46"
+      "source": "backend/app/uat2/workflow_router.py:108"
     },
     {
       "calls": [
@@ -15398,7 +15774,7 @@
       "registration": "",
       "route": "",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/workflow_router.py:64"
+      "source": "backend/app/uat2/workflow_router.py:126"
     },
     {
       "calls": [
@@ -15428,7 +15804,145 @@
       "registration": "unmounted",
       "route": "/uat2/simulation/analysis/{workflow_id}/private-export",
       "side_effects": "inspect calls; DB/network/filesystem effects possible",
-      "source": "backend/app/uat2/workflow_router.py:64"
+      "source": "backend/app/uat2/workflow_router.py:126"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "current_portfolio",
+        "db.run_sync",
+        "request_binding",
+        "router.get"
+      ],
+      "capability": "journal_portfolio",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/journal-portfolio')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/journal-portfolio",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:20"
+    },
+    {
+      "calls": [
+        "Depends",
+        "reviews.preview",
+        "router.post",
+        "snapshot_work"
+      ],
+      "capability": "preview_snapshot",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/snapshot-reviews')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/snapshot-reviews",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:69"
+    },
+    {
+      "calls": [
+        "Depends",
+        "reviews.describe",
+        "router.get",
+        "snapshot_work"
+      ],
+      "capability": "read_snapshot_review",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "GET",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.get('/snapshot-reviews/{review_id}')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/snapshot-reviews/{review_id}",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:76"
+    },
+    {
+      "calls": [
+        "Depends",
+        "reviews.accept",
+        "router.post",
+        "snapshot_work"
+      ],
+      "capability": "accept_snapshot_review",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/snapshot-reviews/{review_id}/accept')"
+      ],
+      "owner_source": [
+        "not established in local function; inspect callers/repository"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/snapshot-reviews/{review_id}/accept",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:83"
+    },
+    {
+      "calls": [
+        "Depends",
+        "HTTPException",
+        "body.model_dump",
+        "connect",
+        "db.commit",
+        "db.rollback",
+        "db.run_sync",
+        "describe",
+        "request_binding",
+        "router.post"
+      ],
+      "capability": "simulate_connection",
+      "classification": "owner-private",
+      "kind": "http",
+      "method": "POST",
+      "module": "platform",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "Depends(get_async_db)",
+        "Depends(get_current_user)",
+        "router.post('/connections')"
+      ],
+      "owner_source": [
+        "user.id"
+      ],
+      "registration": "unmounted",
+      "route": "/uat2/simulation/connections",
+      "side_effects": "inspect calls; DB/network/filesystem effects possible",
+      "source": "backend/app/uat2/workflow_router.py:90"
     },
     {
       "calls": [],
@@ -16636,6 +17150,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/indmoney-us/research/legacy-setup",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/research/legacy-setup",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/research/legacy-setup/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/indmoney-us/research",
       "classification": "owner-private",
       "kind": "page",
@@ -16652,6 +17185,25 @@
       "route": "/console/indmoney-us/research",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/indmoney-us/research/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/indmoney-us/research/threat-history",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/indmoney-us/research/threat-history",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/indmoney-us/research/threat-history/page.tsx:1"
     },
     {
       "calls": [],
@@ -16883,6 +17435,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/profile/modules",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/modules",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/modules/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/profile",
       "classification": "owner-private",
       "kind": "page",
@@ -16937,6 +17508,44 @@
       "route": "/console/profile/privacy",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/profile/privacy/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/profile/privacy/requests",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/privacy/requests",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/privacy/requests/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/profile/research-library",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/profile/research-library",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/profile/research-library/page.tsx:1"
     },
     {
       "calls": [],
@@ -17301,6 +17910,25 @@
     },
     {
       "calls": [],
+      "capability": "/console/zerodha/research/legacy-setup",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/research/legacy-setup",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/research/legacy-setup/page.tsx:1"
+    },
+    {
+      "calls": [],
       "capability": "/console/zerodha/research",
       "classification": "owner-private",
       "kind": "page",
@@ -17317,6 +17945,25 @@
       "route": "/console/zerodha/research",
       "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
       "source": "frontend/app/console/zerodha/research/page.tsx:1"
+    },
+    {
+      "calls": [],
+      "capability": "/console/zerodha/research/threat-history",
+      "classification": "owner-private",
+      "kind": "page",
+      "method": "GET",
+      "module": "frontend",
+      "module_lifecycle_gate": "framework/core or frontend proxy; backend remains authoritative",
+      "observed_guards": [
+        "none found locally; inspect frontend/proxy.ts and layouts"
+      ],
+      "owner_source": [
+        "Auth.js session/backend token where enforced; inspect server helper/proxy"
+      ],
+      "registration": "App Router convention",
+      "route": "/console/zerodha/research/threat-history",
+      "side_effects": "backend proxy or server rendering; see corresponding backend entry; exports may return files",
+      "source": "frontend/app/console/zerodha/research/threat-history/page.tsx:1"
     },
     {
       "calls": [],
@@ -17540,8 +18187,8 @@
     "backend/app/domains/auth/dependencies.py": "3120533d6bf92326a014a8d22e5f67fc7980443a22339ee11874ca8cb1767abc",
     "backend/app/domains/auth/google_signin.py": "fa34f6685dc59837e2d083daefec4709c4cebe8f66faa882179ef1b9f5688238",
     "backend/app/domains/auth/models.py": "279ca51fd8a2c750051407bd1721c3bf2a0e83ccb1e9b33671b5bb8551e87a26",
-    "backend/app/domains/auth/router.py": "54c8f4d638799a3b49fef95a690ea40ff758bb37192e723cdd6817c74cd62d39",
-    "backend/app/domains/auth/schemas.py": "b9ed808ca03f82e2a2ec47c655a4241cfa91532714827c28d37c740b9aaddbf3",
+    "backend/app/domains/auth/router.py": "32882bad4d00f2d34cc54c57d7c518a48b876a12c60c64b25e1c18dda1b5cd4a",
+    "backend/app/domains/auth/schemas.py": "7ed199b9bc96fd87bd96700e8f74d873e29004c6037b6544c33a62188379790d",
     "backend/app/domains/auth/session_revocation.py": "15f90b7efa30edcfc0b1a8e82ea603e3f7a03d273956642d68f97a93962a00b3",
     "backend/app/domains/auth/tasks.py": "491bcc47f793f324dabe8dd8a79c5560cdae422e688dd89981fd1b9aa7b4a7b8",
     "backend/app/domains/auth/websocket_tickets.py": "d52c78b54fb15678b9575415cea4dae365b3995f246fa3bfc7550e161b57e98f",
@@ -17598,13 +18245,15 @@
     "backend/app/domains/cost_drivers/transfer.py": "66e90ae518e4d64ada01ea0505d820cb4a8ea98839e7d7d48bc92cc35bd0e474",
     "backend/app/domains/dashboard/__init__.py": "04b269ae770e44af85e4c7cb7ec5dc553cca428293365179b291040f2c0be43d",
     "backend/app/domains/dashboard/models.py": "94888385aad300fd1ea0473527c3e6a0d94565a85e33294c020306e54b7b36fa",
+    "backend/app/domains/dashboard/native_history.py": "69f7116836e121c27e1da882b9e4f411ff134804be0231b0b381637d087a420f",
     "backend/app/domains/dashboard/router.py": "698e48fd609123099385273d77478752bf5dadef970c7452073f1072a01cc5b3",
-    "backend/app/domains/dashboard/schemas.py": "8eed84716c178d2fdb0d567fa5673149bdc54e6dcfb3a23b57d15aff9a5d0f47",
-    "backend/app/domains/dashboard/service.py": "e38f8aa44f7e70220955c51c24fa9e1d6bd215b5256f9458a3e6eb8e65996f01",
+    "backend/app/domains/dashboard/schemas.py": "e6cb7eb471a9cfa468d8feb11c335f5b63c25f323c773a95c5d4368887ac9a5f",
+    "backend/app/domains/dashboard/service.py": "93498b09959f3b6b64bf97c5b85af8845914868692a5731271f316486bcdc3d0",
     "backend/app/domains/dashboard/tasks.py": "5a91b4dffe8a30c02c62e4969ae71002da0c585eb5648c8c8a1c61a5ecd8c298",
     "backend/app/domains/fx_rates/__init__.py": "3f50e1de2cf5a33d4ec3e7f1f2124cde14c699dd62965ad3c75ebfbcad836eee",
+    "backend/app/domains/fx_rates/cost_read.py": "2efd9258685a59e438235d33cf5822bfe76b8fc1de087adec0ed27f19606b415",
     "backend/app/domains/fx_rates/models.py": "12b83795d5f44d5d392600344f5a048b88236e8a50d4223b6d429113f4594d73",
-    "backend/app/domains/fx_rates/service.py": "a833f6983fc0248ad50950c9da2c889b0912c7693f9782fc271dfb16bc19de5e",
+    "backend/app/domains/fx_rates/service.py": "25a159330863157ff25dcd8a33e8907aaae5faf68451d561e2e5a68bf134d3b4",
     "backend/app/domains/fx_rates/tasks.py": "e69a2de0163fa1ed16a512860b86ff0c44c0c486224cec245c4fa39b1517836f",
     "backend/app/domains/google_sheets/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/google_sheets/crypto.py": "a307e084443ea00e60c4cbee185f69d30fa169554c5437a38b5e83ec3bd14e9a",
@@ -17663,14 +18312,14 @@
     "backend/app/domains/mails/tasks.py": "1e70fbcaf5aae681c14be12c9a970dd78e5e3b3206d7f61334424e410fc2f311",
     "backend/app/domains/modules/__init__.py": "bbed15b5c53ff02eabfebb0e737623a6f446adf789ca53840c0891efef6f1c6a",
     "backend/app/domains/modules/boundaries.py": "a6c06ed0d7b7ed07ee9dcb7924b9a2c670cbd944d0e8a8f6ad529bc336f38ff7",
-    "backend/app/domains/modules/coverage.py": "4dbd53b5963f1e8dd6ef2a974ce0ae48ab0836f9c10f44c2be4f2e39274ca8aa",
+    "backend/app/domains/modules/coverage.py": "4494253ca403073ef568b8bd296f43765eaf7e1bc60b77dd5db163b4339ef776",
     "backend/app/domains/modules/dispatch.py": "5b2f0125cf5922786d1ac301608d8189b84551ab697a3ba47fa4a7349d791352",
     "backend/app/domains/modules/execution.py": "9515241e861cb6d5ad6921e27a0cfceda71f82cfe772d76c3e90531757f27a10",
     "backend/app/domains/modules/lifecycle.py": "bd59851bde8f50f981324ea15635b2c51cda6d3a3766c94f9ee084551e359d85",
     "backend/app/domains/modules/models.py": "209b1c7b62e005d8c5a6738b178698bab4ea5afeabbfd005d26cc4e1d8b98ab6",
     "backend/app/domains/modules/notification_visibility.py": "100b687571b3085b49c5af0372d2e3d20ba3d1c471f859997fd1c1434bb7aab5",
     "backend/app/domains/modules/policy.py": "3235a6c514a49928516f6bbf32b38686e1b3be7b4d2d306e1204277661c0f08b",
-    "backend/app/domains/modules/presentation.py": "46e1fa59088519d61d5ca227e4f4239cfc8eb386f3ee4f563afe194912f5bbe3",
+    "backend/app/domains/modules/presentation.py": "42cd5c9b8f81314070f76176583fe434018c25c5e114dc111d152149585fafb1",
     "backend/app/domains/modules/registry.py": "0f3cbf09be1bca388e9e0dbfdd02399d6482e71b4912dc1ea370e3acc3f6df9f",
     "backend/app/domains/modules/router.py": "6c5c7e366ea709307498f3f2201ddd0869918ef80a7b53b95ec0e540c8b7e888",
     "backend/app/domains/modules/safety.py": "319c7ef40e7027347a8df5ad4b4425ceb73ce009574184a63b328a24f02d9df7",
@@ -17800,7 +18449,7 @@
     "backend/app/domains/public_service/monitor_application_router.py": "56d5cdbf12586edbb74e3a4e795c300692c0f3a72a54ae34d05f15bbda24c6f3",
     "backend/app/domains/public_service/monitor_dispatch.py": "e13550d77d7f2c154a8fa21249997be6014e6f43f2ac9dd409c46eddf379e0f5",
     "backend/app/domains/public_service/monitoring.py": "209c576cb5b61b0c982aae6766c06efe434ab2e89ee537e1d2af373b14cba5b3",
-    "backend/app/domains/public_service/native_outbox_export.py": "e7635682dd37fe2087041ed349de403858857c42d991ea749cc4afef025e31d6",
+    "backend/app/domains/public_service/native_outbox_export.py": "59db55f6aaa7778f62144e87a6612d6aa597ed383e5592b6b3ac306a8a830f6b",
     "backend/app/domains/public_service/native_profile_restore_contract.py": "ed76b9d48e1ceecfa9247094cde82745527887947404608ceb07f4a2d25a27f3",
     "backend/app/domains/public_service/operations.py": "0c9692cb4a4d63c4833fc60ed11dd7b8e08f6586ef59396dc2ce5d52f0fd9593",
     "backend/app/domains/public_service/privacy.py": "4f0c1c67df82b0ada4652b82141482ea49114b3364fb93934c309e73cdd04c3a",
@@ -17810,11 +18459,11 @@
     "backend/app/domains/public_service/quarantined_privacy.py": "d7a2c8ab9db7cace31f3854fc49537c4ce9795826676ff45febe7e2f85303e8a",
     "backend/app/domains/public_service/recoverable_privacy.py": "16f288b3dc253af708a42a19630127d5d46330faea3e77c17f53acddf9826fd2",
     "backend/app/domains/public_service/recovery_exclusions.py": "8bc16997003a9541e0be28a83c6a9a54b968294b2e01235e23183cfed5d1ab2d",
-    "backend/app/domains/public_service/redaction.py": "589fb29a03685bbdd226b44c466af0c007d801f852225d01fd60f5e69f920e65",
+    "backend/app/domains/public_service/redaction.py": "b522e42927f9faba070d32bb07a0b4275036807a4ff7744b9cf09dea61886c5d",
     "backend/app/domains/public_service/residency.py": "023e242b6a3e26f97e8490f11934c2a962079e2b90d6be2dbbcf1c4d831bc874",
     "backend/app/domains/public_service/retention_policy.py": "b0a87c4d427e00c2d4e2e65068e0df7e8828baf9ea62d5a9987cd0ca0a371b8f",
     "backend/app/domains/public_service/reviewed_residency.py": "d8384f5146108a40388798a2400394d940858814da103ae981e527734462c124",
-    "backend/app/domains/public_service/router.py": "8d6bb52aa2cfc41f968518bb66102ca1c05949e1ac927db8236841dc921264c1",
+    "backend/app/domains/public_service/router.py": "7c245c1260352c4902b2ee3727952c7a4aca97e24699f375b5c80b8460768c45",
     "backend/app/domains/public_service/safe_privacy_projection.py": "117d4680e4a301d22e9555e248707472f6090f93538b8ed7d731a82024e98d29",
     "backend/app/domains/public_service/scan_store_inventory.py": "28b1ba0f40cb6bd66a9727f77d872fc35223d0a328ba6a08007fb39ff81eefa0",
     "backend/app/domains/public_service/security.py": "ad833cf404c555a10fc8a9cf87f509b1753428c89bbebc622b17a6b0ee9f6646",
@@ -17846,7 +18495,7 @@
     "backend/app/domains/recommendation_audit/verdict.py": "f97991cb30856d67121e8677504ce1c2f7cd5e1e2789bb99f7ea08dfff9ddf79",
     "backend/app/domains/recommendation_audit/worker.py": "0412992dffc280ef4027f3881d0ad4d24260e1b1a9688f9857fb5c12ed5a4b26",
     "backend/app/domains/runs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "backend/app/domains/runs/analysis_router.py": "45aef775ef660a846f9df35f1bce8861999e8d8482d188205b082d28ac34043c",
+    "backend/app/domains/runs/analysis_router.py": "2de7e0fe621dbc2849ccd7d152c6b5f927031fdcebaab1793ee16eb5afb81d33",
     "backend/app/domains/runs/analysis_workflows/__init__.py": "6dfd5f09235824b0815167aaf35404f9af5894b07108a9d79caa1c209d3b9b57",
     "backend/app/domains/runs/analysis_workflows/acquisition.py": "1f541db2a4513d3ee6541206a8fd83630febc739de3fb12ed1b5e492c9e64eb6",
     "backend/app/domains/runs/analysis_workflows/action_plan.py": "6d487cea5ea9535f053457bbb63d859ce32f7cadee53dde229786e73c4159981",
@@ -17867,16 +18516,17 @@
     "backend/app/domains/runs/analysis_workflows/service.py": "6248342c4f5b18d04beac23dbf62631bef113f7c3be4b14203268d43640913bd",
     "backend/app/domains/runs/analysis_workflows/shortlist.py": "11ad9cf118c908dd8e5d17e17c9e7fc3a80d1c9086efeb2a63d031a514a16774",
     "backend/app/domains/runs/analysis_workflows/synthetic_composition.py": "0296fe76729654595a3fb4e7f93556502fc63b88c7c4ee0b39c8981f83453873",
-    "backend/app/domains/runs/analysis_workflows/synthetic_journal.py": "faddec2ce90f4946a61d8cee8cb82c7ae491ca71fad54918b1fb5b634975b830",
+    "backend/app/domains/runs/analysis_workflows/synthetic_journal.py": "7c7574e80a78be06b95b8131f1d3fff6df762d38e9380d009c372ba0fbef17a6",
+    "backend/app/domains/runs/analysis_workflows/synthetic_price_history.py": "14922d851150cfafd48d2eff8c29fd661fe9c7f0144fff6ec351203aeeb09cf0",
     "backend/app/domains/runs/analysis_workflows/synthetic_sources.py": "eddcfcc54903469e63a99d68e3d4929807563b7c98aeb29fc0f90183f02cbd0e",
     "backend/app/domains/runs/auto_rebalance_audit.py": "32e04c7bf212bcf7e989252f6877bf205ecfef13942babec807441efac0dbcab",
     "backend/app/domains/runs/final_actionable_history.py": "028824f322069aff76cadfb1dcdc89f3e86a272dd5f2296fbbd740b58b0ccf4c",
     "backend/app/domains/runs/models.py": "0676320045948635562975a39d85e7a590578d1dbad85bc98464563bdb7ae21b",
     "backend/app/domains/runs/presentation.py": "9d34e2049f3d876222a9a21000f73a3bc7fc210f71272938db36d5436c1ddba8",
-    "backend/app/domains/runs/repository.py": "19867e37b290858e22d6fa99aae79a24522a9012a4c76d4125c26aad3c0d5ce7",
-    "backend/app/domains/runs/router.py": "b9f1e3fc19d3f3677f0af409b832d879fe4e46c7dc4019e36a40f2f9c179bd63",
+    "backend/app/domains/runs/repository.py": "9b2dab887cac9d57f76f7c3528f3078534759fd497b640121abfcd37785c684a",
+    "backend/app/domains/runs/router.py": "21606c00c4efcc4a3d1e210a1db19829b87b01f2be06f87645f34ebfbabb756d",
     "backend/app/domains/runs/run_identity.py": "6a117eed94d5ee7886c499d7df7b9f7d57ab59258f4160ad35f52818e2a671fe",
-    "backend/app/domains/runs/schemas.py": "5bacda33e8c17e8806901ad64a0e1d046570eedf3eafe16d2c78fb809aac66eb",
+    "backend/app/domains/runs/schemas.py": "ad3e18755da26f6173e82218904b5ed9d2ae7197aa26878cf41ca00f8770d793",
     "backend/app/domains/runs/tasks.py": "0618d24488224f4d67a0224cc6f89208c7368cce2b885b5642bf2fc03062cdaa",
     "backend/app/domains/runs/use_cases/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "backend/app/domains/runs/use_cases/create_run.py": "6ebc9862f3964c8343322d977ead5462910c6630ee4e8f2ff16702f86d24b2d5",
@@ -17955,27 +18605,38 @@
     "backend/app/shared/types.py": "d2ecdcbf27e937c869e1bfd0b508681eb2a3b40b0ca8070dec39561bb8ca900b",
     "backend/app/shared/ws_channels.py": "a6b1101c6a1014ade1446275fb299aa690fc9dd4d0577825f610617d9ec2aa1b",
     "backend/app/shared/ws_relay.py": "ea0a0b2a84fe570df06bec7ffc13d12bdf2af2672909d5890bdca3b47fe73423",
+    "backend/app/uat2/activity_history.py": "8c2eb0d70a29837bdcfc3d91a9d7eba512fd9c0a8addac13fad3bba765ea30ac",
     "backend/app/uat2/adapters.py": "bf9eb73ee40c0eca6f546fb9427aa6727ecc7e9a3bf11c5724be15428827a38a",
     "backend/app/uat2/analysis_worker.py": "4b6a3ed3d38c218769c03ede728354ce1f48fd66408b414cd0978118405be1af",
+    "backend/app/uat2/buy_threshold.py": "40f74c38f1fb1187e323f14c07304fee2da960b54a8d02f969ed851daadd0c5d",
+    "backend/app/uat2/combined_history.py": "126d7d2b3bfa5335c962b087d7aa0ba2fedcfce02188449e72d9b07f57c29678",
+    "backend/app/uat2/event_history.py": "40953323d6140bb83c48a7abd0ccefaba29abcc5f55606f701e0ee4c591cc335",
+    "backend/app/uat2/event_holding_targets.py": "17559d6a7f107a28801b53d40da065f8ebd13e1fba4ebe516e0e971a5edb87f5",
     "backend/app/uat2/fixtures.py": "4c208f9a87c63a9a3ce95082b103136e62ba7c1dcfb29e728aa18a999b66eebd",
     "backend/app/uat2/http_bindings.py": "0c4e8502eb31db87715726db22566007e20a121908e237e523a14aadca2797f2",
+    "backend/app/uat2/journal_history.py": "f32369c04ffbc8f1ec98c8dbcd6f67fdaa41fc38c80cf95f0b668e4d0147bff7",
+    "backend/app/uat2/journal_portfolio.py": "51ba8ebf00e7776f6a8bc3393010ba2a45ff4f96b16018f1af775f50b328bbe4",
     "backend/app/uat2/main.py": "1cc36856f4acdc177a13fcbed744fd7fcd21e37ee62ebd1bb0d63703e53c45e9",
     "backend/app/uat2/operations.py": "bd613e122f26911ce3ab3f5e7c0c181a94e83b42e248add14a9ca08bacef0618",
     "backend/app/uat2/order_worker.py": "3a270628c8855d4a497bca4970397d8644d0ec24ac2e774de90ccbcb737ddb59",
     "backend/app/uat2/policy_bindings.py": "d25f9d3c756f6be91df480cb5eba5388bd65abb980d7682af2e010a7c0602dda",
     "backend/app/uat2/private_exports.py": "59ffc52b91623cd7c4644b6dd19a06dc07a6ebffb1156be5720ba477272b754a",
+    "backend/app/uat2/prompt_library.py": "4329136e40c909c9b7dca99955f301eb99cf6385177cf01616c60da6c9a75ed6",
+    "backend/app/uat2/recommendation_history.py": "df6347abe0d136145167e133249699aa3f8a1e3a488f57c91aaa5774b6c3d845",
     "backend/app/uat2/reset.py": "56a0b66d1d591dce6b93c8b37c22e509aeefbed3a5396ad59768341bad1c13b5",
-    "backend/app/uat2/revision_baskets.py": "d8696f863adea625f5108593ffb757c2ec12af2b1b955bfdf432489913032e9f",
-    "backend/app/uat2/router.py": "fd5a7b806768432c70966d5331d657933a13fa263e1c801d508808d2dd524816",
+    "backend/app/uat2/revision_baskets.py": "dde26ad2cfec2ee06e0c2f0272ae739866b536ba65d9ba081f1ecc71358b9400",
+    "backend/app/uat2/router.py": "cc973984052665eb571cd9d297bff85a37ab0e2dde6d698859af5aa122621acc",
     "backend/app/uat2/runtime.py": "072136970cd41c2f35d7a23cfd32a14d8952e51afa6f5e314f07c0ac18662876",
     "backend/app/uat2/scheduler.py": "6d34a1dee4c56f4220e7ae817b36d5379a7b345a62f7799b197f624c5890f782",
+    "backend/app/uat2/snapshot_reviews.py": "7acb69c4d87a71db8c3edad2df8e069bce91ba439c230a7e822a23d9ffe21f48",
     "backend/app/uat2/stage05_role_preflight.py": "433bae189126b416340e95e9b44802e33c2d7eaa5e59e1c5ed10ce58995326eb",
     "backend/app/uat2/stage07_lifecycle_smoke.py": "31f8d111818f63437b7a3fe893cce9052719d61f9d85004ce9e715688f001b40",
     "backend/app/uat2/synthetic_connections.py": "ccb6f15bd14d200927cf753451486b0219cd8fd721f023e36b731125e29baee8",
-    "backend/app/uat2/synthetic_orders.py": "7ce2b9e7967b60dc413dc902fd2b776ab23b2af1a7764d5e0ef0f565d643315c",
+    "backend/app/uat2/synthetic_orders.py": "7ba7f185f3ce2868b02d2d27437434dc38552056b9b9fbc8e4f608d591f73922",
+    "backend/app/uat2/threat_history.py": "ec0376f87eee141f49435ab011dd973eba80552c08bb4c60170467fac3591b98",
     "backend/app/uat2/worker.py": "4fbb9691147235f805adde7a1baff510b299eb7eab235ed619bc3b09e3cf1b4e",
-    "backend/app/uat2/workflow.py": "afb2a82131ab95b5cb8f4fafe6ade112a8ae87561c1ac95b7a5e994f98c2db44",
-    "backend/app/uat2/workflow_router.py": "fcbb6fc9c7e17246e2a729870a25cea59b9fefd13d48e78eda38161ff11326a3",
+    "backend/app/uat2/workflow.py": "2151aee65294316a61c504e1cabbbde6c63ab81cf3d8ab65d3c0e3f86bff3b19",
+    "backend/app/uat2/workflow_router.py": "84aecbebedc35d5f3500894d803b1f28bcdcfb2d62bab456700f975fb6d66897",
     "frontend/app/(auth)/forgot-password/page.tsx": "00a6d7abcade22e34d51d2b1db6df6c87b4be73f626bb5100ccaeeed8f486e1d",
     "frontend/app/(auth)/login/page.tsx": "cebbc34fe9f9da600ec3499e39b2efb58d513fc8b8220b0e4f48dc0accf295e5",
     "frontend/app/(auth)/register/page.tsx": "025d5a3992465a4c2fc39f9066d3a25b619214af0a0c96a302efbfc0074ace97",
@@ -17994,10 +18655,10 @@
     "frontend/app/api/bullpen-ai/stage-one.xlsx/route.ts": "2fcf8fc8398fee76227e3829430eeab9ae6408baf7f7e02e8b31baa230939511",
     "frontend/app/api/runtime-fingerprint/route.ts": "7367196caadada31a88ce9ee02565b9a9e9f677675c5b2aa8da9a7423ec07fb9",
     "frontend/app/api/universal-polymarket-scan/auto-run/route.ts": "393550f47b1e629ea7184df1ad09399d3d70930de56cb0db5b3b582b4a06e874",
-    "frontend/app/backend-api/[...path]/route.ts": "9717e58b3fc955a084ef5c6b668ea8bd7258dd9be0a13c29b7f16e789a969814",
+    "frontend/app/backend-api/[...path]/route.ts": "3e4ebecd78bd0a066cebec5139107c4d2710d56776cf288821245ecd9921fb38",
     "frontend/app/console/admin/page.tsx": "91387a19b9c6a56242ddb2806d63532e991367a82732f9ea0aecd811ef34835c",
     "frontend/app/console/apis/page.tsx": "43b77c7bfb2893a9375ab5364715f6dfd08112ca032fdb4e644d33ba9d0916a4",
-    "frontend/app/console/auto-rebalance-runs/[portfolio]/[sequence]/page.tsx": "f5b9d76b220d2d43eefdc338b6f2aebd1f80a3ba791ebeee00541f41a80d8ff8",
+    "frontend/app/console/auto-rebalance-runs/[portfolio]/[sequence]/page.tsx": "c7f2baef8e0e47537b30c1efaca039c0093f0766a98e08037d2f2cd77031030a",
     "frontend/app/console/auto-rebalance-runs/[portfolio]/page.tsx": "538bab4699132cabd73168e3a64f354b7302749a20d208d1718ff5563d60eb9f",
     "frontend/app/console/automated-rebalance/page.tsx": "17dc9277546885f92b9b6df2a5356b63c0fd1ce68e291f493a11f3f04b55295f",
     "frontend/app/console/bullpen-ai-auto-live/page.tsx": "efdc176476975fba031e7a72e879b453f6ea38ac955ba076c1d1a2922b9f1b2d",
@@ -18018,35 +18679,40 @@
     "frontend/app/console/bullpen008/history/page.tsx": "409511021f20207787e4e467f647bb69075910733a6271bdbff4212b1770038b",
     "frontend/app/console/bullpen008/page.tsx": "d385faf3b0442acd171170aab3184400a755180485b9b80a0b14eb9068ef616f",
     "frontend/app/console/bullpen008/runs/[runId]/page.tsx": "51f5db9da76b763bf15b30a19f6db8903f959ea1addd173bf4ed37ae2165a5c2",
-    "frontend/app/console/dashboard/page.tsx": "c7d2445192cfc9580066e4c2e39fcb015af0da4aa54e6f5bb325e2d2b83782b3",
+    "frontend/app/console/dashboard/page.tsx": "7e82c8da6a0b06eb8f0d4a5916b65009d2ca314a79418400bf234d88aa3691c0",
     "frontend/app/console/google-sheets/callback/page.tsx": "272561226de5762adeb940fdbe9513da1ddce29359d23e7d351709575d894ce2",
     "frontend/app/console/google-sheets/page.tsx": "47ccecf7cbf94700513b444c5927a95893404eeb00cfb730e34909ce807f2e43",
     "frontend/app/console/help/page.tsx": "019371f92e1813d1153277a042bf4d48a12a18140a8d1c733b3c5c845ce3d86b",
     "frontend/app/console/indmoney-us-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/indmoney-us/activity/page.tsx": "6d5978ee151e393363e223afad13c00d47676b87834c56a344b5169cae443550",
-    "frontend/app/console/indmoney-us/events/page.tsx": "797f251250268ac1d342fd7903085fb549319b3ae547068498fa87743218bde4",
+    "frontend/app/console/indmoney-us/events/page.tsx": "7172c538ea512839732adfbf3398f10c47c8bbed103eb0f412723696c9af4b28",
     "frontend/app/console/indmoney-us/final-actionables/calculation-sheet/page.tsx": "2f17022ab6219be6004c107d9d98e0416d42c7b1d9423a444c61b79c06078207",
-    "frontend/app/console/indmoney-us/final-actionables/page.tsx": "ddc4cf1515d0aa44ba9fcaeef1e5f45d22f97cfd98891133cb4e47bd2ed09b34",
+    "frontend/app/console/indmoney-us/final-actionables/page.tsx": "0676bd8c95977d06041d6859f87fd0d0617ea910d48059204390ca96bc327d6b",
     "frontend/app/console/indmoney-us/page.tsx": "10300aa829ed847027328bfad4ee32734460382238c015daaa467bc8e8927995",
     "frontend/app/console/indmoney-us/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
-    "frontend/app/console/indmoney-us/portfolio/page.tsx": "a93366c77c55c940cdaf4844923f59ac21891fd54fcc0e6753963f05a73a8211",
+    "frontend/app/console/indmoney-us/portfolio/page.tsx": "ebc183f6c1c0d647b011181379a6ee75b51f74b005422ce6f2f2b5d171ec0511",
     "frontend/app/console/indmoney-us/rebalance/page.tsx": "911d6a66bcc7e5344584ae975b55f3b666f6a417353a62c65dab91730fd0c8cb",
+    "frontend/app/console/indmoney-us/research/legacy-setup/page.tsx": "3fc1ede3676040e0d4652e665cc02841502b10324c032e05d94a83d8a8baf33f",
     "frontend/app/console/indmoney-us/research/page.tsx": "3368bf5bab8e8a10bae7ca0d4f78ee1667b8dc9810773218f09f312f0101524d",
+    "frontend/app/console/indmoney-us/research/threat-history/page.tsx": "ec9e442a319df53a7e003f56f9e126735ceb923c36337a9745d91457800e9577",
     "frontend/app/console/indmoney-us/swing-trade/page.tsx": "87ba0b9e6a61c6e6f39cbc178a642d9902c1fb87a8d64921b763ac17f5e77078",
-    "frontend/app/console/indmoney-us/threats/page.tsx": "9abf78fb8902f397ad16693608f559de62e216d7585c7f6cf65aed04c4efa020",
-    "frontend/app/console/jobs/[id]/page.tsx": "b77a6915c1d3a8b34c68d794e7ca190d6cc1ca763d9b84c935136c725ef04a3e",
-    "frontend/app/console/jobs/page.tsx": "748373d257af144754b9a21adbad80415ed81b382437bb48c5f7c8614a1396fe",
+    "frontend/app/console/indmoney-us/threats/page.tsx": "7c82ab412485e9214989beffdab1d1888c1ff86ebf5cc1339ec6266ed370bc0c",
+    "frontend/app/console/jobs/[id]/page.tsx": "fcc6ccbd786e1dd3f0705152bb49f10680db2e02989648873567b33bfc979c10",
+    "frontend/app/console/jobs/page.tsx": "db799de023cfe9ad37b834dc8b5282bc3932f2379fa0999b453a811306639e2f",
     "frontend/app/console/llms/page.tsx": "6b50a4724aae4e4bc694a131c7cb4c92bce506b79d1f60528528f0effab8e797",
     "frontend/app/console/mails/page.tsx": "bc7e518a3a65e76fc45af257c44efe0c1e16c94ac2b374406e6161c811abc5d4",
     "frontend/app/console/polymarket-bot/page.tsx": "b582c650c32f81212f25fc37a9ef976d77acf9865dbd61364bd69faa4e8b7314",
     "frontend/app/console/polymarket-direct-bot/page.tsx": "bd663f1bff39290dc6c2d2edbc5b5dd6ef3b9f1cdc1e2dbb78672fea835b6328",
-    "frontend/app/console/profile/activity/page.tsx": "bc96465520af22bea350bf2698783b138a1eca2d64214cb0d980cd279154d9aa",
+    "frontend/app/console/profile/activity/page.tsx": "81ba72e272a008bc12a0bd3144d339919e52091820cb642512ae35203b3e64d4",
     "frontend/app/console/profile/connections/page.tsx": "3c95b14f97444dd5e9371ba1b6f934890a50146519af589292fa5a09ed04d69d",
     "frontend/app/console/profile/cost-drivers/page.tsx": "1248ed64b7ba9a46ecd5c143b4282fb452e4650548522d27f636456c49e1b0bf",
     "frontend/app/console/profile/get-started/page.tsx": "1436f51f3084654a58ddb960be2113684b0b4f58771537cd906e56fb379b474a",
-    "frontend/app/console/profile/page.tsx": "2f5c64c4387a93fd707b416ae2695bcd3d6e29c19a6babb97bb1acde13981e9d",
-    "frontend/app/console/profile/preferences/page.tsx": "309604416c11fa4e916610aae9902913d82d75b50221476612e95fd05b8abbab",
-    "frontend/app/console/profile/privacy/page.tsx": "484e0f1229a22cd42fad352966f9f42cdb8aeced5ab6d0fc285c0978f687d050",
+    "frontend/app/console/profile/modules/page.tsx": "d8b4346355c917bfa7fd8e28a0fc274e4bff41637d869d2191c920cef8dca88c",
+    "frontend/app/console/profile/page.tsx": "928869ed1db3ec769c58c732396332f819c8046df482aecf54fffba682c3d28b",
+    "frontend/app/console/profile/preferences/page.tsx": "7e0e67f31c2e35f58319b1bf132dc569c324c16088d39b029b8cb0cde4b4f9a2",
+    "frontend/app/console/profile/privacy/page.tsx": "e3c26b5ac6d9a5c0f4c894efb166fbe9124b5f940a5ffb38c39538d7b78fb006",
+    "frontend/app/console/profile/privacy/requests/page.tsx": "ca36e40ca8efa108ab56ae22f3cc5d75304a90fd86850e5a23900d422045049d",
+    "frontend/app/console/profile/research-library/page.tsx": "162fb9e8b0e3a19a54941e2eaf36f228608754b61e9477b2956e632134f7a48d",
     "frontend/app/console/profile/security/page.tsx": "3082b2ceba9096a61621c93743d3c8ed6e0eceaea2430ae698a065e7e3127d8a",
     "frontend/app/console/profile/usage/page.tsx": "1d83d320a1d910b2f09643fccfb7b1925ef2f4eb29efcbec2b9e26a0a933e19d",
     "frontend/app/console/prompts/page.tsx": "ea1d6bb90c7f95ceed02a3ee1da3493170ee9b18bb39343a0ec9d24b7aa41bdd",
@@ -18059,16 +18725,18 @@
     "frontend/app/console/uat2/page.tsx": "275e49f5394cb07234a68791d5afb540d6317c610775d60653820d709b97e37b",
     "frontend/app/console/zerodha-swing-run/[id]/page.tsx": "1497bf157a9adeb41855e406d1eecf4ff6adf4a839e4a00de07604cb9b002873",
     "frontend/app/console/zerodha/activity/page.tsx": "6d5978ee151e393363e223afad13c00d47676b87834c56a344b5169cae443550",
-    "frontend/app/console/zerodha/events/page.tsx": "6dfef9d8575c9525720e8ffa99b7343785ac75388ecb1fb0ae15707c6907bb75",
+    "frontend/app/console/zerodha/events/page.tsx": "7eea5ca403a21f92a026a44787d37aa4ab57f4590bba73a8b2260da80d33559d",
     "frontend/app/console/zerodha/final-actionables/calculation-sheet/page.tsx": "cbb82c389f7f3a87ae3cf88c69af53965c1c9fa8d030122a6ef4dece3ecc1bd4",
-    "frontend/app/console/zerodha/final-actionables/page.tsx": "aaeb1a87341353b2fb314688ca7af9c55e6a444e8b45115021bbfe9fdb093ad3",
+    "frontend/app/console/zerodha/final-actionables/page.tsx": "70cc61dd1892b5ea756f237db0f6d551b80fa95de4549cff8206b0afc0287c92",
     "frontend/app/console/zerodha/page.tsx": "10300aa829ed847027328bfad4ee32734460382238c015daaa467bc8e8927995",
     "frontend/app/console/zerodha/plans/page.tsx": "b91b81f01003c59136bb747a9aa0ebafbfc94fcdf3de3c3d0e8100d0e14a1353",
-    "frontend/app/console/zerodha/portfolio/page.tsx": "9f8fd337e4211cdcb25801922a46db146b7d0758027dc687cb0a67cce4c62f6e",
+    "frontend/app/console/zerodha/portfolio/page.tsx": "00142ac820982fcad9bc1fd7d4fa96fbe5c7e3092b412ccdaf5486cbbf90b43e",
     "frontend/app/console/zerodha/rebalance/page.tsx": "71b1341f864e17d0ce9b595865562818522968594e7e96bc5feac62ff0818338",
+    "frontend/app/console/zerodha/research/legacy-setup/page.tsx": "3fc1ede3676040e0d4652e665cc02841502b10324c032e05d94a83d8a8baf33f",
     "frontend/app/console/zerodha/research/page.tsx": "3368bf5bab8e8a10bae7ca0d4f78ee1667b8dc9810773218f09f312f0101524d",
+    "frontend/app/console/zerodha/research/threat-history/page.tsx": "ec9e442a319df53a7e003f56f9e126735ceb923c36337a9745d91457800e9577",
     "frontend/app/console/zerodha/swing-trade/page.tsx": "9fac9e718e9aaae148aae3294e59a843c0953b720c47194e48be021a764dcf7c",
-    "frontend/app/console/zerodha/threats/page.tsx": "252b68e29530d742f8802dca1f4d46c92757a115d3a25c709711ec29ac7b3e45",
+    "frontend/app/console/zerodha/threats/page.tsx": "f5a321473ec65d76096f4ea5fb806b4c924f0dc5e25f111d33bacf31572a293b",
     "frontend/app/database/page.tsx": "0d09f24b8bd2947fad39f124617596c55a9b24e51d8e0dabcad742f18307553c",
     "frontend/app/dev/stage-two-llm-popup/page.tsx": "542d0cccc1df003afdc0cbff772ddd680349ccbc1fdaf0829a183ef1025255d0",
     "frontend/app/page.tsx": "2b17b3f517fb3bb5e85cb3ac52d75aef5ebd8111e04544110b531201517557bf",

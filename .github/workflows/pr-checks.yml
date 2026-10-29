@@ -49,7 +49,7 @@ jobs:
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/priority-adapters.xml').getroot()
           cases=root.findall('.//testcase')
-          assert len(cases) == 42
+          assert len(cases) == 43
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           assert sum(c.attrib.get('classname','').split('.')[-1]=='test_priority_adapters_postgres' for c in cases)==5
@@ -1917,7 +1917,7 @@ jobs:
           root=ET.parse('/tmp/uiux.xml').getroot()
           assert not root.findall('.//testcase/skipped'), 'UX checks cannot skip'
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
-          assert len(root.findall('.//testcase')) == 143
+          assert len(root.findall('.//testcase')) == 146
           PY_CHECK
       - name: Verify explicit synthetic acquisition scope and HTTP action
         run: python -m pytest -q --junitxml=/tmp/synthetic-source.xml backend/tests/test_simulation_source_scope.py backend/tests/test_synthetic_source_http.py
