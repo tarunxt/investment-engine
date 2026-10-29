@@ -118,6 +118,8 @@ def configure_output_context(job: Any, dimensions: Mapping[str, str | None]) -> 
     expected = next(iter(counts)) if len(counts) == 1 else None
     sources = frozen_sources_from_context(getattr(job, 'request_context_json', None),
                                           market=analysis_run_identity(job).market)
+    if kind == "rebalance" and "[REBALANCE_UNIVERSE_V1]" in _instruction_prefix(prompt) and sources is None:
+        raise OutputPreflightError("Complete Swing coverage requires frozen selected source references; refresh inputs before starting.")
     return _context.set(OutputContext(kind, metadata, holdings, expected, sources))
 
 
@@ -154,8 +156,16 @@ def normalize_runtime_output(content: str, *, kind: str | None = None, fragment:
         return None
     result = normalize_output(content, context.kind, metadata=context.metadata,
                               holdings=context.holdings, derive_arithmetic=True,
-                              minimum_rows=1 if fragment or context.kind == 'rebalance' else context.expected_rows or 5)
+                              minimum_rows=1 if fragment or context.kind == 'rebalance' else context.expected_rows or 5,
+                              non_buy_candidates=frozenset(key for source in context.swing_sources or () for key in source.identities))
     findings = list(result.findings)
+    if context.kind == 'rebalance' and not fragment and context.swing_sources is not None:
+        required = {key for source in context.swing_sources for key in source.identities}
+        present = {identity(row.values) for row in result.rows if row.valid}
+        for exchange, symbol in sorted(required - present):
+            findings.append(Finding('missing_swing_candidate', f'Missing selected Swing candidate {exchange}:{symbol}; analysis must not be invented.'))
+        if any(not source.complete for source in context.swing_sources):
+            findings.append(Finding('incomplete_swing_source', 'Selected Swing source coverage is incomplete; full candidate coverage cannot be certified.'))
     if not fragment and context.expected_rows is not None and result.coverage.canonical_rows != context.expected_rows:
         findings.append(Finding('requested_row_count', f'Requested exactly {context.expected_rows} stock rows; received {result.coverage.canonical_rows}. All source rows were retained.'))
     if context.kind == 'swing':

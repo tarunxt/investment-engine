@@ -156,3 +156,20 @@ test('score context distinguishes saved formulas, current reconstructions, legac
   assert.equal(presentation.describeSuggestionScoreContext(base).scoreLabel, 'Saved score (method unrecorded)');
   assert.equal(presentation.describeSuggestionScoreContext({ origin: 'current_reconstruction' }).scoreLabel, 'Reconstructed calculated score');
 });
+
+test('rebalance saved-input union preserves both Swing jobs, missing candidates, zero holdings and separate venues without invented actions',()=>{
+ const universe=load('../lib/rebalanceUniverse.ts',{...parser,...flow});
+ const swing=(symbols)=>'| Exchange Symbol | Stock Symbol | Units to Buy | Price Per Unit | Total Buy Amount |\n|---|---|---|---|---|\n'+symbols.map(symbol=>`| NSE | ${symbol} | 1 | 100 | 100 |`).join('\n');
+ const prompt='## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n|---|---|---|\n| BSE | CGPOWER | 13 |\n| BSE | OIL | 0 |\n| NSE | HAL | 3 |\n## 2. Completed Swing Trade Runs After Previous Market Close\n### India Run #202 | model one | completed\n'+swing(['CGPOWER','ICICIBANK','INFY','KAYNES','SUNPHARMA'])+'\n### India Run #202 | model two | completed\n'+swing(['BSE','CDSL','DIXON','ETERNAL','HDFCBANK'])+'\n## 3. Latest Threats Report\nNo fixture threats';
+ const action='Action (Buy/Add/Sell All/Trim/Hold/Buy New)';
+ const output=JSON.stringify({stocks:[{...row,'Stock Symbol':'CGPOWER','Exchange Symbol':'BSE',[action]:'Hold','Rationale Cruxx':'Original reason'}]});
+ const source={...run(output),id:444,prompt};
+ const result=universe.rebalanceUniverse([source,source]);
+ assert.equal(result.rows.length,13);assert.equal(new Set(result.rows.map(row=>row.key)).size,13);
+ for(const symbol of ['KAYNES','SUNPHARMA','BSE','HDFCBANK']){const candidate=result.rows.find(row=>row.key===`NSE:${symbol}`);assert.ok(candidate);assert.deepEqual(candidate.actions,{});assert.deepEqual(candidate.reasons,{});}
+ assert.equal(result.rows.find(row=>row.key==='BSE:OIL').sources.some(source=>source.includes('holdings')),true);
+ const nse=result.rows.find(row=>row.key==='NSE:CGPOWER'),bse=result.rows.find(row=>row.key==='BSE:CGPOWER');assert.deepEqual(nse.relatedVenues,['BSE']);assert.deepEqual(bse.relatedVenues,['NSE']);assert.deepEqual(nse.actions,{});assert.equal(Object.values(bse.actions)[0],'Hold');
+ assert.equal(universe.rebalanceUniverse([{...source,run_jobs:[{...source.run_jobs[0],job:{...source.run_jobs[0].job,status:'partial',response:'malformed'}}]}]).warnings.some(w=>w.includes('incomplete')),true);
+ const original=JSON.stringify(source);universe.rebalanceUniverse([source]);assert.equal(JSON.stringify(source),original);
+ const ui=readFileSync(new URL('../app/console/dashboard/_components/StockFlowTabs.tsx',import.meta.url),'utf8');assert.match(ui,/Missing analysis — no decision recorded/);assert.match(ui,/stocks=\{flow.universe.rows\}/);assert.match(ui,/buildDashboardActionRows\(\s*rebalance,/);
+});

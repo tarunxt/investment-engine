@@ -125,7 +125,7 @@ def prepare_holdings(holdings: Sequence[Mapping[str, Any]] | None) -> tuple[dict
 def validate_row(
     source_values: Mapping[str, Any], columns: Sequence[Column], source: Provenance,
     metadata: Mapping[str, Any], holdings: Mapping[tuple[str, str], Mapping[str, Any]],
-    kind: str, *, derive_arithmetic: bool,
+    kind: str, *, derive_arithmetic: bool, non_buy_candidates: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[dict[str, Any], tuple[str, ...], list[Finding]]:
     row = dict(source_values)
     findings: list[Finding] = []
@@ -200,17 +200,18 @@ def validate_row(
     if amount is not None and price is not None and buy is not None and _sum(amount, _product(buy, price).copy_negate()).copy_abs() > Decimal("0.005"):
         error("amount_arithmetic", "Total Buy Amount contradicts Units to Buy × Price per Unit at currency-cent precision.", "total_buy_amount")
     if kind == "rebalance":
-        _validate_action(row, holding, error)
+        _validate_action(row, holding, error, non_buy_candidates)
     return row, tuple(filled), findings
 
 
-def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, error: Any) -> None:
+def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, error: Any, non_buy_candidates: frozenset[tuple[str, str]] = frozenset()) -> None:
     action = row.get("action")
     allowed = {"Buy", "Add", "Buy/Add", "Add more", "Buy New", "Sell All", "Trim", "Hold"}
     if not isinstance(action, str) or action not in allowed:
         error("invalid_action", "Action must be an explicit supported decision label.", "action")
         return
-    if holding is None and action != "Buy New":
+    non_buy = holding is None and action == "Hold" and identity(row) in non_buy_candidates and all(number(row.get(key)) == 0 for key in ("current_units", "units_change", "final_units", "units_to_buy", "total_buy_amount"))
+    if holding is None and action != "Buy New" and not non_buy:
         error("holding_not_in_snapshot", "Existing-position decision has no exact exchange/symbol match in the snapshot.", "current_units")
     if holding is not None and action == "Buy New":
         error("buy_new_existing_holding", "Buy New contradicts an existing snapshot holding.", "action")

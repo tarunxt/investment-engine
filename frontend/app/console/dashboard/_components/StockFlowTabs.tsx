@@ -35,6 +35,7 @@ import type {
   RunResponse,
   ZerodhaPortfolioSnapshotDetail,
 } from "@/types/api";
+import { rebalanceUniverse, type UniverseRow } from "@/lib/rebalanceUniverse";
 import { cn } from "@/lib/utils";
 
 export type RebalanceStockFlowPortfolio = "zerodha" | "indmoneyUs";
@@ -519,6 +520,7 @@ function RebalanceStockFlowSubwidget({
       .sort(compareFinalActionablesForThreshold(buyThreshold));
     const swingJobOutputs = swingEvidence.outputs;
     const rebalanceJobOutputs = buildStageJobOutputs(rebalance, matchingRebalanceRuns);
+    const universe = rebalanceUniverse(matchingRebalanceRuns);
     return {
       portfolio,
       swing,
@@ -526,6 +528,7 @@ function RebalanceStockFlowSubwidget({
       actionables,
       swingJobOutputs,
       rebalanceJobOutputs,
+      universe,
       rebalanceRun,
       swingRun,
       technicalRun,
@@ -574,9 +577,9 @@ function RebalanceStockFlowSubwidget({
                   <StockRow key={stock.key} name={stock.symbol} detailed details={[`Exchange: ${stock.exchange || "—"}`, `Suggestions: ${stock.totalSuggestions}`]} />
                 )) : <EmptyStage />}
               </Stage>
-              <Stage title="Rebalance Scan" count={flow.rebalance.length} meta={flow.rebalanceMeta}>
-                {flow.rebalance.length ? flow.rebalance.map((stock) => (
-                  <StockRow key={stock.key} name={stock.symbol} action={stock.consensusAction} detailed details={[`Consensus: ${consensusLabel(stock)}`, `Exchange: ${stock.exchange || "—"}`]} />
+              <Stage title="Rebalance Scan" count={flow.universe.rows.length} meta={flow.rebalanceMeta}>
+                {flow.universe.rows.length ? flow.universe.rows.map((stock) => (
+                  <StockRow key={stock.key} name={stock.key} action={Object.values(stock.actions).join(" / ") || "Missing analysis — no decision recorded"} detailed details={stock.sources} />
                 )) : <EmptyStage />}
               </Stage>
               <Stage
@@ -610,9 +613,9 @@ function RebalanceStockFlowSubwidget({
                 />
 
                 <RebalanceJobOutputsStage
-                  count={flow.rebalance.length}
+                  count={flow.universe.rows.length}
                   meta={flow.rebalanceMeta}
-                  stocks={flow.rebalance}
+                  stocks={flow.universe.rows} warnings={flow.universe.warnings}
                   outputs={flow.rebalanceJobOutputs}
                 />
 
@@ -840,10 +843,10 @@ function SwingJobOutputsStage({ count, meta, outputs }: { count: number; meta: {
   );
 }
 
-function RebalanceJobOutputsStage({ count, meta, stocks, outputs }: { count: number; meta: { models: string; timestamp: string } | null; stocks: StockConsensus[]; outputs: StageJobOutput[] }) {
+function RebalanceJobOutputsStage({ count, meta, stocks, outputs, warnings }: { count: number; meta: { models: string; timestamp: string } | null; stocks: UniverseRow[]; outputs: StageJobOutput[]; warnings: string[] }) {
   return (
     <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
-      <StageHeader title="Rebalance Scan" count={count} meta={meta} />
+      <StageHeader title="Rebalance Scan" count={count} meta={meta} /><p className="px-4 py-2 text-xs">All saved holdings and selected Swing candidates. Missing analysis is display-only: no score, allocation or executable order is invented. Listings remain separate; same-symbol venues are associations only, not shared quote sources.</p>{warnings.map(warning => <p key={warning} role="status" className="px-4 py-1 text-xs text-amber-900">{warning}</p>)}
       <div role="region" aria-label="Rebalance job outputs, scroll to inspect" tabIndex={0} className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain focus-visible:outline-2 focus-visible:outline-blue-700">
         <table className="w-full min-w-max border-collapse">
           <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
@@ -860,10 +863,10 @@ function RebalanceJobOutputsStage({ count, meta, stocks, outputs }: { count: num
           <tbody className="divide-y divide-slate-200 bg-white">
             {stocks.length ? stocks.map((stock) => (
               <tr key={stock.key}>
-                <td className="px-4 py-3 text-sm font-semibold text-slate-950">{stock.symbol}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-slate-950" title={stock.sources.join("; ")}>{stock.key}{stock.relatedVenues.length ? <span className="block text-xs font-normal">Same symbol also at {stock.relatedVenues.join(", ")}; separate listing</span> : null}</td>
                 {outputs.map((output) => {
-                  const action = output.actions.get(stock.key) || "Not covered";
-                  return <td key={`${stock.key}:${output.key}`} className="border-l border-slate-100 px-4 py-3"><ActionBadge action={action} /></td>;
+                  const action = stock.actions[output.key] || "Missing analysis — no decision recorded";
+                  return <td key={`${stock.key}:${output.key}`} className="border-l border-slate-100 px-4 py-3"><ActionBadge action={action} /><span className="block max-w-48 whitespace-normal text-xs text-slate-600">{stock.reasons[output.key] || "No model reason recorded; not an inferred rejection."}</span></td>;
                 })}
               </tr>
             )) : <EmptyTableRow colSpan={Math.max(1, outputs.length + 1)} />}

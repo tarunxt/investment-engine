@@ -38,6 +38,7 @@ def normalize_output(
     holdings: Sequence[Mapping[str, Any]] | None = None,
     derive_arithmetic: bool = False,
     minimum_rows: int = 1,
+    non_buy_candidates: frozenset[tuple[str, str]] = frozenset(),
 ) -> NormalizationResult:
     """Return replacement content only for a fully validated, preserving result.
 
@@ -98,7 +99,7 @@ def normalize_output(
             source_values = {key: value for key, value in zip(keys, cells) if value is not MISSING}
             try:
                 values, filled, row_findings = validate_row(source_values, columns, source, supplied_metadata, snapshot,
-                                                           kind, derive_arithmetic=derive_arithmetic)
+                                                           kind, derive_arithmetic=derive_arithmetic, non_buy_candidates=non_buy_candidates)
             except ArithmeticError:
                 values, filled = dict(source_values), ()
                 row_findings = [Finding("unsupported_arithmetic", "Numeric representation cannot be validated safely; preserve the source values.", source=source)]

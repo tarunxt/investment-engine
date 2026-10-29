@@ -296,3 +296,66 @@ def test_worker_superset_rebalance_needs_no_paid_format_retry():
     assert job.prompt == original_prompt
     assert job.status == JobStatus.COMPLETED
     assert 'preserved extra' in job.response
+
+
+def test_rebalance_requires_all_selected_swing_venues_without_fabrication(scoped):
+    from app.domains.jobs.output_contracts.consistency import FrozenSwingSource
+    from app.domains.jobs import output_runtime
+    from dataclasses import replace
+    scoped(make_job('rebalance'))
+    context = current_output_context()
+    sources = (FrozenSwingSource(2226, 'a'*64, (('NSE','KAYNES'),('NSE','SUNPHARMA'),('NSE','CGPOWER')), True),
+               FrozenSwingSource(2227, 'b'*64, (('NSE','BSE'),('NSE','HDFCBANK'),('NSE','KAYNES')), True))
+    token = output_runtime._context.set(replace(context, swing_sources=sources))
+    try:
+        original = table(REBALANCE_COLUMNS, [rebalance_row()])
+        result = normalize_runtime_output(original)
+        missing = [f.message for f in result.findings if f.code == 'missing_swing_candidate']
+        assert len(missing) == 5
+        assert all(any(symbol in message for message in missing) for symbol in ['KAYNES','SUNPHARMA','CGPOWER','BSE','HDFCBANK'])
+        assert result.content == original and not result.safe_to_replace
+    finally:
+        output_runtime._context.reset(token)
+
+
+def test_unheld_non_buy_is_allowed_only_for_exact_selected_candidate():
+    row = rebalance_row()
+    row.update(stock_symbol='KAYNES', action='Hold', current_units='0', units_change='0', final_units='0', units_to_buy='0', total_buy_amount='0')
+    content = table(REBALANCE_COLUMNS, [row])
+    selected = frozenset({('NSE','KAYNES')})
+    good = normalize_output(content, 'rebalance', holdings=[], non_buy_candidates=selected)
+    assert good.safe_to_replace
+    assert not normalize_output(content, 'rebalance', holdings=[]).safe_to_replace
+    assert not normalize_output(content, 'rebalance', holdings=[], non_buy_candidates=frozenset({('BSE','KAYNES')})).safe_to_replace
+    row['units_change'] = '1'
+    assert not normalize_output(table(REBALANCE_COLUMNS,[row]), 'rebalance', holdings=[], non_buy_candidates=selected).safe_to_replace
+
+
+def test_complete_union_keeps_holdings_zero_candidates_and_both_venues(scoped):
+    from app.domains.jobs.output_contracts.consistency import FrozenSwingSource
+    from app.domains.jobs import output_runtime
+    from dataclasses import replace
+    scoped(make_job('rebalance'))
+    sources = (FrozenSwingSource(2226,'a'*64,(('NSE','KAYNES'),('NSE','ABC')),True),
+               FrozenSwingSource(2227,'b'*64,(('BSE','ABC'),('NSE','KAYNES')),True))
+    context = current_output_context()
+    token = output_runtime._context.set(replace(context,swing_sources=sources))
+    rows = [rebalance_row(), rebalance_row('KAYNES',current_units=0,final_units=0), rebalance_row('ABC',exchange_symbol='BSE',current_units=0,final_units=0)]
+    content = table(REBALANCE_COLUMNS,rows)
+    try:
+        result = normalize_runtime_output(content)
+        assert result.safe_to_replace and len(result.rows) == 3
+        bad = normalize_runtime_output(table(REBALANCE_COLUMNS,rows[:2]))
+        assert any(f.code == 'missing_swing_candidate' and 'BSE:ABC' in f.message for f in bad.findings)
+        output_runtime._context.set(replace(context,swing_sources=(replace(sources[0],complete=False),)))
+        assert any(f.code == 'incomplete_swing_source' for f in normalize_runtime_output(content).findings)
+    finally:
+        output_runtime._context.reset(token)
+
+
+def test_new_union_contract_requires_authoritative_frozen_sources_before_provider():
+    from app.domains.jobs.output_runtime import OutputPreflightError
+    job = make_job('rebalance')
+    job.prompt = '[REBALANCE_UNIVERSE_V1]\n' + job.prompt
+    with pytest.raises(OutputPreflightError, match='frozen selected source'):
+        configure_output_context(job,{})
