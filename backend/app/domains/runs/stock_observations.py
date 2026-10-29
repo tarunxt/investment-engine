@@ -41,15 +41,21 @@ def stock_observation_page(session, *, user_id, market, symbol, cursor=None, lim
     if phase not in {'jobs', 'audit'} or limit < 1 or limit > 100: raise ValueError('Invalid observation cursor or limit')
     result = []
     if phase == 'jobs':
-        if not after.isdigit(): raise ValueError('Invalid job cursor')
-        records = session.execute(select(RunJob, Run, Job).join(Run, Run.id == RunJob.run_id).join(Job, Job.id == RunJob.job_id).where(Run.user_id == user_id, Job.user_id == user_id, RunJob.id < (int(after) or 9223372036854775807)).order_by(RunJob.id.desc()).limit(limit + 1)).all()
+        if not after.isdigit() or int(after) > 2147483647: raise ValueError('Invalid job cursor')
+        query = select(RunJob, Run, Job).join(Run, Run.id == RunJob.run_id).join(Job, Job.id == RunJob.job_id).where(Run.user_id == user_id, Job.user_id == user_id)
+        # The initial page has no cursor bound. A 64-bit sentinel bound to this
+        # INTEGER column overflows asyncpg's int4 encoder before SQL executes.
+        if int(after): query = query.where(RunJob.id < int(after))
+        records = session.execute(query.order_by(RunJob.id.desc()).limit(limit + 1)).all()
         for link, run, job in records[:limit]:
             identity = analysis_run_identity(run)
             if identity.market != market: continue
             result.extend(rows_for_source(text=job.response or '', symbol=symbol, run_id=run.id, job_id=job.id, revision=digest(job.response or ''), stage=identity.stage or 'unknown', run_status=status_value(run.status), job_status=status_value(job.status), provider=job.provider, model=job.model, created_at=job.created_at.isoformat(), source='retained_job'))
         next_cursor = f'jobs:{records[limit - 1][0].id}' if len(records) > limit else 'audit:'
     else:
-        records = list(session.scalars(select(EvidenceRecord).where(EvidenceRecord.user_id == user_id, EvidenceRecord.kind == 'output', EvidenceRecord.id < (after or chr(0x10ffff))).order_by(EvidenceRecord.id.desc()).limit(limit + 1)))
+        query = select(EvidenceRecord).where(EvidenceRecord.user_id == user_id, EvidenceRecord.kind == 'output')
+        if after: query = query.where(EvidenceRecord.id < after)
+        records = list(session.scalars(query.order_by(EvidenceRecord.id.desc()).limit(limit + 1)))
         run_ids = {record.run_id for record in records[:limit]}
         inputs = list(session.scalars(select(EvidenceRecord).where(EvidenceRecord.user_id == user_id, EvidenceRecord.kind == 'input', EvidenceRecord.run_id.in_(run_ids)))) if run_ids else []
         for record in records[:limit]:
