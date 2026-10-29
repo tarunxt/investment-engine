@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
-import { validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
+import { kiteWeightContext, stockIdentity, validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { technicalPriceEvidence } from "@/lib/technicalPriceEvidence";
@@ -3690,6 +3690,7 @@ function ScopedZerodhaBasketPreviewDialog({
     const rowQuote = tradingViewMarket === "india" ? validDisplayPrice(order?.lastPrice) : null;
     return { ltp: quote?.price ?? rowQuote, limitPrice: tradingViewMarket === "india" ? validDisplayPrice(order?.price) : null, ltpAsOf: quote?.asOf ?? (rowQuote !== null ? ltpRefreshedAt ?? undefined : undefined), ltpSource: quote?.source ?? (rowQuote !== null ? "Quoted LTP shown in this exact row; freshness not independently verified" : undefined), quoteLoading: quoteRead.loading && !quote && rowQuote === null };
   };
+  const currentWeights = kiteWeightContext(tradingViewMarket === "india" ? detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null : null);
   const displayStock = (row: DashboardActionRow) => {
     const currentOrder = orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange);
     const currentDetail = currentOrder?.detail ?? row.detail;
@@ -3699,10 +3700,10 @@ function ScopedZerodhaBasketPreviewDialog({
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
       return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
-    return { symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    return { currentValue: currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
-  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, tradingViewMarket === "india" ? currentWeights.totalAssets : portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
   const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (score: number | null) => displayScoreAccepted(score, displayCalculations.lower, displayCalculations.upper, displayCalculations.showAll);
   if (!open) return null;
@@ -4022,7 +4023,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         return (
                           <Fragment key={group.action}>
                             <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                              <td className="px-4 py-3" colSpan={17}>
+                              <td className="px-4 py-3" colSpan={tradingViewMarket === "india" ? 20 : 17}>
                                 <label className="inline-flex items-center gap-3 text-sm font-black">
                                   <input
                                     type="checkbox"
@@ -4169,7 +4170,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               </tr>
                               {order.wholeShareReview && (
                                 <tr className="bg-amber-50/40">
-                                  <td colSpan={17} className="px-4 pb-4 pt-2">
+                                  <td colSpan={tradingViewMarket === "india" ? 20 : 17} className="px-4 pb-4 pt-2">
                                     <WholeShareTrimChoice
                                       symbol={order.symbol}
                                       choice={order.wholeShareReview}

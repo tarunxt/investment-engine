@@ -253,3 +253,9 @@ The Swing tile groups the exact selected job responses embedded in the saved Reb
 ### All analysed listings receive their calculated scores
 
 Final Actionables and the basket allocation universe now retain zero-position Hold/non-buy decisions and calculate their scores through the same score matrix as the Actionables layout. Scores are not hard-coded or replaced with missing placeholders merely because no trade was proposed. The basket separately excludes explicit all-model zero-position non-buy decisions from executable orders, while displaying them in the full allocation universe. Missing-analysis-only rows still do not acquire invented scores. ZerodhaStocks and Zerodha Amount cells omit the inline Estimate suffix; price-source information remains available in their tooltip and calculation popup.
+
+### Basket target versus current allocation
+
+Final Weight is now labelled Target Weight. The India basket adds Current Weight, Difference, and Action New. Current Weight uses each exact exchange/symbol holding’s settled plus T1 quantity times its saved LTP, divided by the sum of those holding values plus available margin. Non-held listings are zero only with a complete valid portfolio snapshot. Missing values or a non-positive denominator remain unavailable. The same T1-inclusive asset base is used for India display sizing.
+
+Difference is target minus current weight in percentage points, coloured green/red by sign. Known scores outside the positive-score allocation set have target zero; missing scores never imply zero. Action New prioritises Sell All for held stocks with zero target, otherwise Buy New/Add More for positive differences, Trim for negative differences, and Hold for equality. This comparison is display-only and does not change existing order eligibility, selections, quantities, or historical artifacts.
