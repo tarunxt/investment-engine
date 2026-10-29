@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as React from 'react';
 const require = createRequire(import.meta.url);
-function load(path, bindings={}) { const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
+function load(path, bindings={}) { bindings = { BasketMetricPopup: () => null, ...bindings }; const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
 const math=load('../lib/basketDisplayCalculations.ts');
 const end='2026-10-28T12:00:00Z', start='2026-10-23T12:00:00Z';
 const observation=(run,score,overrides={})=>({id:run,run_id:run,symbol:'HAL',exchange:'NSE',covered_at:end,score,completed:true,coverage_status:'suggested',...overrides});
@@ -46,7 +46,7 @@ test('delayed history, day/scope changes, stale responses and nested calculation
  let state=render();assert.equal(state.loading,true);h.flush();assert.equal(pending.length,1);pending.shift().resolve(history([observation(1,2)]));await tick();state=render();assert.equal(state.loading,false);
  const historyButton=find(state.cells(stocks[0]),n=>n.props?.['aria-label']==='HAL Historical Weighted Score calculation');historyButton.props.onClick();state=render();assert.equal(state.popupOpen,true);
  assert.match(JSON.stringify(state.popup.props.children), /Zerodha holdings last_price · exact venue/); assert.match(JSON.stringify(state.popup.props.children), /LTP as of/);
- const popup=state.popup.type(state.popup.props);assert.equal(popup.props.role,'dialog');h.flush();let stopped=0;popup.props.onClick({stopPropagation(){stopped++;}});state=render();assert.equal(state.popupOpen,false);assert.equal(stopped,1);
+ assert.equal(state.popup.props.summary.value, '2'); assert.equal(state.popup.props.summary.metrics[1].value, '1'); state.popup.props.onClose();state=render();assert.equal(state.popupOpen,false);
  state.setParameters({...state.parameters,days:10});state=render();h.flush();const old=pending.shift();assert.equal(old.params.days,10);
  render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);h.flush();old.resolve({...history([observation(2,99)]),days:10,window_start:'2026-10-18T12:00:00Z'});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,true);
  const current=pending.shift();current.resolve({...history([]),market:'us',days:10,window_start:'2026-10-18T12:00:00Z'});await tick();state=render(true,'us',[{symbol:'HAL',exchange:'NYSE',score:2,ltp:243}]);assert.equal(state.loading,false);
