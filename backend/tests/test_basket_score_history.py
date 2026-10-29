@@ -34,6 +34,32 @@ def test_failed_partial_deleted_and_wrong_market_sources_are_not_completed(db):
     assert score_history_view(db, user_id=1, market='us', symbols=['FIXTUREEQ'], days=5, as_of=AS_OF, timezone_name='UTC')['observations'] == []
 
 
+@pytest.mark.parametrize('stage', ['Swing', 'Technical', 'Threats'])
+def test_already_persisted_overall_score_is_eligible_from_any_completed_stage(db, stage):
+    FinalActionableHistory.__table__.create(db.bind)
+    run, _ = source(db)
+    run.auto_rebalance_label = f'India Run 1 ({stage} Scan)'
+    run.prompt = f'India {stage} Scan'
+    add(db, run, AS_OF, score=1.75)
+    result = score_history_view(db, user_id=1, market='india', symbols=['FIXTUREEQ'], days=5, as_of=AS_OF, timezone_name='UTC')
+    assert len(result['observations']) == 1
+    assert result['observations'][0]['completed'] is True
+    assert result['observations'][0]['score'] == 1.75
+    run.status = JobStatus.PARTIAL
+    db.commit()
+    assert score_history_view(db, user_id=1, market='india', symbols=['FIXTUREEQ'], days=5, as_of=AS_OF, timezone_name='UTC')['observations'][0]['completed'] is False
+
+
+def test_raw_parameter_or_confidence_values_do_not_create_overall_scores(db):
+    FinalActionableHistory.__table__.create(db.bind)
+    run, job = source(db)
+    run.auto_rebalance_label = 'India Run 1 (Technical Scan)'
+    run.prompt = '## Technical Scan Input Bundle\nMarket: India equities'
+    job.response = '| Exchange | Stock Symbol | Confidence | Score Rationale Technical Setup |\n|---|---|---|---|\n| NSE | FIXTUREEQ | 7.7 | 2.5 |'
+    db.commit()
+    assert score_history_view(db, user_id=1, market='india', symbols=['FIXTUREEQ'], days=5, as_of=AS_OF, timezone_name='UTC')['observations'] == []
+
+
 def test_invalid_window_or_timezone_never_defaults_to_a_different_scope(db):
     for overrides in [{'days':0}, {'days':3651}, {'as_of': AS_OF.replace(tzinfo=None)}, {'timezone_name':'Invalid/Zone'}, {'symbols':[]}]:
         with pytest.raises(ValueError): score_history_view(db, **({'user_id':1,'market':'india','symbols':['HAL'],'days':5,'as_of':AS_OF,'timezone_name':'UTC'} | overrides))

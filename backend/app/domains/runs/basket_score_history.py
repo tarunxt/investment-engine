@@ -37,7 +37,7 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
     for history, run in rows[:10000]:
         identity = analysis_run_identity(run) if run else None
         score = history.score
-        completed = run is not None and status_value(run.status) == 'completed' and identity.market == market and identity.stage == 'rebalance'
+        completed = run is not None and status_value(run.status) == 'completed' and identity.market == market
         valid = isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score)
         observations.append({'id': history.id, 'run_id': history.rebalance_run_id, 'symbol': history.stock_symbol, 'exchange': saved_venue(history), 'covered_at': history.covered_at.replace(tzinfo=timezone.utc).isoformat() if history.covered_at.tzinfo is None else history.covered_at.isoformat(), 'score': score if valid else None, 'action': history.action, 'formula_version': history.formula_version, 'completed': completed, 'coverage_status': history.coverage_status})
     # An immutable completed decision is also a recorded score. Never choose a
@@ -51,7 +51,7 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
     groups = {}
     for capture, run in captures[:10000]:
         identity = analysis_run_identity(run)
-        if status_value(run.status) != 'completed' or identity.market != market or identity.stage != 'rebalance' or not (capture.provenance in {'terminal', 'prospective'} or capture.provenance.startswith('technical:')): continue
+        if status_value(run.status) != 'completed' or identity.market != market or not (capture.provenance in {'terminal', 'prospective'} or capture.provenance.startswith('technical:')): continue
         payload = capture.payload
         coverage = payload.get('coverage') or {}
         attempted = coverage.get('attempted', 0)
