@@ -52,7 +52,7 @@ jobs:
           assert len(cases) == 43
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
-          assert sum(c.attrib.get('classname','').split('.')[-1]=='test_priority_adapters_postgres' for c in cases)==5
+          assert sum(c.attrib.get('classname','').split('.')[-1]=='test_priority_adapters_postgres' for c in cases)==6
           PY_CHECK
 
   backend-syntax:
@@ -1959,7 +1959,7 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/synthetic-acquisition.xml').getroot()
-          assert len(root.findall('.//testcase')) == 11
+          assert len(root.findall('.//testcase')) == 13
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
@@ -1981,7 +1981,7 @@ jobs:
           python - <<'PY_CHECK'
           import xml.etree.ElementTree as ET
           root=ET.parse('/tmp/native-privacy.xml').getroot()
-          assert len(root.findall('.//testcase')) == 57
+          assert len(root.findall('.//testcase')) == 58
           assert not root.findall('.//testcase/skipped')
           assert not root.findall('.//testcase/failure') and not root.findall('.//testcase/error')
           PY_CHECK
