@@ -226,3 +226,20 @@ Job response DTOs expose canonical partial output; ORM jobs, original errors and
 frozen workflow snapshots are unchanged. Original failure details remain under
 `partial_recovery` metadata. Stage read summaries use the projected counts. Genuine
 provider failures, contradictions and unparseable outputs remain failed.
+
+### Usable partial sources in basket history
+
+Basket display history accepts a finite saved stock score from a completed or
+partial run. The additive `eligible` flag is distinct from `completed`; partial
+runs retain their actual status. Current basket calculations also accept partial
+source runs, retain the server-observed timestamp and exact market/venue checks,
+and suppress overlapping saved observations so each source contributes once.
+Failed/pending sources, invalid scores and unknown identities remain excluded.
+Immutable audit fallbacks still require their original complete formula evidence.
+
+The stock popup merges retained recent run reconstructions into the summary-source
+table, ordered newest first, without writing history. An original saved summary
+wins over its reconstruction; gap records do not hide usable retained output.
+Reconstructed scores have a separate column and are never relabelled as original
+recorded scores or substituted into the saved-score average. Historic rows without
+an original saved overall score cannot retroactively provide one.
