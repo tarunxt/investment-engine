@@ -276,3 +276,20 @@ test('limit-price estimates show their actual price in popup, preserve quote fie
  assert.equal(math.brokerDisplayAllocation(.095,190000,1374.3,'india').amount,13*1374.3);
  const source=readFileSync(new URL('../components/BasketDisplayCalculations.tsx',import.meta.url),'utf8');assert.match(source,/formatBasketDisplayCurrency\(derived\?\.amount, "USD"\)/);
  });
+
+test('partial current source remains usable and overlapping saved runs count only once', () => {
+ const current={symbol:'HAL',exchange:'NSE',market:'india',score:2.4,calculatedAt:end,sources:[{runId:447,createdAt:end,completed:false,status:'partial',market:'india'},{runId:448,createdAt:end,completed:true,status:'completed',market:'india'}]};
+ const result=math.historicalMean(history([observation(447,1,{completed:false,eligible:true,run_status:'partial'}),observation(440,1.2,{completed:false,eligible:true,run_status:'partial'})]),'HAL','NSE',current);
+ assert.equal(result.rows.length,2);assert.ok(Math.abs(result.score-1.8)<1e-12);assert.match(result.rows[0].formula_version,/partially usable/);
+ for(const status of ['failed','processing','pending',undefined])assert.equal(math.historicalMean(history([]),'HAL','NSE',{...current,sources:[{...current.sources[0],status}]}).score,null);
+ assert.equal(math.historicalMean(history([observation(1,null,{eligible:true,completed:false})]),'HAL','NSE').score,null);
+});
+
+test('summary sources show newer retained partial runs without fabricating recorded scores', () => {
+ const {mergeSummarySourceRows}=load('../lib/summarySourceRows.ts');
+ const saved=[{id:1,rebalance_run_id:400,covered_at:'2026-09-02T12:00:00Z',score:2,coverage_status:'suggested'}];
+ const retained=[{runId:447,coveredAt:end,formulaScore:1.7,stock:{symbol:'HAL',exchange:'NSE'}},{runId:400,coveredAt:start,formulaScore:3,stock:{symbol:'HAL',exchange:'NSE'}}];
+ const before=structuredClone([saved,retained]);const rows=mergeSummarySourceRows(saved,[...retained,retained[0]]);
+ assert.deepEqual(rows.map(row=>[row.runId,row.kind]),[[447,'retained'],[400,'saved']]);assert.equal(rows[0].item.score,undefined);assert.equal(rows[1].item.score,2);assert.deepEqual([saved,retained],before);
+ assert.equal(mergeSummarySourceRows([{...saved[0],rebalance_run_id:447,coverage_status:'parse_failed'}],retained).filter(row=>row.kind==='retained').length,2);
+});

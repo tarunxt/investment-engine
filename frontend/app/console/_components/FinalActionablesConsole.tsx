@@ -1,4 +1,5 @@
 "use client";
+import { mergeSummarySourceRows } from "@/lib/summarySourceRows";
 import type { StockSourceObservation } from "@/types/api";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -4267,15 +4268,16 @@ function ScopedStockDetailsButton({
     [persistedHistory, showUncoveredHistory],
   );
   const persistedRunIds = useMemo(
-    () => new Set(persistedHistory.map((item) => item.rebalance_run_id)),
+    () => new Set(persistedHistory.filter((item) => item.coverage_status === "suggested").map((item) => item.rebalance_run_id)),
     [persistedHistory],
   );
   const matchingHistoricalRows = useMemo(
     () => effectiveHistoricalRows.filter(
-      (row) => stockConsensusMatches(row.stock, stock) && !persistedRunIds.has(row.runId),
+      (row) => row.market === market && row.stock.exchange.toUpperCase() === stock.exchange.toUpperCase() && stockConsensusMatches(row.stock, stock) && !persistedRunIds.has(row.runId),
     ),
-    [effectiveHistoricalRows, persistedRunIds, stock],
+    [effectiveHistoricalRows, persistedRunIds, stock, market],
   );
+  const summarySourceRows = useMemo(() => mergeSummarySourceRows(displayedPersistedHistory, matchingHistoricalRows), [displayedPersistedHistory, matchingHistoricalRows]);
   const historyLoadGeneration = useRef(0);
   useEffect(() => { if (!open) return; return () => { historyLoadGeneration.current += 1; }; }, [open]);
   const loadPersistedHistory = useCallback(async (cursor: string | null, append: boolean) => {
@@ -4580,8 +4582,9 @@ function ScopedStockDetailsButton({
                   </div>
                 ) : null}
                 <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} />
-                <h4 className="mt-5 mb-2 text-sm font-semibold">Saved summary source rows</h4>
-                {displayedPersistedHistory.length ? (
+                <h4 className="mt-5 mb-2 text-sm font-semibold">Saved summary source rows · including retained recent runs</h4>
+                <p className="mb-2 text-xs text-slate-600">Newest sources first. A retained run without an original saved summary is shown explicitly; its current-formula score is separate from the recorded score and is not substituted into the original-score history average.</p>
+                {summarySourceRows.length ? (
                   <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
                     <table className="min-w-[72rem] text-xs">
                       <thead>
@@ -4592,6 +4595,7 @@ function ScopedStockDetailsButton({
                           <th className="px-3 py-2 font-semibold">Score-based action · current rules</th>
                           <th className="px-3 py-2 font-semibold">Original recorded action</th>
                           <th className="px-3 py-2 font-semibold">Recorded score</th>
+                          <th className="px-3 py-2 font-semibold">Current-formula score (reconstructed)</th>
                           <th className="px-3 py-2 font-semibold">Consensus</th>
                           <th className="px-3 py-2 font-semibold">Historical value</th>
                           <th className="px-3 py-2 font-semibold">Action/current units</th>
@@ -4599,16 +4603,35 @@ function ScopedStockDetailsButton({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {displayedPersistedHistory.map((item) => (
+                        {summarySourceRows.map((source) => {
+                          if (source.kind === "retained") {
+                            const item = source.item;
+                            return <tr key={`retained:${item.runId}:${item.stock.key}`} className="bg-amber-50/50">
+                              <td className="px-3 py-2">{item.stock.exchange}:{item.stock.symbol}</td>
+                              <td className="whitespace-nowrap px-3 py-2"><RunJobLink runId={item.runId}>#{item.runId} · {formatDateTime(item.coveredAt)}</RunJobLink></td>
+                              <td className="px-3 py-2">Retained output · original summary not saved</td>
+                              <td className="px-3 py-2"><FinalActionValue value={item.formulaAction} /><span className="block text-slate-500">Current-formula reconstruction</span></td>
+                              <td className="px-3 py-2">—</td>
+                              <td className="px-3 py-2" title="No original overall score was saved. Raw parameter scores are not an overall recorded score.">—</td>
+                              <td className="px-3 py-2"><button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: item.coveredAt, runId: item.runId, reconstructedDetail: item.detail })}>{formatScoreValue(item.formulaScore)}</button></td>
+                              <td className="px-3 py-2"><ConsensusBreakupButton stock={item.stock} action={item.formulaAction} /></td>
+                              <td className="px-3 py-2">{formatDisplayAmount(item.formulaEstimate.currentInvestmentAmount, market)}</td>
+                              <td className="px-3 py-2">{formatQuantity(item.formulaEstimate.units)}/{formatQuantity(item.formulaEstimate.currentUnits)}</td>
+                              <td className="px-3 py-2">{formatDisplayAmount(item.formulaEstimate.amount, market)}</td>
+                            </tr>;
+                          }
+                          const item = source.item;
+                          return (
                           <tr key={item.id} className={item.coverage_status === "suggested" ? "bg-white" : "bg-slate-50/70"}>
                             <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{item.stock_symbol}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
-                              <RunJobLink runId={item.rebalance_run_id}>{formatDateTime(item.covered_at)}</RunJobLink>
+                              <RunJobLink runId={item.rebalance_run_id}>#{item.rebalance_run_id} · {formatDateTime(item.covered_at)}</RunJobLink>
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 capitalize text-gray-600">{item.coverage_status.replaceAll("_", " ")}</td>
                             <td className="px-3 py-2" title={historyScoreDerivedAction(item).note}>{historyScoreDerivedAction(item).action ? <FinalActionValue value={historyScoreDerivedAction(item).action} /> : <span className="text-slate-500">{historyScoreDerivedAction(item).note}</span>}</td>
                             <td className="px-3 py-2"><FinalActionValue value={item.action} /></td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">{item.score === null ? "—" : <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setHistoricalMatrix({ item, coveredAt: item.covered_at, runId: item.rebalance_run_id })} title={`Exact saved score: ${item.score}; action uses this value before display rounding.`} aria-label={`Open ${item.stock_symbol} score matrix for ${formatDateTime(item.covered_at)}`}>{formatScoreValue(item.score)}</button>}</td>
+                            <td className="px-3 py-2">—</td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
                               {item.consensus_numerator !== null && item.consensus_denominator !== null
                                 ? `${item.consensus_numerator}/${item.consensus_denominator}`
@@ -4620,7 +4643,7 @@ function ScopedStockDetailsButton({
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatDisplayAmount(item.amount, market)}</td>
                           </tr>
-                        ))}
+                        ); })}
                       </tbody>
                     </table>
                   </div>
@@ -4639,78 +4662,7 @@ function ScopedStockDetailsButton({
                     </Button>
                   </div>
                 ) : null}
-                {matchingHistoricalRows.length ? (
-                  <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
-                    <p className="px-3 py-2 text-xs text-amber-900">Reconstructed using captured model holdings and current formula settings. Technical coverage is limited to before this rebalance started because its original completion time is unavailable. These rows are context, not the original frozen formula or proof of reversal; saved suggestion values above remain unchanged.</p>
-                    <table className="min-w-[70rem] text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                          <th className="px-3 py-2 font-semibold">Stock</th>
-                          <th className="px-3 py-2 font-semibold">Timestamp covered</th>
-                          {FINAL_ACTIONABLE_COLUMNS.filter((column) => column !== "stock").map((column) => (
-                            <th key={`historical-${column}`} className={cn("px-3 py-2 font-semibold", column === "currentValue" ? "bg-blue-50 text-blue-950" : "")}>
-                              {FINAL_ACTIONABLE_COLUMN_LABELS[column]}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {matchingHistoricalRows.map((historicalRow) => {
-                          const historicalStock = historicalRow.stock;
-                          const historicalAction = historicalRow.formulaAction;
-                          const historicalEstimate = historicalRow.formulaEstimate;
-                          const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(historicalAction);
-                          const renderHistoricalColumn = (column: Exclude<FinalActionableColumnKey, "stock">) => {
-                            if (column === "score") {
-                              return <button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: historicalRow.coveredAt, runId: historicalRow.runId, reconstructedDetail: historicalRow.detail })}>{formatScoreValue(historicalRow.formulaScore)}</button>;
-                            }
-                            if (column === "consensus") return <ConsensusBreakupButton stock={historicalStock} action={historicalAction} />;
-                            if (column === "currentValue") return formatDisplayAmount(historicalEstimate.currentInvestmentAmount ?? getCurrentValueAmount(historicalStock.representative), market);
-                            if (column === "actionCurrentUnits") {
-                              const actionUnits = showActionColumns ? formatQuantity(historicalEstimate.units) : "0";
-                              return `${actionUnits}/${formatQuantity(historicalEstimate.currentUnits)}`;
-                            }
-                            return showActionColumns ? formatDisplayAmount(historicalEstimate.amount, market) : "—";
-                          };
-                          return (
-                            <tr key={`${historicalRow.runId}-${historicalStock.key}`} className="bg-white/40">
-                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                <span className="inline-flex items-center">
-                                  <StockDetailsButton
-                                    stock={historicalStock}
-                                    market={market}
-                                    technicalScan={technicalScan}
-                                    detailsData={detailsData}
-                                    onFocusCalculation={onFocusCalculation}
-                                    historicalRows={historicalRows}
-                                    formulaConfig={formulaConfig}
-                                    onMatrixDetailOpen={onMatrixDetailOpen}
-                                  />
-                                  <TradingViewSymbolLink
-                                    symbol={historicalStock.symbol}
-                                    market={market}
-                                    exchange={historicalStock.exchange}
-                                    className="font-medium underline-offset-4 hover:text-blue-700 hover:underline"
-                                  >
-                                    {historicalStock.symbol}
-                                  </TradingViewSymbolLink>
-                                </span>
-                              </td>
-                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                <RunJobLink runId={historicalRow.runId}>{formatDateTime(historicalRow.coveredAt)}</RunJobLink>
-                              </td>
-                              {FINAL_ACTIONABLE_COLUMNS.filter((column) => column !== "stock").map((column) => (
-                                <td key={`${historicalRow.runId}-${historicalStock.key}-${column}`} className={cn("px-3 py-2 align-top text-gray-700", column === "score" ? "font-semibold text-gray-800" : "")}>
-                                  <div className="truncate">{renderHistoricalColumn(column)}</div>
-                                </td>
-                              ))}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : directHistoricalEvidenceRows.length ? (
+                {!summarySourceRows.length && directHistoricalEvidenceRows.length ? (
                   <div className="space-y-3">
                     <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
                       Final Actionables history table rows were not available for this symbol, so the popup double-checked the captured LLM rows directly and recovered the prior recommendation evidence below.

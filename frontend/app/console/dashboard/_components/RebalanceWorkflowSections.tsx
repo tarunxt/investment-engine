@@ -3687,7 +3687,7 @@ function ScopedZerodhaBasketPreviewDialog({
     const scoreSources = ids.map(runId => {
       const run = scoreSourceRuns.find(source => source.id === runId);
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
-      return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", market: sameMarket ? tradingViewMarket : null };
+      return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
     return { symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };

@@ -140,3 +140,18 @@ def test_real_asyncpg_window_queries_keep_boundary_and_owner_semantics(engine):
                 assert rows[0][0] in (1,'decision-1')
         finally: await connection.close()
     asyncio.run(check())
+
+
+def test_saved_partial_score_is_eligible_without_claiming_run_completed(db):
+    FinalActionableHistory.__table__.create(db.bind)
+    run, _ = source(db)
+    run.status = JobStatus.PARTIAL
+    add(db, run, AS_OF, score=1.75)
+    def read():
+        return score_history_view(db, user_id=1, market='india', symbols=['FIXTUREEQ'], days=5, as_of=AS_OF, timezone_name='UTC')['observations'][0]
+    assert read()['eligible'] is True
+    assert read()['completed'] is False
+    assert read()['run_status'] == 'partial'
+    run.status = JobStatus.FAILED
+    db.commit()
+    assert read()['eligible'] is False
