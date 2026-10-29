@@ -265,3 +265,14 @@ test('limit-price estimates show their actual price in popup, preserve quote fie
  render(false);h.flush();state=render(true,[{...stock,limitPrice:null,quoteLoading:false}]);h.flush();assert.equal(state.loading,true);pending.shift().resolve(history([observation(2,2)]));await tick();state=render(true,[{...stock,limitPrice:null,quoteLoading:false}]);assert.equal(find(state.cells({...stock,limitPrice:null,quoteLoading:false}),node=>node.props?.['aria-label']==='HAL Zerodha Amount calculation').props.children,'Unavailable');
  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/limitPrice: tradingViewMarket === "india" \? validDisplayPrice\(order\?\.price\)/);assert.doesNotMatch(source,/ltp:\s*validDisplayPrice\(order\?\.price/);
 });
+
+ test('popup final currency results use shared rounding while retaining precise intermediates',async()=>{
+ const h=hooks(),pending=[];const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:()=>new Promise(resolve=>pending.push(resolve))},createPortal:node=>node});
+ const stock={symbol:'HAL',exchange:'NSE',score:2,ltp:1374.3};
+ const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],190000,end,'Zerodha');};
+ let state=render();h.flush();pending.shift()(history([observation(1,2)]));await tick();state=render();
+ find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Zerodha Amount calculation').props.onClick();state=render();
+ const text=JSON.stringify(state.popup.props.children);assert.match(text,/₹17,865.90/);assert.doesNotMatch(text,/17,865.899999999998/);
+ assert.equal(math.brokerDisplayAllocation(.095,190000,1374.3,'india').amount,13*1374.3);
+ const source=readFileSync(new URL('../components/BasketDisplayCalculations.tsx',import.meta.url),'utf8');assert.match(source,/formatBasketDisplayCurrency\(derived\?\.amount, "USD"\)/);
+ });
