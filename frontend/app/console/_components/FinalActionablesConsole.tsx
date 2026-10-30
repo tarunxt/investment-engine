@@ -4211,13 +4211,15 @@ export function StockDetailsButton(props: Parameters<typeof ScopedStockDetailsBu
   return <ScopedStockDetailsButton key={`${props.market}:${props.stock.key}`} {...props} />;
 }
 
+const EMPTY_STOCK_DETAIL_HISTORY: HistoricalDashboardActionRow[] = [];
+
 function ScopedStockDetailsButton({
   stock,
   market,
   technicalScan,
   detailsData,
   onFocusCalculation,
-  historicalRows = [],
+  historicalRows = EMPTY_STOCK_DETAIL_HISTORY,
   formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   onMatrixDetailOpen,
 }: {
@@ -4255,8 +4257,8 @@ function ScopedStockDetailsButton({
     () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
     [stock, zerodhaHolding, zerodhaOrders],
   );
-  const auditDetail = useMemo(() => buildScoreMatrixDetail(stock, technicalScan, formulaConfig), [stock, technicalScan, formulaConfig]);
-  const auditRunCount = new Set(stock.rows.map(row => row.meta.runId)).size;
+  const auditDetail = useMemo(() => open ? buildScoreMatrixDetail(stock, technicalScan, formulaConfig) : null, [open, stock, technicalScan, formulaConfig]);
+  const auditRunCount = useMemo(() => open ? new Set(stock.rows.map(row => row.meta.runId)).size : 0, [open, stock.rows]);
   const eventRows = open ? getAnalysisTableRowsForStock(
     effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
     stock,
@@ -4289,7 +4291,25 @@ function ScopedStockDetailsButton({
   const summaryPageCount = Math.max(1, Math.ceil(summarySourceRows.length / 25));
   const visibleSummaryPage = Math.min(summaryPage, summaryPageCount - 1);
   const historyLoadGeneration = useRef(0);
-  useEffect(() => { if (!open) return; return () => { historyLoadGeneration.current += 1; }; }, [open]);
+  const detailSessionGeneration = useRef(0);
+  const closeDetails = useCallback(() => {
+    // Invalidate before scheduling a render, rather than waiting for passive cleanup.
+    historyLoadGeneration.current += 1;
+    detailSessionGeneration.current += 1;
+    setHistoricalMatrix(null);
+    setOpen(false);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const session = detailSessionGeneration.current;
+    return () => {
+      // A previous commit's cleanup must not cancel a newly reopened session.
+      if (detailSessionGeneration.current === session) {
+        historyLoadGeneration.current += 1;
+        detailSessionGeneration.current += 1;
+      }
+    };
+  }, [open]);
   const loadPersistedHistory = useCallback(async (cursor: string | null, append: boolean) => {
     const generation = ++historyLoadGeneration.current;
     setHistoryLoading(true);
@@ -4310,11 +4330,13 @@ function ScopedStockDetailsButton({
   }, [market, stock.symbol]);
 
   const retryCapturedDetails = useCallback(async () => {
+    const generation = detailSessionGeneration.current;
     const [portfolioResult, eventsResult, threatsResult] = await Promise.allSettled([
       market === "india" ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
       market === "india" ? apiService.zerodhaEventsLatest() : apiService.indmoneyUsEventsLatest(),
       market === "india" ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
     ]);
+    if (generation !== detailSessionGeneration.current) return;
     const nextError = combineOperationalErrors([
       getRejectedResultMessage(portfolioResult, "Portfolio"),
       getRejectedResultMessage(eventsResult, "Events"),
@@ -4384,16 +4406,17 @@ function ScopedStockDetailsButton({
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
     let cancelled = false;
+    const generation = detailSessionGeneration.current;
     apiService
       .zerodhaOrders()
       .then((response) => {
-        if (!cancelled) {
+        if (!cancelled && generation === detailSessionGeneration.current) {
           setZerodhaOrders(response.data ?? []);
           setZerodhaOrdersError(null);
         }
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (!cancelled && generation === detailSessionGeneration.current) {
           setZerodhaOrders([]);
           setZerodhaOrdersError(error instanceof Error ? error.message : "Unable to load Zerodha orders");
         }
@@ -4410,6 +4433,7 @@ function ScopedStockDetailsButton({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          detailSessionGeneration.current += 1;
           setResolvedDetailsData(null);
           setPersistedHistory([]);
           setShowUncoveredHistory(false);
@@ -4425,7 +4449,7 @@ function ScopedStockDetailsButton({
         <Info className="h-[18px] w-[18px]" />
       </button>
 
-      {open ? (
+      {open && auditDetail ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
           ref={detailPanelRef}
@@ -4435,7 +4459,7 @@ function ScopedStockDetailsButton({
           aria-modal={!historicalMatrix}
           onKeyDown={(event) => {
             if (historicalMatrix) return;
-            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOpen(false); }
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeDetails(); }
             if (event.key === "Tab") {
               const nodes = Array.from(detailPanelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') ?? []);
               const first = nodes[0]; const last = nodes[nodes.length - 1];
@@ -4444,7 +4468,7 @@ function ScopedStockDetailsButton({
             }
           }}
           aria-labelledby={`stock-details-${stock.key}`}
-          onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) setOpen(false); }}
+          onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) closeDetails(); }}
         >
           <div
             className="min-w-0 w-full max-w-5xl rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
@@ -4474,7 +4498,7 @@ function ScopedStockDetailsButton({
                     type="button"
                     onClick={() => {
                       onFocusCalculation({ stockKey: stock.key, header: "Stock Info" });
-                      setOpen(false);
+                      closeDetails();
                     }}
                     className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     aria-label={`Open Actionables Calculations for ${stock.symbol}`}
@@ -4485,7 +4509,7 @@ function ScopedStockDetailsButton({
                 ) : null}
                 <button
                   type="button"
-                  onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) setOpen(false); }}
+                  onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) closeDetails(); }}
                   className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   aria-label="Close stock details"
                 >
