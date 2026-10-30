@@ -15,3 +15,24 @@ export function technicalPriceEvidence(instruments: string[], result: ZerodhaDis
   });
   return `\n\n[TECHNICAL_PRICE_ANCHORS_V1]\n${JSON.stringify(anchors)}\n[/TECHNICAL_PRICE_ANCHORS_V1]\nUse these exact-venue broker prices as the common price basis. Check corporate actions and adjusted charts. Trigger and invalidation must be numeric levels on this basis and within 25% of the anchor; if evidence cannot be reconciled, do not invent a setup. Unreconciled output is rejected.\n`;
 }
+
+/** Only a confirmed market-data entitlement denial permits research-only mode.
+ * Authentication, transport and quote-integrity failures still stop the stage.
+ */
+export async function resolveTechnicalPriceEvidence(
+  instruments: string[],
+  readQuotes: (instruments: string[]) => Promise<ZerodhaDisplayQuoteResponse>,
+  now = Date.now(),
+): Promise<string> {
+  let result: ZerodhaDisplayQuoteResponse;
+  try {
+    result = await readQuotes(instruments);
+  } catch (error) {
+    const failure = error as { status?: number; message?: string } | null;
+    if (failure?.status !== 403 || !failure.message?.includes("Zerodha denied market-data access (PermissionException)")) {
+      throw error;
+    }
+    return `\n\n[TECHNICAL_PRICE_MODE_V1]internet_research_no_broker_quotes[/TECHNICAL_PRICE_MODE_V1]\nKite market-data permission is unavailable. Continue the technical internet research requested above using fresh exact-exchange sources. No broker price anchors were supplied: do not describe researched prices as broker-verified or live Kite quotes. Check source dates and corporate actions; do not invent prices or setups when evidence is unavailable.\n`;
+  }
+  return technicalPriceEvidence(instruments, result, now);
+}
