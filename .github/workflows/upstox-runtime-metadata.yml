@@ -67,5 +67,12 @@ jobs:
                     result['sma_port_listening'] = True
             except OSError:
                 result['sma_port_listening'] = False
+            version = subprocess.run(['/usr/bin/aws', '--version'], capture_output=True, text=True, timeout=10)
+            result['aws_cli_version'] = (version.stdout or version.stderr).strip()
+            try:
+                import boto3
+                result['signing_credential_provider_method'] = boto3.Session().get_credentials().method
+            except Exception as error:
+                result['signing_provider_error_type'] = type(error).__name__
             print("UPSTOX_RUNTIME_METADATA=" + json.dumps(result, sort_keys=True))
             PY
