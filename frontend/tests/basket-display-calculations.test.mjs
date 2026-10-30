@@ -427,3 +427,14 @@ test('Upstox enabled flag comes from owner-scoped capabilities and is dismissed 
  const h=hooks();const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{zerodhaDisplayQuotes:async()=>{throw new Error('prices unavailable');},zerodhaQuoteCapabilities:async()=>({upstox_ltp_enabled:true})},createPortal:node=>node});
  const render=(scope='owner-a')=>{h.start();return component.useBasketDisplayQuotes(true,'india',['NSE:ABC'],scope);};let state=render();assert.equal(state.upstoxEnabled,false);h.flush();await tick();state=render();assert.equal(state.upstoxEnabled,true);assert.equal(state.error,'prices unavailable');state=render('owner-b');assert.equal(state.upstoxEnabled,false);
 });
+
+test('column preferences survive the actual keyed basket close/reopen and snapshot remount',()=>{
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8'),ast=ts.createSourceFile('workflow.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const node=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='ZerodhaBasketPreviewDialog');const compiled=ts.transpileModule(`${node.getText(ast)}\nexport {ZerodhaBasketPreviewDialog}`,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+ const h=hooks(),loaded={exports:{}};new Function('exports','require','useState','ScopedZerodhaBasketPreviewDialog',compiled)(loaded.exports,require,h.bindings.useState,()=>null);
+ const props={open:true,detailsData:{portfolioSnapshot:{captured_at:end}},basketBrokerLabel:'Zerodha',tradingViewMarket:'india'};
+ const render=(changes={})=>{h.start();return loaded.exports.ZerodhaBasketPreviewDialog({...props,...changes});};let view=render();const firstKey=view.key;view.props.columnPreferences.toggle('Status');view=render({open:false});assert.notEqual(view.key,firstKey);assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);
+ view=render();assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);view=render({detailsData:{portfolioSnapshot:{captured_at:'2026-10-30T12:00:00Z'}}});assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);
+ view=render({basketBrokerLabel:'IndMoney',tradingViewMarket:'us'});assert.deepEqual(view.props.columnPreferences.hiddenColumns,[]);view.props.columnPreferences.toggle('Amount');view=render();assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);
+ view.props.columnPreferences.toggle('Status');assert.deepEqual(render().props.columnPreferences.hiddenColumns,[]);
+});

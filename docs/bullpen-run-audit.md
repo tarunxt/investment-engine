@@ -2718,7 +2718,8 @@ metadata does not change executable sizing, selection, order guards or broker pa
 
 Weight Difference and Zerodha Stocks are the displayed header names. A dedicated
 trailing column control opens a stacked checkbox picker; visibility is session
-state and never mutates orders, selection or execution guards. Group/detail/empty
+state held above the keyed snapshot/open remount and never mutates orders,
+selection or execution guards. Group/detail/empty
 row spans follow visible columns. The removed banners' estimate and provenance
 details remain in calculation popups and value tooltips. A read-only,
 authenticated owner-scoped quote-capabilities flag identifies actual Upstox
