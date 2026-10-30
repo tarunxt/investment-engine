@@ -1,4 +1,4 @@
-"""Exact-venue broker quote reads for display sizing, with no price fallbacks."""
+"""Exact-venue quote reads for display sizing; estimates stay outside this API."""
 import math
 import re
 from datetime import datetime, timezone
@@ -10,9 +10,15 @@ def validate_instruments(instruments):
     return sorted(set(instruments))
 
 
-async def read_display_quotes(service, token, instruments):
+async def read_display_quotes(service, token, instruments, user_id=None):
     # One broker read for the entire bounded batch. No per-row request fanout.
-    raw = await service.get_quotes(token, instruments)
+    from .upstox_quotes import read_upstox_quotes
+    broker_error = None
+    try:
+        raw = await service.get_quotes(token, instruments)
+    except Exception as exc:
+        broker_error = exc
+        raw = {}
     received = datetime.now(timezone.utc).isoformat()
     quotes = []
     missing = []
@@ -23,7 +29,16 @@ async def read_display_quotes(service, token, instruments):
             missing.append(instrument)
             continue
         quotes.append({"instrument": instrument, "price": price, "as_of": received, "source": "Zerodha broker /quote last_price · exact venue · server receipt time"})
-    return {"quotes": quotes, "missing": missing}
+    # Independently read the full batch for the provider comparison column.
+    # Only absent Kite prices may use those values in the selected quote list.
+    upstox = await read_upstox_quotes(user_id, instruments) if user_id is not None else []
+    fallback = [row for row in upstox if row["instrument"] in missing]
+    quotes.extend(fallback)
+    filled = {row["instrument"] for row in fallback}
+    missing = [key for key in missing if key not in filled]
+    if broker_error is not None and not quotes:
+        raise broker_error
+    return {"quotes": quotes, "missing": missing, "upstox_quotes": upstox}
 
 
 def quote_failure_detail(error):

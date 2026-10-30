@@ -2688,3 +2688,48 @@ Celery analysis uses the dedicated credx_recovery_analysis queue and credx:recov
 
 
 Recovery equity analysis now also admits Zerodha India threats/events and matching India run/job contexts. This expands analysis only: broker order routes, Bullpen commands, bots, scheduler, exports, and legacy financial queues remain blocked. No historical audit evidence is rewritten.
+
+# Read-only display quote fallback
+
+The owner-scoped Upstox fallback at `GET /zerodha/portfolio/quotes` can supply
+missing Kite prices. The additive `upstox_quotes` field separately supplies
+provider comparison prices for the Upstox LTP display column; it does not mutate
+executable quantities or amounts. Quote responses preserve the existing `instrument`, `price`,
+`as_of`, and `source` fields, with Upstox source and exchange last-trade timestamp
+retained by `technicalPriceEvidence` in `TECHNICAL_PRICE_ANCHORS_V1` when used as
+Technical validation input. This does not change Stage 1–3 algorithms, allocation,
+execution guards, or frozen audit snapshots. No historical quote provenance is
+rewritten. See `docs/upstox-ltp-fallback.md` for freshness and failure rules.
+
+## Executable basket Units explanation
+
+The Units value between the existing decrement/increment buttons opens a stacked,
+read-only calculation summary above the basket. This uses executable row sizing,
+not the independent allocation Shares/Target Weight display calculation. New
+basket rows capture their actual formula-estimate/holding base, requested percent,
+unrounded and rounded quantity, cap and final baseline. Manual unit changes,
+percentage changes and quote-refresh caps retain the original baseline and record
+the latest quantity transition. The current displayed quantity remains authoritative;
+missing or unreconciled history is explicitly unavailable. No historic LLM inputs
+or frozen audit evidence are reconstructed or rewritten. The optional `unitsTrace`
+metadata does not change executable sizing, selection, order guards or broker payloads.
+
+## Basket display columns and original sell groups
+
+Weight Difference and Zerodha Stocks are the displayed header names. A dedicated
+trailing column control opens a stacked checkbox picker; visibility is session
+state and never mutates orders, selection or execution guards. Group/detail/empty
+row spans follow visible columns. The removed banners' estimate and provenance
+details remain in calculation popups and value tooltips. A read-only,
+authenticated owner-scoped quote-capabilities flag identifies actual Upstox
+configuration, independently of provider quote success.
+
+For original Sell All and Trim basket actions, Zerodha Stocks shows the exact
+listing's current Kite snapshot holding quantity, including settled plus T1
+units. This is a display total, not a claim about sellable quantity. Matching
+multiple holding entries is additive; a complete snapshot can verify zero, while
+missing/incomplete/invalid snapshots remain unavailable. Zerodha Amount is that
+quantity times valid Quoted LTP, falling back to genuine Upstox LTP; it never uses
+a Limit Price estimate for these actions. Calculation summaries retain holding
+source/as-of and price source/as-of. Buy, Add and Hold allocation semantics and
+all executable Units/Amount and broker payloads remain unchanged.

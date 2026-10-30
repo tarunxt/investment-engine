@@ -378,6 +378,13 @@ async def get_status(
     )
 
 
+@router.get("/portfolio/quote-capabilities")
+async def portfolio_quote_capabilities(current_user: User = Depends(get_current_user)):
+    """Owner-scoped configuration flags only; no credential or provider read."""
+    from .upstox_quotes import configured_for
+    return {"upstox_ltp_enabled": configured_for(current_user.id)}
+
+
 @router.get("/portfolio/quotes")
 async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, max_length=500), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
     """Authenticated read-only quote batch; never prepare, modify or submit orders."""
@@ -390,7 +397,7 @@ async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, 
     if not token:
         raise HTTPException(401, "Not connected to Zerodha. Please login first.")
     try:
-        return await read_display_quotes(_svc, token, keys)
+        return await read_display_quotes(_svc, token, keys, user_id=current_user.id)
     except KiteError as exc:
         status_code, detail = quote_failure_detail(exc)
         logger.warning("Read-only portfolio quote rejected for user %s: %s", current_user.id, detail)

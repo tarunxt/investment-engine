@@ -8,9 +8,9 @@ export type BasketMetricSummary = {
   metrics: { label: string; value: string }[];
   notice: string; warning?: boolean; status?: "loading" | "error";
 };
-function ModalLayer({ title, eyebrow, onClose, children, footer, tools, covered = false, details = false }: {
+function ModalLayer({ title, eyebrow, onClose, children, footer, tools, covered = false, details = false, wide = false }: {
   title: string; eyebrow: string; onClose: () => void; children: ReactNode;
-  footer: ReactNode; tools?: ReactNode; covered?: boolean; details?: boolean;
+  footer: ReactNode; tools?: ReactNode; covered?: boolean; details?: boolean; wide?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -37,7 +37,7 @@ function ModalLayer({ title, eyebrow, onClose, children, footer, tools, covered 
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) { event.preventDefault(); first?.focus(); }
       }}>
       <section role="dialog" aria-modal={covered ? undefined : true} aria-label={title} tabIndex={-1} ref={panel}
-        className={`${styles.panel} ${details ? styles.detailPanel : ""}`} onClick={event => event.stopPropagation()}>
+        className={`${styles.panel} ${wide ? styles.widePanel : ""} ${details ? styles.detailPanel : ""}`} onClick={event => event.stopPropagation()}>
         <header className={styles.header}>
           <div><p className={styles.eyebrow}>{eyebrow}</p><h2>{title}</h2></div>
           <div className={styles.actions}>{tools}<button type="button" className={styles.iconButton} aria-label={details ? "Close calculation details" : "Close metric summary"} onClick={onClose}><X size={19} aria-hidden="true" /></button></div>
@@ -49,12 +49,12 @@ function ModalLayer({ title, eyebrow, onClose, children, footer, tools, covered 
   );
 }
 /** Presentation only: values and audit detail come from the existing calculation. */
-export function BasketMetricPopup({ title, eyebrow, summary, children, onClose }: {
-  title: string; eyebrow: string; summary: BasketMetricSummary; children: ReactNode; onClose: () => void;
+export function BasketMetricPopup({ title, eyebrow, summary, children, onClose, wide = false }: {
+  title: string; eyebrow: string; summary: BasketMetricSummary; children: ReactNode; onClose: () => void; wide?: boolean;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   return <>
-    <ModalLayer title={title} eyebrow={eyebrow} onClose={onClose} covered={detailsOpen}
+    <ModalLayer title={title} eyebrow={eyebrow} onClose={onClose} covered={detailsOpen} wide={wide}
       tools={<button type="button" className={`${styles.iconButton} ${styles.menuButton}`} aria-label="Calculation details" title="Calculation details" aria-haspopup="dialog" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(true)}><Menu size={21} aria-hidden="true" /></button>}
       footer={<button type="button" className={styles.button} onClick={onClose}>Done</button>}>
       <div className={styles.hero} aria-live="polite">
@@ -70,3 +70,5 @@ export function BasketMetricPopup({ title, eyebrow, summary, children, onClose }
     </ModalLayer>}
   </>;
 }
+
+export { ModalLayer as BasketModalLayer };
