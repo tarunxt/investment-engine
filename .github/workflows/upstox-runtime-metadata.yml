@@ -74,5 +74,19 @@ jobs:
                 result['signing_credential_provider_method'] = boto3.Session().get_credentials().method
             except Exception as error:
                 result['signing_provider_error_type'] = type(error).__name__
+            # Signed MCP initialization only. No tool invocation and no secret
+            # reference is supplied; this cannot request a secret value.
+            verified = next((row['path'] for row in wrappers if row['sha256'] == result['official_wrapper_sha256']), None)
+            if verified:
+                try:
+                    import runpy
+                    resolver = runpy.run_path(verified)
+                    response, session_id = resolver['_mcp_post']({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'credx-upstox-metadata-check', 'version': '1'}}})
+                    result['signed_mcp_initialize_ok'] = isinstance(response, dict) and 'result' in response and 'error' not in response
+                    if isinstance(response, dict) and 'error' in response:
+                        result['signed_mcp_protocol_error_code'] = response['error'].get('code')
+                except Exception as error:
+                    result['signed_mcp_error_type'] = type(error).__name__
+                    result['signed_mcp_http_status'] = getattr(error, 'code', None)
             print("UPSTOX_RUNTIME_METADATA=" + json.dumps(result, sort_keys=True))
             PY
