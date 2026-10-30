@@ -100,6 +100,7 @@ import {
   type AutoRebalanceAuditState,
 } from "@/lib/autoRebalanceAudit";
 import {
+  technicalInputPlanIssue,
   deduplicateStageRunInputs,
   deduplicateThreatStageInputs,
   getSelectedStageRunIds,
@@ -6700,6 +6701,12 @@ ${zerodhaExecutionMode === "direct_market"
         endedAt: null,
         completedAt: null,
         error: null,
+        errorDetails: [],
+        lastRunId: null, activeRunId: null, recommendedStocks: null,
+        passedLlms: 0, partialLlms: 0, failedLlms: 0, completedLlms: 0,
+        partialNotice: null, exportStatus: null, costUsd: null, costInr: null,
+        provider: null, model: null, runStatus: "processing", totalLlms: null,
+        rebalanceInputs: null, frozenFinal: undefined,
         ...extra,
       });
       void recordAutoRebalanceStage(portfolio, stage, "processing", {
@@ -7650,6 +7657,8 @@ ${zerodhaExecutionMode === "direct_market"
       }
       const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
         !runSpecificMode || stagesToRun.has(stage);
+      const inputPlanIssue = technicalInputPlanIssue(shouldRunCurrentStage("technical"), shouldRunCurrentStage("rebalance"), selectedInputs[portfolio].technical);
+      if (inputPlanIssue) { window.alert(inputPlanIssue); return; }
       let currentStage: WorkflowStageKey = "sync";
 
       // Zerodha authentication must be opened synchronously from the Run click.
@@ -8166,7 +8175,7 @@ ${zerodhaExecutionMode === "direct_market"
             "explicit technical scan inputs", () => cancelRequestedRef.current,
           );
           if (selectedTechnicalInputs.has("technical:next") && !generatedRebalanceRun) {
-            throw new Error("Next Rebalance output is unavailable. Run Rebalance or explicitly select saved Rebalance jobs. Refresh Select Inputs and start a new workflow.");
+            throw new Error("Technical input unavailable: Next Rebalance was selected, but this invocation produced no Rebalance run. No Technical provider job was created. Select saved completed/partial Rebalance jobs explicitly, or include Rebalance in the selected stages. Previous tile output is not substituted.");
           }
           const rebalanceInputs = deduplicateStageRunInputs([
             ...(selectedTechnicalInputs.has("technical:next") && generatedRebalanceRun ? [generatedRebalanceRun] : []),
@@ -8595,6 +8604,11 @@ ${zerodhaExecutionMode === "direct_market"
       specificMode,
       selectedStages,
     );
+    const technicalInputIssue = technicalInputPlanIssue(
+      !specificMode[section.portfolio] || selectedStages[section.portfolio].has("technical"),
+      !specificMode[section.portfolio] || selectedStages[section.portfolio].has("rebalance"),
+      selectedInputs[section.portfolio].technical,
+    );
     const showQuotaLlmSwitchWarning = shouldShowQuotaLlmSwitchWarning(
       states[section.portfolio],
     );
@@ -8759,6 +8773,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         </div>
 
+        {technicalInputIssue ? <div role="alert" className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p>{technicalInputIssue}</p><button type="button" className="mt-2 font-semibold text-blue-800 underline" onClick={() => openInputSelection(section.portfolio, "technical")}>Choose saved Rebalance inputs</button></div> : null}
         {showQuotaLlmSwitchWarning ? (
           <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
