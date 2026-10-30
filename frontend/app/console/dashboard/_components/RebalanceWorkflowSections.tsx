@@ -3690,6 +3690,12 @@ function ScopedZerodhaBasketPreviewDialog({
     ? { portfolioValue: currentWeights.portfolioValue, availableMargin, totalAssets: currentWeights.totalAssets }
     : portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
   const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
+  const upstoxCell = (symbol: string, exchange: string) => {
+    const quote = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(row => row.source.startsWith("Upstox ")), symbol, exchange);
+    return <td className="whitespace-nowrap px-4 py-3 text-slate-700" data-provider="upstox" title={quote ? `${quote.source} · As of ${quote.asOf}` : "No Upstox quote available for this exact listing"}>
+      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><div className="text-[10px] text-slate-500">Last trade {formatTimestamp(quote.asOf)}</div><div className="text-[10px] text-slate-500">Display only</div></> : "Unavailable"}
+    </td>;
+  };
   const displayQuote = (symbol: string, exchange: string) => {
     const quote = verifiedFetchedDisplayQuote(quoteRead.quotes, symbol, exchange) ?? verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange);
     const order = orders.find(row => row.symbol === symbol && row.exchange === exchange);
@@ -4013,6 +4019,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         {displayCalculations.headers}
                         <th className="px-4 py-3 font-semibold">Units</th>
                         <th className="px-4 py-3 font-semibold">%</th>
+                        {tradingViewMarket === "india" ? <th className="px-4 py-3 font-semibold">Upstox LTP</th> : null}
                         <th className="px-4 py-3 font-semibold">Quoted LTP</th>
                         <th className="px-4 py-3 font-semibold">Limit Price</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
@@ -4028,7 +4035,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         return (
                           <Fragment key={group.action}>
                             <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                              <td className="px-4 py-3" colSpan={tradingViewMarket === "india" ? 20 : 17}>
+                              <td className="px-4 py-3" colSpan={tradingViewMarket === "india" ? 21 : 17}>
                                 <label className="inline-flex items-center gap-3 text-sm font-black">
                                   <input
                                     type="checkbox"
@@ -4140,6 +4147,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                     </span>
                                   )}
                                 </td>
+                                {tradingViewMarket === "india" ? upstoxCell(order.symbol, order.exchange) : null}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(tradingViewMarket === "india" ? displayQuote(order.symbol, order.exchange).ltp : displayQuote(order.symbol, order.exchange).ltp ?? order.lastPrice, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount, basketCurrency)}</td>
@@ -4175,7 +4183,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               </tr>
                               {order.wholeShareReview && (
                                 <tr className="bg-amber-50/40">
-                                  <td colSpan={tradingViewMarket === "india" ? 20 : 17} className="px-4 pb-4 pt-2">
+                                  <td colSpan={tradingViewMarket === "india" ? 21 : 17} className="px-4 pb-4 pt-2">
                                     <WholeShareTrimChoice
                                       symbol={order.symbol}
                                       choice={order.wholeShareReview}
@@ -4200,6 +4208,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
                                 {displayCalculations.cells(displayStock(row))}
                                 <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
+                                {tradingViewMarket === "india" ? upstoxCell(row.stock.symbol, row.stock.exchange) : null}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={quote.ltpSource}>{quote.ltp === null ? "Unavailable" : formatBasketCurrency(quote.ltp, basketCurrency)}</td>
                                 <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">{row.formulaAction === "Hold" ? "Hold · No executable order" : "Display only · No executable order"}</td>

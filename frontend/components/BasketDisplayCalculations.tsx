@@ -10,13 +10,14 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
   const keys = [...new Set(instruments)].sort().join(",");
   const [attempt, setAttempt] = useState(0);
   const request = useMemo(() => ({ open, market, keys, scope, attempt }), [open, market, keys, scope, attempt]);
-  const [state, setState] = useState<{ request: object | null; quotes: { instrument: string; price: number; as_of: string; source: string }[]; error?: string }>({ request: null, quotes: [] });
+  const [state, setState] = useState<{ request: object | null; quotes: { instrument: string; price: number; as_of: string; source: string }[]; upstoxQuotes?: { instrument: string; price: number; as_of: string; source: string }[]; error?: string }>({ request: null, quotes: [] });
   useEffect(() => {
     if (!open || market !== "india" || !keys) return;
     let active = true;
     const requested = keys.split(",");
     void (async () => {
       const quotes: { instrument: string; price: number; as_of: string; source: string }[] = [];
+      const upstoxQuotes: typeof quotes = [];
       if (requested.length > 500) throw new Error("Display quote batch exceeds 500 instruments.");
       for (let offset = 0; offset < requested.length; offset += 50) {
         if (!active) return null;
@@ -24,15 +25,17 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
         const data = await apiService.zerodhaDisplayQuotes(batch);
         if (!Array.isArray(data.quotes) || !Array.isArray(data.missing) || data.quotes.some(quote => !batch.includes(quote.instrument))) throw new Error("Quote response does not match this basket.");
         quotes.push(...data.quotes);
+        if (data.upstox_quotes !== undefined && (!Array.isArray(data.upstox_quotes) || data.upstox_quotes.some(quote => !batch.includes(quote.instrument) || !quote.source?.startsWith("Upstox ")))) throw new Error("Upstox response does not match this basket.");
+        upstoxQuotes.push(...(data.upstox_quotes ?? []));
       }
-      return quotes;
-    })().then(quotes => {
-      if (active && quotes) setState({ request, quotes });
+      return { quotes, upstoxQuotes };
+    })().then(result => {
+      if (active && result) setState({ request, ...result });
     }).catch((error: unknown) => { if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." }); });
     return () => { active = false; };
   }, [open, market, keys, request]);
   const current = open && market === "india" && state.request === request;
-  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], error: current ? state.error : undefined, loading: Boolean(open && market === "india" && keys && !current) };
+  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], error: current ? state.error : undefined, loading: Boolean(open && market === "india" && keys && !current) };
 }
 
 export function CalculationPopup({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {

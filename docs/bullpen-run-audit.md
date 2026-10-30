@@ -2692,7 +2692,9 @@ Recovery equity analysis now also admits Zerodha India threats/events and matchi
 # Read-only display quote fallback
 
 The owner-scoped Upstox fallback at `GET /zerodha/portfolio/quotes` can supply
-missing Kite prices. Quote responses preserve the existing `instrument`, `price`,
+missing Kite prices. The additive `upstox_quotes` field separately supplies
+provider comparison prices for the Upstox LTP display column; it does not mutate
+executable quantities or amounts. Quote responses preserve the existing `instrument`, `price`,
 `as_of`, and `source` fields, with Upstox source and exchange last-trade timestamp
 retained by `technicalPriceEvidence` in `TECHNICAL_PRICE_ANCHORS_V1` when used as
 Technical validation input. This does not change Stage 1–3 algorithms, allocation,

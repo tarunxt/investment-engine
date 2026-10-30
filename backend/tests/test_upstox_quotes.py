@@ -69,7 +69,8 @@ def test_only_missing_kite_prices_use_fallback(monkeypatch, broker_fails):
         return [{'instrument': 'NSE:ABC', 'price': 125, 'as_of': NOW.isoformat(), 'source': 'Upstox'}]
     monkeypatch.setattr(upstox, 'read_upstox_quotes', fallback)
     result = asyncio.run(read_display_quotes(Broker(), 'synthetic', ['NSE:KEEP', 'NSE:ABC', 'NSE:MISSING'], user_id=73))
-    assert calls == [(73, ['NSE:KEEP', 'NSE:ABC', 'NSE:MISSING'] if broker_fails else ['NSE:ABC', 'NSE:MISSING'])]
+    assert calls == [(73, ['NSE:KEEP', 'NSE:ABC', 'NSE:MISSING'])]
+    assert result['upstox_quotes'][0]['price'] == 125
     assert result['missing'] == (['NSE:KEEP', 'NSE:MISSING'] if broker_fails else ['NSE:MISSING'])
     if not broker_fails:
         assert result['quotes'][0]['price'] == 100
@@ -130,15 +131,16 @@ def test_original_kite_error_survives_when_upstox_is_unavailable(monkeypatch):
     assert caught.value is error
 
 
-def test_no_fallback_request_when_kite_has_every_price(monkeypatch):
+def test_comparison_reads_upstox_even_when_kite_has_every_price(monkeypatch):
     class Broker:
         async def get_quotes(self, token, instruments): return {'NSE:ABC': {'last_price': 10}}
-    async def fallback(owner, missing):
-        assert missing == []
-        return []
+    async def fallback(owner, requested):
+        assert requested == ['NSE:ABC']
+        return [{'instrument': 'NSE:ABC', 'price': 125, 'as_of': NOW.isoformat(), 'source': 'Upstox'}]
     monkeypatch.setattr(upstox, 'read_upstox_quotes', fallback)
     result = asyncio.run(read_display_quotes(Broker(), 'synthetic', ['NSE:ABC'], user_id=73))
     assert result['missing'] == [] and result['quotes'][0]['price'] == 10
+    assert result['upstox_quotes'][0]['price'] == 125
 
 
 def test_authenticated_route_passes_owner_to_fallback_on_kite_permission_denial(monkeypatch):

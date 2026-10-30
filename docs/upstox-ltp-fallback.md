@@ -1,7 +1,10 @@
 # Read-only Upstox LTP fallback
 
 The authenticated `GET /zerodha/portfolio/quotes` endpoint keeps every valid Kite
-price and asks Upstox only for missing exact-venue listings. Kite permission,
+price and reads Upstox independently for the full exact-venue batch. Only missing
+Kite prices use Upstox in the selected quote list. The additive `upstox_quotes`
+response field powers the separate Upstox LTP column immediately left of Quoted
+LTP, including listings where Kite already supplies a valid price. Kite permission,
 authentication, rate-limit and transport failures can also trigger the fallback.
 Kite holdings, orders and credential handling are unchanged. This integration
 does not place orders or change basket preparation or execution price guards.
@@ -18,9 +21,14 @@ using its approved secret mechanism:
 The canonical systemd configuration target is `/etc/investor/backend.env`, but
 this does not authorize writing a raw token into that file. Follow the required
 skill's Secrets Manager dynamic-reference and `asm-exec` instructions for runtime
-resolution; verify the actual launcher before changing it. In this task's
-environment the skill, AWS tools and `asm-exec` were unavailable. Secure setup
-therefore remains pending a correctly equipped operator/environment.
+resolution; verify the actual launcher before changing it. The official skill
+and wrapper were read at immutable aws/agent-toolkit-for-aws commit
+`9d76dd4494b7ff76105f52f5d59ae2180dc91289`. Resolution supports either SMA or
+SigV4-signed AWS MCP; an AWS connector is not itself required. No wrapper was
+installed or run in this task. Current production launcher, reachable resolution
+backend, identity permission, actual secret identity/region and secure token
+ingestion still require verification and separate approval. Historical UAT
+wrapper availability does not establish production readiness.
 
 Do not put the token in frontend configuration, source control, tickets, command
 arguments, or logs. Missing configuration disables this fallback. Other users
