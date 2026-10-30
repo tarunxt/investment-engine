@@ -160,3 +160,14 @@ def test_authenticated_route_passes_owner_to_fallback_on_kite_permission_denial(
     monkeypatch.setattr(upstox, 'read_upstox_quotes', fallback)
     result = asyncio.run(router.portfolio_display_quotes(['NSE:ABC'], object(), SimpleNamespace(id=73)))
     assert result['missing'] == [] and result['quotes'][0]['source'] == 'Upstox'
+
+
+def test_quote_capabilities_are_owner_scoped_and_expose_no_credential(monkeypatch):
+    from types import SimpleNamespace
+    from app.domains.zerodha import router
+    monkeypatch.setenv('UPSTOX_ANALYTICS_TOKEN', 'synthetic-sensitive-value')
+    monkeypatch.setenv('UPSTOX_LTP_OWNER_USER_ID', '73')
+    assert asyncio.run(router.portfolio_quote_capabilities(SimpleNamespace(id=73))) == {'upstox_ltp_enabled': True}
+    assert asyncio.run(router.portfolio_quote_capabilities(SimpleNamespace(id=74))) == {'upstox_ltp_enabled': False}
+    monkeypatch.delenv('UPSTOX_ANALYTICS_TOKEN')
+    assert asyncio.run(router.portfolio_quote_capabilities(SimpleNamespace(id=73))) == {'upstox_ltp_enabled': False}

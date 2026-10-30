@@ -1272,6 +1272,10 @@ class apiServiceClass implements IApiService {
     return this.get<ZerodhaDisplayQuoteResponse>(`${URLs.zerodha.portfolio()}/quotes?${query}`, { skipUnauthorizedRefresh: true });
   }
 
+  zerodhaQuoteCapabilities(): Promise<{ upstox_ltp_enabled: boolean }> {
+    return this.get<{ upstox_ltp_enabled: boolean }>(`${URLs.zerodha.portfolio()}/quote-capabilities`, { skipUnauthorizedRefresh: true });
+  }
+
   zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
     return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio(), {
       timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,

@@ -101,6 +101,29 @@ export function displaySizingPrice(quoted: number | null | undefined, limit: num
   return quote !== null ? { price: quote, basis: 'quoted_ltp', label: 'Quoted LTP shown in this row' } : estimate !== null ? { price: estimate, basis: 'limit_estimate', label: 'Estimate using Limit Price; not live LTP' } : { price: null, basis: 'unavailable', label: 'No valid Quoted LTP or Limit Price is available' };
 }
 
+export function kiteHoldingQuantity(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number; t1_quantity: number }[]; holdings_count: number; captured_at: string } | null, symbol: string, exchange: string) {
+  if (!snapshot || !Array.isArray(snapshot.holdings) || snapshot.holdings_count !== snapshot.holdings.length || !Number.isFinite(Date.parse(snapshot.captured_at))) return null;
+  const matches = snapshot.holdings.filter(row => stockIdentity(row.tradingsymbol.trim(), row.exchange.trim()) === stockIdentity(symbol.trim(), exchange.trim()));
+  let quantity = 0;
+  for (const row of matches) {
+    if (![row.quantity, row.t1_quantity].every(value => typeof value === 'number' && Number.isFinite(value) && value >= 0)) return null;
+    quantity += row.quantity + row.t1_quantity;
+  }
+  if (!Number.isFinite(quantity)) return null;
+  return { quantity, asOf: snapshot.captured_at, source: 'Kite portfolio snapshot · exact venue · settled quantity + T1 quantity; display total, not a sellable-quantity assertion' };
+}
+
+export function sellHoldingDisplay(stock: { action?: string | null; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; ltp: number | null; ltpAsOf?: string; ltpSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string }) {
+  if (stock.action !== 'Sell All' && stock.action !== 'Trim') return null;
+  const stocks = typeof stock.holdingQuantity === 'number' && Number.isFinite(stock.holdingQuantity) && stock.holdingQuantity >= 0 ? stock.holdingQuantity : null;
+  const quoted = validDisplayPrice(stock.ltp), price = quoted ?? validDisplayPrice(stock.upstoxLtp);
+  const value = stocks !== null && price !== null ? stocks * price : null;
+  return { stocks, amount: value !== null && Number.isFinite(value) ? value : null, price,
+    source: quoted !== null ? stock.ltpSource ?? 'Quoted LTP shown in this exact row' : stock.upstoxSource ?? 'No genuine price available',
+    asOf: quoted !== null ? stock.ltpAsOf : stock.upstoxAsOf,
+    explanation: 'Current exact-venue Kite holding quantity × Quoted LTP, falling back to genuine Upstox LTP. No Limit Price estimate. Display only; executable Units and Amount unchanged.' };
+}
+
 /** Current Kite exposure includes unsettled T1 units, valued at the saved holding LTP. */
 export function kiteWeightContext(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number; t1_quantity: number; last_price: number }[]; holdings_count: number; captured_at: string; available_margin: number | null } | null) {
   const values = new Map<string, number>();
