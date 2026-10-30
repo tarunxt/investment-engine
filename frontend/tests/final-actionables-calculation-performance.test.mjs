@@ -791,7 +791,7 @@ test('large retained history mounts only 25 rows and defers original field rende
     let hook = 0;
     const { RetainedStockObservations } = helpers({ useState: initial => {
       const index = hook++;
-      const value = index === 0 ? { rows: originals, examined: 2099, note: 'fixture', loading: false, error: null } : index === 2 ? selectedPage : typeof initial === 'function' ? initial() : initial;
+      const value = index === 0 ? { rows: originals, examined: 2099, note: 'fixture', loading: false, error: null } : index === 3 ? selectedPage : typeof initial === 'function' ? initial() : initial;
       return [value, () => {}];
     } });
     return renderToStaticMarkup(React.createElement(RetainedStockObservations, { market: 'india', symbol: 'HAL', saved: [], reconstructed: [] }));
@@ -811,4 +811,12 @@ test('large retained history mounts only 25 rows and defers original field rende
   const opened = renderToStaticMarkup(React.createElement(RetainedSourceFields, { cells: originals[0].cells }));
   assert.match(opened, /Synthetic original rationale/);
   assert.equal(fieldReads, 1);
+});
+
+test('retained scans stop after four pages, publish once, and explicitly resume without duplicate observations',async()=>{
+ let calls=0;const observation={id:'recent-run',run_id:447,job_id:2234,created_at:timestamp};
+ const {scanStockSourceObservations}=helpers({apiService:{getStockSourceObservations:async ({cursor})=>{calls++;const index=cursor?Number(cursor):0;return{market:'india',symbol:'HAL',items:[{...observation,id:index===0?'recent-run':`row-${index}`}],examined_sources:100,coverage_note:'saved only',has_more:index<7,next_cursor:index<7?String(index+1):null};}}});
+ const updates=[];const first=await scanStockSourceObservations('india','HAL',(rows,examined)=>updates.push({rows,examined}),()=>true);assert.equal(calls,4);assert.equal(updates.length,1);assert.equal(updates[0].examined,400);assert.equal(updates[0].rows[0].run_id,447);assert.equal(first.cursor,'4');assert.equal(first.hasMore,true);
+ const second=[];const last=await scanStockSourceObservations('india','HAL',rows=>second.push(...rows),()=>true,first.cursor);assert.equal(calls,8);assert.equal(last.hasMore,false);assert.equal(new Set([...updates[0].rows,...second].map(row=>row.id)).size,8);
+ const source=readFileSync(new URL(sourcePath,import.meta.url),'utf8');assert.match(source,/limit: 50, cursor/);assert.match(source,/summarySourceRows.slice\(visibleSummaryPage \* 25/);assert.match(source,/Load more retained sources/);assert.match(source,/\[saved, reconstructed, state.rows\]/);
 });

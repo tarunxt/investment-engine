@@ -3682,7 +3682,12 @@ function ScopedZerodhaBasketPreviewDialog({
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
 
   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);
-  const portfolioAssets = portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
+  const currentWeights = kiteWeightContext(tradingViewMarket === "india" ? detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null : null);
+  // One saved-snapshot valuation for tile, weights, differences and display sizing.
+  // Include T1 delivery exposure; never add intraday/net positions or quote-refresh values.
+  const portfolioAssets = tradingViewMarket === "india"
+    ? { portfolioValue: currentWeights.portfolioValue, availableMargin, totalAssets: currentWeights.totalAssets }
+    : portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
   const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
   const displayQuote = (symbol: string, exchange: string) => {
     const quote = verifiedFetchedDisplayQuote(quoteRead.quotes, symbol, exchange) ?? verifiedDisplayQuote(detailsData.portfolioSnapshot, tradingViewMarket, symbol, exchange);
@@ -3690,7 +3695,6 @@ function ScopedZerodhaBasketPreviewDialog({
     const rowQuote = tradingViewMarket === "india" ? validDisplayPrice(order?.lastPrice) : null;
     return { ltp: quote?.price ?? rowQuote, limitPrice: tradingViewMarket === "india" ? validDisplayPrice(order?.price) : null, ltpAsOf: quote?.asOf ?? (rowQuote !== null ? ltpRefreshedAt ?? undefined : undefined), ltpSource: quote?.source ?? (rowQuote !== null ? "Quoted LTP shown in this exact row; freshness not independently verified" : undefined), quoteLoading: quoteRead.loading && !quote && rowQuote === null };
   };
-  const currentWeights = kiteWeightContext(tradingViewMarket === "india" ? detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null : null);
   const displayStock = (row: DashboardActionRow) => {
     const currentOrder = orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange);
     const currentDetail = currentOrder?.detail ?? row.detail;
@@ -3703,7 +3707,7 @@ function ScopedZerodhaBasketPreviewDialog({
     return { currentValue: currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
-  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, tradingViewMarket === "india" ? currentWeights.totalAssets : portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
   const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (score: number | null) => displayScoreAccepted(score, displayCalculations.lower, displayCalculations.upper, displayCalculations.showAll);
   if (!open) return null;
@@ -3976,7 +3980,7 @@ function ScopedZerodhaBasketPreviewDialog({
                   </p>
                   {displayCalculations.controls}
                 </div>
-                <PortfolioParametersTile onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
+                <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Saved holdings value includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
               </div>
 
               <p className="mb-3 text-sm text-slate-600">Historical scores and derived weights/amounts are display calculations only. {tradingViewMarket === "india" ? "If Quoted LTP is unavailable, a positive row Limit Price may be used for sizing; the calculation tooltip identifies the price source and Quoted LTP and executable order fields are not replaced. " : ""}They do not update executable Units or Amount. Ranking includes the full captured stock universe, including Hold stocks, independently of the display filter.</p>
