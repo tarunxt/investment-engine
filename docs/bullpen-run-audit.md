@@ -2688,3 +2688,13 @@ Celery analysis uses the dedicated credx_recovery_analysis queue and credx:recov
 
 
 Recovery equity analysis now also admits Zerodha India threats/events and matching India run/job contexts. This expands analysis only: broker order routes, Bullpen commands, bots, scheduler, exports, and legacy financial queues remain blocked. No historical audit evidence is rewritten.
+
+# Read-only display quote fallback
+
+The owner-scoped Upstox fallback at `GET /zerodha/portfolio/quotes` can supply
+missing Kite prices. Quote responses preserve the existing `instrument`, `price`,
+`as_of`, and `source` fields, with Upstox source and exchange last-trade timestamp
+retained by `technicalPriceEvidence` in `TECHNICAL_PRICE_ANCHORS_V1` when used as
+Technical validation input. This does not change Stage 1–3 algorithms, allocation,
+execution guards, or frozen audit snapshots. No historical quote provenance is
+rewritten. See `docs/upstox-ltp-fallback.md` for freshness and failure rules.
