@@ -221,7 +221,7 @@ const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkf
 const ast = ts.createSourceFile('workflow.tsx', workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = new Map();
 function visit(node) {
-  if (node.name && ['runWorkflow', 'loadInputCandidates', 'resetDefaultInputCandidates', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure'].includes(node.name.getText(ast))) {
+  if (node.name && ['runWorkflow', 'loadInputCandidates', 'resetDefaultInputCandidates', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure', 'markRunning'].includes(node.name.getText(ast))) {
     declarations.set(node.name.getText(ast), node);
   }
   ts.forEachChild(node, visit);
@@ -231,8 +231,10 @@ const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].
 const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`, { recommendationAuditEnabled: false });
 
 async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
-  sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false } } = {}) {
+  sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false }, rebalanceStatus = "completed" } = {}) {
   const created = [];
+  const alerts = [];
+  let reservations = 0;
   const completed = [];
   const errors = [];
   const threatReads = [];
@@ -240,6 +242,8 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   const consensusInputs = [];
   const generatedSwing = run();
   const generatedRebalance = run(60, [601, 602], 'rebalance');
+  generatedRebalance.status = rebalanceStatus;
+  if (rebalanceStatus === 'partial') generatedRebalance.run_jobs[1].job.status = 'partial';
   const selectedInputs = { indmoneyUs: {
     swing: new Set(['swing:next', 'threat:99', 'threat:98']),
     rebalance: new Set(['rebalance:next', 'run:50:job:501', 'run:51:job:503']),
@@ -282,7 +286,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     updateStage: (_portfolio, stage, info) => { if (info.error) errors.push({ stage, error: info.error }); },
     markRunning: noop, markCompleted: (_portfolio, stage) => { completed.push(stage); },
     completeSkippedStage: noop, onDashboardRefresh: async () => {}, recordAutoRebalanceStage: async () => {},
-    reserveAutoRebalanceRunMetadata: async () => ({ auto_rebalance_portfolio: 'indmoney_us', auto_rebalance_sequence: 100, auto_rebalance_label: 'IndMoney US Run #100' }),
+    reserveAutoRebalanceRunMetadata: async () => { reservations++; return { auto_rebalance_portfolio: 'indmoney_us', auto_rebalance_sequence: 100, auto_rebalance_label: 'IndMoney US Run #100' }; },
     retryWorkflowRead: async (read) => read(), getSavedStageTargets: () => targets,
     waitForThreatCompletion: async () => threat(99, 'generated').analysis,
     waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70, run_jobs: [] },
@@ -294,12 +298,12 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     buildTechnicalScanMap: () => ({}),
     buildDashboardActionRows: (rows) => rows.map(row => ({ stock: { exchange: 'NASDAQ', symbol: 'TEST', totalSuggestions: 1 }, formulaAction: 'Hold', formulaScore: 0, formulaEstimate: {}, detail: {} })),
     buildTechnicalScanPrompt: (rows) => JSON.stringify(rows), getStageTileLabel: (stage) => stage,
-    window: { setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
+    window: { alert: message => alerts.push(message), setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
     WORKFLOW_COMPLETION_RESET_DELAY_MS: 0, normalizeError: (error) => error.message,
   };
   const { execute } = load(`export const execute = ${callbackSource};`, bindings);
   await execute('indmoneyUs');
-  return { created, completed, errors, threatReads, runReads, consensusInputs, targets };
+  return { created, completed, errors, alerts, reservations, threatReads, runReads, consensusInputs, targets };
 }
 
 test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
@@ -358,7 +362,7 @@ test('offline workflow rejects stale/conflicting and out-of-scope sources before
     { runOverrides: { 60: conflictingRebalance }, expectedStages: ['threats', 'swing', 'rebalance'], failed: 'technical' },
     { threatOverrides: { 99: conflictingThreat }, expectedStages: ['threats'], failed: 'swing' },
     { stages: ['rebalance'], runOverrides: { 50: run(50, [501], 'swing', 'india') }, expectedStages: [], failed: 'rebalance' },
-    { stages: ['technical'], runOverrides: { 60: run(60, [601], 'swing') }, expectedStages: [], failed: 'technical' },
+    { stages: ['technical'], selected: { technical: new Set(['run:60:job:601']) }, runOverrides: { 60: run(60, [601], 'swing') }, expectedStages: [], failed: 'technical' },
     { stages: ['swing'], threatOverrides: { 99: { ...threat(99).analysis, job_id: 777 } }, expectedStages: [], failed: 'swing' },
     { stages: ['rebalance'], selected: { rebalance: new Set(['run:50:job:999']) }, expectedStages: [], failed: 'rebalance' },
   ];
@@ -476,4 +480,26 @@ test('Reset Defaults selects only the upcoming output for every stage', () => {
     reset();
     assert.deepEqual([...state.zerodha[stage]], [`${stage}:next`]);
   }
+});
+
+test('Technical Next without selected Rebalance is rejected before reservation, source reads or provider work',async()=>{
+ const result=await executeWorkflow({stages:['technical']});assert.equal(result.reservations,0);assert.deepEqual(result.created,[]);assert.deepEqual(result.runReads,[]);assert.deepEqual(result.errors,[]);assert.equal(result.alerts.length,1);assert.match(result.alerts[0],/Next means a new result from this invocation/);assert.match(result.alerts[0],/saved completed\/partial/);
+ const issue=inputs.technicalInputPlanIssue(true,false,new Set(['technical:next','run:60:job:601']));assert.ok(issue,'saved jobs do not silently replace a missing requested Next source');
+ assert.equal(inputs.technicalInputPlanIssue(false,false,new Set(['technical:next'])),null);
+});
+
+test('Technical accepts completed/partial generated or explicitly selected saved Rebalance without substituting latest',async()=>{
+ for(const rebalanceStatus of ['completed','partial']){
+  const full=await executeWorkflow({rebalanceStatus});assert.deepEqual(full.alerts,[]);assert.deepEqual(full.errors,[]);assert.ok(full.created.some(call=>call.stage==='technical'));
+  const selected=await executeWorkflow({stages:['technical'],selected:{technical:new Set(['run:60:job:601','run:60:job:602'])},rebalanceStatus});assert.deepEqual(selected.alerts,[]);assert.deepEqual(selected.errors,[]);assert.deepEqual(selected.created.map(call=>call.stage),['technical']);assert.deepEqual(selected.runReads,[60]);assert.deepEqual(keys(selected.consensusInputs[0]),['60:601','60:602']);
+ }
+ const source=read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');const preflight=source.indexOf('const inputPlanIssue =');assert.ok(preflight<source.indexOf('const zerodhaPopup =',preflight));assert.match(source,/Choose saved Rebalance inputs/);assert.match(source,/lastRunId: null, activeRunId: null, recommendedStocks: null/);assert.match(source,/errorDetails: \[\]/);
+});
+
+
+test('starting a stage clears previous run/listing/provider diagnostics without changing retained run data',()=>{
+ const previous={state:'failed',lastRunId:448,recommendedStocks:22,error:'Old failure',errorDetails:[{message:'old'}],partialNotice:'old',costUsd:1,provider:'old',model:'old',frozenFinal:{rows:[1]}};const before=structuredClone(previous);let visible={...previous};
+ const callback=declarations.get('markRunning').initializer.arguments[0].getText(ast);
+ const {mark}=load(`export const mark = ${callback};`,{updateStage:(_portfolio,_stage,info)=>{visible={...visible,...info};},recordAutoRebalanceStage:()=>{}});mark('zerodha','technical',{totalLlms:1});
+ assert.equal(visible.state,'running');assert.equal(visible.lastRunId,null);assert.equal(visible.activeRunId,null);assert.equal(visible.recommendedStocks,null);assert.equal(visible.error,null);assert.deepEqual(visible.errorDetails,[]);assert.equal(visible.provider,null);assert.equal(visible.frozenFinal,undefined);assert.equal(visible.totalLlms,1);assert.deepEqual(previous,before);
 });

@@ -17,6 +17,11 @@ function compile(source) {
 const helperModule = { exports: {} };
 new Function("exports", "module", compile(readFileSync(new URL("../lib/autoRebalanceAudit.ts", import.meta.url), "utf8")))(helperModule.exports, helperModule);
 const { AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, restoreAutoRebalanceAuditState } = helperModule.exports;
+const planSource = readFileSync(new URL("../lib/rebalanceStageInputs.ts", import.meta.url), "utf8");
+const planAst = ts.createSourceFile("inputs.ts", planSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const planExports = {};
+new Function("exports", compile(planAst.statements.find(node => node.name?.getText(planAst) === "technicalInputPlanIssue").getText(planAst)))(planExports);
+const { technicalInputPlanIssue } = planExports;
 const rebalanceSource = readFileSync(new URL("../lib/rebalance.ts", import.meta.url), "utf8");
 const rebalanceAst = ts.createSourceFile("rebalance.ts", rebalanceSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const holdingsGuard = rebalanceAst.statements.find((node) => node.name?.getText(rebalanceAst) === "assertIndmoneyHoldingsSnapshot");
@@ -98,7 +103,7 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
-    useCallback: (fn) => fn, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
+    useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
     apiService, sleep: async (ms) => { delays.push(ms); },
     setAuditStates: set("audits"), setCompletionEmailWarnings: set("warnings"), setStates: set("states"),
@@ -328,7 +333,7 @@ test("actual workflow card renders pending and failed history independently of o
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
-      exports: {},
+      exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
@@ -345,6 +350,11 @@ test("actual workflow card renders pending and failed history independently of o
     const html = renderToStaticMarkup(card({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
     assert.match(html, status === "pending" ? /role="status"/ : /role="alert"/);
     assert.match(html, /Completed outputs remain available/);
+    const specificBindings = { ...bindings, specificMode: { zerodha: true }, selectedStages: { zerodha: new Set(["technical"]) } };
+    const specificCard = new Function(...Object.keys(specificBindings), source)(...Object.values(specificBindings));
+    const specificHtml = renderToStaticMarkup(specificCard({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
+    assert.match(specificHtml, /Choose saved Rebalance inputs/);
+    assert.match(specificHtml, /Next means a new result from this invocation/);
     if (status === "failed") {
       assert.match(html, /completion email has not been queued/);
       assert.match(html, /Check saved run history/);
