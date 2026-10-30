@@ -3596,7 +3596,10 @@ function WorkflowStageTile({
   );
 }
 function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasketPreviewDialog>[0]) {
-  return <ScopedZerodhaBasketPreviewDialog key={`${props.basketBrokerLabel ?? "Zerodha"}:${props.tradingViewMarket ?? "india"}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} />;
+  // Keep preferences above the deliberately remounted snapshot/open scope.
+  const [columnPreferences, setColumnPreferences] = useState<Record<string, string[]>>({});
+  const preferenceScope = `${props.basketBrokerLabel ?? "Zerodha"}:${props.tradingViewMarket ?? "india"}`;
+  return <ScopedZerodhaBasketPreviewDialog key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} columnPreferences={{ hiddenColumns: columnPreferences[preferenceScope] ?? [], toggle: label => setColumnPreferences(current => { const hidden = current[preferenceScope] ?? []; return { ...current, [preferenceScope]: hidden.includes(label) ? hidden.filter(value => value !== label) : [...hidden, label] }; }) }} />;
 }
 function ScopedZerodhaBasketPreviewDialog({
   open,
@@ -3642,6 +3645,7 @@ function ScopedZerodhaBasketPreviewDialog({
   primaryButtonLabel,
   basketInfoText = "Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.",
   basketCurrency = "INR",
+  columnPreferences,
 }: {
   open: boolean;
   loading: boolean;
@@ -3686,11 +3690,13 @@ function ScopedZerodhaBasketPreviewDialog({
   primaryButtonLabel?: string;
   basketInfoText?: ReactNode;
   basketCurrency?: "INR" | "USD";
+  columnPreferences?: { hiddenColumns: string[]; toggle: (label: string) => void };
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
   const [unitsDetailId, setUnitsDetailId] = useState<string | null>(null);
-  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const [localHiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const hiddenColumns = columnPreferences?.hiddenColumns ?? localHiddenColumns;
   const [columnMenu, setColumnMenu] = useState<string[] | null>(null);
   useEffect(() => { if (!open) { setUnitsDetailId(null); setColumnMenu(null); } }, [open]);
   const unitsDetailOrder = unitsDetailId ? orders.find(order => order.id === unitsDetailId) : undefined;
@@ -4274,7 +4280,7 @@ function ScopedZerodhaBasketPreviewDialog({
     </div>
     {displayCalculations.popup}
     {unitsDetailOrder ? <BasketUnitsPopup row={unitsDetailOrder} broker={basketBrokerLabel} onClose={() => setUnitsDetailId(null)} /> : null}
-    {columnMenu ? <BasketColumnPicker labels={columnMenu} hidden={hiddenColumns} onToggle={label => setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
+    {columnMenu ? <BasketColumnPicker labels={columnMenu} hidden={hiddenColumns} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
     </>
   );
 }
