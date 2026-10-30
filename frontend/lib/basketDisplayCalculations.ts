@@ -104,18 +104,21 @@ export function displaySizingPrice(quoted: number | null | undefined, limit: num
 /** Current Kite exposure includes unsettled T1 units, valued at the saved holding LTP. */
 export function kiteWeightContext(snapshot: { holdings: { exchange: string; tradingsymbol: string; quantity: number; t1_quantity: number; last_price: number }[]; holdings_count: number; captured_at: string; available_margin: number | null } | null) {
   const values = new Map<string, number>();
-  if (!snapshot || snapshot.holdings_count !== snapshot.holdings.length || !Number.isFinite(Date.parse(snapshot.captured_at)) || snapshot.available_margin === null || !Number.isFinite(snapshot.available_margin)) return { values, totalAssets: null, valid: false };
-  let portfolioValue = 0;
+  if (!snapshot || snapshot.holdings_count !== snapshot.holdings.length || !Number.isFinite(Date.parse(snapshot.captured_at)) || snapshot.available_margin === null || !Number.isFinite(snapshot.available_margin)) return { values, portfolioValue: null, totalAssets: null, valid: false };
+  let portfolioCents = 0;
   for (const holding of snapshot.holdings) {
     const units = holding.quantity + holding.t1_quantity;
-    if (![holding.quantity, holding.t1_quantity, holding.last_price].every(Number.isFinite) || units < 0 || (units > 0 && holding.last_price <= 0)) return { values: new Map<string, number>(), totalAssets: null, valid: false };
-    const value = Math.round(units * holding.last_price * 100) / 100;
+    if (![holding.quantity, holding.t1_quantity, holding.last_price].every(Number.isFinite) || holding.quantity < 0 || holding.t1_quantity < 0 || units < 0 || (units > 0 && holding.last_price <= 0) || !["NSE", "BSE"].includes(holding.exchange?.trim().toUpperCase()) || !holding.tradingsymbol?.trim()) return { values: new Map<string, number>(), portfolioValue: null, totalAssets: null, valid: false };
+    const cents = Math.round(units * holding.last_price * 100);
+    if (!Number.isSafeInteger(cents) || !Number.isSafeInteger(portfolioCents + cents)) return { values: new Map<string, number>(), portfolioValue: null, totalAssets: null, valid: false };
+    const value = cents / 100;
     const key = stockIdentity(holding.tradingsymbol.trim(), holding.exchange.trim());
     values.set(key, (values.get(key) ?? 0) + value);
-    portfolioValue += value;
+    portfolioCents += cents;
   }
+  const portfolioValue = portfolioCents / 100;
   const totalAssets = portfolioValue + snapshot.available_margin;
-  return { values, totalAssets: Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null, valid: Number.isFinite(totalAssets) && totalAssets > 0 };
+  return { values, portfolioValue, totalAssets: Number.isFinite(totalAssets) && totalAssets > 0 ? totalAssets : null, valid: Number.isFinite(totalAssets) && totalAssets > 0 };
 }
 
 export function weightComparison(currentValue: number | null | undefined, totalAssets: number | null, target: number | null | undefined) {

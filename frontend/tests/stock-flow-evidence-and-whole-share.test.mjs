@@ -25,7 +25,7 @@ const selection=load('../lib/zerodhaBasketSelection.ts');
 const math=load('../lib/scoreMatrixMath.ts');
 const presentation=load('../lib/recommendationAuditPresentation.ts',math);
 const threshold=load('../lib/buyThresholdPersistence.ts');
-const evidence=load('../components/RecommendationAuditEvidence.tsx',presentation);
+const evidence=load('../components/RecommendationAuditEvidence.tsx',{...React,...presentation});
 const timestamp='2024-02-01T12:00:00Z';
 function run(response, status='completed', market='india', id=10) {
   return {id,status,created_at:timestamp,prompt:market==='india'?'Act as an India swing-trading strategist.':'Act as an INDmoney US swing-trading strategist.',run_jobs:[{job_id:id*10,job:{provider:'synthetic',model:'fixture',status,response,created_at:timestamp}}]};
@@ -203,4 +203,11 @@ test('zero-position non-buy rows remain displayable but cannot enter executable 
  for(const value of ['-','', '1']) assert.equal(b.isExplicitNonBuyDecision({rows:[{cells:{...cells,'Current Units':value}}]}),false);
  const source=readFileSync(new URL(workflowPath,import.meta.url),'utf8');
  assert.match(source,/filter\(row => !isExplicitNonBuyDecision\(row.stock\)\)/);
+});
+
+test('large legacy evidence keeps only 25 mounted records with accessible pagination and no lost originals',()=>{
+ const legacyHistory=Array.from({length:473},(_,index)=>({run_id:500-index,timestamp,action:'Hold',score:index/1000,formula_version:'legacy-backfill-v1',coverage:'suggested',origin:'saved_suggestion'}));const before=JSON.stringify(legacyHistory);
+ const current={calculation:{score:0,findings:[]},sizing:{findings:[]},coverage:{successful:1,attempted:1}};
+ const started=performance.now();const html=renderToStaticMarkup(React.createElement(evidence.RecommendationAuditEvidence,{comparison:{current,previous:null,coverage:{},comparison:null},verification:null,runId:999,runCount:1,market:'india',currentScore:0,currentAction:'Hold',legacyHistory}));
+ assert.equal((html.match(/Saved suggestion history/g)||[]).length,25);assert.match(html,/Page 1 of 19/);assert.match(html,/Next legacy evidence/);assert.equal(JSON.stringify(legacyHistory),before);assert.ok(html.length<50000);console.log('473-row legacy fixture render ms:',(performance.now()-started).toFixed(2),'HTML bytes:',html.length);
 });

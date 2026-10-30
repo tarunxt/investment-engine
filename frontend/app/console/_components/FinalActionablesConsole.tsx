@@ -4141,21 +4141,24 @@ function HistoricalScoreMatrixPopup({ item, coveredAt, runId, reconstructedDetai
   );
 }
 
-export async function scanStockSourceObservations(market: SwingTradeMarket, symbol: string, onPage: (rows: StockSourceObservation[], examined: number, note: string) => void, active: () => boolean) {
-  let cursor: string | null = null;
-  const cursors = new Set<string>(), rows = new Map<string, StockSourceObservation>();
-  let examined = 0;
-  while (active()) {
+export async function scanStockSourceObservations(market: SwingTradeMarket, symbol: string, onPage: (rows: StockSourceObservation[], examined: number, note: string) => void, active: () => boolean, startCursor: string | null = null) {
+  let cursor = startCursor, examined = 0, note = "", hasMore = true;
+  const cursors = new Set<string>(startCursor ? [startCursor] : []), rows = new Map<string, StockSourceObservation>();
+  // Bound each interaction. Continuation is explicit and retains all accessible pages.
+  for (let pages = 0; pages < 4 && active(); pages++) {
     const page = await apiService.getStockSourceObservations({ market, symbol, cursor });
     if (!active()) return;
     if (page.market !== market || normalizeStockSymbol(page.symbol) !== normalizeStockSymbol(symbol)) throw new Error("Stock source response does not match this selection.");
     for (const row of page.items) if (!rows.has(row.id)) rows.set(row.id, row);
-    examined += page.examined_sources;
-    onPage([...rows.values()].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || b.job_id - a.job_id), examined, page.coverage_note);
-    if (!page.has_more) return;
+    examined += page.examined_sources; note = page.coverage_note; hasMore = page.has_more;
+    if (!hasMore) { cursor = null; break; }
     if (!page.next_cursor || cursors.has(page.next_cursor)) throw new Error("Source pagination stopped because the cursor did not advance. Coverage is incomplete.");
     cursor = page.next_cursor; cursors.add(cursor);
   }
+  if (!active()) return;
+  // Publish once per bounded batch rather than sorting/cloning the growing history per response.
+  onPage([...rows.values()], examined, note);
+  return { cursor, hasMore };
 }
 
 export function RetainedSourceFields({ cells }: { cells: Record<string, unknown> }) {
@@ -4164,25 +4167,28 @@ export function RetainedSourceFields({ cells }: { cells: Record<string, unknown>
 }
 
 export function RetainedStockObservations({ market, symbol, saved, reconstructed, onScoreOpen }: { market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[]; onScoreOpen?: (selection: { item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail }) => void }) {
-  const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null }>({ rows: [], examined: 0, note: "", loading: true, error: null });
+  const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null; nextCursor?: string | null; hasMore?: boolean }>({ rows: [], examined: 0, note: "", loading: true, error: null });
   const [attempt, setAttempt] = useState(0);
+  const [scanCursor, setScanCursor] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   useEffect(() => {
     if (typeof apiService.getStockSourceObservations !== "function") return;
     let active = true;
-    void scanStockSourceObservations(market, symbol, (rows, examined, note) => { if (active) setState({ rows, examined, note, loading: true, error: null }); }, () => active).then(() => { if (active) setState(current => ({ ...current, loading: false })); }, (error: unknown) => { if (active) setState(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Retained sources could not be read." })); });
+    void scanStockSourceObservations(market, symbol, (rows, examined, note) => { if (active) setState(current => ({ ...current, rows: [...new Map([...current.rows, ...rows].map(row => [row.id, row])).values()], examined: current.examined + examined, note, loading: true, error: null })); }, () => active, scanCursor).then(result => { if (active && result) setState(current => ({ ...current, loading: false, nextCursor: result.cursor, hasMore: result.hasMore })); }, (error: unknown) => { if (active) setState(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Retained sources could not be read." })); });
     return () => { active = false; };
-  }, [market, symbol, attempt]);
-  const numeric = (value: unknown) => value !== null && value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Number(value) : null;
-  const rows = [
+  }, [market, symbol, attempt, scanCursor]);
+  const rows = useMemo(() => {
+    const numeric = (value: unknown) => value !== null && value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Number(value) : null;
+    const savedRuns = new Set(saved.map(item => item.rebalance_run_id));
+    return [
     ...saved.map(item => ({ id: `saved:${item.id}`, run_id: item.rebalance_run_id, job_id: null, provider: null, model: null, created_at: item.covered_at, stage: "Saved summary", run_status: item.coverage_status, job_status: "", source: `Original saved summary · ${item.formula_version}`, cells: { "original action": item.action, "recorded score": item.score, "historical units": item.historical_current_units, "original amount": item.amount }, score: item.score, action: item.action, derived: historyScoreDerivedAction(item), selection: { item, coveredAt: item.covered_at, runId: item.rebalance_run_id } })),
-    ...reconstructed.filter(row => !saved.some(item => item.rebalance_run_id === row.runId)).map(row => ({ id: `reconstructed:${row.runId}:${row.id}`, run_id: row.runId, job_id: null, provider: null, model: null, created_at: row.coveredAt, stage: "Rebalance reconstruction", run_status: "Original completion unavailable", job_status: "", source: "Reconstructed · current formula, not original saved decision", cells: { "current formula action": row.formulaAction, "current formula score": row.formulaScore, "captured units": row.detail.currentUnits }, score: row.formulaScore, action: null, derived: historyScoreDerivedAction({ score: row.formulaScore, historical_current_units: row.detail.currentUnits, coverage_status: "suggested" }), selection: { item: null, coveredAt: row.coveredAt, runId: row.runId, reconstructedDetail: row.detail } })),
+    ...reconstructed.filter(row => !savedRuns.has(row.runId)).map(row => ({ id: `reconstructed:${row.runId}:${row.id}`, run_id: row.runId, job_id: null, provider: null, model: null, created_at: row.coveredAt, stage: "Rebalance reconstruction", run_status: "Original completion unavailable", job_status: "", source: "Reconstructed · current formula, not original saved decision", cells: { "current formula action": row.formulaAction, "current formula score": row.formulaScore, "captured units": row.detail.currentUnits }, score: row.formulaScore, action: null, derived: historyScoreDerivedAction({ score: row.formulaScore, historical_current_units: row.detail.currentUnits, coverage_status: "suggested" }), selection: { item: null, coveredAt: row.coveredAt, runId: row.runId, reconstructedDetail: row.detail } })),
     ...state.rows.map(row => { const score = numeric(row.cells["recorded score"] ?? row.cells["final score"] ?? row.cells["calculated score"] ?? row.cells.score); const actionKey = Object.keys(row.cells).find(key => key === "action" || key.startsWith("action buy")); const action = actionKey === undefined ? undefined : row.cells[actionKey]; return { ...row, score, action: action == null ? null : String(action), derived: historyScoreDerivedAction({ score, historical_current_units: numeric(row.cells["current units"] ?? row.cells.current_units), coverage_status: ["completed", "partial"].includes(row.job_status) ? "suggested" : "run_failed" }), selection: null }; }),
-  ].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || (b.job_id ?? 0) - (a.job_id ?? 0));
+  ].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || (b.job_id ?? 0) - (a.job_id ?? 0)); }, [saved, reconstructed, state.rows]);
   const pageCount = Math.max(1, Math.ceil(rows.length / 25));
   const currentPage = Math.min(page, pageCount - 1);
   const visibleRows = rows.slice(currentPage * 25, (currentPage + 1) * 25);
-  return <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4"><h3 className="font-semibold">All retained runs containing {symbol} · original source observations</h3><p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">{state.error ? "Scan incomplete:" : "Scan complete:"} {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => { setPage(0); setAttempt(value => value + 1); }}>Retry all retained sources</button></p> : null}<nav aria-label="Retained source history pages" className="mt-3 flex flex-wrap items-center gap-3 text-sm"><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous observations</button><span role="status">Showing {rows.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25, rows.length)} of {rows.length} observations · Page {currentPage + 1} of {pageCount}</span><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next observations</button></nav><div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{visibleRows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : row.selection && onScoreOpen ? <button type="button" className="text-blue-700 underline" onClick={() => onScoreOpen(row.selection!)}>{formatScoreValue(row.score)}</button> : formatScoreValue(row.score)}</td><td className="p-2"><RetainedSourceFields cells={row.cells} /></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}<p className="mt-3 text-xs text-slate-600">{state.note || "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed."}</p></section>;
+  return <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4"><h3 className="font-semibold">All retained runs containing {symbol} · original source observations</h3><p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">{state.error || state.hasMore ? "Scan incomplete:" : "Scan complete:"} {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => { setState({ rows: [], examined: 0, note: "", loading: true, error: null }); setPage(0); setScanCursor(null); setAttempt(value => value + 1); }}>Retry all retained sources</button></p> : null}{state.hasMore && !state.loading && !state.error ? <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => { setState(current => ({ ...current, loading: true, error: null })); setScanCursor(state.nextCursor ?? null); }}>Load more retained sources</button> : null}<nav aria-label="Retained source history pages" className="mt-3 flex flex-wrap items-center gap-3 text-sm"><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous observations</button><span role="status">Showing {rows.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25, rows.length)} of {rows.length} observations · Page {currentPage + 1} of {pageCount}</span><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next observations</button></nav><div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{visibleRows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : row.selection && onScoreOpen ? <button type="button" className="text-blue-700 underline" onClick={() => onScoreOpen(row.selection!)}>{formatScoreValue(row.score)}</button> : formatScoreValue(row.score)}</td><td className="p-2"><RetainedSourceFields cells={row.cells} /></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}<p className="mt-3 text-xs text-slate-600">{state.note || "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed."}</p></section>;
 }
 
 export function historyScoreDerivedAction(item: Pick<FinalActionableHistoryItem, "score" | "historical_current_units" | "coverage_status">): { action: ActionCategory | null; note: string } {
@@ -4278,6 +4284,10 @@ function ScopedStockDetailsButton({
     [effectiveHistoricalRows, persistedRunIds, stock, market],
   );
   const summarySourceRows = useMemo(() => mergeSummarySourceRows(displayedPersistedHistory, matchingHistoricalRows), [displayedPersistedHistory, matchingHistoricalRows]);
+  const [summaryPage, setSummaryPage] = useState(0);
+  const [rawHistoryPage, setRawHistoryPage] = useState(0);
+  const summaryPageCount = Math.max(1, Math.ceil(summarySourceRows.length / 25));
+  const visibleSummaryPage = Math.min(summaryPage, summaryPageCount - 1);
   const historyLoadGeneration = useRef(0);
   useEffect(() => { if (!open) return; return () => { historyLoadGeneration.current += 1; }; }, [open]);
   const loadPersistedHistory = useCallback(async (cursor: string | null, append: boolean) => {
@@ -4285,21 +4295,12 @@ function ScopedStockDetailsButton({
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      let next = cursor;
-      const seen = new Set<string>();
-      let first = !append;
-      do {
-        const response = await apiService.getFinalActionableHistory({ market, symbol: stock.symbol, limit: 200, cursor: next });
-        if (generation !== historyLoadGeneration.current) return;
-        if (response.items.some(item => item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(stock.symbol))) throw new Error("Saved-history scope does not match this stock.");
-        const replacePage = first;
-        setPersistedHistory(current => { const merged = new Map((replacePage ? [] : current).map(item => [item.id, item])); for (const item of response.items) merged.set(item.id, item); return [...merged.values()].sort((a, b) => parseTimestampMs(b.covered_at) - parseTimestampMs(a.covered_at) || b.id - a.id); });
-        first = false;
-        setHistoryCursor(response.next_cursor); setHistoryHasMore(response.has_more);
-        if (!response.has_more) break;
-        if (!response.next_cursor || seen.has(response.next_cursor)) throw new Error("Saved-history pagination did not advance; coverage is incomplete.");
-        seen.add(response.next_cursor); next = response.next_cursor;
-      } while (next);
+      const response = await apiService.getFinalActionableHistory({ market, symbol: stock.symbol, limit: 50, cursor });
+      if (generation !== historyLoadGeneration.current) return;
+      if (response.items.some(item => item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(stock.symbol))) throw new Error("Saved-history scope does not match this stock.");
+      if (response.has_more && (!response.next_cursor || response.next_cursor === cursor)) throw new Error("Saved-history pagination did not advance; coverage is incomplete.");
+      setPersistedHistory(current => { const merged = new Map((append ? current : []).map(item => [item.id, item])); for (const item of response.items) merged.set(item.id, item); return [...merged.values()].sort((a, b) => parseTimestampMs(b.covered_at) - parseTimestampMs(a.covered_at) || b.id - a.id); });
+      setHistoryCursor(response.next_cursor); setHistoryHasMore(response.has_more);
     } catch (error) {
       if (generation !== historyLoadGeneration.current) return;
       setHistoryError(normalizeOperationalErrorMessage(error instanceof Error ? error.message : "Unable to load complete stock history."));
@@ -4377,6 +4378,8 @@ function ScopedStockDetailsButton({
 
     return rows.sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt));
   }, [open, stock]);
+  const rawPageCount = Math.max(1, Math.ceil(Math.max(directHistoricalEvidenceRows.length, stock.rows.length) / 25));
+  const rawPage = Math.min(rawHistoryPage, rawPageCount - 1);
 
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
@@ -4583,6 +4586,7 @@ function ScopedStockDetailsButton({
                 ) : null}
                 <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} />
                 <h4 className="mt-5 mb-2 text-sm font-semibold">Saved summary source rows · including retained recent runs</h4>
+                <nav aria-label="Saved summary history pages" className="flex gap-3 text-sm"><button type="button" disabled={visibleSummaryPage === 0} onClick={() => setSummaryPage(visibleSummaryPage - 1)}>Previous summaries</button><span>Page {visibleSummaryPage + 1} of {summaryPageCount}</span><button type="button" disabled={visibleSummaryPage + 1 >= summaryPageCount} onClick={() => setSummaryPage(visibleSummaryPage + 1)}>Next summaries</button></nav>
                 <p className="mb-2 text-xs text-slate-600">Newest sources first. A retained run without an original saved summary is shown explicitly; its current-formula score is separate from the recorded score and is not substituted into the original-score history average.</p>
                 {summarySourceRows.length ? (
                   <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
@@ -4603,7 +4607,7 @@ function ScopedStockDetailsButton({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {summarySourceRows.map((source) => {
+                        {summarySourceRows.slice(visibleSummaryPage * 25, (visibleSummaryPage + 1) * 25).map((source) => {
                           if (source.kind === "retained") {
                             const item = source.item;
                             return <tr key={`retained:${item.runId}:${item.stock.key}`} className="bg-amber-50/50">
@@ -4680,7 +4684,7 @@ function ScopedStockDetailsButton({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                          {directHistoricalEvidenceRows.map((row) => (
+                          {directHistoricalEvidenceRows.slice(rawPage * 25, (rawPage + 1) * 25).map((row) => (
                             <tr key={row.id} className="bg-white/40">
                               <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                                 <RunJobLink runId={row.runId}>{row.source}</RunJobLink><br />
@@ -4705,7 +4709,7 @@ function ScopedStockDetailsButton({
               </section>
 
               <section className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
-                <h3 className="mb-3 font-semibold text-violet-950">Swing / rebalance all-runs LLM breakup</h3>
+                <h3 className="mb-3 font-semibold text-violet-950">Swing / rebalance all-runs LLM breakup</h3><nav aria-label="Original model history pages" className="mb-2 flex gap-3 text-sm"><button type="button" disabled={rawPage === 0} onClick={() => setRawHistoryPage(rawPage - 1)}>Previous model rows</button><span>Page {rawPage + 1} of {rawPageCount}</span><button type="button" disabled={rawPage + 1 >= rawPageCount} onClick={() => setRawHistoryPage(rawPage + 1)}>Next model rows</button></nav>
                 <div className="overflow-x-auto rounded-lg border border-violet-100 bg-white/75">
                   <table className="min-w-full text-xs">
                     <thead className="bg-violet-100/70 text-left text-violet-900">
@@ -4719,7 +4723,7 @@ function ScopedStockDetailsButton({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-violet-100">
-                      {stock.rows.map((row) => (
+                      {stock.rows.slice(rawPage * 25, (rawPage + 1) * 25).map((row) => (
                         <tr key={`${row.meta.runId}-${row.meta.jobId}-details`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
                             {row.meta.runLabel}<br />{row.meta.provider} {row.meta.model}<br />
