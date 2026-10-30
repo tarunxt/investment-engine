@@ -1,0 +1,67 @@
+name: Upstox runtime metadata (read only)
+
+on:
+  push:
+    branches: [ops/upstox-runtime-metadata]
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect non-secret production runtime metadata
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          command_timeout: 3m
+          script: |
+            set -eu
+            app_root='${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}'
+            "$app_root/backend/.venv/bin/python" - <<'PY'
+            import json, pathlib, shutil, subprocess, urllib.request
+            import boto3
+            from botocore.config import Config
+            result = {"proposed_secret_name": "credx/production/upstox-analytics"}
+            # Never read Environment= values or backend.env. These properties
+            # contain paths/identity only, not command-line secret values.
+            service = subprocess.run(["systemctl", "show", "investor-backend", "--property=User", "--property=FragmentPath", "--property=DropInPaths", "--property=WorkingDirectory"], capture_output=True, text=True, timeout=10)
+            result["service_metadata"] = service.stdout.strip().splitlines()
+            candidates = ["/usr/local/bin/asm-exec", "/srv/investment-engine/tools/aws-secrets-manager/asm-exec", "/srv/credx-uat/tools/aws-secrets-manager", "/srv/credx-uat/tools/aws-secrets-manager/asm-exec"]
+            result["wrapper_candidates"] = [{"path": path, "exists": pathlib.Path(path).exists(), "is_file": pathlib.Path(path).is_file()} for path in candidates]
+            result["asm_exec_on_path"] = shutil.which("asm-exec")
+            result["aws_cli_on_path"] = shutil.which("aws")
+            # IMDS session material stays inside this process. Only the
+            # non-secret instance identity document fields are reported.
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                req = urllib.request.Request("http://169.254.169.254/latest/api/token", method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+                imds_session = opener.open(req, timeout=3).read().decode()
+                req = urllib.request.Request("http://169.254.169.254/latest/dynamic/instance-identity/document", headers={"X-aws-ec2-metadata-token": imds_session})
+                identity = json.loads(opener.open(req, timeout=3).read())
+                result["instance_identity"] = {key: identity.get(key) for key in ["accountId", "region", "instanceId"]}
+            except Exception as error:
+                result["instance_identity_error_type"] = type(error).__name__
+            try:
+                session = boto3.Session()
+                region = result.get("instance_identity", {}).get("region") or session.region_name
+                result["region"] = region
+                config = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 0})
+                identity = session.client("sts", region_name=region or "us-east-1", config=config).get_caller_identity()
+                result["runtime_identity"] = {key: identity[key] for key in ["Account", "Arn"]}
+                if region:
+                    try:
+                        metadata = session.client("secretsmanager", region_name=region, config=config).describe_secret(SecretId=result["proposed_secret_name"])
+                        result["existing_secret_metadata"] = {key: metadata[key] for key in ["ARN", "Name"]}
+                    except Exception as error:
+                        result["secret_metadata_error_type"] = type(error).__name__
+                        result["secret_metadata_error_code"] = getattr(error, "response", {}).get("Error", {}).get("Code")
+            except Exception as error:
+                result["runtime_identity_error_type"] = type(error).__name__
+            print("UPSTOX_RUNTIME_METADATA=" + json.dumps(result, sort_keys=True))
+            PY
