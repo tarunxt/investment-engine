@@ -90,3 +90,65 @@ jobs:
                     result['signed_mcp_http_status'] = getattr(error, 'code', None)
             print("UPSTOX_RUNTIME_METADATA=" + json.dumps(result, sort_keys=True))
             PY
+      - name: Owner IDs and approved exact-secret read-only quote smoke
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          command_timeout: 3m
+          script: |
+            set -eu
+            sudo -u investor -H bash --noprofile --norc <<'APP_SH'
+            set -euo pipefail
+            cd /srv/investor/backend
+            source /srv/investor/deploy/no-docker/load-env-file.sh
+            load_env_file /etc/investor/backend.env
+            .venv/bin/python - <<'OWNER_PY'
+            import asyncio, json, logging
+            logging.disable(logging.CRITICAL)
+            result = {}
+            try:
+                from sqlalchemy import select
+                from app.domains.auth.models import User
+                from app.domains.zerodha.models import ZerodhaCredential
+                from app.infrastructure.database.session import AsyncSessionLocal
+                async def inspect():
+                    async with AsyncSessionLocal() as db:
+                        active = list((await db.execute(select(User.id).where(User.is_active.is_(True)).order_by(User.id).limit(2))).scalars())
+                        owners = list((await db.execute(select(ZerodhaCredential.user_id).distinct().limit(2))).scalars())
+                        return {'active_user_ids_bounded': active, 'kite_owner_ids_bounded': owners, 'sole_active_owner_candidate': active[0] if len(active) == 1 and owners == active else None}
+                result.update(asyncio.run(inspect()))
+            except Exception as error:
+                result['owner_lookup_error_type'] = type(error).__name__
+            print('UPSTOX_OWNER_METADATA=' + json.dumps(result, sort_keys=True))
+            OWNER_PY
+            resolver=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
+            printf '%s  %s\n' 05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f "$resolver" | sha256sum -c --status
+            export UPSTOX_ANALYTICS_TOKEN='{{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}'
+            exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'QUOTE_PY'
+            import json, math, os, urllib.error, urllib.request
+            result = {'operation': 'GET market quote only', 'instrument': 'NSE_EQ|INE848E01016'}
+            try:
+                request = urllib.request.Request('https://api.upstox.com/v2/market-quote/quotes?instrument_key=NSE_EQ%7CINE848E01016', headers={'Authorization': 'Bearer ' + os.environ['UPSTOX_ANALYTICS_TOKEN'], 'Accept': 'application/json'})
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    result['http_status'] = response.status
+                    payload = json.loads(response.read())
+                rows = [row for row in payload.get('data', {}).values() if isinstance(row, dict) and row.get('instrument_token') == result['instrument']]
+                if len(rows) == 1:
+                    row = rows[0]
+                    price = row.get('last_price')
+                    result['valid_quote'] = isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0
+                    if result['valid_quote']:
+                        result.update({'last_price': price, 'last_trade_time': row.get('last_trade_time'), 'source': 'Upstox full quote GET; exact instrument token; exchange last-trade timestamp'})
+                else:
+                    result['valid_quote'] = False
+            except Exception as error:
+                result['error_type'] = type(error).__name__
+                result['http_status'] = getattr(error, 'code', None)
+                result['valid_quote'] = False
+            print('UPSTOX_QUOTE_SMOKE=' + json.dumps(result, sort_keys=True))
+            raise SystemExit(0 if result.get('valid_quote') else 1)
+            QUOTE_PY
+            APP_SH
