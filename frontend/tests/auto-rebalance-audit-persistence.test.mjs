@@ -22,6 +22,8 @@ const planAst = ts.createSourceFile("inputs.ts", planSource, ts.ScriptTarget.Lat
 const planExports = {};
 new Function("exports", compile(planAst.statements.find(node => node.name?.getText(planAst) === "technicalInputPlanIssue").getText(planAst)))(planExports);
 const { technicalInputPlanIssue } = planExports;
+const priceExports = {};
+new Function("exports", compile(readFileSync(new URL("../lib/technicalPriceEvidence.ts", import.meta.url), "utf8")))(priceExports);
 const rebalanceSource = readFileSync(new URL("../lib/rebalance.ts", import.meta.url), "utf8");
 const rebalanceAst = ts.createSourceFile("rebalance.ts", rebalanceSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const holdingsGuard = rebalanceAst.statements.find((node) => node.name?.getText(rebalanceAst) === "assertIndmoneyHoldingsSnapshot");
@@ -56,7 +58,7 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
+function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
@@ -98,7 +100,7 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
     zerodhaPortfolioOverview: async () => ({ latest: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaThreatsLatest: async () => ({ analysis: { captured_at: "2026-10-29T09:17:00Z" } }),
-    zerodhaDisplayQuotes: async () => ({ quotes: [], missing: [] }),
+    zerodhaDisplayQuotes: quoteRead ?? (async () => ({ quotes: [], missing: [] })),
     indmoneyUsCreatePortfolioSnapshot: async () => snapshot,
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
@@ -129,7 +131,7 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
     buildConsensusRows: () => [{ exchange: "NSE", symbol: "TEST" }],
-    buildTechnicalScanMap: () => ({}), technicalPriceEvidence: () => "", buildTechnicalScanPrompt: () => "technical",
+    buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
     buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore: 0, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
     buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1,
@@ -496,4 +498,17 @@ test("kill during stage audit records cancellation on an unstarted stage and pre
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.emails.length, 0);
   assert.equal(h.modelCalls.length, 1);
+});
+
+
+test("Personal API denial still creates Technical and completes frozen Actionables", async () => {
+  const h = harness({quoteRead: async () => {throw Object.assign(new Error("Zerodha denied market-data access (PermissionException). This connection cannot provide live quotes."),{status:403});}});
+  await h.runWorkflow("zerodha");
+  const technical = h.modelCalls.find(call => call.scanLabel === "Technical Scan");
+  assert.ok(technical);
+  assert.match(technical.prompt,/internet_research_no_broker_quotes/);
+  assert.match(technical.prompt,/TECHNICAL_REBALANCE_SOURCES_V1/);
+  assert.doesNotMatch(technical.prompt,/TECHNICAL_PRICE_ANCHORS_V1/);
+  assert.equal(h.view.states.zerodha.technical.state,"completed");
+  assert.equal(h.view.states.zerodha.actionables.state,"completed");
 });

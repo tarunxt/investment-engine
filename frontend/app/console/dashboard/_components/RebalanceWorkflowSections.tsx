@@ -5,7 +5,7 @@ import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/componen
 import { kiteWeightContext, stockIdentity, validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
-import { technicalPriceEvidence } from "@/lib/technicalPriceEvidence";
+import { resolveTechnicalPriceEvidence } from "@/lib/technicalPriceEvidence";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
 import { shouldSaveThresholds, thresholdSignature, type ThresholdPersistence } from "@/lib/buyThresholdPersistence";
@@ -8188,8 +8188,8 @@ ${zerodhaExecutionMode === "direct_market"
               "No fresh rebalance consensus rows were available for technical scan. Consensus rows are the normalized stock/action rows parsed from completed Rebalance LLM outputs. Run Rebalance in this workflow or explicitly select completed Rebalance outputs in Select Inputs.",
             );
           const instruments = consensus.map(stock => `${stock.exchange}:${stock.symbol}`);
-          const priceEvidence = market === "india" ? technicalPriceEvidence(instruments,
-            await apiService.zerodhaDisplayQuotes(instruments)) : "";
+          const priceEvidence = market === "india" ? await resolveTechnicalPriceEvidence(instruments,
+            keys => apiService.zerodhaDisplayQuotes(keys)) : "";
           const technicalRun = await apiService.createRun(
             buildRunPayload({
               prompt: buildTechnicalScanPrompt(consensus, market) + priceEvidence + `\n[TECHNICAL_REBALANCE_SOURCES_V1]${JSON.stringify({ run_ids: rebalanceInputs.map(run => run.id), job_ids: rebalanceInputs.flatMap(run => run.run_jobs.map(link => link.job_id)) })}[/TECHNICAL_REBALANCE_SOURCES_V1]`,

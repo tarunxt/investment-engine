@@ -171,11 +171,16 @@ The Stock Flow header separately lists the actual saved Rebalance Swing inputs.
 India holdings prompts include all records, settled and T1 units separately, and
 use settled plus T1 for investment exposure. This does not authorize or increase
 sellable order quantities. Historical saved prompts are never rewritten.
-Technical receives timestamped exact-venue broker quotes (at most 15 minutes old)
+Technical attempts timestamped exact-venue broker quotes (at most 15 minutes old)
 and rejects missing/ambiguous anchors. Opt-in worker validation requires every
 listing exactly once and numeric trigger/invalidation prices within 25% of the
 anchor. A different corporate-action price basis must be reconciled before a new
 scan; no automatic scale correction or invented setup is applied.
+A confirmed HTTP 403 Kite market-data PermissionException instead uses the existing
+internet-research prompt, with TECHNICAL_PRICE_MODE_V1 recorded in the saved prompt.
+No broker anchors are emitted in this mode and researched prices are not described
+as broker-verified. Authentication/network errors and invalid returned quotes still
+fail the stage. Input lineage and frozen final calculation checks are unchanged.
 
 Mixed successful/failed provider jobs record a partial stage even when an older
 aggregate Run status says completed. Listing counts are parsed by table headers,
