@@ -1,103 +1,22 @@
-name: Upstox runtime metadata (read only)
-
+name: Upstox owner metadata (read only)
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
-
 permissions:
   contents: read
-
 jobs:
-  metadata:
+  owner:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect non-secret production runtime metadata
+      - name: Inspect owner IDs only without secret operations
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          command_timeout: 3m
-          script: |
-            set -eu
-            app_root='${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}'
-            python_bin=''
-            for candidate in "$app_root/backend/.venv/bin/python" /srv/investor/backend/.venv/bin/python /usr/bin/python3; do
-              if [ -x "$candidate" ]; then python_bin="$candidate"; break; fi
-            done
-            "$python_bin" - <<'PY'
-            import hashlib, json, pathlib, re, shutil, socket, subprocess, urllib.request
-            result = {"proposed_secret_name": "credx/production/upstox-analytics"}
-            # Never read Environment= values or backend.env. These properties
-            # contain paths/identity only, not command-line secret values.
-            service = subprocess.run(["systemctl", "show", "investor-backend", "--property=User", "--property=ActiveState", "--property=FragmentPath", "--property=DropInPaths", "--property=WorkingDirectory"], capture_output=True, text=True, timeout=10)
-            result["service_metadata"] = service.stdout.strip().splitlines()
-            candidates = ["/usr/local/bin/asm-exec", "/srv/investment-engine/tools/aws-secrets-manager/asm-exec", "/srv/credx-uat/tools/aws-secrets-manager", "/srv/credx-uat/tools/aws-secrets-manager/asm-exec"]
-            result["wrapper_candidates"] = [{"path": path, "exists": pathlib.Path(path).exists(), "is_file": pathlib.Path(path).is_file()} for path in candidates]
-            result["asm_exec_on_path"] = shutil.which("asm-exec")
-            result["aws_cli_on_path"] = shutil.which("aws")
-            # IMDS session material stays inside this process. Only the
-            # non-secret instance identity document fields are reported.
-            try:
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                req = urllib.request.Request("http://169.254.169.254/latest/api/token", method="PUT", headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
-                imds_session = opener.open(req, timeout=3).read().decode()
-                req = urllib.request.Request("http://169.254.169.254/latest/dynamic/instance-identity/document", headers={"X-aws-ec2-metadata-token": imds_session})
-                identity = json.loads(opener.open(req, timeout=3).read())
-                result["instance_identity"] = {key: identity.get(key) for key in ["accountId", "region", "instanceId"]}
-            except Exception as error:
-                result["instance_identity_error_type"] = type(error).__name__
-            # Independent checks only: do not repeat the denied secret lookup.
-            root = pathlib.Path('/srv/credx-uat/tools/aws-secrets-manager')
-            wrappers = []
-            if root.is_dir():
-                for path in root.rglob('asm-exec'):
-                    if path.is_file():
-                        wrappers.append({'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-            result['nested_wrappers'] = wrappers
-            result['official_wrapper_sha256'] = '05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f'
-            result['wrapper_matches_official_pin'] = any(row['sha256'] == result['official_wrapper_sha256'] for row in wrappers)
-            start = subprocess.run(['systemctl', 'show', 'investor-backend', '--property=ExecStart', '--value'], capture_output=True, text=True, timeout=10).stdout
-            match = re.search(r'path=([^ ;}]+)', start)
-            result['active_exec_metadata'] = {'executable': match.group(1) if match else None, 'contains_asm_exec': 'asm-exec' in start, 'contains_uvicorn': 'uvicorn' in start, 'uses_run_backend_script': 'run-backend.sh' in start}
-            try:
-                with socket.create_connection(('127.0.0.1', 2773), timeout=1):
-                    result['sma_port_listening'] = True
-            except OSError:
-                result['sma_port_listening'] = False
-            version = subprocess.run(['/usr/bin/aws', '--version'], capture_output=True, text=True, timeout=10)
-            result['aws_cli_version'] = (version.stdout or version.stderr).strip()
-            try:
-                import boto3
-                result['signing_credential_provider_method'] = boto3.Session().get_credentials().method
-            except Exception as error:
-                result['signing_provider_error_type'] = type(error).__name__
-            # Signed MCP initialization only. No tool invocation and no secret
-            # reference is supplied; this cannot request a secret value.
-            verified = next((row['path'] for row in wrappers if row['sha256'] == result['official_wrapper_sha256']), None)
-            if verified:
-                try:
-                    import runpy
-                    resolver = runpy.run_path(verified)
-                    response, session_id = resolver['_mcp_post']({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26', 'capabilities': {}, 'clientInfo': {'name': 'credx-upstox-metadata-check', 'version': '1'}}})
-                    result['signed_mcp_initialize_ok'] = isinstance(response, dict) and 'result' in response and 'error' not in response
-                    if isinstance(response, dict) and 'error' in response:
-                        result['signed_mcp_protocol_error_code'] = response['error'].get('code')
-                except Exception as error:
-                    result['signed_mcp_error_type'] = type(error).__name__
-                    result['signed_mcp_http_status'] = getattr(error, 'code', None)
-            print("UPSTOX_RUNTIME_METADATA=" + json.dumps(result, sort_keys=True))
-            PY
-      - name: Owner IDs and approved exact-secret read-only quote smoke
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          command_timeout: 3m
+          command_timeout: 2m
           script: |
             set -eu
             sudo -u investor -H bash --noprofile --norc <<'APP_SH'
@@ -116,39 +35,15 @@ jobs:
                 from app.infrastructure.database.session import AsyncSessionLocal
                 async def inspect():
                     async with AsyncSessionLocal() as db:
-                        active = list((await db.execute(select(User.id).where(User.is_active.is_(True)).order_by(User.id).limit(2))).scalars())
-                        owners = list((await db.execute(select(ZerodhaCredential.user_id).distinct().limit(2))).scalars())
+                        # Core table columns avoid configuring unrelated ORM relationships.
+                        users = User.__table__
+                        credentials = ZerodhaCredential.__table__
+                        active = list((await db.execute(select(users.c.id).where(users.c.is_active.is_(True)).order_by(users.c.id).limit(2))).scalars())
+                        owners = list((await db.execute(select(credentials.c.user_id).distinct().limit(2))).scalars())
                         return {'active_user_ids_bounded': active, 'kite_owner_ids_bounded': owners, 'sole_active_owner_candidate': active[0] if len(active) == 1 and owners == active else None}
                 result.update(asyncio.run(inspect()))
             except Exception as error:
                 result['owner_lookup_error_type'] = type(error).__name__
             print('UPSTOX_OWNER_METADATA=' + json.dumps(result, sort_keys=True))
             OWNER_PY
-            resolver=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
-            printf '%s  %s\n' 05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f "$resolver" | sha256sum -c --status
-            export UPSTOX_ANALYTICS_TOKEN='{{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}'
-            exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'QUOTE_PY'
-            import json, math, os, urllib.error, urllib.request
-            result = {'operation': 'GET market quote only', 'instrument': 'NSE_EQ|INE848E01016'}
-            try:
-                request = urllib.request.Request('https://api.upstox.com/v2/market-quote/quotes?instrument_key=NSE_EQ%7CINE848E01016', headers={'Authorization': 'Bearer ' + os.environ['UPSTOX_ANALYTICS_TOKEN'], 'Accept': 'application/json'})
-                with urllib.request.urlopen(request, timeout=15) as response:
-                    result['http_status'] = response.status
-                    payload = json.loads(response.read())
-                rows = [row for row in payload.get('data', {}).values() if isinstance(row, dict) and row.get('instrument_token') == result['instrument']]
-                if len(rows) == 1:
-                    row = rows[0]
-                    price = row.get('last_price')
-                    result['valid_quote'] = isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0
-                    if result['valid_quote']:
-                        result.update({'last_price': price, 'last_trade_time': row.get('last_trade_time'), 'source': 'Upstox full quote GET; exact instrument token; exchange last-trade timestamp'})
-                else:
-                    result['valid_quote'] = False
-            except Exception as error:
-                result['error_type'] = type(error).__name__
-                result['http_status'] = getattr(error, 'code', None)
-                result['valid_quote'] = False
-            print('UPSTOX_QUOTE_SMOKE=' + json.dumps(result, sort_keys=True))
-            raise SystemExit(0 if result.get('valid_quote') else 1)
-            QUOTE_PY
             APP_SH
