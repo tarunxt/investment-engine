@@ -28,7 +28,7 @@ jobs:
               if [ -x "$candidate" ]; then python_bin="$candidate"; break; fi
             done
             "$python_bin" - <<'PY'
-            import json, pathlib, shutil, subprocess, urllib.request
+            import hashlib, json, pathlib, re, shutil, socket, subprocess, urllib.request
             result = {"proposed_secret_name": "credx/production/upstox-analytics"}
             # Never read Environment= values or backend.env. These properties
             # contain paths/identity only, not command-line secret values.
@@ -49,23 +49,23 @@ jobs:
                 result["instance_identity"] = {key: identity.get(key) for key in ["accountId", "region", "instanceId"]}
             except Exception as error:
                 result["instance_identity_error_type"] = type(error).__name__
+            # Independent checks only: do not repeat the denied secret lookup.
+            root = pathlib.Path('/srv/credx-uat/tools/aws-secrets-manager')
+            wrappers = []
+            if root.is_dir():
+                for path in root.rglob('asm-exec'):
+                    if path.is_file():
+                        wrappers.append({'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+            result['nested_wrappers'] = wrappers
+            result['official_wrapper_sha256'] = '05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f'
+            result['wrapper_matches_official_pin'] = any(row['sha256'] == result['official_wrapper_sha256'] for row in wrappers)
+            start = subprocess.run(['systemctl', 'show', 'investor-backend', '--property=ExecStart', '--value'], capture_output=True, text=True, timeout=10).stdout
+            match = re.search(r'path=([^ ;}]+)', start)
+            result['active_exec_metadata'] = {'executable': match.group(1) if match else None, 'contains_asm_exec': 'asm-exec' in start, 'contains_uvicorn': 'uvicorn' in start, 'uses_run_backend_script': 'run-backend.sh' in start}
             try:
-                import boto3
-                from botocore.config import Config
-                session = boto3.Session()
-                region = result.get("instance_identity", {}).get("region") or session.region_name
-                result["region"] = region
-                config = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 0})
-                identity = session.client("sts", region_name=region or "us-east-1", config=config).get_caller_identity()
-                result["runtime_identity"] = {key: identity[key] for key in ["Account", "Arn"]}
-                if region:
-                    try:
-                        metadata = session.client("secretsmanager", region_name=region, config=config).describe_secret(SecretId=result["proposed_secret_name"])
-                        result["existing_secret_metadata"] = {key: metadata[key] for key in ["ARN", "Name"]}
-                    except Exception as error:
-                        result["secret_metadata_error_type"] = type(error).__name__
-                        result["secret_metadata_error_code"] = getattr(error, "response", {}).get("Error", {}).get("Code")
-            except Exception as error:
-                result["runtime_identity_error_type"] = type(error).__name__
+                with socket.create_connection(('127.0.0.1', 2773), timeout=1):
+                    result['sma_port_listening'] = True
+            except OSError:
+                result['sma_port_listening'] = False
             print("UPSTOX_RUNTIME_METADATA=" + json.dumps(result, sort_keys=True))
             PY
