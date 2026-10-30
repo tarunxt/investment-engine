@@ -4020,7 +4020,7 @@ function ScopedZerodhaBasketPreviewDialog({
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead>
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                        <th className="px-4 py-3 font-semibold">
+                        <th className="px-4 py-3 font-semibold" data-column-label="Selection">
                           <label className="inline-flex items-center gap-2 whitespace-nowrap">
                             <input
                               type="checkbox"
@@ -4029,7 +4029,6 @@ function ScopedZerodhaBasketPreviewDialog({
                               aria-label="Select or deselect all selectable basket orders, including hidden rows"
                               className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                             />
-                            <span>All Stocks</span>
                           </label>
                         </th>
                         <th className="px-4 py-3 font-semibold">Stock</th>

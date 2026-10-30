@@ -13,7 +13,7 @@ function text(nodes: ReactNode): string {
 export function basketTableColumns(table: ReactNode): string[] {
   if (!isValidElement(table)) return [];
   const element = table as Element;
-  if (element.type === "tr") return flatten(element.props.children).filter(node => isValidElement(node) && node.type === "th").map(node => text((node as Element).props.children));
+  if (element.type === "tr") return flatten(element.props.children).filter(node => isValidElement(node) && node.type === "th").map(node => typeof (node as Element).props["data-column-label"] === "string" ? String((node as Element).props["data-column-label"]) : text((node as Element).props.children));
   for (const child of flatten(element.props.children)) {
     const labels = basketTableColumns(child);
     if (labels.length) return labels;
