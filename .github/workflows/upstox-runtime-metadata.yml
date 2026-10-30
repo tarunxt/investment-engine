@@ -23,14 +23,16 @@ jobs:
           script: |
             set -eu
             app_root='${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}'
-            "$app_root/backend/.venv/bin/python" - <<'PY'
+            python_bin=''
+            for candidate in "$app_root/backend/.venv/bin/python" /srv/investor/backend/.venv/bin/python /usr/bin/python3; do
+              if [ -x "$candidate" ]; then python_bin="$candidate"; break; fi
+            done
+            "$python_bin" - <<'PY'
             import json, pathlib, shutil, subprocess, urllib.request
-            import boto3
-            from botocore.config import Config
             result = {"proposed_secret_name": "credx/production/upstox-analytics"}
             # Never read Environment= values or backend.env. These properties
             # contain paths/identity only, not command-line secret values.
-            service = subprocess.run(["systemctl", "show", "investor-backend", "--property=User", "--property=FragmentPath", "--property=DropInPaths", "--property=WorkingDirectory"], capture_output=True, text=True, timeout=10)
+            service = subprocess.run(["systemctl", "show", "investor-backend", "--property=User", "--property=ActiveState", "--property=FragmentPath", "--property=DropInPaths", "--property=WorkingDirectory"], capture_output=True, text=True, timeout=10)
             result["service_metadata"] = service.stdout.strip().splitlines()
             candidates = ["/usr/local/bin/asm-exec", "/srv/investment-engine/tools/aws-secrets-manager/asm-exec", "/srv/credx-uat/tools/aws-secrets-manager", "/srv/credx-uat/tools/aws-secrets-manager/asm-exec"]
             result["wrapper_candidates"] = [{"path": path, "exists": pathlib.Path(path).exists(), "is_file": pathlib.Path(path).is_file()} for path in candidates]
@@ -48,6 +50,8 @@ jobs:
             except Exception as error:
                 result["instance_identity_error_type"] = type(error).__name__
             try:
+                import boto3
+                from botocore.config import Config
                 session = boto3.Session()
                 region = result.get("instance_identity", {}).get("region") or session.region_name
                 result["region"] = region
