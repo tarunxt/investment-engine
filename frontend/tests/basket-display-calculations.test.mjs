@@ -438,3 +438,14 @@ test('column preferences survive the actual keyed basket close/reopen and snapsh
  view=render({basketBrokerLabel:'IndMoney',tradingViewMarket:'us'});assert.deepEqual(view.props.columnPreferences.hiddenColumns,[]);view.props.columnPreferences.toggle('Amount');view=render();assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);
  view.props.columnPreferences.toggle('Status');assert.deepEqual(render().props.columnPreferences.hiddenColumns,[]);
 });
+
+test('Action New pills follow the displayed derived action and match Side colors',async()=>{
+ for(const fixture of [{score:-1,current:200,action:'Sell All',tone:'bg-red-100 text-red-700'},{score:1,current:200,action:'Trim',tone:'bg-red-100 text-red-700'},{score:1,current:0,action:'Buy New',tone:'bg-emerald-100 text-emerald-700'},{score:1,current:10,action:'Add More',tone:'bg-emerald-100 text-emerald-700'},{score:1,current:95,action:'Hold',tone:'bg-slate-100 text-slate-700'}]){
+  const h=hooks();const stock={symbol:'HAL',exchange:'NSE',action:'Hold',score:fixture.score,currentValue:fixture.current,ltp:100};const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:async()=>history([observation(1,fixture.score)])},createPortal:node=>node});const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],1000,end,'Zerodha');};let state=render();h.flush();await tick();state=render();const pill=find(state.cells(stock),node=>node.type==='span'&&node.props.children===fixture.action);assert.ok(pill,fixture.action);assert.ok(pill.props.className.includes(fixture.tone));assert.match(pill.props.className,/rounded-full.*font-bold/);
+ }
+});
+
+test('selection header keeps its checkbox and a usable picker label without visible All Stocks text',()=>{
+ const workflow=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.doesNotMatch(workflow,/<span>All Stocks<\/span>/);assert.match(workflow,/aria-label="Select or deselect all selectable basket orders, including hidden rows"/);
+ const component=load('../components/BasketColumnPicker.tsx',{Children:React.Children,Fragment:React.Fragment,cloneElement:React.cloneElement,isValidElement:React.isValidElement,Menu:()=>null,BasketModalLayer:()=>null});const input=React.createElement('input',{type:'checkbox','aria-label':'Select all basket orders'});const table=React.createElement('table',{},React.createElement('thead',{},React.createElement('tr',{},React.createElement('th',{'data-column-label':'Selection'},input),React.createElement('th',{},'Status'))));assert.deepEqual(component.basketTableColumns(table),['Selection','Status']);const output=component.BasketColumnTable({children:table,hidden:[],onOpen:()=>{}});assert.ok(find(output,node=>node.type==='input'));assert.ok(find(output,node=>node.props?.['aria-label']==='Choose basket columns'));
+});
