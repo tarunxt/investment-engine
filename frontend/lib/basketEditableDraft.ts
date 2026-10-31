@@ -1,4 +1,4 @@
-export type BasketDraftContext = { action: string | null; suggestedUnits: number | null; source?: string; asOf?: string };
+export type BasketDraftContext = { action: string | null; originalAction?: string; suggestedUnits: number | null; source?: string; asOf?: string };
 export function draftDirection(action: string | null | undefined): 'BUY' | 'SELL' | null {
   if (['Sell All','Trim','Sell'].includes(action ?? '')) return 'SELL';
   if (['Buy New','Add More','Add more','Buy'].includes(action ?? '')) return 'BUY';
