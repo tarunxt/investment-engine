@@ -1,5 +1,7 @@
 "use client";
 
+import { estimateReadinessLabel, isKnownEstimate } from "@/lib/rebalanceReadiness";
+
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -19,6 +21,7 @@ interface LlmModelSelectionPanelProps {
   title?: string;
   emptyMessage?: string;
   loading?: boolean;
+  showEstimateReadiness?: boolean;
   loadingRows?: number;
   modelMixControls?: ReactNode;
   showBulkActions?: boolean;
@@ -53,6 +56,7 @@ type ProviderCostSummary = {
   selectedCount: number;
   estimatedCostInr: number;
   historicalCostInr: number;
+  unknownEstimateCount: number;
 };
 
 function getModelKey(providerName: string, model: string) {
@@ -131,6 +135,7 @@ export function LlmModelSelectionPanel({
   title = "Models",
   emptyMessage = "No configured LLM models are available yet.",
   loading = false,
+  showEstimateReadiness = false,
   loadingRows = 3,
   modelMixControls,
   showBulkActions = true,
@@ -175,7 +180,10 @@ export function LlmModelSelectionPanel({
             model,
             getHistoricalCostInr,
           );
+          const estimate = getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model];
+          const known = isKnownEstimate(estimate);
           return {
+            unknownEstimateCount: summary.unknownEstimateCount + (known ? 0 : multiplier),
             selectedCount: summary.selectedCount + multiplier,
             estimatedCostInr:
               summary.estimatedCostInr +
@@ -184,7 +192,7 @@ export function LlmModelSelectionPanel({
               summary.historicalCostInr + (historicalCostInr ?? 0) * multiplier,
           };
         },
-        { selectedCount: 0, estimatedCostInr: 0, historicalCostInr: 0 },
+        { selectedCount: 0, estimatedCostInr: 0, historicalCostInr: 0, unknownEstimateCount: 0 },
       );
 
       return summaries;
@@ -195,6 +203,9 @@ export function LlmModelSelectionPanel({
     (total, summary) => total + summary.estimatedCostInr,
     0,
   );
+  const unknownEstimateCount = Object.values(providerCostSummaries).reduce((total, summary) => total + summary.unknownEstimateCount, 0)
+    + Math.max(0, selectedKeys.size - Object.values(providerCostSummaries).reduce((total, summary) => total + summary.selectedCount, 0));
+  const estimateLabel = (cost: number, unknown: number) => estimateReadinessLabel(cost, unknown, loading, selectedKeys.size);
   const selectedHistoricalCostInr = Object.values(providerCostSummaries).reduce(
     (total, summary) => total + summary.historicalCostInr,
     0,
@@ -226,7 +237,7 @@ export function LlmModelSelectionPanel({
             Web-capable selected: {selectedWebCapableCount} / {selectedKeys.size}
           </span>
           <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
-            {costSummaryLabel}: {costSummaryValue ?? formatInrCost(selectedEstimatedCostInr)}
+            {costSummaryLabel}: {costSummaryValue ?? (showEstimateReadiness ? estimateLabel(selectedEstimatedCostInr, unknownEstimateCount) : formatInrCost(selectedEstimatedCostInr))}
           </span>
           {selectedHistoricalCostInr > 0 ? (
             <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700 ring-1 ring-amber-100">
@@ -309,6 +320,7 @@ export function LlmModelSelectionPanel({
               selectedCount: 0,
               estimatedCostInr: 0,
               historicalCostInr: 0,
+              unknownEstimateCount: 0,
             };
 
             return (
@@ -360,7 +372,7 @@ export function LlmModelSelectionPanel({
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
                     <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
-                      Selected estimate: {formatInrCost(providerCostSummary.estimatedCostInr)}
+                      Selected estimate: {showEstimateReadiness ? estimateLabel(providerCostSummary.estimatedCostInr, providerCostSummary.unknownEstimateCount) : formatInrCost(providerCostSummary.estimatedCostInr)}
                     </span>
                     {providerCostSummary.historicalCostInr > 0 ? (
                       <span className="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700 ring-1 ring-amber-100">
@@ -489,7 +501,7 @@ export function LlmModelSelectionPanel({
                                   selected && compatible ? "text-slate-600" : "",
                                 )}
                               >
-                                Est. {formatInrCost(estimated)}
+                                Est. {showEstimateReadiness && !isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? "Unknown" : showEstimateReadiness ? estimateReadinessLabel(estimated, 0, false, 1) : formatInrCost(estimated)}
                               </span>
                               {historicalCost !== null ? (
                                 <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100">

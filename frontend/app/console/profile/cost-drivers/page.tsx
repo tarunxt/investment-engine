@@ -1,95 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { URLs } from "@/lib/urls";
-import { apiService } from "@/services/api";
+import type { Diagnostic, MetricRow, Recommendation, TransferBreakdown } from "./types";
+import { useCostUsage } from "./CostUsageProvider";
 
-const COST_DRIVERS_SYNC_EVENT = "credx-cost-drivers:sync";
-
-type CostDriver = {
-  rank: number;
-  driver: string;
-  source: string;
-  monthToDateCost: number;
-  projectedMonthEndCost: number;
-  usageQuantity: number;
-  unit: string;
-  confidence: string;
-  severity: string;
-  whyItCostsMoney: string;
-  suggestedAction: string;
-  estimatedMonthlySavings: number;
-  estimatedMonthlySavingsDisplay?: string | null;
-  linkToAWSConsole?: string | null;
-};
-type Traffic = {
-  path: string;
-  contentType: string;
-  extension: string;
-  requests: number;
-  totalBytes: number;
-  totalGB: number;
-  estimatedTransferCost: number;
-  cacheHitRate: number;
-  topUserAgent: string;
-  classification: string;
-  recommendation: string;
-};
-type EvidenceItem = {
-  label: string;
-  value: string | number;
-  unit?: string | null;
-};
-type Recommendation = {
-  id?: string | null;
-  driverKey: string;
-  severity: string;
-  title: string;
-  explanation?: string;
-  whyThisMatters?: string | null;
-  suggestedAction?: string;
-  recommendedActions?: string[];
-  estimatedMonthlySavingsUsd?: number | null;
-  confidence: string;
-  source: string;
-  evidence?: EvidenceItem[];
-  lastCheckedAt?: string | null;
-  relatedAwsConsoleUrl?: string | null;
-};
-type TransferBreakdown = {
-  classification: string;
-  totalBytes: number;
-  totalGB: number;
-  requests: number;
-  topPaths?: string[];
-};
-type MetricRow = Record<
-  string,
-  string | number | boolean | TransferBreakdown[] | null | undefined
->;
-type Diagnostic = { service: string; status: string; message: string };
-type Dashboard = {
-  summary: Record<string, unknown>;
-  dailyCostTrend: MetricRow[];
-  dataTransferTrend: MetricRow[];
-  topServices: MetricRow[];
-  topUsageTypes: MetricRow[];
-  costDrivers: CostDriver[];
-  traffic: Traffic[];
-  recommendations: Recommendation[];
-  inventory: Record<string, unknown>;
-  debug: Record<string, unknown>;
-  diagnostics?: Diagnostic[];
-};
-
-const money = (v: number) => `$${Number(v || 0).toFixed(2)}`;
+const money = (v: number) => typeof v === "number" && Number.isFinite(v) ? `$${v.toFixed(2)}` : "Unknown";
 const savings = (v?: number | null) =>
   v == null ? "Not enough data" : money(v);
-const gb = (v: number) => `${Number(v || 0).toFixed(2)} GB`;
+const gb = (v: number) => typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(2)} GB` : "Unknown";
 const severityClass = (severity: string) =>
   severity === "critical"
     ? "bg-red-100 text-red-700"
@@ -375,80 +297,9 @@ function TransferBreakdownDialog({
 }
 
 export default function PlatformCostDriversPage() {
-  const [data, setData] = useState<Dashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data, selectedMonth, setSelectedMonth, refreshing, load } = useCostUsage();
   const months = useMemo(() => monthOptions(), []);
-  const [selectedMonth, setSelectedMonth] = useState(() =>
-    monthValue(new Date()),
-  );
-  const [selectedTransferDay, setSelectedTransferDay] =
-    useState<MetricRow | null>(null);
-
-  const load = useCallback(
-    async (refresh = false) => {
-      setError(null);
-      if (refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      try {
-        const response = refresh
-          ? await apiService.post<Dashboard>(
-              URLs.costDrivers.refresh(selectedMonth),
-            )
-          : await apiService.get<Dashboard>(
-              URLs.costDrivers.summary(selectedMonth),
-            );
-        setData(response);
-        if (refresh) {
-          window.dispatchEvent(
-            new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
-              detail: { source: "details", month: selectedMonth, data: response },
-            }),
-          );
-        }
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Unable to load cost drivers",
-        );
-      } finally {
-        if (refresh) {
-          setRefreshing(false);
-        } else {
-          setLoading(false);
-        }
-      }
-    },
-    [selectedMonth],
-  );
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void load();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-
-  useEffect(() => {
-    const handleSync = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        source?: string;
-        month?: string;
-        data?: Dashboard;
-      }>).detail;
-      if (!detail || detail.source === "details") return;
-      if (detail.month && detail.month !== selectedMonth) {
-        setSelectedMonth(detail.month);
-      }
-      if (detail.data && detail.month === selectedMonth) {
-        setData(detail.data);
-      }
-    };
-    window.addEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
-    return () => window.removeEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
-  }, [selectedMonth]);
+  const [selectedTransferDay, setSelectedTransferDay] = useState<MetricRow | null>(null);
 
   const selectedMonthLabel = monthLabel(selectedMonth);
 
@@ -483,7 +334,7 @@ export default function PlatformCostDriversPage() {
             ],
             [
               "Projected overage cost",
-              money((data.summary.projectedOverageUsd as number) || 0),
+              money(data.summary.projectedOverageUsd as number),
               "Internet transfer out only",
             ],
             [
@@ -514,19 +365,6 @@ export default function PlatformCostDriversPage() {
         : [],
     [data],
   );
-
-  if (loading)
-    return (
-      <div className="text-sm text-muted-foreground">
-        Loading Platform Cost Drivers…
-      </div>
-    );
-  if (!data)
-    return (
-      <div className="text-sm text-red-600">
-        {error || "No cost driver data available."}
-      </div>
-    );
 
   return (
     <div className="w-full max-w-7xl space-y-6">
@@ -559,11 +397,6 @@ export default function PlatformCostDriversPage() {
             onChange={(event) => {
               const month = event.target.value;
               setSelectedMonth(month);
-              window.dispatchEvent(
-                new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
-                  detail: { source: "details", month },
-                }),
-              );
             }}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
@@ -580,11 +413,6 @@ export default function PlatformCostDriversPage() {
         </div>
       </div>
       <Separator />
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
       {data.debug.mockMode === true && (
         <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-sm font-medium text-purple-800">
           Demo data — not real AWS account findings. Placeholder media/image

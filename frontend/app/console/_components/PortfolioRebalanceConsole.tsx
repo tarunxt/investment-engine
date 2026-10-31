@@ -33,6 +33,7 @@ import {
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { RebalanceReadiness } from "./RebalanceReadiness";
 import { apiService } from "@/services/api";
 import type {
   IndMoneyUsPortfolioSnapshotDetail,
@@ -249,7 +250,7 @@ function RebalanceInputBox({
   market: SwingTradeMarket;
   basePrompt: string;
 }) {
-  const { setPrompt, setOutputSourceSelection } = useDashboard();
+  const { setPrompt, setOutputSourceSelection, prompt, selectedTargets, submitting } = useDashboard();
   const [portfolioSnapshot, setPortfolioSnapshot] =
     useState<PortfolioSnapshot>(null);
   const [threatAnalysis, setThreatAnalysis] = useState<ThreatAnalysis>(null);
@@ -264,10 +265,12 @@ function RebalanceInputBox({
     () => new Set(),
   );
   const lastGeneratedPromptRef = useRef("");
+  const inputRequestRef = useRef(0);
 
   const previousClose = useMemo(() => getPreviousMarketClose(market), [market]);
 
   const loadInputs = useCallback(async () => {
+    const request = ++inputRequestRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -300,24 +303,27 @@ function RebalanceInputBox({
         run.run_jobs.map((link) => getSwingJobSelectionId(run.id, link)),
       );
 
+      if (request !== inputRequestRef.current) return;
       setPortfolioSnapshot(portfolioRes.latest as PortfolioSnapshot);
       setThreatAnalysis(threatsRes.analysis as ThreatAnalysis);
       setSwingRuns(fullRuns);
       setSelectedSwingJobIds(new Set(allSwingJobIds));
     } catch (err) {
+      if (request !== inputRequestRef.current) return;
       setError(normalizeError(err));
       setPortfolioSnapshot(null);
       setThreatAnalysis(null);
       setSwingRuns([]);
       setSelectedSwingJobIds(new Set());
     } finally {
-      setLoading(false);
+      if (request === inputRequestRef.current) setLoading(false);
     }
   }, [market, portfolio, previousClose]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadInputs();
+    return () => { inputRequestRef.current += 1; };
   }, [loadInputs]);
 
   const selectedSwingRuns = useMemo(
@@ -483,6 +489,12 @@ function RebalanceInputBox({
 
   return (
     <>
+    <RebalanceReadiness
+      loading={loading} error={error}
+      portfolio={portfolioSnapshot} threats={threatAnalysis}
+      selectedSwingCount={selectedSwingRuns.reduce((count, run) => count + run.run_jobs.filter((link) => Boolean(link.job.response?.trim())).length, 0)}
+      blockedReason={inputError || (submitting ? "Submission in progress." : !prompt.trim() ? "Enter a prompt." : selectedTargets.size === 0 ? "Select at least one model." : null)}
+    />
     <Card
       className="overflow-hidden border border-gray-200 shadow-sm"
       size="sm"
@@ -844,6 +856,7 @@ function RebalanceInputBox({
       runActionLabel="Run Rebalance"
       runButtonClassName="bg-emerald-600 text-white hover:bg-emerald-500 focus-visible:border-emerald-600 focus-visible:ring-emerald-300"
       submitBlockedReason={inputError}
+      showEstimateReadiness
     />
     </>
   );
