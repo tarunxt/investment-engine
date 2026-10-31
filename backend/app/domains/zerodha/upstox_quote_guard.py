@@ -141,9 +141,7 @@ class QuoteGuard:
             cached = await self.cached()
             if cached is not None:
                 return cached
-            # No mapping download or provider request until shared budget admits.
-            if not await self.admit():
-                return []
+            # Fetch reserves quota immediately before authenticated dispatch.
             rows = await fetch(self)
             await self.redis.set(self.cache, json.dumps(rows), ex=CACHE_SECONDS if rows else FAILURE_SECONDS)
             return rows

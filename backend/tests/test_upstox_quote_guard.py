@@ -125,6 +125,7 @@ def test_cancelled_leader_releases_lock_and_counts_consumed_budget():
             await established(g)
             started = asyncio.Event()
             async def fetch(g):
+                assert await g.admit()
                 started.set()
                 await asyncio.Future()
             task = asyncio.create_task(g.run(fetch))
@@ -205,3 +206,27 @@ def test_complete_adapter_uses_shared_guard_without_external_requests(monkeypatc
             assert await redis.hget(g.stats, 'admitted') == '1'
     asyncio.run(run())
     assert 'dummy-secret-do-not-log' not in caplog.text
+
+
+def test_admission_follows_slow_mapping_and_precedes_send(monkeypatch):
+    import httpx
+    from app.domains.zerodha import upstox_quotes as quotes
+    monkeypatch.setenv('UPSTOX_ANALYTICS_TOKEN', 'offline-dummy')
+    events = []
+    async def master(client):
+        events.append('mapping')
+        await asyncio.sleep(.01)
+        return {'NSE:ABC': 'NSE_EQ|INE123456789'}
+    class Guard:
+        async def admit(self):
+            events.append('admission')
+            return True
+        async def count(self, field): pass
+    def send(request):
+        events.append('send')
+        return httpx.Response(200, json={'status': 'success', 'data': {}})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(quotes, 'load_instruments', master)
+    monkeypatch.setattr(quotes.httpx, 'AsyncClient', lambda **kw: real(transport=httpx.MockTransport(send), **kw))
+    asyncio.run(quotes._fetch_quotes(['NSE:ABC'], Guard()))
+    assert events == ['mapping', 'admission', 'send']

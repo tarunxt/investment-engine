@@ -44,6 +44,7 @@ def test_production_and_diagnostic_send_identical_requests_once(monkeypatch):
     # Wire contract is independent of Redis admission; distributed admission is
     # exercised end-to-end in test_upstox_quote_guard.py with mocked transport.
     class Guard:
+        async def admit(self): return True
         async def count(self, field): pass
         async def backoff(self, value): pass
     assert asyncio.run(upstox._fetch_quotes(["NSE:NHPC"], Guard())) == []

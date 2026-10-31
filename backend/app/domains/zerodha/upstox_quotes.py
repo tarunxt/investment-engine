@@ -120,13 +120,16 @@ async def read_upstox_quotes(user_id, instruments):
 
 async def _fetch_quotes(instruments, guard):
     try:
-        # Budget already reserved, including failures and timeout uncertainty.
+        # Mapping is public; reserve quote quota immediately before dispatch so
+        # a slow mapping download cannot bunch previously admitted requests.
         async with asyncio.timeout(15):
             async with httpx.AsyncClient(timeout=6, follow_redirects=False) as client:
                 mapping = await load_instruments(client)
                 requested = {key: mapping[key] for key in instruments if key in mapping}
                 if not requested:
                     await guard.count("unmapped")
+                    return []
+                if not await guard.admit():
                     return []
                 request = build_quote_request(client, requested.values(), os.environ["UPSTOX_ANALYTICS_TOKEN"])
                 response = await client.send(request)
