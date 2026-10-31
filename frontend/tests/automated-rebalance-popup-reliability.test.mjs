@@ -16,13 +16,15 @@ const clientSource = readFileSync(
   ),
   "utf8",
 );
-const workflowSource = readFileSync(
+const baseWorkflowSource = readFileSync(
   new URL(
     "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
     import.meta.url,
   ),
   "utf8",
 );
+const workflowSource = baseWorkflowSource + "\n" + readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
+const sharedTileSource = readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
 const stockFlowSource = readFileSync(
   new URL(
     "../app/console/dashboard/_components/StockFlowTabs.tsx",
@@ -107,9 +109,9 @@ test("shared order previews expose the correct broker in the close action", () =
 });
 
 test("stage cards keep every shortcut as an independent native button", () => {
-  const tileStart = workflowSource.indexOf("function WorkflowStageTile");
-  const tileEnd = workflowSource.indexOf("function ZerodhaBasketPreviewDialog", tileStart);
-  const tileSource = workflowSource.slice(tileStart, tileEnd);
+  const tileStart = sharedTileSource.indexOf("function WorkflowStageTile");
+  const tileEnd = sharedTileSource.length;
+  const tileSource = sharedTileSource.slice(tileStart, tileEnd);
 
   assert.match(tileSource, /<article[\s\S]*?aria-label=\{`\$\{selectable/);
   assert.doesNotMatch(tileSource, /<button[\s\S]*?role="button"/);

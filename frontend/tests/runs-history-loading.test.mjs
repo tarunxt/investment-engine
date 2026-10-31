@@ -8,6 +8,10 @@ function read(relativePath) {
 }
 
 function loadModule(relativePath, imports = {}, suffix = "") {
+  if (relativePath.endsWith('runs/page.tsx')) {
+    imports['@/lib/portfolioStageHistory'] = loadModule('../lib/portfolioStageHistory.ts');
+    if (imports['@/services/api']?.apiService) imports['@/services/api'].apiService.getAutoRebalanceHistory ??= async () => ({ items: [], total: 0 });
+  }
   const output = ts.transpileModule(read(relativePath) + suffix, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,

@@ -217,7 +217,7 @@ test('rebalance prompts distinguish existing holdings from overlapping Swing can
   }
 });
 
-const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');
+const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx') + '\n' + read('../components/shared/WorkflowStageTile.tsx');
 const ast = ts.createSourceFile('workflow.tsx', workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = new Map();
 function visit(node) {
