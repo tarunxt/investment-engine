@@ -68,7 +68,7 @@ for(const width of [320,768,1280]){await page.setViewportSize({width,height:900}
   if(await page.getByRole('button',{name:'Hide Verify Reversal',exact:true}).count()!==1)throw Error('Independent toggle changed Verify Reversal');
  }
  if(await page.evaluate(()=>window.comparisonReads)!==comparisonReads)throw Error('Independent toggles caused requests');
- const history=page.getByRole('table',{name:'Stock-Scan History',exact:true});if(await history.getByRole('columnheader').count()!==11||await history.locator('tbody tr').count()!==2)throw Error('Reusable history columns/rows lost: '+JSON.stringify({tables:await history.count(),headers:await history.getByRole('columnheader').count(),rows:await history.locator('tbody tr').count(),head:await history.locator('thead').innerHTML()}));
+ const history=page.getByRole('table',{name:'Stock-Rebalance Scan History',exact:true});if(await history.getByRole('columnheader').count()!==11||await history.locator('tbody tr').count()!==2)throw Error('Reusable history columns/rows lost: '+JSON.stringify({tables:await history.count(),headers:await history.getByRole('columnheader').count(),rows:await history.locator('tbody tr').count(),head:await history.locator('thead').innerHTML()}));
  assertions.push('independent retained/consensus toggles preserve edited values; reusable history keeps eleven columns at '+width);
 
  if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('Audit body overflows '+width);

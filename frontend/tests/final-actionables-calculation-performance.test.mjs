@@ -652,7 +652,7 @@ test('third layer distinguishes failed/absent evidence, traps focus and exposes 
   const h = helpers(); const fixture = parameterFixture(h);
   const section = h.DetailedRationaleScoreSection;
   const html = renderToStaticMarkup(React.createElement(section, { detail: fixture.detail, readOnly: true, onParameterScoreOpen: row => { selectedParameter = row; } }));
-  assert.match(html, /Show original scores and rationale for Average of Score Rationale - Technical Setup/);
+  assert.match(html, /Show original scores and rationale for Average of: Score Rationale - Technical Setup/);
   const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
   assert.match(source, /inert=\{selectedParameter \? true : undefined\}/);
   assert.match(source, /onParameterScoreOpen=\{setSelectedParameter\}/);
@@ -845,7 +845,7 @@ test('detail lifecycle skips closed matrix work, keeps empty-history memo stable
 });
 
 
-test('Stock-Scan History is reusable with all eleven columns, immutable data and preserved row/control actions',()=>{
+test('Stock-Rebalance Scan History is reusable with all eleven columns, immutable data and preserved row/control actions',()=>{
  const {StockScanHistory,STOCK_SCAN_HISTORY_COLUMNS}=imported;
  assert.equal(STOCK_SCAN_HISTORY_COLUMNS.length,11);
  const rows=[{id:'saved',cells:['NSE:HAL','saved timestamp','suggested','Buy New','Hold','2','—','1/2','100','1/0','200']},{id:'retained',cells:['NSE:HAL','retained timestamp','Retained output · original summary not saved','Trim','—','—','-1.5','1/2','100','-1/5','200']}];
@@ -853,7 +853,7 @@ test('Stock-Scan History is reusable with all eleven columns, immutable data and
  const renderRow=row=>React.createElement('tr',{key:row.id},...row.cells.map((cell,index)=>React.createElement('td',{key:index},index===5?React.createElement('button',{'aria-label':'Open '+row.id+' score',onClick:()=>clicked.push(row.id)},cell):cell)));
  const props={rows,renderRow,controls:React.createElement('button',{onClick:()=>clicked.push('page')},'Next page')};
  const html=renderToStaticMarkup(React.createElement(StockScanHistory,props));
- assert.match(html,/aria-label="Stock-Scan History"/);assert.equal((html.match(/<th /g)??[]).length,11);assert.equal((html.match(/<td/g)??[]).length,22);
+ assert.match(html,/aria-label="Stock-Rebalance Scan History"/);assert.equal((html.match(/<th /g)??[]).length,11);assert.equal((html.match(/<td/g)??[]).length,22);
  for(const label of STOCK_SCAN_HISTORY_COLUMNS)assert.ok(html.includes(label.replaceAll('&','&amp;')));
  const tree=StockScanHistory(props);findElement(tree,'Open saved score').props.onClick();findElement(tree,'Open retained score').props.onClick();findMatching(tree,n=>n.props?.children==='Next page').props.onClick();
  assert.deepEqual(clicked,['saved','retained','page']);assert.deepEqual(rows,before);
@@ -867,4 +867,61 @@ test('only the requested retained-coverage paragraph is omitted; other notices a
  assert.equal(retainedSourceCoverageDisplayNote(removed+' Incomplete coverage: one source failed.'),'Incomplete coverage: one source failed.');
  assert.equal(retainedSourceCoverageDisplayNote('Other retained-source limitation'),'Other retained-source limitation');
  assert.match(retainedSourceCoverageDisplayNote(null),/cannot be reconstructed/);
+});
+
+test('older original Rebalance sources reach the renamed widget without inventing aggregate history',()=>{
+ const original=(runId,extra={})=>({id:`${runId}:job:revision:0`,run_id:runId,job_id:runId+1000,stage:'rebalance',run_status:'completed',job_status:'completed',provider:'fixture',model:'fixture-model',created_at:timestamp,source:'retained_job',cells:{'stock symbol':'TEST0','exchange symbol':'NSE',action:'Hold','current units':0,'score rationale cruxx':2.03},...extra});
+ const old=[original(452),original(450),original(449,{stage:'technical'}),original(448,{cells:{'stock symbol':'OTHER','exchange symbol':'NSE'}}),original(446,{cells:{'stock symbol':'TEST0','exchange symbol':'BSE'}})];
+ assert.equal(imported.originalRebalanceSources([original(453,{cells:{'stock symbol':'NSE:TEST0','exchange symbol':'nse'}})],'TEST0','NSE').length,1);
+ assert.equal(imported.originalRebalanceSources([original(454,{cells:{'stock symbol':'BSE:TEST0','exchange symbol':'NSE'}})],'TEST0','NSE').length,0);
+ const before=structuredClone(old);
+ const scoped=imported.originalRebalanceSources(old,'TEST0','NSE');assert.deepEqual(scoped.map(r=>r.run_id),[452,450]);
+ const merged=imported.mergeSummarySourceRows([],[],[...scoped,scoped[0]]);assert.deepEqual(merged.map(r=>r.runId),[452,450]);assert.ok(merged.every(r=>r.kind==='observation'));
+ assert.equal(imported.originalSourceCell(scoped[0].cells,['recorded score','overall weighted score']),null,'parameter score 2.03 must not become an original overall score');
+ assert.equal(imported.originalSourceCell(scoped[0].cells,['current units']),'0','verified zero survives');
+ assert.equal(imported.originalSourceCell({'current units':1,Current_Units:2},['current units']),null,'ambiguous aliases must not be guessed');
+ assert.equal(imported.originalSourceCell({'source contract status':'Malformed','current units':10},['current units']),null);
+ const saved={id:1,rebalance_run_id:452,coverage_status:'suggested',covered_at:timestamp};
+ assert.deepEqual(imported.mergeSummarySourceRows([saved],[],scoped).map(r=>r.kind),['saved','observation']);assert.deepEqual(old,before);
+ const {ScopedStockDetailsButton,buildConsensusRows}=helpers();assert.ok(ScopedStockDetailsButton&&buildConsensusRows);
+});
+
+test('retained reader shares existing bounded pages with the widget and continues to Run 450 without a second scan',async()=>{
+ const state=[],effectSlots=[];let si=0,ei=0,effects=[],read;const calls=[];
+ const onReadChange=value=>{read=value};
+ const h=helpers({useState(initial){const i=si++;if(!(i in state))state[i]=initial;return[state[i],v=>{state[i]=typeof v==='function'?v(state[i]):v}]},useMemo:fn=>fn(),useEffect(fn,deps){const i=ei++,old=effectSlots[i];if(!old||deps.some((v,j)=>!Object.is(v,old.deps[j]))){old?.cleanup?.();effectSlots[i]={deps};effects.push(()=>effectSlots[i].cleanup=fn())}},apiService:{getStockSourceObservations:async({cursor})=>{calls.push(cursor);const i=cursor?Number(cursor):0;return{market:'india',symbol:'TEST0',items:i>=3?[{id:String(i),run_id:i===3?452:450,job_id:1,stage:'rebalance',run_status:'completed',job_status:'completed',provider:'fixture',model:'fixture',created_at:timestamp,source:'retained_job',cells:{'stock symbol':'TEST0','exchange symbol':'NSE'}}]:[],examined_sources:1,coverage_note:'fixture',has_more:i<4,next_cursor:i<4?String(i+1):null}}}});
+ async function render(){si=0;ei=0;h.RetainedStockObservations({market:'india',symbol:'TEST0',saved:[],reconstructed:[],onReadChange});effects.splice(0).forEach(fn=>fn());await new Promise(r=>setImmediate(r));}
+ await render();await render();await render();assert.deepEqual(calls,[null,'1','2','3']);assert.equal(read.hasMore,true);assert.deepEqual(read.rows.map(r=>r.run_id),[452]);
+ read.loadMore();await render();await render();await render();assert.deepEqual(calls,[null,'1','2','3','4']);assert.deepEqual(read.rows.map(r=>r.run_id),[452,450]);assert.equal(read.hasMore,false);
+ await render();assert.equal(calls.length,5,'ordinary renders cannot repeat the source scan');effectSlots.forEach(e=>e.cleanup?.());
+});
+
+test('score presentation adds one colon/prefix and hides only the requested reconstruction paragraph',()=>{
+ const h=helpers();for(const s of ['Average of Score Rationale Cruxx','Average of: Score Rationale Cruxx','Average of:: Score Rationale Cruxx'])assert.equal(h.formatScoreParameterHeading(s),'Average of: Score Rationale Cruxx');
+ assert.equal(h.formatScoreParameterHeading('Technical scan'),'Technical scan');
+ assert.equal(h.formatScoreMissingReason('Not updated: Not updated: No matching Technical Scan row'),'Not updated: No matching Technical Scan row');
+ const notes=[h.RECONSTRUCTED_HISTORY_EXPLANATION,'Original evidence is incomplete.'];assert.deepEqual(h.visibleHistoricalReadNotes(notes),['Original evidence is incomplete.']);assert.equal(notes.length,2,'saved provenance remains unchanged');
+});
+
+
+test('Technical Scan Ticker Symbol alias joins the exact venue and preserves selected run/job provenance',()=>{
+ const h=helpers(),meta={runId:452,jobId:1452,provider:'fixture',model:'fixture-model',createdAt:timestamp,runLabel:'Selected Technical Scan'};
+ const parsed=h.parseTechnicalScanResponse('| Exchange Symbol | Ticker Symbol | Primary Setup | Bias |\n| --- | --- | --- | --- |\n| NSE | NSE:CGPOWER | Breakout | bullish |',meta);
+ assert.equal(parsed.length,1);assert.equal(parsed[0].runId,452);assert.equal(parsed[0].jobId,1452);
+ const stock={symbol:'CGPOWER',exchange:'NSE',representative:{'Stock Symbol':'CGPOWER'}};
+ assert.equal(h.getTechnicalScanForStock({'SYMBOL:CGPOWER':parsed[0]},stock),parsed[0]);
+ assert.equal(h.getTechnicalScanForStock({'SYMBOL:CGPOWER':{...parsed[0],stockSymbol:'CGPOWER.NS'}},stock)?.jobId,1452);
+ assert.equal(h.getTechnicalScanForStock({'SYMBOL:CGPOWER':{...parsed[0],exchangeSymbol:'BSE'}},stock),null,'symbol fallback cannot cross venues');
+ assert.equal(h.getTechnicalScanForStock({'SYMBOL:CGPOWER':{...parsed[0],market:'us'}},stock),null,'symbol fallback cannot cross known markets');
+ assert.equal(h.getTechnicalScanForStock({},stock),null,'genuine absence remains unavailable');
+});
+
+
+test('verified partial source runs retain completed and partial jobs without manufacturing original scores',()=>{
+ const observations=[[450,2240,'partial'],[450,2241,'completed'],[452,2245,'completed'],[452,2246,'partial']].map(([run_id,job_id,job_status])=>({id:`${run_id}:${job_id}:fixture:0`,run_id,job_id,stage:'rebalance',run_status:'partial',job_status,provider:'fixture',model:'fixture',created_at:timestamp,source:'retained_job',cells:{'stock symbol':'CGPOWER','exchange symbol':'NSE'}}));
+ const before=structuredClone(observations);const scoped=imported.originalRebalanceSources(observations,'CGPOWER','NSE');const merged=imported.mergeSummarySourceRows([],[],scoped);
+ assert.deepEqual(merged.map(row=>row.item.job_id),[2245,2246,2240,2241]);assert.ok(merged.every(row=>row.kind==='observation'&&row.item.run_status==='partial'));assert.deepEqual(observations,before);
+ const h=helpers();const [scan]=h.parseTechnicalScanResponse('| EXCHANGE SYMBOL | STOCK SYMBOL | Primary Setup | Secondary Setups | Bias | Premarket trend | Last 5 candles trend | Confidence Score |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| NSE | CGPOWER | Lower-high pullback | 200DMA/rejection | bearish | 0 | -2 | 8.8 |',{runId:455,jobId:2252,provider:'fixture',model:'fixture',createdAt:timestamp,runLabel:'India 211'});
+ assert.equal(scan.stockSymbol,'CGPOWER');assert.equal(scan.premarketTrend,'0');assert.equal(scan.last5CandlesTrend,'-2');assert.equal(scan.confidenceScore,'8.8');assert.equal(scan.runId,455);assert.equal(scan.jobId,2252);
+ assert.equal(h.getTechnicalScanForStock({'NSE:CGPOWER':scan},{symbol:'CGPOWER',exchange:'NSE',representative:{}}),scan,'canonical observed header/venue is already valid; absence must not be fabricated');
 });

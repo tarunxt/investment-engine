@@ -1,6 +1,6 @@
 "use client";
 import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
-import { mergeSummarySourceRows } from "@/lib/summarySourceRows";
+import { mergeSummarySourceRows, originalRebalanceSources, originalSourceCell } from "@/lib/summarySourceRows";
 import type { StockSourceObservation } from "@/types/api";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -348,6 +348,7 @@ export type StockConsensus = {
 };
 
 export type TechnicalScanResult = {
+  market?: SwingTradeMarket | null;
   stockSymbol: string;
   exchangeSymbol: string;
   primarySetup: string;
@@ -1846,6 +1847,11 @@ function getLatestTechnicalScanSourceMeta(scanMap: TechnicalScanMap) {
 }
 
 
+export function formatScoreParameterHeading(value: string) { return value.replace(/^Average of(?:\s*:)*\s*/i, "Average of: "); }
+export function formatScoreMissingReason(value: string) { return `Not updated: ${value.replace(/^(?:Not updated:\s*)+/i, "")}`; }
+export const RECONSTRUCTED_HISTORY_EXPLANATION = "This exact displayed row was reconstructed from its captured source jobs using current formula settings. It is not the original historical weighted policy or saved decision. Source run/job IDs are preserved for parameter drilldowns.";
+export function visibleHistoricalReadNotes(notes?: string[]) { return (notes ?? []).filter(note => note !== RECONSTRUCTED_HISTORY_EXPLANATION); }
+
 function buildMissingTechnicalScanReason(stock: StockConsensus, technicalScanSourceLabel?: string | null) {
   const sourceClause = technicalScanSourceLabel ? ` (${technicalScanSourceLabel})` : "";
   return `Not updated: No matching Technical Scan${sourceClause} row was found for ${stock.exchange || "UNKNOWN"}/${stock.symbol}. Check that the selected Technical Scan output contains this ticker and that its Stock Symbol matches the rebalance/actionables ticker.`;
@@ -2727,7 +2733,7 @@ function parseTechnicalScanResponse(
 
     const headers = splitMarkdownRow(line).map(normalizeScanHeader);
     const hasStockColumn = headers.some((header) =>
-      ["stock symbol", "symbol", "stock", "ticker"].includes(header),
+      ["stock symbol", "ticker symbol", "symbol", "stock", "ticker"].includes(header),
     );
     const hasSetupColumn = headers.some((header) =>
       header.includes("setup") || header.includes("pattern"),
@@ -2811,6 +2817,7 @@ export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: Techn
         const job = link.job;
         if (!job || job.status !== "completed" || !job.response) return [];
         const meta = {
+          market: getAnalysisRunIdentity(run).market,
           runId: run.id,
           jobId: link.job_id,
           provider: job.provider,
@@ -2865,6 +2872,15 @@ function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistor
 }
 
 export function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
+  const expectedExchange = normalizeScanKey(stock.exchange);
+  const expectedMarket = ["NSE", "BSE"].includes(expectedExchange) ? "india" : ["NASDAQ", "NYSE", "NYSEARCA", "AMEX", "ARCA"].includes(expectedExchange) ? "us" : null;
+  const matchesContext = (scan: TechnicalScanResult) => {
+    const explicitExchange = normalizeScanKey(scan.exchangeSymbol);
+    const annotatedExchange = /^(NSE|BSE|NASDAQ|NYSE|NYSEARCA|AMEX|ARCA):/i.exec(scan.stockSymbol.trim())?.[1]?.toUpperCase()
+      ?? (/\.(NS|NSE)$/i.test(scan.stockSymbol) ? "NSE" : /\.(BO|BSE)$/i.test(scan.stockSymbol) ? "BSE" : null);
+    if (scan.market && expectedMarket && scan.market !== expectedMarket) return false;
+    return [explicitExchange, annotatedExchange].every(exchange => !exchange || exchange === "UNKNOWN" || !expectedExchange || expectedExchange === "UNKNOWN" || exchange === expectedExchange);
+  };
   const symbolCandidates = [
     stock.symbol,
     stock.representative["Stock Symbol"],
@@ -2874,11 +2890,11 @@ export function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: Stock
   for (const symbol of symbolCandidates) {
     const exactScan = scanMap[getStockIdentityKey(stock.exchange, symbol)]
       ?? scanMap[getStockIdentityKey("UNKNOWN", symbol)];
-    if (exactScan) return exactScan;
+    if (exactScan && matchesContext(exactScan)) return exactScan;
 
     for (const candidate of getScanSymbolCandidates(symbol)) {
       const symbolScan = scanMap[`SYMBOL:${candidate}`];
-      if (symbolScan) return symbolScan;
+      if (symbolScan && matchesContext(symbolScan)) return symbolScan;
     }
   }
 
@@ -4174,7 +4190,9 @@ export function retainedSourceCoverageDisplayNote(note?: string | null) {
   return note.replace("All retained owned sources are scanned across pages. Deleted uncaptured outputs and sources with unknown market identity cannot be reconstructed. No provider call or history write is performed.", "").trim();
 }
 
-export function RetainedStockObservations({ market, symbol, saved, reconstructed, onScoreOpen }: { market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[]; onScoreOpen?: (selection: { item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail }) => void }) {
+type RetainedSourceRead = { rows: StockSourceObservation[]; loading: boolean; error: string | null; hasMore?: boolean; loadMore: () => void; retry: () => void };
+
+export function RetainedStockObservations({ market, symbol, saved, reconstructed, onScoreOpen, onReadChange }: { onReadChange?: (read: RetainedSourceRead) => void; market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[]; onScoreOpen?: (selection: { item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail }) => void }) {
   const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null; nextCursor?: string | null; hasMore?: boolean }>({ rows: [], examined: 0, note: "", loading: true, error: null });
   const [attempt, setAttempt] = useState(0);
   const [scanCursor, setScanCursor] = useState<string | null>(null);
@@ -4185,6 +4203,10 @@ export function RetainedStockObservations({ market, symbol, saved, reconstructed
     void scanStockSourceObservations(market, symbol, (rows, examined, note) => { if (active) setState(current => ({ ...current, rows: [...new Map([...current.rows, ...rows].map(row => [row.id, row])).values()], examined: current.examined + examined, note, loading: true, error: null })); }, () => active, scanCursor).then(result => { if (active && result) setState(current => ({ ...current, loading: false, nextCursor: result.cursor, hasMore: result.hasMore })); }, (error: unknown) => { if (active) setState(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Retained sources could not be read." })); });
     return () => { active = false; };
   }, [market, symbol, attempt, scanCursor]);
+  useEffect(() => { onReadChange?.({ rows: state.rows, loading: state.loading, error: state.error, hasMore: state.hasMore,
+    loadMore: () => { if (state.hasMore && !state.loading && !state.error) { setState(current => ({ ...current, loading: true })); setScanCursor(state.nextCursor ?? null); } },
+    retry: () => { setState({ rows: [], examined: 0, note: "", loading: true, error: null }); setPage(0); setScanCursor(null); setAttempt(value => value + 1); },
+  }); }, [state, onReadChange]);
   const rows = useMemo(() => {
     const numeric = (value: unknown) => value !== null && value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Number(value) : null;
     const savedRuns = new Set(saved.map(item => item.rebalance_run_id));
@@ -4255,6 +4277,7 @@ function ScopedStockDetailsButton({
   const [showUncoveredHistory, setShowUncoveredHistory] = useState(false);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [retainedSourceRead, setRetainedSourceRead] = useState<RetainedSourceRead | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [resolvedDetailsData, setResolvedDetailsData] = useState<StockDetailsData | null>(null);
@@ -4293,7 +4316,7 @@ function ScopedStockDetailsButton({
     ),
     [effectiveHistoricalRows, persistedRunIds, stock, market],
   );
-  const summarySourceRows = useMemo(() => mergeSummarySourceRows(displayedPersistedHistory, matchingHistoricalRows), [displayedPersistedHistory, matchingHistoricalRows]);
+  const summarySourceRows = useMemo(() => mergeSummarySourceRows(displayedPersistedHistory, matchingHistoricalRows, originalRebalanceSources(retainedSourceRead?.rows ?? [], stock.symbol, stock.exchange)), [displayedPersistedHistory, matchingHistoricalRows, retainedSourceRead, stock.symbol, stock.exchange]);
   const [summaryPage, setSummaryPage] = useState(0);
   const [rawHistoryPage, setRawHistoryPage] = useState(0);
   const summaryPageCount = Math.max(1, Math.ceil(summarySourceRows.length / 25));
@@ -4614,12 +4637,27 @@ function ScopedStockDetailsButton({
                     Loading available historical suggestions…
                   </div>
                 ) : null}
-                <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} />
+                <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} onReadChange={setRetainedSourceRead} />
                 <StockScanHistory
                   rows={summarySourceRows.slice(visibleSummaryPage * 25, (visibleSummaryPage + 1) * 25)}
                   controls={<nav aria-label="Saved summary history pages" className="flex gap-3 text-sm"><button type="button" disabled={visibleSummaryPage === 0} onClick={() => setSummaryPage(visibleSummaryPage - 1)}>Previous summaries</button><span>Page {visibleSummaryPage + 1} of {summaryPageCount}</span><button type="button" disabled={visibleSummaryPage + 1 >= summaryPageCount} onClick={() => setSummaryPage(visibleSummaryPage + 1)}>Next summaries</button></nav>}
                   emptyState={persistedHistory.length > 0 ? <p className="mb-3 text-sm text-slate-500">No visible suggestions in the loaded history. Use the control above to show Run Failed / Not Mentioned rows.</p> : null}
                   renderRow={(source) => {
+                          if (source.kind === "observation") {
+                            const item = source.item, cell = (names: string[]) => originalSourceCell(item.cells, names) ?? "Not recorded";
+                            return <tr key={`original:${item.id}`} className="bg-blue-50/30">
+                              <td className="px-3 py-2">{stock.symbol}<RetainedSourceFields cells={item.cells} /></td>
+                              <td className="px-3 py-2"><RunJobLink runId={item.run_id}>#{item.run_id} · {item.created_at ? formatDateTime(item.created_at) : "Original timestamp unavailable"}</RunJobLink></td>
+                              <td className="px-3 py-2" title={`${item.source} · Source ${item.id}`}>Original retained Rebalance source · saved summary unavailable<br />Job #{item.job_id} · {item.provider ?? "Provider unavailable"} · {item.model ?? "Model unavailable"}<br />{item.run_status} / {item.job_status}</td>
+                              <td className="px-3 py-2">No aggregate recorded score available</td>
+                              <td className="px-3 py-2">{cell(["action", "action buy add sell all trim hold buy new", "original action"])}</td>
+                              <td className="px-3 py-2" title="Only an explicitly recorded overall weighted score is shown; parameter scores are kept in original fields.">{cell(["recorded score", "overall weighted score"])}</td>
+                              <td className="px-3 py-2">Not reconstructed</td><td className="px-3 py-2">Not aggregated</td>
+                              <td className="px-3 py-2">{cell(["current investment amount", "current value"])}</td>
+                              <td className="px-3 py-2">{cell(["units change"])}/{cell(["current units"])}</td>
+                              <td className="px-3 py-2">{cell(["amount", "total buy amount", "total sell amount"])}</td>
+                            </tr>;
+                          }
                           if (source.kind === "retained") {
                             const item = source.item;
                             return <tr key={`retained:${item.runId}:${item.stock.key}`} className="bg-amber-50/50">
@@ -4661,6 +4699,9 @@ function ScopedStockDetailsButton({
                           </tr>
                         ); }}
                 />
+                {retainedSourceRead?.loading ? <p role="status" className="text-xs text-slate-500">Reading original retained Rebalance sources…</p> : null}
+                {retainedSourceRead?.error ? <p role="alert">Original source coverage incomplete: {retainedSourceRead.error} <button type="button" onClick={retainedSourceRead.retry}>Retry original sources</button></p> : null}
+                {retainedSourceRead?.hasMore ? <button type="button" disabled={retainedSourceRead.loading || Boolean(retainedSourceRead.error)} onClick={retainedSourceRead.loadMore} className="my-3 rounded border px-3 py-2">Load older original Rebalance sources</button> : null}
                 {historyHasMore ? (
                   <div className="mb-3 p-3 text-center">
                     <Button
@@ -5243,12 +5284,12 @@ function DetailedRationaleScoreSection({
               onClick={() => openCalculationColumn(row)}
               title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
             >
-              {row.parameter}
+              {formatScoreParameterHeading(row.parameter)}
             </button>
-          ) : row.parameter}
+          ) : formatScoreParameterHeading(row.parameter)}
           {row.missingReason ? (
             <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-700">
-              Not updated: {row.missingReason}
+              {formatScoreMissingReason(row.missingReason)}
             </p>
           ) : null}
           {rangeIssue ? (
@@ -5259,7 +5300,7 @@ function DetailedRationaleScoreSection({
         </td>
         <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
           {onParameterScoreOpen ? (
-            <button type="button" className="cursor-pointer rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 focus:ring-2 focus:ring-blue-500" onClick={() => onParameterScoreOpen(row)} aria-label={`Show original scores and rationale for ${row.parameter}`}>{formatScoreValue(row.score)}</button>
+            <button type="button" className="cursor-pointer rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 focus:ring-2 focus:ring-blue-500" onClick={() => onParameterScoreOpen(row)} aria-label={`Show original scores and rationale for ${formatScoreParameterHeading(row.parameter)}`}>{formatScoreValue(row.score)}</button>
           ) : onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
             <button
               type="button"
@@ -5280,7 +5321,7 @@ function DetailedRationaleScoreSection({
               value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
               onChange={(event) => onMultiplierChange(row.id, event.target.value)}
               className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-              aria-label={`Multiplier for ${row.parameter}`}
+              aria-label={`Multiplier for ${formatScoreParameterHeading(row.parameter)}`}
             />
           ) : row.multiplier}
         </td>
@@ -5711,7 +5752,7 @@ function ParameterScoreEvidencePopup({ detail, parameter, observations, onClose 
         }
       }}>
       <div className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4"><h2 id="parameter-evidence-title" className="font-bold">{detail.stockSymbol} · {parameter.parameter}</h2><button type="button" onClick={onClose} aria-label="Close parameter score details" className="rounded border px-3 py-2">Close</button></div>
+        <div className="flex items-start justify-between gap-4"><h2 id="parameter-evidence-title" className="font-bold">{detail.stockSymbol} · {formatScoreParameterHeading(parameter.parameter)}</h2><button type="button" onClick={onClose} aria-label="Close parameter score details" className="rounded border px-3 py-2">Close</button></div>
         {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading original scores and rationale…</p>
           : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load parameter evidence: {result.error}</p>
           : !result.rows.length ? <p className="mt-4">Original per-run score/rationale provenance was not captured for this parameter. No aggregate or latest-source value has been substituted.</p>
@@ -5838,7 +5879,8 @@ export function ScoreMatrixModal({
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
-          {editedDetail.historicalReadNotes?.map((note, index) => <p key={`historical-note-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{note}</p>)}
+          {editedDetail.historicalReadNotes?.includes(RECONSTRUCTED_HISTORY_EXPLANATION) ? <span className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">Current-formula reconstruction</span> : null}
+          {visibleHistoricalReadNotes(editedDetail.historicalReadNotes).map((note, index) => <p key={`historical-note-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{note}</p>)}
           {validationSummary.hasIssues ? (
             <Alert className="border-rose-300 bg-rose-50 text-rose-950">
               <AlertTriangle className="size-4" />
