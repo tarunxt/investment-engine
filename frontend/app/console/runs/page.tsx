@@ -185,14 +185,14 @@ async function loadAllBullpenRuns(signal?: AbortSignal) {
   return items;
 }
 
-function StatusBadge({ status }: { status?: string | null }) {
+function StatusBadge({ status, label }: { status?: string | null; label?: string }) {
   const normalized = normalizeStatus(status);
-  const StatusIcon = STATUS_ICONS[normalized] ?? Clock3;
+  const StatusIcon = label ? Clock3 : STATUS_ICONS[normalized] ?? Clock3;
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1',
-        STATUS_STYLES[normalized] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+        label ? 'bg-amber-50 text-amber-700 ring-amber-200' : STATUS_STYLES[normalized] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
       )}
     >
       <StatusIcon
@@ -201,7 +201,7 @@ function StatusBadge({ status }: { status?: string | null }) {
           (normalized === 'processing' || normalized === 'running') && 'animate-spin',
         )}
       />
-      {normalized.replaceAll('_', ' ')}
+      {label ?? normalized.replaceAll('_', ' ')}
     </span>
   );
 }
@@ -228,7 +228,7 @@ function PortfolioRunTile({
             {run.prompt_preview || 'Run details and generated results'}
           </p>
         </div>
-        <StatusBadge status={run.status} />
+        <StatusBadge status={run.status} label={normalizeStatus(run.status) === 'completed' ? 'Finished · completeness unverified' : undefined} />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 pt-4 text-xs text-gray-500">
         <span>Run #{run.id}</span>

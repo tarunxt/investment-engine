@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { STAGE_ORDER, WorkflowStageTile } from '@/components/shared/WorkflowStageTile';
-import { historicalStageInfo } from '@/lib/portfolioStageHistory';
+import { historicalStageInfo, portfolioResultCompleteness } from '@/lib/portfolioStageHistory';
 import { getRunDetailPathFromPrompt } from '@/lib/runPresentation';
 import { formatCompactStageTime } from '@/lib/datetime';
 import { URLs } from '@/lib/urls';
@@ -16,11 +16,15 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
 }) {
   const detailPath = URLs.routes.console.autoRebalanceRunDetail(group.portfolio === 'india' ? 'zerodha' : 'indmoneyUs', group.sequence);
   const children = runs.filter(run => run.auto_rebalance_portfolio === group.portfolio && run.auto_rebalance_sequence === group.sequence);
+  const completeness = portfolioResultCompleteness(group);
   return (
     <section className="min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm" aria-label={group.label}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-semibold text-gray-950"><Link href={detailPath} className="text-blue-700 underline underline-offset-2">{group.label}</Link></h2>
-        <span className="text-sm capitalize text-gray-600">{group.status.replaceAll('_', ' ')}</span>
+        <div className="text-right text-sm">
+          <span className={completeness.complete ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-800'}>{completeness.label}</span>
+          <p className="text-xs text-gray-500">Execution: {group.status.replaceAll('_', ' ')}</p>
+        </div>
       </div>
       <div role="region" aria-label={`${group.label} six stages; scroll horizontally`} tabIndex={0}
         className="mt-4 overflow-x-auto rounded-xl pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">

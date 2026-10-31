@@ -17,7 +17,7 @@ import {
 import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
 import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
 import { apiService } from '@/services/api';
-import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
+import { displayedUsdCostCurrency, formatUsdCostWithCurrency } from '@/lib/fxPresentation';
 
 const parseApiTimestamp = (value?: string | null) => {
   if (!value || typeof value !== 'string') return null;
@@ -48,7 +48,7 @@ const hasKnownCost = (value?: number | null): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
 const formatCostInr = (usd: number, usdInrRate: number) =>
-  formatUsdAsVerifiedInr(usd, usdInrRate);
+  formatUsdCostWithCurrency(usd, usdInrRate);
 
 const formatNullableCostInr = (value: number | null | undefined, usdInrRate: number) =>
   hasKnownCost(value) ? formatCostInr(value, usdInrRate) : 'Not captured';
@@ -308,7 +308,7 @@ export function RecentJobsTable() {
                                   <th className="px-2 py-2 font-semibold">Status</th>
                                   <th className="px-2 py-2 font-semibold">Run At</th>
                                   <th className="px-2 py-2 font-semibold">Sheets</th>
-                                  <th className="px-2 py-2 font-semibold">Cost (INR)</th>
+                                  <th className="px-2 py-2 font-semibold">Cost ({displayedUsdCostCurrency(usdInrRate)})</th>
                                   <th className="px-2 py-2 font-semibold">Error</th>
                                 </tr>
                               </thead>

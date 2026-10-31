@@ -49,3 +49,16 @@ test("USD costs remain native when no verified conversion is available", () => {
   assert.equal(formatUsdAsVerifiedInr(2, null), "$2.00 (FX unavailable)");
   assert.equal(formatUsdAsVerifiedInr(0.0012, undefined), "$0.001200 (FX unavailable)");
 });
+
+test("recent job currency labels follow verified FX and retain native USD on loading or failure", () => {
+  const { displayedUsdCostCurrency, formatUsdCostWithCurrency } = loadModule();
+  for (const rate of [0, null, undefined, NaN, Infinity, -1]) {
+    assert.equal(displayedUsdCostCurrency(rate), "USD");
+    assert.equal(formatUsdCostWithCurrency(2, rate), "USD $2.00 (FX unavailable)");
+    assert.equal(formatUsdCostWithCurrency(0, rate), "USD $0.00 (FX unavailable)");
+  }
+  assert.equal(displayedUsdCostCurrency(86.125), "INR");
+  assert.equal(formatUsdCostWithCurrency(2, 86.125), "INR ₹172.25");
+  assert.equal(formatUsdCostWithCurrency(0, 86.125), "INR ₹0.00");
+  assert.equal(formatUsdCostWithCurrency(0.0012, null), "USD $0.001200 (FX unavailable)");
+});

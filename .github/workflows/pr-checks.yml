@@ -314,6 +314,7 @@ jobs:
           tests/runs-history-loading.test.mjs
           tests/full-run-history.test.mjs
           tests/final-actionables-run-identity.test.mjs
+          tests/actionables-runs-matching.test.mjs
           tests/final-actionables-consensus-denominator.test.mjs
           tests/final-actionables-history-persistence.test.mjs
           tests/final-actionables-position-context.test.mjs
@@ -466,6 +467,11 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: node scripts/saved-output-offline-playwright.mjs
+
+      - name: Verify final-actionables run matching states offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: node scripts/actionables-runs-matching-offline-playwright.mjs
 
       - name: Verify offline basket fixture interactions and quote counters
         if: matrix.bundler == 'webpack'
