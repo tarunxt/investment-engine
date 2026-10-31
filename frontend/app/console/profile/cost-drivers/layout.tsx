@@ -1,11 +1,10 @@
 import type { ReactNode } from "react";
-import { OptimizationActionCenter } from "./OptimizationActionCenter";
+import { CostUsageProvider } from "./CostUsageProvider";
 
 export default function CostDriversLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="space-y-6">
-      <OptimizationActionCenter />
+    <CostUsageProvider>
       {children}
-    </div>
+    </CostUsageProvider>
   );
 }
