@@ -1,22 +1,22 @@
-name: Upstox policy metadata (read only)
+name: Upstox safe token-format metadata
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
 permissions:
   contents: read
 jobs:
-  owner:
+  format:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect only the new inline policy action and resource
+      - name: Inspect only safe token format and expiry indicators
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          command_timeout: 2m
+          command_timeout: 3m
           script: |
             set -eu
             sudo -u investor -H bash --noprofile --norc <<'APP_SH'
@@ -24,21 +24,25 @@ jobs:
             cd /srv/investor/backend
             source /srv/investor/deploy/no-docker/load-env-file.sh
             load_env_file /etc/investor/backend.env
-            .venv/bin/python - <<'POLICY_PY'
-            import json, logging
-            logging.disable(logging.CRITICAL)
-            result = {'role': 'CredXCostDriverRole', 'policy': 'CredXUpstoxReadOnly'}
-            try:
-                import boto3
-                from botocore.config import Config
-                response = boto3.client('iam', config=Config(connect_timeout=3, read_timeout=5, retries={'max_attempts':0})).get_role_policy(RoleName=result['role'], PolicyName=result['policy'])
-                document = response['PolicyDocument']
-                statements = document.get('Statement', [])
-                if isinstance(statements, dict): statements = [statements]
-                result['statements'] = [{'Effect': statement.get('Effect'), 'Action': statement.get('Action'), 'Resource': statement.get('Resource'), 'Condition': statement.get('Condition')} for statement in statements]
-            except Exception as error:
-                result['error_type'] = type(error).__name__
-                result['error_code'] = getattr(error, 'response', {}).get('Error', {}).get('Code')
-            print('UPSTOX_IAM_POLICY_METADATA=' + json.dumps(result, sort_keys=True))
-            POLICY_PY
+            resolver=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
+            printf '%s  %s\n' 05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f "$resolver" | sha256sum -c --status
+            export UPSTOX_ANALYTICS_TOKEN='{{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}'
+            exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'FORMAT_PY'
+            import base64, datetime, json, os, time
+            value = os.environ['UPSTOX_ANALYTICS_TOKEN']
+            stripped = value.strip()
+            parts = stripped.split('.')
+            result = {'nonempty': bool(value), 'outer_whitespace': value != stripped, 'has_bearer_prefix': stripped.lower().startswith('bearer '), 'looks_like_json': stripped.startswith(('{','[')), 'contains_linebreaks': '\n' in value or '\r' in value, 'jwt_segment_count': len(parts), 'looks_truncated': '...' in value or '\u2026' in value}
+            if len(parts) == 3:
+                try:
+                    payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+                    expiry = payload.get('exp')
+                    result['jwt_has_numeric_expiry'] = isinstance(expiry, (int,float))
+                    if isinstance(expiry, (int,float)):
+                        result['jwt_expired'] = expiry <= time.time()
+                        result['jwt_expiry_utc'] = datetime.datetime.fromtimestamp(expiry,datetime.timezone.utc).isoformat()
+                except Exception:
+                    result['jwt_payload_parseable'] = False
+            print('UPSTOX_TOKEN_FORMAT_METADATA=' + json.dumps(result, sort_keys=True))
+            FORMAT_PY
             APP_SH
