@@ -759,19 +759,8 @@ function AccountFooter({
             </summary>
             <div role="region" aria-label="Account and appearance" className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[min(32rem,70dvh)] overflow-y-auto overscroll-contain rounded-2xl border border-sidebar-border bg-sidebar pb-3 shadow-xl">
                 <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
-                            {getUserInitials(user)}
-                        </div>
-                        <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
-                                {displayName}
-                            </p>
-                            <p className="truncate text-xs text-muted-foreground">
-                                {user?.email}
-                            </p>
-                        </div>
-                    </div>
+                    <p className="truncate text-sm font-semibold">{displayName}</p>
+                    <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
 
                     <div className="mt-3 grid grid-cols-2 gap-2">
                         {ACCOUNT_NAVIGATION.map((item) => (
