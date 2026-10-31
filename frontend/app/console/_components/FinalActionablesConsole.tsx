@@ -4598,7 +4598,6 @@ function ScopedStockDetailsButton({
                     Show Run Failed / Not Mentioned
                   </button>
                 </div>
-                <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">Score-based action applies today’s score-range rules to the exact Recorded Score: [−3, −2) Sell All; [−2, −1) Trim; [−1, 1) Hold; [1, 3] Add more when historical units are positive, otherwise Buy New when known zero. Unknown historical holdings leave the bullish action undetermined. Original recorded action, score, units and amounts are preserved; the derived action changes no orders or saved history. Historical formula context may differ from today’s rules.</p>
                 {historyError ? (
                   <div className="mb-3">
                     <OperationalErrorNotice

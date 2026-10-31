@@ -510,6 +510,8 @@ test('historical score clicks stack locally; outside top close preserves capture
   findElement(render(), 'Open TEST0 captured details').props.onClick({ stopPropagation() {} });
   await Promise.resolve(); await Promise.resolve();
   let tree = render();
+  assert.doesNotMatch(JSON.stringify(tree), /Score-based action applies today’s score-range rules|Historical formula context may differ from today’s rules/);
+  assert.ok(findMatching(tree, node => node.type === imported.StockScanHistory), 'history widget remains available');
   const score = findMatching(tree, node => node.props?.['aria-label']?.startsWith('Open TEST0 score matrix for'));
   assert.ok(score);
   score.props.onClick(); tree = render();
