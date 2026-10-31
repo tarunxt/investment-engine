@@ -50,7 +50,11 @@ export function ThreatMarketCard({
   lastUpdated,
   href,
   emptyMessage,
+  readPending,
+  readStatus,
 }: {
+  readPending?: boolean;
+  readStatus?: string;
   market: DashboardMarket;
   title: string;
   description: string;
@@ -64,7 +68,7 @@ export function ThreatMarketCard({
   const accent = ACCENT_STYLES[market];
 
   return (
-    <section className="relative overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
+    <section aria-busy={readPending || undefined} className="relative overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
       <div className={cn('absolute inset-x-0 top-0 h-32 bg-linear-to-br', accent.gradient)} />
       <div className={cn('absolute -left-10 top-10 size-28 rounded-full blur-3xl', accent.glow)} />
 
@@ -82,6 +86,7 @@ export function ThreatMarketCard({
             </div>
             <h2 className="mt-4 font-serif text-2xl tracking-tight text-slate-950">{title}</h2>
             <p className="mt-2 max-w-xl text-sm leading-7 text-slate-600">{description}</p>
+            {readStatus ? <p role="status" className="mt-2 text-sm font-semibold text-slate-700">{readStatus}</p> : null}
           </div>
 
           <div className="rounded-[24px] border border-slate-200 bg-white/85 px-4 py-3 shadow-sm">
