@@ -1,5 +1,23 @@
 # Final Actionables display provenance
 
+## Run matching retrieval states
+
+Both India and US run groups distinguish loading, failed retrieval, retained
+source data, and confirmed empty results. An unfinished or failed request does
+not imply no matching run or zero consolidated runs/stocks. A retained source
+group is labeled while refreshing or after a failed refresh. A successful check
+distinguishes no qualifying run from a selected group with no parsable stock
+rows. The source disclosure preserves the saved input bundle (or full legacy
+prompt), source IDs and timestamps verbatim; missing text/timestamps are labeled
+unavailable. It does not infer missing sources or claim corrupted data.
+
+The existing matcher and counts remain unchanged: market/stage identity,
+completed/partial status or saved usable model output, latest creation time,
+and whitespace-normalized input bundle equality (full prompt for legacy runs).
+Existing request-generation guards reject stale success and failure responses.
+These are read-only presentation changes with no provider, scan, execution,
+history-write, or account side effects.
+
 The current recommendation view previously combined the latest portfolio
 quantity with the first model's Units Change/Final Units and a multi-model mean.
 For example, two independent jobs proposing changes of 6 and 5 for a captured
