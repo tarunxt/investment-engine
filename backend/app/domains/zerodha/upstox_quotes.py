@@ -18,6 +18,17 @@ MASTER_TTL = 6 * 60 * 60
 RECENT_TRADE_AGE = 120
 
 
+
+def build_quote_request(client, instrument_keys, token):
+    """Shared production/diagnostic wire contract; no retries or identity overrides."""
+    return client.build_request(
+        "GET", "https://api.upstox.com/v2/market-quote/quotes",
+        params={"instrument_key": ",".join(sorted(set(instrument_keys)))},
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json",
+                 "Content-Type": "application/json"},
+    )
+
+
 def configured_for(user_id):
     # No global credential may become an implicit shared market-data account.
     return (str(user_id) == os.getenv("UPSTOX_LTP_OWNER_USER_ID", "")
@@ -111,9 +122,8 @@ async def read_upstox_quotes(user_id, instruments):
                 requested = {key: mapping[key] for key in instruments if key in mapping}
                 if not requested:
                     return []
-                response = await client.get("https://api.upstox.com/v2/market-quote/quotes",
-                    params={"instrument_key": ",".join(sorted(set(requested.values())))},
-                    headers={"Authorization": "Bearer " + os.environ["UPSTOX_ANALYTICS_TOKEN"], "Accept": "application/json"})
+                request = build_quote_request(client, requested.values(), os.environ["UPSTOX_ANALYTICS_TOKEN"])
+                response = await client.send(request)
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict) or payload.get("status") != "success":
