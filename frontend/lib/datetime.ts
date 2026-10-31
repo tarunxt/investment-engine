@@ -55,3 +55,15 @@ export function formatApiTimestamp<TEmptyValue extends string | null = string>(
     timeZoneName,
   });
 }
+
+/** Compact display only; retain the original timestamp for quote eligibility/provenance. */
+export function formatCompactQuoteTime(value: string | null | undefined): string {
+  const date = parseApiTimestamp(value);
+  if (!date) return 'Unavailable';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
+  return `${part('day')} ${part('month')}: ${part('hour')}:${part('minute')}:${part('second')} IST`;
+}

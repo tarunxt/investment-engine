@@ -7,6 +7,7 @@ import * as React from 'react';
 const require = createRequire(import.meta.url);
 function load(path, bindings={}) { bindings = { BasketMetricPopup: () => null, BasketActionSizingPopup: () => null, ...bindings }; const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
 const math=load('../lib/basketDisplayCalculations.ts');
+const dateMath=load('../lib/datetime.ts');
 Object.assign(math,load('../lib/basketActionSizing.ts',math));
 const end='2026-10-28T12:00:00Z', start='2026-10-23T12:00:00Z';
 const observation=(run,score,overrides={})=>({id:run,run_id:run,symbol:'HAL',exchange:'NSE',covered_at:end,score,completed:true,coverage_status:'suggested',...overrides});
@@ -166,7 +167,7 @@ test('actual broker preview renders US copy and labels without India routing con
  const output=ts.transpileModule(`${node.getText(ast)}\nexport {ScopedZerodhaBasketPreviewDialog};`,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  const Button=props=>React.createElement('button',props,props.children),stub=()=>null;
  let sizingAssets;let providerQuotes=[];const tileComponent=()=>null;
- const bindings={BasketColumnTable:props=>props.children,kiteWeightContext:math.kiteWeightContext,kiteHoldingQuantity:math.kiteHoldingQuantity,stockIdentity:math.stockIdentity,validDisplayPrice:math.validDisplayPrice,useBasketDisplayQuotes:()=>({quotes:[],upstoxQuotes:providerQuotes,loading:false}),verifiedFetchedDisplayQuote:math.verifiedFetchedDisplayQuote,useState:initial=>[typeof initial==='function'?initial():initial,()=>{}],useEffect:()=>{},useBasketDisplayCalculations:(_open,_market,_stocks,assets)=>{sizingAssets=assets;return({popupOpen:false,showAll:true,lower:-2,upper:1.5,cells:()=>Array.from({length:9},(_,i)=>React.createElement("td",{key:i},"derived")),headers:null,controls:null,popup:null,setParameters:()=>{}});},portfolioParameterMargin:snapshot=>snapshot?.available_margin ?? null,portfolioParameterAssets:()=>({portfolioValue:100,availableMargin:0,totalAssets:100}),verifiedDisplayQuote:()=>null,displayScoreAccepted:()=>true,isWholeShareOrderSelectable:()=>true,getZerodhaAvailableMarginToneClass:()=>'',getIndiaMarketStatus:()=>({open:false,label:'NSE/BSE closed → Zerodha AMO'}),ZERODHA_BASKET_SECTION_ORDER:['Buy New'],ZERODHA_BASKET_SECTION_LABELS:{'Buy New':'Buy New'},getZerodhaBasketActionForPercent:order=>order.action,compareZerodhaBasketOrdersByScore:()=>0,parseTimestampMs:Date.parse,formatTimestamp:v=>v,formatBasketCurrency:(value,currency)=>`${currency} ${value}`,formatZerodhaLtpRefreshTime:()=>'',formatBasketQuantity:String,formatBasketPercent:String,getZerodhaBasketUnitLimit:()=>null,ZERODHA_ORDER_KINDS:['Market'],Fragment:React.Fragment,Button,cn:(...v)=>v.filter(Boolean).join(' '),Info:stub,X:stub,Loader2:stub,TradingViewUrlListButton:stub,TradingViewSymbolLink:props=>React.createElement('span',null,props.children),PortfolioParametersTile:tileComponent,ScoreMatrixModal:stub,StockDetailsButton:stub,ScoreMatrixButton:stub,ConsensusBreakupButton:stub,WholeShareTrimChoice:stub};
+ const bindings={BasketColumnTable:props=>props.children,kiteWeightContext:math.kiteWeightContext,kiteHoldingQuantity:math.kiteHoldingQuantity,stockIdentity:math.stockIdentity,validDisplayPrice:math.validDisplayPrice,useBasketDisplayQuotes:()=>({quotes:[],upstoxQuotes:providerQuotes,loading:false}),verifiedFetchedDisplayQuote:math.verifiedFetchedDisplayQuote,useState:initial=>[typeof initial==='function'?initial():initial,()=>{}],useEffect:()=>{},useBasketDisplayCalculations:(_open,_market,_stocks,assets)=>{sizingAssets=assets;return({popupOpen:false,showAll:true,lower:-2,upper:1.5,cells:()=>Array.from({length:9},(_,i)=>React.createElement("td",{key:i},"derived")),headers:null,controls:null,popup:null,setParameters:()=>{}});},portfolioParameterMargin:snapshot=>snapshot?.available_margin ?? null,portfolioParameterAssets:()=>({portfolioValue:100,availableMargin:0,totalAssets:100}),verifiedDisplayQuote:()=>null,displayScoreAccepted:()=>true,isWholeShareOrderSelectable:()=>true,getZerodhaAvailableMarginToneClass:()=>'',getIndiaMarketStatus:()=>({open:false,label:'NSE/BSE closed → Zerodha AMO'}),ZERODHA_BASKET_SECTION_ORDER:['Buy New'],ZERODHA_BASKET_SECTION_LABELS:{'Buy New':'Buy New'},getZerodhaBasketActionForPercent:order=>order.action,compareZerodhaBasketOrdersByScore:()=>0,parseTimestampMs:Date.parse,formatTimestamp:v=>v,formatCompactQuoteTime:dateMath.formatCompactQuoteTime,formatBasketCurrency:(value,currency)=>`${currency} ${value}`,formatZerodhaLtpRefreshTime:()=>'',formatBasketQuantity:String,formatBasketPercent:String,getZerodhaBasketUnitLimit:()=>null,ZERODHA_ORDER_KINDS:['Market'],Fragment:React.Fragment,Button,cn:(...v)=>v.filter(Boolean).join(' '),Info:stub,X:stub,Loader2:stub,TradingViewUrlListButton:stub,TradingViewSymbolLink:props=>React.createElement('span',null,props.children),PortfolioParametersTile:tileComponent,ScoreMatrixModal:stub,StockDetailsButton:stub,ScoreMatrixButton:stub,ConsensusBreakupButton:stub,WholeShareTrimChoice:stub};
  const result={exports:{}};new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));
  const props={open:true,loading:false,error:null,orders:[{id:'row',symbol:'ABC',exchange:'NASDAQ',action:'Buy New',side:'BUY',units:1,lastPrice:20,price:20,amount:20,percent:100,orderKind:'Market',stock:{},detail:{calculatedScore:2}}],selectedIds:new Set(),detailsData:{portfolioSnapshot:null},historicalRows:[],formulaConfig:{},buyThreshold:2.5,buyThresholdDraft:'2.50',onBuyThresholdDraftChange:()=>{},onClose:()=>{},onToggle:()=>{},onToggleAll:()=>{},onToggleSection:()=>{},onUnitsChange:()=>{},onPercentChange:()=>{},onOrderKindChange:()=>{},onExecutionModeChange:()=>{},onRefreshLtp:()=>{},onFormulaConfigChange:()=>{},executionMode:'publisher_limit',placing:false,directMarketAvailable:false,submission:null,ltpRefreshing:false,ltpRefreshedAt:null};
  let executions=0;const onPlaceOrder=()=>{executions++;};
@@ -188,7 +189,9 @@ test('actual broker preview renders US copy and labels without India routing con
  const comparisonProps={...props,orders:[{...props.orders[0],exchange:'NSE'}],tradingViewMarket:'india',basketBrokerLabel:'Zerodha',onPlaceOrder};
  const providerHtml=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog(comparisonProps));
  assert.match(providerHtml,/data-provider="upstox"[^>]*><div>INR 123.45/);
- assert.match(providerHtml,/Last trade 2026-10-28/);assert.match(providerHtml,/older last trade display only/);
+ assert.match(providerHtml,/28 Oct: 17:30:00 IST/);assert.match(providerHtml,/older last trade display only/);
+ assert.match(providerHtml,/(?:dateTime|datetime)="2026-10-28T12:00:00Z"/);
+ assert.doesNotMatch(providerHtml,/Last trade|>Display only</);
  assert.equal(comparisonProps.orders[0].lastPrice,20);assert.equal(comparisonProps.orders[0].units,1);assert.equal(executions,0);
  for(const rows of [[],[{...providerQuotes[0],instrument:'BSE:ABC'}],[{...providerQuotes[0],price:0}],[{...providerQuotes[0],source:'Kite exact venue'}]]){
    providerQuotes=rows;const partial=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog(comparisonProps));assert.match(partial,/data-provider="upstox"[^>]*>Unavailable/);
@@ -504,4 +507,19 @@ test('requested verbose basket notes are removed while selection and funding gua
  for(const text of ['Protected MARKET requires backend direct-order access','Using latest synced portfolio snapshot prices until the first quote refresh','Refresh updates the preview and the next basket payload only','Includes safety buffer','rows stay selected only when Final Score'])assert.ok(!source.includes(text),text);
  assert.ok(source.includes('No affordable BUY rows remain after refreshed margin and safety buffer'));
  const display=readFileSync(new URL('../components/BasketDisplayCalculations.tsx',import.meta.url),'utf8');assert.ok(!display.includes('Current displayed Score:'));
+});
+
+
+test('compact quote time uses exact 24-hour IST presentation across date boundaries',()=>{
+ const cases=[
+  ['2026-10-30T10:28:33Z','30 Oct: 15:58:33 IST'],
+  ['2026-10-30T15:58:33+05:30','30 Oct: 15:58:33 IST'],
+  ['2026-10-30 10:28:33','30 Oct: 15:58:33 IST'],
+  ['2026-10-31T18:29:59Z','31 Oct: 23:59:59 IST'],
+  ['2026-10-31T18:30:00Z','1 Nov: 00:00:00 IST'],
+  ['2026-12-31T18:30:00Z','1 Jan: 00:00:00 IST'],
+  ['2028-02-28T18:30:00Z','29 Feb: 00:00:00 IST'],
+ ];
+ for(const [raw,expected] of cases)assert.equal(dateMath.formatCompactQuoteTime(raw),expected);
+ for(const raw of [null,undefined,'','invalid'])assert.equal(dateMath.formatCompactQuoteTime(raw),'Unavailable');
 });
