@@ -128,11 +128,11 @@ test('history loader fetches every bounded page and propagates failure instead o
   const fn = ast.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'loadWorkflowHistory');
   const code = ts.transpileModule(fn.getText(ast) + '\nexport {loadWorkflowHistory}', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const out = {};
-  const api = { getAutoRebalanceHistory: async (portfolio, params) => { calls.push({ portfolio, ...params }); return { items: Array.from({ length: params.offset ? 1 : 250 }, (_, i) => group(portfolio, params.offset + i)), total: 251 }; } };
+  const api = { getAutoRebalanceHistory: async (portfolio, params) => { calls.push({ portfolio, ...params }); return { items: Array.from({ length: Math.min(params.limit, 251 - params.offset) }, (_, i) => group(portfolio, params.offset + i)), total: 251 }; } };
   new Function('apiService', 'exports', code)(api, out);
   for (const portfolio of ['india', 'indmoney_us']) assert.equal((await out.loadWorkflowHistory(portfolio)).length, 251);
-  assert.deepEqual(calls.map(call => call.offset), [0, 250, 0, 250]);
-  api.getAutoRebalanceHistory = async (_, params) => { if (params.offset) throw new Error('saved history unavailable'); return { items: Array(250).fill(group()), total: 251 }; };
+  assert.deepEqual(calls.map(call => call.offset), [0, 50, 100, 150, 200, 250, 0, 50, 100, 150, 200, 250]);
+  api.getAutoRebalanceHistory = async (_, params) => { if (params.offset) throw new Error('saved history unavailable'); return { items: Array(50).fill(group()), total: 251 }; };
   await assert.rejects(out.loadWorkflowHistory('india'), /saved history unavailable/);
 });
 
