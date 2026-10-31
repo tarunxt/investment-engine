@@ -303,6 +303,7 @@ jobs:
           tests/rebalance-stage-inputs.test.mjs
           tests/portfolio-parameters.test.mjs
           tests/basket-display-calculations.test.mjs
+          tests/basket-stable-row-order.test.mjs
           tests/basket-column-preferences.test.mjs
           tests/output-source-jobs.test.mjs
           tests/output-consistency-notice.test.mjs
