@@ -1451,8 +1451,11 @@ function buildZerodhaBasketScoreWarningMessage(orders: ZerodhaBasketPreviewOrder
 }
 
 function compareZerodhaBasketOrdersByScore(left: ZerodhaBasketPreviewOrder, right: ZerodhaBasketPreviewOrder) {
-  const leftAction = getZerodhaBasketActionForPercent(left);
-  const rightAction = getZerodhaBasketActionForPercent(right);
+  // Editable India drafts are grouped by Action New. Their percent changes with
+  // Units, so the legacy percent-derived action must not become a sort key.
+  // Legacy/non-draft baskets keep their existing ordering semantics.
+  const leftAction = left.draftContext ? basketActionGroup(left.draftContext.action) as ActionCategory : getZerodhaBasketActionForPercent(left);
+  const rightAction = right.draftContext ? basketActionGroup(right.draftContext.action) as ActionCategory : getZerodhaBasketActionForPercent(right);
   const leftActionIndex = ZERODHA_BASKET_SECTION_ORDER.indexOf(leftAction);
   const rightActionIndex = ZERODHA_BASKET_SECTION_ORDER.indexOf(rightAction);
   const actionComparison = (leftActionIndex === -1 ? Number.MAX_SAFE_INTEGER : leftActionIndex)
