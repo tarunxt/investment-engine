@@ -25,9 +25,8 @@ const fixture = await readFile(
 const mocks = {
   "@/hooks/useAuth": "export const useAuth = () => ({user:{id:9001}})",
   "@/services/api":
-    "export const apiService = {getDashboardSummary:()=>window.__summaryRead()}",
-  "@/components/shared/LazyMount": "export const LazyMount = () => null",
-  "next/dynamic": "export default () => () => null",
+    "export const apiService = {getDashboardSummary:()=>window.__summaryRead(),zerodhaThreatsLatest:()=>window.__threatRead(),indmoneyUsThreatsLatest:()=>window.__threatRead()}",
+  "next/dynamic": 'import React, {lazy,Suspense} from "react"; export default (load,options) => { const C=lazy(()=>load().then(component=>({default:component}))); return props=><Suspense fallback={options?.loading ? React.createElement(options.loading):null}><C {...props}/></Suspense> }',
   "next/link":
     'import React from "react"; export default ({children,prefetch,...props}) => <a {...props}>{children}</a>',
 };
@@ -98,6 +97,12 @@ try {
     "partial-source",
     "missing-cash",
     "unavailable-fx",
+    "deferred-panels",
+    "loading-panels",
+    "saved-panels",
+    "cached-panels",
+    "empty-panels",
+    "failed-panels",
   ]) {
     const page = await browser.newPage({
       viewport: { width: 1440, height: 1100 },
@@ -115,6 +120,9 @@ try {
       .waitFor();
     if (state === "loading") {
       await page.getByText("Loading…", { exact: true }).first().waitFor();
+      await page.getByText("Loading portfolio summary…", {exact:true}).waitFor();
+      await page.getByText("Loading saved Zerodha India snapshot…", {exact:true}).waitFor();
+      await page.getByText("Loading saved INDmoney US snapshot…", {exact:true}).waitFor();
     } else if (state === "failed") {
       await page
         .getByText("Some dashboard modules could not be refreshed:", {
@@ -180,6 +188,29 @@ try {
           exact: false,
         })
         .waitFor();
+    }
+    if (state.endsWith("-panels")) {
+      const deferred = page.getByText("Not loaded yet · India Threat Pulse. Scroll to this panel to load the saved report.", {exact:true});
+      await deferred.waitFor();
+      assert.equal(await page.evaluate(()=>window.__threatReads),0,"deferred panels must not read reports early");
+      assert.equal(await deferred.locator("..").getAttribute("aria-busy"),"false");
+      if (state !== "deferred-panels") {
+        await deferred.scrollIntoViewIfNeeded();
+        await page.waitForFunction(()=>window.__threatReads===2);
+        if (state === "cached-panels") {
+          await page.getByText("Refreshing saved report…",{exact:true}).first().waitFor();
+          assert.equal(await page.getByText("Refreshing saved report…",{exact:true}).count(),2);
+          assert.equal(await page.getByText("Saved report loaded · See latest scan time below.",{exact:true}).count(),0);
+        } else if (state === "loading-panels") {
+          await page.getByText("Loading saved India Threat Pulse…",{exact:true}).waitFor();
+          await page.getByText("Loading saved US Threat Pulse…",{exact:true}).waitFor();
+        } else {
+          const text=state === "saved-panels" ? "Saved report loaded · See latest scan time below." : state === "failed-panels" ? "Saved report read failed. Displayed data has not been refreshed." : "No saved report available.";
+          await page.getByText(text,{exact:true}).first().waitFor();
+          assert.equal(await page.getByText(text,{exact:true}).count(),2);
+          assert.equal(await page.getByText("Loading saved India Threat Pulse…",{exact:true}).count(),0);
+        }
+      }
     }
     assert.deepEqual(errors, [], `${state}: browser runtime errors`);
     assert.equal(
