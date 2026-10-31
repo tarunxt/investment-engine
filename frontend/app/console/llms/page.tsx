@@ -189,7 +189,7 @@ export default function LlmsPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-6 lg:max-w-none lg:px-0">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-500">LLMs</p>
