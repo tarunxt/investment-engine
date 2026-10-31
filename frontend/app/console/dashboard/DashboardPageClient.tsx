@@ -89,7 +89,7 @@ const ThreatMarketCard = dynamic(
     import("./_components/ThreatMarketCard").then(
       (module) => module.ThreatMarketCard,
     ),
-  { ssr: false },
+  { ssr: false, loading: () => <DashboardThreatCardSkeleton /> },
 );
 
 type DashboardState = {
@@ -1821,7 +1821,7 @@ function DashboardPageForUser({
 
       <section className="grid gap-6 xl:grid-cols-2">
         {showIndiaPortfolioSkeleton ? (
-          <DashboardMarketCardSkeleton />
+          <DashboardMarketCardSkeleton label="Loading saved Zerodha India snapshot…" />
         ) : (
           <MarketPortfolioCard
             dataStatus={totalStatuses.zerodha}
@@ -1913,7 +1913,7 @@ function DashboardPageForUser({
         )}
 
         {showUsPortfolioSkeleton ? (
-          <DashboardMarketCardSkeleton />
+          <DashboardMarketCardSkeleton label="Loading saved INDmoney US snapshot…" />
         ) : (
           <MarketPortfolioCard
             dataStatus={{
@@ -2097,8 +2097,8 @@ function DashboardPageForUser({
         minHeight={360}
         fallback={
           <section className="grid gap-6 xl:grid-cols-2">
-            <DashboardThreatCardSkeleton />
-            <DashboardThreatCardSkeleton />
+            <DashboardThreatCardSkeleton title="India Threat Pulse" deferred />
+            <DashboardThreatCardSkeleton title="US Threat Pulse" deferred />
           </section>
         }
         onVisible={() => {
@@ -2107,11 +2107,13 @@ function DashboardPageForUser({
       >
         <section className="grid gap-6 xl:grid-cols-2">
         {showIndiaThreatSkeleton ? (
-          <DashboardThreatCardSkeleton />
+          <DashboardThreatCardSkeleton title="India Threat Pulse" />
         ) : (
           <ThreatMarketCard
             market="india"
             title="India Threat Pulse"
+            readPending={pendingSections.zerodhaThreat}
+            readStatus={pendingSections.zerodhaThreat ? "Refreshing saved report…" : errorsBySection.zerodhaThreat ? "Saved report read failed. Displayed data has not been refreshed." : dashboard.zerodhaThreat?.report ? "Saved report loaded · See latest scan time below." : "No saved report available."}
             description="Summary of the most important downside signals, protection cues, and severity mix from the latest India threat scan."
             summaryPoints={getThreatSummaryPoints(dashboard.zerodhaThreat)}
             severityCounts={countThreatSeverities(
@@ -2123,6 +2125,8 @@ function DashboardPageForUser({
             emptyMessage={
               dashboard.zerodhaThreat?.report
                 ? null
+                : errorsBySection.zerodhaThreat
+                  ? "The saved report could not be loaded. Reopen the dashboard to retry the read."
                 : indiaSnapshot
                   ? "Run a Zerodha threat scan to populate Table 10 actionables and the India severity pulse."
                   : "Threat insights will appear here after your first India portfolio sync."
@@ -2131,11 +2135,13 @@ function DashboardPageForUser({
         )}
 
         {showUsThreatSkeleton ? (
-          <DashboardThreatCardSkeleton />
+          <DashboardThreatCardSkeleton title="US Threat Pulse" />
         ) : (
           <ThreatMarketCard
             market="us"
             title="US Threat Pulse"
+            readPending={pendingSections.indmoneyThreat}
+            readStatus={pendingSections.indmoneyThreat ? "Refreshing saved report…" : errorsBySection.indmoneyThreat ? "Saved report read failed. Displayed data has not been refreshed." : dashboard.indmoneyThreat?.report ? "Saved report loaded · See latest scan time below." : "No saved report available."}
             description="Quick read on crowded winners, event risk, and capital-protection ideas from the latest INDmoney US threat radar."
             summaryPoints={getThreatSummaryPoints(dashboard.indmoneyThreat)}
             severityCounts={countThreatSeverities(
@@ -2147,6 +2153,8 @@ function DashboardPageForUser({
             emptyMessage={
               dashboard.indmoneyThreat?.report
                 ? null
+                : errorsBySection.indmoneyThreat
+                  ? "The saved report could not be loaded. Reopen the dashboard to retry the read."
                 : usSnapshot
                   ? "Run the INDmoney US threat scan to surface Table 10 actionables on the dashboard."
                   : "Threat insights will appear here after your first INDmoney US snapshot."

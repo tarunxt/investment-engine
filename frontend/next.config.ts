@@ -70,11 +70,7 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         {
-          source: "/database",
-          destination: databaseViewerUrl,
-        },
-        {
-          source: "/database/:path*",
+          source: "/database/:path+",
           destination: `${databaseViewerUrl}/:path*`,
         },
       ],
