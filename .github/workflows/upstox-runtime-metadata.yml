@@ -1,4 +1,4 @@
-name: Upstox owner metadata (read only)
+name: Upstox policy metadata (read only)
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect owner IDs only without secret operations
+      - name: Inspect only the new inline policy action and resource
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -24,26 +24,21 @@ jobs:
             cd /srv/investor/backend
             source /srv/investor/deploy/no-docker/load-env-file.sh
             load_env_file /etc/investor/backend.env
-            .venv/bin/python - <<'OWNER_PY'
-            import asyncio, json, logging
+            .venv/bin/python - <<'POLICY_PY'
+            import json, logging
             logging.disable(logging.CRITICAL)
-            result = {}
+            result = {'role': 'CredXCostDriverRole', 'policy': 'CredXUpstoxReadOnly'}
             try:
-                from sqlalchemy import select
-                from app.domains.auth.models import User
-                from app.domains.zerodha.models import ZerodhaCredential
-                from app.infrastructure.database.session import AsyncSessionLocal
-                async def inspect():
-                    async with AsyncSessionLocal() as db:
-                        # Core table columns avoid configuring unrelated ORM relationships.
-                        users = User.__table__
-                        credentials = ZerodhaCredential.__table__
-                        active = list((await db.execute(select(users.c.id).where(users.c.is_active.is_(True)).order_by(users.c.id).limit(2))).scalars())
-                        owners = list((await db.execute(select(credentials.c.user_id).distinct().limit(2))).scalars())
-                        return {'active_user_ids_bounded': active, 'kite_owner_ids_bounded': owners, 'sole_active_owner_candidate': active[0] if len(active) == 1 and owners == active else None}
-                result.update(asyncio.run(inspect()))
+                import boto3
+                from botocore.config import Config
+                response = boto3.client('iam', config=Config(connect_timeout=3, read_timeout=5, retries={'max_attempts':0})).get_role_policy(RoleName=result['role'], PolicyName=result['policy'])
+                document = response['PolicyDocument']
+                statements = document.get('Statement', [])
+                if isinstance(statements, dict): statements = [statements]
+                result['statements'] = [{'Effect': statement.get('Effect'), 'Action': statement.get('Action'), 'Resource': statement.get('Resource'), 'Condition': statement.get('Condition')} for statement in statements]
             except Exception as error:
-                result['owner_lookup_error_type'] = type(error).__name__
-            print('UPSTOX_OWNER_METADATA=' + json.dumps(result, sort_keys=True))
-            OWNER_PY
+                result['error_type'] = type(error).__name__
+                result['error_code'] = getattr(error, 'response', {}).get('Error', {}).get('Code')
+            print('UPSTOX_IAM_POLICY_METADATA=' + json.dumps(result, sort_keys=True))
+            POLICY_PY
             APP_SH
