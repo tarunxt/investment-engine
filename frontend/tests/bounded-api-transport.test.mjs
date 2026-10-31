@@ -414,3 +414,16 @@ test("recovery policy is returned immediately without fallback or opening the ci
     assert.equal(JSON.parse(new TextDecoder().decode(result.response.body)).code, "RECOVERY_CONTAINMENT");
   }
 });
+
+test('protected-order POST pre-execution 401/403/422 remains authoritative with bounded auth retry and no transport fallback', async () => {
+  for (const status of [401, 403, 422]) {
+    const calls=[];let refreshes=0;
+    const result=await executeBoundedApiRequest(baseOptions({method:'POST',
+      fetchCandidate:async candidate=>{calls.push(candidate.transport);return response(status);},
+      refreshAuthentication:async()=>{refreshes++;},
+    }));
+    assert.equal(result.response.status,status);
+    assert.deepEqual(calls,status===401?['direct','direct']:['direct']);
+    assert.equal(refreshes,status===401?1:0);
+  }
+});

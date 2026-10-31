@@ -3,6 +3,8 @@
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
+import { useBasketSubmissionSafety } from "@/hooks/useBasketSubmissionSafety";
 import { BasketDraftUnits } from "@/components/BasketDraftUnits";
 import { BasketMarketClosedNotice } from "@/components/BasketMarketClosedNotice";
 import { draftDirection, suggestedDraftUnits, editableDraftAmount, editableDraftIssues, type BasketDraftContext } from "@/lib/basketEditableDraft";
@@ -3032,6 +3034,7 @@ function ScopedZerodhaBasketPreviewDialog({
     ...(order.wholeShareReview && order.wholeShareReview !== "exit" ? ["Existing whole-share choice requires explicit review."] : []),
     ...(!directMarketAvailable || !marketStatus.open || executionMode !== 'direct_market' ? ['Market execution requires enabled direct broker access during regular market hours.'] : []),
   ];
+  const affordabilityIssue = isZerodhaPreview ? basketAffordabilityIssue(selectedOrders, availableMargin) : null;
   const selectedDraftIssues = selectedOrders.flatMap(order => rowDraftIssues(order).map(reason => `${order.exchange}:${order.symbol}: ${reason}`));
   const sectionGroups = [...new Set<string>([...ZERODHA_BASKET_SECTION_ORDER, "Hold", ...(isZerodhaPreview ? ["Unavailable"] : [])])].map((action) => ({
     action,
@@ -3048,6 +3051,7 @@ function ScopedZerodhaBasketPreviewDialog({
     ...(ltpRefreshing ? ["Quote refresh is in progress."] : []),
     ...(orderSubmissionBlockedReason ? [orderSubmissionBlockedReason] : []),
     ...selectedDraftIssues,
+    ...(affordabilityIssue ? [affordabilityIssue] : []),
   ];
   const buttonText = isZerodhaPreview ? "Place Order" : (primaryButtonLabel ?? "Place Order");
   const busyText = executionMode === "direct_market" ? "Placing…" : "Opening…";
@@ -3056,7 +3060,7 @@ function ScopedZerodhaBasketPreviewDialog({
       type="button"
       onClick={() => onPlaceOrder(isZerodhaPreview ? basketRows : undefined)}
       aria-describedby={orderBlockers.length ? orderBlockersId : undefined}
-      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason) || selectedDraftIssues.length > 0}
+      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason) || selectedDraftIssues.length > 0 || Boolean(affordabilityIssue)}
       className={cn(
         "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
         className,
@@ -4514,6 +4518,8 @@ export function RebalanceWorkflowSections({
   onDashboardRefresh?: () => Promise<void>;
 }) {
   const usdInrRate = useUsdInrRate();
+  const { user: basketOwner } = useAuth();
+  const basketSafety = useBasketSubmissionSafety(basketOwner?.id ?? null);
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
     readPersistedWorkflow(),
   );
@@ -5294,8 +5300,8 @@ export function RebalanceWorkflowSections({
   }, []);
 
   const placeSelectedZerodhaBasketOrders = useCallback(async (previewDrafts?: ZerodhaBasketPreviewOrder[]) => {
-    if (zerodhaOrderSubmissionBlockedReason) {
-      setZerodhaBasketError(zerodhaOrderSubmissionBlockedReason);
+    if (basketSafety.blockedReason || zerodhaBasketPlacing || zerodhaBasketLtpRefreshing || zerodhaOrderSubmissionBlockedReason) {
+      setZerodhaBasketError(basketSafety.blockedReason ?? zerodhaOrderSubmissionBlockedReason ?? "Order placement or quote refresh is in progress.");
       return;
     }
     const sourceDrafts = previewDrafts ?? zerodhaBasketOrders;
@@ -5308,6 +5314,8 @@ export function RebalanceWorkflowSections({
       if (zerodhaExecutionMode !== 'direct_market' || !getIndiaMarketStatus().open) errors.push('Market drafts require direct broker access during regular market hours; protected LIMIT fallback is not used.');
       if (errors.length) { setZerodhaBasketError(errors.join(' ')); return; }
     }
+    const affordabilityIssue = basketAffordabilityIssue(selectedOrders, portfolioParameterMargin(zerodhaBasketDetailsData.portfolioSnapshot, "india"));
+    if (affordabilityIssue) { setZerodhaBasketError(affordabilityIssue); return; }
     try { assertWholeShareOrdersReviewed(selectedOrders); }
     catch (error) { setZerodhaBasketError(normalizeError(error)); return; }
     if (!selectedOrders.length) {
@@ -5342,7 +5350,10 @@ ${zerodhaExecutionMode === "direct_market"
         setZerodhaBasketError("Protected MARKET orders are available only during regular NSE/BSE trading hours. Switch back to the protected LIMIT basket after market close.");
         return;
       }
+      let attemptStarted = false;
       try {
+        await basketSafety.begin();
+        attemptStarted = true;
         const response = await apiService.zerodhaPlaceProtectedMarketOrdersSequenced({
           orders: selectedOrders.map((order) => ({
             tradingsymbol: order.symbol.toUpperCase(),
@@ -5359,6 +5370,8 @@ ${zerodhaExecutionMode === "direct_market"
           wait_for_sell_completion: true,
           safety_buffer_amount: Math.max(50, selectedOrders.filter((order) => order.side === "BUY").reduce((sum, order) => sum + (order.amount ?? 0), 0) * 0.01),
         });
+        const responseIssue = basketResponseIssue(response, selectedOrders);
+        if (responseIssue) throw new Error(`Order response cannot be safely reconciled: ${responseIssue}`);
         const allResults = [...response.sell_results, ...response.buy_results];
         const failed = allResults.filter((result) => result.status === "failed");
         const placedResultKeys = new Set(
@@ -5369,6 +5382,7 @@ ${zerodhaExecutionMode === "direct_market"
         const placedOrders = selectedOrders.filter((order) =>
           placedResultKeys.has(`${order.exchange.toUpperCase()}:${order.symbol.toUpperCase()}:${order.side}`),
         );
+        setSelectedZerodhaBasketIds(current => new Set([...current].filter(id => !placedOrders.some(order => order.id === id))));
         const failedMessages = [...failed.map((result) => `${result.tradingsymbol}: ${result.error || "unknown error"}`), ...response.skipped_buy_results.map((result) => `${result.tradingsymbol}: ${result.error || "buy skipped"}`), ...response.messages];
         let portfolioRefreshedAt: string | null = null;
 
@@ -5403,10 +5417,16 @@ ${zerodhaExecutionMode === "direct_market"
           messages: response.messages,
           portfolioRefreshedAt,
         });
+        if (failed.length) basketSafety.uncertain();
+        else basketSafety.complete();
         if (failed.length || response.skipped_count) {
           setZerodhaBasketError(`Placed ${response.placed_count} protected MARKET order${response.placed_count === 1 ? "" : "s"}; ${response.failed_count} failed; ${response.skipped_count} buy order${response.skipped_count === 1 ? "" : "s"} skipped/reduced: ${failedMessages.join("; ")}`);
         }
       } catch (error) {
+        if (attemptStarted) {
+          if (error instanceof APIError && definitiveBasketRejection(error)) basketSafety.complete();
+          else basketSafety.uncertain();
+        }
         setZerodhaBasketError(`Could not place protected MARKET orders: ${normalizeError(error)}. Check the Kite order book before retrying: a failed response does not prove that no orders were placed.`);
       } finally {
         setZerodhaBasketPlacing(false);
@@ -5495,7 +5515,7 @@ ${zerodhaExecutionMode === "direct_market"
     } finally {
       setZerodhaBasketPlacing(false);
     }
-  }, [zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
+  }, [basketSafety, zerodhaBasketPlacing, zerodhaBasketLtpRefreshing, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [
@@ -8240,7 +8260,7 @@ ${zerodhaExecutionMode === "direct_market"
         onWholeShareChoice={reviewZerodhaWholeShareChoice}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
-        orderSubmissionBlockedReason={zerodhaOrderSubmissionBlockedReason}
+        orderSubmissionBlockedReason={basketSafety.blockedReason ?? zerodhaOrderSubmissionBlockedReason}
         directMarketAvailable={zerodhaDirectMarketAvailable}
         executionMode={zerodhaExecutionMode}
         onExecutionModeChange={changeZerodhaExecutionMode}
