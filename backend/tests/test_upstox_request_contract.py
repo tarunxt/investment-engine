@@ -41,7 +41,13 @@ def test_production_and_diagnostic_send_identical_requests_once(monkeypatch):
         return httpx.Response(403, json={"message": "Provider access denied"})
     real_client = httpx.AsyncClient
     monkeypatch.setattr(upstox.httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
-    assert asyncio.run(upstox.read_upstox_quotes(2, ["NSE:NHPC"])) == []
+    # Wire contract is independent of Redis admission; distributed admission is
+    # exercised end-to-end in test_upstox_quote_guard.py with mocked transport.
+    class Guard:
+        async def admit(self): return True
+        async def count(self, field): pass
+        async def backoff(self, value): pass
+    assert asyncio.run(upstox._fetch_quotes(["NSE:NHPC"], Guard())) == []
     async def smoke():
         async with real_client(transport=httpx.MockTransport(handler), timeout=6, follow_redirects=False) as client:
             return await diagnose(client, KEY, TOKEN)

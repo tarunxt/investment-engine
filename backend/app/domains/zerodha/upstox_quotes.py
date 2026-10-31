@@ -1,4 +1,4 @@
-"""Owner-scoped, read-only Upstox quotes. Never cache authenticated prices."""
+"""Owner-scoped, read-only Upstox quotes. Shared short-lived display cache; never execution prices."""
 import asyncio
 import gzip
 import io
@@ -114,23 +114,39 @@ def normalize_quotes(data, requested, now):
 async def read_upstox_quotes(user_id, instruments):
     if not instruments or not configured_for(user_id):
         return []
+    from .upstox_quote_guard import guarded_quotes
+    return await guarded_quotes(user_id, instruments, lambda guard: _fetch_quotes(instruments, guard))
+
+
+async def _fetch_quotes(instruments, guard):
     try:
-        # Deadline includes instrument download and quote read. No retry storm.
+        # Mapping is public; reserve quote quota immediately before dispatch so
+        # a slow mapping download cannot bunch previously admitted requests.
         async with asyncio.timeout(15):
             async with httpx.AsyncClient(timeout=6, follow_redirects=False) as client:
                 mapping = await load_instruments(client)
                 requested = {key: mapping[key] for key in instruments if key in mapping}
                 if not requested:
+                    await guard.count("unmapped")
+                    return []
+                if not await guard.admit():
                     return []
                 request = build_quote_request(client, requested.values(), os.environ["UPSTOX_ANALYTICS_TOKEN"])
                 response = await client.send(request)
+                if response.status_code == 429:
+                    await guard.backoff(response.headers.get("Retry-After"))
+                    logger.warning("Upstox quote rate limited; shared cooldown applied")
+                    return []
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict) or payload.get("status") != "success":
-                    logger.warning("Upstox read-only quote fallback returned invalid status for owner %s", user_id)
+                    await guard.count("invalid_response")
+                    logger.warning("Upstox read-only quote fallback returned invalid status")
                     return []
-                return normalize_quotes(payload.get("data"), requested, datetime.now(timezone.utc))
+                rows = normalize_quotes(payload.get("data"), requested, datetime.now(timezone.utc))
+                await guard.count("success" if rows else "empty_response")
+                return rows
     except (httpx.HTTPError, TimeoutError, ValueError, OSError, EOFError):
-        # Never log exception bodies, request headers, or credential values.
-        logger.warning("Upstox read-only quote fallback unavailable for owner %s", user_id)
+        await guard.count("provider_failure")
+        logger.warning("Upstox read-only quote fallback unavailable")
         return []

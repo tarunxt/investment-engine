@@ -39,7 +39,7 @@ jobs:
       - name: Install backend test dependencies
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
-          python -m pip install --disable-pip-version-check pytest aiosqlite==0.22.1
+          python -m pip install --disable-pip-version-check pytest aiosqlite==0.22.1 'fakeredis[lua]==2.40.0'
 
       - name: Run dashboard and Bullpen scan contract tests
         env:
@@ -48,6 +48,7 @@ jobs:
           pytest -q
           backend/tests/test_zerodha_display_quotes.py
           backend/tests/test_upstox_quotes.py
+          backend/tests/test_upstox_quote_guard.py
           backend/tests/test_upstox_request_contract.py
           backend/tests/test_recovery_containment.py
           backend/tests/test_sports_rankings.py

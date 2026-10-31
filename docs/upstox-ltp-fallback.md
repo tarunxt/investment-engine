@@ -51,7 +51,7 @@ symbol to Upstox instrument keys. Only NSE/BSE equity segments with valid ISIN
 keys are included. Ambiguous or absent listings stay missing; no company-name or
 cross-exchange match is attempted. The public mapping is cached for six hours
 per process. An expired mapping must refresh successfully; there is no stale
-mapping fallback. Authenticated quotes are never cached or shared across users.
+mapping fallback. Authenticated display quotes use the bounded owner-scoped shared cache described below; they are never shared across users.
 
 The implementation uses `GET /v2/market-quote/quotes` rather than LTP V3 because
 the full quote response includes `last_trade_time`. A positive finite last price
@@ -109,3 +109,59 @@ request-ID information, and makes one request. It must not be used to evade a
 provider access block. Request-contract tests use only dummy credentials and
 mocked transports. This change neither activates Upstox nor changes deployed
 credentials, account scope, UI, or executable orders.
+
+## Shared quote protection (31 October 2026)
+
+The full-quote adapter uses existing `REDIS_URL` infrastructure, shared by all
+production backend processes. Atomic Redis Lua sliding windows reserve a request
+**before** dispatch: at most **20/second, 200/minute, 1,000/30 minutes** for this
+owner/API. Failed, cancelled and uncertain requests consume their reservation.
+No local fallback is allowed if Redis or coordination fails. The owner is
+opaque-hashed in Redis key names; credential rotation isolates caches without
+resetting the account budget. Exact venue and sorted instrument set scope each
+cache/coalescing lock; another owner's cache cannot be served.
+
+For unknown history on first use or Redis history loss, provider requests are
+suppressed for **30 minutes** to cover the unknown preceding quota window. This
+warm-up begins on the first quote request after release, not on deploy. If only
+the reservation set disappears while recent history remains, the remaining
+30-minute window is also suppressed. Counters record `history_warmup`. Normal
+backend restarts do not clear Redis coordination. Do not flush these keys to
+accelerate activation. Redis durability/eviction and all app processes using the
+same Redis database remain operational requirements.
+
+Successful normalized display quotes cache for **five seconds**, including
+partial results; empty/failed results cache for **two seconds** to damp duplicate
+proxy requests. An identical in-flight batch has one distributed leader, with a
+20-second lease exceeding its 15-second HTTP deadline. Followers wait up to
+800ms then report unavailable, never dispatch a duplicate. Real exchange `as_of`
+and original retrieval source text are retained; cache hits are explicitly
+labelled cached display quotes. No cache value qualifies as an execution quote.
+
+HTTP 429 applies an account/API-wide cooldown for at least 60 seconds, honoring
+longer numeric or HTTP-date `Retry-After`. A later shorter backoff cannot shorten
+an active cooldown. No automatic provider retry occurs. Quota or cooldown blocks
+return no fabricated quote; existing Kite-first fallback/missing-price behavior
+remains. Other selected failures receive only the two-second negative cache.
+
+Fixed-field cumulative counters live at the account's opaque Redis namespace
+`upstox:full-quotes:v1:<sha256-owner>:counters`: `admitted`, `quota_blocked`,
+`backoff_blocked`, `history_warmup`, `cache_hit`, `coalesced`,
+`coalesced_unavailable`, `provider_429`, `provider_failure`, `invalid_response`,
+`empty_response`, `unmapped`, `success`. They record reservations/results, not
+billable usage, and disappear if Redis state is lost. Sanitized warning events
+contain neither identities nor token/connection/response values. Read these
+counters through existing authorized operations tooling; no public metrics
+endpoint or new credentials are introduced.
+
+The UI has no periodic quote polling: open/reopen/reload, snapshot changes and
+explicit Refresh/Retry start cycles. It batches 50 instruments (up to 500 total),
+so 13 mapped instruments normally produce one admitted full-quote read. The
+separate public master mapping download keeps its existing six-hour process
+cache. Other independent apps/manual diagnostics using the same Upstox account
+are outside this limiter; the reserved headroom cannot guarantee their traffic
+is below account-wide limits. Official standard REST limits are 50/second,
+500/minute and 2,000/30 minutes per API/user; quote classification under standard
+APIs is inferred from the docs. Full quotes accepts 500 instruments/request:
+https://upstox.com/developer/api-documentation/rate-limiting/
+https://upstox.com/developer/api-documentation/get-full-market-quote/

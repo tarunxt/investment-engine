@@ -81,6 +81,15 @@ def test_read_is_owner_scoped_bounded_get_only_and_fails_closed(monkeypatch, mod
     monkeypatch.setenv('UPSTOX_LTP_OWNER_USER_ID', '73')
     monkeypatch.setenv('UPSTOX_ANALYTICS_TOKEN', 'synthetic-sensitive-value')
     calls = []
+    # Isolate wire/normalization fixture from shared infrastructure. Guard itself
+    # is tested against actual Lua separately in test_upstox_quote_guard.py.
+    from app.domains.zerodha import upstox_quote_guard
+    class Guard:
+        async def admit(self): return True
+        async def count(self, field): pass
+        async def backoff(self, value): pass
+    async def guarded(owner, instruments, fetch): return await fetch(Guard())
+    monkeypatch.setattr(upstox_quote_guard, 'guarded_quotes', guarded)
     async def master(client): return {'NSE:ABC': KEY}
     monkeypatch.setattr(upstox, 'load_instruments', master)
     real_client = httpx.AsyncClient
