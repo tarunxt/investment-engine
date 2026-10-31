@@ -15,10 +15,10 @@ export function StockScanHistory<Row>({ rows, renderRow, controls, emptyState }:
   controls?: ReactNode; emptyState?: ReactNode;
 }) {
   return <>
-    <h4 className="mt-5 mb-2 text-sm font-semibold">Stock-Scan History</h4>
+    <h4 className="mt-5 mb-2 text-sm font-semibold">Stock-Rebalance Scan History</h4>
     {controls}
     {rows.length ? <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
-      <table aria-label="Stock-Scan History" className="min-w-[72rem] text-xs">
+      <table aria-label="Stock-Rebalance Scan History" className="min-w-[72rem] text-xs">
         <thead><tr className="border-b border-gray-200 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-gray-500">
           {STOCK_SCAN_HISTORY_COLUMNS.map(label => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}
         </tr></thead>
