@@ -56,7 +56,7 @@ const TABS = [
 
 type RunTab = (typeof TABS)[number]['id'];
 type PortfolioTab = Exclude<RunTab, 'bullpen'>;
-type RunErrors = Record<'portfolio' | 'bullpen', string | null>;
+type RunErrors = Record<'portfolio' | 'india' | 'indmoney_us' | 'bullpen', string | null>;
 
 const PAGE_SIZE = 20;
 const API_PAGE_SIZE = 100;
@@ -117,34 +117,41 @@ function getPortfolioTab(run: RunListItem): PortfolioTab | null {
   return null;
 }
 
-async function loadWorkflowHistory(portfolio: AutoRebalancePortfolioKey) {
+async function loadWorkflowHistory(portfolio: AutoRebalancePortfolioKey, signal?: AbortSignal) {
   const items: AutoRebalanceHistoryItemResponse[] = [];
-  const limit = 250;
-  for (let offset = 0; ; offset += limit) {
-    const response = await apiService.getAutoRebalanceHistory(portfolio, { limit, offset });
+  // Each group hydrates saved stages and jobs. Keep individual DB projections
+  // small instead of loading 250 groups' output bodies on a cold request.
+  const limit = 50;
+  let total: number | undefined;
+  for (let offset = 0; total === undefined || offset < total; offset += limit) {
+    signal?.throwIfAborted();
+    const response = await apiService.getAutoRebalanceHistory(portfolio, { limit, offset }, { signal });
+    signal?.throwIfAborted();
+    if (!Number.isSafeInteger(response.total) || response.total < 0) throw new Error('Saved history returned an invalid total. Refresh to retry.');
+    total ??= response.total;
+    if (response.items.length < Math.min(limit, total - offset)) throw new Error('Saved history changed while loading. Refresh to retry the complete history.');
     items.push(...response.items);
-    if (items.length >= response.total || response.items.length < limit) return items;
   }
+  if (new Set(items.map(group => `${group.portfolio}:${group.sequence}`)).size !== items.length) throw new Error('Saved history changed while loading. Refresh to retry the complete history.');
+  return items;
 }
 
-async function loadAllPortfolioRuns() {
-  const first = await apiService.getRuns({
-    page: 1,
-    limit: API_PAGE_SIZE,
-    summary: true,
-  });
-  if (first.pages <= 1) return first.items;
-
-  const remaining = await Promise.all(
-    Array.from({ length: first.pages - 1 }, (_, index) =>
-      apiService.getRuns({
-        page: index + 2,
-        limit: API_PAGE_SIZE,
-        summary: true,
-      }),
-    ),
-  );
-  return [first, ...remaining].flatMap((response) => response.items);
+async function loadAllPortfolioRuns(signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const first = await apiService.getRuns({ page: 1, limit: API_PAGE_SIZE, summary: true }, { signal });
+  signal?.throwIfAborted();
+  const items = [...first.items];
+  // A bounded batch avoids issuing every summary page into the connection pool
+  // alongside both grouped histories and Bullpen. Never publish a partial list.
+  for (let page = 2; page <= first.pages; page += 2) {
+    signal?.throwIfAborted();
+    const batch = await Promise.all(Array.from({ length: Math.min(2, first.pages - page + 1) }, (_, index) =>
+      apiService.getRuns({ page: page + index, limit: API_PAGE_SIZE, summary: true }, { signal }),
+    ));
+    signal?.throwIfAborted();
+    items.push(...batch.flatMap(response => response.items));
+  }
+  return items;
 }
 
 async function loadAllBullpenRuns(signal?: AbortSignal) {
@@ -300,8 +307,8 @@ export default function RunsPage() {
   const [bullpenRuns, setBullpenRuns] = useState<BullpenAutoLiveHistoryItem[]>([]);
   const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1));
   const [loading, setLoading] = useState(true);
-  const [sourceErrors, setSourceErrors] = useState<RunErrors>({ portfolio: null, bullpen: null });
-  const error = [sourceErrors.portfolio, activeTab === 'bullpen' ? sourceErrors.bullpen : null].filter(Boolean).join(' ') || null;
+  const [sourceErrors, setSourceErrors] = useState<RunErrors>({ portfolio: null, india: null, indmoney_us: null, bullpen: null });
+  const error = [sourceErrors.portfolio, activeTab === 'zerodha' ? sourceErrors.india : activeTab === 'indmoney' ? sourceErrors.indmoney_us : sourceErrors.bullpen].filter(Boolean).join(' ') || null;
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -312,28 +319,28 @@ export default function RunsPage() {
     const controller = new AbortController();
     loadAbortControllerRef.current = controller;
     setLoading(true);
-    setSourceErrors({ portfolio: null, bullpen: null });
-    const [portfolioResult, bullpenResult] = await Promise.allSettled([
-      Promise.all([loadAllPortfolioRuns(), loadWorkflowHistory('india'), loadWorkflowHistory('indmoney_us')]),
-      loadAllBullpenRuns(controller.signal),
+    setSourceErrors({ portfolio: null, india: null, indmoney_us: null, bullpen: null });
+    // Publish each successful source immediately. A slow/failed market or
+    // Bullpen must not erase another source, or delay its already saved groups.
+    const publish = async <T,>(source: keyof RunErrors, label: string, read: () => Promise<T>, save: (value: T) => void) => {
+      try {
+        const value = await read();
+        if (!controller.signal.aborted) save(value);
+      } catch (error) {
+        if (!controller.signal.aborted) setSourceErrors(current => ({ ...current, [source]: label + normalizeError(error) }));
+      }
+    };
+    await Promise.allSettled([
+      publish('portfolio', 'IndMoney/Zerodha: ', () => loadAllPortfolioRuns(controller.signal), setPortfolioRuns),
+      ...(['india', 'indmoney_us'] as const).map(portfolio => publish(
+        portfolio, portfolio === 'india' ? 'Zerodha grouped history: ' : 'IndMoney grouped history: ',
+        () => loadWorkflowHistory(portfolio, controller.signal),
+        groups => setWorkflowGroups(current => [...current.filter(group => group.portfolio !== portfolio), ...groups]),
+      )),
+      publish('bullpen', 'Bullpen: ', () => loadAllBullpenRuns(controller.signal), setBullpenRuns),
     ]);
     if (controller.signal.aborted) return;
 
-    const errors: RunErrors = { portfolio: null, bullpen: null };
-    if (portfolioResult.status === 'fulfilled') {
-      setPortfolioRuns(portfolioResult.value[0]);
-      setWorkflowGroups([...portfolioResult.value[1], ...portfolioResult.value[2]]);
-    } else {
-      errors.portfolio = 'IndMoney/Zerodha: ' + normalizeError(portfolioResult.reason);
-    }
-
-    if (bullpenResult.status === 'fulfilled') {
-      setBullpenRuns(bullpenResult.value);
-    } else {
-      errors.bullpen = 'Bullpen: ' + normalizeError(bullpenResult.reason);
-    }
-
-    setSourceErrors(errors);
     setLastUpdated(new Date());
     setLoading(false);
   }, []);
@@ -397,7 +404,7 @@ export default function RunsPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Run History</h1>
           <p className="mt-1 text-sm text-gray-600">
             {lastUpdated
-              ? 'Last updated ' +
+              ? 'Last refreshed ' +
                 lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })
               : 'Loading all runs…'}
           </p>
@@ -450,7 +457,7 @@ export default function RunsPage() {
       {error ? (
         <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{error}</span>
+          <span>{error} Available saved results remain visible; use Refresh to retry unavailable history.</span>
         </div>
       ) : null}
 
@@ -462,7 +469,7 @@ export default function RunsPage() {
           </div>
         ) : visibleItems.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
-            No runs found in this category.
+            {error ? 'History could not be fully loaded. Use Refresh to retry; saved runs have not been deleted.' : 'No runs found in this category.'}
           </div>
         ) : activeTab === 'bullpen' ? (
           (visibleItems as BullpenAutoLiveHistoryItem[]).map((run) => (
@@ -476,7 +483,7 @@ export default function RunsPage() {
           ))
         ) : (
           (visibleItems as ReturnType<typeof buildPortfolioHistoryEntries>).map((entry) => entry.group ? (
-            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} onOpen={path => router.push(path)} />
+            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} runLinksAvailable={!loading && !sourceErrors.portfolio} onOpen={path => router.push(path)} />
           ) : entry.run ? (
             <PortfolioRunTile key={entry.key} run={entry.run} onOpen={() => router.push(getRunDetailPathFromPrompt(entry.run.id, entry.run.prompt_preview))} />
           ) : null)

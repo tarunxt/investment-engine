@@ -152,6 +152,8 @@ const DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000;
 const DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500;
 const CAPTURED_DETAILS_READ_TIMEOUT_MS = 20_000;
 const FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS = 20_000;
+// Stored portfolio history uses the BFF's bounded 18s database-read budget.
+const PORTFOLIO_HISTORY_READ_TIMEOUT_MS = 20_000;
 // History can use the backend's 12-second database deadline and the BFF's
 // 14-second transport budget. The generic five-second browser cap cuts these
 // valid reads off before either layer can return its result or bounded error.
@@ -1058,14 +1060,24 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  private getPortfolioHistory<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+    // One browser request; the BFF owns the bounded backend transport fallback.
+    // Share only active reads within the existing authenticated session scope.
+    return this.readDeduplicator.run({ method: "GET", url, signal: options.signal }, () => this.fetch<T>(url, {
+      method: "GET", cache: "no-store", timeoutMs: PORTFOLIO_HISTORY_READ_TIMEOUT_MS, ...options,
+    }));
+  }
+
   getAutoRebalanceHistory(
     portfolio: AutoRebalancePortfolioKey,
     params?: { limit?: number; offset?: number },
+    options: ApiRequestControl = {},
   ): Promise<AutoRebalanceHistoryListResponse> {
     const suffix = (params?.limit ? `&limit=${params.limit}` : "") +
       (params?.offset ? `&offset=${params.offset}` : "");
-    return this.get<AutoRebalanceHistoryListResponse>(
+    return this.getPortfolioHistory<AutoRebalanceHistoryListResponse>(
       `${URLs.runs.autoRebalanceHistory(portfolio)}${suffix}`,
+      options,
     );
   }
 
@@ -1090,16 +1102,21 @@ class apiServiceClass implements IApiService {
     );
   }
 
-  getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {
+  getRuns(params?: { page?: number; limit?: number; summary?: boolean }, options: ApiRequestControl = {}): Promise<PaginatedResponse<RunListItem>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.summary) qs.set("summary", "true");
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunListItem>>(
-      `${URLs.runs.list()}${query ? `?${query}` : ""}`,
-      { validate: isPaginatedResponse<RunListItem> },
-    );
+    const url = `${URLs.runs.list()}${query ? `?${query}` : ""}`;
+    // The BFF owns bounded fallback for history. Avoid a second browser-level
+    // race abandoning its primary transport at 1.5s while DB work continues.
+    if (params?.summary) return this.getPortfolioHistory<PaginatedResponse<RunListItem>>(url, {
+      validate: isPaginatedResponse<RunListItem>, ...options,
+    });
+    return this.get<PaginatedResponse<RunListItem>>(url, {
+      validate: isPaginatedResponse<RunListItem>, ...options,
+    });
   }
 
   getAllFullRuns(): Promise<RunResponse[]> {
