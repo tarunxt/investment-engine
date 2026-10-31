@@ -297,6 +297,7 @@ jobs:
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs
           tests/dashboard-portfolio-totals.test.mjs
+          tests/automated-rebalance-popup-reliability.test.mjs
           tests/rebalance-workflow-resilience.test.mjs
           tests/auto-rebalance-audit-persistence.test.mjs
           tests/recommendation-audit-recovery-policy.test.mjs
@@ -455,6 +456,11 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: npm run test:playwright-hardening
+
+      - name: Verify saved-output states and keyboard behavior offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: node scripts/saved-output-offline-playwright.mjs
 
       - name: Verify offline basket fixture interactions and quote counters
         if: matrix.bundler == 'webpack'
