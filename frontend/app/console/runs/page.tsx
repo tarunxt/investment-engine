@@ -54,6 +54,7 @@ const TABS = [
 
 type RunTab = (typeof TABS)[number]['id'];
 type PortfolioTab = Exclude<RunTab, 'bullpen'>;
+type RunErrors = Record<'portfolio' | 'bullpen', string | null>;
 
 const PAGE_SIZE = 20;
 const API_PAGE_SIZE = 100;
@@ -287,7 +288,8 @@ export default function RunsPage() {
   const [bullpenRuns, setBullpenRuns] = useState<BullpenAutoLiveHistoryItem[]>([]);
   const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1));
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [sourceErrors, setSourceErrors] = useState<RunErrors>({ portfolio: null, bullpen: null });
+  const error = [sourceErrors.portfolio, activeTab === 'bullpen' ? sourceErrors.bullpen : null].filter(Boolean).join(' ') || null;
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -296,27 +298,27 @@ export default function RunsPage() {
     const controller = new AbortController();
     loadAbortControllerRef.current = controller;
     setLoading(true);
-    setError(null);
+    setSourceErrors({ portfolio: null, bullpen: null });
     const [portfolioResult, bullpenResult] = await Promise.allSettled([
       loadAllPortfolioRuns(),
       loadAllBullpenRuns(controller.signal),
     ]);
     if (controller.signal.aborted) return;
 
-    const errors: string[] = [];
+    const errors: RunErrors = { portfolio: null, bullpen: null };
     if (portfolioResult.status === 'fulfilled') {
       setPortfolioRuns(portfolioResult.value);
     } else {
-      errors.push('IndMoney/Zerodha: ' + normalizeError(portfolioResult.reason));
+      errors.portfolio = 'IndMoney/Zerodha: ' + normalizeError(portfolioResult.reason);
     }
 
     if (bullpenResult.status === 'fulfilled') {
       setBullpenRuns(bullpenResult.value);
     } else {
-      errors.push('Bullpen: ' + normalizeError(bullpenResult.reason));
+      errors.bullpen = 'Bullpen: ' + normalizeError(bullpenResult.reason);
     }
 
-    setError(errors.length ? errors.join(' ') : null);
+    setSourceErrors(errors);
     setLastUpdated(new Date());
     setLoading(false);
   }, []);
