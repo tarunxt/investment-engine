@@ -5,6 +5,8 @@ import type { StockSourceObservation } from "@/types/api";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { RecommendationAuditPanel } from "@/components/RecommendationAuditPanel";
+import { CollapsedSection } from "@/components/CollapsedSection";
+import { StockScanHistory } from "@/components/StockScanHistory";
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
 import {
@@ -4166,6 +4168,11 @@ export function RetainedSourceFields({ cells }: { cells: Record<string, unknown>
   return <details onToggle={event => setOpen(event.currentTarget.open)}><summary className="cursor-pointer text-blue-700">View original scores, rationale and fields</summary>{open ? <dl className="mt-2 space-y-2">{Object.entries(cells).map(([key, value]) => <div key={key}><dt className="font-semibold">{key}</dt><dd className="max-w-xl whitespace-pre-wrap break-words">{value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : String(value ?? "Unavailable")}</dd></div>)}</dl> : null}</details>;
 }
 
+export function retainedSourceCoverageDisplayNote(note?: string | null) {
+  if (!note) return "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed.";
+  return note.replace("All retained owned sources are scanned across pages. Deleted uncaptured outputs and sources with unknown market identity cannot be reconstructed. No provider call or history write is performed.", "").trim();
+}
+
 export function RetainedStockObservations({ market, symbol, saved, reconstructed, onScoreOpen }: { market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[]; onScoreOpen?: (selection: { item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail }) => void }) {
   const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null; nextCursor?: string | null; hasMore?: boolean }>({ rows: [], examined: 0, note: "", loading: true, error: null });
   const [attempt, setAttempt] = useState(0);
@@ -4188,7 +4195,7 @@ export function RetainedStockObservations({ market, symbol, saved, reconstructed
   const pageCount = Math.max(1, Math.ceil(rows.length / 25));
   const currentPage = Math.min(page, pageCount - 1);
   const visibleRows = rows.slice(currentPage * 25, (currentPage + 1) * 25);
-  return <section className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4"><h3 className="font-semibold">All retained runs containing {symbol} · original source observations</h3><p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">{state.error || state.hasMore ? "Scan incomplete:" : "Scan complete:"} {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => { setState({ rows: [], examined: 0, note: "", loading: true, error: null }); setPage(0); setScanCursor(null); setAttempt(value => value + 1); }}>Retry all retained sources</button></p> : null}{state.hasMore && !state.loading && !state.error ? <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => { setState(current => ({ ...current, loading: true, error: null })); setScanCursor(state.nextCursor ?? null); }}>Load more retained sources</button> : null}<nav aria-label="Retained source history pages" className="mt-3 flex flex-wrap items-center gap-3 text-sm"><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous observations</button><span role="status">Showing {rows.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25, rows.length)} of {rows.length} observations · Page {currentPage + 1} of {pageCount}</span><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next observations</button></nav><div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{visibleRows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : row.selection && onScoreOpen ? <button type="button" className="text-blue-700 underline" onClick={() => onScoreOpen(row.selection!)}>{formatScoreValue(row.score)}</button> : formatScoreValue(row.score)}</td><td className="p-2"><RetainedSourceFields cells={row.cells} /></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}<p className="mt-3 text-xs text-slate-600">{state.note || "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed."}</p></section>;
+  return <CollapsedSection className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4" title={`All retained runs containing ${symbol} · original source observations`}> <p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">{state.error || state.hasMore ? "Scan incomplete:" : "Scan complete:"} {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => { setState({ rows: [], examined: 0, note: "", loading: true, error: null }); setPage(0); setScanCursor(null); setAttempt(value => value + 1); }}>Retry all retained sources</button></p> : null}{state.hasMore && !state.loading && !state.error ? <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => { setState(current => ({ ...current, loading: true, error: null })); setScanCursor(state.nextCursor ?? null); }}>Load more retained sources</button> : null}<nav aria-label="Retained source history pages" className="mt-3 flex flex-wrap items-center gap-3 text-sm"><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous observations</button><span role="status">Showing {rows.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25, rows.length)} of {rows.length} observations · Page {currentPage + 1} of {pageCount}</span><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next observations</button></nav><div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{visibleRows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : row.selection && onScoreOpen ? <button type="button" className="text-blue-700 underline" onClick={() => onScoreOpen(row.selection!)}>{formatScoreValue(row.score)}</button> : formatScoreValue(row.score)}</td><td className="p-2"><RetainedSourceFields cells={row.cells} /></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}{retainedSourceCoverageDisplayNote(state.note) ? <p className="mt-3 text-xs text-slate-600">{retainedSourceCoverageDisplayNote(state.note)}</p> : null}</CollapsedSection>;
 }
 
 export function historyScoreDerivedAction(item: Pick<FinalActionableHistoryItem, "score" | "historical_current_units" | "coverage_status">): { action: ActionCategory | null; note: string } {
@@ -4546,8 +4553,7 @@ function ScopedStockDetailsButton({
                 legacyHistoryHasMore={historyHasMore} legacyHistoryError={historyError}
               />
 
-              <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
-                <h3 className="mb-3 font-semibold text-blue-950">Provider consensus & technical scan</h3>
+              <CollapsedSection key={`${market}:${stock.key}:consensus`} title="Provider consensus & technical scan" className="rounded-xl border border-blue-100 bg-blue-50/70 p-4" headingClassName="font-semibold text-blue-950">
                 <KeyValueGrid
                   itemClassName="border-blue-100 bg-white/75"
                   values={[
@@ -4573,7 +4579,7 @@ function ScopedStockDetailsButton({
                     ["Invalidation level", technicalScan?.invalidationLevel || "—"],
                   ]}
                 />
-              </section>
+              </CollapsedSection>
 
 
 
@@ -4609,29 +4615,11 @@ function ScopedStockDetailsButton({
                   </div>
                 ) : null}
                 <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} />
-                <h4 className="mt-5 mb-2 text-sm font-semibold">Saved summary source rows · including retained recent runs</h4>
-                <nav aria-label="Saved summary history pages" className="flex gap-3 text-sm"><button type="button" disabled={visibleSummaryPage === 0} onClick={() => setSummaryPage(visibleSummaryPage - 1)}>Previous summaries</button><span>Page {visibleSummaryPage + 1} of {summaryPageCount}</span><button type="button" disabled={visibleSummaryPage + 1 >= summaryPageCount} onClick={() => setSummaryPage(visibleSummaryPage + 1)}>Next summaries</button></nav>
-                <p className="mb-2 text-xs text-slate-600">Newest sources first. A retained run without an original saved summary is shown explicitly; its current-formula score is separate from the recorded score and is not substituted into the original-score history average.</p>
-                {summarySourceRows.length ? (
-                  <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
-                    <table className="min-w-[72rem] text-xs">
-                      <thead>
-                        <tr className="border-b border-gray-200 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                          <th className="px-3 py-2 font-semibold">Stock</th>
-                          <th className="px-3 py-2 font-semibold">Timestamp covered</th>
-                          <th className="px-3 py-2 font-semibold">Coverage</th>
-                          <th className="px-3 py-2 font-semibold">Score-based action · current rules</th>
-                          <th className="px-3 py-2 font-semibold">Original recorded action</th>
-                          <th className="px-3 py-2 font-semibold">Recorded score</th>
-                          <th className="px-3 py-2 font-semibold">Current-formula score (reconstructed)</th>
-                          <th className="px-3 py-2 font-semibold">Consensus</th>
-                          <th className="px-3 py-2 font-semibold">Historical value</th>
-                          <th className="px-3 py-2 font-semibold">Action/current units</th>
-                          <th className="px-3 py-2 font-semibold">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {summarySourceRows.slice(visibleSummaryPage * 25, (visibleSummaryPage + 1) * 25).map((source) => {
+                <StockScanHistory
+                  rows={summarySourceRows.slice(visibleSummaryPage * 25, (visibleSummaryPage + 1) * 25)}
+                  controls={<nav aria-label="Saved summary history pages" className="flex gap-3 text-sm"><button type="button" disabled={visibleSummaryPage === 0} onClick={() => setSummaryPage(visibleSummaryPage - 1)}>Previous summaries</button><span>Page {visibleSummaryPage + 1} of {summaryPageCount}</span><button type="button" disabled={visibleSummaryPage + 1 >= summaryPageCount} onClick={() => setSummaryPage(visibleSummaryPage + 1)}>Next summaries</button></nav>}
+                  emptyState={persistedHistory.length > 0 ? <p className="mb-3 text-sm text-slate-500">No visible suggestions in the loaded history. Use the control above to show Run Failed / Not Mentioned rows.</p> : null}
+                  renderRow={(source) => {
                           if (source.kind === "retained") {
                             const item = source.item;
                             return <tr key={`retained:${item.runId}:${item.stock.key}`} className="bg-amber-50/50">
@@ -4671,13 +4659,8 @@ function ScopedStockDetailsButton({
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatDisplayAmount(item.amount, market)}</td>
                           </tr>
-                        ); })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : persistedHistory.length > 0 ? (
-                  <p className="mb-3 text-sm text-slate-500">No visible suggestions in the loaded history. Use the control above to show Run Failed / Not Mentioned rows.</p>
-                ) : null}
+                        ); }}
+                />
                 {historyHasMore ? (
                   <div className="mb-3 p-3 text-center">
                     <Button

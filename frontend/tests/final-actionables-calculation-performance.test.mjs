@@ -26,6 +26,8 @@ const colors = load('../lib/actionColorScheme.ts');
 const parser = load('../components/InvestmentRecommendationTable.tsx', colors);
 const imported = {
   ...React, ...parser, ...colors,
+  ...load("../components/CollapsedSection.tsx", React),
+  ...load("../components/StockScanHistory.tsx"),
   ...load('../lib/technicalSetups.ts'), ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'), ...load('../lib/runPresentation.ts'),
   ...load('../lib/actionableQuantityDisplay.ts'),
@@ -200,10 +202,13 @@ function hookHarness() {
     hooks: { useState, useMemo: (compute) => compute(), useCallback: (fn) => fn, useRef: (value) => ({ current: value }), useEffect: () => {} },
   };
 }
+function componentChildren(node) {
+  return [...React.Children.toArray(node.props?.children), ...(typeof node.props?.renderRow === 'function' && Array.isArray(node.props.rows) ? node.props.rows.map(node.props.renderRow) : []), ...React.Children.toArray(node.props?.controls)];
+}
 function findElement(node, label) {
   if (!node || typeof node !== 'object') return null;
   if (node.props?.['aria-label'] === label) return node;
-  return React.Children.toArray(node.props?.children).map((child) => findElement(child, label)).find(Boolean) ?? null;
+  return componentChildren(node).map((child) => findElement(child, label)).find(Boolean) ?? null;
 }
 
 test('closed detail buttons skip cache work; opening, closing during a request, and reopening preserve history access', async () => {
@@ -492,7 +497,7 @@ test('reconstructed dates require one exact historical run/date match without gu
 function findMatching(node, predicate) {
   if (!node || typeof node !== 'object') return null;
   if (predicate(node)) return node;
-  return React.Children.toArray(node.props?.children).map(child => findMatching(child, predicate)).find(Boolean) ?? null;
+  return componentChildren(node).map(child => findMatching(child, predicate)).find(Boolean) ?? null;
 }
 
 test('historical score clicks stack locally; outside top close preserves captured details and reopen', async () => {
@@ -835,4 +840,29 @@ test('detail lifecycle skips closed matrix work, keeps empty-history memo stable
  click(findElement(tree,'Close stock details'));render();assert.equal(matrixCounter.calls,2);
  // Passive effects are deliberately not flushed: dismissal must invalidate synchronously.
  const source=readFileSync(new URL(sourcePath,import.meta.url),'utf8');assert.match(source,/historyLoadGeneration.current \+= 1;[\s\S]{0,180}setOpen\(false\)/);
+});
+
+
+test('Stock-Scan History is reusable with all eleven columns, immutable data and preserved row/control actions',()=>{
+ const {StockScanHistory,STOCK_SCAN_HISTORY_COLUMNS}=imported;
+ assert.equal(STOCK_SCAN_HISTORY_COLUMNS.length,11);
+ const rows=[{id:'saved',cells:['NSE:HAL','saved timestamp','suggested','Buy New','Hold','2','—','1/2','100','1/0','200']},{id:'retained',cells:['NSE:HAL','retained timestamp','Retained output · original summary not saved','Trim','—','—','-1.5','1/2','100','-1/5','200']}];
+ const before=structuredClone(rows),clicked=[];
+ const renderRow=row=>React.createElement('tr',{key:row.id},...row.cells.map((cell,index)=>React.createElement('td',{key:index},index===5?React.createElement('button',{'aria-label':'Open '+row.id+' score',onClick:()=>clicked.push(row.id)},cell):cell)));
+ const props={rows,renderRow,controls:React.createElement('button',{onClick:()=>clicked.push('page')},'Next page')};
+ const html=renderToStaticMarkup(React.createElement(StockScanHistory,props));
+ assert.match(html,/aria-label="Stock-Scan History"/);assert.equal((html.match(/<th /g)??[]).length,11);assert.equal((html.match(/<td/g)??[]).length,22);
+ for(const label of STOCK_SCAN_HISTORY_COLUMNS)assert.ok(html.includes(label.replaceAll('&','&amp;')));
+ const tree=StockScanHistory(props);findElement(tree,'Open saved score').props.onClick();findElement(tree,'Open retained score').props.onClick();findMatching(tree,n=>n.props?.children==='Next page').props.onClick();
+ assert.deepEqual(clicked,['saved','retained','page']);assert.deepEqual(rows,before);
+ const second=renderToStaticMarkup(React.createElement(StockScanHistory,{rows:[],renderRow,emptyState:React.createElement('p',null,'No history')}));assert.match(second,/No history/);assert.doesNotMatch(second,/<table/);
+});
+
+test('only the requested retained-coverage paragraph is omitted; other notices and data remain',()=>{
+ const {retainedSourceCoverageDisplayNote}=helpers();
+ const removed='All retained owned sources are scanned across pages. Deleted uncaptured outputs and sources with unknown market identity cannot be reconstructed. No provider call or history write is performed.';
+ assert.equal(retainedSourceCoverageDisplayNote(removed),'');
+ assert.equal(retainedSourceCoverageDisplayNote(removed+' Incomplete coverage: one source failed.'),'Incomplete coverage: one source failed.');
+ assert.equal(retainedSourceCoverageDisplayNote('Other retained-source limitation'),'Other retained-source limitation');
+ assert.match(retainedSourceCoverageDisplayNote(null),/cannot be reconstructed/);
 });
