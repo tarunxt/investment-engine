@@ -1,0 +1,69 @@
+#!/usr/bin/env node
+// Offline browser acceptance of the production run-group UI and scoped loader.
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {existsSync} from 'node:fs';
+import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
+import ts from 'typescript';
+import {chromium} from 'playwright';
+const require=createRequire(import.meta.url);
+const frontend=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const temporary=await mkdtemp(path.join(os.tmpdir(),'actionables-runs-matching-'));
+const source=await readFile(path.join(frontend,'app/console/_components/FinalActionablesConsole.tsx'),'utf8');
+const scoped=source.slice(source.indexOf('function ScopedFinalActionablesConsole'));
+const start=scoped.indexOf('  const loadRuns = useCallback('),end=scoped.indexOf('\n  const loadTechnicalScanHistory',start);
+assert.ok(start>0&&end>start);
+const ast=ts.createSourceFile('source.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const names=['getLatestMatchingRuns','isCompletedRebalanceRun','hasUsableRebalanceLlmOutput','isUsableModelOutputStatus','extractRebalanceInputFingerprint','normalizeWhitespace','parseTimestampMs'];
+const matching=ast.statements.filter(n=>names.includes(n.name?.getText(ast))).map(n=>n.getText(ast)).join('\n');
+const entry=`import React,{useState,useRef,useCallback,useEffect} from 'react';import{createRoot}from'react-dom/client';
+import{ActionablesRunGroup,ActionablesEmptyState}from${JSON.stringify(path.join(frontend,'components/shared/ActionablesRunGroup.tsx'))};
+import{isAnalysisRunForStage}from${JSON.stringify(path.join(frontend,'lib/rebalanceRunIdentity.ts'))};
+${matching}
+window.pending=[];window.fixture={mode:'deferred'};window.refresh={};
+const fetchAllFullRuns=()=>new Promise((resolve,reject)=>window.pending.push({resolve,reject}));
+const cacheFinalActionablesRuns=()=>{};
+function Panel({market}){const[runs,setRuns]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(null);const runsRequestRef=useRef(0),runCacheKey=market;
+${scoped.slice(start,end)}
+useEffect(()=>{window.refresh[market]=loadRuns;void loadRuns();return()=>{runsRequestRef.current++}},[loadRuns]);
+const matched=getLatestMatchingRuns(runs,market),latestRun=matched[0]??null;
+return <article><h2>{market==='india'?'India':'US'}</h2><button onClick={()=>loadRuns()}>Refresh {market}</button><ActionablesRunGroup market={market} latestRun={latestRun} runCount={matched.length} stockCount={latestRun?.fixtureStockCount??0} loading={loading} error={error}/>{(!latestRun||loading||error)&&<ActionablesEmptyState loading={loading} error={error} hasMatchingRun={Boolean(latestRun)}/>}</article>};
+createRoot(document.getElementById('root')).render(<><h1>Final Actionables · Offline acceptance fixture</h1><main><Panel market='india'/><Panel market='us'/></main></>);`;
+let browser,server;
+try{
+await writeFile(path.join(temporary,'entry.tsx'),entry);
+await writeFile(path.join(temporary,'loader.cjs'),`const ts=require(${JSON.stringify(require.resolve('typescript'))});module.exports=function(s){return ts.transpileModule(s,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020},fileName:this.resourcePath}).outputText;};`);
+const w=require('next/dist/compiled/webpack/webpack');
+await new Promise((resolve,reject)=>w.webpack({mode:'development',devtool:false,entry:path.join(temporary,'entry.tsx'),output:{path:temporary,filename:'bundle.js'},resolve:{extensions:['.tsx','.ts','.js'],modules:[path.join(frontend,'node_modules'),'node_modules']},module:{rules:[{test:/\.tsx?$/,use:path.join(temporary,'loader.cjs')}]},plugins:[new w.webpack.DefinePlugin({'process.env.NODE_ENV':JSON.stringify('development')})]},(e,s)=>e?reject(e):s.hasErrors()?reject(Error(s.toString({all:false,errors:true}))):resolve()));
+const bundle=await readFile(path.join(temporary,'bundle.js'));
+server=createServer((req,res)=>{if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');return res.end(bundle)}res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<meta charset='utf-8'><style>body{font:15px system-ui;background:#f8fafc;color:#334155;padding:24px}main{display:grid;grid-template-columns:1fr 1fr;gap:24px}article{min-width:0}section{background:white;border:1px solid #cbd5e1;border-radius:12px;padding:20px;margin:12px 0}dl{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}dd{margin:8px 0}dt,h3{font-weight:650;color:#0f172a}p{line-height:1.6}button,summary{cursor:pointer;color:#1d4ed8}pre{white-space:pre-wrap;overflow:auto;max-height:250px;background:#f1f5f9;padding:12px;font-size:12px}[role=alert]{color:#b91c1c}h1{font-size:22px}</style><div id='root'></div><script src='/bundle.js'></script>`)});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
+const executablePath=process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined);
+browser=await chromium.launch({headless:true,...(executablePath?{executablePath}:{})});
+const context=await browser.newContext({viewport:{width:1440,height:1100}}),external=[],errors=[];
+await context.route('**/*',r=>{if(new URL(r.request().url()).origin!==origin){external.push(r.request().url());return r.abort()}return r.continue()});
+const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(origin);
+const india=page.getByRole('region',{name:'India run group'}),us=page.getByRole('region',{name:'US run group'});
+await india.getByText(/checking matching runs/).waitFor();assert.doesNotMatch(await page.textContent('body'),/None found|No qualifying|No parsable/);
+const artifact=process.env.ACTIONABLES_MATCHING_ARTIFACT_DIR||'/tmp/actionables-runs-matching-evidence';await mkdir(artifact,{recursive:true});
+await page.screenshot({path:path.join(artifact,'01-loading.png'),fullPage:true});
+const run=(id,market)=>({id,status:'completed',created_at:'2026-10-31T10:15:00Z',auto_rebalance_portfolio:market==='us'?'indmoney_us':'india',auto_rebalance_label:(market==='us'?'IndMoney US':'India')+' Run #105 (Rebalance Scan)',prompt:'[REBALANCE_FLOW:'+market+']\nRebalance.\n## Rebalance Input Bundle\nSnapshot date: 2026-10-30; captured at: 2026-10-31T08:00:00Z\nSwing Trade Run #440; Job #701; Created: 2026-10-31T09:00:00Z\nThreats job #702',fixtureStockCount:19,run_jobs:[]});
+await page.evaluate(r=>{window.pending[0].resolve([r]);window.pending[1].resolve([])},run(450,'india'));
+await india.getByText('#450',{exact:true}).waitFor();await us.getByText('No qualifying run in loaded results',{exact:true}).waitFor();
+await india.locator('summary').click();assert.match(await india.textContent(),/#440; Job #701/);assert.equal(await india.locator('time').getAttribute('datetime'),'2026-10-31T10:15:00Z');
+await page.screenshot({path:path.join(artifact,'02-success-and-confirmed-empty.png'),fullPage:true});
+await page.getByRole('button',{name:'Refresh us',exact:true}).click();await page.evaluate(()=>window.pending[2].reject(Error('Offline request failed')));
+await us.getByText('Matching runs could not be checked. Retry with Refresh.',{exact:true}).waitFor();assert.doesNotMatch(await us.textContent(),/No qualifying|<dd>0/);
+await page.screenshot({path:path.join(artifact,'03-failed.png'),fullPage:true});
+await page.evaluate(()=>{window.refresh.india();window.refresh.india()});
+await page.evaluate(r=>window.pending[4].resolve([r]),run(451,'india'));await india.getByText('#451',{exact:true}).waitFor();
+await page.evaluate(r=>window.pending[3].resolve([r]),run(449,'india'));await page.waitForTimeout(50);assert.equal(await india.getByText('#451',{exact:true}).count(),1);assert.equal(await india.getByText('#449',{exact:true}).count(),0);
+await page.getByRole('button',{name:'Refresh india',exact:true}).click();await page.evaluate(()=>window.pending[5].reject(Error('Refresh failed')));await india.getByText(/Current matching results are unverified/).waitFor();assert.equal(await india.getByText('#451',{exact:true}).count(),1);
+await page.screenshot({path:path.join(artifact,'04-retained-source-after-failure.png'),fullPage:true});
+assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
+const result={result:'PASS',checks:['India/US pending state without false empty/count','source ID and timestamp preservation','success','confirmed empty','failed retrieval','newer response wins','retained source explicitly unverified'],externalRequests:external,pageErrors:errors,screenshots:4};await writeFile(path.join(artifact,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+}finally{await browser?.close();if(server)await new Promise(r=>server.close(r));await rm(temporary,{recursive:true,force:true})}

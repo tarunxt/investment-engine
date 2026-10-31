@@ -11,9 +11,10 @@ export type CompletionPreference = {
   segments: string[];
 };
 
-export function CompletionPreferences({ items, disabled, onApply }: {
+export function CompletionPreferences({ items, disabled, available = true, onApply }: {
   items: CompletionPreference[];
   disabled: boolean;
+  available?: boolean;
   onApply: (values: Record<string, boolean>) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -26,14 +27,14 @@ export function CompletionPreferences({ items, disabled, onApply }: {
   return (
     <Dialog.Root open={open} onOpenChange={changeOpen}>
       <Dialog.Trigger asChild>
-        <button type="button" disabled={disabled} className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition hover:bg-muted/40 disabled:opacity-50">
+        <button type="button" disabled={disabled || !available} className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition hover:bg-muted/40 disabled:opacity-50">
           <Settings2 className="mt-0.5 h-4 w-4 shrink-0 text-violet-600" />
           <span className="flex-1">
             <span className="block text-sm font-semibold">Stage and scan completion</span>
             <span className="mt-1 flex flex-wrap gap-1.5">
               {['Zerodha', 'IndMoney', 'Bullpen'].map((name) => <span key={name} className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-bold uppercase text-violet-700">{name}</span>)}
             </span>
-            <span className="mt-2 block text-xs text-muted-foreground">{count} of {items.length} notifications selected · Configure stages</span>
+            <span className="mt-2 block text-xs text-muted-foreground">{available ? `${count} of ${items.length} notifications selected · Configure stages` : 'Unavailable'}</span>
           </span>
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
         </button>
