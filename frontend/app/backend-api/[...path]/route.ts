@@ -262,6 +262,7 @@ function getResearchHistoryReadScope(method: string, path: string) {
   if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
   // Full stored run details and model cost estimates read historical model
   // output. Keep their deadline and circuit separate from wallet/broker reads.
+  if (path === "runs" || path === "runs/auto-rebalance-history") return "runs/history";
   if (/^runs\/[0-9]+$/.test(path)) return "runs/detail";
   if (path === "providers") return "providers";
   return undefined;

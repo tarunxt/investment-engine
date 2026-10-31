@@ -83,7 +83,7 @@ test("Zerodha sync routes have their own bounded connection and snapshot budgets
 test("captured-read budgets do not expand unrelated reads or mutations", () => {
   const { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs } = loadProxyBudgets();
   for (const path of [
-    "zerodha/orders", "zerodha/portfolio/2026-10-07", "indmoney-us/portfolio", "runs", "jobs/42",
+    "zerodha/orders", "zerodha/portfolio/2026-10-07", "indmoney-us/portfolio", "jobs/42",
     "zerodha/events/run", "zerodha/events/42/extra", "other/events/latest",
     "indmoney-us/threats/not-an-id",
   ]) {
@@ -135,7 +135,7 @@ test("stored run details and provider estimates have coherent isolated read dead
   assert.equal(getResearchHistoryReadScope("GET", "runs/12"), "runs/detail");
   assert.equal(getResearchHistoryReadScope("GET", "runs/999999"), "runs/detail");
   assert.equal(getResearchHistoryReadScope("GET", "providers"), "providers");
-  for (const path of ["runs", "runs/12/cancel", "runs/auto-rebalance-history", "providers/extra"]) {
+  for (const path of ["runs/12/cancel", "providers/extra"]) {
     assert.equal(getResearchHistoryReadScope("GET", path), undefined);
     assert.equal(getProxyTotalTimeoutMs("GET", path), 4_000);
   }
@@ -145,4 +145,39 @@ test("stored run details and provider estimates have coherent isolated read dead
       assert.equal(getProxyTotalTimeoutMs(method, path), 8_000);
     }
   }
+});
+
+test('run history lists use an isolated bounded DB-read budget, not the generic four-second cutoff', () => {
+  const { getProxyAttemptTimeoutMs, getProxyTotalTimeoutMs, getResearchHistoryReadScope } = loadProxyBudgets();
+  for (const path of ['runs', 'runs/auto-rebalance-history']) {
+    for (const method of ['GET', 'HEAD']) {
+      assert.equal(getProxyAttemptTimeoutMs(method, path), 16_000);
+      assert.equal(getProxyTotalTimeoutMs(method, path), 18_000);
+      assert.equal(getResearchHistoryReadScope(method, path), 'runs/history');
+    }
+    for (const method of ['POST', 'PATCH', 'DELETE']) {
+      assert.equal(getProxyTotalTimeoutMs(method, path), 8_000);
+      assert.equal(getResearchHistoryReadScope(method, path), undefined);
+    }
+  }
+  assert.equal(getProxyTotalTimeoutMs('GET', 'jobs'), 4_000);
+});
+
+test('a five-second stored history response succeeds, a stalled read remains bounded, and retry can recover', async () => {
+  const { executeBoundedApiRequest, ApiOriginCircuitBreaker, ApiTransportDeadlineError } = loadModule('../lib/boundedApiTransport.ts');
+  const budgets = loadProxyBudgets();
+  let now = 0; let id = 0; const timers = new Map();
+  const clock = { now: () => now, setTimeout: (callback, delay) => { timers.set(++id, { callback, due: now + delay }); return id; }, clearTimeout: key => timers.delete(key) };
+  const advance = async ms => { now += ms; for (const [key, value] of [...timers]) if (value.due <= now) { timers.delete(key); value.callback(); } for (let i = 0; i < 10; i++) await Promise.resolve(); };
+  const response = { status: 200, headers: new Headers(), body: new TextEncoder().encode('{"items":[]}').buffer };
+  const base = { method: 'GET', candidates: [{ baseUrl: 'http://history.test', stage: 'primary', circuitScope: 'runs/history' }],
+    circuit: new ApiOriginCircuitBreaker(2, 1000), clock,
+    totalBudgetMs: budgets.getProxyTotalTimeoutMs('GET', 'runs'), primaryAttemptBudgetMs: budgets.getProxyAttemptTimeoutMs('GET', 'runs') };
+  const slow = executeBoundedApiRequest({ ...base, fetchCandidate: () => new Promise(resolve => clock.setTimeout(() => resolve(response), 5000)) });
+  await advance(5000); assert.equal((await slow).response.status, 200);
+  const stalled = executeBoundedApiRequest({ ...base, fetchCandidate: (_, signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))) });
+  const rejected = assert.rejects(stalled, ApiTransportDeadlineError);
+  await advance(18000); await rejected;
+  const retry = await executeBoundedApiRequest({ ...base, fetchCandidate: async () => response });
+  assert.equal(retry.response.status, 200);
 });

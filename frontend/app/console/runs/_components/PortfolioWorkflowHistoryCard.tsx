@@ -8,9 +8,10 @@ import { formatCompactStageTime } from '@/lib/datetime';
 import { URLs } from '@/lib/urls';
 import type { AutoRebalanceHistoryItemResponse, RunListItem } from '@/types/api';
 
-export function PortfolioWorkflowHistoryCard({ group, runs, onOpen }: {
+export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvailable = true }: {
   group: AutoRebalanceHistoryItemResponse;
   runs: RunListItem[];
+  runLinksAvailable?: boolean;
   onOpen: (path: string) => void;
 }) {
   const detailPath = URLs.routes.console.autoRebalanceRunDetail(group.portfolio === 'india' ? 'zerodha' : 'indmoneyUs', group.sequence);
@@ -37,7 +38,7 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen }: {
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500">
         <span>Started: {formatCompactStageTime(group.created_at)}</span>
-        <span>{children.length} stage run{children.length === 1 ? '' : 's'}</span>
+        <span>{runLinksAvailable ? `${children.length} stage run${children.length === 1 ? '' : 's'}` : 'Stage run links are still loading or unavailable'}</span>
         <Link href={detailPath} className="text-blue-700 underline">Stage history and diagnostics</Link>
         {children.map(run => <Link key={run.id} href={getRunDetailPathFromPrompt(run.id, run.prompt_preview)} className="text-blue-700 underline">Run #{run.id} · {run.status} · {run.run_jobs.length} provider jobs</Link>)}
       </div>
