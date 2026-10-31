@@ -114,7 +114,7 @@ import {
   type ThreatStageInput,
 } from "@/lib/rebalanceStageInputs";
 import { URLs } from "@/lib/urls";
-import { formatApiTimestamp } from "@/lib/datetime";
+import { formatApiTimestamp, formatCompactQuoteTime } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
 import { cn } from "@/lib/utils";
 import type {
@@ -3726,7 +3726,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const upstoxCell = (symbol: string, exchange: string) => {
     const quote = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(row => row.source.startsWith("Upstox ")), symbol, exchange);
     return <td className="whitespace-nowrap px-4 py-3 text-slate-700" data-provider="upstox" title={quote ? `${quote.source} · As of ${quote.asOf}` : "No Upstox quote available for this exact listing"}>
-      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><div className="text-[10px] text-slate-500">Last trade {formatTimestamp(quote.asOf)}</div><div className="text-[10px] text-slate-500">Display only</div></> : "Unavailable"}
+      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><time dateTime={quote.asOf} className="block text-[10px] text-slate-500">{formatCompactQuoteTime(quote.asOf)}</time></> : "Unavailable"}
     </td>;
   };
   const displayQuote = (symbol: string, exchange: string) => {
