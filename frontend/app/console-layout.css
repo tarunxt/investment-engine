@@ -1,11 +1,13 @@
 /* Console page gutters belong to ConsoleShell. Desktop-wide route wrappers
  * must not add another centered cap or another set of horizontal gutters.
  * Deliberately match known wide page containers only, at the first two layout
- * levels: narrow forms, reading columns, cards and dialogs retain their sizing.
+ * levels, plus the explicit Bullpen mount boundary. Narrow forms, reading
+ * columns, cards and dialogs retain their sizing.
  */
 @media (min-width: 1024px) {
   [data-console-shell] > :is(.mx-auto.max-w-7xl, .mx-auto[class~="max-w-[96rem]"]):not(.fixed, [role="dialog"], dialog),
-  [data-console-shell] > :is(div, main, section):not(.fixed, [role="dialog"], dialog) > :is(.mx-auto.max-w-7xl, .mx-auto[class~="max-w-[96rem]"]):not(.fixed, [role="dialog"], dialog) {
+  [data-console-shell] > :is(div, main, section):not(.fixed, [role="dialog"], dialog) > :is(.mx-auto.max-w-7xl, .mx-auto[class~="max-w-[96rem]"]):not(.fixed, [role="dialog"], dialog),
+  [data-console-shell] [data-bullpen-workspace] > .mx-auto.max-w-7xl {
     width: 100%;
     min-width: 0;
     max-width: none;
