@@ -1,4 +1,4 @@
-name: Upstox single sanitized provider diagnostic
+name: Upstox final controlled provider diagnostic
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
@@ -35,7 +35,9 @@ jobs:
 
 
             def sanitized_result(status, headers, raw, credential):
-                result = {'http_status': status, 'error_code': None, 'error_message': None, 'request_id': None}
+                result = {'http_status': status, 'error_code': None, 'error_message': None, 'request_id': None, 'content_type': 'other', 'response_kind': None}
+                mime = str(headers.get('content-type', '')).split(';', 1)[0].strip().lower()
+                result['content_type'] = mime if mime in {'application/json','text/html','text/plain'} else 'missing' if not mime else 'other'
                 def safe_text(value):
                     if not isinstance(value, str):
                         return None
@@ -53,17 +55,31 @@ jobs:
                 try:
                     payload = json.loads(raw)
                 except (ValueError, TypeError, UnicodeDecodeError):
+                    result['response_kind'] = 'html' if raw.lstrip().lower().startswith((b'<!doctype html',b'<html')) else 'empty' if not raw else 'non_json'
                     result['error_message'] = 'Non-JSON error response; body withheld' if status >= 400 else 'Non-JSON response; body withheld'
                     return result
+                result['response_kind'] = 'json_object' if isinstance(payload, dict) else 'json_array' if isinstance(payload,list) else 'json_scalar'
                 if not isinstance(payload, dict):
                     result['error_message'] = 'Unexpected JSON response shape; body withheld'
                     return result
-                errors = payload.get('errors')
-                error = errors[0] if isinstance(errors, list) and errors and isinstance(errors[0], dict) else payload
-                code = error.get('errorCode', error.get('error_code', error.get('code')))
-                if isinstance(code, str) and re.fullmatch(r'(?:UDAPI\d{1,12}|[A-Z][A-Z0-9_]{1,63})', code):
-                    result['error_code'] = code
-                result['error_message'] = safe_text(error.get('message', error.get('error_message')))
+                candidates = [payload]
+                for _ in range(3):
+                    for node in list(candidates):
+                        if not isinstance(node,dict): continue
+                        for key in ['errors','error','detail']:
+                            value = node.get(key)
+                            if isinstance(value,dict) and value not in candidates: candidates.append(value)
+                            if isinstance(value,list):
+                                candidates.extend(item for item in value[:2] if isinstance(item,dict) and item not in candidates)
+                for node in candidates:
+                    if result['error_code'] is None:
+                        code = node.get('errorCode',node.get('error_code',node.get('code')))
+                        if isinstance(code,str) and re.fullmatch(r'(?:UDAPI\d{1,12}|[A-Z][A-Z0-9_]{1,63})',code): result['error_code'] = code
+                    if result['error_message'] is None:
+                        for key in ['message','error_message','error_description','detail','reason','error','title']:
+                            if isinstance(node.get(key),str):
+                                result['error_message'] = safe_text(node[key])
+                                break
                 if status == 200:
                     rows = [row for row in payload.get('data', {}).values() if isinstance(row, dict) and row.get('instrument_token') == 'NSE_EQ|INE848E01016'] if isinstance(payload.get('data'), dict) else []
                     price = rows[0].get('last_price') if len(rows) == 1 else None
