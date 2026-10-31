@@ -67,3 +67,15 @@ export function formatCompactQuoteTime(value: string | null | undefined): string
   const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
   return `${part('day')} ${part('month')}: ${part('hour')}:${part('minute')}:${part('second')} IST`;
 }
+
+/** Stage tiles/panel summaries only; preserve the original instant and IST zone. */
+export function formatCompactStageTime(value: string | null | undefined): string {
+  const date = parseApiTimestamp(value);
+  if (!date) return 'Not available';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? '';
+  return `${part('day')} ${part('month')} ${part('hour')}:${part('minute')}`;
+}
