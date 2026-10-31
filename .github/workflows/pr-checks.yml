@@ -317,6 +317,7 @@ jobs:
           tests/final-actionables-history-persistence.test.mjs
           tests/final-actionables-position-context.test.mjs
           tests/stock-flow-evidence-and-whole-share.test.mjs
+          tests/stage-tile-formatting.test.mjs
           tests/stock-flow-coverage.test.mjs
           tests/stock-flow-tabs.test.mjs
           tests/final-actionables-calculation-performance.test.mjs

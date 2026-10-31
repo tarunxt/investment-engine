@@ -186,13 +186,14 @@ test('LLM completion separates passed, partial and failed and partial notices ar
     error_message: status === 'partial' ? 'LLM output is partially used' : status === 'failed' ? 'Provider timeout' : null,
   }}));
   const progress = ui.getRunProgress(mixed);
-  assert.equal(ui.formatLlmCompletion(progress), '3/3 (Passed: 1 | Partial: 1 | Failed: 1)');
+  assert.equal(progress.completedLlms, 3);
+  assert.equal(ui.formatLlmCompletion(progress), '1/3 (Passed:1, Partial:1, Failed:1)');
   assert.equal(ui.summarizeRun(mixed).error, 'Provider timeout');
   mixed.run_jobs.pop();
   const summary = ui.summarizeRun(mixed);
   assert.equal(summary.error, null);
   assert.match(summary.partialNotice, /partially used/);
-  assert.equal(ui.formatLlmCompletion(ui.getRunProgress(mixed)), '2/2 (Passed: 1 | Partial: 1 | Failed: 0)');
+  assert.equal(ui.formatLlmCompletion(ui.getRunProgress(mixed)), '1/2 (Passed:1, Partial:1)');
 });
 
 test('zero-position non-buy rows remain displayable but cannot enter executable basket',()=>{

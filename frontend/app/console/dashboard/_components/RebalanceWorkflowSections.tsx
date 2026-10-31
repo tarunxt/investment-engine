@@ -117,7 +117,7 @@ import {
   type ThreatStageInput,
 } from "@/lib/rebalanceStageInputs";
 import { URLs } from "@/lib/urls";
-import { formatApiTimestamp, formatCompactQuoteTime } from "@/lib/datetime";
+import { formatApiTimestamp, formatCompactQuoteTime, formatCompactStageTime } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
 import { cn } from "@/lib/utils";
 import type {
@@ -2295,18 +2295,26 @@ function getRunOutputSummary(run: RunResponse) {
 }
 
 function formatLlmCompletion(info: StageInfo) {
-  if (!info.totalLlms) return "Not available";
-  const completed = info.completedLlms ?? 0;
-  const partial = info.partialLlms ?? 0;
-  const failed = info.failedLlms ?? 0;
-  const passed = info.passedLlms ?? Math.max(0, completed - partial - failed);
-  return `${completed}/${info.totalLlms} (Passed: ${passed} | Partial: ${partial} | Failed: ${failed})`;
+  const count = (value: number | null | undefined) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const total = count(info.totalLlms), completed = count(info.completedLlms);
+  const partial = count(info.partialLlms), failed = count(info.failedLlms);
+  // completedLlms includes every terminal response. The requested display
+  // numerator counts only passed LLMs; underlying run progress stays unchanged.
+  const passed = count(info.passedLlms) ?? (completed === 0 || total === 0 ? 0
+    : completed !== null && partial !== null && failed !== null ? Math.max(0, completed - partial - failed) : null);
+  if (total === null && passed === null && partial === null && failed === null) return "Not available";
+  const parts = [`Passed:${passed ?? "?"}`];
+  if (partial !== null && partial > 0) parts.push(`Partial:${partial}`);
+  if (failed !== null && failed > 0) parts.push(`Failed:${failed}`);
+  // Unfinished/missing classifications must not masquerade as passed or failed.
+  const unresolved = total === null ? 0 : Math.max(0, total - (passed ?? 0) - (partial ?? 0) - (failed ?? 0));
+  if (unresolved > 0) parts.push(`Unresolved:${unresolved}`);
+  return `${passed ?? "?"}/${total ?? "?"} (${parts.join(", ")})`;
 }
 
 function formatRecommendedStockProgress(info: StageInfo) {
   return info.recommendedStocks === null || info.recommendedStocks === undefined
-    ? "n/a" : `${info.recommendedStocks} analysed listings`;
-
+    ? "n/a" : String(info.recommendedStocks);
 }
 
 function isSheetExportError(error?: string | null) {
@@ -2335,7 +2343,7 @@ type StageTileRow = { label: string; value: string; detail?: string | null; erro
 
 function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
   return [
-    { label: "Last scan", value: formatTimestamp(info.completedAt ?? info.startedAt) },
+    { label: "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "LLMs completed", value: formatLlmCompletion(info) },
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
@@ -2347,7 +2355,7 @@ function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
 
 function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
   return [
-    { label: "Last update", value: formatTimestamp(info.completedAt ?? info.startedAt) },
+    { label: "Last update", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
     ...(info.partialNotice ? [{ label: "Partial use", value: info.partialNotice }] : []),
@@ -3053,7 +3061,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
 function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: number): StageTileRow[] {
   if (stage === "sync") {
     const rows: StageTileRow[] = [
-      { label: "Latest sync", value: formatTimestamp(info.completedAt) },
+      { label: "Latest sync", value: formatCompactStageTime(info.completedAt) },
     ];
     if (info.error) rows.push({ label: "Error", value: info.error });
     return rows;
@@ -8661,8 +8669,8 @@ ${zerodhaExecutionMode === "direct_market"
               </Link>
             </div>
             <p className="mt-2 text-base leading-6 text-slate-500">
-              Last run on{" "}
-              {formatTimestamp(lastRunByPortfolio[section.portfolio])}
+              Last run:{" "}
+              {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
             {audit?.status === "pending" ? (
               <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
