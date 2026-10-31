@@ -1,15 +1,15 @@
-name: Upstox safe token-format metadata
+name: Upstox single sanitized provider diagnostic
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
 permissions:
   contents: read
 jobs:
-  format:
+  diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect only safe token format and expiry indicators
+      - name: One same-endpoint diagnostic with strict response redaction
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -27,22 +27,71 @@ jobs:
             resolver=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
             printf '%s  %s\n' 05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f "$resolver" | sha256sum -c --status
             export UPSTOX_ANALYTICS_TOKEN='{{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}'
-            exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'FORMAT_PY'
-            import base64, datetime, json, os, time
-            value = os.environ['UPSTOX_ANALYTICS_TOKEN']
-            stripped = value.strip()
-            parts = stripped.split('.')
-            result = {'nonempty': bool(value), 'outer_whitespace': value != stripped, 'has_bearer_prefix': stripped.lower().startswith('bearer '), 'looks_like_json': stripped.startswith(('{','[')), 'contains_linebreaks': '\n' in value or '\r' in value, 'jwt_segment_count': len(parts), 'looks_truncated': '...' in value or '\u2026' in value}
-            if len(parts) == 3:
+            # One request only; raw bodies, headers and credentials stay process-local.
+            exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'DIAGNOSTIC_PY'
+            import json, math, os, re, urllib.error, urllib.request
+
+            URL = 'https://api.upstox.com/v2/market-quote/quotes?instrument_key=NSE_EQ%7CINE848E01016'
+
+
+            def sanitized_result(status, headers, raw, credential):
+                result = {'http_status': status, 'error_code': None, 'error_message': None, 'request_id': None}
+                def safe_text(value):
+                    if not isinstance(value, str):
+                        return None
+                    value = value.replace(credential, '[REDACTED]') if credential else value
+                    value = re.sub(r'(?i)bearer\s+\S+', 'Bearer [REDACTED]', value)
+                    value = re.sub(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', '[REDACTED]', value)
+                    value = re.sub(r'[A-Za-z0-9_+/=-]{40,}', '[REDACTED]', value)
+                    value = ''.join(char for char in value if char.isprintable())
+                    return value[:240]
+                for key in ['x-request-id', 'x-correlation-id', 'request-id', 'x-amzn-requestid', 'cf-ray']:
+                    value = headers.get(key)
+                    if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9:._=;-]{1,160}', value) and (not credential or credential not in value):
+                        result['request_id'] = safe_text(value)
+                        break
                 try:
-                    payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
-                    expiry = payload.get('exp')
-                    result['jwt_has_numeric_expiry'] = isinstance(expiry, (int,float))
-                    if isinstance(expiry, (int,float)):
-                        result['jwt_expired'] = expiry <= time.time()
-                        result['jwt_expiry_utc'] = datetime.datetime.fromtimestamp(expiry,datetime.timezone.utc).isoformat()
-                except Exception:
-                    result['jwt_payload_parseable'] = False
-            print('UPSTOX_TOKEN_FORMAT_METADATA=' + json.dumps(result, sort_keys=True))
-            FORMAT_PY
+                    payload = json.loads(raw)
+                except (ValueError, TypeError, UnicodeDecodeError):
+                    result['error_message'] = 'Non-JSON error response; body withheld' if status >= 400 else 'Non-JSON response; body withheld'
+                    return result
+                if not isinstance(payload, dict):
+                    result['error_message'] = 'Unexpected JSON response shape; body withheld'
+                    return result
+                errors = payload.get('errors')
+                error = errors[0] if isinstance(errors, list) and errors and isinstance(errors[0], dict) else payload
+                code = error.get('errorCode', error.get('error_code', error.get('code')))
+                if isinstance(code, str) and re.fullmatch(r'(?:UDAPI\d{1,12}|[A-Z][A-Z0-9_]{1,63})', code):
+                    result['error_code'] = code
+                result['error_message'] = safe_text(error.get('message', error.get('error_message')))
+                if status == 200:
+                    rows = [row for row in payload.get('data', {}).values() if isinstance(row, dict) and row.get('instrument_token') == 'NSE_EQ|INE848E01016'] if isinstance(payload.get('data'), dict) else []
+                    price = rows[0].get('last_price') if len(rows) == 1 else None
+                    valid = isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0
+                    result['error_message'] = 'Exact requested instrument returned a positive finite last_price' if valid else 'HTTP 200 without a valid exact-instrument quote'
+                return result
+
+
+            class NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, *args, **kwargs):
+                    return None
+
+
+            def main():
+                credential = os.environ['UPSTOX_ANALYTICS_TOKEN']
+                request = urllib.request.Request(URL, headers={'Authorization': 'Bearer ' + credential, 'Accept': 'application/json'})
+                opener = urllib.request.build_opener(NoRedirect())
+                try:
+                    with opener.open(request, timeout=15) as response:
+                        result = sanitized_result(response.status, response.headers, response.read(8192), credential)
+                except urllib.error.HTTPError as error:
+                    result = sanitized_result(error.code, error.headers, error.read(8192), credential)
+                except Exception as error:
+                    result = {'http_status': None, 'error_code': type(error).__name__, 'error_message': 'Transport failed; exception details withheld', 'request_id': None}
+                print('UPSTOX_SANITIZED_DIAGNOSTIC=' + json.dumps(result, sort_keys=True))
+
+
+            if __name__ == '__main__':
+                main()
+            DIAGNOSTIC_PY
             APP_SH
