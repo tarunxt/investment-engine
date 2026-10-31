@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -630,14 +630,18 @@ export default function MailsPage() {
   const [githubError, setGithubError] = useState<string | null>(null);
   const [historyTab, setHistoryTab] = useState<MailHistoryTab>('all');
   const [preferences, setPreferences] = useState<MailPreference[]>([]);
-  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesLoadState, setPreferencesLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const preferencesLoading = preferencesLoadState === 'loading';
+  const preferencesUnavailable = preferencesLoadState !== 'ready';
+  const preferencesRequest = useRef(0);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesDirty, setPreferencesDirty] = useState(false);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const [preferencesSaved, setPreferencesSaved] = useState(false);
 
   const loadPreferences = useCallback(async () => {
-    setPreferencesLoading(true);
+    const request = ++preferencesRequest.current;
+    setPreferencesLoadState('loading');
     setPreferencesError(null);
     try {
       const response = await fetch(URLs.mails.preferences(), {
@@ -650,16 +654,18 @@ export default function MailsPage() {
       if (!response.ok || !Array.isArray(payload?.items)) {
         throw new Error('Mail preferences could not be loaded.');
       }
+      if (request !== preferencesRequest.current) return;
       setPreferences(payload.items);
       setPreferencesDirty(false);
+      setPreferencesLoadState('ready');
     } catch (preferenceFailure) {
+      if (request !== preferencesRequest.current) return;
+      setPreferencesLoadState('error');
       setPreferencesError(
         preferenceFailure instanceof Error
           ? preferenceFailure.message
           : 'Mail preferences could not be loaded.',
       );
-    } finally {
-      setPreferencesLoading(false);
     }
   }, []);
 
@@ -667,6 +673,7 @@ export default function MailsPage() {
     // Initial network synchronization is intentionally performed after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPreferences();
+    return () => { preferencesRequest.current += 1; };
   }, [loadPreferences]);
 
   function setPreference(key: string, enabled: boolean) {
@@ -684,7 +691,7 @@ export default function MailsPage() {
   }
 
   async function savePreferences() {
-    if (preferencesSaving || !preferencesDirty) return;
+    if (preferencesUnavailable || preferencesSaving || !preferencesDirty) return;
     setPreferencesSaving(true);
     setPreferencesError(null);
     setPreferencesSaved(false);
@@ -905,7 +912,7 @@ export default function MailsPage() {
                 <button
                   type="button"
                   onClick={() => setAllPreferences(true)}
-                  disabled={preferencesLoading || preferencesSaving}
+                  disabled={preferencesUnavailable || preferencesSaving}
                   className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
                 >
                   Select all
@@ -913,7 +920,7 @@ export default function MailsPage() {
                 <button
                   type="button"
                   onClick={() => setAllPreferences(false)}
-                  disabled={preferencesLoading || preferencesSaving}
+                  disabled={preferencesUnavailable || preferencesSaving}
                   className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
                 >
                   Deselect all
@@ -922,7 +929,7 @@ export default function MailsPage() {
             </div>
 
             {preferencesLoading ? (
-              <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <div role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
                 <RefreshCw className="h-4 w-4 animate-spin" />
                 Loading notification settings…
               </div>
@@ -930,7 +937,8 @@ export default function MailsPage() {
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <CompletionPreferences
                   items={preferences.filter((item) => item.group === 'completion')}
-                  disabled={preferencesSaving}
+                  disabled={preferencesUnavailable || preferencesSaving}
+                  available={!preferencesUnavailable}
                   onApply={(values) => {
                     setPreferences((current) => current.map((item) => item.key in values ? { ...item, enabled: values[item.key] } : item));
                     setPreferencesDirty(true);
@@ -946,7 +954,7 @@ export default function MailsPage() {
                       type="checkbox"
                       checked={preference.enabled}
                       onChange={(event) => setPreference(preference.key, event.target.checked)}
-                      disabled={preferencesSaving}
+                      disabled={preferencesUnavailable || preferencesSaving}
                       className="mt-0.5 h-4 w-4 shrink-0 accent-violet-600"
                     />
                     <span>
@@ -976,7 +984,17 @@ export default function MailsPage() {
 
             {preferencesError ? (
               <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                {preferencesError}
+                <p>{preferencesError}</p>
+                {preferencesLoadState === 'error' ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadPreferences()}
+                    className="mt-2 inline-flex items-center gap-2 rounded-lg border border-red-300 px-3 py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
+                  >
+                    <RefreshCw aria-hidden="true" className="h-4 w-4" />
+                    Retry settings
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {preferencesSaved ? (
@@ -989,7 +1007,7 @@ export default function MailsPage() {
             <button
               type="button"
               onClick={() => void savePreferences()}
-              disabled={preferencesLoading || preferencesSaving || !preferencesDirty}
+              disabled={preferencesUnavailable || preferencesSaving || !preferencesDirty}
               className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
