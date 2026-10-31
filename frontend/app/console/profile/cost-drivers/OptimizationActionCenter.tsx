@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useCostUsage } from "./CostUsageProvider";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 import {
@@ -26,7 +27,7 @@ import {
 
 type ActionStatus = "open" | "in-progress" | "done" | "deferred";
 type ActionStatusMap = Record<string, ActionStatus>;
-const COST_DRIVERS_SYNC_EVENT = "credx-cost-drivers:sync";
+
 
 const money = (value: number) => `$${Number(value || 0).toFixed(2)}`;
 const monthValue = (date: Date) =>
@@ -156,96 +157,30 @@ function ActionCard({
 
 export function OptimizationActionCenter() {
   const months = useMemo(() => monthOptions(), []);
-  const [selectedMonth, setSelectedMonth] = useState(() =>
-    monthValue(new Date()),
-  );
-  const [selectedData, setSelectedData] = useState<CostDashboard | null>(null);
+  const { data: selectedData, selectedMonth, setSelectedMonth, refreshing, load, lastLoadedAt } = useCostUsage();
   const [previousData, setPreviousData] = useState<CostDashboard | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [actionStatuses, setActionStatuses] = useState<ActionStatusMap>({});
 
-  const load = useCallback(
-    async (refresh = false) => {
-      setError(null);
-      if (refresh) setRefreshing(true);
-      else setLoading(true);
-
-      try {
-        const selectedRequest = refresh
-          ? apiService.post<CostDashboard>(
-              URLs.costDrivers.refresh(selectedMonth),
-            )
-          : apiService.get<CostDashboard>(
-              URLs.costDrivers.summary(selectedMonth),
-            );
-        const previousRequest = apiService
-          .get<CostDashboard>(
-            URLs.costDrivers.summary(previousMonthValue(selectedMonth)),
-          )
-          .catch(() => null);
-        const [selected, previous] = await Promise.all([
-          selectedRequest,
-          previousRequest,
-        ]);
-        setSelectedData(selected);
-        setPreviousData(previous);
-        setLastLoadedAt(new Date());
-        if (refresh) {
-          window.dispatchEvent(
-            new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
-              detail: { source: "action-centre", month: selectedMonth, data: selected },
-            }),
-          );
-        }
-      } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Unable to load the optimisation review.",
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [selectedMonth],
-  );
-
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, [load]);
-
-  useEffect(() => {
-    const handleSync = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        source?: string;
-        month?: string;
-        data?: CostDashboard;
-      }>).detail;
-      if (!detail || detail.source === "action-centre") return;
-      if (detail.month && detail.month !== selectedMonth) {
-        setSelectedMonth(detail.month);
-      }
-      if (detail.data && detail.month === selectedMonth) {
-        setSelectedData(detail.data);
-        setLastLoadedAt(new Date());
-      }
-    };
-    window.addEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
-    return () => window.removeEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
+    let active = true;
+    const timer = window.setTimeout(() => {
+    void apiService.get<CostDashboard>(URLs.costDrivers.summary(previousMonthValue(selectedMonth)))
+      .then((previous) => { if (active) setPreviousData(previous); })
+      .catch(() => { /* A missing comparison is unknown, not zero. */ });
+    }, 0);
+    return () => { active = false; window.clearTimeout(timer); };
   }, [selectedMonth]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
     try {
       const saved = window.localStorage.getItem(actionStatusKey(selectedMonth));
       setActionStatuses(saved ? (JSON.parse(saved) as ActionStatusMap) : {});
     } catch {
       setActionStatuses({});
     }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [selectedMonth]);
 
   const review = useMemo(
@@ -274,25 +209,7 @@ export function OptimizationActionCenter() {
     [selectedMonth],
   );
 
-  if (loading && !selectedData) {
-    return (
-      <Card className="w-full max-w-7xl">
-        <CardContent className="py-6 text-sm text-muted-foreground">
-          Building the cost optimisation review…
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!review) {
-    return (
-      <Card className="w-full max-w-7xl border-red-200">
-        <CardContent className="py-6 text-sm text-red-700">
-          {error || "No cost optimisation data is available."}
-        </CardContent>
-      </Card>
-    );
-  }
+  if (!review) return null;
 
   const isLower = review.changeUsd < 0;
   const isClosedMonth = selectedMonth < monthValue(new Date());
@@ -334,11 +251,6 @@ export function OptimizationActionCenter() {
                   onChange={(event) => {
                     const month = event.target.value;
                     setSelectedMonth(month);
-                    window.dispatchEvent(
-                      new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
-                        detail: { source: "action-centre", month },
-                      }),
-                    );
                   }}
                   className="mt-1 block h-9 min-w-36 rounded-md border bg-background px-2 text-sm text-foreground"
                 >
@@ -365,12 +277,6 @@ export function OptimizationActionCenter() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              The latest refresh had a problem: {error}. The last successful
-              review remains displayed.
-            </div>
-          )}
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-lg border bg-background p-4">
