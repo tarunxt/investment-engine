@@ -201,7 +201,7 @@ test("Zerodha basket validates sells against live holdings and labels the score 
   );
   assert.match(
     workflowSource,
-    /Stock score scan completed: \{formatTimestamp\(scoreScanCompletedAt\)\}/,
+    /Last score scan: \{formatCompactStageTime\(scoreScanCompletedAt\)\}/,
   );
   assert.match(
     finalActionablesSource,
