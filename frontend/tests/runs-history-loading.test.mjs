@@ -221,3 +221,49 @@ test("a superseded Runs refresh cannot publish its older result", async () => {
   assert.equal(writes.length, completedWrites);
   assert.deepEqual(state[2], [{ id: "new-run" }]);
 });
+
+function runsErrorHarness(apiService, initialTab = 'indmoney') {
+  const slots = []; let cursor = 0; let refresh;
+  const { default: RunsPage } = loadModule('../app/console/runs/page.tsx', {
+    react: {
+      useState(initial) { const index = cursor++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial; return [slots[index], next => { slots[index] = typeof next === 'function' ? next(slots[index]) : next; }]; },
+      useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
+      useCallback(fn) { refresh = fn; return fn; }, useEffect() {}, useMemo(fn) { return fn(); },
+    },
+    'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
+    'next/navigation': { useRouter: () => ({ replace() {} }), useSearchParams: () => new URLSearchParams({ tab: initialTab }) },
+    '@/lib/utils': { cn: () => '' }, '@/services/api': { apiService, APIError: class extends Error {} },
+  });
+  function render() { cursor = 0; return RunsPage(); }
+  function nodes(tree) { if (!tree || typeof tree !== 'object') return []; if (Array.isArray(tree)) return tree.flatMap(nodes); return [tree, ...nodes(tree.props?.children)]; }
+  function select(tab) { const button = nodes(render()).find(n => n.props?.role === 'tab' && n.props.children[0].props.children === tab); assert.ok(button); button.props.onClick(); return render(); }
+  return { render, select, refresh: () => { render(); return refresh(); }, text: () => JSON.stringify(render()) };
+}
+
+test('Bullpen errors arriving after tab changes stay scoped; switching back retains the real failure', async () => {
+  let rejectHistory; let historyReads = 0;
+  const h = runsErrorHarness({ getRuns: async () => ({ items: [], pages: 1 }), getBullpenAutoLiveHistory: () => { historyReads++; return new Promise((_, reject) => { rejectHistory = reject; }); } }, 'bullpen');
+  const pending = h.refresh();
+  h.select('Zerodha');
+  rejectHistory(new Error('Endpoint unavailable during analysis-only recovery.'));
+  await pending;
+  assert.doesNotMatch(h.text(), /Bullpen: Endpoint unavailable/);
+  h.select('IndMoney Runs'); assert.doesNotMatch(h.text(), /Bullpen: Endpoint unavailable/);
+  h.select('Bullpen'); assert.match(h.text(), /Bullpen: Endpoint unavailable during analysis-only recovery\./);
+  h.select('Zerodha'); assert.doesNotMatch(h.text(), /Bullpen: Endpoint unavailable/);
+  h.select('Bullpen'); assert.match(h.text(), /Bullpen: Endpoint unavailable/);
+  assert.equal(historyReads, 1, 'tab changes only update visibility; no retry or recovery bypass');
+});
+
+test('active Bullpen failures stay visible and unrelated portfolio errors are preserved', async () => {
+  let failBullpen = true;
+  const h = runsErrorHarness({ getRuns: async () => { throw new Error('Saved portfolio history unavailable.'); }, getBullpenAutoLiveHistory: async () => { if (failBullpen) throw new Error('Endpoint unavailable during analysis-only recovery.'); return historyPage(1, 1); } }, 'bullpen');
+  await h.refresh();
+  assert.match(h.text(), /Bullpen: Endpoint unavailable/);
+  assert.match(h.text(), /IndMoney\/Zerodha: Saved portfolio history unavailable/);
+  h.select('Zerodha'); assert.doesNotMatch(h.text(), /Bullpen: Endpoint unavailable/); assert.match(h.text(), /IndMoney\/Zerodha: Saved portfolio history unavailable/);
+  h.select('IndMoney Runs'); assert.doesNotMatch(h.text(), /Bullpen: Endpoint unavailable/); assert.match(h.text(), /IndMoney\/Zerodha: Saved portfolio history unavailable/);
+  failBullpen = false; await h.refresh(); h.select('Bullpen');
+  assert.doesNotMatch(h.text(), /Bullpen: Endpoint unavailable/);
+  assert.match(h.text(), /IndMoney\/Zerodha: Saved portfolio history unavailable/);
+});
