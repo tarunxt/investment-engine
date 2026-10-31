@@ -91,7 +91,7 @@ test('local modal edits, readonly totals, vertical steppers, outside/inside clos
   const other = harness(); const otherComponent = load('../components/PortfolioParametersTile.tsx', { ...math, ...other.hooks, createPortal: node => node }).PortfolioParametersTile;
   other.start(); const isolated = otherComponent({ ...props, currency: 'USD', availableMargin: null, totalAssets: null }); assert.match(JSON.stringify(isolated), /Max Weight.*10.00/);
   const workflow = readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx', import.meta.url), 'utf8');
-  assert.match(workflow, /xl:grid-cols-5/);
+  assert.match(workflow, /xl:grid-cols-3/);
   assert.match(workflow, /portfolioParameterAssets\(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin\)/);
   assert.match(workflow, /key=\{`\$\{basketBrokerLabel\}:\$\{tradingViewMarket\}:\$\{detailsData.portfolioSnapshot\?\.captured_at/);
   const componentSource = readFileSync(new URL('../components/PortfolioParametersTile.tsx', import.meta.url), 'utf8');
