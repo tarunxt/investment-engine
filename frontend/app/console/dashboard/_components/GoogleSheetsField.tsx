@@ -1,7 +1,6 @@
 'use client';
 
 import { FileSpreadsheet } from 'lucide-react';
-import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -60,11 +59,6 @@ export function GoogleSheetsField({
         >
           {isCheckingSheets ? 'Checking connection...' : googleSheetsConnected ? 'Connected' : 'Not connected'}
         </span>
-        {!isCheckingSheets && !googleSheetsConnected && (
-          <Link href="/console/google-sheets" className="text-indigo-600 hover:text-indigo-800 hover:underline">
-            Connect now
-          </Link>
-        )}
       </div>
 
       {autoExportEnabled && (
@@ -88,11 +82,7 @@ export function GoogleSheetsField({
               </p>
             ) : (
               <p className="mt-1 text-sm text-amber-700">
-                No personal sheet linked yet. Set it from{' '}
-                <Link href="/console/google-sheets" className="text-indigo-600 hover:text-indigo-800 hover:underline">
-                  Google Sheets settings
-                </Link>
-                .
+                No personal sheet linked. Auto-export requires an existing linked sheet.
               </p>
             )}
           </div>

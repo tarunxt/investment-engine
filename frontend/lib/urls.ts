@@ -669,7 +669,6 @@ export const URLs = {
       bullpenSports30Days: () => "/console/bullpen-sports?tab=30-days",
       bullpenSportsEndOfMonth: () =>
         "/console/bullpen-sports?tab=end-of-month",
-      googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
       llms: () => "/console/llms",
       technicalSetups: () => "/console/technical-setups",

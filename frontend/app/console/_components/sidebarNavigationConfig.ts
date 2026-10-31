@@ -281,13 +281,6 @@ export const SIDEBAR_SECTIONS = [
                         href: URLs.routes.console.apis(),
                         matchMode: 'prefix',
                     },
-                    {
-                        type: 'item',
-                        id: 'google-sheets',
-                        name: 'Google Sheets',
-                        href: URLs.routes.console.googleSheets(),
-                        matchMode: 'prefix',
-                    },
                 ],
             },
         ],
