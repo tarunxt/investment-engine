@@ -648,6 +648,7 @@ export interface LlmCostHistoryRun {
 }
 
 export interface LlmCostHistoryResponse {
+  coverage_note?: string;
   provider: string;
   name: string;
   timezone: string;
