@@ -264,3 +264,20 @@ Final Actionables and the basket allocation universe now retain zero-position Ho
 Final Weight is now labelled Target Weight. The India basket adds Current Weight, Difference, and Action New. Current Weight uses each exact exchange/symbol holding’s settled plus T1 quantity times its saved LTP, divided by the sum of those holding values plus available margin. Non-held listings are zero only with a complete valid portfolio snapshot. Missing values or a non-positive denominator remain unavailable. The same T1-inclusive asset base is used for India display sizing.
 
 Difference is target minus current weight in percentage points, coloured green/red by sign. Known scores outside the positive-score allocation set have target zero; missing scores never imply zero. Action New prioritises Sell All for held stocks with zero target, otherwise Buy New/Add More for positive differences, Trim for negative differences, and Hold for equality. This comparison is display-only and does not change existing order eligibility, selections, quantities, or historical artifacts.
+
+### Display action sizing in the India basket
+
+Action Zerodha Stocks and Action Zerodha Amount appear before the renamed Target
+Zerodha Stocks/Amount. These are display calculations, separate from executable
+Units, Amount, selections and broker payloads. Signed shares use (current portfolio
+value + available margin) × (target weight − current weight as a fraction) / genuine
+Upstox LTP, rounded to nearest whole share with halves away from zero. Sells are
+capped at floor of the known exact-venue holdings. Zero target explicitly displays
+all known holdings as a negative Sell All quantity, retaining a fractional display
+holding total; it does not assert sellability. Amount is signed shares × Upstox LTP.
+Missing Upstox price/provenance/time never falls back to Kite or a limit estimate;
+a known zero-target quantity can still display while its amount is unavailable.
+The stacked calculation view records the inputs, source/as-of, raw result and
+rounding/cap. No stored audit snapshot, order sizing formula or historical artifact
+is changed. Requested explanatory banners are removed without changing their
+underlying market-access, score-selection, funding-buffer or execution safeguards.
