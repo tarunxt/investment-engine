@@ -132,7 +132,7 @@ export function ConsoleShellSkeleton({
           />
         </div>
 
-        <main className="px-4 py-6 sm:px-6 lg:py-6">
+        <main className="px-4 py-6 sm:px-6 lg:py-6" data-console-shell="loading">
           <div className="mx-auto flex max-w-7xl flex-col gap-6">
             {children}
             {showDefaultContent ? <DefaultConsoleContentSkeleton /> : null}
