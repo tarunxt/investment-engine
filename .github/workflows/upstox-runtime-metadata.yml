@@ -1,4 +1,4 @@
-name: Upstox final controlled provider diagnostic
+name: Corrected bounded Upstox quote check
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: One same-endpoint diagnostic with strict response redaction
+      - name: One corrected quote through deployed production request builder
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -19,6 +19,7 @@ jobs:
           command_timeout: 3m
           script: |
             set -eu
+            test "$(sudo -u investor -H git -C /srv/investor rev-parse HEAD)" = bca0d2a8e360dc23b12a8c75ff5c2d100ef1e6f3
             sudo -u investor -H bash --noprofile --norc <<'APP_SH'
             set -euo pipefail
             cd /srv/investor/backend
@@ -27,87 +28,37 @@ jobs:
             resolver=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
             printf '%s  %s\n' 05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f "$resolver" | sha256sum -c --status
             export UPSTOX_ANALYTICS_TOKEN='{{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}'
-            # One request only; raw bodies, headers and credentials stay process-local.
             exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'DIAGNOSTIC_PY'
-            import json, math, os, re, urllib.error, urllib.request
+            import asyncio, json, os
+            from datetime import datetime, timezone
+            import httpx
+            from scripts import diagnose_upstox_quote as diagnostic
+            from app.domains.zerodha.upstox_quotes import normalize_quotes
 
-            URL = 'https://api.upstox.com/v2/market-quote/quotes?instrument_key=NSE_EQ%7CINE848E01016'
-
-
-            def sanitized_result(status, headers, raw, credential):
-                result = {'http_status': status, 'error_code': None, 'error_message': None, 'request_id': None, 'content_type': 'other', 'response_kind': None}
-                mime = str(headers.get('content-type', '')).split(';', 1)[0].strip().lower()
-                result['content_type'] = mime if mime in {'application/json','text/html','text/plain'} else 'missing' if not mime else 'other'
-                def safe_text(value):
-                    if not isinstance(value, str):
-                        return None
-                    value = value.replace(credential, '[REDACTED]') if credential else value
-                    value = re.sub(r'(?i)bearer\s+\S+', 'Bearer [REDACTED]', value)
-                    value = re.sub(r'[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+', '[REDACTED]', value)
-                    value = re.sub(r'[A-Za-z0-9_+/=-]{40,}', '[REDACTED]', value)
-                    value = ''.join(char for char in value if char.isprintable())
-                    return value[:240]
-                for key in ['x-request-id', 'x-correlation-id', 'request-id', 'x-amzn-requestid', 'cf-ray']:
-                    value = headers.get(key)
-                    if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9:._=;-]{1,160}', value) and (not credential or credential not in value):
-                        result['request_id'] = safe_text(value)
-                        break
-                try:
-                    payload = json.loads(raw)
-                except (ValueError, TypeError, UnicodeDecodeError):
-                    result['response_kind'] = 'html' if raw.lstrip().lower().startswith((b'<!doctype html',b'<html')) else 'empty' if not raw else 'non_json'
-                    result['error_message'] = 'Non-JSON error response; body withheld' if status >= 400 else 'Non-JSON response; body withheld'
-                    return result
-                result['response_kind'] = 'json_object' if isinstance(payload, dict) else 'json_array' if isinstance(payload,list) else 'json_scalar'
-                if not isinstance(payload, dict):
-                    result['error_message'] = 'Unexpected JSON response shape; body withheld'
-                    return result
-                candidates = [payload]
-                for _ in range(3):
-                    for node in list(candidates):
-                        if not isinstance(node,dict): continue
-                        for key in ['errors','error','detail']:
-                            value = node.get(key)
-                            if isinstance(value,dict) and value not in candidates: candidates.append(value)
-                            if isinstance(value,list):
-                                candidates.extend(item for item in value[:2] if isinstance(item,dict) and item not in candidates)
-                for node in candidates:
-                    if result['error_code'] is None:
-                        code = node.get('errorCode',node.get('error_code',node.get('code')))
-                        if isinstance(code,str) and re.fullmatch(r'(?:UDAPI\d{1,12}|[A-Z][A-Z0-9_]{1,63})',code): result['error_code'] = code
-                    if result['error_message'] is None:
-                        for key in ['message','error_message','error_description','detail','reason','error','title']:
-                            if isinstance(node.get(key),str):
-                                result['error_message'] = safe_text(node[key])
-                                break
+            instrument = 'NSE_EQ|INE848E01016'
+            original = diagnostic.sanitized_result
+            def checked_result(status, headers, raw, credential, key):
+                result = original(status, headers, raw, credential, key)
+                result['genuine_quote'] = False
                 if status == 200:
-                    rows = [row for row in payload.get('data', {}).values() if isinstance(row, dict) and row.get('instrument_token') == 'NSE_EQ|INE848E01016'] if isinstance(payload.get('data'), dict) else []
-                    price = rows[0].get('last_price') if len(rows) == 1 else None
-                    valid = isinstance(price, (int, float)) and not isinstance(price, bool) and math.isfinite(price) and price > 0
-                    result['error_message'] = 'Exact requested instrument returned a positive finite last_price' if valid else 'HTTP 200 without a valid exact-instrument quote'
+                    try:
+                        payload = json.loads(raw)
+                        quotes = normalize_quotes(payload.get('data'), {'NSE:NHPC': instrument}, datetime.now(timezone.utc)) if isinstance(payload, dict) and payload.get('status') == 'success' else []
+                        if len(quotes) == 1:
+                            result['genuine_quote'] = True
+                            result['quote'] = quotes[0]
+                    except (ValueError, TypeError, OverflowError):
+                        pass
                 return result
-
-
-            class NoRedirect(urllib.request.HTTPRedirectHandler):
-                def redirect_request(self, *args, **kwargs):
-                    return None
-
-
-            def main():
-                credential = os.environ['UPSTOX_ANALYTICS_TOKEN']
-                request = urllib.request.Request(URL, headers={'Authorization': 'Bearer ' + credential, 'Accept': 'application/json'})
-                opener = urllib.request.build_opener(NoRedirect())
-                try:
-                    with opener.open(request, timeout=15) as response:
-                        result = sanitized_result(response.status, response.headers, response.read(8192), credential)
-                except urllib.error.HTTPError as error:
-                    result = sanitized_result(error.code, error.headers, error.read(8192), credential)
-                except Exception as error:
-                    result = {'http_status': None, 'error_code': type(error).__name__, 'error_message': 'Transport failed; exception details withheld', 'request_id': None}
-                print('UPSTOX_SANITIZED_DIAGNOSTIC=' + json.dumps(result, sort_keys=True))
-
-
-            if __name__ == '__main__':
-                main()
+            diagnostic.sanitized_result = checked_result
+            async def main():
+                started = datetime.now(timezone.utc).isoformat()
+                async with asyncio.timeout(15):
+                    async with httpx.AsyncClient(timeout=6, follow_redirects=False) as client:
+                        result = await diagnostic.diagnose(client, instrument, os.environ['UPSTOX_ANALYTICS_TOKEN'])
+                result['attempt_started_at'] = started
+                result['attempt_finished_at'] = datetime.now(timezone.utc).isoformat()
+                print('UPSTOX_CORRECTED_QUOTE_DIAGNOSTIC=' + json.dumps(result, sort_keys=True))
+            asyncio.run(main())
             DIAGNOSTIC_PY
             APP_SH
