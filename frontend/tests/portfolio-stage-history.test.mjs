@@ -139,7 +139,7 @@ test('history loader fetches every bounded page and propagates failure instead o
 
 test('desktop and narrow browser layouts keep six tiles in one keyboard-scrollable row; original retains 2x3', async () => {
   const css = await postcss([tailwind({ base: new URL('../', import.meta.url).pathname })]).process('@import "tailwindcss";', { from: new URL('app/globals.css', root).pathname });
-  const history = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: group(), runs: [], onOpen() {} }));
+  const history = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: group('indmoney_us', 120, { status: 'completed' }), runs: [], onOpen() {} }));
   const original = renderToStaticMarkup(React.createElement('div', { id: 'original', className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, shared.STAGE_ORDER.map(key => React.createElement(shared.WorkflowStageTile, { key, stage: key, info: model.historicalStageInfo(stage(key)), now: Date.parse(timestamp) }))));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   try {
@@ -148,6 +148,8 @@ test('desktop and narrow browser layouts keep six tiles in one keyboard-scrollab
     for (const width of [1920, 390]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.setContent(`<style>${css.css}</style><main style="max-width:1800px;margin:auto">${history}${original}</main>`);
+      await page.screenshot({ path: `/tmp/runs-partial-${width}.png`, fullPage: true });
+      assert.match(await page.locator('section').innerText(), /Finished with partial results/);
       const boxes = await page.locator('section article').evaluateAll(nodes => nodes.map(n => ({ top: n.offsetTop, width: n.getBoundingClientRect().width })));
       assert.equal(new Set(boxes.map(box => box.top)).size, 1);
       assert.ok(boxes.every(box => box.width >= 272));
@@ -164,4 +166,39 @@ test('desktop and narrow browser layouts keep six tiles in one keyboard-scrollab
       }
     }
   } finally { await browser.close(); }
+});
+
+
+test('run completeness reflects saved stages across both markets without changing execution facts', () => {
+  for (const market of ['india', 'indmoney_us']) {
+    const full = group(market, 120, { status: 'completed', stages: shared.STAGE_ORDER.map(key => stage(key, {
+      completed_provider_count: 3, partial_provider_count: 0, failed_provider_count: 0,
+    })) });
+    const before = structuredClone(full);
+    assert.equal(model.portfolioResultCompleteness(full).label, 'Fully complete');
+    const partial = structuredClone(full);
+    partial.stages[3].partial_provider_count = 1;
+    assert.equal(model.portfolioResultCompleteness(partial).label, 'Finished with partial results');
+    partial.stages[3].partial_provider_count = 0;
+    partial.stages[3].summary.partial_notice = 'LLM output is partially used';
+    assert.equal(model.portfolioResultCompleteness(partial).label, 'Finished with partial results');
+    for (const status of ['failed', 'cancelled', 'processing', 'pending', 'unknown']) {
+      assert.equal(model.portfolioResultCompleteness({ ...full, status }).complete, false);
+      assert.equal(model.portfolioResultCompleteness({ ...full, stages: full.stages.map((s, i) => i ? s : { ...s, status }) }).complete, false);
+    }
+    assert.equal(model.portfolioResultCompleteness({ ...full, stages: [] }).complete, false);
+    assert.equal(model.portfolioResultCompleteness({ ...full, stages: full.stages.slice(1) }).complete, false);
+    const missingCounts = structuredClone(full);
+    delete missingCounts.stages[0].provider_count;
+    assert.equal(model.portfolioResultCompleteness(missingCounts).complete, false);
+    const conflicting = structuredClone(full);
+    conflicting.stages[3].partial_provider_count = 1;
+    conflicting.stages[3].summary.partial_llms = 0;
+    assert.equal(model.portfolioResultCompleteness(conflicting).complete, false);
+    const html = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: partial, runs: [], onOpen() {} }));
+    assert.match(html, /Finished with partial results/);
+    assert.match(html, /Execution: completed/);
+    assert.match(html, /LLM output partial/);
+    assert.deepEqual(full, before);
+  }
 });
