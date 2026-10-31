@@ -1,13 +1,14 @@
 // Real local React components, synthetic saved data, mocked APIs, zero external requests.
 import { createRequire } from 'node:module';
+import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import ts from 'typescript';
 const require=createRequire(import.meta.url), frontend=path.resolve(path.dirname(new URL(import.meta.url).pathname),'..');
-const output=path.resolve(frontend,'../../reports/verify-reversal-ui-20261008/offline-ui'), src=path.join(output,'src');
+const output=path.resolve(process.env.CREDX_AUDIT_UI_OUTPUT??path.resolve(frontend,'../../reports/verify-reversal-ui-20261008/offline-ui')), src=path.join(output,'src');
 await mkdir(src,{recursive:true});
-const files=['components/RecommendationAuditPanel.tsx','components/RecommendationAuditEvidence.tsx','components/WholeShareTrimChoice.tsx','components/InvestmentRecommendationTable.tsx','components/ui/button.tsx','lib/stockFlowEvidence.ts','lib/rebalanceRunIdentity.ts','lib/recommendationAuditPresentation.ts','lib/scoreMatrixMath.ts','lib/wholeShareReview.ts','lib/actionColorScheme.ts','lib/utils.ts','app/console/dashboard/_components/StockFlowTabs.tsx'];
+const files=['components/RecommendationAuditPanel.tsx','components/RecommendationAuditEvidence.tsx','components/WholeShareTrimChoice.tsx','components/InvestmentRecommendationTable.tsx','components/ui/button.tsx','lib/stockFlowEvidence.ts','lib/rebalanceUniverse.ts','lib/stockFlowCoverage.ts','lib/rebalanceRunIdentity.ts','lib/recommendationAuditPresentation.ts','lib/scoreMatrixMath.ts','lib/wholeShareReview.ts','lib/actionColorScheme.ts','lib/utils.ts','app/console/dashboard/_components/StockFlowTabs.tsx'];
 for(const file of files){const target=path.join(src,file.replace(/\.tsx?$/,'.js'));await mkdir(path.dirname(target),{recursive:true});await writeFile(target,ts.transpileModule(await readFile(path.join(frontend,file),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText);}
 await writeFile(path.join(output,'stub-ui.js'),`import React from 'react';export default function Stub({children}){return React.createElement('span',null,children)};export const TradingViewSymbolLink=Stub;`);
 await writeFile(path.join(output,'mock-audit.js'),`
@@ -15,7 +16,7 @@ export const recommendationAuditEnabled=true;
 const at='2024-02-01T12:00:00Z';
 const current={id:'current',run_id:102,market:'india',symbol:'FIXTUREEQ',exchange:'NSE',provenance:'legacy_observed',captured_at:at,decision_at:at,original_completion_at:null,provider_families:[['synthetic','same-family']],calculation:{raw_action:'Sell All',formula_action:'Trim',score:'-1.26',formula_units:'-.5',current_units:'1',numerator:'-16.38',denominator:'13',averages:{cruxx:'-1','technical-short':'-1.46','fundamentals-short':'-3','fundamentals-medium-long':'0'},findings:[]},sizing:{policy:'existing-basket-rounding-v1',action:'Sell All',units:'-1',findings:[]},coverage:{successful:2,attempted:2}};
 let present=null;
-export const recommendationAuditApi={comparison:async()=>({current,previous:null,present_calculation:present,bundle_hash:'fixture',coverage:{queried_decisions:0,has_more:false},comparison:null,capabilities:{external_enabled:false,recovery_read_only:false,recovery_stored_only:true}}),capture:async()=>{window.captureCalls++;present={...current,id:'present',captured_at:at,provenance:'calculation_observed',calculation:{...current.calculation,score:'-1.466666666',numerator:'-22',denominator:'15'}};return {decision_ids:['present']}},verify:async request=>{window.auditRequests.push(request);return {id:'verification',status:'completed',verdict:'insufficient_evidence',budget_usd:'0',spent_usd:'0',reserved_usd:'0',dispatch_pending:false,result:{checked_at:at,findings:['A preceding frozen snapshot and independent decision-time counterevidence are missing.'],limitations:['This rechecks stored data; no live market data was fetched.'],claims:[],sources:[]}}},status:async()=>{throw Error('Unexpected poll')},cancel:async()=>{throw Error('Unexpected cancel')},materialize:async()=>{throw Error('Unexpected write')}};
+export const recommendationAuditApi={comparison:async()=>(window.comparisonReads=(window.comparisonReads??0)+1,{current,previous:null,present_calculation:present,bundle_hash:'fixture',coverage:{queried_decisions:0,has_more:false},comparison:null,capabilities:{external_enabled:false,recovery_read_only:false,recovery_stored_only:true}}),capture:async()=>{window.captureCalls++;present={...current,id:'present',captured_at:at,provenance:'calculation_observed',calculation:{...current.calculation,score:'-1.466666666',numerator:'-22',denominator:'15'}};return {decision_ids:['present']}},verify:async request=>{window.auditRequests.push(request);return {id:'verification',status:'completed',verdict:'insufficient_evidence',budget_usd:'0',spent_usd:'0',reserved_usd:'0',dispatch_pending:false,result:{checked_at:at,findings:['A preceding frozen snapshot and independent decision-time counterevidence are missing.'],limitations:['This rechecks stored data; no live market data was fetched.'],claims:[],sources:[]}}},status:async()=>{throw Error('Unexpected poll')},cancel:async()=>{throw Error('Unexpected cancel')},materialize:async()=>{throw Error('Unexpected write')}};
 `);
 await writeFile(path.join(output,'mock-flow.js'),`
 import {parseInvestmentRecommendationContent} from './src/components/InvestmentRecommendationTable.js';
@@ -43,10 +44,23 @@ const style=await postcss([tailwind({base:frontend})]).process(`@import "tailwin
 await writeFile(path.join(output,'style.css'),style.css);
 await writeFile(path.join(output,'index.html'),'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cred-X local UI review · synthetic fixtures</title><link rel="stylesheet" href="style.css"><body><div id="root"></div><script src="bundle.js"></script></body></html>');
 if(process.env.CREDX_AUDIT_UI_BUILD_ONLY==='1'){console.log(JSON.stringify({built:true,browser_checks_run:false,prototype:path.join(output,'index.html'),synthetic_fixtures:true}));process.exit(0);}
+const server=createServer(async(req,res)=>{const files={'/':'index.html','/bundle.js':'bundle.js','/style.css':'style.css'},file=files[req.url];if(!file){res.writeHead(404);return res.end();}try{res.setHeader('Content-Type',file.endsWith('.html')?'text/html':file.endsWith('.css')?'text/css':'text/javascript');res.end(await readFile(path.join(output,file)));}catch{res.writeHead(500);res.end('Fixture unavailable');}});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+server.address().port;
 const browser=await chromium.launch({headless:true,...(process.env.CREDX_AUDIT_BROWSER_EXECUTABLE?{executablePath:process.env.CREDX_AUDIT_BROWSER_EXECUTABLE}:{})});
 const assertions=[],screenshots=[],errors=[],network=[];
-try{const page=await browser.newPage();page.on('pageerror',error=>errors.push(error.message));await page.route(/^https?:/,route=>{network.push(route.request().url());return route.abort()});
-for(const width of [320,768,1280]){await page.setViewportSize({width,height:900});await page.goto('file://'+path.join(output,'index.html'));await page.getByRole('heading',{name:'Quick overview of findings'}).waitFor();
+try{const page=await browser.newPage();page.on('pageerror',error=>errors.push(error.message));await page.route(/^https?:/,route=>{if(new URL(route.request().url()).origin===origin)return route.continue();network.push(route.request().url());return route.abort()});
+for(const width of [320,768,1280]){await page.setViewportSize({width,height:900});await page.goto(origin);
+ const expand=page.getByRole('button',{name:'Expand Verify Reversal',exact:true});await expand.waitFor();
+ const detailsId=await expand.getAttribute('aria-controls');if(await expand.getAttribute('aria-expanded')!=='false'||!await page.evaluate(id=>document.getElementById(id)?.hidden,detailsId))throw Error('Reversal did not start collapsed');
+ await expand.focus();await page.keyboard.press('Enter');await page.getByRole('heading',{name:'Quick overview of findings'}).waitFor();
+ const retainedHeading=await page.getByRole('heading',{name:'Quick overview of findings'}).elementHandle();const comparisonReads=await page.evaluate(()=>window.comparisonReads);
+ for(let i=0;i<3;i++){
+  const hide=page.getByRole('button',{name:'Hide Verify Reversal',exact:true});if(await hide.getAttribute('aria-expanded')!=='true')throw Error('Expanded state not exposed');await hide.focus();await page.keyboard.press('Space');
+  if(!await page.evaluate(id=>document.getElementById(id)?.hidden,detailsId)||!await retainedHeading.evaluate(node=>node.isConnected))throw Error('Hidden reversal details were unmounted');
+  await expand.focus();await page.keyboard.press('Enter');await page.getByRole('heading',{name:'Quick overview of findings'}).waitFor();
+ }
+ if(await page.evaluate(()=>window.comparisonReads)!==comparisonReads||(await page.evaluate(()=>window.auditRequests)).length)throw Error('Toggling caused audit requests');
+ assertions.push('collapsed default, Enter/Space repeated toggles, mounted evidence and no extra audit requests at '+width);
  if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1))throw Error('Audit body overflows '+width);
  await page.getByRole('heading',{name:'In-depth details'}).waitFor();await page.getByText(/Prior frozen snapshot missing$/).waitFor();
  const shot='audit-'+width+'.png';await page.screenshot({path:path.join(output,shot),fullPage:true});screenshots.push(shot);
@@ -67,4 +81,4 @@ await page.getByRole('button',{name:'Capture current calculation',exact:true}).c
 const check=page.getByRole('checkbox',{name:'Select reviewed full exit'});if(!await check.isDisabled())throw Error('Fractional trim selectable by default');await page.getByRole('button',{name:'Review full exit · sell 1 share'}).click();if(await check.isChecked())throw Error('Reviewed exit silently selected');await check.check();await page.getByRole('button',{name:'Keep position · no order'}).click();if(!await check.isDisabled()||await check.isChecked())throw Error('Keep failed to clear selection');
 assertions.push('stored-only verification, idempotency and explicit recheck','separate current observation','whole-share choice plus separate selection');if(errors.length||network.length)throw Error(JSON.stringify({errors,network}));
 const result={passed:true,synthetic_fixtures:true,real_components:true,external_requests:network.length,errors,assertions,screenshots,limitations:['Consensus/final-score provider and portfolio APIs are mocked; this is not a production data or full basket execution test.','User reference screenshot could not be materialized.']};await writeFile(path.join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
-}finally{await browser.close();}
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
