@@ -151,3 +151,18 @@ export function weightComparison(currentValue: number | null | undefined, totalA
   const action = delta === null ? null : current! > 0 && target === 0 ? 'Sell All' : delta > 0 ? current === 0 ? 'Buy New' : 'Add More' : delta < 0 ? 'Trim' : 'Hold';
   return { current, difference: delta, action };
 }
+
+/** Integer presentation only; calculation values remain unchanged. Halves round away from zero. */
+export function formatBasketIntegerCurrency(value: number | null | undefined, signed = false) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'Unavailable';
+  const rounded = excelRound(value), normalized = Object.is(rounded, -0) ? 0 : rounded;
+  return `${signed && normalized > 0 ? '+' : ''}${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(normalized)}`;
+}
+
+export function basketActionGroup(action: string | null | undefined): string {
+  return action === 'Add More' ? 'Add more' : ['Sell All', 'Trim', 'Buy New', 'Add more', 'Hold'].includes(action ?? '') ? action! : 'Unavailable';
+}
+export function actionQuantityMatchesDraft(quantity: number | null | undefined, side: string, units: number | null | undefined) {
+  return typeof quantity === 'number' && Number.isFinite(quantity) && typeof units === 'number' && Number.isFinite(units) && units > 0
+    && (side === 'BUY' && quantity > 0 && quantity === units || side === 'SELL' && quantity < 0 && -quantity === units);
+}
