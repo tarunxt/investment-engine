@@ -13,6 +13,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
+import { PortfolioWorkflowHistoryCard } from './_components/PortfolioWorkflowHistoryCard';
+import { buildPortfolioHistoryEntries } from '@/lib/portfolioStageHistory';
 import { Button } from '@/components/ui/button';
 import { formatApiTimestamp } from '@/lib/datetime';
 import {
@@ -21,7 +23,7 @@ import {
 } from '@/lib/runPresentation';
 import { cn } from '@/lib/utils';
 import { apiService, APIError } from '@/services/api';
-import type { BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
+import type { AutoRebalanceHistoryItemResponse, AutoRebalancePortfolioKey, BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -113,6 +115,16 @@ function getPortfolioTab(run: RunListItem): PortfolioTab | null {
   }
 
   return null;
+}
+
+async function loadWorkflowHistory(portfolio: AutoRebalancePortfolioKey) {
+  const items: AutoRebalanceHistoryItemResponse[] = [];
+  const limit = 250;
+  for (let offset = 0; ; offset += limit) {
+    const response = await apiService.getAutoRebalanceHistory(portfolio, { limit, offset });
+    items.push(...response.items);
+    if (items.length >= response.total || response.items.length < limit) return items;
+  }
 }
 
 async function loadAllPortfolioRuns() {
@@ -293,6 +305,8 @@ export default function RunsPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
 
+  const [workflowGroups, setWorkflowGroups] = useState<AutoRebalanceHistoryItemResponse[]>([]);
+
   const loadRuns = useCallback(async () => {
     loadAbortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -300,14 +314,15 @@ export default function RunsPage() {
     setLoading(true);
     setSourceErrors({ portfolio: null, bullpen: null });
     const [portfolioResult, bullpenResult] = await Promise.allSettled([
-      loadAllPortfolioRuns(),
+      Promise.all([loadAllPortfolioRuns(), loadWorkflowHistory('india'), loadWorkflowHistory('indmoney_us')]),
       loadAllBullpenRuns(controller.signal),
     ]);
     if (controller.signal.aborted) return;
 
     const errors: RunErrors = { portfolio: null, bullpen: null };
     if (portfolioResult.status === 'fulfilled') {
-      setPortfolioRuns(portfolioResult.value);
+      setPortfolioRuns(portfolioResult.value[0]);
+      setWorkflowGroups([...portfolioResult.value[1], ...portfolioResult.value[2]]);
     } else {
       errors.portfolio = 'IndMoney/Zerodha: ' + normalizeError(portfolioResult.reason);
     }
@@ -339,8 +354,12 @@ export default function RunsPage() {
     [portfolioRuns],
   );
 
+  const groupedRuns = useMemo(() => ({
+    indmoney: buildPortfolioHistoryEntries(workflowGroups.filter(group => group.portfolio === 'indmoney_us'), categorizedRuns.indmoney),
+    zerodha: buildPortfolioHistoryEntries(workflowGroups.filter(group => group.portfolio === 'india'), categorizedRuns.zerodha),
+  }), [workflowGroups, categorizedRuns]);
   const selectedItems =
-    activeTab === 'bullpen' ? bullpenRuns : categorizedRuns[activeTab];
+    activeTab === 'bullpen' ? bullpenRuns : groupedRuns[activeTab];
   const pages = Math.max(1, Math.ceil(selectedItems.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const visibleItems = selectedItems.slice(
@@ -404,7 +423,7 @@ export default function RunsPage() {
           const count =
             tab.id === 'bullpen'
               ? bullpenRuns.length
-              : categorizedRuns[tab.id].length;
+              : groupedRuns[tab.id].length;
           return (
             <button
               key={tab.id}
@@ -456,15 +475,11 @@ export default function RunsPage() {
             />
           ))
         ) : (
-          (visibleItems as RunListItem[]).map((run) => (
-            <PortfolioRunTile
-              key={run.id}
-              run={run}
-              onOpen={() =>
-                router.push(getRunDetailPathFromPrompt(run.id, run.prompt_preview))
-              }
-            />
-          ))
+          (visibleItems as ReturnType<typeof buildPortfolioHistoryEntries>).map((entry) => entry.group ? (
+            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} onOpen={path => router.push(path)} />
+          ) : entry.run ? (
+            <PortfolioRunTile key={entry.key} run={entry.run} onOpen={() => router.push(getRunDetailPathFromPrompt(entry.run.id, entry.run.prompt_preview))} />
+          ) : null)
         )}
       </div>
 
@@ -472,7 +487,7 @@ export default function RunsPage() {
         <span className="text-xs text-gray-500">
           {selectedItems.length === 0
             ? 'No results'
-            : from + '–' + to + ' of ' + selectedItems.length + ' runs'}
+            : from + '–' + to + ' of ' + selectedItems.length + (activeTab === 'bullpen' ? ' runs' : ' run groups')}
         </span>
         <div className="flex items-center gap-1">
           <button

@@ -171,7 +171,7 @@ test("changed dashboard TypeScript and threat routers parse", () => {
 
 test("stage Duration opens a dedicated breakdown dialog without navigating the tile", () => {
   const workflowSource = read(
-    "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+    "../components/shared/WorkflowStageTile.tsx",
   );
   const dialogSource = read(
     "../app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",

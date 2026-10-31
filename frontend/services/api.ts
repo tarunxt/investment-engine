@@ -1060,9 +1060,10 @@ class apiServiceClass implements IApiService {
 
   getAutoRebalanceHistory(
     portfolio: AutoRebalancePortfolioKey,
-    params?: { limit?: number },
+    params?: { limit?: number; offset?: number },
   ): Promise<AutoRebalanceHistoryListResponse> {
-    const suffix = params?.limit ? `&limit=${params.limit}` : "";
+    const suffix = (params?.limit ? `&limit=${params.limit}` : "") +
+      (params?.offset ? `&offset=${params.offset}` : "");
     return this.get<AutoRebalanceHistoryListResponse>(
       `${URLs.runs.autoRebalanceHistory(portfolio)}${suffix}`,
     );
