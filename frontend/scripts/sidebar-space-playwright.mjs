@@ -44,6 +44,7 @@ try {
     const open=page.getByRole('button',{name:'Open navigation'});
     if(await open.isVisible())await open.click();
     await nav.waitFor();
+    assert.equal(await nav.locator('a[href="/console/google-sheets"]').count(),0);
     const storageBefore=await page.evaluate(()=>({...localStorage}));
     const box=await nav.boundingBox();
     assert.ok(box.height>height/zoom*.60,`navigation should occupy most height: ${box.height}`);
@@ -60,10 +61,10 @@ try {
       if(entry.group){await page.keyboard.press('Enter');assert.equal(await target.getAttribute('aria-expanded'),'true');await page.keyboard.press(' ');assert.equal(await target.getAttribute('aria-expanded'),'false');}
     }
     // Navigate to a destination low in the list; route transition reveals and highlights it.
-    await page.evaluate(()=>{history.pushState({},'','/console/google-sheets');window.dispatchEvent(new Event('popstate'))});
+    await page.evaluate(()=>{history.pushState({},'','/console/apis');window.dispatchEvent(new Event('popstate'))});
     const active=nav.locator('[aria-current="page"]');await active.waitFor();
     await page.waitForFunction(()=>{const nav=document.querySelector('nav'),a=nav.querySelector('[aria-current="page"]');const n=nav.getBoundingClientRect(),r=a.getBoundingClientRect();return r.top>=n.top&&r.bottom<=n.bottom});
-    assert.equal(await active.getAttribute('href'),'/console/google-sheets');
+    assert.equal(await active.getAttribute('href'),'/console/apis');
     const summary=page.locator('summary').filter({hasText:'Account'});
     await summary.focus();await page.keyboard.press('Enter');
     const panel=page.getByRole('region',{name:'Account and appearance'});await panel.waitFor();
