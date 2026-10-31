@@ -7,8 +7,8 @@ const source = readFileSync(
 );
 
 assert.match(source, /type ZerodhaExecutionMode = "direct_market" \| "publisher_limit";/);
-assert.match(source, /Open Kite protected LIMIT basket/);
-assert.match(source, /Place protected MARKET/);
+assert.doesNotMatch(source, /Open Kite protected LIMIT basket/);
+assert.match(source, /const buttonText = isZerodhaPreview \? "Place Order"/);
 assert.match(source, /Protected MARKET: Sell first, then buy/);
 assert.match(source, /Refresh LTP/);
 assert.match(source, /Quoted LTP refreshed/);

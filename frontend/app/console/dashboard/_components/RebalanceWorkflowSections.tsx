@@ -24,6 +24,7 @@ import {
   type SVGProps,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -3712,6 +3713,7 @@ function ScopedZerodhaBasketPreviewDialog({
   basketCurrency?: "INR" | "USD";
   columnPreferences?: { hiddenColumns: string[]; order?: string[]; names?: Record<string, string>; toggle: (label: string) => void; reorder?: (order: string[]) => void; rename?: (id: string, name: string) => void };
 }) {
+  const orderBlockersId = useId();
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
   const [manualDraftUnits, setManualDraftUnits] = useState<Record<string, number>>({});
@@ -3834,19 +3836,27 @@ function ScopedZerodhaBasketPreviewDialog({
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0 || group.displayRows.length > 0);
 
-  const buttonText = primaryButtonLabel ?? (executionMode === "direct_market" ? "Place protected MARKET: sell first, then buy" : (submission?.phase === "sell_first" ? "Refresh & Open Buy Basket" : "Open Kite protected LIMIT basket"));
+  const orderBlockers = [
+    ...(!selectedOrders.length ? ["Select at least one stock."] : []),
+    ...(placing ? ["Order submission is in progress."] : []),
+    ...(ltpRefreshing ? ["Quote refresh is in progress."] : []),
+    ...(orderSubmissionBlockedReason ? [orderSubmissionBlockedReason] : []),
+    ...selectedDraftIssues,
+  ];
+  const buttonText = isZerodhaPreview ? "Place Order" : (primaryButtonLabel ?? "Place Order");
   const busyText = executionMode === "direct_market" ? "Placing…" : "Opening…";
   const renderPlaceOrderButton = (className?: string) => (
     <Button
       type="button"
       onClick={() => onPlaceOrder(isZerodhaPreview ? basketRows : undefined)}
+      aria-describedby={orderBlockers.length ? orderBlockersId : undefined}
       disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason) || selectedDraftIssues.length > 0}
       className={cn(
         "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
         className,
       )}
     >
-      {orderSubmissionBlockedReason ? "Trading paused: recovery mode" : placing ? busyText : buttonText}
+      {placing ? busyText : buttonText}
     </Button>
   );
 
@@ -3899,7 +3909,6 @@ function ScopedZerodhaBasketPreviewDialog({
             ) : null}
           </div>
           <div className="flex items-center gap-3">
-            {renderPlaceOrderButton()}
             <button
               type="button"
               onClick={onClose}
@@ -4266,12 +4275,12 @@ function ScopedZerodhaBasketPreviewDialog({
           )}
         </div>
 
-        <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="sticky bottom-0 z-10 flex shrink-0 items-end gap-3 border-t border-slate-200 bg-white p-4 sm:p-5">
           {!isZerodhaPreview ? <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Review selected US stock quantities and USD amounts before confirming the final basket.
           </div> : null}
-          {selectedDraftIssues.length ? <details className="max-w-xl text-sm text-amber-800"><summary>Selected rows need execution review</summary><ul>{selectedDraftIssues.map((reason, index) => <li key={`${index}:${reason}`}>{reason}</li>)}</ul></details> : null}
-          {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
+          {orderBlockers.length ? <details id={orderBlockersId} className="min-w-0 flex-1 text-sm text-amber-800"><summary>Why Place Order is unavailable</summary><ul tabIndex={0} aria-label="Blocking order checks" className="mt-2 max-h-40 overflow-y-auto">{orderBlockers.map((reason, index) => <li key={`${index}:${reason}`}>{reason}</li>)}</ul></details> : null}
+          {renderPlaceOrderButton("ml-auto self-end justify-center")}
         </div>
 
         <ScoreMatrixModal
