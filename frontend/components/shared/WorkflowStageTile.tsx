@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, type SVGProps } from "react";
-import { createPortal } from "react-dom";
-import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useCallback, type SVGProps } from "react";
+import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2 } from "lucide-react";
+import { StageErrorDetails } from "@/components/shared/StageErrorDetails";
 import { cn } from "@/lib/utils";
 import { formatCompactStageTime } from "@/lib/datetime";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
@@ -49,6 +48,7 @@ export type StageInfo = {
   errorDetails?: StageErrorDetail[];
   activeRunId?: number | null;
   lastRunId?: number | null;
+  jobId?: number | null;
   completedLlms?: number | null;
   passedLlms?: number | null;
   partialLlms?: number | null;
@@ -250,14 +250,29 @@ export function isInsufficientBalanceError(error?: string | null) {
 
 export function formatBriefTileError(error?: string | null) {
   if (!error?.trim() || isSheetExportError(error)) return "None";
-  if (isInsufficientBalanceError(error)) return "DeepSeek credits were insufficient for this run";
-  const trimmed = error.trim().replace(/\s+/g, " ");
-  return trimmed.length > 96 ? `${trimmed.slice(0, 93)}…` : trimmed;
+  if (/partial(?:ly)?/i.test(error)) return "LLM output partial";
+  if (isInsufficientBalanceError(error)) return "Provider credits insufficient";
+  if (/timeout|timed?\s*out|deadline/i.test(error)) return "Request timed out";
+  if (/quota|rate.?limit|\b429\b/i.test(error)) return "Provider quota exceeded";
+  if (/authenticat|unauthori[sz]ed|invalid.*key|\b40[13]\b/i.test(error)) return "Provider authentication failed";
+  if (/invalid.*output|output.*contract|parsing|parse.*fail|malformed/i.test(error)) return "Invalid LLM output";
+  if (/cancelled|canceled|interrupted/i.test(error)) return "Stage execution interrupted";
+  return "Stage execution failed";
 }
 
 export function getTileErrorDetail(error?: string | null) {
   if (!error?.trim() || isSheetExportError(error)) return null;
-  return error.trim();
+  return error;
+}
+
+export function getStageTileError(info: StageInfo): StageTileRow {
+  const error = getTileErrorDetail(info.error);
+  const partial = info.partialNotice?.trim() ? info.partialNotice :
+    info.runStatus === "partial" || (info.partialLlms ?? 0) > 0
+      ? `Recorded partial output${info.partialLlms != null ? `: ${info.partialLlms} partial LLM responses` : ""}.` : null;
+  const detail = [error, partial && partial !== error ? partial : null].filter(Boolean).join("\n\n") ||
+    (info.errorDetails?.length ? info.errorDetails.map(item => item.message).join("\n\n") : null);
+  return { label: "Error", value: error ? formatBriefTileError(error) : partial ? "LLM output partial" : detail ? "Stage execution failed" : "None", detail, errorDetails: info.errorDetails };
 }
 
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
@@ -267,8 +282,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
     { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    ...(info.partialNotice ? [{ label: "Partial use", value: info.partialNotice }] : []),
-    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error), errorDetails: info.errorDetails },
+    getStageTileError(info),
   ];
 }
 
@@ -277,8 +291,7 @@ export function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
     { label: "Last update", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
-    ...(info.partialNotice ? [{ label: "Partial use", value: info.partialNotice }] : []),
-    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error), errorDetails: info.errorDetails },
+    getStageTileError(info),
   ];
 }
 
@@ -287,7 +300,7 @@ export function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: 
     const rows: StageTileRow[] = [
       { label: "Latest sync", value: formatCompactStageTime(info.completedAt) },
     ];
-    if (info.error) rows.push({ label: "Error", value: info.error });
+    rows.push(getStageTileError(info));
     return rows;
   }
   if (LLM_STAGE_TILE_KEYS.has(stage)) {
@@ -458,8 +471,6 @@ export function WorkflowStageTile({
         : ""
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);
-  const [openErrorDetail, setOpenErrorDetail] = useState<string | null>(null);
-  const lastAutoOpenedErrorRef = useRef<string | null>(null);
   const [durationDialogOpen, setDurationDialogOpen] = useState(false);
   const closeDurationDialog = useCallback(
     () => setDurationDialogOpen(false),
@@ -473,30 +484,6 @@ export function WorkflowStageTile({
         : stage === "actionables"
           ? getActionablesStageTileRows(info)
           : getIdleStageRows(stage, info, now);
-  const stageErrorRow = stageRows.find(
-    (row) => row.label === "Error" && row.detail,
-  );
-  // Deliberately exclude status and errorDetails. Polling can hydrate those
-  // fields after the first failure render; they enrich the open dialog but do
-  // not represent a second failure and must not reopen a dialog the user
-  // already closed.
-  const stageErrorFingerprint = stageErrorRow
-    ? JSON.stringify({
-        stage,
-        detail: stageErrorRow.detail,
-        runId: info.activeRunId ?? info.lastRunId ?? null,
-      })
-    : null;
-
-  useEffect(() => {
-    // Historical idle-stage errors remain manually reopenable from the tile,
-    // but only a newly failed active stage should interrupt the user.
-    if (historical || !stageErrorFingerprint || info.state !== "failed") return;
-    if (lastAutoOpenedErrorRef.current === stageErrorFingerprint) return;
-    lastAutoOpenedErrorRef.current = stageErrorFingerprint;
-    setOpenErrorDetail(stageErrorFingerprint);
-  }, [historical, info.state, stageErrorFingerprint]);
-
   const renderStageRow = (row: StageTileRow) => {
     if (historical && row.label === "Duration" && !info.endedAt) {
       return <p key={row.label}><span className="font-semibold">Duration:</span> n/a</p>;
@@ -523,147 +510,17 @@ export function WorkflowStageTile({
       );
     }
 
-    return (
-      <p
-        key={row.label}
-        className={
-          row.label === "Error" && row.value !== "None"
-            ? "text-red-700"
-            : row.label === "Partial use" ? "text-amber-700" : undefined
-        }
-      >
-        <span
-          className={cn(
-            "font-semibold text-slate-600",
-            row.label === "LLMs completed" && "pointer-events-auto",
-          )}
-        >
-          {row.label}:
-        </span>{" "}
-        {row.label === "Error" && row.detail ? (
-          <span className="relative inline-flex align-middle">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setOpenErrorDetail((current) =>
-                  current === stageErrorFingerprint
-                    ? null
-                    : stageErrorFingerprint,
-                );
-              }}
-              className="pointer-events-auto cursor-pointer rounded text-left text-red-700 underline decoration-red-300 underline-offset-2 transition hover:text-red-800 hover:decoration-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
-              aria-label="Show detailed LLM error"
-              title="Show detailed LLM error"
-            >
-              {row.value}
-            </button>
-            {openErrorDetail === stageErrorFingerprint &&
-            typeof document !== "undefined"
-              ? createPortal(
-                  <div
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="Detailed LLM error"
-                    className="pointer-events-auto fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-slate-950/60 px-4 py-10"
-                    onClick={() => setOpenErrorDetail(null)}
-                  >
-                    <div
-                      className="w-full max-w-2xl overflow-hidden rounded-2xl border border-red-200 bg-white text-left text-sm text-slate-700 shadow-2xl"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-5 py-4">
-                        <div>
-                          <span className="block text-xs font-bold uppercase tracking-[0.16em] text-red-700">Stage failed</span>
-                          <span className="mt-1 block text-xl font-bold text-slate-950">{stageMeta.idle}</span>
-                          <span className="mt-1 block text-xs text-slate-600">
-                            Status: {info.runStatus || info.state}
-                            {info.activeRunId || info.lastRunId
-                              ? ` · Run #${info.activeRunId ?? info.lastRunId}`
-                              : ""}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setOpenErrorDetail(null)}
-                          className="rounded-full p-2 text-slate-500 hover:bg-red-100 hover:text-slate-900"
-                          aria-label="Close detailed error"
-                        >
-                          <X className="size-5" />
-                        </button>
-                      </div>
-                      <div className="space-y-5 px-5 py-5">
-                        <section>
-                          <span className="block font-bold text-slate-950">Error message</span>
-                          <span className="mt-2 block whitespace-pre-wrap break-words rounded-xl border border-red-200 bg-red-50 p-3 font-medium text-red-800">
-                            {row.detail}
-                          </span>
-                        </section>
-                        <section>
-                          <span className="block font-bold text-slate-950">Provider and job details</span>
-                          {row.errorDetails?.length ? (
-                            <span className="mt-2 block space-y-3">
-                              {row.errorDetails.map((detail, index) => (
-                                <span
-                                  key={`${detail.provider ?? "unknown"}-${detail.model ?? "unknown"}-${detail.jobId ?? index}`}
-                                  className="block rounded-xl border border-slate-200 bg-slate-50 p-3"
-                                >
-                                  <span className="block font-semibold text-slate-900">
-                                    {detail.provider || "Unknown provider"} / {detail.model || "Unknown model"}
-                                  </span>
-                                  <span className="mt-0.5 block text-xs text-slate-500">
-                                    {detail.jobId ? `Job #${detail.jobId}` : "Job ID unavailable"}
-                                    {detail.runId ? ` · Run #${detail.runId}` : " · Run ID unavailable"}
-                                    {detail.status ? ` · Status: ${detail.status}` : ""}
-                                  </span>
-                                  <span className="mt-2 block whitespace-pre-wrap break-words">{detail.message}</span>
-                                  <span className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                                    <span className="block"><b>HTTP status:</b> {detail.httpStatus ?? "Unavailable"}</span>
-                                    <span className="block"><b>Retry safe:</b> {detail.retrySafe === true ? "Yes" : detail.retrySafe === false ? "No" : "Unavailable"}</span>
-                                    <span className="block"><b>Correlation ID:</b> {detail.correlationId || "Unavailable"}</span>
-                                    <span className="block"><b>Attempt:</b> {detail.attempt ?? "Unavailable"}</span>
-                                    <span className="block sm:col-span-2"><b>Exception type:</b> {detail.exceptionType || "Unavailable"}</span>
-                                    <span className="block break-all sm:col-span-2"><b>Trace reference:</b> {detail.traceReference || "Unavailable"}</span>
-                                  </span>
-                                  <span className="mt-3 block">
-                                    <span className="block text-xs font-bold uppercase tracking-wide text-slate-500">Provider response body</span>
-                                    <code className="mt-1 block max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-2 text-xs text-slate-100">
-                                      {detail.providerResponseBody || "Unavailable"}
-                                    </code>
-                                  </span>
-                                </span>
-                              ))}
-                            </span>
-                          ) : (
-                            <span className="mt-2 block rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                              The backend did not return an underlying provider exception or job identifier. The message above is the complete diagnostic currently available; inspect the server logs for this run and preserve the original exception in the API response.
-                            </span>
-                          )}
-                        </section>
-                        <section>
-                          <span className="block font-bold text-slate-950">What to do next</span>
-                          <ol className="mt-2 list-decimal space-y-1.5 pl-5">
-                            <li>Check the provider/job detail above and correct the reported authentication, quota, timeout, parsing, or upstream-service issue.</li>
-                            <li>If no underlying cause was returned, inspect backend and worker logs using the run or job ID shown above.</li>
-                            <li>Retry this stage only after the cause is corrected; completed stages and their outputs remain unchanged.</li>
-                          </ol>
-                        </section>
-                        <div className="flex justify-end border-t pt-4">
-                          <Button type="button" onClick={() => setOpenErrorDetail(null)}>Close</Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>,
-                  document.body,
-                )
-              : null}
-          </span>
-        ) : (
-          <span>{row.value}</span>
-        )}
-      </p>
-    );
+    if (row.label === "Error") {
+      return <p key={row.label} className={row.detail ? "text-red-700" : undefined}>
+        <span className="font-semibold text-slate-600">Error:</span>{" "}
+        <span>{row.value}</span>{" "}
+        {row.detail ? <StageErrorDetails stageLabel={stageMeta.idle} info={info} row={row} /> : null}
+      </p>;
+    }
+    return <p key={row.label}>
+      <span className={cn("font-semibold text-slate-600", row.label === "LLMs completed" && "pointer-events-auto")}>{row.label}:</span>{" "}
+      <span>{row.value}</span>
+    </p>;
   };
 
   return (

@@ -88,7 +88,8 @@ test('both portfolios render shared tiles, missing stages, historical counts and
     assert.match(html, /Stocks recommended:<\/span> <span>7/);
     assert.match(html, /30 Oct|20 Oct/);
     assert.match(html, /Run #8/); assert.match(html, /Run #9/); assert.doesNotMatch(html, /Run #10/);
-    assert.match(html, /saved timeout/);
+    assert.match(html, /Request timed out/);
+    assert.doesNotMatch(html, /saved timeout/);
     assert.match(html, /tabindex="0"/);
     assert.match(html, /href="\/console\/runs\/9"/);
     assert.match(html, new RegExp(`/console/auto-rebalance-runs/${portfolio === 'india' ? 'zerodha' : 'indmoneyUs'}/211`));

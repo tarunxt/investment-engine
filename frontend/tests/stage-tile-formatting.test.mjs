@@ -13,7 +13,7 @@ function load(relative, names=[], bindings={}) {
 }
 const date=load('../lib/datetime.ts');
 const workflowPath='../components/shared/WorkflowStageTile.tsx';
-const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatInrCost:()=>'-'});
+const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatInrCost:()=>'-'});
 
 test('stage timestamp matches requested IST 24-hour examples and preserves offset/naive-UTC parsing',()=>{
   assert.equal(date.formatCompactStageTime('2026-10-30T14:07:01Z'),'30 Oct 19:37');
@@ -53,8 +53,10 @@ test('every Stage tile adapter shares compact timestamps, count-only recommendat
     assert.equal(rows[0].value,'30 Oct 19:37',portfolio+' '+stage);
     if(stage!=='sync'){
       assert.equal(rows.find(r=>r.label==='Stocks recommended').value,'7');
-      assert.equal(rows.find(r=>r.label==='Error').value,'Provider timeout');
-      assert.equal(rows.find(r=>r.label==='Partial use').value,info.partialNotice);
+      assert.equal(rows.find(r=>r.label==='Error').value,'Request timed out');
+      assert.match(rows.find(r=>r.label==='Error').detail,/Provider timeout/);
+      assert.match(rows.find(r=>r.label==='Error').detail,/One output is partially used/);
+      assert.equal(rows.some(r=>r.label==='Partial use'),false);
     }
   }
   assert.deepEqual(info,before);
@@ -62,4 +64,24 @@ test('every Stage tile adapter shares compact timestamps, count-only recommendat
   assert.equal(ui.formatRecommendedStockProgress({recommendedStocks:0}),'0');
   const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');
   assert.match(source,/Last run:\{" "\}\s*\{formatCompactStageTime\(lastRunByPortfolio\[section.portfolio\]\)\}/);
+});
+
+test('every stage combines partial and error details in a single concise Error row without changing evidence', () => {
+  for (const stage of ['sync','threats','swing','rebalance','technical','actionables']) {
+    const info={state:'failed',runStatus:'partial',partialLlms:1,error:'  Provider timeout: original long request diagnostic\nwith second line  ',partialNotice:'Original partial notice with available rows.',errorDetails:[{provider:'test',model:'test',jobId:3,runId:7,message:'original provider exception'}]};
+    const before=structuredClone(info);
+    const rows=ui.getIdleStageRows(stage,info,0), errors=rows.filter(row=>row.label==='Error');
+    assert.equal(errors.length,1); assert.equal(rows.some(row=>row.label==='Partial use'),false);
+    assert.equal(errors[0].value,'Request timed out');
+    assert.equal(errors[0].detail, info.error+'\n\n'+info.partialNotice);
+    assert.deepEqual(errors[0].errorDetails,info.errorDetails); assert.deepEqual(info,before);
+    const partial=ui.getStageTileError({state:'completed',partialNotice:'LLM output is partially used: long original explanation.'});
+    assert.equal(partial.value,'LLM output partial'); assert.match(partial.detail,/long original explanation/);
+  }
+  assert.equal(ui.getStageTileError({state:'idle'}).value,'None');
+  assert.equal(ui.getStageTileError({state:'completed',runStatus:'partial'}).value,'LLM output partial');
+  assert.match(ui.getStageTileError({state:'failed',errorDetails:[{message:'only diagnostic'}]}).detail,/only diagnostic/);
+  for (const message of ['quota exceeded','Insufficient balance','authentication failed','invalid output contract','cancelled','unclassified failure']) {
+    const words=ui.formatBriefTileError(message).split(/\s+/);assert.ok(words.length>=2&&words.length<=3,message);
+  }
 });

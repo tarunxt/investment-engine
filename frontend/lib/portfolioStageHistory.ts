@@ -29,6 +29,7 @@ export function historicalStageInfo(stage?: AutoRebalanceStageResponse): StageIn
     endedAt: stage.completed_at,
     completedAt: stage.completed_at,
     lastRunId: stage.run_id,
+    jobId: stage.job_id,
     totalLlms: number('total_llms') ?? stage.provider_count,
     completedLlms: number('completed_llms') ?? stage.completed_provider_count + failed,
     passedLlms: number('passed_llms') ?? Math.max(0, stage.completed_provider_count - partial),
