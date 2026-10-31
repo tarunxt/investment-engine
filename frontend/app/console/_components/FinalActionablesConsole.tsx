@@ -1,4 +1,5 @@
 "use client";
+import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
 import { mergeSummarySourceRows } from "@/lib/summarySourceRows";
 import type { StockSourceObservation } from "@/types/api";
 
@@ -8242,7 +8243,8 @@ export function DashboardFinalActionablesTables() {
     const actionRows = actionRowsByMarket[market];
     const historicalActionRows = historicalActionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
-    const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
+    const matchingRuns = getLatestMatchingRuns(runs, market);
+    const latestRebalanceAt = matchingRuns[0]?.created_at ?? null;
     const latestTechnicalAt = Object.values(technicalScans)
       .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
       .filter((scan) => {
@@ -8303,9 +8305,10 @@ export function DashboardFinalActionablesTables() {
         </div>
 
         <div className="space-y-4">
-          {loading && actionRows.length === 0 ? (
+          <ActionablesRunGroup market={market} latestRun={matchingRuns[0] ?? null} runCount={matchingRuns.length} stockCount={actionRows.length} loading={loading} error={error ?? fallbackNotice} />
+          {actionRows.length === 0 ? (
             <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-              Loading final actionables…
+              <ActionablesEmptyState loading={loading} error={error ?? fallbackNotice} hasMatchingRun={Boolean(matchingRuns[0])} />
             </div>
           ) : (
             ACTION_CATEGORIES.map((action) => {
@@ -8864,7 +8867,17 @@ function ScopedFinalActionablesConsole({
         ) : null}
 
 
-        {showRunDetails ? (
+        <ActionablesRunGroup
+          market={market}
+          latestRun={groupedRuns.latestRun ?? null}
+          runCount={groupedRuns.runs.length}
+          stockCount={totalStocksConsolidated}
+          loading={loading}
+          error={error}
+          onDetails={() => setShowRunDetails(value => !value)}
+        />
+
+        {showRunDetails && ((!loading && !error) || groupedRuns.latestRun) ? (
           <RunGroupDetails
             runs={groupedRuns.runs}
             latestRun={groupedRuns.latestRun}
@@ -8873,44 +8886,8 @@ function ScopedFinalActionablesConsole({
           />
         ) : (
           <>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Run Group</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 text-sm text-gray-600 sm:grid-cols-3">
-                <div>
-                  <div className="font-semibold text-gray-900">
-                    Latest matching run
-                  </div>
-                  <div>
-                    {groupedRuns.latestRun
-                      ? `#${groupedRuns.latestRun.id}`
-                      : "None found"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowRunDetails(true)}
-                  className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <div className="font-semibold text-gray-900">
-                    Runs consolidated
-                  </div>
-                  <div>{groupedRuns.runs.length}</div>
-                  <div className="mt-1 text-xs text-blue-700">
-                    Open run consideration details
-                  </div>
-                </button>
-                <div>
-                  <div className="font-semibold text-gray-900">
-                    Total Stocks consolidated
-                  </div>
-                  <div>{totalStocksConsolidated}</div>
-                </div>
-              </CardContent>
-            </Card>
 
-            <ActionSummarySections
+            {(!loading && !error || groupedRuns.latestRun) ? <ActionSummarySections
               formulaConfig={scoreMatrixFormulaConfig}
               consensus={consensus}
               market={market}
@@ -8923,7 +8900,7 @@ function ScopedFinalActionablesConsole({
                 setCalculationFocusTarget(target);
                 setCalculationsOpen(true);
               }}
-            />
+            /> : null}
           </>
         )}
 
@@ -8953,6 +8930,8 @@ function ScopedFinalActionablesConsole({
                 <div className="py-12 text-center text-sm text-gray-500">
                   Loading final actionables…
                 </div>
+              ) : error && !consensus.length ? (
+                <ActionablesEmptyState loading={false} error={error} hasMatchingRun={Boolean(groupedRuns.latestRun)} />
               ) : consensus.length ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-max text-sm">
@@ -9007,10 +8986,7 @@ function ScopedFinalActionablesConsole({
                 </div>
               ) : (
                 <div className="mx-auto max-w-2xl py-12 text-center text-sm text-gray-500">
-                  No completed rebalance output tables were found for the latest
-                  matching input set. Runs with empty or missing prompts are
-                  ignored by the input-set matcher until a completed rebalance
-                  response is available.
+                  <ActionablesEmptyState loading={loading} error={error} hasMatchingRun={Boolean(groupedRuns.latestRun)} />
                 </div>
               )}
             </CardContent>
