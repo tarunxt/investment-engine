@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -83,6 +77,12 @@ import {
   PortfolioCommandChart,
   type PortfolioCommandChartOption,
 } from "./_components/PortfolioCommandChart";
+
+import {
+  TotalDataStatus,
+  dataAge,
+  type TotalDataStatusInfo,
+} from "./_components/TotalDataStatus";
 
 const ThreatMarketCard = dynamic(
   () =>
@@ -330,10 +330,7 @@ function writeDashboardOverviewCacheEntry(
   }
 }
 
-function logDashboardCacheFallback(
-  key: DashboardSectionKey,
-  reason: unknown,
-) {
+function logDashboardCacheFallback(key: DashboardSectionKey, reason: unknown) {
   console.warn(
     JSON.stringify({
       event: "dashboard_read_fallback_triggered",
@@ -528,8 +525,12 @@ function formatCommandTileUpdatedAt(value?: string | null) {
     hour12: false,
   }).format(date);
   const day = new Intl.DateTimeFormat("en-GB", { day: "2-digit" }).format(date);
-  const month = new Intl.DateTimeFormat("en-GB", { month: "long" }).format(date);
-  const year = new Intl.DateTimeFormat("en-GB", { year: "numeric" }).format(date);
+  const month = new Intl.DateTimeFormat("en-GB", { month: "long" }).format(
+    date,
+  );
+  const year = new Intl.DateTimeFormat("en-GB", { year: "numeric" }).format(
+    date,
+  );
 
   return `${time} | ${day} ${month}, ${year}`;
 }
@@ -575,12 +576,14 @@ function PortfolioCommandSummary({
   refreshingIndmoney,
   refreshingBullpen,
   fx,
+  totalStatuses,
 }: {
+  totalStatuses: Record<CommandTileInfoKey, TotalDataStatusInfo>;
   totalValue: number | null;
-  zerodhaValue: number;
+  zerodhaValue: number | null;
   zerodhaPortfolioValue: number | null | undefined;
-  zerodhaMargin: number;
-  indmoneyValue: number;
+  zerodhaMargin: number | null;
+  indmoneyValue: number | null;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
   bullpenTotalValueInr: number | null | undefined;
@@ -664,12 +667,15 @@ function PortfolioCommandSummary({
           </button>
         </div>
         <div className="mt-1 text-sm font-bold text-white">
-          {formatter(value)}
+          {totalStatuses[keyName].complete
+            ? formatter(value)
+            : "Incomplete total"}
         </div>
         <div className="mt-3 space-y-1 text-xs leading-5 text-slate-200">
           <div>Portfolio: {formatter(portfolioValue)}</div>
           <div>{cashLabel}: {formatter(cashValue)}</div>
         </div>
+        <TotalDataStatus info={totalStatuses[keyName]} />
         <div className="mt-3 flex items-center gap-1.5 text-[10px] leading-4 text-slate-300">
           <Clock className="size-3" />
           <span>{formatCommandTileUpdatedAt(updatedAt)}</span>
@@ -717,6 +723,22 @@ function PortfolioCommandSummary({
               ? "Combined INR unavailable"
               : formatPrivateInvestmentValue(totalValue)}
           </div>
+          <p className="mt-2 text-xs text-slate-300">
+            Sources: Zerodha, INDmoney and Bullpen snapshots · Oldest snapshot:{" "}
+            {dataAge(
+              Math.min(
+                ...Object.values(totalStatuses)
+                  .map((info) => Date.parse(info.capturedAt ?? ""))
+                  .filter(Number.isFinite),
+              ),
+            )}
+            . Source details below.
+            {Object.values(totalStatuses).some(
+              (info) => !info.complete || info.failed,
+            )
+              ? " Incomplete sources: combined total omitted."
+              : ""}
+          </p>
           <div
             className={`mt-2 text-xs leading-5 ${
               fx?.status === "valid" ? "text-slate-300" : "text-amber-200"
@@ -1025,7 +1047,7 @@ function dashboardSummaryToState(
             walletValue: summary.bullpen.wallet_value,
           },
           fetchedAt: summary.bullpen.fetched_at ?? undefined,
-          positionsSource: "last-successful-live-snapshot",
+          positionsSource: summary.bullpen.source,
         }
       : null,
   };
@@ -1062,7 +1084,20 @@ function DashboardPageForUser({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingBullpenTile, setRefreshingBullpenTile] = useState(false);
   const [errorsBySection, setErrorsBySection] = useState<DashboardErrorsState>(
-    {},
+    () => {
+      if (!initialSummary) return {};
+      return Object.fromEntries(
+        [
+          ["zerodhaOverview", initialSummary.sections.zerodha],
+          ["indmoneyOverview", initialSummary.sections.indmoney_us],
+          ["bullpenPositions", initialSummary.sections.bullpen],
+        ].flatMap(([key, section]) =>
+          typeof section === "object" && section?.status === "unavailable"
+            ? [[key, "Source temporarily unavailable."]]
+            : [],
+        ),
+      );
+    },
   );
   const [dataProvenance, setDataProvenance] =
     useState<DashboardDataProvenance | null>(() => {
@@ -1074,6 +1109,17 @@ function DashboardPageForUser({
       }
       return readDashboardOverviewCacheProvenance(userId);
     });
+  const [cacheTimes, setCacheTimes] = useState<
+    Partial<Record<DashboardSectionKey, number>>
+  >(() => {
+    if (initialSummary) return {};
+    const entries = readDashboardOverviewCachePayload(userId).entries;
+    return Object.fromEntries(
+      DASHBOARD_SECTION_KEYS.flatMap((key) =>
+        entries[key] ? [[key, entries[key]!.cachedAt]] : [],
+      ),
+    );
+  });
   const requestIdRef = useRef(0);
   const loadDashboardPromiseRef = useRef<Promise<void> | null>(null);
   const loadThreatsPromiseRef = useRef<Promise<void> | null>(null);
@@ -1122,81 +1168,94 @@ function DashboardPageForUser({
       setRefreshing(true);
     }
 
-    const loadPromise = apiService
-      .getDashboardSummary()
-      .then((summary) => {
-        if (requestId !== requestIdRef.current) return;
-        const update = dashboardSummaryToState(summary);
-        setDataProvenance({
-          source: "live-summary",
-          asOf: Date.parse(summary.generated_at),
-        });
-        setDashboard((current) => {
-          const nextState = {
-            ...current,
-            ...update,
-            // A temporarily unavailable summary must never erase a verified
-            // Bullpen snapshot already displayed or cached in this browser.
-            bullpenPositions:
-              current.bullpenPositions ?? update.bullpenPositions ?? null,
-          };
-          for (const key of DASHBOARD_CRITICAL_KEYS) {
-            writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
-          }
-          return nextState;
-        });
-        const sectionErrors: DashboardErrorsState = {};
-        if (summary.sections.zerodha?.status === "unavailable") {
-          sectionErrors.zerodhaOverview =
-            "India portfolio: temporarily unavailable.";
-        }
-        if (summary.sections.indmoney_us?.status === "unavailable") {
-          sectionErrors.indmoneyOverview =
-            "US portfolio: temporarily unavailable.";
-        }
-        if (summary.sections.bullpen?.status === "unavailable") {
-          sectionErrors.bullpenPositions =
-            "Bullpen wallet: no passive cached snapshot is available.";
-        }
-        setErrorsBySection(sectionErrors);
-      })
-      .catch((error) => {
-        if (requestId !== requestIdRef.current) return;
-        const cached = readDashboardOverviewCache(userId);
-        if (cached) {
-          logDashboardCacheFallback("zerodhaOverview", error);
-          setDashboard((current) => ({ ...current, ...cached }));
-          setDataProvenance(readDashboardOverviewCacheProvenance(userId));
-          setErrorsBySection({
-            zerodhaOverview:
-              "Dashboard summary: live refresh failed; showing last saved data.",
-          });
-          return;
-        }
-        setErrorsBySection({
-          zerodhaOverview: `Dashboard summary: ${normalizeError(error)}`,
-        });
-      })
-      .finally(() => {
-        if (requestId === requestIdRef.current) {
-          setPendingSections((current) => ({
-            ...current,
-            fx: false,
-            zerodhaStatus: false,
-            zerodhaOverview: false,
-            indmoneyOverview: false,
-            polymarketState: false,
-            bullpenPositions: false,
+      const loadPromise = apiService
+        .getDashboardSummary()
+        .then((summary) => {
+          if (requestId !== requestIdRef.current) return;
+          const update = dashboardSummaryToState(summary);
+          setCacheTimes((current) => ({
+            bullpenPositions: current.bullpenPositions,
           }));
-          setRefreshing(false);
-        }
-        if (loadDashboardPromiseRef.current === loadPromise) {
-          loadDashboardPromiseRef.current = null;
-        }
-      });
-    loadDashboardPromiseRef.current = loadPromise;
-    return loadPromise;
-  }, [userId]);
+          setDataProvenance({
+            source: "live-summary",
+            asOf: Date.parse(summary.generated_at),
+          });
+          setDashboard((current) => {
+            const nextState = {
+              ...current,
+              ...update,
+              // A temporarily unavailable summary must never erase a verified
+              // Bullpen snapshot already displayed or cached in this browser.
+              bullpenPositions:
+                current.bullpenPositions ?? update.bullpenPositions ?? null,
+            };
+            for (const key of DASHBOARD_CRITICAL_KEYS) {
+              writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
+            }
+            return nextState;
+          });
+          const sectionErrors: DashboardErrorsState = {};
+          if (summary.sections.zerodha?.status === "unavailable") {
+            sectionErrors.zerodhaOverview =
+              "India portfolio: temporarily unavailable.";
+          }
+          if (summary.sections.indmoney_us?.status === "unavailable") {
+            sectionErrors.indmoneyOverview =
+              "US portfolio: temporarily unavailable.";
+          }
+          if (summary.sections.bullpen?.status === "unavailable") {
+            sectionErrors.bullpenPositions =
+              "Bullpen wallet: no passive cached snapshot is available.";
+          }
+          setErrorsBySection(sectionErrors);
+        })
+        .catch((error) => {
+          if (requestId !== requestIdRef.current) return;
+          const cached = readDashboardOverviewCache(userId);
+          if (cached) {
+            logDashboardCacheFallback("zerodhaOverview", error);
+            setDashboard((current) => ({ ...current, ...cached }));
+            const entries = readDashboardOverviewCachePayload(userId).entries;
+            setCacheTimes(
+              Object.fromEntries(
+                DASHBOARD_SECTION_KEYS.flatMap((key) =>
+                  entries[key] ? [[key, entries[key]!.cachedAt]] : [],
+                ),
+              ),
+            );
+            setDataProvenance(readDashboardOverviewCacheProvenance(userId));
+            setErrorsBySection({
+              zerodhaOverview:
+                "Dashboard summary: live refresh failed; showing last saved data.",
+            });
+            return;
+          }
+          setErrorsBySection({
+            zerodhaOverview: `Dashboard summary: ${normalizeError(error)}`,
+          });
+        })
+        .finally(() => {
+          if (requestId === requestIdRef.current) {
+            setPendingSections((current) => ({
+              ...current,
+              fx: false,
+              zerodhaStatus: false,
+              zerodhaOverview: false,
+              indmoneyOverview: false,
+              polymarketState: false,
+              bullpenPositions: false,
+            }));
+            setRefreshing(false);
+          }
+          if (loadDashboardPromiseRef.current === loadPromise) {
+            loadDashboardPromiseRef.current = null;
+          }
+        });
+      loadDashboardPromiseRef.current = loadPromise;
+      return loadPromise;
+    },
+    [userId],
+  );
 
   const loadThreats = useCallback(() => {
     if (loadThreatsPromiseRef.current) return loadThreatsPromiseRef.current;
@@ -1317,15 +1376,20 @@ function DashboardPageForUser({
           0,
         )
       : null);
-  const zerodhaAvailableMargin = indiaSnapshot?.available_margin ?? 0;
-  const zerodhaCommandValue =
-    (indiaSnapshot?.holdings_market_value ?? 0) + zerodhaAvailableMargin;
+  const zerodhaAvailableMargin = indiaSnapshot?.available_margin ?? null;
+  const indiaComplete =
+    indiaSnapshot != null &&
+    Number.isFinite(indiaSnapshot.holdings_market_value) &&
+    Number.isFinite(indiaSnapshot.available_margin);
+  const zerodhaCommandValue = indiaComplete
+    ? indiaSnapshot.holdings_market_value + indiaSnapshot.available_margin
+    : null;
   const usdInrRate = validDashboardFxRate(dashboard.fx);
   const effectiveFx =
     dashboard.fx?.status === "valid" && usdInrRate == null
       ? { ...dashboard.fx, status: "stale" as const }
       : dashboard.fx;
-  const indmoneyInvestedValue = usSnapshot?.invested_value ?? 0;
+  const indmoneyInvestedValue = usSnapshot?.invested_value ?? null;
   const indmoneyPortfolioValue =
     usSnapshot?.current_value == null
       ? undefined
@@ -1334,8 +1398,14 @@ function DashboardPageForUser({
     usSnapshot?.wallet_balance == null
       ? undefined
       : usSnapshot.wallet_balance * (usdInrRate ?? 1);
-  const indmoneyCommandValue =
-    (indmoneyPortfolioValue ?? 0) + (indmoneyAvailableFundsValue ?? 0);
+  const usComplete =
+    indmoneyPortfolioValue != null &&
+    indmoneyAvailableFundsValue != null &&
+    Number.isFinite(indmoneyPortfolioValue) &&
+    Number.isFinite(indmoneyAvailableFundsValue);
+  const indmoneyCommandValue = usComplete
+    ? indmoneyPortfolioValue + indmoneyAvailableFundsValue
+    : null;
   const bullpenSummary = dashboard.bullpenPositions?.summary;
   const bullpenPositionRows = dashboard.bullpenPositions?.positions;
   const bullpenVerifiedActivePositions =
@@ -1383,21 +1453,26 @@ function DashboardPageForUser({
   const bullpenCashValue = bullpenDisplayValues.cashValue;
   const bullpenTotalValue = bullpenDisplayValues.totalValue;
   const totalCommandValue =
-    usdInrRate == null
+    usdInrRate == null ||
+    zerodhaCommandValue == null ||
+    indmoneyCommandValue == null ||
+    errorsBySection.zerodhaOverview ||
+    errorsBySection.indmoneyOverview ||
+    errorsBySection.bullpenPositions ||
+    bullpenPortfolioValue == null ||
+    bullpenCashValue == null
       ? null
       : bullpenTotalValue == null
         ? null
         : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
-  const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
+  const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? null;
   const persistedIndiaTrend = buildPersistedDashboardTrend(
     dashboard.portfolioHistory?.india ?? [],
   );
   const portfolioCommandTrend =
     persistedIndiaTrend.length > 0
       ? persistedIndiaTrend
-      : buildGenuineInrPortfolioTrend(
-          dashboard.zerodhaOverview?.history ?? [],
-        );
+      : buildGenuineInrPortfolioTrend(dashboard.zerodhaOverview?.history ?? []);
   const persistedIndmoneyTrend = buildPersistedDashboardTrend(
     dashboard.portfolioHistory?.indmoney ?? [],
   );
@@ -1436,10 +1511,45 @@ function DashboardPageForUser({
     dashboard.bullpenPositions?.lastSuccessfulLiveSnapshot?.fetchedAt ??
     dashboard.bullpenPositions?.health?.timestamp ??
     null;
+  const totalStatuses: Record<CommandTileInfoKey, TotalDataStatusInfo> = {
+    zerodha: {
+      source: `Zerodha · ${indiaSnapshot?.source ?? "No stored snapshot"}`,
+      capturedAt: indiaSnapshot?.captured_at,
+      cachedAt: cacheTimes.zerodhaOverview,
+      complete: indiaComplete,
+      pending: pendingSections.zerodhaOverview,
+      failed: Boolean(errorsBySection.zerodhaOverview),
+    },
+    indmoney: {
+      source: `INDmoney · ${usSnapshot?.source ?? "No imported snapshot"}`,
+      capturedAt: usSnapshot?.captured_at,
+      cachedAt: cacheTimes.indmoneyOverview,
+      complete: usComplete,
+      pending: pendingSections.indmoneyOverview,
+      failed: Boolean(
+        errorsBySection.indmoneyOverview ||
+        errorsBySection.zerodhaOverview?.startsWith("Dashboard summary:"),
+      ),
+    },
+    bullpen: {
+      source: `Bullpen · ${dashboard.bullpenPositions?.positionsSource ?? "No wallet snapshot"}`,
+      capturedAt: bullpenUpdatedAt,
+      cachedAt: cacheTimes.bullpenPositions,
+      complete:
+        bullpenPortfolioValue != null &&
+        bullpenCashValue != null &&
+        bullpenTotalValue != null,
+      pending: refreshingBullpenTile || pendingSections.bullpenPositions,
+      failed: Boolean(
+        errorsBySection.bullpenPositions ||
+        errorsBySection.zerodhaOverview?.startsWith("Dashboard summary:"),
+      ),
+    },
+  };
   const combinedChartCapturedAt =
     [indiaSnapshot?.captured_at, usSnapshot?.captured_at, bullpenUpdatedAt]
       .filter((value): value is string => Boolean(value))
-      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+      .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
   const portfolioChartOptions: Record<
     "india" | "indmoney" | "bullpen" | "combined",
     PortfolioCommandChartOption
@@ -1449,30 +1559,39 @@ function DashboardPageForUser({
       currentValue: zerodhaCommandValue,
       trendPoints: portfolioCommandTrend,
       capturedAt: indiaSnapshot?.captured_at,
+      dataStatus: totalStatuses.zerodha,
     },
     indmoney: {
       label: "IndMoney portfolio value",
       currentValue: usdInrRate == null ? null : indmoneyCommandValue,
       trendPoints: indmoneyCommandTrend,
       capturedAt: usSnapshot?.captured_at,
+      dataStatus: totalStatuses.indmoney,
     },
     bullpen: {
       label: "Bullpen portfolio value",
       currentValue: usdInrRate == null ? null : (bullpenTotalValue ?? null),
       trendPoints: bullpenCommandTrend,
       capturedAt: bullpenUpdatedAt,
+      dataStatus: totalStatuses.bullpen,
     },
     combined: {
       label: "Combined portfolio value",
       currentValue: totalCommandValue,
       trendPoints: combinedCommandTrend,
       capturedAt: combinedChartCapturedAt,
+      dataStatus: {
+        source: "Zerodha + INDmoney + Bullpen · Verified FX required",
+        capturedAt: combinedChartCapturedAt,
+        complete: totalCommandValue != null,
+      },
     },
   };
   const refreshBullpenTile = useCallback(async (forceFresh = true) => {
     setRefreshingBullpenTile(true);
     try {
       const positions = await fetchBullpenPositions(forceFresh);
+      setCacheTimes((current) => ({ ...current, bullpenPositions: undefined }));
       setDashboard((current) => {
         const nextState = { ...current, bullpenPositions: positions };
         writeDashboardOverviewCacheEntry(
@@ -1532,21 +1651,30 @@ function DashboardPageForUser({
           {[
             {
               label: "India total (portfolio + cash)",
-              value: formatInr(zerodhaCommandValue),
+              value: indiaComplete
+                ? formatInr(zerodhaCommandValue)
+                : "Incomplete total",
+              status: totalStatuses.zerodha,
             },
             {
               label: "INDmoney total (portfolio + cash)",
               value:
                 usdInrRate == null
                   ? "Unavailable"
-                  : formatInr(indmoneyCommandValue),
+                  : usComplete
+                    ? formatInr(indmoneyCommandValue)
+                    : "Incomplete total",
+              status: totalStatuses.indmoney,
             },
             {
               label: "Bullpen total (portfolio + cash)",
               value:
                 usdInrRate == null || bullpenTotalValue == null
                   ? "Unavailable"
-                  : formatInr(bullpenTotalValue),
+                  : totalStatuses.bullpen.complete
+                    ? formatInr(bullpenTotalValue)
+                    : "Incomplete total",
+              status: totalStatuses.bullpen,
             },
           ].map((metric) => (
             <div key={metric.label} className="rounded-2xl bg-slate-50 p-4">
@@ -1554,8 +1682,18 @@ function DashboardPageForUser({
                 {metric.label}
               </p>
               <p className="mt-2 text-2xl font-semibold text-slate-950">
-                {metric.value}
+                {metric.status.pending && !metric.status.capturedAt
+                  ? "Loading…"
+                  : metric.value}
               </p>
+              <TotalDataStatus info={metric.status} />
+              {metric.label.startsWith("India") ? null : (
+                <p className="mt-1 text-xs text-slate-600">
+                  {usdInrRate == null
+                    ? "INR unavailable · Verified USD/INR required"
+                    : `FX: ${effectiveFx?.source ?? "Unknown source"} · ${formatDataAge(effectiveFx?.as_of)}`}
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -1575,7 +1713,7 @@ function DashboardPageForUser({
             {dataProvenance.source === "server-summary"
               ? "Server dashboard summary"
               : dataProvenance.source === "live-summary"
-                ? "Live dashboard summary"
+                ? "Reloaded stored dashboard summary"
                 : "Browser cache"}
           </span>
           {` • ${formatDataAge(dataProvenance.asOf)}`}
@@ -1628,8 +1766,17 @@ function DashboardPageForUser({
               </div>
             </div>
 
+            <p className="mt-4 max-w-3xl text-xs leading-5 text-slate-300">
+              Refresh Board reloads stored portfolio snapshots and FX status,
+              and requests a fresh Bullpen wallet read. Zerodha sync is
+              requested when its workflow is open. INDmoney stays at the last
+              imported snapshot until you import a new one. Reloading the board
+              does not make stored snapshot prices current. If a read fails, the
+              last available data is labelled below.
+            </p>
             <div className="mt-7 grid gap-6 xl:grid-cols-2 xl:items-stretch">
               <PortfolioCommandSummary
+                totalStatuses={totalStatuses}
                 totalValue={totalCommandValue}
                 zerodhaValue={zerodhaCommandValue}
                 zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
@@ -1677,6 +1824,7 @@ function DashboardPageForUser({
           <DashboardMarketCardSkeleton />
         ) : (
           <MarketPortfolioCard
+            dataStatus={totalStatuses.zerodha}
             market="india"
             title="Zerodha India"
             description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
@@ -1768,6 +1916,10 @@ function DashboardPageForUser({
           <DashboardMarketCardSkeleton />
         ) : (
           <MarketPortfolioCard
+            dataStatus={{
+              ...totalStatuses.indmoney,
+              source: `${totalStatuses.indmoney.source} · ${usdInrRate == null ? "USD · INR conversion unavailable" : `FX ${effectiveFx?.source ?? "unknown"}, ${formatDataAge(effectiveFx?.as_of)}`}`,
+            }}
             market="us"
             title="INDmoney US"
             description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."

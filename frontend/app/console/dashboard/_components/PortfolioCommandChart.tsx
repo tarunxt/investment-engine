@@ -10,19 +10,19 @@ import {
   type PortfolioHistoryRange,
 } from "@/lib/portfolioHistory";
 
+import { TotalDataStatus, type TotalDataStatusInfo } from "./TotalDataStatus";
+
 import { formatInr } from "./dashboardOverviewUtils";
 
 export type PortfolioCommandChartKey =
-  | "india"
-  | "indmoney"
-  | "bullpen"
-  | "combined";
+  "india" | "indmoney" | "bullpen" | "combined";
 
 export type PortfolioCommandChartOption = {
   label: string;
   currentValue: number | null;
   trendPoints: GenuinePortfolioPoint[];
   capturedAt?: string | null;
+  dataStatus?: TotalDataStatusInfo;
 };
 
 const PORTFOLIO_COMMAND_CHART_KEYS: PortfolioCommandChartKey[] = [
@@ -199,8 +199,9 @@ export function PortfolioCommandChart({
   userId: number | null | undefined;
   options: Record<PortfolioCommandChartKey, PortfolioCommandChartOption>;
 }) {
-  const [selectedChart, setSelectedChart] =
-    useState<PortfolioCommandChartKey>(() => readChartPreference(userId));
+  const [selectedChart, setSelectedChart] = useState<PortfolioCommandChartKey>(
+    () => readChartPreference(userId),
+  );
   const [selectedRange, setSelectedRange] =
     useState<PortfolioHistoryRange>("ALL");
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(
@@ -212,10 +213,7 @@ export function PortfolioCommandChart({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
-        chartPreferenceKey(userId),
-        selectedChart,
-      );
+      window.localStorage.setItem(chartPreferenceKey(userId), selectedChart);
     } catch {
       // The in-memory selection still works when browser storage is blocked.
     }
@@ -291,6 +289,9 @@ export function PortfolioCommandChart({
         <div className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-5xl">
           {formatInr(selectedOption.currentValue)}
         </div>
+        {selectedOption.dataStatus ? (
+          <TotalDataStatus info={selectedOption.dataStatus} compact />
+        ) : null}
         <div className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">
           Current portfolio + cash
         </div>
@@ -360,10 +361,13 @@ export function PortfolioCommandChart({
           {selector}
           <div className="mt-5 flex items-center gap-4">
             <div className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
-              {formatInr(selectedOption.currentValue ?? latestTrendValue)}
+              {formatInr(selectedOption.currentValue)}
             </div>
             <Upload className="size-6 text-slate-200" aria-hidden="true" />
           </div>
+          {selectedOption.dataStatus ? (
+            <TotalDataStatus info={selectedOption.dataStatus} compact />
+          ) : null}
           <div
             className={`mt-3 text-base font-semibold ${
               selectedRangeChangeValue >= 0

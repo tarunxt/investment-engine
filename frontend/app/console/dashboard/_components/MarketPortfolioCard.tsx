@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { TotalDataStatus, type TotalDataStatusInfo } from './TotalDataStatus';
 import { Wallet } from 'lucide-react';
 
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
@@ -96,7 +97,9 @@ export function MarketPortfolioCard({
   threatsHref,
   actionLinks,
   emptyMessage,
+  dataStatus,
 }: {
+  dataStatus?: TotalDataStatusInfo;
   market: DashboardMarket;
   title: string;
   description: string;
@@ -179,6 +182,7 @@ export function MarketPortfolioCard({
                     {metric.label}
                   </div>
                   <div className="mt-2 text-lg font-semibold">{metric.value}</div>
+                  {dataStatus ? <TotalDataStatus info={dataStatus} compact /> : null}
                   {metric.detail ? (
                     <div className="mt-1 text-xs text-slate-500">{metric.detail}</div>
                   ) : null}
