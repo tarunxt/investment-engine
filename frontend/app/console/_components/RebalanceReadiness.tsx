@@ -27,8 +27,8 @@ export function RebalanceReadiness({ loading, error, portfolio, threats, selecte
         ))}
       </ul>
       <p className="mt-3 font-medium" role="status">{blockedReason ? `Execution blocked: ${blockedReason}` : "Execution may proceed under the current input rules."}</p>
-      <p className="mt-1 text-xs text-gray-600">Missing Swing or Threats context does not block this console. US holdings must pass the existing snapshot validation. Model selection and prompt checks still apply; queued jobs remain subject to server validation.</p>
-      <p className="mt-1 text-xs text-gray-600">An unknown model estimate is not a verified zero and does not change execution eligibility.</p>
+      <p className="mt-1 text-xs text-gray-600">Swing and Threats context is not required by the existing input rules. Checklist states describe saved context; the execution message reflects submission checks. US holdings must pass the existing snapshot validation. Model selection and prompt checks still apply; queued jobs remain subject to server validation.</p>
+      <p className="mt-1 text-xs text-gray-600">An unknown model estimate is not a verified zero and does not change execution eligibility. A reported ₹0.00 estimate does not confirm a free run.</p>
     </section>
   );
 }

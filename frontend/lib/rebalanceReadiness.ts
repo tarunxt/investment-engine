@@ -16,5 +16,6 @@ export function estimateReadinessLabel(cost: number, unknown: number, loading: b
   if (loading) return "Loading pricing…";
   if (unknown > 0) return `Unknown (${unknown} model estimate${unknown === 1 ? "" : "s"} unavailable)`;
   if (selected === 0) return "Select models";
+  if (cost === 0) return "₹0.00 reported (zero not verified)";
   return `₹${cost.toFixed(2)}`;
 }

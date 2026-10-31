@@ -501,7 +501,7 @@ export function LlmModelSelectionPanel({
                                   selected && compatible ? "text-slate-600" : "",
                                 )}
                               >
-                                Est. {showEstimateReadiness && !isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? "Unknown" : formatInrCost(estimated)}
+                                Est. {showEstimateReadiness && !isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? "Unknown" : showEstimateReadiness ? estimateReadinessLabel(estimated, 0, false, 1) : formatInrCost(estimated)}
                               </span>
                               {historicalCost !== null ? (
                                 <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100">

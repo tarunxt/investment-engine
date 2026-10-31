@@ -54,7 +54,7 @@ test('unknown, partial, stale selection, loading and explicit zero estimates sta
   assert.equal(readiness.isKnownEstimate(0), true);
   assert.match(modelPanel({}), /Unknown \(2 model estimates unavailable\)/);
   assert.match(modelPanel({ a: 2 }), /Unknown \(1 model estimate unavailable\)/);
-  assert.match(modelPanel({ a: 0, b: 0 }), /Estimated selected total: ₹0.00/);
+  assert.match(modelPanel({ a: 0, b: 0 }), /Estimated selected total: ₹0.00 reported \(zero not verified\)/);
   assert.match(modelPanel({ a: 1.25, b: 2.5 }), /Estimated selected total: ₹3.75/);
   assert.match(modelPanel({ a: 0, b: 0 }, { loading: true }), /Loading pricing/);
   assert.match(modelPanel({ a: 0, b: 0 }, { selectedKeys: new Set(['retired::model']) }), /Unknown/);
