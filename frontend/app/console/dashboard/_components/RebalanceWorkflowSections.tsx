@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { BasketDraftUnits } from "@/components/BasketDraftUnits";
+import { draftDirection, suggestedDraftUnits, editableDraftAmount, editableDraftIssues, type BasketDraftContext } from "@/lib/basketEditableDraft";
 import { useAuth } from "@/hooks/useAuth";
 import { readBasketColumnLayout, writeBasketColumnLayout, emptyBasketColumnLayout, type BasketColumnLayout } from "@/lib/basketColumnPreferences";
 import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
@@ -275,6 +277,7 @@ type ZerodhaBasketSubmission = {
   messages?: string[];
 };
 type ZerodhaBasketPreviewOrder = {
+  draftContext?: BasketDraftContext;
   id: string;
   exchange: string;
   symbol: string;
@@ -3657,7 +3660,7 @@ function ScopedZerodhaBasketPreviewDialog({
   loadingLabel = "Preparing Zerodha basket…",
   scoreScanCompletedAt: scoreScanCompletedAtOverride = null,
   primaryButtonLabel,
-  basketInfoText = "Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.",
+  basketInfoText = "All rows are visible and selectable. Selection does not assert execution validity. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours. Market drafts require enabled direct broker access; no silent LIMIT fallback is used.",
   basketCurrency = "INR",
   columnPreferences,
 }: {
@@ -3670,13 +3673,13 @@ function ScopedZerodhaBasketPreviewDialog({
   selectedIds: Set<string>;
   onClose: () => void;
   onToggle: (id: string) => void;
-  onToggleAll: () => void;
+  onToggleAll: (ids?: string[]) => void;
   onToggleSection: (action: ActionCategory, visibleIds?: string[]) => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
   onPercentChange: (id: string, percent: ZerodhaBasketOrderPercent) => void;
   onUnitsChange: (id: string, delta: number) => void;
   onWholeShareChoice?: (id: string, choice: "keep" | "exit") => void;
-  onPlaceOrder: () => void;
+  onPlaceOrder: (drafts?: ZerodhaBasketPreviewOrder[]) => void;
   placing: boolean;
   directMarketAvailable: boolean;
   orderSubmissionBlockedReason?: string | null;
@@ -3708,6 +3711,7 @@ function ScopedZerodhaBasketPreviewDialog({
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
+  const [manualDraftUnits, setManualDraftUnits] = useState<Record<string, number>>({});
   const [unitsDetailId, setUnitsDetailId] = useState<string | null>(null);
   const [localHiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const hiddenColumns = columnPreferences?.hiddenColumns ?? localHiddenColumns;
@@ -3751,11 +3755,36 @@ function ScopedZerodhaBasketPreviewDialog({
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin });
-  const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
-  const visibleScore = (score: number | null) => displayScoreAccepted(score, displayCalculations.lower, displayCalculations.upper, displayCalculations.showAll);
+  const legacyDisplayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
+  const visibleScore = (_score: number | null) => true;
+  const buildEditableRow = (existing: ZerodhaBasketPreviewOrder | undefined, row?: DashboardActionRow): ZerodhaBasketPreviewOrder => {
+    const stock = existing ? { symbol: existing.symbol, exchange: existing.exchange, score: existing.detail.calculatedScore, ...displayQuote(existing.symbol, existing.exchange) } : displayStock(row!);
+    const metrics = displayCalculations.metrics?.(stock);
+    const action = metrics?.comparison.action ?? null, direction = draftDirection(action);
+    const suggested = suggestedDraftUnits(metrics?.actionSizing.stocks);
+    const id = existing?.id ?? `basket:${stockIdentity(stock.symbol, stock.exchange)}`;
+    const units = Object.hasOwn(manualDraftUnits, id) ? manualDraftUnits[id] : suggested;
+    const price = metrics?.actionSizing.price ?? null;
+    const holding = kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, stock.symbol, stock.exchange);
+    const upstox = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(quote => quote.source.startsWith("Upstox ")), stock.symbol, stock.exchange);
+    return { ...existing, id, symbol: stock.symbol, exchange: stock.exchange,
+      action: (basketActionGroup(action) === 'Unavailable' ? 'Hold' : basketActionGroup(action)) as ActionCategory,
+      side: direction ?? existing?.side ?? 'BUY', units, baseUnits: suggested, currentUnits: holding?.quantity ?? null,
+      price, lastPrice: price, amount: editableDraftAmount(units, price), availableBalance: availableMargin,
+      percent: direction === 'SELL' && holding?.quantity ? (units ?? 0) / holding.quantity * 100 : 100,
+      orderKind: 'Market', stock: existing?.stock ?? row!.stock, detail: existing?.detail ?? row!.detail,
+      technicalScan: existing?.technicalScan ?? null,
+      draftContext: { action, originalAction: existing ? getZerodhaBasketActionForPercent(existing) : row!.formulaAction, suggestedUnits: suggested, source: upstox?.source, asOf: upstox?.asOf },
+    };
+  };
+  const basketRows = tradingViewMarket === 'india' ? [
+    ...orders.map(order => buildEditableRow(order)),
+    ...legacyDisplayOnlyRows.map(row => buildEditableRow(undefined, row)),
+  ] : orders;
+  const displayOnlyRows = tradingViewMarket === 'india' ? [] : legacyDisplayOnlyRows;
   if (!open) return null;
 
-  const selectableOrders = orders.filter(isWholeShareOrderSelectable);
+  const selectableOrders = tradingViewMarket === "india" ? basketRows : orders.filter(isWholeShareOrderSelectable);
   const selectedOrders = selectableOrders.filter((order) => selectedIds.has(order.id));
   const selectedBuyAmount = selectedOrders
     .filter((order) => order.side === "BUY")
@@ -3768,8 +3797,8 @@ function ScopedZerodhaBasketPreviewDialog({
     selectedBuyAmount,
   );
   const safetyBufferAmount = selectedBuyAmount > 0 ? Math.max(50, selectedBuyAmount * 0.01) : 0;
-  const projectedBuyPower = availableMargin === null ? null : Math.max(0, availableMargin + selectedSellAmount - safetyBufferAmount);
-  const hiddenSelectedCount = selectedOrders.filter(order => !visibleScore(order.detail.calculatedScore)).length;
+  const projectedBuyPower = availableMargin === null || selectedOrders.some(order => order.amount === null) ? null : Math.max(0, availableMargin + selectedSellAmount - safetyBufferAmount);
+
   const allSelected = selectableOrders.length > 0 && selectableOrders.every(order => selectedIds.has(order.id));
   const isZerodhaPreview = tradingViewMarket === "india";
   const marketStatus = getIndiaMarketStatus();
@@ -3787,12 +3816,17 @@ function ScopedZerodhaBasketPreviewDialog({
   const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
   const groupForOrder = (order: ZerodhaBasketPreviewOrder) => isZerodhaPreview && typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
   const groupForDisplay = (row: DashboardActionRow) => isZerodhaPreview && typeof displayCalculations.metrics === "function" ? basketActionGroup(displayCalculations.metrics(displayStock(row)).comparison.action) : row.formulaAction;
-  const actionDraftMismatch = isZerodhaPreview && typeof displayCalculations.metrics === "function" && selectedOrders.some(order => !actionQuantityMatchesDraft(orderCalculation(order)?.actionSizing.stocks, order.side, order.units));
+  const rowDraftIssues = (order: ZerodhaBasketPreviewOrder) => !isZerodhaPreview ? [] : [
+    ...editableDraftIssues(order),
+    ...(order.wholeShareReview && order.wholeShareReview !== "exit" ? ["Existing whole-share choice requires explicit review."] : []),
+    ...(!directMarketAvailable || !marketStatus.open || executionMode !== 'direct_market' ? ['Market execution requires enabled direct broker access during regular market hours.'] : []),
+  ];
+  const selectedDraftIssues = selectedOrders.flatMap(order => rowDraftIssues(order).map(reason => `${order.exchange}:${order.symbol}: ${reason}`));
   const sectionGroups = [...new Set<string>([...ZERODHA_BASKET_SECTION_ORDER, "Hold", ...(isZerodhaPreview ? ["Unavailable"] : [])])].map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
     displayRows: displayOnlyRows.filter(row => groupForDisplay(row) === action && visibleScore(row.formulaScore)).sort((a, b) => (b.formulaScore ?? -Infinity) - (a.formulaScore ?? -Infinity) || a.stock.key.localeCompare(b.stock.key)),
-    orders: orders
+    orders: basketRows
       .filter((order) => groupForOrder(order) === action && visibleScore(order.detail.calculatedScore))
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0 || group.displayRows.length > 0);
@@ -3802,8 +3836,8 @@ function ScopedZerodhaBasketPreviewDialog({
   const renderPlaceOrderButton = (className?: string) => (
     <Button
       type="button"
-      onClick={onPlaceOrder}
-      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason) || actionDraftMismatch}
+      onClick={() => onPlaceOrder(isZerodhaPreview ? basketRows : undefined)}
+      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason) || selectedDraftIssues.length > 0}
       className={cn(
         "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
         className,
@@ -3924,18 +3958,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 <div>
                   <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Execution Mode</div>
                   <div className="mt-2 inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-                    <button
-                      type="button"
-                      onClick={() => onExecutionModeChange("publisher_limit")}
-                      className={cn(
-                        "rounded-full px-4 py-2 text-sm font-semibold transition",
-                        executionMode === "publisher_limit"
-                          ? "bg-blue-600 text-white shadow-sm"
-                          : "text-slate-600 hover:bg-slate-100",
-                      )}
-                    >
-                      Protected LIMIT basket: Sell tray first, then buy tray
-                    </button>
+
                     <button
                       type="button"
                       onClick={() => canUseDirectMarket && onExecutionModeChange("direct_market")}
@@ -3985,14 +4008,10 @@ function ScopedZerodhaBasketPreviewDialog({
 
               ) : <p className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Review selected US stock quantities and USD amounts before confirming the final basket.</p>}
 
-              <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-5 xl:grid-cols-5">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Orders</div>
-                  <div className="mt-2 text-2xl font-black text-slate-950">{selectedOrders.length}/{orders.length}</div>
-                </div>
+              <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
-                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedBuyAmount, basketCurrency)}</div>
+                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "BUY" && order.amount === null) ? null : selectedBuyAmount, basketCurrency)}</div>
                   <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
                     Available Margin
                   </div>
@@ -4003,28 +4022,10 @@ function ScopedZerodhaBasketPreviewDialog({
                 </div>
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
-                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedSellAmount, basketCurrency)}</div>
-                </div>
-                <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
-                  <label className="block text-xs font-bold uppercase tracking-wide text-blue-700" htmlFor="zerodha-buy-threshold">
-                    Buy Threshold
-                  </label>
-                  <input
-                    id="zerodha-buy-threshold"
-                    type="number"
-                    step="0.01"
-                    value={buyThresholdDraft}
-                    onChange={(event) => onBuyThresholdDraftChange(event.target.value)}
-                    className="mt-2 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-lg font-black text-slate-950 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                    aria-label="Buy-side auto-select final score threshold"
-                  />
-
-                  {displayCalculations.controls}
+                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "SELL" && order.amount === null) ? null : selectedSellAmount, basketCurrency)}</div>
                 </div>
                 <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Saved holdings value includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
               </div>
-
-              {hiddenSelectedCount > 0 ? <p role="status" className="mb-3 text-amber-800">{hiddenSelectedCount} selected executable order(s) are hidden by the display filter and remain selected. Show all to review them. Group checkboxes affect only visible selectable orders; All Stocks controls all selectable orders, including hidden rows.</p> : null}
               {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
               {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               <div className="overflow-hidden rounded-2xl border border-slate-200">
@@ -4034,15 +4035,7 @@ function ScopedZerodhaBasketPreviewDialog({
                     <thead>
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-semibold" data-column-label="Selection">
-                          <label className="inline-flex items-center gap-2 whitespace-nowrap">
-                            <input
-                              type="checkbox"
-                              checked={allSelected}
-                              onChange={onToggleAll}
-                              aria-label="Select or deselect all selectable basket orders, including hidden rows"
-                              className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                            />
-                          </label>
+                          <input type="checkbox" checked={allSelected} onChange={() => onToggleAll(isZerodhaPreview ? basketRows.map(row => row.id) : undefined)} aria-label="Select or deselect all basket rows" className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                         </th>
                         <th className="px-4 py-3 font-semibold">Stock</th>
                         <th className="px-4 py-3 font-semibold">Score</th>
@@ -4063,7 +4056,7 @@ function ScopedZerodhaBasketPreviewDialog({
                     <tbody className="divide-y divide-slate-100">
                       {!orders.length && !allocationUniverse.length ? <tr><td colSpan={tradingViewMarket === "india" ? 23 : 17} className="px-4 py-6 text-slate-500">No basket rows available.</td></tr> : null}
                       {sectionGroups.map((group) => {
-                        const sectionSelectable = group.orders.filter(isWholeShareOrderSelectable);
+                        const sectionSelectable = isZerodhaPreview ? group.orders : group.orders.filter(isWholeShareOrderSelectable);
                         const sectionSelected = sectionSelectable.filter(order => selectedIds.has(order.id)).length;
                         const sectionAllSelected = sectionSelectable.length > 0 && sectionSelected === sectionSelectable.length;
                         return (
@@ -4080,7 +4073,6 @@ function ScopedZerodhaBasketPreviewDialog({
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                   />
                                   <span>{group.label}</span>
-                                  <span className="text-xs font-semibold text-slate-500">{sectionSelected}/{sectionSelectable.length} visible selectable selected{group.displayRows.length ? ` · ${group.displayRows.length} display-only` : ""}</span>
                                 </label>
                               </td>
                             </tr>
@@ -4096,7 +4088,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   <input
                                     type="checkbox"
                                     checked={selectedIds.has(order.id)}
-                                    disabled={!isWholeShareOrderSelectable(order)}
+                                    disabled={!isZerodhaPreview && !isWholeShareOrderSelectable(order)}
                                     onChange={() => onToggle(order.id)}
                                     aria-label={`Select ${order.exchange} ${order.symbol}`}
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -4129,18 +4121,18 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
                                 </td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{getZerodhaBasketActionForPercent(order)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{isZerodhaPreview ? order.draftContext?.originalAction ?? getZerodhaBasketActionForPercent(order) : getZerodhaBasketActionForPercent(order)}</td>
                                 <td className="px-4 py-3">
                                   <span className={cn(
                                     "rounded-full px-3 py-1 text-xs font-bold",
-                                    order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
+                                    isZerodhaPreview && !draftDirection(order.draftContext?.action) ? "bg-slate-100 text-slate-700" : order.side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700",
                                   )}>
-                                    {order.side}
+                                    {isZerodhaPreview ? draftDirection(order.draftContext?.action) ?? (order.draftContext?.action === "Hold" ? "Hold" : "Unavailable") : order.side}
                                   </span>
                                 </td>
                                 {displayCalculations.cells({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) })}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                                  {isZerodhaPreview ? <div title={`Display/action quantity only. Executable draft: ${formatBasketQuantity(order.units)} ${order.side} units. A mismatch blocks submission.`}>{displayCalculations.units?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) }, "Units action")}</div> : <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
+                                  {isZerodhaPreview ? <BasketDraftUnits symbol={order.symbol} action={order.draftContext?.action ?? null} units={order.units} onChange={units => setManualDraftUnits(current => ({ ...current, [order.id]: units }))}>{displayCalculations.units?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) }, "Units action", order.units)}</BasketDraftUnits> : <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
                                     <button
                                       type="button"
                                       onClick={() => onUnitsChange(order.id, -1)}
@@ -4165,7 +4157,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   </div>}
                                 </td>
                                 <td className="px-4 py-3">
-                                  {order.side === "SELL" ? (
+                                  {isZerodhaPreview ? <span>{formatBasketPercent(order.percent)}</span> : order.side === "SELL" ? (
                                     <button
                                       type="button"
                                       onClick={() => onPercentChange(order.id, order.percent >= 100 ? 50 : 100)}
@@ -4183,10 +4175,10 @@ function ScopedZerodhaBasketPreviewDialog({
                                 </td>
                                 {tradingViewMarket === "india" ? upstoxCell(order.symbol, order.exchange) : null}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(tradingViewMarket === "india" ? displayQuote(order.symbol, order.exchange).ltp : displayQuote(order.symbol, order.exchange).ltp ?? order.lastPrice, basketCurrency)}</td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.price, basketCurrency)}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={isZerodhaPreview ? "Market orders have no limit price; estimated value uses Upstox LTP." : undefined}>{isZerodhaPreview ? "—" : formatBasketCurrency(order.price, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount, basketCurrency)}</td>
                                 <td className="px-4 py-3">
-                                  <select
+                                  {isZerodhaPreview ? <span>Market</span> : <select
                                     value={order.orderKind}
                                     onChange={(event) => onOrderKindChange(order.id, event.target.value as ZerodhaBasketOrderKind)}
                                     className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
@@ -4196,7 +4188,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                         {orderKind}
                                       </option>
                                     ))}
-                                  </select>
+                                  </select>}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">
                                   {isSkipped ? (
@@ -4211,7 +4203,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   ) : isSubmitted ? (
                                     <span className="inline-flex rounded-full bg-amber-100 px-3 py-1 font-bold text-amber-800">Failed / check Kite</span>
                                   ) : (
-                                    <span>Pending</span>
+                                    <span className="inline-block max-w-xs whitespace-normal">{rowDraftIssues(order).join(" ") || "Ready for broker validation"}</span>
                                   )}
                                 </td>
                               </tr>
@@ -4279,7 +4271,7 @@ function ScopedZerodhaBasketPreviewDialog({
               ? "Protected MARKET mode submits selected SELL orders first through the backend with market_protection=-1, waits for execution status, refreshes margin, then submits only affordable BUY orders. Access tokens never reach the browser; execution is not atomic or guaranteed."
               : ""}
           </div> : null}
-          {actionDraftMismatch ? <p role="status" className="text-sm text-amber-800">Units mirror Action Zerodha Stocks. Submission is blocked while selected action quantities or sides differ from executable drafts; no order quantity is changed automatically.</p> : null}
+          {selectedDraftIssues.length ? <details className="max-w-xl text-sm text-amber-800"><summary>Selected rows need execution review</summary><ul>{selectedDraftIssues.map((reason, index) => <li key={`${index}:${reason}`}>{reason}</li>)}</ul></details> : null}
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
 
@@ -5836,17 +5828,12 @@ export function RebalanceWorkflowSections({
           );
         });
         setZerodhaBasketOrders(nextOrders);
-        setSelectedZerodhaBasketIds(
-          buildDefaultZerodhaBasketSelection(
-            getZerodhaBasketSelectableOrders(nextOrders),
-            zerodhaBasketBuyThreshold,
-          ),
-        );
+        setSelectedZerodhaBasketIds(new Set());
       }
       setZerodhaBasketSubmission(null);
       return next;
     });
-  }, [zerodhaBasketBuyThreshold, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
+  }, [zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
 
   const closeAutoRebalanceCostHistory = useCallback(() => {
     setCostHistoryPortfolio(null);
@@ -5892,7 +5879,7 @@ export function RebalanceWorkflowSections({
       setZerodhaDirectMarketAvailable(
         directMarketEnabled,
       );
-      setZerodhaExecutionMode(directMarketEnabled && getIndiaMarketStatus().open ? "direct_market" : "publisher_limit");
+      setZerodhaExecutionMode("direct_market");
       const [eventsResult, threatsResult] = await Promise.allSettled([
         apiService.zerodhaEventsLatest(),
         apiService.zerodhaThreatsLatest(),
@@ -5928,12 +5915,7 @@ export function RebalanceWorkflowSections({
       setZerodhaAllocationUniverse(stockFlowResult.value.warning ? [] : actionRows);
       if (stockFlowResult.value.warning) setZerodhaBasketError(`Display calculations unavailable for cached source: ${stockFlowResult.value.warning}`);
       setZerodhaBasketOrders(orders);
-      setSelectedZerodhaBasketIds(
-        buildDefaultZerodhaBasketSelection(
-          getZerodhaBasketSelectableOrders(orders),
-          zerodhaBasketBuyThreshold,
-        ),
-      );
+      setSelectedZerodhaBasketIds(new Set());
     } catch (error) {
       if (generation !== zerodhaPreparation.current) return;
       setZerodhaAllocationUniverse([]);
@@ -5993,12 +5975,7 @@ export function RebalanceWorkflowSections({
       setIndmoneyAllocationUniverse(stockFlowSource.warning ? [] : actionRows);
       if (stockFlowSource.warning) setIndmoneyBasketError(`Display calculations unavailable for cached source: ${stockFlowSource.warning}`);
       setIndmoneyBasketOrders(orders);
-      setSelectedIndmoneyBasketIds(
-        buildDefaultZerodhaBasketSelection(
-          getZerodhaBasketSelectableOrders(orders),
-          indmoneyBasketBuyThreshold,
-        ),
-      );
+      setSelectedIndmoneyBasketIds(new Set());
     } catch (error) {
       if (generation !== indmoneyPreparation.current) return;
       setIndmoneyAllocationUniverse([]);
@@ -6022,17 +5999,10 @@ export function RebalanceWorkflowSections({
 
     setZerodhaBasketBuyThreshold(parsed);
     setZerodhaBasketSubmission(null);
-    setSelectedZerodhaBasketIds((current) =>
-      syncZerodhaBasketBuySelection(
-        current,
-        getZerodhaBasketSelectableOrders(zerodhaBasketOrders),
-        parsed,
-      ),
-    );
+
   }, [zerodhaBasketOrders]);
 
   const toggleZerodhaBasketOrder = useCallback((id: string) => {
-    if (!zerodhaBasketOrders.some(order => order.id === id && isWholeShareOrderSelectable(order))) return;
     setSelectedZerodhaBasketIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -6041,13 +6011,13 @@ export function RebalanceWorkflowSections({
     });
   }, [zerodhaBasketOrders]);
 
-  const toggleAllZerodhaBasketOrders = useCallback(() => {
-    const selectable = zerodhaBasketOrders.filter(isWholeShareOrderSelectable);
-    setSelectedZerodhaBasketIds(current => selectable.every(order => current.has(order.id)) ? new Set() : new Set(selectable.map(order => order.id)));
+  const toggleAllZerodhaBasketOrders = useCallback((ids?: string[]) => {
+    const allIds = ids ?? zerodhaBasketOrders.map(order => order.id);
+    setSelectedZerodhaBasketIds(current => allIds.every(id => current.has(id)) ? new Set() : new Set(allIds));
   }, [zerodhaBasketOrders]);
-  const toggleZerodhaBasketSection = useCallback((action: ActionCategory, visibleIds?: string[]) => {
-    const ids = zerodhaBasketOrders.filter(isWholeShareOrderSelectable).filter(order => visibleIds ? visibleIds.includes(order.id) : getZerodhaBasketActionForPercent(order) === action).map(order => order.id);
-    setSelectedZerodhaBasketIds(current => toggleVisibleSelection(current, ids));
+  const toggleZerodhaBasketSection = useCallback((action: ActionCategory, ids?: string[]) => {
+    const groupIds = ids ?? zerodhaBasketOrders.filter(order => getZerodhaBasketActionForPercent(order) === action).map(order => order.id);
+    setSelectedZerodhaBasketIds(current => toggleVisibleSelection(current, groupIds));
   }, [zerodhaBasketOrders]);
 
   const updateZerodhaBasketOrderKind = useCallback(
@@ -6101,13 +6071,7 @@ export function RebalanceWorkflowSections({
     if (!Number.isFinite(parsed)) return;
 
     setIndmoneyBasketBuyThreshold(parsed);
-    setSelectedIndmoneyBasketIds((current) =>
-      syncZerodhaBasketBuySelection(
-        current,
-        getZerodhaBasketSelectableOrders(indmoneyBasketOrders),
-        parsed,
-      ),
-    );
+
   }, [indmoneyBasketOrders]);
 
   const toggleIndmoneyBasketOrder = useCallback((id: string) => {
@@ -6170,23 +6134,30 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketError(null);
   }, []);
 
-  const placeSelectedZerodhaBasketOrders = useCallback(async () => {
+  const placeSelectedZerodhaBasketOrders = useCallback(async (previewDrafts?: ZerodhaBasketPreviewOrder[]) => {
     if (zerodhaOrderSubmissionBlockedReason) {
       setZerodhaBasketError(zerodhaOrderSubmissionBlockedReason);
       return;
     }
-    const selectedOrders = zerodhaBasketOrders
-      .filter((order) => selectedZerodhaBasketIds.has(order.id))
-      .sort(compareZerodhaBasketOrdersByScore);
+    const sourceDrafts = previewDrafts ?? zerodhaBasketOrders;
+    const missingIds = [...selectedZerodhaBasketIds].filter(id => !sourceDrafts.some(order => order.id === id));
+    if (missingIds.length) { setZerodhaBasketError(`Selected rows missing from the reviewed draft: ${missingIds.join(', ')}. Reopen and review the complete basket.`); return; }
+    const selectedOrders = sourceDrafts.filter(order => selectedZerodhaBasketIds.has(order.id)).sort(compareZerodhaBasketOrdersByScore);
+    if (previewDrafts) {
+      const errors = selectedOrders.flatMap(order => editableDraftIssues(order).map(reason => `${order.exchange}:${order.symbol}: ${reason}`));
+      if (new Set(selectedOrders.map(order => stockIdentity(order.symbol, order.exchange))).size !== selectedOrders.length) errors.push('Duplicate exact listing in selected drafts.');
+      if (zerodhaExecutionMode !== 'direct_market' || !getIndiaMarketStatus().open) errors.push('Market drafts require direct broker access during regular market hours; protected LIMIT fallback is not used.');
+      if (errors.length) { setZerodhaBasketError(errors.join(' ')); return; }
+    }
     try { assertWholeShareOrdersReviewed(selectedOrders); }
     catch (error) { setZerodhaBasketError(normalizeError(error)); return; }
     if (!selectedOrders.length) {
       window.alert("Select at least one Zerodha basket row before opening Kite.");
       return;
     }
-    const scoreWarningMessage = buildZerodhaBasketScoreWarningMessage(selectedOrders);
-    if (scoreWarningMessage) {
-      window.alert(scoreWarningMessage);
+    if (!previewDrafts) {
+      const scoreWarningMessage = buildZerodhaBasketScoreWarningMessage(selectedOrders);
+      if (scoreWarningMessage) window.alert(scoreWarningMessage);
     }
     const marketStatus = getIndiaMarketStatus();
     const isPublisherBuySecondStep = zerodhaExecutionMode === "publisher_limit" && zerodhaBasketSubmission?.phase === "sell_first";
@@ -9168,7 +9139,7 @@ ${zerodhaExecutionMode === "direct_market"
         loadingLabel="Preparing IndMoney basket…"
         primaryButtonLabel="Final Order"
         basketCurrency="USD"
-        basketInfoText="Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the IndMoney basket here before final order execution."
+        basketInfoText="All rows remain visible. Review the IndMoney basket before final execution."
       />
 
       {promptDialog ? (

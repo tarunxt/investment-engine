@@ -14,7 +14,7 @@ assert.match(source, /Refresh LTP/);
 assert.match(source, /Quoted LTP refreshed/);
 assert.match(source, /Quoted LTP/);
 assert.match(source, /Buy Threshold/);
-assert.match(source, /Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold/);
+assert.doesNotMatch(source, /Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold/);
 assert.doesNotMatch(source, /Publisher-safe fallback uses \/connect\/basket only for protected LIMIT orders/);
 assert.match(source, /SELL rows first/);
 assert.match(source, /Refresh & Open Buy Basket/);

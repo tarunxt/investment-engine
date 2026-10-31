@@ -332,3 +332,34 @@ Rename cancellation/empty text never changes a name. Reordering transforms every
 header/body cell together, retains selection controls and keeps the trailing
 column-menu control reachable. Offline browser fixtures validate these controls
 with blocked external requests; they are not production quote/order acceptance.
+
+### Editable full-universe Market drafts
+
+This supersedes the earlier read-only Units mirror and display-only selection UI.
+Every captured India listing is visible and selectable, independently of score
+ranges, Buy Threshold, validity or original executable status. Top-N/Target Weight
+allocation math is retained. No automatic Buy Threshold selection remains in the
+basket, and the obsolete threshold/range tile and selected/display-only count
+copy are removed. Column identity/order/name persistence is unchanged.
+
+Each row creates a draft from the absolute Action quantity suggestion. User whole
+share steps are retained in component state through ordinary rerenders, allocation
+updates and popup open/close; a fresh basket/snapshot scope begins a new draft.
+Sell direction comes from Action New and is displayed with a red Units container;
+buys are green, Hold/unknown is neutral. The Action popup distinguishes the signed
+suggestion, positive edited Units, manual delta and edited amount. Amount always
+uses current draft Units × genuine Upstox LTP; missing prices are unavailable,
+including for zero Units, and no Limit/Kite estimate is substituted. Every India
+row displays Market; Market has no limit-price field. Clickable numeric details
+use hover/focus styling instead of dotted underlines.
+
+Selection is not execution eligibility. The complete reviewed draft list reaches
+the submission boundary; missing selected IDs are errors rather than silently
+omitted rows. Both UI and submission guards report row-specific invalid/zero or
+fractional quantities, missing/stale/future Upstox trade timestamps, unsupported
+venues, Action/side mismatch, unknown/insufficient holdings and one-share Trim
+review. Actual Market submission additionally requires regular market hours,
+direct broker entitlement, existing whole-share review, account/broker validation,
+and the existing explicit confirmation. Market drafts never silently fall back
+to LIMIT trays. No broker API, credential, server validation or frozen historical
+artifact is altered. Offline tests stop before any order or provider operation.
