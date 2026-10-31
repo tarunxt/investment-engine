@@ -281,3 +281,25 @@ The stacked calculation view records the inputs, source/as-of, raw result and
 rounding/cap. No stored audit snapshot, order sizing formula or historical artifact
 is changed. Requested explanatory banners are removed without changing their
 underlying market-access, score-selection, funding-buffer or execution safeguards.
+
+### Offline basket checklist acceptance and tab-session column visibility
+
+`npm run test:basket-offline` bundles the actual display hooks, portfolio parameter
+controls, column picker and stacked calculation components with the production
+preference wrapper into an isolated component fixture. It uses a dummy user,
+fixed holdings/history/prices, a loopback-only fixture API and browser routing
+that blocks external requests. This is offline component/browser evidence, not
+production acceptance or a live-provider quote test. The surrounding basket shell
+and executable sentinel are fixtures; existing order-handler and payload tests
+remain the evidence for executable behavior.
+
+Checks cover settled plus T1 portfolio value with margin added once, positive-only
+top-N and deterministic ties, all three percentage steppers with 0/100 boundaries,
+stacked Action/Target summary/details/close behavior, trim and zero-target
+all-holdings quantities, and unavailable Upstox amount without a genuine fixture
+price. Counters assert one fixture quote read per open/reload and none from local
+control edits. Full page reload previously lost hidden columns; visibility now
+uses tab-session storage scoped by authenticated user, broker and market. Storage
+failures/corrupt entries fall back to usable in-memory defaults. No credential,
+portfolio value or order data is written to these preferences; no backend schema,
+order formula, frozen audit snapshot or executable payload is changed.
