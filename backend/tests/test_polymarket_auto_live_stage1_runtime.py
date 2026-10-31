@@ -721,6 +721,12 @@ async def test_008_keyset_scan_follows_every_cursor(monkeypatch):
 
 @pytest.mark.anyio
 async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
+    # Freeze the scan clock before these fixed fixture deadlines. The test
+    # verifies cursor transitions, not expiry relative to the CI wall clock.
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._now_iso",
+        lambda: "2026-09-01T00:00:00+00:00",
+    )
     requested_pages: list[tuple[str, int]] = []
 
     def row(index: int) -> dict[str, object]:
