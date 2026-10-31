@@ -1,64 +1,105 @@
-name: Corrected bounded Upstox quote check
+name: Approved owner-scoped Upstox backend activation
 on:
   push:
     branches: [ops/upstox-runtime-metadata]
 permissions:
   contents: read
 jobs:
-  diagnostic:
+  activate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: One corrected quote through deployed production request builder
+      - name: Configure exact secret reference and restart only backend
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          command_timeout: 3m
+          command_timeout: 4m
           script: |
-            set -eu
-            test "$(sudo -u investor -H git -C /srv/investor rev-parse HEAD)" = bca0d2a8e360dc23b12a8c75ff5c2d100ef1e6f3
-            sudo -u investor -H bash --noprofile --norc <<'APP_SH'
+            sudo bash --noprofile --norc <<'ACTIVATION_SH'
+            #!/usr/bin/env bash
+            # Approved owner-only activation after the successful corrected quote check.
             set -euo pipefail
-            cd /srv/investor/backend
-            source /srv/investor/deploy/no-docker/load-env-file.sh
-            load_env_file /etc/investor/backend.env
-            resolver=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
-            printf '%s  %s\n' 05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f "$resolver" | sha256sum -c --status
-            export UPSTOX_ANALYTICS_TOKEN='{{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}'
-            exec /usr/bin/python3 "$resolver" -- /srv/investor/backend/.venv/bin/python - <<'DIAGNOSTIC_PY'
-            import asyncio, json, os
-            from datetime import datetime, timezone
-            import httpx
-            from scripts import diagnose_upstox_quote as diagnostic
-            from app.domains.zerodha.upstox_quotes import normalize_quotes
-
-            instrument = 'NSE_EQ|INE848E01016'
-            original = diagnostic.sanitized_result
-            def checked_result(status, headers, raw, credential, key):
-                result = original(status, headers, raw, credential, key)
-                result['genuine_quote'] = False
-                if status == 200:
-                    try:
-                        payload = json.loads(raw)
-                        quotes = normalize_quotes(payload.get('data'), {'NSE:NHPC': instrument}, datetime.now(timezone.utc)) if isinstance(payload, dict) and payload.get('status') == 'success' else []
-                        if len(quotes) == 1:
-                            result['genuine_quote'] = True
-                            result['quote'] = quotes[0]
-                    except (ValueError, TypeError, OverflowError):
-                        pass
-                return result
-            diagnostic.sanitized_result = checked_result
-            async def main():
-                started = datetime.now(timezone.utc).isoformat()
-                async with asyncio.timeout(15):
-                    async with httpx.AsyncClient(timeout=6, follow_redirects=False) as client:
-                        result = await diagnostic.diagnose(client, instrument, os.environ['UPSTOX_ANALYTICS_TOKEN'])
-                result['attempt_started_at'] = started
-                result['attempt_finished_at'] = datetime.now(timezone.utc).isoformat()
-                print('UPSTOX_CORRECTED_QUOTE_DIAGNOSTIC=' + json.dumps(result, sort_keys=True))
-            asyncio.run(main())
-            DIAGNOSTIC_PY
-            APP_SH
+            exec 9>/run/investor-production-deploy.lock
+            flock -n 9
+            app_root=/srv/investor
+            expected_sha=bca0d2a8e360dc23b12a8c75ff5c2d100ef1e6f3
+            expected_hash=05a9f8164b63b286bcf88bf4223c95b799e0ecaada45ddcd805567f57b20299f
+            source_wrapper=/srv/credx-uat/tools/aws-secrets-manager/references/asm-exec
+            runtime_wrapper=/usr/local/lib/credx/upstox-asm-exec-05a9f8164b63
+            dropin=/etc/systemd/system/investor-backend.service.d/zzzz-upstox-ltp.conf
+            [[ "$(sudo -u investor -H git -C "$app_root" rev-parse HEAD)" == "$expected_sha" ]]
+            [[ "$(sha256sum "$source_wrapper" | cut -d ' ' -f1)" == "$expected_hash" ]]
+            [[ "$(systemctl show investor-backend --property=User --value)" == investor ]]
+            [[ -z "$(systemctl show investor-backend --property=ExecStartPre --value)" ]]
+            current_start=$(systemctl show investor-backend --property=ExecStart --value)
+            [[ "$current_start" == *"path=/srv/investor/deploy/no-docker/scripts/run-backend.sh ;"* ]]
+            # Refuse conflicts, printing neither existing environment values nor credentials.
+            if awk '/^[[:space:]]*(export[[:space:]]+)?UPSTOX_(ANALYTICS_TOKEN|LTP_OWNER_USER_ID)[[:space:]]*=/{found=1}END{exit !found}' /etc/investor/backend.env; then
+              echo 'Existing canonical Upstox configuration requires reconciliation; unchanged.' >&2
+              exit 1
+            fi
+            assert_financial_stopped(){
+             for family in investor investment-engine; do
+              for role in celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
+               state=$(systemctl show "$family-$role" --property=ActiveState --value)
+               [[ "$state" == inactive || "$state" == failed ]]
+              done
+             done
+            }
+            assert_financial_stopped
+            systemctl is-active --quiet investor-backend
+            analysis_pid=$(systemctl show investor-recovery-analysis --property=MainPID --value)
+            backend_pid=$(systemctl show investor-backend --property=MainPID --value)
+            [[ ! -e "$dropin" ]]
+            if [[ -e "$runtime_wrapper" ]]; then
+             [[ "$(sha256sum "$runtime_wrapper" | cut -d ' ' -f1)" == "$expected_hash" ]]
+            else
+             install -d -o root -g root -m 0755 /usr/local/lib/credx
+             install -o root -g root -m 0555 "$source_wrapper" "$runtime_wrapper"
+            fi
+            [[ "$(sha256sum "$runtime_wrapper" | cut -d ' ' -f1)" == "$expected_hash" ]]
+            # Only reference metadata is persisted. Plaintext token stays in asm-exec/child memory.
+            install -d -o root -g root -m 0755 /etc/systemd/system/investor-backend.service.d
+            temporary=$(mktemp /etc/systemd/system/investor-backend.service.d/.upstox.XXXXXX)
+            cat >"$temporary" <<'UNIT'
+            [Service]
+            Environment="UPSTOX_LTP_OWNER_USER_ID=2"
+            Environment="UPSTOX_ANALYTICS_TOKEN={{resolve:secretsmanager:arn:aws:secretsmanager:ap-south-1:457945009677:secret:credx/production/upstox-analytics.-yEWL8d:SecretString}}"
+            ExecStart=
+            ExecStart=/usr/bin/python3 /usr/local/lib/credx/upstox-asm-exec-05a9f8164b63 -- /srv/investor/deploy/no-docker/scripts/run-backend.sh
+            UNIT
+            chmod 0644 "$temporary"
+            chown root:root "$temporary"
+            mv "$temporary" "$dropin"
+            # A failed readiness check removes only this new drop-in and restores the old start.
+            rollback(){
+             rm -f "$dropin"
+             systemctl daemon-reload
+             systemctl restart investor-backend
+             echo 'Activation failed; removed only the new Upstox drop-in and restored backend launch.' >&2
+            }
+            trap 'rollback' ERR
+            systemctl daemon-reload
+            systemctl restart investor-backend
+            for attempt in $(seq 1 45); do
+             if curl -fsS --max-time 2 http://127.0.0.1:8000/health/ready >/dev/null 2>&1; then break; fi
+             sleep 1
+            done
+            curl -fsS --max-time 5 http://127.0.0.1:8000/health/ready >/dev/null
+            systemctl is-active --quiet investor-backend
+            [[ "$(systemctl show investor-backend --property=MainPID --value)" != "$backend_pid" ]]
+            [[ "$(systemctl show investor-recovery-analysis --property=MainPID --value)" == "$analysis_pid" ]]
+            assert_financial_stopped
+            [[ -z "$(systemctl show investor-backend --property=ExecStartPre --value)" ]]
+            # Owner guard verification is synthetic/offline; this makes no provider request.
+            sudo -u investor -H env UPSTOX_LTP_OWNER_USER_ID=2 UPSTOX_ANALYTICS_TOKEN=synthetic-owner-guard PYTHONPATH=/srv/investor/backend /srv/investor/backend/.venv/bin/python - <<'PY'
+            from app.domains.zerodha.upstox_quotes import configured_for
+            assert configured_for(2) and not configured_for(3) and not configured_for(None)
+            print('Owner guard verified offline: owner 2 enabled; other owners disabled.')
+            PY
+            trap - ERR
+            printf 'UPSTOX_RUNTIME_ACTIVATION={"owner_user_id":2,"backend_ready":true,"only_backend_restarted":true,"financial_workers_stopped":true,"secret_reference_only":true,"provider_requests_during_activation":0,"activated_at":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            ACTIVATION_SH
