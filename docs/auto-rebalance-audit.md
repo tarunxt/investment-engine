@@ -363,3 +363,22 @@ direct broker entitlement, existing whole-share review, account/broker validatio
 and the existing explicit confirmation. Market drafts never silently fall back
 to LIMIT trays. No broker API, credential, server validation or frozen historical
 artifact is altered. Offline tests stop before any order or provider operation.
+
+## Saved-output access (AUTO-OUTPUT-ACCESS)
+
+Stage output dialogs render authenticated saved data directly. Console pages retain
+`frame-ancestors 'none'`; they must never be embedded in a stage-output iframe.
+Threats & Guardrails reads the selected portfolio's existing latest-analysis GET,
+shows its saved job ID, provider/model, status and updated/created timestamp, and
+renders saved Markdown as escaped text (structured reports fall back to JSON).
+Sync reads the existing portfolio overview and shows only its latest saved snapshot.
+A successful null result is explicitly empty; request and saved-job failures remain
+errors with a retry. Retry reads saved data and never starts a workflow or provider.
+The ordinary stage-page link opens in a separate tab with `noopener noreferrer`.
+
+Each opening/retry invalidates earlier requests; closing also invalidates pending
+responses. Historical run openings and retries retain the requested run ID and
+portfolio/stage filters. The dialog supports Escape, keyboard focus cycling,
+background inertness and focus restoration. Offline browser acceptance is available
+with `node frontend/scripts/saved-output-offline-playwright.mjs`; it uses fixtures
+and blocks external network requests.

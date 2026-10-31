@@ -81,7 +81,7 @@ test("LLMs completed opens an inline provider/model dialog with layered saved-da
 test("Actionables View Output renders the shared widget natively instead of framing the dashboard", () => {
   assert.match(
     workflowSource,
-    /\["swing", "rebalance", "technical", "actionables"\]\.includes\(stage\)/,
+    /const routeUrl = getStageOutputRoute\(portfolio, stage\)/,
   );
   assert.match(
     workflowSource,
@@ -206,4 +206,26 @@ test("Zerodha basket validates sells against live holdings and labels the score 
     finalActionablesSource,
     /createdAt: job\.updated_at \?\? job\.created_at/,
   );
+});
+
+test("saved outputs use authenticated native reads and retain safe stage links without framing", () => {
+  const loader = baseWorkflowSource.slice(baseWorkflowSource.indexOf("  const showStageOutput = useCallback("), baseWorkflowSource.indexOf("  const persistLlmDialogSelection"));
+  assert.doesNotMatch(baseWorkflowSource, /<iframe/);
+  assert.doesNotMatch(loader, /if \(routeUrl\) return|\.run\(|\.execute\(|\.sync\(/);
+  assert.match(loader, /await apiService\.zerodhaThreatsLatest\(\)/);
+  assert.match(loader, /await apiService\.indmoneyUsThreatsLatest\(\)/);
+  assert.match(loader, /No saved threat output is available yet/);
+  assert.match(loader, /savedAt = latest\?\.updated_at/);
+  assert.match(loader, /Job #\$\{latest\.job_id\}/);
+  assert.match(loader, /if \(requestId !== outputRequestRef\.current\) return/);
+  assert.match(loader, /requestedRunId !== undefined && run\.id !== requestedRunId/);
+  assert.match(baseWorkflowSource, /showStageOutput\(outputDialog\.portfolio, outputDialog\.stage, outputDialog\.requestedRunId\)/);
+  const dialog = readFileSync(new URL("../components/shared/SavedOutputDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /role="dialog" aria-modal="true" aria-labelledby/);
+  assert.match(dialog, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(dialog, /element\.inert = true/);
+  assert.match(dialog, /opener\.focus\(\)/);
+  assert.match(dialog, /event\.key === "Escape"/);
+  const security = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
+  assert.match(security, /frame-ancestors 'none'/);
 });

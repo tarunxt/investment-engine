@@ -3,6 +3,7 @@
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
 import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
 import { useBasketSubmissionSafety } from "@/hooks/useBasketSubmissionSafety";
@@ -4718,9 +4719,18 @@ export function RebalanceWorkflowSections({
     body: string;
     loading: boolean;
     error: string | null;
+    requestedRunId?: number;
+    savedAt?: string | null;
+    provenance?: string | null;
     routeUrl?: string | null;
     run?: RunResponse | null;
   } | null>(null);
+  const outputRequestRef = useRef(0);
+  const closeOutputDialog = useCallback(() => {
+    outputRequestRef.current += 1;
+    setOutputDialog(null);
+    setActionablesCalculationsPortfolio(null);
+  }, []);
   const [actionablesCalculationsPortfolio, setActionablesCalculationsPortfolio] =
     useState<WorkflowPortfolio | null>(null);
   const [promptDialog, setPromptDialog] = useState<{
@@ -6465,92 +6475,50 @@ ${zerodhaExecutionMode === "direct_market"
     }
   }, [usdInrRate]);
 
-  useEffect(() => {
-    const handleOpenStageOutput = (event: Event) => {
-      const payload = (event as CustomEvent<{ runId?: number; stage?: WorkflowStageKey; portfolio?: WorkflowPortfolio }>).detail;
-      if (!payload?.runId || !payload.stage || !payload.portfolio) return;
-      if (payload.stage !== "rebalance" && payload.stage !== "technical") return;
-      event.preventDefault();
-      const title = `${payload.portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[payload.stage].idle} Output`;
-      setOutputDialog({
-        portfolio: payload.portfolio,
-        stage: payload.stage,
-        title,
-        body: "",
-        loading: true,
-        error: null,
-        routeUrl: null,
-        run: null,
-      });
-      void fetchAllFullRuns()
-        .then((runs) => {
-          const selectedRun = runs.find((run) => run.id === payload.runId) ?? null;
-          setOutputDialog({
-            portfolio: payload.portfolio as WorkflowPortfolio,
-            stage: payload.stage as WorkflowStageKey,
-            title,
-            body: selectedRun ? "" : `No saved run output was found for run #${payload.runId}.`,
-            loading: false,
-            error: null,
-            routeUrl: null,
-            run: selectedRun,
-          });
-        })
-        .catch((error) => {
-          setOutputDialog({
-            portfolio: payload.portfolio as WorkflowPortfolio,
-            stage: payload.stage as WorkflowStageKey,
-            title,
-            body: "",
-            loading: false,
-            error: normalizeError(error),
-            routeUrl: null,
-            run: null,
-          });
-        });
-    };
-
-    window.addEventListener("final-actionables:open-stage-output", handleOpenStageOutput);
-    return () => window.removeEventListener("final-actionables:open-stage-output", handleOpenStageOutput);
-  }, []);
-
   const showStageOutput = useCallback(
-    async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
+    async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey, requestedRunId?: number) => {
       const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle} Output`;
-      const routeUrl = ["swing", "rebalance", "technical", "actionables"].includes(stage)
-        ? null
-        : getStageOutputRoute(portfolio, stage);
+      const requestId = ++outputRequestRef.current;
+      const routeUrl = getStageOutputRoute(portfolio, stage);
       setOutputDialog({
         portfolio,
         stage,
+        requestedRunId,
         title,
         body: "",
-        loading: false,
+        loading: stage !== "actionables",
         error: null,
         routeUrl,
         run: null,
       });
       try {
-        if (routeUrl) return;
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
         let body = "No saved output is available yet.";
+        let savedAt: string | null = null;
+        let provenance: string | null = null;
+        let savedError: string | null = null;
         let selectedRun: RunResponse | null = null;
         if (stage === "sync") {
           const overview =
             portfolio === "zerodha"
               ? await apiService.zerodhaPortfolioOverview()
               : await apiService.indmoneyUsPortfolioOverview();
-          body = JSON.stringify(overview.latest ?? overview, null, 2);
+          body = overview.latest ? JSON.stringify(overview.latest, null, 2) : "No saved portfolio snapshot is available yet.";
+          savedAt = overview.latest?.captured_at ?? null;
+          provenance = overview.latest ? `Portfolio snapshot · ${overview.latest.snapshot_date} · ${overview.latest.source}` : null;
         } else if (stage === "threats") {
           const latest =
             portfolio === "zerodha"
               ? (await apiService.zerodhaThreatsLatest()).analysis
               : (await apiService.indmoneyUsThreatsLatest()).analysis;
-          body =
-            latest?.report?.raw_markdown?.trim() ||
-            latest?.error_message ||
-            "No saved threat output is available yet.";
+          savedAt = latest?.updated_at ?? latest?.created_at ?? null;
+          provenance = latest ? `Job #${latest.job_id} · ${latest.provider}/${latest.model} · ${latest.status}` : null;
+          if (latest?.error_message && !latest.report) savedError = latest.error_message;
+          body = latest?.report?.raw_markdown?.trim() ||
+            (latest?.report ? JSON.stringify(latest.report, null, 2) :
+              latest ? `Saved job status: ${latest.status}. No report text has been saved for this job.` :
+              "No saved threat output is available yet.");
         } else if (stage === "actionables") {
           body =
             "Final Actionables are rendered in the dashboard output tables below. Use the section anchor to inspect the latest India and US actionable rows.";
@@ -6558,6 +6526,7 @@ ${zerodhaExecutionMode === "direct_market"
           const runs = await fetchAllFullRuns();
           selectedRun = sortRunsByLatestTimestamp(
             runs.filter((run) => {
+              if (requestedRunId !== undefined && run.id !== requestedRunId) return false;
               if (stage === "swing")
                 return isAnalysisRunForStage(run, "swing", market);
               if (stage === "rebalance")
@@ -6567,6 +6536,8 @@ ${zerodhaExecutionMode === "direct_market"
               return false;
             }),
           )[0];
+          savedAt = selectedRun ? getLatestRunTimestamp(selectedRun) : null;
+          provenance = selectedRun ? `Run #${selectedRun.id}` : null;
           const jobs =
             selectedRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
           body = jobs.length
@@ -6581,31 +6552,53 @@ ${zerodhaExecutionMode === "direct_market"
               ].join("\n\n---\n\n")
             : "No saved LLM output is available yet.";
         }
+        if (requestId !== outputRequestRef.current) return;
         setOutputDialog({
           portfolio,
           stage,
+          requestedRunId,
           title,
           body,
           loading: false,
-          error: null,
-          routeUrl: null,
+          error: savedError,
+          routeUrl,
+          savedAt,
+          provenance,
           run: selectedRun,
         });
       } catch (error) {
+        if (requestId !== outputRequestRef.current) return;
         setOutputDialog({
           portfolio,
           stage,
+          requestedRunId,
           title,
           body: "",
           loading: false,
           error: normalizeError(error),
-          routeUrl: null,
+          routeUrl,
           run: null,
         });
       }
     },
     [],
   );
+
+  useEffect(() => {
+    const handleOpenStageOutput = (event: Event) => {
+      const payload = (event as CustomEvent<{ runId?: number; stage?: WorkflowStageKey; portfolio?: WorkflowPortfolio }>).detail;
+      if (!Number.isSafeInteger(payload?.runId) || (payload.runId ?? 0) <= 0) return;
+      if (payload.stage !== "rebalance" && payload.stage !== "technical") return;
+      if (payload.portfolio !== "zerodha" && payload.portfolio !== "indmoneyUs") return;
+      event.preventDefault();
+      void showStageOutput(payload.portfolio, payload.stage, payload.runId);
+    };
+    window.addEventListener("final-actionables:open-stage-output", handleOpenStageOutput);
+    return () => {
+      outputRequestRef.current += 1;
+      window.removeEventListener("final-actionables:open-stage-output", handleOpenStageOutput);
+    };
+  }, [showStageOutput]);
 
   const persistLlmDialogSelection = useCallback(
     (nextKeys: Set<string>) => {
@@ -8351,39 +8344,22 @@ ${zerodhaExecutionMode === "direct_market"
       ) : null}
 
       {outputDialog ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4" onClick={() => {
-          setOutputDialog(null);
-          setActionablesCalculationsPortfolio(null);
-        }}>
-          <div className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl bg-white shadow-2xl xl:max-w-[95vw]" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">
-                  {outputDialog.title}
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Latest saved stage output for the selected portfolio.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setOutputDialog(null);
-                  setActionablesCalculationsPortfolio(null);
-                }}
-                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Close output view"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
+        <SavedOutputDialog
+          title={outputDialog.title}
+          savedAt={outputDialog.savedAt}
+          provenance={outputDialog.provenance}
+          routeUrl={outputDialog.routeUrl ?? getStageOutputRoute(outputDialog.portfolio, outputDialog.stage)}
+          onClose={closeOutputDialog}
+          onRetry={() => void showStageOutput(outputDialog.portfolio, outputDialog.stage, outputDialog.requestedRunId)}
+          loading={outputDialog.loading}
+        >
             <div className="max-h-[72vh] overflow-auto bg-white p-0 text-slate-900">
               {outputDialog.loading ? (
-                <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+                <div role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
                   <Loader2 className="size-4 animate-spin" /> Loading output…
                 </div>
               ) : outputDialog.error ? (
-                <div className="m-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                <div role="alert" className="m-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                   {outputDialog.error}
                 </div>
               ) : outputDialog.stage === "actionables" ? (
@@ -8396,12 +8372,6 @@ ${zerodhaExecutionMode === "direct_market"
                     }
                   />
                 </div>
-              ) : outputDialog.routeUrl ? (
-                <iframe
-                  src={outputDialog.routeUrl}
-                  title={outputDialog.title}
-                  className="h-[72vh] w-full border-0 bg-white"
-                />
               ) : outputDialog.run ? (
                 <RunOutputDetails run={outputDialog.run} />
               ) : (
@@ -8410,8 +8380,7 @@ ${zerodhaExecutionMode === "direct_market"
                 </pre>
               )}
             </div>
-          </div>
-        </div>
+        </SavedOutputDialog>
       ) : null}
 
       {dialogOpen ? (
