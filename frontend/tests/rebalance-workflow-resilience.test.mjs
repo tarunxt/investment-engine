@@ -160,7 +160,7 @@ test("technical output opens the exact latest run even when that run failed", ()
     source,
     /if \(stage === "technical"\)\s+return isTechnicalScanRun\(run, market\);/,
   );
-  assert.match(stageTileSource, /DeepSeek credits were insufficient for this run/);
+  assert.match(stageTileSource, /Provider credits insufficient/);
   assert.match(stageTileSource, /no\\s\+credits\?\\s\+remaining/);
 });
 
@@ -194,7 +194,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   assert.match(runWorkflowSource, /window\.alert\(message\)/);
   assert.match(
     stageTileSource,
-    /if \(info\.error\) rows\.push\(\{ label: "Error", value: info\.error \}\);/,
+    /rows\.push\(getStageTileError\(info\)\);/,
   );
 });
 

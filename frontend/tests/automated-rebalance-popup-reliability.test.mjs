@@ -129,23 +129,20 @@ test("stage cards keep every shortcut as an independent native button", () => {
   );
 });
 
-test("stage failures automatically open a detailed modal and remain manually reopenable", () => {
-  assert.match(workflowSource, /createPortal\(/);
-  assert.match(workflowSource, /document\.body/);
-  assert.match(workflowSource, /lastAutoOpenedErrorRef/);
-  assert.match(workflowSource, /setOpenErrorDetail\(stageErrorFingerprint\)/);
-  assert.match(workflowSource, /info\.state !== "failed"/);
-  assert.doesNotMatch(
-    workflowSource,
-    /stageErrorFingerprint = stageErrorRow[\s\S]{0,300}errorDetails:/,
-  );
-  assert.match(workflowSource, /aria-modal="true"/);
-  assert.match(workflowSource, /className="pointer-events-auto fixed inset-0 z-\[200\]/);
-  assert.match(workflowSource, /Error message/);
-  assert.match(workflowSource, /Provider and job details/);
-  assert.match(workflowSource, /What to do next/);
-  assert.match(workflowSource, /The backend did not return an underlying provider exception or job identifier/);
-  assert.match(workflowSource, /aria-label="Show detailed LLM error"/);
+test("stage errors open a compact user-invoked dialog with intact source diagnostics", () => {
+  const popup = readFileSync(new URL("../components/shared/StageErrorDetails.tsx", import.meta.url), "utf8");
+  assert.match(sharedTileSource, /<StageErrorDetails stageLabel=/);
+  assert.doesNotMatch(sharedTileSource, /lastAutoOpenedErrorRef|setOpenErrorDetail/);
+  assert.match(popup, /createPortal\(/);
+  assert.match(popup, /showModal\(\)/);
+  assert.match(popup, /<dialog/);
+  assert.match(popup, /max-w-md/);
+  assert.match(popup, /aria-haspopup="dialog"/);
+  assert.match(popup, /error details for/);
+  assert.match(popup, /row\.detail/);
+  assert.match(popup, /detail\.providerResponseBody/);
+  assert.match(popup, /detail\.traceReference/);
+  assert.match(popup, /info\.jobId/);
 });
 
 test("stage failures preserve provider diagnostics and are recorded only once", () => {
