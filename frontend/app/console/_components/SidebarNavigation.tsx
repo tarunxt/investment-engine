@@ -3,6 +3,7 @@
 import {
     useEffect,
     useMemo,
+    useRef,
     useState,
     useSyncExternalStore,
     type FormEvent,
@@ -712,66 +713,104 @@ function AccountFooter({
 }: AccountFooterProps) {
     const displayName = user?.full_name || user?.username || 'User';
     const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
+    const detailsRef = useRef<HTMLDetailsElement>(null);
+    const accountActive = ACCOUNT_NAVIGATION.some((item) => isLeafActive(pathname, item));
+
+    useEffect(() => {
+        const details = detailsRef.current;
+        if (!details) return;
+        const dismiss = (event: PointerEvent) => {
+            if (!details.contains(event.target as Node)) details.open = false;
+        };
+        const escape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && details.open) {
+                details.open = false;
+                details.querySelector('summary')?.focus();
+            }
+        };
+        document.addEventListener('pointerdown', dismiss);
+        document.addEventListener('keydown', escape);
+        return () => {
+            document.removeEventListener('pointerdown', dismiss);
+            document.removeEventListener('keydown', escape);
+        };
+    }, []);
+
+    const navigateFromAccount = () => {
+        if (detailsRef.current) detailsRef.current.open = false;
+        onNavigate();
+    };
 
     return (
-        <div className="border-t border-sidebar-border/80 pt-4">
-            <div className="px-3">
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                    Account
-                </h2>
-            </div>
-
-            <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
-                <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
-                        {getUserInitials(user)}
-                    </div>
-                    <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
-                            {displayName}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                            {user?.email}
-                        </p>
-                    </div>
-                </div>
-
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                    {ACCOUNT_NAVIGATION.map((item) => (
-                        <div
-                            key={item.id}
-                            className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
-                        >
-                            <NavigationLeafLink
-                                leaf={item}
-                                active={isLeafActive(pathname, item)}
-                                onNavigate={onNavigate}
-                            />
+        <details ref={detailsRef} className="group/account relative border-t border-sidebar-border/80 px-3 pt-2">
+            <summary
+                className={cn(
+                    'flex cursor-pointer list-none items-center gap-3 rounded-xl px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring [&::-webkit-details-marker]:hidden',
+                    accountActive ? 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border' : 'hover:bg-sidebar-accent',
+                )}
+                aria-label={accountActive ? 'Account and appearance, current section' : 'Account and appearance'}
+            >
+                <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">{getUserInitials(user)}</span>
+                <span className="min-w-0 flex-1 text-left">
+                    <span className="block font-semibold">Account</span>
+                    <span className="block truncate text-xs text-muted-foreground">{displayName}</span>
+                </span>
+                <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 transition group-open/account:rotate-180" />
+            </summary>
+            <div role="region" aria-label="Account and appearance" className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[min(32rem,70dvh)] overflow-y-auto overscroll-contain rounded-2xl border border-sidebar-border bg-sidebar pb-3 shadow-xl">
+                <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
+                            {getUserInitials(user)}
                         </div>
-                    ))}
-                </div>
-            </div>
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
+                                {displayName}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                                {user?.email}
+                            </p>
+                        </div>
+                    </div>
 
-            <div className="mt-3">
-                <SidebarThemeToggle />
-            </div>
-
-            {onLogout ? (
-                <div className="px-3 pt-3">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onNavigate();
-                            void onLogout();
-                        }}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2.5 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                    >
-                        <LogoutIcon className="h-4 w-4" />
-                        {ACCOUNT_ACTIONS.logout.label}
-                    </button>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                        {ACCOUNT_NAVIGATION.map((item) => (
+                            <div
+                                key={item.id}
+                                className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
+                            >
+                                <NavigationLeafLink
+                                    leaf={item}
+                                    active={isLeafActive(pathname, item)}
+                                    onNavigate={navigateFromAccount}
+                                />
+                            </div>
+                        ))}
+                    </div>
                 </div>
-            ) : null}
-        </div>
+
+                <details className="mx-3 mt-3 rounded-xl border border-sidebar-border">
+                    <summary className="cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">Appearance</summary>
+                    <SidebarThemeToggle />
+                </details>
+
+                {onLogout ? (
+                    <div className="px-3 pt-3">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                navigateFromAccount();
+                                void onLogout();
+                            }}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2.5 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                        >
+                            <LogoutIcon className="h-4 w-4" />
+                            {ACCOUNT_ACTIONS.logout.label}
+                        </button>
+                    </div>
+                ) : null}
+            </div>
+        </details>
     );
 }
 
@@ -782,6 +821,7 @@ export function SidebarNavigation({
     onLogout,
     onNavigate,
 }: SidebarNavigationProps) {
+    const navigationRef = useRef<HTMLElement>(null);
     const [isReordering, setIsReordering] = useState(false);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
@@ -901,6 +941,23 @@ export function SidebarNavigation({
             coordinateGetter: sortableKeyboardCoordinates,
         }),
     );
+
+    useEffect(() => {
+        const navigation = navigationRef.current;
+        if (!navigation || isReordering) return;
+        const revealActiveRoute = () => {
+            const active = navigation.querySelector<HTMLElement>('[aria-current="page"]');
+            if (!active) return;
+            const bounds = navigation.getBoundingClientRect();
+            const item = active.getBoundingClientRect();
+            if (item.top < bounds.top) navigation.scrollTop += item.top - bounds.top - 4;
+            else if (item.bottom > bounds.bottom) navigation.scrollTop += item.bottom - bounds.bottom + 4;
+        };
+        revealActiveRoute();
+        const observer = new ResizeObserver(revealActiveRoute);
+        observer.observe(navigation);
+        return () => observer.disconnect();
+    }, [pathname, expandedGroupId, sections, isReordering]);
 
     const persistNameOverrides = (next: NavigationNameOverrides) => {
         persistNavigationNameOverrides(namesStorageKey, next);
@@ -1067,7 +1124,7 @@ export function SidebarNavigation({
             </div>
 
             <div className="mt-4 min-h-0 flex-1">
-                <nav aria-label="Console navigation" className="h-full overflow-y-auto px-2 pb-4">
+                <nav ref={navigationRef} aria-label="Console navigation" className="h-full overflow-y-auto overscroll-contain px-2 pb-4 pt-1">
                     <DndContext
                         sensors={sensors}
                         collisionDetection={closestCenter}
