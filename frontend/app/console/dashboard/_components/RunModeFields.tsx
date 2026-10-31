@@ -4,7 +4,7 @@ import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import { useDashboard } from "../_context";
 
-export function RunModeFields() {
+export function RunModeFields({ showEstimateReadiness = false }: { showEstimateReadiness?: boolean } = {}) {
   const {
     isLoading,
     providers,
@@ -27,6 +27,7 @@ export function RunModeFields() {
     <div className="space-y-3">
       <LlmModelSelectionPanel
         providers={providers}
+        showEstimateReadiness={showEstimateReadiness}
         selectedKeys={selectedTargets}
         loading={isLoading}
         modelMixControls={
