@@ -9,6 +9,7 @@ const source = readFileSync(
   ),
   "utf8",
 );
+const stageTileSource = readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
 const bridgeSource = readFileSync(
   new URL(
     "../app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge.tsx",
@@ -159,8 +160,8 @@ test("technical output opens the exact latest run even when that run failed", ()
     source,
     /if \(stage === "technical"\)\s+return isTechnicalScanRun\(run, market\);/,
   );
-  assert.match(source, /DeepSeek credits were insufficient for this run/);
-  assert.match(source, /no\\s\+credits\?\\s\+remaining/);
+  assert.match(stageTileSource, /DeepSeek credits were insufficient for this run/);
+  assert.match(stageTileSource, /no\\s\+credits\?\\s\+remaining/);
 });
 
 test("ambiguous threat starts reconcile against durable history instead of producing Error null", () => {
@@ -192,7 +193,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   assert.match(runWorkflowSource, /Could not start \$\{/);
   assert.match(runWorkflowSource, /window\.alert\(message\)/);
   assert.match(
-    source,
+    stageTileSource,
     /if \(info\.error\) rows\.push\(\{ label: "Error", value: info\.error \}\);/,
   );
 });

@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const require = createRequire(import.meta.url);
 function load(relative, bindings = {}, exports = [], functionsOnly = false) {
-  const source = readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const source = readFileSync(new URL(relative, import.meta.url), 'utf8') + (relative.endsWith('RebalanceWorkflowSections.tsx') ? '\n' + readFileSync(new URL('../components/shared/WorkflowStageTile.tsx', import.meta.url), 'utf8') : '');
   const ast = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const text = ast.statements.filter(node => functionsOnly ? ts.isFunctionDeclaration(node) : !ts.isImportDeclaration(node)).map(node => node.getText(ast)).join('\n');
   const compiled = ts.transpileModule(text + `\nexport { ${exports.join(',')} };`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;

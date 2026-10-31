@@ -11,11 +11,11 @@ attempt record. A Web Lock serializes admission across tabs of the same origin.
 Missing browser locking/storage fails closed. Submission-in-progress and quote
 refresh are also checked in the parent, not only on the button.
 
-A complete response without failed rows clears the record. Returned placed rows
+A response clears the record only when counts and identities are consistent, every reviewed unit is accounted for, and every placed order has a unique nonempty broker ID. Failed rows, missing receipts, omitted results and unresolved partial quantities retain the lock. Explicit fully-accounted reductions/skips remain valid. Returned placed rows
 are deselected. HTTP 401/403/422 rejects before this endpoint's execution are
 retryable. Timeout, network failure, unexpected responses, 5xx and failed broker
 rows retain the lock: neither a timeout nor a failed response proves cancellation.
-The lock survives closing/reopening the dialog, remount, reload and another tab
+Persisted records contain only timestamp and state; legacy listing details are removed on hydration. The lock survives closing/reopening the dialog, remount, reload and another tab
 for the same user. Another user's record is isolated.
 
 ## Recovery limitation and release review
@@ -34,6 +34,8 @@ review this recovery limitation before release.
 
 - `node --test tests/basket-*.test.mjs tests/zerodha-*.test.mjs`
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium node scripts/basket-submission-safety-playwright.mjs`
+- `node --test tests/bounded-api-transport.test.mjs`
+- `python backend/scripts/verify-basket-preexecution-offline.py` (from repository root)
 - `npx tsc --noEmit`
 
 The browser fixture mounts the production basket and actual production submission
@@ -45,3 +47,13 @@ response; the application must conservatively lock both when transport cannot
 prove whether dispatch occurred. Tests cover budget rejection, missing/old prices,
 Add More/Buy More, accessible blocker descriptions, close/reopen, reload,
 definitive rejection and resolved skipped responses. No live orders are submitted.
+
+The pre-execution Python verifier runs AST-extracted production authentication,
+request schemas and the sequenced endpoint through an in-memory FastAPI ASGI app.
+It fakes database/JWT/service boundaries and forbids sockets/DNS. It proves 401,
+403 and 422 rejection paths make no placement calls, without importing application
+startup or connecting services; it is not the complete backend integration suite.
+The BFF transport test verifies these rejections stay authoritative, with at most
+one same-origin authentication refresh and no mutation transport fallback.
+The browser suite also exercises simultaneous admission from two pages using
+real Web Locks and shared localStorage; only one mock dispatch is admitted.

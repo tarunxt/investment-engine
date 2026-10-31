@@ -12,7 +12,7 @@ function load(relative, names=[], bindings={}) {
   const module={exports:{}};new Function('require','exports','module',...Object.keys(bindings),code)(require,module.exports,module,...Object.values(bindings));return module.exports;
 }
 const date=load('../lib/datetime.ts');
-const workflowPath='../app/console/dashboard/_components/RebalanceWorkflowSections.tsx';
+const workflowPath='../components/shared/WorkflowStageTile.tsx';
 const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatInrCost:()=>'-'});
 
 test('stage timestamp matches requested IST 24-hour examples and preserves offset/naive-UTC parsing',()=>{
@@ -60,6 +60,6 @@ test('every Stage tile adapter shares compact timestamps, count-only recommendat
   assert.deepEqual(info,before);
   for(const value of [null,undefined])assert.equal(ui.formatRecommendedStockProgress({recommendedStocks:value}),'n/a');
   assert.equal(ui.formatRecommendedStockProgress({recommendedStocks:0}),'0');
-  const source=readFileSync(new URL(workflowPath,import.meta.url),'utf8');
+  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');
   assert.match(source,/Last run:\{" "\}\s*\{formatCompactStageTime\(lastRunByPortfolio\[section.portfolio\]\)\}/);
 });

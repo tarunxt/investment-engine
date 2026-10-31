@@ -620,36 +620,40 @@ async def reserve_auto_rebalance_label(
 
 @router.get("/auto-rebalance-history", response_model=AutoRebalanceHistoryListResponse)
 async def list_auto_rebalance_history(
+    offset: int = Query(default=0, ge=0),
     portfolio: str = Query(..., pattern="^(india|indmoney_us)$"),
     limit: int = Query(default=100, ge=1, le=250),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    recent_sequences = set(
-        (
-            await db.execute(
-                select(AutoRebalanceWorkflow.sequence)
-                .where(
-                    AutoRebalanceWorkflow.user_id == current_user.id,
-                    AutoRebalanceWorkflow.portfolio == portfolio,
-                )
-                .order_by(
-                    AutoRebalanceWorkflow.sequence.desc(),
-                    AutoRebalanceWorkflow.updated_at.desc(),
-                )
-                .limit(limit)
-            )
-        ).scalars().all()
-    )
+    # Include legacy run/job sequences as well as durable workflow rows. All
+    # branches retain the authenticated owner and market boundary.
+    sequence_query = select(AutoRebalanceWorkflow.sequence).where(
+        AutoRebalanceWorkflow.user_id == current_user.id,
+        AutoRebalanceWorkflow.portfolio == portfolio,
+    ).union(
+        select(Run.auto_rebalance_sequence).where(
+            Run.user_id == current_user.id,
+            Run.auto_rebalance_portfolio == portfolio,
+            Run.auto_rebalance_sequence.is_not(None),
+        ),
+        select(Job.auto_rebalance_sequence).where(
+            Job.user_id == current_user.id,
+            Job.auto_rebalance_portfolio == portfolio,
+            Job.auto_rebalance_sequence.is_not(None),
+        ),
+    ).subquery()
+    sequences = list((await db.execute(
+        select(sequence_query.c.sequence)
+        .order_by(sequence_query.c.sequence.desc())
+        .offset(offset).limit(limit)
+    )).scalars().all())
+    total = (await db.execute(select(func.count()).select_from(sequence_query))).scalar_one()
     history = await _build_auto_rebalance_history(
-        db,
-        user_id=current_user.id,
-        portfolio=portfolio,
-        sequences=recent_sequences or None,
+        db, user_id=current_user.id, portfolio=portfolio, sequences=set(sequences),
     )
     return AutoRebalanceHistoryListResponse(
-        items=[item for item, _, _ in history[:limit]],
-        total=len(history),
+        items=[item for item, _, _ in history], total=total,
     )
 
 
