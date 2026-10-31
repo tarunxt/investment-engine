@@ -457,6 +457,11 @@ jobs:
         working-directory: frontend
         run: npm run test:playwright-hardening
 
+      - name: Verify API cost trend states and currency provenance offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: node scripts/api-cost-provenance-playwright.mjs
+
       - name: Verify saved-output states and keyboard behavior offline
         if: matrix.bundler == 'webpack'
         working-directory: frontend
