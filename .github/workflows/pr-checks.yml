@@ -48,6 +48,7 @@ jobs:
           pytest -q
           backend/tests/test_zerodha_display_quotes.py
           backend/tests/test_upstox_quotes.py
+          backend/tests/test_upstox_request_contract.py
           backend/tests/test_recovery_containment.py
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_ranking_integrity.py

@@ -89,3 +89,23 @@ Analytics Tokens are free, read-only, valid for one year and limited to one per
 account. Market quote GET APIs need no static IP; account/private API categories
 can require a whitelisted IP. Actual account entitlement and quote access still
 require live verification after approved secure configuration.
+
+### Shared request construction and manual diagnostic
+
+Production and `backend/scripts/diagnose_upstox_quote.py` use the same
+`build_quote_request` function and normal httpx transport, including GET, encoded
+`instrument_key`, Bearer authorization, `Accept: application/json`, and the
+`Content-Type: application/json` header shown in Upstox's official full-quote
+example. No User-Agent override, proxy override, redirect following or retry is
+introduced. Adding Content-Type aligns with the example; it does not establish a
+fix for the previously observed browser-signature 403.
+
+The diagnostic is import-safe and never runs automatically. A separately
+approved live call may invoke it as a module with `PYTHONPATH=backend` and an
+explicit `--instrument-key`, through the mandatory approved secret resolver; do
+not pass a token on the command line or print raw HTTP responses. It retains at
+most 8192 response bytes in process, outputs only sanitized status/error and
+request-ID information, and makes one request. It must not be used to evade a
+provider access block. Request-contract tests use only dummy credentials and
+mocked transports. This change neither activates Upstox nor changes deployed
+credentials, account scope, UI, or executable orders.
