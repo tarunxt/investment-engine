@@ -4264,12 +4264,8 @@ function ScopedZerodhaBasketPreviewDialog({
         </div>
 
         <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          {!isZerodhaPreview || executionMode === "direct_market" ? <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            {!isZerodhaPreview
-              ? "Review selected US stock quantities and USD amounts before confirming the final basket."
-              : executionMode === "direct_market"
-              ? "Protected MARKET mode submits selected SELL orders first through the backend with market_protection=-1, waits for execution status, refreshes margin, then submits only affordable BUY orders. Access tokens never reach the browser; execution is not atomic or guaranteed."
-              : ""}
+          {!isZerodhaPreview ? <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Review selected US stock quantities and USD amounts before confirming the final basket.
           </div> : null}
           {selectedDraftIssues.length ? <details className="max-w-xl text-sm text-amber-800"><summary>Selected rows need execution review</summary><ul>{selectedDraftIssues.map((reason, index) => <li key={`${index}:${reason}`}>{reason}</li>)}</ul></details> : null}
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
