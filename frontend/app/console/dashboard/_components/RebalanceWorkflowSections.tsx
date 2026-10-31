@@ -2,16 +2,16 @@
 
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
-import { readBasketColumnPreferences, writeBasketColumnPreferences } from "@/lib/basketColumnPreferences";
+import { readBasketColumnLayout, writeBasketColumnLayout, emptyBasketColumnLayout, type BasketColumnLayout } from "@/lib/basketColumnPreferences";
 import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
-import { kiteWeightContext, kiteHoldingQuantity, stockIdentity, validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
+import { basketActionGroup, actionQuantityMatchesDraft, kiteWeightContext, kiteHoldingQuantity, stockIdentity, validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { resolveTechnicalPriceEvidence } from "@/lib/technicalPriceEvidence";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
 import { BasketUnitsPopup } from "@/components/BasketUnitsPopup";
-import { BasketColumnTable, BasketColumnPicker } from "@/components/BasketColumnPicker";
+import { BasketColumnTable, BasketColumnPicker, BasketColumnRename } from "@/components/BasketColumnPicker";
 import type { BasketUnitsTrace } from "@/lib/basketUnitsExplanation";
 import { shouldSaveThresholds, thresholdSignature, type ThresholdPersistence } from "@/lib/buyThresholdPersistence";
 import { mergeStageEvidence } from "@/lib/stockFlowEvidence";
@@ -3601,19 +3601,19 @@ function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasket
   // Keep preferences above the remounted preview and across reloads in this tab.
   const { user } = useAuth();
   const owner = user && Number.isSafeInteger(user.id) && user.id > 0 ? user.id : null;
-  const [columnPreferences, setColumnPreferences] = useState<Record<string, string[]>>({});
+  const [columnPreferences, setColumnPreferences] = useState<Record<string, BasketColumnLayout>>({});
   const preferenceScope = `${owner ?? "anonymous"}:${props.basketBrokerLabel ?? "Zerodha"}:${props.tradingViewMarket ?? "india"}`;
   useEffect(() => {
     if (owner === null) return;
-    const hidden = readBasketColumnPreferences(preferenceScope);
+    const hidden = readBasketColumnLayout(preferenceScope);
     setColumnPreferences(current => Object.hasOwn(current, preferenceScope) ? current : { ...current, [preferenceScope]: hidden });
   }, [owner, preferenceScope]);
   useEffect(() => {
     if (owner !== null && Object.hasOwn(columnPreferences, preferenceScope)) {
-      writeBasketColumnPreferences(preferenceScope, columnPreferences[preferenceScope]);
+      writeBasketColumnLayout(preferenceScope, columnPreferences[preferenceScope]);
     }
   }, [owner, preferenceScope, columnPreferences]);
-  return <ScopedZerodhaBasketPreviewDialog key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} columnPreferences={{ hiddenColumns: columnPreferences[preferenceScope] ?? [], toggle: label => setColumnPreferences(current => { const hidden = current[preferenceScope] ?? []; return { ...current, [preferenceScope]: hidden.includes(label) ? hidden.filter(value => value !== label) : [...hidden, label] }; }) }} />;
+  return <ScopedZerodhaBasketPreviewDialog key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} columnPreferences={{ hiddenColumns: columnPreferences[preferenceScope]?.hidden ?? [], order: columnPreferences[preferenceScope]?.order ?? [], names: columnPreferences[preferenceScope]?.names ?? {}, toggle: id => setColumnPreferences(current => { const layout = current[preferenceScope] ?? emptyBasketColumnLayout(); return { ...current, [preferenceScope]: { ...layout, hidden: layout.hidden.includes(id) ? layout.hidden.filter(value => value !== id) : [...layout.hidden, id] } }; }), reorder: order => setColumnPreferences(current => ({ ...current, [preferenceScope]: { ...(current[preferenceScope] ?? emptyBasketColumnLayout()), order } })), rename: (id, name) => setColumnPreferences(current => { const layout = current[preferenceScope] ?? emptyBasketColumnLayout(); return { ...current, [preferenceScope]: { ...layout, names: { ...layout.names, [id]: name } } }; }) }} />;
 }
 function ScopedZerodhaBasketPreviewDialog({
   open,
@@ -3704,7 +3704,7 @@ function ScopedZerodhaBasketPreviewDialog({
   primaryButtonLabel?: string;
   basketInfoText?: ReactNode;
   basketCurrency?: "INR" | "USD";
-  columnPreferences?: { hiddenColumns: string[]; toggle: (label: string) => void };
+  columnPreferences?: { hiddenColumns: string[]; order?: string[]; names?: Record<string, string>; toggle: (label: string) => void; reorder?: (order: string[]) => void; rename?: (id: string, name: string) => void };
 }) {
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
@@ -3712,6 +3712,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const [localHiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const hiddenColumns = columnPreferences?.hiddenColumns ?? localHiddenColumns;
   const [columnMenu, setColumnMenu] = useState<string[] | null>(null);
+  const [renameColumn, setRenameColumn] = useState<string | null>(null);
   useEffect(() => { if (!open) { setUnitsDetailId(null); setColumnMenu(null); } }, [open]);
   const unitsDetailOrder = unitsDetailId ? orders.find(order => order.id === unitsDetailId) : undefined;
 
@@ -3783,12 +3784,16 @@ function ScopedZerodhaBasketPreviewDialog({
       .filter((value): value is string => Boolean(value))
       .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null
   );
-  const sectionGroups = [...new Set<ActionCategory>([...ZERODHA_BASKET_SECTION_ORDER, "Hold"])].map((action) => ({
+  const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
+  const groupForOrder = (order: ZerodhaBasketPreviewOrder) => isZerodhaPreview && typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
+  const groupForDisplay = (row: DashboardActionRow) => isZerodhaPreview && typeof displayCalculations.metrics === "function" ? basketActionGroup(displayCalculations.metrics(displayStock(row)).comparison.action) : row.formulaAction;
+  const actionDraftMismatch = isZerodhaPreview && typeof displayCalculations.metrics === "function" && selectedOrders.some(order => !actionQuantityMatchesDraft(orderCalculation(order)?.actionSizing.stocks, order.side, order.units));
+  const sectionGroups = [...new Set<string>([...ZERODHA_BASKET_SECTION_ORDER, "Hold", ...(isZerodhaPreview ? ["Unavailable"] : [])])].map((action) => ({
     action,
-    label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
-    displayRows: displayOnlyRows.filter(row => row.formulaAction === action && visibleScore(row.formulaScore)).sort((a, b) => (b.formulaScore ?? -Infinity) - (a.formulaScore ?? -Infinity) || a.stock.key.localeCompare(b.stock.key)),
+    label: ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
+    displayRows: displayOnlyRows.filter(row => groupForDisplay(row) === action && visibleScore(row.formulaScore)).sort((a, b) => (b.formulaScore ?? -Infinity) - (a.formulaScore ?? -Infinity) || a.stock.key.localeCompare(b.stock.key)),
     orders: orders
-      .filter((order) => getZerodhaBasketActionForPercent(order) === action && visibleScore(order.detail.calculatedScore))
+      .filter((order) => groupForOrder(order) === action && visibleScore(order.detail.calculatedScore))
       .sort(compareZerodhaBasketOrdersByScore),
   })).filter((group) => group.orders.length > 0 || group.displayRows.length > 0);
 
@@ -3798,7 +3803,7 @@ function ScopedZerodhaBasketPreviewDialog({
     <Button
       type="button"
       onClick={onPlaceOrder}
-      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason)}
+      disabled={!selectedOrders.length || placing || ltpRefreshing || Boolean(orderSubmissionBlockedReason) || actionDraftMismatch}
       className={cn(
         "shrink-0 rounded-full bg-blue-600 px-5 text-sm font-bold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700 disabled:opacity-50",
         className,
@@ -3810,7 +3815,7 @@ function ScopedZerodhaBasketPreviewDialog({
 
   return (
     <>
-    <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="flex max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
@@ -3994,8 +3999,7 @@ function ScopedZerodhaBasketPreviewDialog({
                   <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
                     {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin, basketCurrency)}
                   </div>
-                  <div className="mt-2 text-xs font-bold uppercase tracking-wide text-emerald-700">Projected after selected sells</div>
-                  <div className="mt-1 text-sm font-black text-emerald-900">{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</div>
+                  <div className="mt-2 whitespace-nowrap text-sm text-emerald-900">After sales: <strong>{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</strong></div>
                 </div>
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
@@ -4025,7 +4029,7 @@ function ScopedZerodhaBasketPreviewDialog({
               {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="overflow-x-auto overscroll-x-contain">
-                  <BasketColumnTable hidden={hiddenColumns} onOpen={setColumnMenu}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnPreferences?.names} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead>
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -4070,7 +4074,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   <input
                                     type="checkbox"
                                     checked={sectionAllSelected}
-                                    onChange={() => onToggleSection(group.action, sectionSelectable.map(order => order.id))}
+                                    onChange={() => onToggleSection(group.action as ActionCategory, sectionSelectable.map(order => order.id))}
                                     disabled={!sectionSelectable.length}
                                     aria-label={`Select or deselect ${group.label} ${basketBrokerLabel} basket orders`}
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -4136,7 +4140,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 </td>
                                 {displayCalculations.cells({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) })}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                                  <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
+                                  {isZerodhaPreview ? <div title={`Display/action quantity only. Executable draft: ${formatBasketQuantity(order.units)} ${order.side} units. A mismatch blocks submission.`}>{displayCalculations.units?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) }, "Units action")}</div> : <div className="inline-flex items-center overflow-hidden rounded-full border border-slate-200 bg-white text-sm font-semibold shadow-sm">
                                     <button
                                       type="button"
                                       onClick={() => onUnitsChange(order.id, -1)}
@@ -4158,7 +4162,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                     >
                                       +
                                     </button>
-                                  </div>
+                                  </div>}
                                 </td>
                                 <td className="px-4 py-3">
                                   {order.side === "SELL" ? (
@@ -4237,7 +4241,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction}</td>
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
                                 {displayCalculations.cells(displayStock(row))}
-                                <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
+                                <td className="px-4 py-3 text-slate-500">{isZerodhaPreview ? displayCalculations.units?.(displayStock(row), "Units action") : "Not applicable"}</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
                                 {tradingViewMarket === "india" ? upstoxCell(row.stock.symbol, row.stock.exchange) : null}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={quote.ltpSource}>{quote.ltp === null ? "Unavailable" : formatBasketCurrency(quote.ltp, basketCurrency)}</td>
                                 <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
@@ -4275,6 +4279,7 @@ function ScopedZerodhaBasketPreviewDialog({
               ? "Protected MARKET mode submits selected SELL orders first through the backend with market_protection=-1, waits for execution status, refreshes margin, then submits only affordable BUY orders. Access tokens never reach the browser; execution is not atomic or guaranteed."
               : ""}
           </div> : null}
+          {actionDraftMismatch ? <p role="status" className="text-sm text-amber-800">Units mirror Action Zerodha Stocks. Submission is blocked while selected action quantities or sides differ from executable drafts; no order quantity is changed automatically.</p> : null}
           {renderPlaceOrderButton("w-full justify-center sm:w-auto")}
         </div>
 
@@ -4288,7 +4293,8 @@ function ScopedZerodhaBasketPreviewDialog({
     </div>
     {displayCalculations.popup}
     {unitsDetailOrder ? <BasketUnitsPopup row={unitsDetailOrder} broker={basketBrokerLabel} onClose={() => setUnitsDetailId(null)} /> : null}
-    {columnMenu ? <BasketColumnPicker labels={columnMenu} hidden={hiddenColumns} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
+    {renameColumn ? <BasketColumnRename key={renameColumn} id={renameColumn} name={columnPreferences?.names?.[renameColumn] ?? renameColumn} onSave={name => columnPreferences?.rename?.(renameColumn, name)} onClose={() => setRenameColumn(null)} /> : null}
+    {columnMenu ? <BasketColumnPicker covered={Boolean(renameColumn)} labels={columnMenu} hidden={hiddenColumns} order={columnPreferences?.order} names={columnPreferences?.names} onReorder={columnPreferences?.reorder} onRequestRename={setRenameColumn} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
     </>
   );
 }
@@ -6040,7 +6046,7 @@ export function RebalanceWorkflowSections({
     setSelectedZerodhaBasketIds(current => selectable.every(order => current.has(order.id)) ? new Set() : new Set(selectable.map(order => order.id)));
   }, [zerodhaBasketOrders]);
   const toggleZerodhaBasketSection = useCallback((action: ActionCategory, visibleIds?: string[]) => {
-    const ids = zerodhaBasketOrders.filter(isWholeShareOrderSelectable).filter(order => getZerodhaBasketActionForPercent(order) === action && (!visibleIds || visibleIds.includes(order.id))).map(order => order.id);
+    const ids = zerodhaBasketOrders.filter(isWholeShareOrderSelectable).filter(order => visibleIds ? visibleIds.includes(order.id) : getZerodhaBasketActionForPercent(order) === action).map(order => order.id);
     setSelectedZerodhaBasketIds(current => toggleVisibleSelection(current, ids));
   }, [zerodhaBasketOrders]);
 

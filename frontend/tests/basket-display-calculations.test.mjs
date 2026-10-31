@@ -5,7 +5,9 @@ import { createRequire } from 'node:module';
 import ts from 'typescript';
 import * as React from 'react';
 const require = createRequire(import.meta.url);
-function load(path, bindings={}) { bindings = { BasketMetricPopup: () => null, BasketActionSizingPopup: () => null, ...bindings }; const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
+let sharedColumnBindings = {};
+function load(path, bindings={}) { bindings = { ...sharedColumnBindings, BasketMetricPopup: () => null, BasketActionSizingPopup: () => null, ...bindings }; const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
+sharedColumnBindings = load('../lib/basketColumnPreferences.ts');
 const math=load('../lib/basketDisplayCalculations.ts');
 const dateMath=load('../lib/datetime.ts');
 Object.assign(math,load('../lib/basketActionSizing.ts',math));
@@ -118,10 +120,10 @@ test('actual filtered-group handlers toggle only visible selectable IDs and pres
   const orders=[{id:'A',action:'Buy New',selectable:true},{id:'B',action:'Buy New',selectable:true},{id:'locked',action:'Buy New',selectable:false},{id:'other',action:'Trim',selectable:true}];let selected=new Set(['A']);
   const fn=callback(`toggle${cap}BasketSection`,{useCallback:fn=>fn,[`${broker}BasketOrders`]:orders,[`setSelected${cap}BasketIds`]:fn=>{selected=fn(selected);},getZerodhaBasketActionForPercent:row=>row.action,isWholeShareOrderSelectable:row=>row.selectable,...math});
   fn('Buy New',['A']);assert.deepEqual([...selected],[]);assert.equal(selected.has('B'),false);
-  selected=new Set(['B']);fn('Buy New',['A','locked','display-only','other']);assert.deepEqual([...selected].sort(),['A','B']);
-  fn('Buy New',[]);assert.deepEqual([...selected].sort(),['A','B']);
+  selected=new Set(['B']);fn('Buy New',['A','locked','display-only','other']);assert.deepEqual([...selected].sort(),broker==='zerodha'?['A','B','other']:['A','B']);
+  fn('Buy New',[]);assert.deepEqual([...selected].sort(),broker==='zerodha'?['A','B','other']:['A','B']);
   const all=callback(`toggleAll${cap}BasketOrders`,{useCallback:fn=>fn,[`${broker}BasketOrders`]:orders.filter(o=>o.selectable),[`setSelected${cap}BasketIds`]:fn=>{selected=fn(selected);},isWholeShareOrderSelectable:row=>row.selectable});
-  all();assert.deepEqual([...selected].sort(),['A','B','other']);all();assert.equal(selected.size,0);
+  selected=new Set(['B']);all();assert.deepEqual([...selected].sort(),['A','B','other']);all();assert.equal(selected.size,0);
  }
 });
 
@@ -200,19 +202,25 @@ test('actual broker preview renders US copy and labels without India routing con
  const popupState=hooks(),UnitsPopup=()=>null;
  const interactiveBindings={...bindings,...popupState.bindings,BasketUnitsPopup:UnitsPopup};
  const interactive={exports:{}};new Function('exports','module','require',...Object.keys(interactiveBindings),output)(interactive.exports,interactive,require,...Object.values(interactiveBindings));
- const renderUnits=(next=comparisonProps)=>{popupState.start();return interactive.exports.ScopedZerodhaBasketPreviewDialog(next);};
+ const usUnitsProps={...comparisonProps,tradingViewMarket:'us'};
+ const renderUnits=(next=usUnitsProps)=>{popupState.start();return interactive.exports.ScopedZerodhaBasketPreviewDialog(next);};
  const untouched=structuredClone(comparisonProps.orders);let interactiveTree=renderUnits();popupState.flush();
  for(let iteration=0;iteration<3;iteration++){
    const numberButton=find(interactiveTree,node=>node.props?.['aria-label']==='Explain NSE ABC Units');assert.equal(numberButton.type,'button');assert.equal(numberButton.props['aria-haspopup'],'dialog');numberButton.props.onClick();interactiveTree=renderUnits();
    const popup=find(interactiveTree,node=>node.type===UnitsPopup);assert.ok(popup);assert.equal(popup.props.row,comparisonProps.orders[0]);assert.ok(find(interactiveTree,node=>node.props?.inert===true));popup.props.onClose();interactiveTree=renderUnits();assert.equal(find(interactiveTree,node=>node.type===UnitsPopup),null);assert.deepEqual(comparisonProps.orders,untouched);assert.equal(executions,0);
  }
- find(interactiveTree,node=>node.props?.['aria-label']==='Explain NSE ABC Units').props.onClick();renderUnits({...comparisonProps,open:false});popupState.flush();interactiveTree=renderUnits();assert.equal(find(interactiveTree,node=>node.type===UnitsPopup),null);
+ find(interactiveTree,node=>node.props?.['aria-label']==='Explain NSE ABC Units').props.onClick();renderUnits({...usUnitsProps,open:false});popupState.flush();interactiveTree=renderUnits();assert.equal(find(interactiveTree,node=>node.type===UnitsPopup),null);
  bindings.ZERODHA_BASKET_SECTION_ORDER.push('Sell All','Trim','Add more');
  const actions=['Sell All','Trim','Buy New','Add more','Hold'];
  const allocationUniverse=actions.map((action,index)=>({id:`display-${index}`,formulaAction:action,formulaScore:index/10,stock:{key:`NSE:FIXTURE${index}`,symbol:`FIXTURE${index}`,exchange:'NSE',rows:[]},detail:{calculatedScore:index/10}}));
  const display=result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],allocationUniverse,tradingViewMarket:'india',basketBrokerLabel:'Zerodha',onPlaceOrder});
  const displayRows=[];function collect(node){if(!node||typeof node!=='object')return;if(node.props?.['data-display-only'])displayRows.push(node);React.Children.toArray(node.props?.children).forEach(collect);}collect(display);
  assert.equal(displayRows.length,5);for(const row of displayRows){assert.equal(React.Children.toArray(row.props.children).length,23);assert.equal(find(row,node=>node.type==='input').props.disabled,true);assert.equal(find(row,node=>node.type==='input').props.onChange,undefined);assert.equal(find(row,node=>node.type==='select'),null);}
+ const regroupedBindings={...bindings,basketActionGroup:math.basketActionGroup,actionQuantityMatchesDraft:math.actionQuantityMatchesDraft,useBasketDisplayCalculations:()=>({popupOpen:false,showAll:true,lower:-2,upper:1.5,cells:()=>Array.from({length:9},(_,i)=>React.createElement('td',{key:i},'derived')),headers:null,controls:null,popup:null,setParameters:()=>{},metrics:stock=>({comparison:{action:stock.symbol==='ABC'?'Sell All':'Trim'},actionSizing:{stocks:-5}}),units:()=>React.createElement('button',{},'-5')})};
+ const regrouped={exports:{}};new Function('exports','module','require',...Object.keys(regroupedBindings),output)(regrouped.exports,regrouped,require,...Object.values(regroupedBindings));
+ const originalHold={formulaAction:'Hold',formulaScore:1,stock:{key:'NSE:ICICIBANK',symbol:'ICICIBANK',exchange:'NSE',rows:[]},detail:{calculatedScore:1}};
+ const regroupedTree=regrouped.exports.ScopedZerodhaBasketPreviewDialog({...comparisonProps,selectedIds:new Set(['row']),allocationUniverse:[originalHold]});const regroupedHtml=renderToStaticMarkup(regroupedTree);
+ assert.match(regroupedHtml,/Select or deselect Sell All Zerodha basket orders/);assert.match(regroupedHtml,/<span>Trim<\/span>/);assert.match(regroupedHtml,/ICICIBANK/);assert.match(regroupedHtml,/No executable order/);assert.ok(find(regroupedTree,n=>n.type===Button&&n.props.onClick===onPlaceOrder).props.disabled);assert.equal(comparisonProps.orders[0].side,'BUY');assert.equal(comparisonProps.orders[0].units,1);assert.equal(executions,0);
  const displayHtml=renderToStaticMarkup(display);for(const action of actions)assert.ok(displayHtml.includes(action));assert.equal((displayHtml.match(/colSpan="23"/g)??[]).length,5);assert.match(displayHtml,/Hold · No executable order/);assert.match(displayHtml,/Unavailable/);assert.match(displayHtml,/Not applicable/);assert.equal(executions,0);
 
 });
@@ -292,8 +300,8 @@ test('limit-price estimates show their actual price in popup, preserve quote fie
  const stock={symbol:'HAL',exchange:'NSE',score:2,ltp:null,limitPrice:40,quoteLoading:true};
  const render=(open=true,rows=[stock])=>{h.start();return component.useBasketDisplayCalculations(open,'india',rows,1000,end,'Zerodha');};
  let state=render();h.flush();pending.shift().resolve(history([observation(1,2)]));await tick();state=render();
- const amount=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation');assert.equal(amount.props.title,'Estimate using Limit Price; not live LTP');assert.match(JSON.stringify(amount.props.children),/80.00/);assert.doesNotMatch(JSON.stringify(amount.props.children),/Estimate/);amount.props.onClick();state=render();let text=JSON.stringify(state.popup.props.children);assert.match(text,/Estimate using Limit Price; not live LTP/);assert.match(text,/Used price/);assert.equal(stock.ltp,null);assert.equal(stock.limitPrice,40);
- const quoted={...stock,ltp:50,quoteLoading:false};state=render(true,[quoted]);text=JSON.stringify(state.popup.props.children);assert.doesNotMatch(text,/Estimate using Limit Price; not live LTP/);assert.equal(find(state.cells(quoted),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation').props.children,'₹100.00');
+ const amount=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation');assert.equal(amount.props.title,'Estimate using Limit Price; not live LTP');assert.match(JSON.stringify(amount.props.children),/₹80/);assert.doesNotMatch(JSON.stringify(amount.props.children),/Estimate/);amount.props.onClick();state=render();let text=JSON.stringify(state.popup.props.children);assert.match(text,/Estimate using Limit Price; not live LTP/);assert.match(text,/Used price/);assert.equal(stock.ltp,null);assert.equal(stock.limitPrice,40);
+ const quoted={...stock,ltp:50,quoteLoading:false};state=render(true,[quoted]);text=JSON.stringify(state.popup.props.children);assert.doesNotMatch(text,/Estimate using Limit Price; not live LTP/);assert.equal(find(state.cells(quoted),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation').props.children,'₹100');
  render(false);h.flush();state=render(true,[{...stock,limitPrice:null,quoteLoading:false}]);h.flush();assert.equal(state.loading,true);pending.shift().resolve(history([observation(2,2)]));await tick();state=render(true,[{...stock,limitPrice:null,quoteLoading:false}]);assert.equal(find(state.cells({...stock,limitPrice:null,quoteLoading:false}),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation').props.children,'Unavailable');
  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/limitPrice: tradingViewMarket === "india" \? validDisplayPrice\(order\?\.price\)/);assert.doesNotMatch(source,/ltp:\s*validDisplayPrice\(order\?\.price/);
 });
@@ -435,7 +443,7 @@ test('Upstox enabled flag comes from owner-scoped capabilities and is dismissed 
 test('column preferences survive the actual keyed basket close/reopen and snapshot remount',()=>{
  const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8'),ast=ts.createSourceFile('workflow.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  const node=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='ZerodhaBasketPreviewDialog');const compiled=ts.transpileModule(`${node.getText(ast)}\nexport {ZerodhaBasketPreviewDialog}`,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
- const h=hooks(),loaded={exports:{}};new Function('exports','require','useState','useEffect','useAuth','readBasketColumnPreferences','writeBasketColumnPreferences','ScopedZerodhaBasketPreviewDialog',compiled)(loaded.exports,require,h.bindings.useState,h.bindings.useEffect,()=>({user:{id:71}}),()=>[],()=>{},()=>null);
+ const h=hooks(),loaded={exports:{}};new Function('exports','require','useState','useEffect','useAuth','readBasketColumnLayout','writeBasketColumnLayout','emptyBasketColumnLayout','ScopedZerodhaBasketPreviewDialog',compiled)(loaded.exports,require,h.bindings.useState,h.bindings.useEffect,()=>({user:{id:71}}),sharedColumnBindings.emptyBasketColumnLayout,()=>{},sharedColumnBindings.emptyBasketColumnLayout,()=>null);
  const props={open:true,detailsData:{portfolioSnapshot:{captured_at:end}},basketBrokerLabel:'Zerodha',tradingViewMarket:'india'};
  const render=(changes={})=>{h.start();return loaded.exports.ZerodhaBasketPreviewDialog({...props,...changes});};let view=render();const firstKey=view.key;view.props.columnPreferences.toggle('Status');view=render({open:false});assert.notEqual(view.key,firstKey);assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);
  view=render();assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);view=render({detailsData:{portfolioSnapshot:{captured_at:'2026-10-30T12:00:00Z'}}});assert.deepEqual(view.props.columnPreferences.hiddenColumns,['Status']);
@@ -522,4 +530,32 @@ test('compact quote time uses exact 24-hour IST presentation across date boundar
  ];
  for(const [raw,expected] of cases)assert.equal(dateMath.formatCompactQuoteTime(raw),expected);
  for(const raw of [null,undefined,'','invalid'])assert.equal(dateMath.formatCompactQuoteTime(raw),'Unavailable');
+});
+
+test('integer amount presentation rounds signed halves away from zero without changing calculation precision',()=>{
+ for(const [raw,expected] of [[243.5,'₹244'],[-243.5,'-₹244'],[-.4,'₹0'],[243.49,'₹243']])assert.equal(math.formatBasketIntegerCurrency(raw),expected);
+ assert.equal(math.formatBasketIntegerCurrency(243.5,true),'+₹244');assert.equal(math.formatBasketIntegerCurrency(null),'Unavailable');
+});
+
+test('zero targets remain zero with holdings/missing price while Units share signed Action quantity and popup',async()=>{
+ for(const score of [-1,1]){
+ const stock={symbol:'HAL',exchange:'NSE',action:'Sell All',score,currentValue:500,holdingQuantity:5,ltp:null,limitPrice:null,upstoxLtp:score<0?null:100,upstoxAsOf:end,upstoxSource:'Upstox fixture'};
+ const h=hooks(),component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:async()=>history([observation(1,score)])},createPortal:n=>n});const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],1000,end,'Zerodha');};let state=render();h.flush();await tick();state=render();
+ if(score<0){for(const kind of ['Target Zerodha Stocks','Target Zerodha Amount']){const button=find(state.cells(stock),n=>n.props?.['aria-label']===`HAL ${kind} calculation`);assert.match(String(button.props.children),/0/);button.props.onClick();state=render();assert.match(state.popup.props.summary.value,/0/);assert.match(state.popup.props.summary.notice,/Zero Target/);state.popup.props.onClose();state=render();}assert.equal(state.metrics(stock).actionSizing.stocks,-5);}
+ const action=find(state.cells(stock),n=>n.props?.['aria-label']==='HAL Action Zerodha Stocks calculation'),units=state.units(stock,'Units action');assert.equal(units.props.children,action.props.children);
+ for(let i=0;i<3;i++){state.units(stock,'Units action').props.onClick();state=render();assert.equal(state.popup.props.title,'Action Zerodha Stocks');assert.equal(state.popup.props.calculation.stocks,state.metrics(stock).actionSizing.stocks);state.popup.props.onClose();state=render();assert.equal(state.popup,null);}
+ }
+});
+
+test('Action New group identity is independent of original Side/action and mismatched executable drafts fail closed',()=>{
+ assert.equal(math.basketActionGroup('Add More'),'Add more');assert.equal(math.basketActionGroup(null),'Unavailable');
+ for(const [current,target,group]of[[500,0,'Sell All'],[500,.1,'Trim'],[0,.1,'Buy New'],[10,.1,'Add more'],[100,.1,'Hold']])assert.equal(math.basketActionGroup(math.weightComparison(current,1000,target).action),group);
+ assert.equal(math.actionQuantityMatchesDraft(-5,'SELL',5),true);assert.equal(math.actionQuantityMatchesDraft(25,'BUY',25),true);for(const args of [[-5,'BUY',5],[25,'BUY',7],[null,'SELL',5],[0,'BUY',0],[-5,'SELL',2]])assert.equal(math.actionQuantityMatchesDraft(...args),false);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/groupForDisplay\(row\) === action/);assert.match(source,/groupForOrder\(order\) === action/);assert.match(source,/Boolean\(orderSubmissionBlockedReason\) \|\| actionDraftMismatch/);assert.match(source,/After sales: <strong>/);
+});
+
+test('reordered and renamed table uses stable IDs for every cell and preserves selection controls',()=>{
+ const component=load('../components/BasketColumnPicker.tsx',{Children:React.Children,Fragment:React.Fragment,cloneElement:React.cloneElement,isValidElement:React.isValidElement,Menu:()=>null,BasketModalLayer:()=>null});let rename;
+ const table=React.createElement('table',{},React.createElement('thead',{},React.createElement('tr',{},React.createElement('th',{'data-column-label':'Selection'},React.createElement('input',{type:'checkbox'})),React.createElement('th',{},'Units'))),React.createElement('tbody',{},React.createElement('tr',{},React.createElement('td',{},'selected'),React.createElement('td',{},'-5'))));
+ const output=component.BasketColumnTable({children:table,hidden:[],order:['Units','Selection'],names:{Units:'Trade size',Selection:'Choose rows'},onOpen:()=>{},onRequestRename:id=>rename=id});const head=find(output,n=>n.type==='tr');const cells=React.Children.toArray(head.props.children);assert.equal(cells[0].props['data-basket-column'],'Units');assert.equal(cells[0].props.children,'Trade size');assert.ok(find(cells[1],n=>n.type==='input'));cells[0].props.onContextMenu({preventDefault(){}});assert.equal(rename,'Units');
 });

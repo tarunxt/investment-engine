@@ -303,3 +303,32 @@ uses tab-session storage scoped by authenticated user, broker and market. Storag
 failures/corrupt entries fall back to usable in-memory defaults. No credential,
 portfolio value or order data is written to these preferences; no backend schema,
 order formula, frozen audit snapshot or executable payload is changed.
+
+### Basket layout and Action New presentation
+
+The India basket groups executable and display-only rows by calculated Action New,
+independently of original Action or Side. Rows without an available derived action
+stay in an Unavailable section. Moving a display-only row into a sell group never
+makes it selectable. Group toggles operate on the current group's explicit guarded
+order IDs, retaining hidden selections.
+
+Units now displays the exact signed Action Zerodha Stocks value and opens that
+same calculation. It does not silently rewrite executable order drafts or sides.
+The basket submit controls fail closed if any selected row's displayed action
+quantity/side differs from its executable draft; the reason is visible. Existing
+whole-share, price, score, broker and recovery guards remain. This is a UI
+consistency guard, not a new backend execution or sizing algorithm. Zero Target
+Weight makes both Target Stocks and Target Amount zero even with known holdings
+and no price; current holdings and sell-all Action quantities remain distinct.
+Action/Target Amount presentation rounds to nearest integer (halves away from
+zero), while formulas and detail values retain precision. After sales retains the
+computed margin + selected sells − funding buffer amount.
+
+Column configuration v2 stores canonical IDs, order, hidden IDs and display names
+within the existing authenticated owner/broker/market tab-session scope. V1 hidden
+preferences migrate. Native drag/drop, move buttons/Alt+arrow keyboard controls,
+and right-click/keyboard context rename work without changing calculation IDs.
+Rename cancellation/empty text never changes a name. Reordering transforms every
+header/body cell together, retains selection controls and keeps the trailing
+column-menu control reachable. Offline browser fixtures validate these controls
+with blocked external requests; they are not production quote/order acceptance.
