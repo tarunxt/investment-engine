@@ -302,6 +302,7 @@ jobs:
           tests/rebalance-stage-inputs.test.mjs
           tests/portfolio-parameters.test.mjs
           tests/basket-display-calculations.test.mjs
+          tests/basket-column-preferences.test.mjs
           tests/output-source-jobs.test.mjs
           tests/output-consistency-notice.test.mjs
           tests/auto-rebalance-provider-errors-ist.test.mjs
@@ -451,6 +452,11 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: npm run test:playwright-hardening
+
+      - name: Verify offline basket fixture interactions and quote counters
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: npm run test:basket-offline
 
       - name: Verify fingerprint, auth, routes, assets, and backend proxy
         id: runtime

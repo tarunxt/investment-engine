@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useAuth } from "@/hooks/useAuth";
+import { readBasketColumnPreferences, writeBasketColumnPreferences } from "@/lib/basketColumnPreferences";
 import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/components/BasketDisplayCalculations";
 import { kiteWeightContext, kiteHoldingQuantity, stockIdentity, validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
@@ -3596,9 +3598,21 @@ function WorkflowStageTile({
   );
 }
 function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasketPreviewDialog>[0]) {
-  // Keep preferences above the deliberately remounted snapshot/open scope.
+  // Keep preferences above the remounted preview and across reloads in this tab.
+  const { user } = useAuth();
+  const owner = user && Number.isSafeInteger(user.id) && user.id > 0 ? user.id : null;
   const [columnPreferences, setColumnPreferences] = useState<Record<string, string[]>>({});
-  const preferenceScope = `${props.basketBrokerLabel ?? "Zerodha"}:${props.tradingViewMarket ?? "india"}`;
+  const preferenceScope = `${owner ?? "anonymous"}:${props.basketBrokerLabel ?? "Zerodha"}:${props.tradingViewMarket ?? "india"}`;
+  useEffect(() => {
+    if (owner === null) return;
+    const hidden = readBasketColumnPreferences(preferenceScope);
+    setColumnPreferences(current => Object.hasOwn(current, preferenceScope) ? current : { ...current, [preferenceScope]: hidden });
+  }, [owner, preferenceScope]);
+  useEffect(() => {
+    if (owner !== null && Object.hasOwn(columnPreferences, preferenceScope)) {
+      writeBasketColumnPreferences(preferenceScope, columnPreferences[preferenceScope]);
+    }
+  }, [owner, preferenceScope, columnPreferences]);
   return <ScopedZerodhaBasketPreviewDialog key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} columnPreferences={{ hiddenColumns: columnPreferences[preferenceScope] ?? [], toggle: label => setColumnPreferences(current => { const hidden = current[preferenceScope] ?? []; return { ...current, [preferenceScope]: hidden.includes(label) ? hidden.filter(value => value !== label) : [...hidden, label] }; }) }} />;
 }
 function ScopedZerodhaBasketPreviewDialog({
