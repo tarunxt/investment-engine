@@ -1275,7 +1275,7 @@ function formatBasketPercent(value: number) {
 }
 
 function formatZerodhaLtpRefreshTime(value: string | null) {
-  if (!value) return "Using latest synced portfolio snapshot prices until the first quote refresh";
+  if (!value) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Using recently refreshed quoted LTP for the next basket";
   return `Quoted LTP refreshed ${new Intl.DateTimeFormat("en-IN", {
@@ -3735,7 +3735,7 @@ function ScopedZerodhaBasketPreviewDialog({
     return { currentValue: currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
-  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel);
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin });
   const displayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (score: number | null) => displayScoreAccepted(score, displayCalculations.lower, displayCalculations.upper, displayCalculations.showAll);
   if (!open) return null;
@@ -3936,7 +3936,7 @@ function ScopedZerodhaBasketPreviewDialog({
                       ? "Protected MARKET submits SELL rows first with market_protection=-1, waits for terminal sell status, refreshes margin, then submits only affordable BUY rows. Per-row order type selectors still control the LIMIT basket fallback."
                       : directMarketAvailable
                         ? "Protected MARKET becomes available only while NSE/BSE regular trading is open."
-                        : "Protected MARKET requires backend direct-order access from a Kite-whitelisted server egress IP."}
+                        : null}
                   </p>
                 </div>
 
@@ -3960,9 +3960,7 @@ function ScopedZerodhaBasketPreviewDialog({
                   <div className="text-xs text-slate-500">
                     {formatZerodhaLtpRefreshTime(ltpRefreshedAt)}
                   </div>
-                  <div className="max-w-sm text-xs leading-5 text-slate-500 lg:text-right">
-                    Refresh updates the preview and the next basket payload only. Any Kite basket tabs already opened keep showing Zerodha&apos;s own live LTP feed.
-                  </div>
+
                 </div>
               </div>
 
@@ -3984,7 +3982,6 @@ function ScopedZerodhaBasketPreviewDialog({
                   </div>
                   <div className="mt-2 text-xs font-bold uppercase tracking-wide text-emerald-700">Projected after selected sells</div>
                   <div className="mt-1 text-sm font-black text-emerald-900">{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</div>
-                  <div className="mt-1 text-[11px] font-semibold text-emerald-700">Includes safety buffer {formatBasketCurrency(safetyBufferAmount, basketCurrency)}; not guaranteed until sells fill and margins refresh.</div>
                 </div>
                 <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
                   <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
@@ -4003,9 +4000,7 @@ function ScopedZerodhaBasketPreviewDialog({
                     className="mt-2 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-lg font-black text-slate-950 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                     aria-label="Buy-side auto-select final score threshold"
                   />
-                  <p className="mt-2 text-xs leading-5 text-blue-800">
-                    Buy New and Buy More rows stay selected only when Final Score is greater than {buyThreshold.toFixed(2)}.
-                  </p>
+
                   {displayCalculations.controls}
                 </div>
                 <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Saved holdings value includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
@@ -4048,7 +4043,7 @@ function ScopedZerodhaBasketPreviewDialog({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {!orders.length && !allocationUniverse.length ? <tr><td colSpan={tradingViewMarket === "india" ? 21 : 17} className="px-4 py-6 text-slate-500">No basket rows available.</td></tr> : null}
+                      {!orders.length && !allocationUniverse.length ? <tr><td colSpan={tradingViewMarket === "india" ? 23 : 17} className="px-4 py-6 text-slate-500">No basket rows available.</td></tr> : null}
                       {sectionGroups.map((group) => {
                         const sectionSelectable = group.orders.filter(isWholeShareOrderSelectable);
                         const sectionSelected = sectionSelectable.filter(order => selectedIds.has(order.id)).length;
@@ -4056,7 +4051,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         return (
                           <Fragment key={group.action}>
                             <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
-                              <td className="px-4 py-3" colSpan={tradingViewMarket === "india" ? 21 : 17}>
+                              <td className="px-4 py-3" colSpan={tradingViewMarket === "india" ? 23 : 17}>
                                 <label className="inline-flex items-center gap-3 text-sm font-black">
                                   <input
                                     type="checkbox"
@@ -4204,7 +4199,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               </tr>
                               {order.wholeShareReview && (
                                 <tr className="bg-amber-50/40">
-                                  <td colSpan={tradingViewMarket === "india" ? 21 : 17} className="px-4 pb-4 pt-2">
+                                  <td colSpan={tradingViewMarket === "india" ? 23 : 17} className="px-4 pb-4 pt-2">
                                     <WholeShareTrimChoice
                                       symbol={order.symbol}
                                       choice={order.wholeShareReview}
