@@ -343,7 +343,7 @@ test("actual workflow card renders pending and failed history independently of o
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
-      formatTimestamp: () => "03 Oct", lastRunByPortfolio: { zerodha: null }, isBusy: false, STAGE_ORDER: stages, now: 0,
+      formatTimestamp: () => "03 Oct", formatCompactStageTime: () => "03 Oct 00:00", lastRunByPortfolio: { zerodha: null }, isBusy: false, STAGE_ORDER: stages, now: 0,
       WorkflowStageTile: ({ stage }) => createElement("button", null, `View output ${stage}`),
       RebalanceStockFlowTrigger: () => null, getWorkflowRunDuration: () => null,
       getWorkflowRunCost: () => 0, formatInrCost: () => "0", usdInrRate: 1, lastAutoRebalanceCosts: { zerodha: 0 },
