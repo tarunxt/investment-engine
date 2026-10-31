@@ -11,9 +11,11 @@ const DashboardPageClient = dynamic(
     ssr: false,
     loading: () => (
       <div
-        className="h-48 animate-pulse rounded-3xl bg-slate-100"
+        className="h-48 animate-pulse rounded-3xl bg-slate-100 p-6 text-sm font-semibold text-slate-700"
+        role="status"
+        aria-busy="true"
         aria-label="Loading dashboard analytics"
-      />
+      >Loading dashboard analytics…</div>
     ),
   },
 );

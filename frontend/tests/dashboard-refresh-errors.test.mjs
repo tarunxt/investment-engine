@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import ts from "typescript";
+import * as jsxRuntime from "react/jsx-runtime";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const frontendDirectory = fileURLToPath(new URL("../", import.meta.url));
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -193,4 +195,25 @@ test("stage Duration opens a dedicated breakdown dialog without navigating the t
   transpileTypeScript(
     "../app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
   );
+});
+
+
+test("dashboard skeletons visibly distinguish deferred panels from active reads", () => {
+  const output = transpileTypeScript("../app/console/dashboard/_components/DashboardSkeletons.tsx", ts.ModuleKind.CommonJS);
+  const loaded = {exports:{}};
+  new Function("exports", "module", "require", output)(loaded.exports, loaded, (specifier) => {
+    if(specifier === "react/jsx-runtime") return jsxRuntime;
+    if(specifier === "@/components/shared/Loader") return {SkeletonLoader:()=>null};
+    throw new Error(`Unexpected skeleton dependency: ${specifier}`);
+  });
+  for(const [name,label] of [["DashboardHeroSkeleton","Loading portfolio summary…"],["DashboardWorkflowSkeleton","Loading workflow panel…"],["DashboardMarketCardSkeleton","Loading saved portfolio snapshot…"],["DashboardFinalActionablesSkeleton","Loading saved actionables…"],["DashboardThreatCardSkeleton","Loading saved Threat report…"]]) {
+    const html=renderToStaticMarkup(jsxRuntime.jsx(loaded.exports[name],{}));
+    assert.match(html,/role="status"/);
+    assert.match(html,/aria-busy="true"/);
+    assert.ok(html.includes(label),`${name}: visible label`);
+  }
+  const html=renderToStaticMarkup(jsxRuntime.jsx(loaded.exports.DashboardThreatCardSkeleton,{title:"India Threat Pulse",deferred:true}));
+  assert.match(html,/aria-busy="false"/);
+  assert.match(html,/Not loaded yet · India Threat Pulse. Scroll to this panel to load the saved report./);
+  assert.doesNotMatch(html,/Loading saved/);
 });

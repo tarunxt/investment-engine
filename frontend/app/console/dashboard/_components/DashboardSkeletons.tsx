@@ -5,22 +5,30 @@ import { SkeletonLoader } from "@/components/shared/Loader";
 function DashboardSurface({
   children,
   className = "",
+  label,
+  deferred = false,
 }: {
+  label: string;
+  deferred?: boolean;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <section
+      role="status"
+      aria-busy={!deferred}
       className={`overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm ${className}`}
     >
-      {children}
+      <p className="px-6 pt-5 text-sm font-semibold text-slate-700">{label}</p>
+      <div aria-hidden="true">{children}</div>
     </section>
   );
 }
 
 export function DashboardHeroSkeleton() {
   return (
-    <section className="overflow-hidden rounded-[36px] border border-slate-200 bg-slate-950 shadow-lg">
+    <section role="status" aria-busy="true" className="overflow-hidden rounded-[36px] border border-slate-200 bg-slate-950 shadow-lg">
+      <p className="px-6 pt-5 text-sm font-semibold text-slate-200">Loading portfolio summary…</p>
       <div className="grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)] lg:items-center lg:px-8 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)_minmax(430px,0.9fr)]">
         <div className="space-y-4">
           <SkeletonLoader width={176} height={28} className="bg-white/12" />
@@ -76,7 +84,7 @@ export function DashboardHeroSkeleton() {
 
 export function DashboardWorkflowSkeleton() {
   return (
-    <DashboardSurface>
+    <DashboardSurface label="Loading workflow panel…">
       <div className="space-y-5 p-6">
         <div className="space-y-3">
           <SkeletonLoader width={192} height={16} className="bg-slate-200" />
@@ -103,9 +111,9 @@ export function DashboardWorkflowSkeleton() {
   );
 }
 
-export function DashboardMarketCardSkeleton() {
+export function DashboardMarketCardSkeleton({ label = "Loading saved portfolio snapshot…" }: { label?: string }) {
   return (
-    <DashboardSurface>
+    <DashboardSurface label={label}>
       <div className="space-y-6 p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
@@ -165,7 +173,7 @@ export function DashboardMarketCardSkeleton() {
 
 export function DashboardFinalActionablesSkeleton() {
   return (
-    <DashboardSurface className="border-slate-200/90">
+    <DashboardSurface label="Loading saved actionables…" className="border-slate-200/90">
       <div className="space-y-5 p-6">
         <div className="space-y-3">
           <SkeletonLoader width={196} height={16} className="bg-slate-200" />
@@ -197,9 +205,9 @@ export function DashboardFinalActionablesSkeleton() {
   );
 }
 
-export function DashboardThreatCardSkeleton() {
+export function DashboardThreatCardSkeleton({ title = "Threat report", deferred = false }: { title?: string; deferred?: boolean }) {
   return (
-    <DashboardSurface>
+    <DashboardSurface deferred={deferred} label={deferred ? `Not loaded yet · ${title}. Scroll to this panel to load the saved report.` : `Loading saved ${title}…`}>
       <div className="space-y-6 p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-3">
