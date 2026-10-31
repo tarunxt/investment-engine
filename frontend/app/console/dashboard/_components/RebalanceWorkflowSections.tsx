@@ -3,6 +3,7 @@
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
 import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
 import { useBasketSubmissionSafety } from "@/hooks/useBasketSubmissionSafety";
 import { BasketDraftUnits } from "@/components/BasketDraftUnits";
@@ -3137,11 +3138,11 @@ function ScopedZerodhaBasketPreviewDialog({
           </div>
         ) : null}
         <div className="min-h-0 flex-1 overflow-auto p-5">
-          {loading ? (
+          {loading ? (isZerodhaPreview ? <ZerodhaBasketLoading /> : (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}
             </div>
-          ) : orders.length || allocationUniverse.length || !error ? (
+          )) : orders.length || allocationUniverse.length || !error ? (
             <>
               {error ? (
                 <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
