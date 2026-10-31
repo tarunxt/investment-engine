@@ -87,7 +87,7 @@ function formatCost(value?: number | null) {
 
 function StatusBadge({ status }: { status?: string | null }) {
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ${statusTone(status)}`}>
+    <span className={`inline-flex max-w-full rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ${statusTone(status)}`}>
       {status || "Unknown"}
     </span>
   );
@@ -96,9 +96,9 @@ function StatusBadge({ status }: { status?: string | null }) {
 function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
   const label = STAGE_LABELS[stage.stage];
   return (
-    <div className={`rounded-xl border p-4 ${stageCardTone(stage.status)}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
+    <div className={`min-w-0 rounded-xl border p-4 [overflow-wrap:anywhere] ${stageCardTone(stage.status)}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-28">
           <p className="font-semibold text-slate-950">{label}</p>
           <p className="mt-1 text-xs text-slate-600">
             {stage.provider_count
@@ -120,7 +120,7 @@ function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
       {stage.error_message ? (
         <div className="mt-3 flex gap-2 rounded-lg border border-rose-200 bg-white/70 p-3 text-xs leading-5 text-rose-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{stage.error_message}</span>
+          <span className="min-w-0">{stage.error_message}</span>
         </div>
       ) : null}
     </div>
@@ -188,15 +188,15 @@ export function AutoRebalanceHistoryListClient({
           <Link
             key={`${item.portfolio}-${item.sequence}`}
             href={URLs.routes.console.autoRebalanceRunDetail(portfolio, item.sequence)}
-            className={`group rounded-2xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${index === 0 ? "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-100" : stageCardTone(item.status)}`}
+            className={`group min-w-0 rounded-2xl border p-5 [overflow-wrap:anywhere] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${index === 0 ? "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-100" : stageCardTone(item.status)}`}
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1 basis-48">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{index === 0 ? "Latest auto run" : "Auto run"}</p>
                 <h2 className="mt-1 text-xl font-bold text-slate-950">{item.label}</h2>
                 <p className="mt-1 text-sm text-slate-600">Started {formatTime(item.created_at)}</p>
               </div>
-              <div className="flex items-center gap-2"><StatusBadge status={item.status} /><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
+              <div className="flex max-w-full items-center gap-2"><StatusBadge status={item.status} /><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div><p className="text-xs text-slate-500">Current stage</p><p className="mt-1 font-semibold text-slate-900">{item.current_stage ? STAGE_LABELS[item.current_stage] : "Queued"}</p></div>
