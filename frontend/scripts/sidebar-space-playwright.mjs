@@ -30,13 +30,15 @@ try {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const base=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
-  const page=await browser.newPage(); const errors=[],external=[];
+  const page=await browser.newPage(); const errors=[],external=[],scriptRequests=[];
+  page.on('request',request=>{if(request.resourceType()==='script')scriptRequests.push(request.url())});
   page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)});
   await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():(external.push(route.request().url()),route.abort()));
   await page.addInitScript(()=>{localStorage.setItem('investment-engine:theme-preference','system');localStorage.setItem('unrelated-user-preference','preserve-me')});
   const measurements=[];
   for(const [width,height,zoom] of [[1180,757,1],[1165,747,1],[1165,747,.67],[390,747,1],[390,747,.67]]) {
     await page.setViewportSize({width:Math.round(width/zoom),height:Math.round(height/zoom)});
+    scriptRequests.length=0;
     await page.goto(base+'/console/dashboard');
     const nav=page.getByRole('navigation',{name:'Console navigation',includeHidden:true});
     await nav.waitFor({state:'attached'});
@@ -72,9 +74,11 @@ try {
     const directoryButton=page.getByRole('button',{name:'All destinations',exact:true});
     const portfolios=nav.getByRole('button',{name:'Portfolios',exact:true});
     await portfolios.click();
+    assert.ok(scriptRequests.every(url=>url.endsWith('/bundle.js')),'directory chunk must stay off initial route');
     await directoryButton.click();
     const directory=page.getByRole('dialog',{name:'All destinations'});
     await directory.waitFor();
+    assert.ok(scriptRequests.some(url=>!url.endsWith('/bundle.js')),'directory loads on demand');
     const expected=await page.evaluate(()=>[...window.sections.flatMap(s=>s.entries.flatMap(e=>e.type==='group'?e.children:[e])),...window.account].map(e=>e.href));
     assert.equal(await directory.locator('tbody tr').count(),expected.length);
     for(const href of expected)assert.equal(await directory.locator(`a[href="${href}"]`).count(),1);
