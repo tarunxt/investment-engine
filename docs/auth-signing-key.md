@@ -75,6 +75,45 @@ The repository-required `aws-secrets-manager` skill was unavailable in the task
 environment. The explicitly approved server-local generation route governs this
 release; no Secrets Manager retrieval or secret-bearing command was used.
 
+## Proposed first-rotation manual path (coordinator review required)
+
+This proposal does not change workflow state or authorize a merge by itself.
+
+1. Hold just `Deploy to Production` (`.github/workflows/deploy.yml`) before merge,
+   leaving PR checks enabled. Verify that this workflow is disabled and that no
+   queued or running deployment can later acquire the host deployment lock.
+   Coordinate the hold with the sole local operator; do not rely on cancellation
+   after a main push to beat the deployment race.
+2. Obtain successful exact-head checks and independent review, then merge only
+   this repair after the coordinator approves the manual path. Record the actual
+   merge SHA and confirm it adds only the reviewed auth repair to fresh main.
+   Do not dispatch the held deployment workflow for this first rotation.
+3. The sole local operator acquires the existing production deployment lock and
+   rechecks host source/state, stopped financial services, loaded unit commands,
+   EnvironmentFile order and wrapper behavior. Stage the exact reviewed merged
+   source before interruption. Preserve a separate secure recovery artifact of
+   the vetted configured-key code, with source revision/blob provenance and
+   private filesystem metadata. It must contain no environment file or secrets.
+   Existing pre-remediation snapshots are forbidden recovery targets.
+4. Stop isolated recovery and backend before replacing loaded application source.
+   Perform the reviewed private key update and promote only the exact vetted
+   source, without dependency installation, migrations, normal unit installation,
+   broad deployment scripts or frontend deployment. Validate the merged source
+   blobs and effective key configuration privately, including the later recovery
+   overlay. Never print key values, error dictionaries or environment contents.
+5. Start backend through its existing reviewed unit/wrapper, verify readiness,
+   then start isolated recovery. If validation, wrapper resolution, startup or
+   readiness fails, explicitly stop the affected backend/recovery services to
+   prevent automatic restart loops. Retain the new key and configured-key source;
+   repair only from the secure artifact or remain unavailable. Never invoke the
+   old source-restore trap or restore the previous signing configuration.
+6. Verify source/process revision, unauthenticated rejection, stopped financial
+   services and owner relogin. Keep viewer activation held until these pass.
+   Re-enable automated deployment only after coordinator review confirms that
+   the installed secure revision will be the next rollback baseline and that no
+   queued deployment or older artifact can restore fixed-key code. Record the
+   workflow state, release SHA and verification result for the operator handoff.
+
 ## Local verification
 
 `backend/tests/test_auth_signing_config.py` uses only deterministic synthetic
