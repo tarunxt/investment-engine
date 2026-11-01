@@ -7,6 +7,7 @@ The database must be empty initially; this script never resets an existing DB.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -95,6 +96,26 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
                 ),
             }
     return snapshot
+
+
+def verify_forward_baseline(before: dict, after: dict) -> None:
+    """Permit only the registered nullable policy addition; preserve old facts."""
+    observed = deepcopy(after)
+    workflow = observed.get("auto_rebalance_workflows")
+    prior = before.get("auto_rebalance_workflows")
+    if workflow is not None and prior is not None:
+        policy = ("side_effect_policy_json", "JSON", True, None)
+        additions = [column for column in workflow["columns"] if column[0] == policy[0]]
+        require(additions == [policy], "Forward policy column contract changed")
+        require(not any(column[0] == policy[0] for column in prior["columns"]), "Baseline unexpectedly contains forward policy")
+        workflow["columns"].remove(policy)
+        rows = []
+        for raw in workflow["rows"]:
+            row = json.loads(raw)
+            require(policy[0] in row and row.pop(policy[0]) is None, "Forward policy changed legacy row defaults")
+            rows.append(json.dumps(row, sort_keys=True, default=str))
+        workflow["rows"] = sorted(rows)
+    require(observed == before, "Forward head upgrade changed existing schema/data")
 
 
 def seed_baseline(engine: sa.Engine) -> None:
@@ -242,7 +263,7 @@ def main() -> None:
         require(revision(engine)==head, "Full-chain upgrade did not stamp its exact head")
         alembic("current", "--check-heads")
         verify_schema(engine)
-        require(baseline_snapshot(engine,exclude_tables=frozenset(),include_tables=before)==before, "Forward head upgrade changed existing schema/data")
+        verify_forward_baseline(before, baseline_snapshot(engine,exclude_tables=frozenset(),include_tables=before))
         after=baseline_snapshot(engine,exclude_tables=frozenset())
         alembic("upgrade", "head")
         require(revision(engine)==head, "Idempotent upgrade changed head stamp")
