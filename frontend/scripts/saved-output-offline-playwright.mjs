@@ -17,10 +17,12 @@ const start = source.indexOf('  const showStageOutput = useCallback(');
 const end = source.indexOf('  useEffect(() => {\n    const handleOpenStageOutput', start);
 assert.ok(start > 0 && end > start);
 const loader = source.slice(start, end);
+const tileAst = ts.createSourceFile('tile.tsx', await readFile(path.join(frontend, 'components/shared/WorkflowStageTile.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const stageMetadata = tileAst.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(d => d.name.getText(tileAst) === 'STAGE_METADATA')).getText(tileAst).replace(/^export /, '');
 const entry = `import React,{useState,useRef,useCallback} from 'react';
 import {createRoot} from 'react-dom/client';
 import {SavedOutputDialog} from ${JSON.stringify(path.join(frontend,'components/shared/SavedOutputDialog.tsx'))};
-const STAGE_METADATA={threats:{idle:'Threats & Guardrails'},sync:{idle:'Sync'},rebalance:{idle:'Rebalance'}};
+${stageMetadata}
 const getStageOutputRoute=(portfolio,stage)=>'/console/'+portfolio+'/'+stage;
 const normalizeError=e=>e.message;
 const getLatestRunTimestamp=run=>run.updated_at;
@@ -58,6 +60,7 @@ try {
   await page.getByText('Open India',{exact:true}).click();await page.getByRole('status').waitFor();
   assert.equal(await page.getByText('Retry saved output',{exact:true}).isDisabled(),true);
   await dialog.getByText(/Saved threat report for zerodha/).waitFor();
+  assert.match(await dialog.textContent(),/Threats Scan Output/);
   assert.match(await dialog.textContent(),/Job #71 · fixture\/offline · completed/);
   assert.equal(await dialog.locator('time').getAttribute('datetime'),'2026-10-31T12:00:00Z');
   assert.equal(await page.locator('iframe').count(),0);assert.equal(await page.evaluate(()=>window.executed),undefined);

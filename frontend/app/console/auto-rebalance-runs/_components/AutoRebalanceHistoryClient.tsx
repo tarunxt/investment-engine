@@ -28,7 +28,7 @@ export type AutoRebalanceHistoryPortfolio = "zerodha" | "indmoneyUs";
 
 const STAGE_LABELS = {
   sync: "Portfolio sync",
-  threats: "Threats & guardrails",
+  threats: "Threats Scan",
   swing: "Swing scan",
   rebalance: "Rebalance scan",
   technical: "Technical validation",
