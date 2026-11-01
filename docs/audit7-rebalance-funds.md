@@ -31,5 +31,22 @@ partial output and audit persistence. New tests cover both preview modes and
 missing, zero, negative, fractional, invalid and stale captured funds. Audit capture
 already stores the full prompt with a hash when within its existing size limit;
 above that limit existing `prompt_size_exceeded` coverage applies. No audit schema
-or historical evidence was rewritten. Browser rendering/live UI acceptance and
-live model-versus-funds reconciliation remain unverified.
+or historical evidence was rewritten. Live UI acceptance and live model-versus-funds reconciliation remain unverified.
+
+
+Follow-up browser acceptance: `node scripts/rebalance-funds-offline-playwright.mjs`
+from `frontend` passed 15 synthetic Chromium cases. The fixture compiles unchanged
+production RebalanceInputBox declarations, real readiness and UI components; only
+API/dashboard context and the CreateJobCard submission boundary are synthetic.
+It checks exact source field/currency/value, stale timestamp, margin zero provenance,
+wallet versus buying power, unknown values and budget caveats in the actual rendered
+Portfolio section, combined-context detail textarea, generated prompt and retained
+source-selection bundle. Refresh and collapse/reopen retain the evidence; snapshot
+read errors leave prompt/selection empty. Zero external requests and provider calls.
+There is no funds-specific popup in this input component. Live execution acceptance
+is not implied. TypeScript checking also passed for the implementation.
+
+Exact remaining policy question: Which funds source and rule should define each
+market's deployable rebalance budget? This is required only for funded-sizing
+enforcement beyond truthful source context. Existing Swing ideation capital remains
+unchanged.
