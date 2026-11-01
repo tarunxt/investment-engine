@@ -17,9 +17,11 @@ from app.domains.api_usage.router import (
     api_usage_summary as legacy_api_usage_summary,
     llm_cost_history as legacy_llm_cost_history,
 )
+from app.domains.api_usage.coverage import MAX_EVENT_ROWS, summarize_attempt_coverage
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.api_usage.models import (
+    ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
     LlmProviderUsageDailySnapshot,
 )
@@ -35,7 +37,47 @@ from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
-PROVIDER_LEDGER_COMPLETE_FROM_DATE = date(2026, 9, 5)
+# Historical source precedence only: this cutoff does NOT establish completeness.
+LEGACY_CALL_SOURCE_PREFERENCE_FROM_DATE = date(2026, 9, 5)
+
+
+
+def _cost_contract(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cost_provenance": {"actual": "provider_day_total", "reconciled": "provider_day_allocation"}.get(
+            row.get("measurement"), "tariff_estimate"),
+        "settled_billed_cost_usd": None,
+        "coverage_state": "unknown",
+        "cache_split_provenance": "legacy_unknown",
+        "tariff_version_status": "legacy_unknown",
+    }
+
+
+def _accounting_window(start_utc: datetime, end_utc: datetime) -> dict[str, Any]:
+    return {
+        "window_start": start_utc.replace(tzinfo=UTC).isoformat(),
+        "window_end_exclusive": end_utc.replace(tzinfo=UTC).isoformat(),
+        "read_cutoff": datetime.now(UTC).isoformat(),
+        "state": "unknown",
+        "failed_cancelled_attempts": "not_integrated",
+        "hidden_sdk_retries": "unknown",
+        "note": "Saved telemetry is not evidence of complete invocation or settled invoice coverage.",
+    }
+
+
+async def _window_attempt_coverage(db: AsyncSession, *, user_id: int,
+                                   start_utc: datetime, end_utc: datetime,
+                                   provider: str | None = None) -> dict[str, Any]:
+    # These estimates remain separate from legacy/daily totals: adding them
+    # would double count responses represented in both ledgers.
+    statement = select(ApiUsageAttemptEvent).where(
+        ApiUsageAttemptEvent.user_id == user_id,
+        ApiUsageAttemptEvent.started_at >= start_utc.replace(tzinfo=UTC),
+        ApiUsageAttemptEvent.started_at < end_utc.replace(tzinfo=UTC),
+        *([ApiUsageAttemptEvent.actual_provider == provider] if provider else []),
+    ).order_by(ApiUsageAttemptEvent.started_at, ApiUsageAttemptEvent.event_id).limit(MAX_EVENT_ROWS + 1)
+    events = (await db.execute(statement)).scalars().all()
+    return summarize_attempt_coverage(events)
 
 
 def _safe_int(value: object, default: int = 0) -> int:
@@ -200,6 +242,11 @@ def _new_usage_row(
         "tokens_in": max(0, int(tokens_in)),
         "tokens_out": max(0, int(tokens_out)),
         "estimated_cost": max(0.0, float(estimated_cost)),
+        "cost_provenance": "tariff_estimate",
+        "tariff_version_status": "legacy_unknown",
+        "settled_billed_cost_usd": None,
+        "coverage_state": "unknown",
+        "cache_split_provenance": "legacy_unknown",
         "occurred_at": occurred_at,
         "record_kind": record_kind,
         "record_id": record_id,
@@ -459,12 +506,14 @@ async def _load_provider_snapshot_rows(
     user_id: int,
     start_day: date,
     end_day: date,
+    provider: str | None = None,
 ) -> list[dict[str, Any]]:
     snapshots = (
         await db.execute(
             select(LlmProviderUsageDailySnapshot)
             .where(
                 LlmProviderUsageDailySnapshot.user_id == user_id,
+                *([LlmProviderUsageDailySnapshot.provider == provider] if provider else []),
                 LlmProviderUsageDailySnapshot.timezone == str(API_USAGE_TZ),
                 LlmProviderUsageDailySnapshot.usage_date >= start_day,
                 LlmProviderUsageDailySnapshot.usage_date <= end_day,
@@ -496,7 +545,9 @@ async def _load_provider_snapshot_rows(
             record_kind="provider_usage_daily_snapshot",
             record_id=snapshot.id,
         )
-        row["measurement"] = "actual"
+        row["measurement"] = "actual"  # Compatibility enum: provider-day total, not a settled bill.
+        row["cost_provenance"] = "provider_day_total"
+        row["source_as_of"] = snapshot.captured_at.isoformat()
         row["cache_hit_tokens"] = int(snapshot.cache_hit_tokens)
         row["cache_miss_tokens"] = int(snapshot.cache_miss_tokens)
         row["source_note"] = snapshot.source
@@ -534,10 +585,9 @@ def _effective_usage_rows(
         if key in snapshots_by_day:
             effective.extend(snapshots_by_day[key])
             continue
-        usage_day = date.fromisoformat(key[2])
-        if usage_day >= PROVIDER_LEDGER_COMPLETE_FROM_DATE and key in calls_by_day:
+        if date.fromisoformat(key[2]) >= LEGACY_CALL_SOURCE_PREFERENCE_FROM_DATE and key in calls_by_day:
             for row in calls_by_day[key]:
-                row["measurement"] = "actual"
+                row["measurement"] = "estimated"
             effective.extend(calls_by_day[key])
             continue
         for row in local_by_day.get(key, []):
@@ -726,6 +776,8 @@ def _reconcile_snapshot_to_runs(
                 "cache_hit_tokens": cache_hit_allocations[index],
                 "cache_miss_tokens": cache_miss_allocations[index],
                 "measurement": "reconciled",
+                "cost_provenance": "provider_day_allocation",
+                "settled_billed_cost_usd": None,
                 "source_note": (
                     "Allocated from the authoritative provider daily total in "
                     "proportion to persisted Cred-X run telemetry."
@@ -769,11 +821,10 @@ def _run_breakdown_rows(
                 _reconcile_snapshot_to_runs(snapshot, local_by_day.get(key, []))
             )
             continue
-        usage_day = date.fromisoformat(key[2])
-        if usage_day >= PROVIDER_LEDGER_COMPLETE_FROM_DATE and key in calls_by_day:
+        if date.fromisoformat(key[2]) >= LEGACY_CALL_SOURCE_PREFERENCE_FROM_DATE and key in calls_by_day:
             for call_row in calls_by_day[key]:
                 call_row = dict(call_row)
-                call_row["measurement"] = "actual"
+                call_row["measurement"] = "estimated"
                 rows.append(call_row)
             continue
         for local_row in local_by_day.get(key, []):
@@ -876,6 +927,8 @@ def _aggregate_usage(
     )
     for totals in provider_totals.values():
         totals["cost"] = round(float(totals["cost"]), 6)
+    for item in [*items, *provider_totals.values()]:
+        item.update(_cost_contract(item))
     return items, dict(provider_totals)
 
 
@@ -962,6 +1015,8 @@ def _aggregate_run_items(
             str(item["source_label"]).lower(),
         )
     )
+    for item in items:
+        item.update(_cost_contract(item))
     return items
 
 
@@ -1021,11 +1076,10 @@ def _patch_summary_llm_items(
         item["usage_measurement"] = totals.get("measurement", "estimated")
         existing_note = str(item.get("notes") or "").strip()
         accuracy_note = (
-            "Actual provider-ledger requests, tokens and cost."
+            "Provider-day reported total; settlement status unknown."
             if totals.get("measurement") == "actual"
             else (
-                "Estimated from persisted Cred-X jobs; provider-ledger data is not "
-                "available for this day."
+                "Tariff estimate from persisted telemetry; coverage and hidden SDK retries remain unknown."
             )
         )
         item["notes"] = (
@@ -1122,8 +1176,12 @@ async def llm_usage_breakdown(
         "items": items,
         "runs": run_items,
         "provider_totals": provider_totals,
+        "accounting_coverage": _accounting_window(start_utc, end_utc),
+        "attempt_coverage": await _window_attempt_coverage(db, user_id=current_user.id,
+            start_utc=start_utc, end_utc=end_utc),
         "coverage_note": (
-            "Each model is broken down by usage area and individual run. Provider-day "
+            "Invocation coverage is unknown, including failures, cancellations and hidden SDK retries. "
+            "Tariff estimates are not settled billed charges. Each model is broken down by usage area and individual run. Provider-day "
             "totals remain authoritative; when a provider exposes only a daily total, "
             "it is reconciled across runs in proportion to persisted run telemetry."
         ),
@@ -1154,10 +1212,7 @@ async def corrected_llm_cost_history(
     oldest_day = today - timedelta(days=day_limit - 1)
     start_utc, end_utc, _ = _window_utc("custom", oldest_day, today)
     rows = await _load_effective_usage_rows(
-        db,
-        user_id=current_user.id,
-        start_utc=start_utc,
-        end_utc=end_utc,
+        db, user_id=current_user.id, start_utc=start_utc, end_utc=end_utc,
     )
     fx = await load_persisted_usd_inr_rate()
     display_fx_rate = (
@@ -1197,8 +1252,12 @@ async def corrected_llm_cost_history(
         }
         for day_key, totals in sorted(daily_totals.items(), reverse=True)
     ]
+    payload["accounting_coverage"] = _accounting_window(start_utc, end_utc)
+    payload["attempt_coverage"] = await _window_attempt_coverage(db, user_id=current_user.id,
+        provider=normalized_provider, start_utc=start_utc, end_utc=end_utc)
     payload["request_metric"] = "outbound_provider_calls"
     payload["coverage_note"] = (
+        "Tariff estimates are not settled bills. Invocation coverage is unknown, including failed/cancelled calls and hidden SDK retries. "
         "Provider-ledger totals take precedence over reconstructed job estimates. "
         "The legacy run list remains job-oriented."
     )

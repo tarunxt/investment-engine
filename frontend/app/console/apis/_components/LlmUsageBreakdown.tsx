@@ -330,8 +330,8 @@ export default function LlmUsageBreakdown() {
             LLM API Usage Breakdown
           </h2>
           <p className="text-sm text-gray-600">
-            Actual provider-ledger usage where available; older days fall back to
-            reconstructed Cred-X job estimates.
+            Tariff estimates and provider day totals are distinct from settled billed charges.
+            Invocation coverage and hidden SDK retries remain unknown.
           </p>
         </div>
 
@@ -493,11 +493,11 @@ export default function LlmUsageBreakdown() {
                                     {formatUsd(run.estimated_cost)}
                                   </div>
                                   {run.measurement === 'actual' ? (
-                                    <div className="text-xs font-semibold text-emerald-700">Actual</div>
+                                    <div className="text-xs font-semibold text-emerald-700">Provider day total · settlement unknown</div>
                                   ) : run.measurement === 'reconciled' ? (
-                                    <div className="text-xs font-semibold text-amber-700">Reconciled</div>
+                                    <div className="text-xs font-semibold text-amber-700">Allocated provider day total</div>
                                   ) : (
-                                    <div className="text-xs text-gray-500">Estimated</div>
+                                    <div className="text-xs text-gray-500">Tariff estimate</div>
                                   )}
                                 </td>
                               </tr>
@@ -512,7 +512,7 @@ export default function LlmUsageBreakdown() {
                     )}
                     {area.runs.some((run) => run.measurement === 'reconciled') ? (
                       <p className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-                        Reconciled rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
+                        Allocated rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
                       </p>
                     ) : null}
                   </section>
