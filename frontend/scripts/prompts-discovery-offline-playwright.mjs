@@ -27,12 +27,19 @@ const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors
 const fixture=[{id:1,name:'Portfolio Event Calendar Scan Flow',description:'Portfolio event calendar prompt used by Zerodha and INDmoney US event scans for upcoming price-sensitive company events.',body:'[TASK]\nCreate one markdown table listing upcoming price-sensitive events.\n[ROLE]\nAct as an equity market calendar analyst.\n[OBJECTIVE]\n'+('Upcoming earnings, results, board meetings, AGMs. '.repeat(20)),is_system:true,version:2,updated_at:'2026-06-07T10:00:00Z'},...Array.from({length:7},(_,i)=>({id:i+2,name:'Other prompt '+i,body:'Preserved other prompt '+i,is_system:true,version:3,updated_at:'2026-06-07'})),{id:20,name:'My private prompt',description:null,body:'Private content',is_system:false,source_prompt_id:1,version:4,updated_at:'2026-06-07'}];
 const settle=async(data,fail=false)=>page.evaluate(({data,fail})=>window.requests[0][fail?'reject':'resolve'](fail?Error(data):data),{data,fail});
 try{
-for(const width of [1180,390]){
+for(const width of [1180,390,320]){
  await page.setViewportSize({width,height:757});await page.goto(base);await page.getByText('Loading prompts…').waitFor();await settle(fixture);await page.getByText('System v2',{exact:true}).waitFor();
  assert.equal(await page.getByText('Other prompt 6',{exact:true}).count(),1);
  assert.equal(await page.getByText('India',{exact:true}).count(),1);assert.equal(await page.getByText('US',{exact:true}).count(),1);
  await page.screenshot({path:path.join(output,`catalogue-${width}.png`),fullPage:true});
  const preview=page.locator('summary').first();await preview.focus();await page.keyboard.press('Enter');await page.getByRole('region',{name:'Portfolio Event Calendar Scan Flow preview'}).waitFor();
+ const panel=page.getByRole('region',{name:'Portfolio Event Calendar Scan Flow preview'});
+ const panelBox=await panel.boundingBox();
+ for(const action of await panel.getByRole('button').all()){
+  const box=await action.boundingBox();assert.ok(box.x>=panelBox.x && box.x+box.width<=panelBox.x+panelBox.width+0.5,`Preview action must fit panel at ${width}px: ${JSON.stringify({box,panelBox})}`);
+  assert.equal(await action.evaluate(el=>el.scrollWidth>el.clientWidth),false,'Button label must fit its own box');
+ }
+ assert.equal(await panel.evaluate(el=>el.scrollWidth>el.clientWidth),false,'Preview must not overflow internally');
  await page.screenshot({path:path.join(output,`preview-${width}.png`),fullPage:true});
  for(let i=0;i<2;i++){await page.getByRole('button',{name:'Return to Prompt catalogue'}).click();assert.equal(await preview.evaluate(el=>el===document.activeElement),true);await page.keyboard.press('Enter');}
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.getByRole('button',{name:'Open full prompt'}).click();await page.getByText('Edit My Version',{exact:true}).waitFor();await page.getByText('Saving changes creates or updates your personal version.',{exact:false}).waitFor();await page.getByRole('button',{name:'Cancel',exact:true}).click();
@@ -47,5 +54,5 @@ await page.goto(base);await settle([]);await page.getByText('No system prompts c
 await page.goto(base);await settle('Fixture unavailable',true);await page.getByText('System prompts unavailable.').waitFor();assert.equal(await page.getByText('No system prompts configured.').count(),0);await page.screenshot({path:path.join(output,'failed.png')});
 // A response with fewer records is shown as supplied, without fabricated totals or recency.
 await page.goto(base);await settle([fixture[0]]);await page.getByText('System v2',{exact:true}).waitFor();assert.equal(await page.getByText('Updated 07 Jun 2026',{exact:true}).count(),1);assert.equal(await page.evaluate(()=>writes.length),0);assert.deepEqual(errors,[]);
-console.log('PASS catalogue, all records, preview, repeated return/focus, scopes, editor cancel, Rules, loading/empty/failed, partial older response, 1180x757 and390px; no external calls, zero navigation writes, fixture-only private update preserves source. Screenshots: '+output);
+console.log('PASS catalogue, all records, preview, repeated return/focus, scopes, editor cancel, Rules, loading/empty/failed, partial older response, 1180x757,390px and320px with preview action bounding-box containment; no external calls, zero navigation writes, fixture-only private update preserves source. Screenshots: '+output);
 }finally{await browser.close();server.close()}
