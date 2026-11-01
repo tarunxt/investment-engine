@@ -343,7 +343,10 @@ export default function RunDetailPage() {
             Back
           </Button>
           <span className="text-gray-300">/</span>
-          <h1 className="text-lg font-semibold tracking-tight text-gray-950">{runLabel}</h1>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">{run.auto_rebalance_portfolio && run.auto_rebalance_sequence ? `Stage run #${run.id}` : runLabel}</h1>
+            {run.auto_rebalance_portfolio && run.auto_rebalance_sequence ? <p className="text-xs text-gray-500">Workflow #{run.auto_rebalance_sequence} · {runLabel}</p> : null}
+          </div>
           <span
             className={cn(
               'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold capitalize ring-1',

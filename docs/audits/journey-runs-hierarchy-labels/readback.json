@@ -49,6 +49,20 @@
           "href": "/console/runs/440"
         }
       ]
+    },
+    {
+      "surface": "stage detail",
+      "width": 1440,
+      "heading": "Stage run #442",
+      "breadcrumb": "All runs\n/\nWorkflow · IndMoney US Run #120\n/\nSwing Scan stage run · Run #442",
+      "parent": "Workflow #120 · IndMoney US Run #120 (Swing Scan)"
+    },
+    {
+      "surface": "stage detail",
+      "width": 390,
+      "heading": "Stage run #442",
+      "breadcrumb": "All runs\n/\nWorkflow · IndMoney US Run #120\n/\nSwing Scan stage run · Run #442",
+      "parent": "Workflow #120 · IndMoney US Run #120 (Swing Scan)"
     }
   ],
   "errors": [],
