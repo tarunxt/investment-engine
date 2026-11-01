@@ -2734,3 +2734,14 @@ quantity times valid Quoted LTP, falling back to genuine Upstox LTP; it never us
 a Limit Price estimate for these actions. Calculation summaries retain holding
 source/as-of and price source/as-of. Buy, Add and Hold allocation semantics and
 all executable Units/Amount and broker payloads remain unchanged.
+
+### Unknown runtime display (2026-11-01)
+
+The console treats absent run evidence as unknown execution, including workflow
+stage labels and Stage 1 coverage. It does not infer queue membership from a
+workflow template. Saved run status identifies the run and its recorded start or
+completion time; it does not verify current worker execution. Portfolio counts
+without position/runtime evidence render as unavailable, while reported zero
+counts retain their source and observation/freshness qualification. This is a
+presentation change only: audit capture, frozen snapshots, schema, validators,
+calculations, execution and recovery behavior are unchanged.

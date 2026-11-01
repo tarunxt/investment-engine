@@ -1251,3 +1251,15 @@ test("an active Auto Run takes precedence over a saved independent scan", () => 
   assert.match(source, /stageOneResultSource === "independent" && !runIsActive/);
   assert.match(source, /setStageOneResultSource\("original"\)/);
 });
+
+test('absent run evidence never claims that work is queued', async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+  for (const run of [null, undefined]) {
+    const view = buildBullpenAutoRunWorkflowView(run);
+    assert.equal(view.currentStageLabel, 'Execution status unknown');
+    assert.match(view.statusCopy, /queue and execution status are unknown/);
+    assert.doesNotMatch(view.statusCopy, /is waiting in queue/);
+    assert.ok(view.stages.every(stage => stage.progressLabel === 'Unknown'));
+    assert.ok(view.stages.every(stage => /execution status is unknown/.test(stage.detail)));
+  }
+});
