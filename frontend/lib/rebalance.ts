@@ -10,6 +10,13 @@ import { deduplicateStageRunInputs } from "@/lib/rebalanceStageInputs";
 
 export type RebalancePortfolioKey = "zerodha" | "indmoneyUs";
 
+// Shared by the prompt producer and the input preview's section extraction.
+export const REBALANCE_INPUT_SECTION_MARKERS = {
+  portfolio: "## 1. Latest Portfolio Snapshot",
+  swing: "## 2. Completed Swing Trade Runs Explicitly Selected",
+  threats: "## 3. Latest Threats Report",
+} as const;
+
 type PortfolioSnapshot =
   | ZerodhaPortfolioSnapshotDetail
   | IndMoneyUsPortfolioSnapshotDetail
@@ -554,12 +561,12 @@ Market: ${copy.label}
 Previous market close cutoff: ${formatPreviousMarketClose(market, previousClose)}
 Generated at: ${new Date().toISOString()}
 
-## 1. Latest Portfolio Snapshot
+${REBALANCE_INPUT_SECTION_MARKERS.portfolio}
 ${formatPortfolioSnapshot(market, portfolio)}
 
-## 2. Completed Swing Trade Runs Explicitly Selected
+${REBALANCE_INPUT_SECTION_MARKERS.swing}
 ${formatSwingRuns(uniqueSwingRuns, previousClose, market, swingDisplayMode)}
 
-## 3. Latest Threats Report
+${REBALANCE_INPUT_SECTION_MARKERS.threats}
 ${formatPortfolioThreats(threats)}`;
 }

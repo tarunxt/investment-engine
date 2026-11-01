@@ -30,6 +30,7 @@ import {
   buildRebalancePrompt,
   getPreviousMarketClose,
   getRebalanceDefaultExportSheetName,
+  REBALANCE_INPUT_SECTION_MARKERS,
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
@@ -87,7 +88,7 @@ const INPUT_SECTION_META: Array<{
 }> = [
   {
     key: "portfolio",
-    marker: "## 1. Latest Portfolio Snapshot",
+    marker: REBALANCE_INPUT_SECTION_MARKERS.portfolio,
     title: "Portfolio",
     eyebrow: "Holdings snapshot",
     description:
@@ -98,7 +99,7 @@ const INPUT_SECTION_META: Array<{
   },
   {
     key: "swing",
-    marker: "## 2. Completed Swing Trade Runs After Previous Market Close",
+    marker: REBALANCE_INPUT_SECTION_MARKERS.swing,
     title: "Swing",
     eyebrow: "Post-close runs",
     description:
@@ -109,7 +110,7 @@ const INPUT_SECTION_META: Array<{
   },
   {
     key: "threats",
-    marker: "## 3. Latest Threats Report",
+    marker: REBALANCE_INPUT_SECTION_MARKERS.threats,
     title: "Threats",
     eyebrow: "Risk radar",
     description:
@@ -581,6 +582,7 @@ function RebalanceInputBox({
                           ? promptSwingInputSection?.content.length
                           : content.length;
                       if (loading) return "Loading…";
+                      if (inputError) return "Input context unavailable";
                       if (!characterCount) return "No data";
                       if (key === "swing") {
                         return `${swingBriefStats} · ${characterCount.toLocaleString(
@@ -675,12 +677,16 @@ function RebalanceInputBox({
                       {swingInputSection.description}
                     </p>
                     <p className="mt-2 text-xs font-medium text-emerald-800">
-                      {swingBriefStats} ·{" "}
-                      {selectedSwingJobCount.toLocaleString("en-IN")} of{" "}
-                      {totalSwingJobCount.toLocaleString("en-IN")} LLM outputs
-                      selected ·{" "}
-                      {selectedSwingCharacterCount.toLocaleString("en-IN")}{" "}
-                      output characters selected
+                      {loading ? "Loading selected outputs…" : inputError ? "Input context unavailable" : (
+                        <>
+                          {swingBriefStats} ·{" "}
+                          {selectedSwingJobCount.toLocaleString("en-IN")} of{" "}
+                          {totalSwingJobCount.toLocaleString("en-IN")} LLM outputs
+                          selected ·{" "}
+                          {selectedSwingCharacterCount.toLocaleString("en-IN")}{" "}
+                          output characters selected
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -703,6 +709,8 @@ function RebalanceInputBox({
                   <div className="rounded-lg border border-emerald-100 bg-white/70 p-4 text-sm text-gray-600">
                     Loading swing-trade model outputs…
                   </div>
+                ) : inputError ? (
+                  <p className="p-4 text-sm text-gray-600">Selected swing input could not be verified. Refresh Input Box to retry.</p>
                 ) : swingRuns.length === 0 ? (
                   <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-emerald-100 bg-white/70 p-4 font-mono text-xs leading-5 text-gray-800">
                     {swingInputSection.content ||
@@ -825,13 +833,15 @@ function RebalanceInputBox({
               </div>
 
               <div className="border-t border-white/70 bg-white/65 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
-                {promptSwingInputSection?.content
-                  ? `${swingBriefStats} · ${promptSwingInputSection.content.length.toLocaleString(
-                      "en-IN",
-                    )} characters in selected swing input prompt context`
-                  : loading
-                    ? "Counting characters…"
-                    : "0 runs considered · 0 LLMs considered · 0 stocks recommended · 0 characters"}
+                {loading
+                  ? "Counting characters…"
+                  : inputError
+                    ? "Input context unavailable"
+                    : promptSwingInputSection?.content
+                      ? `${swingBriefStats} · ${promptSwingInputSection.content.length.toLocaleString(
+                          "en-IN",
+                        )} characters in selected swing input prompt context`
+                      : "0 runs considered · 0 LLMs considered · 0 stocks recommended · 0 characters"}
               </div>
             </section>
           ) : null}
