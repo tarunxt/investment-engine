@@ -179,8 +179,11 @@ def split_gaps(rows, *, frozen_at=None, embargo_seconds=None, embargo_reason=Non
         inspected = timestamp(row.get("first_result_inspected_at"))
         if inspected is None:
             gaps.append("inspection_history_unknown")
-        elif frozen is None or frozen >= inspected:
-            gaps.append("split_not_frozen_before_inspection")
+        else:
+            if inspected < end:
+                gaps.append("outcome_window_not_mature_at_inspection")
+            if frozen is None or frozen >= inspected:
+                gaps.append("split_not_frozen_before_inspection")
         if not row.get("dependency_group"):
             gaps.append("dependency_group_unknown")
         partitions[partition].append((start, end, row.get("dependency_group")))
