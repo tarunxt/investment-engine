@@ -97,11 +97,11 @@
       "scope": "AUTO-STAGES-HIERARCHY",
       "branch": "codex/auto-stages-hierarchy",
       "pr": 1363,
-      "observed_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
-      "final_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
+      "observed_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
+      "final_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
-      "coordinator_supplied_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
+      "coordinator_supplied_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
       "files": [
         "docs/visual-audit/auto-stages-hierarchy/README.md",
         "docs/visual-audit/auto-stages-hierarchy/evidence-desktop.png",
@@ -115,7 +115,7 @@
         "frontend/components/shared/WorkflowStageLedger.tsx",
         "frontend/scripts/auto-stages-ledger-offline-playwright.mjs"
       ],
-      "integrated_source_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
+      "integrated_source_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
       "source_commit_is_ancestor": true,
       "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
@@ -184,8 +184,8 @@
       "scope": "NAV-SIDEBAR-HIERARCHY",
       "branch": "fix/nav-sidebar-hierarchy",
       "pr": 1346,
-      "observed_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
-      "final_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+      "observed_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
+      "final_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -204,8 +204,8 @@
         "frontend/app/console/_components/SidebarNavigation.tsx",
         "frontend/scripts/sidebar-space-playwright.mjs"
       ],
-      "coordinator_supplied_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
-      "integrated_source_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+      "coordinator_supplied_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
+      "integrated_source_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
       "source_commit_is_ancestor": true,
       "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
@@ -364,16 +364,16 @@
       "scope": "PROMPTS-LIST-DISCOVERY",
       "branch": "visual/prompts-list-discovery",
       "pr": null,
-      "observed_head": "b2561f086bc16db2c2d688172da87e8126356d97",
-      "final_head": "b2561f086bc16db2c2d688172da87e8126356d97",
+      "observed_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
+      "final_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
-      "coordinator_supplied_head": "b2561f086bc16db2c2d688172da87e8126356d97",
+      "coordinator_supplied_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
       "files": [
         "frontend/app/console/prompts/page.tsx",
         "frontend/scripts/prompts-discovery-offline-playwright.mjs"
       ],
-      "integrated_source_head": "b2561f086bc16db2c2d688172da87e8126356d97",
+      "integrated_source_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
       "source_commit_is_ancestor": true,
       "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
