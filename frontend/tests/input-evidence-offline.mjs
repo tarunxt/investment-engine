@@ -16,6 +16,7 @@ const rows = readFileSync(resolve(root, 'app/console/dashboard/_components/Input
 const dialog = workflow.slice(workflow.indexOf('function InputSelectionDialog('), workflow.indexOf('function AutoRebalanceCostHistoryDialog('));
 const entry = `import React,{useState,useRef,useEffect,useMemo,useId} from 'react';
 import {createRoot} from 'react-dom/client';
+import {threatInputRationale} from '${resolve(root, 'app/console/dashboard/_components/threatInputRationale.ts')}';
 import {InputEvidenceRows,InputEvidenceSummary} from '${resolve(root, 'app/console/dashboard/_components/InputEvidenceRows.tsx')}';
 const Button=(p)=><button {...p}/>; const X=()=> <span>×</span>;
 const cn=(...s)=>s.filter(Boolean).join(' '); const formatUsdAsVerifiedInr=(value)=>'₹'+value; const parseTimestampMs=(s)=>Date.parse(s)||0; const formatTimestamp=(s)=>s;
@@ -40,12 +41,16 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const open=()=>page.getByRole('button',{name:'Choose evidence',exact:true}).click();
   const summary=page.getByRole('status');
+  const rationale=()=>page.getByText('Input selection rationale:',{exact:true}).locator('..').innerText();
   await open();
+  assert.match(await rationale(), /1 source selected.*Included reservation: Upcoming run.*has not been generated/);
+  assert.doesNotMatch(await rationale(), /Included saved source/);
   assert.match(await summary.innerText(),/Upcoming output/);
   assert.doesNotMatch(await summary.innerText(),/Saved snapshot/);
   assert.equal(await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).isChecked(),false);
   await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).check();
   assert.match(await summary.innerText(),/Upcoming output · Saved snapshot/);
+  assert.match(await rationale(), /2 sources selected.*Included reservation.*Included saved source/);
   assert.match(await page.getByRole('dialog').innerText(),/Partial/);
   assert.match(await page.getByRole('dialog').innerText(),/Existing snapshot/);
   assert.match(await page.getByRole('dialog').innerText(),/2026-10-31T12:00:00Z/);
@@ -63,6 +68,8 @@ try {
   await page.getByRole('button',{name:'Collapse Latest snapshot',exact:true}).click();
   await page.getByRole('checkbox',{name:'Include Upcoming output',exact:true}).uncheck();
   assert.doesNotMatch(await summary.innerText(),/Upcoming output/);
+  assert.match(await rationale(), /1 source selected.*Included saved source: Latest snapshot/);
+  assert.doesNotMatch(await rationale(), /Included reservation/);
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('button',{name:'Choose evidence',exact:true}).evaluate(e=>document.activeElement===e),true);
   await open();assert.match(await summary.innerText(),/Saved snapshot/);
@@ -72,6 +79,7 @@ try {
   assert.match(await summary.innerText(),/Upcoming output · Saved snapshot/);
   await page.getByRole('checkbox',{name:'Select or deselect all inputs',exact:true}).uncheck();
   assert.match(await summary.innerText(),/No available sources selected/);
+  assert.match(await rationale(), /0 sources selected.*No inputs are included/);
   await page.getByRole('button',{name:'Reset defaults',exact:true}).click();
   await page.getByRole('button',{name:'Close input selection',exact:true}).focus();await page.keyboard.press('Shift+Tab');
   assert.equal(await page.getByRole('button',{name:'Done',exact:true}).evaluate(e=>document.activeElement===e),true);
