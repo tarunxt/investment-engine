@@ -60,6 +60,51 @@ export function IndMoneyUsPasteCard({
         <p className="mt-1 text-sm text-gray-600">Paste INDmoney data and save a timestamped manual snapshot.</p>
       </div>
       <form id="indmoney-us-import-form" onSubmit={handleSubmit} className="space-y-4 px-4 py-4">
+        <details className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+          <summary className="cursor-pointer rounded font-medium text-purple-800 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-purple-700">
+            Show example
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p>
+              In INDmoney, open your US stocks portfolio and copy the portfolio screen text,
+              including Current Holdings. Keep the field labels, values and line breaks.
+              Paste copied text here; screenshots and file uploads are not supported by this box.
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Summary: wallet balance, Current Value, Invested Value, 1D Returns and Total Returns, when shown.</li>
+              <li>Holdings: Current Holdings count, company name and ticker, market price/change, invested value, Qty, Avg., current value and total PnL/percentage.</li>
+            </ul>
+            <p id="indmoney-example-label" className="font-medium">
+              Illustrative example only: fictional company and amounts, not saved holdings.
+            </p>
+            <pre aria-labelledby="indmoney-example-label" className="whitespace-pre-wrap break-words rounded border border-gray-200 bg-white p-3 text-xs leading-relaxed">{`Current Value
+$110.00
+Invested Value
+$100.00
+Total Returns
++$10.00 (▲10.00%)
+Current Holdings (1)
+Stock Name
+Market Price
+Invested (Qty/Price)
+Current value
+Total PnL
+Example Fictional Company
+DEMO
+$11.00
+▲1.00%
+$100.00
+10 Qty
+$10.00 Avg.
+$110.00
++$10.00
+▲10.00%`}</pre>
+            <p>
+              Copy all holdings from your own source screen; do not fill missing fields with example values.
+              Missing or unrecognized fields can produce a partial parse. Review the saved parse status and reconciliation warnings.
+            </p>
+          </div>
+        </details>
         <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
           <div className="space-y-2">
             <label
