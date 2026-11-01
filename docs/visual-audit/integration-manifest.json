@@ -8,7 +8,7 @@
       "branch": "visual/api-cost-provenance",
       "pr": 1345,
       "observed_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
-      "final_head": null,
+      "final_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -21,14 +21,15 @@
       ],
       "coordinator_supplied_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
       "integrated_source_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "AUTO-MODELS-SELECTION",
       "branch": "visual/auto-models-selection",
-      "pr": null,
+      "pr": 1361,
       "observed_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
-      "final_head": null,
+      "final_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
       "coordinator_supplied_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
@@ -69,14 +70,15 @@
         "frontend/tests/rebalance-readiness.test.mjs"
       ],
       "integrated_source_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "AUTO-INPUTS-EVIDENCE",
       "branch": "visual/auto-inputs-evidence",
       "pr": 1347,
       "observed_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
-      "final_head": null,
+      "final_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -88,14 +90,15 @@
       ],
       "coordinator_supplied_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
       "integrated_source_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "AUTO-STAGES-HIERARCHY",
       "branch": "codex/auto-stages-hierarchy",
-      "pr": null,
+      "pr": 1363,
       "observed_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
-      "final_head": null,
+      "final_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
       "coordinator_supplied_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
@@ -113,14 +116,15 @@
         "frontend/scripts/auto-stages-ledger-offline-playwright.mjs"
       ],
       "integrated_source_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "AUTO-DURATION-EXPLANATION",
       "branch": "fix/auto-duration-explanation",
       "pr": 1356,
       "observed_head": "50f8ab80588e31732097c54583a7d97b849ab042",
-      "final_head": null,
+      "final_head": "50f8ab80588e31732097c54583a7d97b849ab042",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -129,14 +133,15 @@
       ],
       "coordinator_supplied_head": "50f8ab80588e31732097c54583a7d97b849ab042",
       "integrated_source_head": "50f8ab80588e31732097c54583a7d97b849ab042",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "AUTO-PROMPT-PREVIEW",
       "branch": "visual/auto-prompt-preview",
       "pr": 1350,
       "observed_head": "79f33b2fde2135297ead7a99ce042087377ef063",
-      "final_head": null,
+      "final_head": "79f33b2fde2135297ead7a99ce042087377ef063",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -145,14 +150,15 @@
       ],
       "coordinator_supplied_head": "79f33b2fde2135297ead7a99ce042087377ef063",
       "integrated_source_head": "79f33b2fde2135297ead7a99ce042087377ef063",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "DASH-LAYOUT-SUMMARY",
       "branch": "visual/dash-layout-summary",
       "pr": 1357,
       "observed_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
-      "final_head": null,
+      "final_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -171,14 +177,15 @@
       ],
       "coordinator_supplied_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
       "integrated_source_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "NAV-SIDEBAR-HIERARCHY",
       "branch": "fix/nav-sidebar-hierarchy",
       "pr": 1346,
       "observed_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
-      "final_head": null,
+      "final_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -199,14 +206,15 @@
       ],
       "coordinator_supplied_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
       "integrated_source_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "US-SNAPSHOT-PROVENANCE",
       "branch": "fix/us-snapshot-provenance",
       "pr": 1352,
       "observed_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
-      "final_head": null,
+      "final_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -263,14 +271,15 @@
       ],
       "coordinator_supplied_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
       "integrated_source_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "LLM-REPORT-COMPARISON",
       "branch": "visual/llm-report-comparison",
       "pr": 1351,
       "observed_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
-      "final_head": null,
+      "final_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -280,14 +289,15 @@
       ],
       "coordinator_supplied_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
       "integrated_source_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "VISUAL-MAILS-HISTORY-HIERARCHY",
       "branch": "visual/mails-history-hierarchy",
-      "pr": null,
+      "pr": 1362,
       "observed_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
-      "final_head": null,
+      "final_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "coordinator_supplied_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
@@ -304,14 +314,15 @@
         "frontend/scripts/mail-history-offline-playwright.mjs"
       ],
       "integrated_source_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "USAGE-ERROR-CONSOLIDATION",
       "branch": "visual/usage-error-consolidation",
       "pr": 1353,
       "observed_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
-      "final_head": null,
+      "final_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -321,14 +332,15 @@
       ],
       "coordinator_supplied_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
       "integrated_source_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "PREFS-FORM-SCOPE",
       "branch": "visual/prefs-form-scope",
       "pr": 1349,
       "observed_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
-      "final_head": null,
+      "final_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -345,14 +357,15 @@
       ],
       "coordinator_supplied_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
       "integrated_source_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "PROMPTS-LIST-DISCOVERY",
       "branch": "visual/prompts-list-discovery",
       "pr": null,
       "observed_head": "b2561f086bc16db2c2d688172da87e8126356d97",
-      "final_head": null,
+      "final_head": "b2561f086bc16db2c2d688172da87e8126356d97",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
       "coordinator_supplied_head": "b2561f086bc16db2c2d688172da87e8126356d97",
@@ -361,14 +374,15 @@
         "frontend/scripts/prompts-discovery-offline-playwright.mjs"
       ],
       "integrated_source_head": "b2561f086bc16db2c2d688172da87e8126356d97",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "VISUAL-RUNS-STAGES-HIERARCHY",
       "branch": "visual/runs-stages-hierarchy",
       "pr": 1354,
       "observed_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
-      "final_head": null,
+      "final_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -385,14 +399,15 @@
       ],
       "coordinator_supplied_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
       "integrated_source_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "RANKINGS-BROWSER-GROUPING",
       "branch": "visual/rankings-browser-grouping",
-      "pr": null,
+      "pr": 1360,
       "observed_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
-      "final_head": null,
+      "final_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -413,14 +428,15 @@
       ],
       "coordinator_supplied_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
       "integrated_source_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "SCANNER-TABLE-COMPARISON",
       "branch": "visual/scanner-table-comparison",
       "pr": 1348,
       "observed_head": "6528616845a29f037d2af1c53b746ec558db63ab",
-      "final_head": null,
+      "final_head": "6528616845a29f037d2af1c53b746ec558db63ab",
       "source_visual_acceptance": "pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -431,14 +447,15 @@
       ],
       "coordinator_supplied_head": "6528616845a29f037d2af1c53b746ec558db63ab",
       "integrated_source_head": "6528616845a29f037d2af1c53b746ec558db63ab",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "BOTS-OVERVIEW-RUNTIME",
       "branch": "visual/bots-overview-runtime",
-      "pr": null,
+      "pr": 1358,
       "observed_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
-      "final_head": null,
+      "final_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -494,14 +511,15 @@
       ],
       "coordinator_supplied_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
       "integrated_source_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "INDIA-PORTFOLIO-HIERARCHY",
       "branch": "visual/india-portfolio-hierarchy",
       "pr": 1355,
       "observed_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
-      "final_head": null,
+      "final_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
       "source_visual_acceptance": "independent acceptance pending",
       "status": "integrated locally; independent visual acceptance pending",
       "files": [
@@ -514,19 +532,21 @@
       ],
       "coordinator_supplied_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
       "integrated_source_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
     {
       "scope": "DB-RECOVERY-PRESERVATION",
       "branch": null,
       "pr": null,
       "observed_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
-      "final_head": null,
+      "final_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
       "source_visual_acceptance": "pending",
       "status": "preserve-only; coordinator reports six tests passed",
       "files": [],
       "integrated_source_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
-      "source_commit_is_ancestor": true
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Preserve-only baseline; no source change"
     }
   ],
   "ci_observed": [
