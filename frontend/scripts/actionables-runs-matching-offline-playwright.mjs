@@ -23,6 +23,7 @@ const matching=ast.statements.filter(n=>names.includes(n.name?.getText(ast))).ma
 const entry=`import React,{useState,useRef,useCallback,useEffect} from 'react';import{createRoot}from'react-dom/client';
 import{ActionablesRunGroup,ActionablesEmptyState}from${JSON.stringify(path.join(frontend,'components/shared/ActionablesRunGroup.tsx'))};
 import{isAnalysisRunForStage}from${JSON.stringify(path.join(frontend,'lib/rebalanceRunIdentity.ts'))};
+import{withFinalActionablesReadDeadline}from${JSON.stringify(path.join(frontend,'lib/finalActionablesReadDeadline.ts'))};
 ${matching}
 window.pending=[];window.fixture={mode:'deferred'};window.refresh={};
 const fetchAllFullRuns=()=>new Promise((resolve,reject)=>window.pending.push({resolve,reject}));

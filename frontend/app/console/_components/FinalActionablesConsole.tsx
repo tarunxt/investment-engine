@@ -1,4 +1,5 @@
 "use client";
+import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
 import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
 import { mergeSummarySourceRows, originalRebalanceSources, originalSourceCell } from "@/lib/summarySourceRows";
 import type { StockSourceObservation } from "@/types/api";
@@ -7161,6 +7162,14 @@ function ActionablesInputSelectionDialog({
   );
 }
 
+export function calculationsCountSummary(stocks: { rows: unknown[] }[], loading: boolean, error?: string | null): string {
+  if (!stocks.length && (loading || error)) {
+    return loading ? "LLMs consolidated in this view: Loading… Stocks: Loading…" : "LLMs consolidated in this view: Unknown. Stocks: Unknown.";
+  }
+  const counts = `LLMs consolidated in this view: ${Math.max(...stocks.map(stock => stock.rows.length), 0)}. Stocks: ${stocks.length}.`;
+  return loading || error ? `${counts} Previously available results; ${loading ? "refresh in progress" : "refresh failed"}.` : counts;
+}
+
 function ActionablesCalculationsModal(props: Parameters<typeof OpenActionablesCalculationsModal>[0]) {
   if (!props.open) return null;
   return <OpenActionablesCalculationsModal {...props} />;
@@ -7396,7 +7405,7 @@ function OpenActionablesCalculationsModal({
             </div>
           </div>
           <div className="border-b border-blue-100 bg-blue-50/50 px-5 py-3 text-sm text-blue-900">
-            LLMs consolidated in this view: {Math.max(...displayedStocks.map((stock) => stock.rows.length), 0)}. Stocks: {displayedStocks.length}.
+            {calculationsCountSummary(displayedStocks, loading, loadError)}
           </div>
           <div className="max-h-[76vh] overflow-auto p-5" aria-busy={loading}>
             {loading ? (
@@ -8682,7 +8691,7 @@ function ScopedFinalActionablesConsole({
     setLoading(true);
     setError(null);
     try {
-      const response = await fetchAllFullRuns();
+      const response = await withFinalActionablesReadDeadline(fetchAllFullRuns());
       if (request !== runsRequestRef.current) return;
       setRuns(response);
       cacheFinalActionablesRuns(runCacheKey, response, market);
