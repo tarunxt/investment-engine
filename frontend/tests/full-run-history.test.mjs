@@ -148,7 +148,10 @@ function loadSetupNameCell() {
 test('Scanner differentiates loading and unavailable counts from a verified zero', () => {
   const SetupNameCell = loadSetupNameCell();
   const render = (countsStatus, group) => renderToStaticMarkup(createElement(SetupNameCell, { row: { setup: 'Breakout' }, countsStatus, group, onSetupClick: () => {} }));
-  assert.match(render('loading'), /Breakout \(Loading…\)/);
+  assert.equal(render('loading'), '<span>Breakout</span>');
+  const source = read('../app/console/technical-setups/page.tsx');
+  assert.match(source, /id="setup-counts-status" role="status"[^>]*>Loading setup counts/);
+  assert.match(source, /No count is inferred as zero/);
   assert.match(render('error'), /Breakout \(Unavailable\)/);
   assert.doesNotMatch(render('loading'), /\(0\)/);
   assert.doesNotMatch(render('error'), /\(0\)/);
