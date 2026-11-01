@@ -673,6 +673,9 @@ export function PortfolioSnapshotsPanel({
             <p className="mt-1 text-sm text-gray-500">
               Daywise holdings and positions saved from your Zerodha account.
             </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Source: {selectedSnapshot.source} · Holdings: {formatCount(selectedSnapshot.holdings_count)}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <div className="text-right text-xs text-gray-500">
