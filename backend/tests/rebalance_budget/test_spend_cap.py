@@ -412,15 +412,17 @@ def test_existing_label_route_authorizes_new_and_replays_same_workflow(cap_db, m
         def add(self, row): self.db.add(row)
         async def commit(self): self.db.commit()
     body = AutoRebalanceRunReservationRequest(portfolio="india", spend_intent="new_workflow",
-        spend_request_id=str(uuid4()))
+        spend_request_id=str(uuid4()), spend_observed_revision=1)
     with f() as db:
         first = asyncio.run(router.reserve_auto_rebalance_label(body, Bridge(db), SimpleNamespace(id=1)))
     with f() as db:
         replay = asyncio.run(router.reserve_auto_rebalance_label(body, Bridge(db), SimpleNamespace(id=1)))
+    assert first.reservation_created is True and replay.reservation_created is False
     assert first.sequence == replay.sequence == 51
     assert first.spend_scope_id == replay.spend_scope_id
     continuation = AutoRebalanceRunReservationRequest(portfolio="india", spend_intent="continue_workflow",
-        spend_request_id=str(uuid4()), spend_scope_id=first.spend_scope_id)
+        spend_request_id=str(uuid4()), spend_scope_id=first.spend_scope_id,
+        spend_observed_revision=4)
     with f() as db:
         next_run = asyncio.run(router.reserve_auto_rebalance_label(continuation, Bridge(db), SimpleNamespace(id=1)))
     assert next_run.sequence == 53 and next_run.spend_scope_id == first.spend_scope_id
@@ -440,3 +442,64 @@ def test_concurrent_duplicate_settlement_counts_charge_once(cap_db):
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(contender, range(2)))
     assert state(f, scope) == (D("5"), D(0), "open")
+
+
+def test_readiness_is_owned_read_only_and_explicitly_unavailable(cap_db):
+    import asyncio
+    from app.domains.runs import router
+    f, _ = cap_db
+    india = bind(f)
+    bind(f, market="indmoney_us")
+    bind(f, user=2)
+    class Bridge:
+        def __init__(self, db): self.db = db
+        async def execute(self, query): return self.db.execute(query)
+    with f() as db:
+        before = db.get(RebalanceSpendScope, india).reserved_inr
+        result = asyncio.run(router.auto_rebalance_spend_readiness("india", Bridge(db), SimpleNamespace(id=1)))
+        assert result["paid_execution_available"] is False
+        assert "No paid request" in result["reason"]
+        assert [s["id"] for s in result["scopes"]] == [india]
+        assert result["cap_inr"] == "20.00000000"
+        assert db.get(RebalanceSpendScope, india).reserved_inr == before
+
+
+def test_concurrent_stale_choices_cannot_grant_two_workflows(cap_db):
+    f, engine = cap_db
+    if engine.dialect.name != "postgresql":
+        pytest.skip("requires explicitly configured disposable PostgreSQL")
+    barrier = Barrier(2)
+    def contender(sequence):
+        barrier.wait()
+        with f() as db:
+            try:
+                row = ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=sequence,
+                    request_key=str(uuid4()), intent="new_workflow", observed_revision=1)
+                db.commit()
+                return row.scope_id
+            except ledger.SpendCapBlocked as exc:
+                assert "another tab" in str(exc)
+                db.rollback()
+                return None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(contender, [90, 91]))
+    assert sum(value is not None for value in results) == 1
+    with f() as db:
+        assert len(db.scalars(select(RebalanceSpendScope)).all()) == 4
+
+
+def test_stale_revision_rejected_but_original_uuid_replay_recovers(cap_db):
+    f, _ = cap_db
+    key = str(uuid4())
+    with f() as db:
+        first = ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=70,
+            request_key=key, intent="new_workflow", observed_revision=1)
+        scope = first.scope_id
+        db.commit()
+    with f() as db:
+        replay = ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=71,
+            request_key=key, intent="new_workflow", observed_revision=1)
+        assert replay.scope_id == scope and replay.sequence == 70
+    with f() as db, pytest.raises(ledger.SpendCapBlocked, match="another tab"):
+        ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=72,
+            request_key=str(uuid4()), intent="new_workflow", observed_revision=0)

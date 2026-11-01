@@ -18,13 +18,29 @@ owner/market scope is rejected. Workers cannot mint grants. No reset or billing
 settings route was added. This is a consent contract on the existing Run boundary;
 a new sequence or retry by itself never authorizes fresh spending.
 
-**UI integration is still required before release.** The current browser sends
-only `{portfolio}`, so the reservation endpoint returns422 before queuing scans.
-The integrator must expose explicit New versus Continue consent, retain/reuse the
-request UUID after an ambiguous start, and pass the original scope ID for a
-continuation. Reopening/reloading must not default to a new grant. Historical
-operations without scopes are not retroactively granted one. No client-generated
-INR amount is trusted. Until this UI is integrated, normal full Run is unavailable.
+The native Run boundary now offers explicit New versus Continue choices. It reads
+owned scopes and a server revision from `GET /runs/auto-rebalance-spend-readiness`;
+that endpoint neither grants spending nor probes providers. Each request includes
+`spend_observed_revision`. Under the owner lock, a stale selection cannot create
+a second grant. UUID replay is evaluated first and recovers the original scope.
+`reservation_created` is true only on the first label creation; false means
+reconcile only, never restart that sequence.
+
+The browser persists a pending request UUID in owner/market-scoped localStorage
+before calling the label endpoint. Web Locks serialize tabs; the backend revision
+check is authoritative across tabs/sessions. Storage or locking failure stops
+before authorization. Reload/navigation do not run stages. An uncertain start is
+resolved using the original request ID and **never** starts stages, even if the
+first request did not reach the server. The user then reviews history and selects
+Continue with the original scope and only remaining stages. This conservatively
+allows an unused authorization to be recovered without risking duplicate jobs.
+No selection defaults to New, and each consumed selection must be chosen again.
+Historical operations without scopes receive no retroactive allowance.
+
+Current readiness explicitly says no live adapter has certified billing bounds.
+New/Continue selection is disabled and Run explains why it cannot start. Resolving
+a pending authorization is still available without starting stages. Saved evidence
+and standalone Sync Now remain usable. No client-generated INR amount is trusted.
 
 The ledger uses PostgreSQL row locks and exact Decimal INR amounts. It reserves
 the verified all-in request upper bound and commits **before** external I/O.
@@ -41,8 +57,9 @@ actual charges are never clamped; a bound breach freezes the scope.
 **No live adapter is currently certified for admission.** DeepSeek, OpenAI,
 Anthropic, Gemini, Tavily and unrecognized adapters stop before paid I/O for an
 automated Rebalance job. For an explicitly authorized scope, the adapter error appears through the existing
-stage/job failure UI and is terminal rather than an automatic retry. The unchanged
-legacy Run UI fails earlier at label reservation, with New/Continue instructions. No paid certification probe is
+stage/job failure UI and is terminal rather than an automatic retry. The native
+Run boundary explains adapter unavailability before authorization or sync; legacy
+clients without consent fields receive an explicit422. No paid certification probe is
 performed. This is intentionally fail-closed, not a promise that today's six-stage
 workflow can complete for ₹20.
 
@@ -95,13 +112,24 @@ The test target is never taken from application `DATABASE_URL`. Every PostgreSQL
 test gets a random schema, which it alone creates/drops. Remote hosts, arbitrary
 database names, query overrides and missing acknowledgement are rejected. All
 provider calls are functions returning synthetic evidence; no model/search/order
-or notification requests are made. No new UI controls need browser fixtures: the
-existing error renderer receives the explicit cap denial without a new flow.
+or notification requests are made. The real React consent component and actual
+client authorization lifecycle run in an isolated Chromium fixture, with only a
+local synthetic HTTP API reachable. It covers explicit consent, New, Continue,
+double click, navigation/reload, uncertain response before/after dispatch,
+concurrent tabs, missing Web Locks and unknown-adapter explanation. Run with:
+
+```
+cd frontend
+node scripts/rebalance-spend-consent-offline-playwright.mjs
+```
+
+`CAP_TEST_NODE_MODULES` and `CAP_TEST_PLAYWRIGHT_PACKAGE` may select already
+installed local tooling when repository dependencies are unavailable.
 
 ## Exact operational impact
 
 - `/runs/auto-rebalance-label` without explicit authorization fields now fails422.
-  The current Run error path displays that start failure; no paid scan is queued.
+  Native Run supplies explicit consent; legacy callers see a clear failure before scans queue.
 - Jobs submitted through `POST /runs` with automated Rebalance metadata, and
   `POST /zerodha/threats/run` or `/indmoney-us/threats/run` with that metadata,
   are gated in `execute_ai_job`. Missing scope bindings and all currently
@@ -116,7 +144,26 @@ existing error renderer receives the explicit cap denial without a new flow.
   orders and independent bot execution paths are not newly disabled by this patch.
   Recovery containment still independently decides what production may execute.
 
-No live adapter is enabled: even after the consent UI is integrated, the selected
+No live adapter is enabled: with the consent UI integrated, the selected
 DeepSeek workflow will remain unavailable under strict enforcement until reliable
 billing bounds are certified. Do not deploy this as a transparent, usable cap
 feature or imply that a planning estimate can bypass this release blocker.
+
+
+## F08 integration boundary (separate owner)
+
+This branch does not implement per-run email/export policy. At the inspected base,
+`buildRunPayload` still derives `auto_export_enabled` from `sheetName`, and the
+completion path can call `queueAutoRebalanceCompletionEmail`. Recovery containment
+remains independent. Spend consent authorizes an allowance only; it is not consent
+to mail, export, orders or settings changes.
+
+The F08 worker must preserve spend fields when extending the existing label body
+and response. Freeze side-effect choices on the server-owned workflow when its
+label/binding is created; UUID replay must return the original frozen policy and
+must not overwrite it. Continuation shares `spend_scope_id`, while its permitted
+side-effect policy must follow F08's explicit continuation rules. No inference
+from a new sequence, spend amount, or New choice may enable mail/export. Integrate
+at `reserveAutoRebalanceRunMetadata`, `buildRunPayload` and completion notification
+handoff; keep backend enforcement at export/mail boundaries. This cap branch does
+not modify those flags or their existing containment.

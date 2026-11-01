@@ -18,8 +18,8 @@ python -m pytest -q -o addopts='' \
   tests/test_recommendation_audit_recovery.py tests/test_auto_rebalance_run_sequence.py
 ```
 
-Result: **147 passed**, no failures/skips. Twelve dependency/deprecation warnings
-were reported; none was an application failure. The cap suite contributes45
+Result: **150 passed**, no failures/skips. Twelve dependency/deprecation warnings
+were reported; none was an application failure. The cap suite contributes48
 tests, including real PostgreSQL races for concurrent admission, concurrent first
 scope binding, and duplicate settlement. Each uses a fresh random local schema;
 the fixture rejects remote/non-test targets and never reads the application
@@ -65,9 +65,28 @@ The existing label route now requires New/Continue intent; it rejects an old
 `{portfolio}`-only request before Redis label reservation. Tests exercise that
 handler plus new-grant/replay/continuation behavior without network access.
 
-The legacy frontend does not yet send the new authorization contract. Native
-New/Continue consent, stable replay request IDs and continuation scope-ID readback
-remain integration requirements before release. No browser fixture was run for a
-new consent UI because no such UI was implemented by this scoped worker. Live
-adapters remain uncertified even after that UI work; ordinary full Run would be
-unavailable under this fail-closed patch.
+The native UI now sends explicit consent, stable UUID, server revision and
+continuation scope. Read-only readiness returns owned allowances and a clear
+adapter-unavailable explanation. UUID replay reconciles without restarting stages.
+A PostgreSQL race verifies that two different stale request UUIDs cannot mint two
+new grants; the original UUID remains replayable despite a stale revision.
+
+The actual React component and authorization module passed an isolated Chromium
+fixture with a local synthetic API: New/Continue, duplicate clicks, navigation,
+reload, uncertain responses, concurrent tabs, missing Web Locks and unavailable
+adapters. External requests were blocked by the browser route guard. The UI fixture
+uses synthetic readiness=true only to exercise the prospective consent lifecycle;
+the real backend always reports live paid execution unavailable. This is not
+provider feasibility or live-run evidence.
+
+The authorization module passes strict TypeScript checking; all changed TS/TSX
+files pass transpile diagnostics. Full Next build/component type checking could
+not run: offline npm cache lacks required packages (first missing zwitch), React
+type declarations and Next's bundled documentation are absent. No external package
+fetch was attempted. Only React/browser APIs were added; no Next API was changed.
+The integrator must run its full frontend build/type/lint checks after merging.
+
+Live adapters remain uncertified. Normal full Run remains unavailable under this
+fail-closed patch, with a visible explanation rather than an unexplained422.
+The independent F08 mail/export policy must be integrated by its owner. No paid
+calls, side effects, production changes, push, PR or deployment were performed.

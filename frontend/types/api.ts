@@ -791,10 +791,28 @@ export interface RunModelTarget {
 
 export type AutoRebalancePortfolioKey = 'india' | 'indmoney_us';
 
+export interface AutoRebalanceSpendAuthorization {
+  spend_intent: 'new_workflow' | 'continue_workflow';
+  spend_request_id: string;
+  spend_observed_revision: number;
+  spend_scope_id?: number;
+}
+
+export interface AutoRebalanceSpendReadiness {
+  portfolio: AutoRebalancePortfolioKey;
+  cap_inr: string;
+  authorization_revision: number;
+  paid_execution_available: boolean;
+  reason: string;
+  scopes: { id: number; status: string; cap_inr: string; settled_inr: string; reserved_inr: string; created_at: string }[];
+}
+
 export interface AutoRebalanceRunReservationResponse {
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
+  spend_scope_id: number;
+  reservation_created: boolean;
 }
 
 export interface AutoRebalanceRunMetadata {

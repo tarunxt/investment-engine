@@ -591,6 +591,34 @@ async def queue_final_actionable_history_backfill(
     return FinalActionableHistoryBackfillResponse(status="queued", task_id=task.id)
 
 
+@router.get("/auto-rebalance-spend-readiness")
+async def auto_rebalance_spend_readiness(
+    portfolio: str = Query(..., pattern="^(india|indmoney_us)$"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Read-only owned allowances; no grants, provider probes or billing config."""
+    from app.domains.rebalance_budget.models import RebalanceSpendScope, RebalanceSpendBinding
+    rows = (await db.execute(select(RebalanceSpendScope).where(
+        RebalanceSpendScope.user_id == current_user.id,
+        RebalanceSpendScope.portfolio == portfolio,
+    ).order_by(RebalanceSpendScope.id.desc()))).scalars().all()
+    revision = (await db.execute(select(RebalanceSpendBinding.id).where(
+        RebalanceSpendBinding.user_id == current_user.id,
+        RebalanceSpendBinding.portfolio == portfolio,
+    ).order_by(RebalanceSpendBinding.id.desc()).limit(1))).scalar_one_or_none() or 0
+    return {
+        "portfolio": portfolio, "cap_inr": "20.00000000",
+        "authorization_revision": revision,
+        "paid_execution_available": False,
+        "reason": "Capped execution is unavailable: no live adapter has verified current price, FX/fees and request bounds. No paid request will be dispatched. Saved evidence remains available.",
+        "scopes": [{"id": row.id, "status": row.status,
+            "cap_inr": str(row.cap_inr), "settled_inr": str(row.settled_inr),
+            "reserved_inr": str(row.reserved_inr), "created_at": row.created_at.isoformat()}
+            for row in rows],
+    }
+
+
 @router.post("/auto-rebalance-label", response_model=AutoRebalanceRunReservationResponse)
 async def reserve_auto_rebalance_label(
     body: AutoRebalanceRunReservationRequest,
@@ -599,8 +627,8 @@ async def reserve_auto_rebalance_label(
 ):
     from app.domains.rebalance_budget.ledger import authorize_workflow, SpendCapBlocked
     # The old request {portfolio} cannot silently authorize fresh spending.
-    if body.spend_intent is None or body.spend_request_id is None:
-        raise HTTPException(422, "Choose New workflow (new ₹20 allowance) or Continue workflow (existing allowance), with a stable request UUID")
+    if body.spend_intent is None or body.spend_request_id is None or body.spend_observed_revision is None:
+        raise HTTPException(422, "Choose New workflow (new ₹20 allowance) or Continue workflow (existing allowance), with a stable request UUID and refreshed allowance revision")
     redis = _get_redis()
     try:
         sequence = await _reserve_auto_rebalance_sequence(db, redis, body.portfolio)
@@ -609,7 +637,8 @@ async def reserve_auto_rebalance_label(
     try:
         binding = await db.run_sync(lambda session: authorize_workflow(session,
             user_id=current_user.id, portfolio=body.portfolio, sequence=sequence,
-            request_key=body.spend_request_id, intent=body.spend_intent, scope_id=body.spend_scope_id))
+            request_key=body.spend_request_id, intent=body.spend_intent, scope_id=body.spend_scope_id,
+            observed_revision=body.spend_observed_revision))
     except SpendCapBlocked as exc:
         raise HTTPException(409, str(exc)) from exc
     if binding.sequence != sequence:
@@ -639,6 +668,7 @@ async def reserve_auto_rebalance_label(
         sequence=sequence,
         label=workflow.label,
         spend_scope_id=binding.scope_id,
+        reservation_created=True,
     )
 
 

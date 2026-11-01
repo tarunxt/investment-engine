@@ -43,7 +43,7 @@ def validate_identity(user_id, portfolio, sequence):
         raise SpendCapBlocked("Automated rebalance requires an owned market and workflow sequence")
 
 
-def authorize_workflow(db, *, user_id, portfolio, sequence, request_key, intent, scope_id=None):
+def authorize_workflow(db, *, user_id, portfolio, sequence, request_key, intent, scope_id=None, observed_revision=None):
     """Explicit new-operation grant or continuation; idempotent across Run retry.
 
     Called only by the authenticated existing label-reservation route. A worker
@@ -72,6 +72,13 @@ def authorize_workflow(db, *, user_id, portfolio, sequence, request_key, intent,
                 or (intent == "continue_workflow" and replay.scope_id != scope_id)):
             raise SpendCapBlocked("Authorization request was already used for different workflow intent")
         return replay
+    if observed_revision is not None:
+        current_revision = db.scalar(select(RebalanceSpendBinding.id).where(
+            RebalanceSpendBinding.user_id == user_id,
+            RebalanceSpendBinding.portfolio == portfolio,
+        ).order_by(RebalanceSpendBinding.id.desc()).limit(1)) or 0
+        if observed_revision != current_revision:
+            raise SpendCapBlocked("Workflow authorization changed in another tab or session; refresh allowance readiness before choosing again")
     existing = db.scalar(select(RebalanceSpendBinding.id).where(
         RebalanceSpendBinding.user_id == user_id, RebalanceSpendBinding.portfolio == portfolio,
         RebalanceSpendBinding.sequence == sequence,
