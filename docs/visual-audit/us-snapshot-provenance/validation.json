@@ -1,0 +1,28 @@
+{
+  "eslint": {
+    "command": [
+      "./node_modules/.bin/eslint",
+      "app/console/indmoney-us/page.tsx",
+      "app/console/indmoney-us/_components/IndMoneyUsPasteCard.tsx",
+      "app/console/indmoney-us/_components/IndMoneyUsSnapshotsPanel.tsx",
+      "app/console/indmoney-us/_components/IndMoneyUsSnapshotWorkspace.tsx",
+      "tests/us-snapshot-provenance.test.mjs",
+      "tests/us-snapshot-rendering.test.mjs"
+    ],
+    "exit_code": 0,
+    "output": ""
+  },
+  "types": {
+    "command": [
+      "./node_modules/.bin/tsc",
+      "--noEmit"
+    ],
+    "exit_code": 0,
+    "output": ""
+  },
+  "tests": {
+    "command": "node --test tests/us-snapshot-provenance.test.mjs tests/us-snapshot-rendering.test.mjs tests/portfolio-history-integrity.test.mjs tests/portfolio-stage-history.test.mjs",
+    "exit_code": 0,
+    "output": "\u2714 missing and sparse history never creates artificial chart points (1.25876ms)\n\u2714 genuine history preserves only source timestamps and values (0.238881ms)\n\u2714 a sparse selected range stays empty instead of borrowing older points (0.274274ms)\n\u2714 verified groups retain market boundaries, legacy identity, retries and deterministic ordering before pagination (11.510166ms)\n\u2714 six historical adapters preserve status, counts and missing evidence without current/global values (0.641969ms)\n\u2714 both portfolios render shared tiles, missing stages, historical counts and every retry source (40.673541ms)\n\u2714 historical stage actions open exact saved runs and group diagnostics, with no action for missing stages (20.860421ms)\n\u2714 history loader fetches every bounded page and propagates failure instead of publishing a partial list (16.519529ms)\n\u2714 desktop and narrow browser layouts keep six tiles in one keyboard-scrollable row; original retains 2x3 (1465.359058ms)\n\u2714 run completeness reflects saved stages across both markets without changing execution facts (15.94126ms)\n\u2714 display refresh retains selected historical snapshot using reads only (3.043815ms)\n\u2714 latest selection uses overview without an extra detail request (1.764995ms)\n\u2714 failed refresh retains displayed data and exposes failure (0.915021ms)\n\u2714 missing selection lets overview select its current saved snapshot (0.858166ms)\n\u2714 actual hydrated page preserves data and all three views at desktop and narrow widths (7216.865412ms)\n\u2714 refresh retains historical selection; failure labels stale displayed data without fabricating new values (885.638325ms)\n\u2714 loading, confirmed empty, failed and unavailable history remain truthful and recoverable (2378.304843ms)\n\u2714 save failure retains draft, explicit fixture save preserves copied timestamp and reports partial status (1212.622941ms)\n\u2139 tests 18\n\u2139 suites 0\n\u2139 pass 18\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 12325.619969\n"
+  }
+}

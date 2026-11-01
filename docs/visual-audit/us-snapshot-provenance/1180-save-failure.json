@@ -1,0 +1,94 @@
+{
+  "viewport": {
+    "width": 1180,
+    "height": 757,
+    "devicePixelRatio": 1
+  },
+  "selectedView": "Paste snapshot",
+  "visibleText": "Saved US snapshot\nPaste snapshot\nMarket and stage navigation\nINDmoney US snapshot\nManual snapshot\nSaved: 20 Oct 2026, 2:49 pm\nParse status: Partial\nSource details\n\nManual US portfolio tracking when no direct API is available.\n\nIMPORT SNAPSHOT\nREFRESH DISPLAYED DATA\n\nSaved snapshot is not a live market feed. Parsed does not mean current prices or a live broker connection.\n\nPaste snapshot\n\nPaste INDmoney data and save a timestamped manual snapshot.\n\nSNAPSHOT TIMESTAMP\n\nUse the time when you copied the INDmoney screen so history stays meaningful.\n\nPASTE INDMONEY DATA HERE\nBest results come from pasting the full portfolio screen, including the holdings list.\n26 chars\nFixture save failure\n\nPartial parsing is okay. We still keep the raw snapshot and show warnings when totals do not reconcile.\n\nSAVE SNAPSHOT",
+  "capturedAt": "2026-10-20T14:49:00Z",
+  "inputs": [
+    {
+      "id": "indmoney-captured-at",
+      "value": "2026-10-21T09:30"
+    },
+    {
+      "id": "indmoney-raw-text",
+      "value": "  Fixture full holdings text  "
+    }
+  ],
+  "links": [
+    {
+      "name": "Portfolio",
+      "href": "/console/indmoney-us"
+    },
+    {
+      "name": "Portfolio — India",
+      "href": "/console/zerodha"
+    },
+    {
+      "name": "Portfolio — US",
+      "href": "/console/indmoney-us"
+    },
+    {
+      "name": "Swing Trade",
+      "href": "/console/indmoney-us/swing-trade"
+    },
+    {
+      "name": "Swing Trade — India",
+      "href": "/console/zerodha/swing-trade"
+    },
+    {
+      "name": "Swing Trade — US",
+      "href": "/console/indmoney-us/swing-trade"
+    },
+    {
+      "name": "Threats",
+      "href": "/console/indmoney-us/threats"
+    },
+    {
+      "name": "Threats — India",
+      "href": "/console/zerodha/threats"
+    },
+    {
+      "name": "Threats — US",
+      "href": "/console/indmoney-us/threats"
+    },
+    {
+      "name": "Events",
+      "href": "/console/indmoney-us/events"
+    },
+    {
+      "name": "Events — India",
+      "href": "/console/zerodha/events"
+    },
+    {
+      "name": "Events — US",
+      "href": "/console/indmoney-us/events"
+    },
+    {
+      "name": "Rebalance",
+      "href": "/console/indmoney-us/rebalance"
+    },
+    {
+      "name": "Rebalance — India",
+      "href": "/console/zerodha/rebalance"
+    },
+    {
+      "name": "Rebalance — US",
+      "href": "/console/indmoney-us/rebalance"
+    },
+    {
+      "name": "Final Actionables",
+      "href": "/console/indmoney-us/final-actionables"
+    },
+    {
+      "name": "Final Actionables — India",
+      "href": "/console/zerodha/final-actionables"
+    },
+    {
+      "name": "Final Actionables — US",
+      "href": "/console/indmoney-us/final-actionables"
+    }
+  ]
+}
