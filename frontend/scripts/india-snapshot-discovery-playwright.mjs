@@ -51,13 +51,13 @@ zerodhaOrders:()=>read('orders',{data:[]})
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():(external.push(route.request().url()),route.abort()));
   const calls=[];
-  const visit=async mode=>{if(await page.evaluate(()=>!!window.apiCalls))calls.push(...await page.evaluate(()=>window.apiCalls));await page.goto(origin+'/?mode='+mode);await page.getByRole('heading',{name:'Zerodha portfolio',exact:true}).waitFor()};
+  const visit=async mode=>{if(await page.evaluate(()=>!!window.apiCalls))calls.push(...await page.evaluate(()=>window.apiCalls));await page.goto(origin+'/?mode='+mode);await page.getByRole('heading',{name:/^(?:Zerodha portfolio|India Portfolio · Zerodha)$/,exact:true}).waitFor()};
   const guidance=()=>page.locator('summary').filter({hasText:'Connection guidance'});
   const saved=()=>page.getByRole('region',{name:'Saved portfolio snapshots'});
   for(const width of [1180,390]) {
     await page.setViewportSize({width,height:width===1180?757:844});
     await page.goto(origin+'/?version=before');
-    await page.getByRole('heading',{name:'Zerodha portfolio',exact:true}).waitFor();
+    await page.getByRole('heading',{name:/^(?:Zerodha portfolio|India Portfolio · Zerodha)$/,exact:true}).waitFor();
     await page.screenshot({path:path.join(evidence,'baseline-'+width+'.png')});
     for(const mode of ['saved','loading','empty','failed','partial','connection-failed','unconfigured','connected']) {
       await visit(mode);

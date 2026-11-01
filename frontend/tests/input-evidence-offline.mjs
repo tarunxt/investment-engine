@@ -16,6 +16,7 @@ const rows = readFileSync(resolve(root, 'app/console/dashboard/_components/Input
 const dialog = workflow.slice(workflow.indexOf('function InputSelectionDialog('), workflow.indexOf('function AutoRebalanceCostHistoryDialog('));
 const entry = `import React,{useState,useRef,useEffect,useMemo,useId} from 'react';
 import {createRoot} from 'react-dom/client';
+import {ModelPickerDialogFrame} from '${resolve(root, 'components/shared/ModelPickerDialogFrame.tsx')}';
 import {threatInputRationale} from '${resolve(root, 'app/console/dashboard/_components/threatInputRationale.ts')}';
 import {InputEvidenceRows,InputEvidenceSummary} from '${resolve(root, 'app/console/dashboard/_components/InputEvidenceRows.tsx')}';
 const Button=(p)=><button {...p}/>; const X=()=> <span>×</span>;
@@ -28,7 +29,7 @@ const candidates=state==='empty'?[]:state==='missing'?[next]:state==='zero'?[nex
 return <main><button onClick={()=>setOpen(true)}>Choose evidence</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','missing','failed','zero'].map(s=><option key={s}>{s}</option>)}</select><InputSelectionDialog open={open} stage="threats" candidates={candidates} selectedIds={selected} usdInrRate={83} loading={state==='loading'} error={state==='failed'?'Fixture read failed':null} onClose={()=>setOpen(false)} onToggle={id=>setSelected(old=>{const n=new Set(old);n.has(id)?n.delete(id):n.add(id);return n})} onToggleAll={()=>setSelected(candidates.every(c=>selected.has(c.id))?new Set():new Set(candidates.map(c=>c.id)))} onResetDefaults={()=>setSelected(new Set([next.id]))}/></main>}
 createRoot(document.getElementById('root')).render(<Fixture/>);`;
 writeFileSync(resolve(temp, 'fixture.tsx'), entry);
-execFileSync('npm', ['exec', '--yes', '--cache', '/tmp/auto-inputs-npm', '--package', 'esbuild', '--', 'esbuild', resolve(temp, 'fixture.tsx'), '--bundle', '--jsx=automatic', '--outfile='+resolve(temp,'fixture.js')], { cwd: root, stdio: 'pipe' });
+execFileSync('npm', ['exec', '--yes', '--cache', '/tmp/auto-inputs-npm', '--package', 'esbuild', '--', 'esbuild', resolve(temp, 'fixture.tsx'), '--bundle', '--jsx=automatic', '--outfile='+resolve(temp,'fixture.js'), '--alias:@='+root], { cwd: root, stdio: 'pipe' });
 const compiler = await compile('@import "tailwindcss";', {base:root,onDependency:()=>{}});
 const candidates = new Scanner({}).scanFiles([{content:dialog+rows,extension:'tsx'}]);
 const css=compiler.build(candidates);
@@ -107,6 +108,23 @@ try {
   assert.match(await summary.innerText(),/Upcoming output · Saved snapshot/);
   await page.getByRole('tab',{name:'Included evidence',exact:true}).click();
   await page.screenshot({path:resolve(evidence,'included-narrow-390x844.png')});
+  await page.getByRole('tab',{name:'Select sources',exact:true}).click();
+  await page.getByRole('button',{name:'Expand Latest snapshot',exact:true}).click();
+  const scroller=page.getByRole('dialog').locator('div.overflow-auto').first();
+  await scroller.evaluate(el=>el.scrollTop=el.scrollHeight);
+  assert.ok(await scroller.evaluate(el=>el.clientHeight>0 && el.scrollTop>0));
+  const lastSource=page.getByRole('checkbox',{name:'Select Latest Zerodha portfolio snapshot',exact:true});
+  await lastSource.scrollIntoViewIfNeeded();await lastSource.focus();
+  assert.equal(await lastSource.evaluate(el=>el===document.activeElement),true);
+  await scroller.evaluate(el=>el.scrollTop=0);
+  assert.equal(await scroller.evaluate(el=>el.scrollTop),0);
+  for(const name of ['Close input selection','Done']){
+    const control=page.getByRole('button',{name,exact:true});
+    const box=await control.boundingBox();assert.ok(box.y>=0 && box.y+box.height<=844);
+    await control.focus();assert.equal(await control.evaluate(el=>el===document.activeElement),true);
+  }
+  await page.screenshot({path:resolve(evidence,'mixed-narrow-scroll-controls.png')});
+
   await page.keyboard.press('Escape');
   for(const state of ['loading','empty','missing','failed']){
     await page.getByRole('combobox',{name:'Fixture state'}).selectOption(state);await open();

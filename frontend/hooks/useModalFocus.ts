@@ -19,7 +19,7 @@ export function useModalFocus(open: boolean, panel: RefObject<HTMLElement | null
     const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>(
       'button, summary, a[href], input, select, textarea, [tabindex]',
     )).filter(element => element.tabIndex >= 0 && !element.matches(':disabled, [inert], [inert] *') && element.getClientRects().length > 0);
-    const focusFirst = () => (controls()[0] ?? dialog).focus();
+    const focusFirst = () => (dialog.querySelector<HTMLElement>('[data-dialog-initial-focus]') ?? controls()[0] ?? dialog).focus();
     const containFocus = (event: FocusEvent) => {
       if (!dialog.contains(event.target as Node)) focusFirst();
     };

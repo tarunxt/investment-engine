@@ -32,6 +32,7 @@ import {History, Loader2, X, ChevronDown, ChevronRight} from 'lucide-react';
 import {LlmModelSelectionPanel} from '${root}/components/shared/LlmModelSelectionPanel';
 import {LlmModelMixControls} from '${root}/components/shared/LlmModelMixControls';
 import {ModelPickerDialogFrame} from '${root}/components/shared/ModelPickerDialogFrame';
+import {PromptTemplateDialog} from '${root}/app/console/automated-rebalance/_components/PromptTemplateDialog';
 import {threatInputRationale} from '${root}/app/console/dashboard/_components/threatInputRationale';
 import {Button} from '${root}/components/ui/button';
 import {cn} from '${root}/lib/utils';
@@ -63,10 +64,12 @@ const formatUsdAsVerifiedInr=()=> 'Unavailable';
 ${extract('InputSelectionDialog')}
 
 function App(){
+ const [promptOpen,setPromptOpen]=useState(false);
  const [inputOpen,setInputOpen]=useState(false),[ids,setIds]=useState(new Set(['fixture-0']));
  const [open,setOpen]=useState(false),[state,setState]=useState('loaded'),[selected,setSelected]=useState(new Set(['openai::gpt-4o-mini']));
  const providers=state==='empty'||state==='failed'||state==='loading'?[]:catalog;
- return <><main><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ return <><main><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ {promptOpen&&<PromptTemplateDialog title="Rebalance template" body="FIXTURE_ONLY" onClose={()=>setPromptOpen(false)} onReviewInputs={()=>{setPromptOpen(false);setInputOpen(true)}}/>}
  <InputSelectionDialog open={inputOpen} stage="rebalance" candidates={state==='empty'||state==='failed'||state==='loading'?[]:Array.from({length:40},(_,i)=>({id:'fixture-'+i,jobNo:'Fixture '+i,label:'Saved input '+i,status:i%2?'partial':'completed',source:'saved',timestamp:null}))} selectedIds={ids} usdInrRate={0} loading={state==='loading'} error={state==='failed'?'Fixture input read failed':state==='partial'?'Fixture partial input read':null} onToggle={id=>setIds(old=>{const next=new Set(old);next.has(id)?next.delete(id):next.add(id);return next;})} onToggleAll={()=>{}} onResetDefaults={()=>{}} onClose={()=>setInputOpen(false)}/>
  <StageLlmSelectorDialog open={open} stage="threats" portfolio="zerodha" providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
 }
@@ -201,6 +204,20 @@ try {
   await page.getByRole('button',{name:'Close input selection'}).click();
   assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true); checks+=2;
  }
+ await page.locator('#input-open').click();
+ const selectedBeforePrompt=await page.getByRole('checkbox',{name:'Select all LLM jobs in Fixture 0',exact:true}).isChecked();
+ await page.keyboard.press('Escape');
+ await page.locator('#prompt-open').click();
+ await page.getByRole('button',{name:'Review selected inputs'}).click();
+ await page.getByRole('dialog',{name:'Select Rebalance Scan inputs',exact:true}).waitFor();
+ assert.equal(await page.getByRole('dialog').count(),1);checks++;
+ assert.equal(await page.getByRole('button',{name:'Close input selection'}).evaluate(el=>el===document.activeElement),true);checks++;
+ assert.equal(await page.getByRole('checkbox',{name:'Select all LLM jobs in Fixture 0',exact:true}).isChecked(),selectedBeforePrompt);checks++;
+ await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#prompt-open').evaluate(el=>el===document.activeElement),true);checks++;
+ assert.equal(await page.locator('main').evaluate(el=>!el.closest('[inert]')),true);checks++;
+ await page.locator('#input-open').click();await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true);checks++;
  writeFileSync(resolve(output,'input-focus-evidence.json'),JSON.stringify(focusEvidence,null,2));
  assert.deepEqual(errors,[]);checks++;
  writeFileSync(resolve(output,'results.json'),JSON.stringify({checks,errors,inventory,viewport:{desktop:[1180,757],narrow:[390,844]},source:'real StageLlmSelectorDialog extracted with offline history/FX fixtures; real panel, frame and template controls'},null,2));
