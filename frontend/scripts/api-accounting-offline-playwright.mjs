@@ -1,7 +1,7 @@
-/** Offline acceptance: actual Mails page, mocked reads and mutations, no backend. */
+/** Offline accounting component acceptance: synthetic reads, no backend. */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -10,8 +10,8 @@ import { chromium } from 'playwright';
 
 const require = createRequire(import.meta.url);
 const frontend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceRoot = process.env.MAIL_PREFS_SOURCE_ROOT || frontend;
-const temporary = await mkdtemp(path.join(tmpdir(), 'mail-prefs-fixture-'));
+const sourceRoot = process.env.API_ACCOUNTING_SOURCE_ROOT || frontend;
+const temporary = await mkdtemp(path.join(tmpdir(), 'api-accounting-fixture-'));
 let browser, server;
 try {
   await writeFile(path.join(temporary, 'entry.tsx'), `
@@ -20,7 +20,6 @@ try {
     import MailsPage from ${JSON.stringify(path.join(sourceRoot, 'app/console/apis/_components/LlmUsageBreakdown.tsx'))};
     window.reads=[]; window.mutations=[];
     window.fetch=()=>new Promise((resolve,reject)=>window.reads.push({resolve,reject}));
-    // StrictMode creates an obsolete first request: the test settles it last.
     createRoot(document.getElementById('root')).render(<MailsPage/>);
   `);
   await writeFile(path.join(temporary, 'loader.cjs'), `const ts=require(${JSON.stringify(require.resolve('typescript'))});module.exports=function(s){return ts.transpileModule(s,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020},fileName:this.resourcePath}).outputText;};`);

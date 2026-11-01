@@ -7,6 +7,9 @@ import tracemalloc
 import pytest
 from sqlalchemy.dialects import postgresql
 import app.models  # canonical mapper registry; no database connection
+from sqlalchemy.orm import configure_mappers
+
+configure_mappers()  # Exclude one-time mapper setup from per-window allocation measurement.
 from app.domains.api_usage.corrected_router import _load_chart_rows, _accounting_window
 
 
@@ -51,7 +54,7 @@ def test_empty_window_never_proves_invoice_or_retry_coverage():
     window = _accounting_window(datetime(2026, 10, 31), datetime(2026, 11, 1))
     assert window['state'] == 'unknown'
     assert window['hidden_sdk_retries'] == 'unknown'
-    assert window['failed_cancelled_attempts'] == 'not_integrated'
+    assert window['failed_cancelled_attempts'] == 'separately_reported_bounded'
     assert window['window_end_exclusive'].startswith('2026-11-01')
 
 

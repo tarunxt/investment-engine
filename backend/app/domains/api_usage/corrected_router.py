@@ -59,7 +59,7 @@ def _accounting_window(start_utc: datetime, end_utc: datetime) -> dict[str, Any]
         "window_end_exclusive": end_utc.replace(tzinfo=UTC).isoformat(),
         "read_cutoff": datetime.now(UTC).isoformat(),
         "state": "unknown",
-        "failed_cancelled_attempts": "not_integrated",
+        "failed_cancelled_attempts": "separately_reported_bounded",
         "hidden_sdk_retries": "unknown",
         "note": "Saved telemetry is not evidence of complete invocation or settled invoice coverage.",
     }
