@@ -121,7 +121,7 @@ class PostgresJobRepository:
         if web_sources is not None:
             job.web_sources = web_sources
         if runtime_metadata_json is not None:
-            job.runtime_metadata_json = runtime_metadata_json
+            job.runtime_metadata_json = {**(job.runtime_metadata_json or {}), **runtime_metadata_json}
         await self._session.flush()
 
 
@@ -155,6 +155,18 @@ class SyncJobRepository:
         web_sources: list[str] | None = None,
         runtime_metadata_json: dict | None = None,
     ) -> None:
+        from app.domains.jobs.execution_claim import KEY, require_owner, LostExecutionOwner, locked_job
+        token = getattr(self, "execution_token", None)
+        claim = None
+        if token:
+            if getattr(self, "execution_owner_lost", lambda: False)():
+                raise LostExecutionOwner("Renewal failed")
+            job, claim = require_owner(self._session, job.id, token)
+        else:
+            job = locked_job(self._session, job.id)
+            if (job.runtime_metadata_json or {}).get(KEY):
+                self._session.rollback()
+                raise LostExecutionOwner("Claimed job requires its execution token")
         job.status = status
         if response is not None:
             job.response = response
@@ -173,7 +185,11 @@ class SyncJobRepository:
         if web_sources is not None:
             job.web_sources = web_sources
         if runtime_metadata_json is not None:
-            job.runtime_metadata_json = runtime_metadata_json
+            job.runtime_metadata_json = {**(job.runtime_metadata_json or {}), **runtime_metadata_json}
+        if claim is not None:
+            if status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
+                claim = {**claim, "state": "finished"}
+            job.runtime_metadata_json = {**(job.runtime_metadata_json or {}), KEY: claim}
         from app.core.config import settings
         if settings.recommendation_audit_enabled:
             from app.domains.recommendation_audit.capture import capture_terminal
