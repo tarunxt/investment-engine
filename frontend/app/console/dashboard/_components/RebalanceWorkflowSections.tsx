@@ -3149,6 +3149,8 @@ function ScopedZerodhaBasketPreviewDialog({
                 </div>
               ) : null}
 
+              {displayCalculations.controls}
+
               {!isZerodhaPreview ? <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p> : null}
 
               {submission ? (

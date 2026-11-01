@@ -168,3 +168,12 @@ export function actionQuantityMatchesDraft(quantity: number | null | undefined, 
   return typeof quantity === 'number' && Number.isFinite(quantity) && typeof units === 'number' && Number.isFinite(units) && units > 0
     && (side === 'BUY' && quantity > 0 && quantity === units || side === 'SELL' && quantity < 0 && -quantity === units);
 }
+
+/** Disclosure only: aggregate calculated targets; never redistribute or alter sizing. */
+export function allocationDisclosure(weights: Map<string, number>, amounts: (number | null)[], assets: number | null, complete: boolean) {
+  const sumWeight = complete && [...weights.values()].every(value => Number.isFinite(value) && value >= 0) ? [...weights.values()].reduce((sum, value) => sum + value, 0) : null;
+  const weight = sumWeight !== null && Number.isFinite(sumWeight) ? sumWeight : null;
+  const sumAmount = weight !== null && assets !== null && Number.isFinite(assets) && assets >= 0 && amounts.length === weights.size && amounts.every(value => value !== null && Number.isFinite(value)) ? amounts.reduce<number>((sum, value) => sum + value!, 0) : null;
+  const roundedAmount = sumAmount !== null && Number.isFinite(sumAmount) ? sumAmount : null;
+  return { weight, residualWeight: weight === null ? null : 1 - weight, roundedAmount, roundedResidual: roundedAmount === null || assets === null ? null : assets - roundedAmount };
+}

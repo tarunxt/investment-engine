@@ -587,7 +587,7 @@ test('draft Units popup distinguishes suggested calculation from manual positive
  const stock={symbol:'HAL',exchange:'NSE',action:'Sell All',score:-1,currentValue:500,holdingQuantity:5,ltp:null,upstoxLtp:100,upstoxAsOf:end,upstoxSource:'Upstox fixture'};
  const h=hooks(),component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:async()=>history([observation(1,-1)])},createPortal:n=>n});const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],1000,end,'Zerodha');};let state=render();h.flush();await tick();state=render();
  for(let i=0;i<3;i++){const button=state.units(stock,'Units action',4);assert.equal(button.props.children,'4');assert.doesNotMatch(button.props.className,/underline|dotted/);button.props.onClick();state=render();assert.equal(state.popup.props.draftUnits,4);assert.equal(state.popup.props.calculation.stocks,-5);state.popup.props.onClose();state=render();}
- assert.equal(state.controls,null);assert.equal(state.showAll,true);
+ assert.equal(state.controls.props["aria-label"],"Allocation disclosure");assert.equal(state.showAll,true);
 });
 
 test('real submission handler rejects every invalid selection and reviews edited draft quantity without sending orders',async()=>{
@@ -644,4 +644,31 @@ test('Audit7 F03 settled saved value and exposure denominator remain distinct',(
  }
  assert.equal(math.kiteWeightContext({...snapshot,holdings_count:2}).valid,false);
  assert.equal(math.kiteWeightContext(null).valid,false);
+});
+
+test('allocation disclosure preserves caps and exposes rounded exposure, residual and unknown provenance',()=>{
+ const weights=math.allocateDisplayScores([{key:'A',score:3},{key:'B',score:2}],math.defaultDisplayParameters()).weights;
+ const amounts=[...weights.values()].map(w=>math.brokerDisplayAllocation(w,1000,60,'india').amount);
+ assert.deepEqual(amounts,[120,120]);
+ assert.deepEqual(math.allocationDisclosure(weights,amounts,1000,true),{weight:.19,residualWeight:.81,roundedAmount:240,roundedResidual:760});
+ assert.deepEqual(math.allocationDisclosure(weights,[120,null],1000,true),{weight:.19,residualWeight:.81,roundedAmount:null,roundedResidual:null});
+ assert.deepEqual(math.allocationDisclosure(weights,amounts,1000,false),{weight:null,residualWeight:null,roundedAmount:null,roundedResidual:null});
+ assert.equal(math.allocationDisclosure(weights,amounts,null,true).roundedAmount,null);
+ assert.deepEqual(math.allocationDisclosure(new Map(),[],0,true),{weight:0,residualWeight:1,roundedAmount:0,roundedResidual:0});
+ assert.equal(math.allocationDisclosure(weights,[Infinity,120],1000,true).roundedAmount,null);
+ assert.equal(math.allocationDisclosure(new Map([['A',.95]]),[120],100,true).roundedResidual,-20);
+});
+test('disclosure table and popup share totals; missing, interrupted, repeated and error history stay unavailable',async()=>{
+ const h=hooks(),pending=[];
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:()=>new Promise((resolve,reject)=>pending.push({resolve,reject}))},createPortal:n=>n,document:{body:{}}});
+ const stocks=[{symbol:'HAL',exchange:'NSE',score:2,ltp:60}];
+ const render=(open=true)=>{h.start();return component.useBasketDisplayCalculations(open,'india',stocks,1000,end,'Zerodha');};
+ let state=render();assert.match(JSON.stringify(state.controls),/Unavailable/);h.flush();
+ pending.shift().resolve(history([observation(1,2)]));await tick();state=render();assert.match(JSON.stringify(state.controls),/90.5%/);assert.match(JSON.stringify(state.controls),/120/);
+ find(state.cells(stocks[0]),n=>n.props?.['aria-label']==='HAL Target Weight calculation').props.onClick();state=render();assert.match(JSON.stringify(state.popup),/90.5%/);
+ state=render(false);h.flush();assert.match(JSON.stringify(state.controls),/Unavailable/);
+ state=render();h.flush();assert.match(JSON.stringify(state.controls),/Unavailable/);pending.shift().reject(new Error('fixture unavailable'));await tick();state=render();assert.match(JSON.stringify(state.controls),/Unavailable/);
+ state.retry();state=render();h.flush();pending.shift().resolve({...history([observation(1,2)]),truncated:true});await tick();state=render();assert.match(JSON.stringify(state.controls),/Unavailable/);
+ state.retry();state=render();h.flush();pending.shift().resolve(history([]));await tick();state=render();assert.match(JSON.stringify(state.controls),/Unavailable/);
+ state.retry();state=render();h.flush();pending.shift().resolve(history([observation(1,0)]));await tick();state=render();assert.match(JSON.stringify(state.controls),/100%/);assert.match(JSON.stringify(state.controls),/₹0.00/);
 });
