@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -45,18 +46,11 @@ function formatSnapshotDate(value: string) {
 }
 
 function formatCapturedAt(value: string) {
-  return new Date(value).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return formatPortfolioTimestamp(value);
 }
 
 function formatSnapshotTime(value: string) {
-  return new Date(value).toLocaleTimeString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    timeStyle: "short",
-  });
+  return formatPortfolioTimestamp(value, true);
 }
 
 function formatShortSnapshotDate(value: string) {
@@ -435,7 +429,7 @@ function SnapshotHistoryChart({
               {formatCurrency(selectedPoint.value)}
             </p>
             <p className="text-xs text-gray-500">
-              {formatSnapshotDate(selectedPoint.snapshot_date)} · Saved{" "}
+              {formatSnapshotDate(selectedPoint.snapshot_date)} · Captured{" "}
               {formatSnapshotTime(selectedPoint.captured_at)}
             </p>
           </div>
@@ -671,19 +665,19 @@ export function PortfolioSnapshotsPanel({
               Portfolio Snapshots
             </h2>
             <p className="mt-1 text-sm text-gray-500">
-              Daywise holdings and positions saved from your Zerodha account.
+              Saved historical holdings and positions. Values and available margin belong to the selected snapshot; they are not live account balance or buying power.
             </p>
             <p className="mt-1 text-xs text-gray-500">
               Source: {selectedSnapshot.source} · Holdings: {formatCount(selectedSnapshot.holdings_count)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="text-right text-xs text-gray-500">
               <p>Viewing snapshot</p>
               <p className="font-medium text-gray-700">
                 {formatSnapshotDate(selectedSnapshot.snapshot_date)}
               </p>
-              <p className="mt-1">Snapshot time</p>
+              <p className="mt-1">Capture time</p>
               <p className="font-medium text-gray-700">
                 {formatSnapshotTime(selectedSnapshot.captured_at)}
               </p>
@@ -772,7 +766,9 @@ export function PortfolioSnapshotsPanel({
               </p>
             </div>
             <div className="text-sm text-gray-500">
-              <p>Captured {formatCapturedAt(selectedSnapshot.captured_at)}</p>
+              <p role="status">Captured <time dateTime={selectedSnapshot.captured_at}>{formatCapturedAt(selectedSnapshot.captured_at)}</time></p>
+              <p>Save time not recorded</p>
+              <p>Price as-of not recorded</p>
               <p className="capitalize">Source: {selectedSnapshot.source}</p>
             </div>
           </div>

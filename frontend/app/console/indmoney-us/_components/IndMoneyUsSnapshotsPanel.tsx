@@ -1,5 +1,6 @@
 'use client';
 
+import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
 import {
   Activity,
   AlertTriangle,
@@ -52,16 +53,11 @@ function formatSnapshotDate(value: string) {
 }
 
 function formatCapturedAt(value: string) {
-  return new Date(value).toLocaleString('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
+  return formatPortfolioTimestamp(value);
 }
 
 function formatSnapshotTime(value: string) {
-  return new Date(value).toLocaleTimeString('en-IN', {
-    timeStyle: 'short',
-  });
+  return formatPortfolioTimestamp(value, true);
 }
 
 function formatShortSnapshotDate(value: string) {
@@ -322,7 +318,7 @@ function SnapshotHistoryChart({
           <div className="text-sm sm:text-right">
             <p className="font-semibold text-gray-950">{formatCurrency(selectedPoint.value)}</p>
             <p className="text-xs text-gray-500">
-              {formatSnapshotDate(selectedPoint.snapshot_date)} · Saved {formatSnapshotTime(selectedPoint.captured_at)}
+              {formatSnapshotDate(selectedPoint.snapshot_date)} · Captured {formatSnapshotTime(selectedPoint.captured_at)}
             </p>
           </div>
         ) : null}
@@ -658,7 +654,7 @@ export function IndMoneyUsSnapshotsPanel({
   return (
     <div className="flex flex-col gap-5">
       <div className="border border-gray-200 bg-white shadow-sm">
-        <h2 className="border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900">Portfolio totals</h2>
+        <h2 className="border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900">Saved portfolio totals</h2>
 
         {error ? (
           <div className="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700">
@@ -678,7 +674,7 @@ export function IndMoneyUsSnapshotsPanel({
             <MetricCard
               label="Current Value"
               value={formatCurrency(selectedSnapshot.current_value ?? selectedSnapshot.derived.parsed_holdings_current_value)}
-              sublabel={`Saved ${formatSnapshotDate(selectedSnapshot.snapshot_date)}`}
+              sublabel={`Snapshot date ${formatSnapshotDate(selectedSnapshot.snapshot_date)}`}
               icon={Wallet}
             />
             <MetricCard
@@ -743,7 +739,9 @@ export function IndMoneyUsSnapshotsPanel({
                 </p>
               </div>
               <div className="text-sm text-gray-500">
-                <p>Captured {formatCapturedAt(selectedSnapshot.captured_at)}</p>
+                <p role="status">Captured <time dateTime={selectedSnapshot.captured_at}>{formatCapturedAt(selectedSnapshot.captured_at)}</time></p>
+              <p>Save time not recorded</p>
+              <p>Price as-of not recorded</p>
                 <p className="capitalize">Source: {selectedSnapshot.source.replace('_', ' ')}</p>
               </div>
             </div>
