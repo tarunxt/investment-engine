@@ -225,7 +225,7 @@ def _timestamp_sort_key(value: datetime) -> float:
     return value.timestamp()
 
 
-def _serialize_auto_rebalance_job(job: Job) -> AutoRebalanceJobDetailResponse:
+def _serialize_auto_rebalance_job(job: Job, provenance: dict | None = None) -> AutoRebalanceJobDetailResponse:
     from app.domains.jobs.schemas import JobResponse
     job = JobResponse.model_validate(job)
     return AutoRebalanceJobDetailResponse(
@@ -243,6 +243,7 @@ def _serialize_auto_rebalance_job(job: Job) -> AutoRebalanceJobDetailResponse:
         web_search_queries=job.web_search_queries,
         web_sources=job.web_sources,
         runtime_metadata_json=job.runtime_metadata_json,
+        output_provenance=provenance,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
@@ -679,6 +680,13 @@ async def get_auto_rebalance_history_detail(
     if not match:
         raise HTTPException(404, detail="Auto-rebalance run not found")
     item, runs, standalone_jobs = match
+    from app.domains.runs.output_provenance import load_output_provenance
+    provenance = await load_output_provenance(
+        db, user_id=current_user.id,
+        job_ids={job.id for job in standalone_jobs} | {
+            link.job.id for run in runs for link in run.run_jobs if link.job is not None
+        },
+    )
     detailed_runs = [
         AutoRebalanceRunDetailResponse(
             id=run.id,
@@ -687,7 +695,7 @@ async def get_auto_rebalance_history_detail(
             created_at=run.created_at,
             updated_at=run.updated_at,
             jobs=[
-                _serialize_auto_rebalance_job(link.job)
+                _serialize_auto_rebalance_job(link.job, provenance.get(link.job.id))
                 for link in run.run_jobs
                 if link.job is not None
             ],
@@ -698,7 +706,7 @@ async def get_auto_rebalance_history_detail(
         **item.model_dump(),
         runs=detailed_runs,
         standalone_jobs=[
-            _serialize_auto_rebalance_job(job)
+            _serialize_auto_rebalance_job(job, provenance.get(job.id))
             for job in sorted(standalone_jobs, key=lambda value: value.id)
         ],
     )

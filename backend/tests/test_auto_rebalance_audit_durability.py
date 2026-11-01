@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 - register mapped relationship targets
 from app.domains.auth.models import ActivityLog, User
+from app.domains.api_usage.models import ApiUsageAttemptEvent
 from app.domains.jobs.models import Job
 from app.domains.prompts.models import Prompt
 from app.domains.runs import router as routes
@@ -26,7 +27,7 @@ from app.shared.types import JobStatus
 
 TABLES = [model.__table__ for model in (
     User, Prompt, Job, Run, RunJob, AutoRebalanceWorkflow,
-    AutoRebalanceWorkflowStage, ActivityLog,
+    AutoRebalanceWorkflowStage, ActivityLog, ApiUsageAttemptEvent,
 )]
 OWNER = SimpleNamespace(id=7)
 START = datetime(2026, 1, 2, 8, 0, tzinfo=timezone.utc)
@@ -238,6 +239,47 @@ async def test_history_still_derives_legacy_run_without_parent(audit_db):
         result = await routes.get_auto_rebalance_history_detail("india", 43, db, OWNER)
     assert result.status == "completed" and result.current_stage == "swing"
     assert result.runs[0].jobs[0].id == 8001
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("portfolio", ["india", "indmoney_us"])
+async def test_saved_output_provenance_is_scoped_and_does_not_rewrite_history(audit_db, portfolio):
+    original = "Model: Claude Sonnet 4.5 (Anthropic)\nSource date: 2026-01-01\nSynthetic value: 123.45"
+    async with audit_db.sessions() as db:
+        job = Job(id=8101, user_id=7, prompt="synthetic", response=original,
+                  provider="deepseek", model="deepseek-v4-flash", status=JobStatus.COMPLETED,
+                  auto_rebalance_portfolio=portfolio, auto_rebalance_sequence=44,
+                  tokens_in=12, tokens_out=34, estimated_cost=0.01)
+        db.add(job)
+        await db.flush()
+        for index, overrides in enumerate([
+            {}, {"actual_model": None}, {"user_id": 8, "actual_provider": "private-other-owner"},
+            {"status": "error", "actual_provider": "failed-provider"},
+            {"phase": "search", "actual_provider": "search-provider"},
+        ]):
+            fields = dict(user_id=7, job_id=job.id, actual_provider="deepseek",
+                          actual_model="deepseek-v4-flash", status="success", phase="request")
+            fields.update(overrides)
+            db.add(ApiUsageAttemptEvent(
+                event_id=f"synthetic-event-{index}", attempt_id=f"synthetic-attempt-{index}",
+                event_kind="finished", requested_provider="deepseek", requested_model="deepseek-v4-flash",
+                started_at=START, finished_at=FINISH, instrumentation_scope="synthetic", **fields,
+            ))
+        await db.commit()
+        detail = await routes.get_auto_rebalance_history_detail(portfolio, 44, db, OWNER)
+        saved = detail.standalone_jobs[0]
+        assert saved.response == original
+        assert (saved.provider, saved.model, saved.tokens_in, saved.tokens_out, saved.estimated_cost) == (
+            "deepseek", "deepseek-v4-flash", 12, 34, 0.01,
+        )
+        assert [identity.model_dump() for identity in saved.output_provenance.identities] == [
+            {"provider": "deepseek", "model": None},
+            {"provider": "deepseek", "model": "deepseek-v4-flash"},
+        ]
+        assert saved.output_provenance.observed_to.replace(tzinfo=timezone.utc) == FINISH
+        with pytest.raises(HTTPException) as denied:
+            await routes.get_auto_rebalance_history_detail(portfolio, 44, db, SimpleNamespace(id=8))
+        assert denied.value.status_code == 404
 
 
 @pytest.mark.anyio

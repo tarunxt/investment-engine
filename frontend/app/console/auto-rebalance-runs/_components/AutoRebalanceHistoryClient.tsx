@@ -17,6 +17,7 @@ import { getStageTileLabel } from "@/components/shared/WorkflowStageTile";
 import { Button } from "@/components/ui/button";
 import { URLs } from "@/lib/urls";
 import { formatApiTimestamp } from "@/lib/datetime";
+import { outputAttribution } from "@/lib/outputProvenance";
 import { apiService } from "@/services/api";
 import type {
   AutoRebalanceHistoryDetailResponse,
@@ -217,11 +218,21 @@ export function AutoRebalanceHistoryListClient({
 }
 
 function JobDetails({ job }: { job: AutoRebalanceJobDetailResponse }) {
+  const attribution = outputAttribution(job);
   return (
-    <article className={`rounded-xl border p-4 ${stageCardTone(job.status)}`}>
+    <article className={`min-w-0 rounded-xl border p-4 [overflow-wrap:anywhere] ${stageCardTone(job.status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="font-semibold text-slate-950">{job.provider} / {job.model}</p><p className="mt-1 text-xs text-slate-600">Provider job #{job.id} · {formatTime(job.updated_at)} · {formatCost(job.estimated_cost)}</p></div>
+        <div className="min-w-0"><p className="font-semibold text-slate-950">Requested: {job.provider} / {job.model}</p><p className="mt-1 text-xs text-slate-600">Provider job #{job.id} · Job updated: {formatTime(job.updated_at)} · {formatCost(job.estimated_cost)}</p></div>
         <StatusBadge status={job.status} />
+      </div>
+      <div className="mt-3 space-y-1 text-xs text-slate-700">
+        <p>Job created: {formatTime(job.created_at)}</p>
+        {attribution.identities.length ? <>
+          <p>Provider-response telemetry: {attribution.identities.map(identity => `${identity.provider} / ${identity.model || "model not reported"}`).join("; ")}</p>
+          <p>Successful calls observed: {formatTime(job.output_provenance?.observed_from)} to {formatTime(job.output_provenance?.observed_to)}. May include repair calls; telemetry coverage may be incomplete.</p>
+        </> : <p>Execution identity unavailable: no successful provider-response telemetry is recorded for this job. Requested settings do not verify which model produced the output.</p>}
+        <p>Original generated text is preserved below. Its model names and source dates are unverified content, distinct from job timestamps and telemetry observation times.</p>
+        {attribution.conflict ? <p role="note" className="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900">Attribution conflict: the generated model header differs from {attribution.comparison === "telemetry" ? "provider-response telemetry" : "requested job settings"}. Generated self-identification is untrusted; do not use it to attribute provider or cost.</p> : null}
       </div>
       {job.error_message ? <div className={`mt-3 rounded-lg border bg-white/70 p-3 text-sm ${job.status === "partial" ? "border-amber-200 text-amber-800" : "border-rose-200 text-rose-800"}`}>{job.error_message}</div> : null}
       <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-3"><span>Input tokens: {job.tokens_in ?? "—"}</span><span>Output tokens: {job.tokens_out ?? "—"}</span><span>Web search: {job.web_search_used ? "used" : "not used"}</span></div>
