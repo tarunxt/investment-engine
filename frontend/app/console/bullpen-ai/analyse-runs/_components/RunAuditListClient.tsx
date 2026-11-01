@@ -99,9 +99,16 @@ export function RunAuditListClient() {
   const [filters, setFilters] = useState<RunAuditFilters>(defaultFilters);
   const [draftFilters, setDraftFilters] =
     useState<RunAuditFilters>(defaultFilters);
-  const [data, setData] = useState<BullpenRunAuditListResponse | null>(null);
+  const [result, setResult] = useState<{
+    data: BullpenRunAuditListResponse;
+    filters: RunAuditFilters;
+    receivedAt: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [openingRunId, setOpeningRunId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [autoLiveRuns, setAutoLiveRuns] = useState<BullpenAutoLiveRun[]>([]);
 
   useEffect(() => {
@@ -134,7 +141,11 @@ export function RunAuditListClient() {
             if (!cancelled) setAutoLiveRuns([]);
           });
         if (!cancelled) {
-          setData(nextData);
+          setResult({
+            data: nextData,
+            filters,
+            receivedAt: new Date().toISOString(),
+          });
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -155,8 +166,13 @@ export function RunAuditListClient() {
     return () => {
       cancelled = true;
     };
-  }, [filters]);
+  }, [filters, retry]);
 
+  const data = result?.data;
+  const currentResult = !loading && !error && result?.filters === filters;
+  const hasFilters = Object.entries(filters).some(
+    ([key, value]) => key !== "page" && key !== "limit" && value !== "",
+  );
   const items = data?.items ?? [];
   const auditedRunIds = new Set(items.map((item) => item.run_id));
   const fallbackAutoLiveRuns = autoLiveRuns.filter(
@@ -164,8 +180,10 @@ export function RunAuditListClient() {
   );
   const total = data?.total ?? 0;
   const totalPages = data?.total_pages ?? 0;
-  const from = total === 0 ? 0 : (filters.page - 1) * filters.limit + 1;
-  const to = total === 0 ? 0 : Math.min(total, filters.page * filters.limit);
+  const from = items.length === 0
+    ? 0
+    : ((data?.page ?? 1) - 1) * (data?.limit ?? 20) + 1;
+  const to = items.length === 0 ? 0 : Math.min(total, from + items.length - 1);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
@@ -420,11 +438,17 @@ export function RunAuditListClient() {
 
       {error ? (
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
-          <CardContent className="py-6 text-sm text-rose-700">
+          <CardContent role="alert" className="py-6 text-sm text-rose-700">
             {error}
+            <p>Audit history could not be verified for the current filters and page.</p>
+            <Button variant="outline" onClick={() => setRetry((value) => value + 1)}>
+              Retry history read
+            </Button>
           </CardContent>
         </Card>
       ) : null}
+
+      {actionError ? <p role="alert" className="text-sm text-rose-700">{actionError}</p> : null}
 
       <div className="space-y-4">
         {loading ? (
@@ -435,11 +459,21 @@ export function RunAuditListClient() {
           </Card>
         ) : null}
 
-        {!loading && items.length === 0 && fallbackAutoLiveRuns.length === 0 ? (
+        {result && !currentResult ? (
+          <p role="status" className="text-sm text-amber-800">
+            Last successful audit read: {formatDateTime(result.receivedAt)} · Page {result.data.page}.
+            These saved results may use previous filters; the current filters and page are unverified.
+          </p>
+        ) : null}
+
+        {currentResult && items.length === 0 ? (
           <Card className="rounded-none border-slate-200 shadow-none">
             <CardContent className="py-10 text-sm text-slate-500">
-              No Bullpen runs or persisted audit snapshots matched the current
-              filters.
+              {total > 0
+                ? "No persisted audit snapshots on this page."
+                : hasFilters
+                  ? "No persisted audit snapshots matched the current filters."
+                  : "No persisted audit snapshots returned by the successful history read."}
             </CardContent>
           </Card>
         ) : null}
@@ -447,27 +481,29 @@ export function RunAuditListClient() {
         {!loading && fallbackAutoLiveRuns.length > 0 ? (
           <div className="space-y-4">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Bullpen runs awaiting audit snapshots
+              Additional Bullpen runs (separate unfiltered run source)
             </p>
             {fallbackAutoLiveRuns.map((run) => (
               <button
                 key={run.id}
                 type="button"
                 className="block w-full text-left"
+                disabled={openingRunId !== null}
+                aria-busy={openingRunId === run.id}
                 onClick={async () => {
-                  setLoading(true);
-                  setError(null);
+                  setOpeningRunId(run.id);
+                  setActionError(null);
                   try {
                     await apiService.materializeBullpenRunAudit(run.id);
                     window.location.href =
                       URLs.routes.console.bullpenAiAnalyseRunDetail(run.id);
                   } catch (nextError) {
-                    setError(
+                    setActionError(
                       nextError instanceof Error
                         ? nextError.message
                         : "Failed to load Bullpen run details.",
                     );
-                    setLoading(false);
+                    setOpeningRunId(null);
                   }
                 }}
               >
@@ -521,7 +557,7 @@ export function RunAuditListClient() {
           </div>
         ) : null}
 
-        {!loading
+        {result
           ? items.map((item) => (
               <Link
                 key={item.snapshot_id}
@@ -703,15 +739,18 @@ export function RunAuditListClient() {
       <Card className="rounded-none border-slate-200 shadow-none">
         <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
           <p className="text-sm text-slate-600">
-            {total === 0
-              ? "No persisted audit snapshots yet."
-              : `${from}–${to} of ${total} Bullpen run audit${total !== 1 ? "s" : ""}`}
+            {!currentResult
+              ? loading ? "Loading audit history…" : "Audit history unavailable for the current request."
+              : total === 0
+                ? hasFilters ? "No audit snapshots matched the current filters." : "No persisted audit snapshots returned."
+                : items.length === 0 ? `${total} audit snapshots; none on this page.`
+                  : `${from}–${to} of ${total} Bullpen run audit${total !== 1 ? "s" : ""}`}
           </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
-              disabled={filters.page <= 1 || loading}
+              disabled={!currentResult || filters.page <= 1}
               onClick={() =>
                 setFilters((current) => ({
                   ...current,
@@ -722,12 +761,12 @@ export function RunAuditListClient() {
               Previous
             </Button>
             <span className="min-w-24 text-center text-sm text-slate-600">
-              Page {filters.page} of {Math.max(totalPages, 1)}
+              {currentResult ? `Page ${data?.page} of ${Math.max(totalPages, 1)}` : "Page count unverified"}
             </span>
             <Button
               variant="outline"
               size="sm"
-              disabled={loading || filters.page >= Math.max(totalPages, 1)}
+              disabled={!currentResult || filters.page >= Math.max(totalPages, 1)}
               onClick={() =>
                 setFilters((current) => ({
                   ...current,

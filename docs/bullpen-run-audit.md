@@ -2774,3 +2774,15 @@ This is presentation only: audit capture, frozen snapshots, formulas, API shapes
 execution permissions and mutation endpoints are unchanged.
 
 Controlled synthetic coverage: `frontend/tests/bullpen008-source-state.test.mjs`.
+
+### Runs Audit list read provenance (A6-12)
+
+The list treats a successful paginated summary response as evidence only for its
+requested filters and page. Loading and failed reads do not imply an empty history
+or a filter mismatch. Last successful snapshot records remain visible during a
+refresh or failure with the read time and original page, explicitly marked as
+possibly using previous filters. Pagination counts and controls are available only
+for the successfully verified current request. Filtered zero results describe a
+filter match, never the existence of all saved history. The supplemental Bullpen
+run source remains independent and is labeled as unfiltered. A history retry only
+repeats the existing list read; it does not invoke explicit materialization.
