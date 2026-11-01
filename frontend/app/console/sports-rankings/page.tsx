@@ -33,6 +33,7 @@ function detailsFor(error: unknown) {
 }
 
 export default function SportsRankingsPage() {
+  const [view, setView] = useState<'repository' | 'filters'>('repository');
   const [competitions, setCompetitions] = useState<CompetitionSummary[]>([]);
   const [selected, setSelected] = useState('epl');
   const [loadedDetail, setDetail] = useState<Detail | null>(null);
@@ -121,12 +122,12 @@ export default function SportsRankingsPage() {
     finally { setRefreshing(false); }
   }
 
-  return <div className="mx-auto max-w-7xl space-y-6 p-4 text-slate-900 dark:text-slate-100 md:p-8">
-    <header className="rounded-2xl bg-slate-950 p-6 text-white">
-      <p className="text-xs uppercase tracking-widest text-sky-300">Data & Integrations</p>
-      <h1 className="mt-2 text-3xl font-semibold">Sports Rankings</h1>
-      <p className="mt-3 max-w-3xl text-sm text-slate-300">Competition and participant repository for Polymarket matching. Supported feeds are checked every 15 minutes; the page updates every minute. Trading analysis is not enabled in this phase.</p>
-      <div className="mt-5 flex flex-wrap gap-6 text-sm">
+  return <div className="mx-auto max-w-7xl space-y-4 p-4 text-slate-900 dark:text-slate-100 md:p-8">
+    <header className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+      <p className="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400">Data & Integrations</p>
+      <h1 className="mt-1 text-2xl font-semibold">Sports Rankings</h1>
+      <p className="mt-2 max-w-3xl text-sm text-slate-600 dark:text-slate-300">Competition and participant repository for Polymarket matching. Supported feeds are checked every 15 minutes; the page updates every minute. Trading analysis is not enabled in this phase.</p>
+      <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
         <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.map(c => c.sport_id)).size}</strong> sports / disciplines</span>
         <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.map(c => c.code).filter(Boolean)).size}</strong> Polymarket prefixes</span>
         <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : competitions.length}</strong> ranking / competition lists</span>
@@ -134,7 +135,19 @@ export default function SportsRankingsPage() {
         <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.filter(c => c.status === 'ready').map(c => c.source_id)).size}</strong> feeds ready</span>
       </div>
     </header>
-    {(error || detailError) && (() => { const issue = (error || detailError)!; return <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 p-4 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100"><button type="button" aria-haspopup="dialog" className="text-left underline decoration-dotted underline-offset-4" onClick={() => setErrorDialog(issue)}>{issue.summary} {competitions.length > 0 && 'Last loaded data remains visible.'} <span className="font-semibold">View details</span></button><button className="rounded-md border border-red-400 px-3 py-1.5 font-semibold hover:bg-red-100 dark:hover:bg-red-900" onClick={reload}>Retry now</button></div>; })()}
+    <div role="tablist" aria-label="Rankings workspace" className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900">
+      {(['repository', 'filters'] as const).map(tab => <button key={tab} id={`rankings-tab-${tab}`} role="tab" aria-selected={view === tab} aria-controls={`rankings-panel-${tab}`} tabIndex={view === tab ? 0 : -1} onClick={() => setView(tab)} onKeyDown={event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === 'Home' ? 'repository' : event.key === 'End' ? 'filters' : tab === 'repository' ? 'filters' : 'repository';
+        setView(next);
+        document.getElementById(`rankings-tab-${next}`)?.focus();
+      }} className={`rounded-lg px-3 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${view === tab ? 'bg-violet-700 text-white' : 'bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-100'}`}>{tab === 'filters' ? 'Filters and rules' : error && !competitions.length ? 'Unavailable repository' : 'Repository'}</button>)}
+    </div>
+    {(error || detailError) && (() => { const issue = (error || detailError)!; return <div role="alert" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+      <p>{error && !competitions.length ? `Rankings are temporarily unavailable. ${issue.summary} The repository could not be loaded yet; the list count is unknown, not a verified empty response.` : issue.summary} {competitions.length > 0 && 'Last loaded data remains visible.'} The page continues to attempt automatic reads; recovery is not confirmed.</p>
+      <div className="flex flex-wrap gap-2"><button className="rounded-md border border-amber-400 px-3 py-1.5 font-semibold hover:bg-amber-100 dark:hover:bg-amber-900" onClick={reload}>Retry now</button><button type="button" aria-haspopup="dialog" className="rounded-md border border-amber-400 px-3 py-1.5 font-semibold hover:bg-amber-100 dark:hover:bg-amber-900" onClick={() => setErrorDialog(issue)}>View details</button></div>
+    </div>; })()}
     {errorDialog && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" onMouseDown={event => { if (event.currentTarget === event.target) setErrorDialog(null); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="rankings-error-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-red-600 dark:text-red-300">Sports Rankings diagnostic</p><h2 id="rankings-error-title" className="mt-1 text-2xl font-semibold">{errorDialog.title}</h2></div><button autoFocus aria-label="Close error details" className="rounded-lg border px-3 py-1.5" onClick={() => setErrorDialog(null)}>Close</button></div>
@@ -148,7 +161,8 @@ export default function SportsRankingsPage() {
     </div>}
     {notice && <p role="status" className="rounded-lg border p-3 text-sm">{notice}</p>}
     {filtered.some(c => c.category === 'Cricket') && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm"><p>Cricket sources are checked every 15 minutes, with a full reconciliation daily at 08:40 IST. You can also request one now.</p><button disabled={refreshing} onClick={reconcileCricket} className="rounded border px-3 py-2 disabled:opacity-50">{refreshing ? 'Queuing…' : 'Reconcile all cricket now'}</button></div>}
-    <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
+    <div>
+      <div id="rankings-panel-filters" role="tabpanel" aria-labelledby="rankings-tab-filters" hidden={view !== 'filters'} tabIndex={0} className="space-y-4">
       <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <label className="block text-sm font-medium" htmlFor="competition-search">Find competition or participant</label>
         <input id="competition-search" className="w-full rounded-lg border bg-transparent p-2" placeholder="hockey, badminton, argpn, team…" value={query} onChange={e => { setQuery(e.target.value); setTeamQuery(''); setGroup('All groups'); setImportedOnly(false); }} />
@@ -156,17 +170,20 @@ export default function SportsRankingsPage() {
           {['All sports', ...Array.from(new Set(competitions.map(c => c.sport))).sort()].map(s => <option key={s}>{s}</option>)}
         </select>
         <select aria-label="Filter by ranking availability" className="w-full rounded-lg border bg-transparent p-2" value={coverage} onChange={e => setCoverage(e.target.value)}>{['All sources', 'Connected feeds', 'Reference only'].map(s => <option key={s}>{s}</option>)}</select>
-        <p className="text-xs text-slate-500">{loading ? 'Loading repository…' : `${filtered.length} ranking / competition lists`}</p>
+        <p className="text-xs text-slate-500">{loading ? 'Loading repository…' : error && !competitions.length ? '— ranking / competition lists (unknown)' : `${filtered.length} ranking / competition lists${error ? ' · last loaded data' : ''}`}</p>
         <div className="max-h-[650px] space-y-1 overflow-y-auto">
-          {filtered.map(c => <button key={c.id} aria-pressed={activeId === c.id} onClick={() => { setSelected(c.id); setTeamQuery(''); setGroup('All groups'); setImportedOnly(false); setNotice(''); }} className={`w-full rounded-lg p-3 text-left ${activeId === c.id ? 'bg-blue-50 ring-1 ring-blue-400 dark:bg-blue-950' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+          {filtered.map(c => <button key={c.id} aria-pressed={activeId === c.id} onClick={() => { setView('repository'); if (typeof document !== 'undefined') requestAnimationFrame(() => document.getElementById('rankings-tab-repository')?.focus()); setSelected(c.id); setTeamQuery(''); setGroup('All groups'); setImportedOnly(false); setNotice(''); }} className={`w-full rounded-lg p-3 text-left ${activeId === c.id ? 'bg-blue-50 ring-1 ring-blue-400 dark:bg-blue-950' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
             <div className="flex items-center justify-between gap-2"><code className="text-xs text-blue-600 dark:text-blue-300">{c.code || 'No verified code'}</code><Status value={c.status} /></div>
             <p className="mt-2 text-sm font-medium">{c.name}</p><p className="mt-1 text-xs text-slate-500">{c.sport} · {c.ranked_count} published rows{c.participants.length ? ` · ${c.participants.length} imported names` : ''}</p>
           </button>)}
-          {!loading && !filtered.length && <p className="p-3 text-sm">{error && !competitions.length ? 'The repository could not be loaded yet.' : 'No matching competitions.'}</p>}
+          {!loading && !error && !filtered.length && <p className="p-3 text-sm">No matching competitions.</p>}
         </div>
       </aside>
-      <section className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
-        {!activeId ? <p>{loading ? 'Loading repository…' : error && !competitions.length ? 'Waiting for the rankings service to recover. This page retries automatically.' : 'No ranking lists match your filters.'}</p> : !detail ? <p>{detailError?.summary || 'Loading rankings…'}</p> : <>
+    <details className="rounded-xl border p-4 text-sm"><summary className="cursor-pointer font-semibold">Full-match head-to-head classification rules</summary><p className="mt-3">Require exactly two distinct opposing participants and a winner, win/loss, moneyline or match-result market for that full match. Yes/No outcomes are not participant names. Exclude sets, maps, periods, innings, halves, scores, spreads, handicaps, totals, player statistics and tournament winners.</p><p className="mt-2">Ordinary races, battle royale events and multi-player golf tournaments are excluded. Their explicit head-to-head or match-play markets may qualify. This repository does not enable trading or change the Bullpen scanner.</p></details>
+      <button type="button" className="rounded-lg border px-3 py-2 text-sm" onClick={() => { setView('repository'); document.getElementById('rankings-tab-repository')?.focus(); }}>Return to {error && !competitions.length ? 'Unavailable repository' : 'Repository'}</button>
+      </div>
+      <section id="rankings-panel-repository" role="tabpanel" aria-labelledby="rankings-tab-repository" hidden={view !== 'repository'} tabIndex={0} className={!activeId && error ? '' : 'min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900'}>
+        {!activeId ? <p>{loading ? 'Loading repository…' : error && !competitions.length ? null : 'No ranking lists match your filters.'}</p> : !detail ? (detailError ? null : <p>Loading rankings…</p>) : <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><p className="text-xs text-slate-500">{detail.category} · {detail.sport} · <code>{detail.code || 'No verified Polymarket code'}</code></p><h2 className="mt-1 text-xl font-semibold">{detail.name}</h2><p className="mt-1 text-sm">{detail.ranking_kind} {detail.season && `· ${detail.season}`}</p></div>
             <Status value={detail.status} />
@@ -193,6 +210,6 @@ export default function SportsRankingsPage() {
         </>}
       </section>
     </div>
-    <details className="rounded-xl border p-4 text-sm"><summary className="cursor-pointer font-semibold">Full-match head-to-head classification rules</summary><p className="mt-3">Require exactly two distinct opposing participants and a winner, win/loss, moneyline or match-result market for that full match. Yes/No outcomes are not participant names. Exclude sets, maps, periods, innings, halves, scores, spreads, handicaps, totals, player statistics and tournament winners.</p><p className="mt-2">Ordinary races, battle royale events and multi-player golf tournaments are excluded. Their explicit head-to-head or match-play markets may qualify. This repository does not enable trading or change the Bullpen scanner.</p></details>
+
   </div>;
 }
