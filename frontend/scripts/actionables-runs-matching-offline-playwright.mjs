@@ -25,13 +25,14 @@ import{ActionablesRunGroup,ActionablesEmptyState}from${JSON.stringify(path.join(
 import{isAnalysisRunForStage}from${JSON.stringify(path.join(frontend,'lib/rebalanceRunIdentity.ts'))};
 import{withFinalActionablesReadDeadline}from${JSON.stringify(path.join(frontend,'lib/finalActionablesReadDeadline.ts'))};
 ${matching}
-window.pending=[];window.fixture={mode:'deferred'};window.refresh={};
+window.pending=[];window.fixture={mode:'deferred'};window.refresh={};window.loadStates={};
 const fetchAllFullRuns=()=>new Promise((resolve,reject)=>window.pending.push({resolve,reject}));
 const cacheFinalActionablesRuns=()=>{};
 function Panel({market}){const[runs,setRuns]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(null);const runsRequestRef=useRef(0),runCacheKey=market;
 ${scoped.slice(start,end)}
 useEffect(()=>{window.refresh[market]=loadRuns;void loadRuns();return()=>{runsRequestRef.current++}},[loadRuns]);
 const matched=getLatestMatchingRuns(runs,market),latestRun=matched[0]??null;
+window.loadStates[market]={loading,error};
 return <article><h2>{market==='india'?'India':'US'}</h2><button onClick={()=>loadRuns()}>Refresh {market}</button><ActionablesRunGroup market={market} latestRun={latestRun} runCount={matched.length} stockCount={latestRun?.fixtureStockCount??0} loading={loading} error={error}/>{(!latestRun||loading||error)&&<ActionablesEmptyState loading={loading} error={error} hasMatchingRun={Boolean(latestRun)}/>}</article>};
 createRoot(document.getElementById('root')).render(<><h1>Final Actionables · Offline acceptance fixture</h1><main><Panel market='india'/><Panel market='us'/></main></>);`;
 let browser,server;
@@ -65,6 +66,32 @@ await page.evaluate(r=>window.pending[4].resolve([r]),run(451,'india'));await in
 await page.evaluate(r=>window.pending[3].resolve([r]),run(449,'india'));await page.waitForTimeout(50);assert.equal(await india.getByText('#451',{exact:true}).count(),1);assert.equal(await india.getByText('#449',{exact:true}).count(),0);
 await page.getByRole('button',{name:'Refresh india',exact:true}).click();await page.evaluate(()=>window.pending[5].reject(Error('Refresh failed')));await india.getByText(/Current matching results are unverified/).waitFor();assert.equal(await india.getByText('#451',{exact:true}).count(),1);
 await page.screenshot({path:path.join(artifact,'04-retained-source-after-failure.png'),fullPage:true});
+// A6-10: exercise the real standalone loadRuns callback and deadline helper.
+// Advancing the browser clock avoids a 30-second wall-clock wait; the pending
+// shared reads are deliberately left alive to prove late success cannot commit.
+await page.clock.install();
+await page.getByRole('button',{name:'Refresh india',exact:true}).click();
+await page.clock.fastForward(30_001);
+await india.getByText(/Current matching results are unverified/).waitFor();
+assert.match(await page.evaluate(()=>window.loadStates.india.error),/did not finish loading in time/);
+assert.equal(await india.getAttribute('aria-busy'),'false');
+assert.equal(await india.getByText('#451',{exact:true}).count(),1);
+await page.evaluate(r=>window.pending[6].resolve([r]),run(452,'india'));
+await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+assert.equal(await india.getByText('#452',{exact:true}).count(),0,'late timed-out success never replaces retained source');
+await page.getByRole('button',{name:'Refresh india',exact:true}).focus();
+await page.keyboard.press('Enter');
+await page.evaluate(r=>window.pending[7].resolve([r]),run(453,'india'));
+await india.getByText('#453',{exact:true}).waitFor();
+await page.getByRole('button',{name:'Refresh us',exact:true}).click();
+await page.clock.fastForward(30_001);
+await us.getByText('Matching runs could not be checked. Retry with Refresh.',{exact:true}).waitFor();
+assert.match(await page.evaluate(()=>window.loadStates.us.error),/did not finish loading in time/);
+assert.doesNotMatch(await us.textContent(),/No qualifying|No parsable/);
+await page.evaluate(r=>window.pending[8].resolve([r]),run(454,'us'));
+await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+assert.equal(await us.getByText('#454',{exact:true}).count(),0);
+await page.screenshot({path:path.join(artifact,'05-aggregate-timeout-retained-and-unknown.png'),fullPage:true});
 assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
-const result={result:'PASS',checks:['India/US pending state without false empty/count','source ID and timestamp preservation','success','confirmed empty','failed retrieval','newer response wins','retained source explicitly unverified'],externalRequests:external,pageErrors:errors,screenshots:4};await writeFile(path.join(artifact,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+const result={result:'PASS',checks:['India/US pending state without false empty/count','source ID and timestamp preservation','success','confirmed empty','failed retrieval','newer response wins','retained source explicitly unverified','30-second aggregate deadline','late timed-out success ignored','keyboard retry recovers after timeout'],externalRequests:external,pageErrors:errors,screenshots:5};await writeFile(path.join(artifact,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }finally{await browser?.close();if(server)await new Promise(r=>server.close(r));await rm(temporary,{recursive:true,force:true})}
