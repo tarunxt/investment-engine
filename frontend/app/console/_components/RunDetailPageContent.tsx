@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
 import Link from 'next/link';
+import { recordedStageRunLabel, RUN_HIERARCHY_HELP } from '@/lib/runHierarchy';
+import type { AutoRebalanceStageResponse } from '@/types/api';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -130,12 +132,23 @@ export default function RunDetailPage() {
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const runId = Number(idParam);
   const hasValidRunId = Number.isInteger(runId) && runId > 0;
+  const [parentStages, setParentStages] = useState<{ portfolio: string; sequence: number; stages: AutoRebalanceStageResponse[] } | null>(null);
   const [run, setRun] = useState<RunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [usdInrRate, setUsdInrRate] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    if (run?.auto_rebalance_portfolio && run.auto_rebalance_sequence) {
+      void apiService.getAutoRebalanceHistoryDetail(run.auto_rebalance_portfolio, run.auto_rebalance_sequence)
+        .then(parent => { if (active) setParentStages({ portfolio: parent.portfolio, sequence: parent.sequence, stages: parent.stages }); })
+        .catch(() => { /* Keep the stage explicitly unknown when parent history is unavailable. */ });
+    }
+    return () => { active = false; };
+  }, [run?.auto_rebalance_portfolio, run?.auto_rebalance_sequence]);
 
   const generationRef = useRef(0);
   const wsClientRef = useRef<WSClient | null>(null);
@@ -309,6 +322,15 @@ export default function RunDetailPage() {
 
   return (
     <div className="mx-auto flex flex-col gap-6">
+      <nav aria-label="Run hierarchy" className="flex flex-wrap gap-2 text-sm">
+        <Link href={URLs.routes.console.runs()} className="text-blue-700 underline">All runs</Link>
+        {run.auto_rebalance_portfolio && run.auto_rebalance_sequence ? <>
+          <span aria-hidden="true">/</span>
+          <Link href={URLs.routes.console.autoRebalanceRunDetail(run.auto_rebalance_portfolio === 'india' ? 'zerodha' : 'indmoneyUs', run.auto_rebalance_sequence)} className="text-blue-700 underline">Workflow · {run.auto_rebalance_label || `${run.auto_rebalance_portfolio === 'india' ? 'India' : 'IndMoney US'} Run #${run.auto_rebalance_sequence}`}</Link>
+        </> : null}
+        <span aria-hidden="true">/</span><span aria-current="page">{run.auto_rebalance_portfolio ? recordedStageRunLabel(run.id, parentStages?.portfolio === run.auto_rebalance_portfolio && parentStages?.sequence === run.auto_rebalance_sequence ? parentStages.stages : []) : 'Run details'} · Run #{run.id}</span>
+      </nav>
+      <p className="text-xs text-gray-500">{RUN_HIERARCHY_HELP}</p>
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -447,7 +469,7 @@ export default function RunDetailPage() {
                     <span className="text-sm font-medium capitalize text-gray-950">
                       {job.provider}
                     </span>
-                    <span className="text-xs text-gray-400">{job.model}</span>
+                    <span className="text-xs text-gray-400">{job.model} · Provider job #{job.id} · Stage run #{run.id}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     {job.tokens_in || job.tokens_out ? (
