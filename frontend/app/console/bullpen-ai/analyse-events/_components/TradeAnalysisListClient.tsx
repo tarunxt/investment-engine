@@ -25,6 +25,7 @@ import type {
 } from "@/types/api";
 
 import {
+  formatConfidence,
   formatCurrency,
   formatDateTime,
   formatDuration,
@@ -132,7 +133,7 @@ function LearningCard({ title, items }: { title: string; items?: string[] }) {
             </p>
           ))
         ) : (
-          <p className="text-slate-500">No signals yet.</p>
+          <p className="text-slate-500">No observations in this category.</p>
         )}
       </CardContent>
     </Card>
@@ -472,6 +473,13 @@ export function TradeAnalysisListClient() {
         </Card>
       ) : null}
 
+      <section aria-label="Analysis scope and coverage" className="space-y-2 text-sm text-slate-700">
+        <p>Applied filters: {Object.entries(filters).map(([key, value]) => `${key}: ${value || "All"}`).join(" · ")}</p>
+        <p>Displayed records: {data ? data.items.length : "Unavailable"}. Outcome-label and fee coverage denominators: unavailable in this response. Aggregate totals do not establish complete coverage.</p>
+        {data ? <p>Displayed-record coverage only: known net P&amp;L {data.items.filter((item) => Number.isFinite(item.net_pnl)).length}/{data.items.length}; known fees {data.items.filter((item) => Number.isFinite(item.fees_total)).length}/{data.items.length}. These counts do not establish full-cohort coverage.</p> : null}
+        <p>Source and analysis versions: unavailable unless supplied in the raw evidence. Exit observations do not establish post-exit performance.</p>
+      </section>
+
       <Tabs defaultValue="trades" className="gap-6">
         <TabsList variant="line">
           <TabsTrigger value="trades">Trades</TabsTrigger>
@@ -569,7 +577,7 @@ export function TradeAnalysisListClient() {
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Reasoning</p>
-                      <p>Confidence: {formatPercent((item.confidence ?? 0) * 100)}</p>
+                      <p>Confidence: {formatConfidence(item.confidence)}</p>
                       <p>Risk score: {formatNumber(item.risk_score, 2)}</p>
                       <p>{item.short_reason || "No buy summary stored."}</p>
                       <p>{item.exit_reason ? `Exit reason: ${item.exit_reason}` : "Position still open or exit reason unavailable."}</p>
@@ -589,6 +597,10 @@ export function TradeAnalysisListClient() {
             </p>
           ) : (
             <>
+              <p className="text-sm leading-6 text-slate-700">
+                Descriptive observations only. Calibration, causal attribution and weight
+                changes are not evaluated. Stored recommendations are unvalidated hypotheses.
+              </p>
               <div className="grid gap-4 lg:grid-cols-2">
                 <LearningCard
                   title="Recommendations"
