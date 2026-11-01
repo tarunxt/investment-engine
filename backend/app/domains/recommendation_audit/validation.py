@@ -12,6 +12,7 @@ from pydantic import Field, field_validator
 
 from .deterministic import digest, number
 from .schemas import StrictModel
+from .retained_context import source_receipts, workflow_context
 
 VERSION = "investment-validation-v1"
 POLICY_FIELDS = (
@@ -170,6 +171,7 @@ def inventory(records, population=None):
                      "outcome_state": record.get("outcome_state") if record.get("outcome_state") in {"known", "unknown", "unresolved", "censored", "pending_maturity"} else "unknown",
                      "freshness": freshness_assessment(record),
                      "capture_coverage": capture_coverage(record),
+                     "retained_workflow_context": workflow_context(record),
                      "lineage_gaps": gaps, "lineage_checks_passed": not gaps,
                      "cost_coverage": cost_coverage(record.get("execution_costs") or {}),
                      "representation": "stored_metadata_projection_not_provider_bytes"})
@@ -273,6 +275,10 @@ def evidence_states(population, contract_reasons):
     for row in population["records"]:
         if row["population_state"] in {"failed", "partial"}:
             states.add(row["population_state"])
+        if row["retained_workflow_context"] and row["retained_workflow_context"]["workflow_status_displayed"] == "FAILED":
+            states.add("failed")
+        if row["retained_workflow_context"] and "PARTIAL" in row["retained_workflow_context"]["stage_states_displayed"].values():
+            states.add("partial")
         if row["capture_coverage"]["state"] in {"failed", "partial"}:
             states.add(row["capture_coverage"]["state"])
         if row["freshness"]["state"] == "stale":
@@ -295,6 +301,10 @@ def validation_report(data):
     for index, row in enumerate(population["records"]):
         if row["population_state"] in {"failed", "partial"}:
             reasons.append(f"population.record.{index}.{row['population_state']}")
+        if row["retained_workflow_context"] and row["retained_workflow_context"]["workflow_status_displayed"] == "FAILED":
+            reasons.append(f"population.record.{index}.historical_workflow_failed_not_investment_outcome")
+        if row["retained_workflow_context"] and "PARTIAL" in row["retained_workflow_context"]["stage_states_displayed"].values():
+            reasons.append(f"population.record.{index}.historical_workflow_stage_partial_not_investment_outcome")
         if row["capture_coverage"]["state"] in {"failed", "partial", "unknown"}:
             reasons.append(f"population.record.{index}.{row['capture_coverage']['reason']}")
         if row["freshness"]["state"] == "stale":
@@ -310,6 +320,7 @@ def validation_report(data):
             "corpus_hash": digest(data["records"]), "status": "not_established",
             "evidence_states": evidence_states(population, policy_gaps),
             "reasons": reasons, "population": population,
+            "retained_source_receipts": source_receipts(data.get("source_receipts") or []),
             "dimensions": {"workflow_completion": "not_assessed", "deterministic_correctness": "separate_replay",
                            "model_robustness": "not_established", "confidence_calibration": "not_established",
                            "economic_effectiveness": "not_established"}}

@@ -198,12 +198,14 @@ actions and all 665 scenario outputs match; additive diagnostic metadata and
 execution timestamps are reported separately. This is not a market or prompt/model
 robustness result. Private source and result files remain outside Git.
 
-R02/R03 received the bounded metadata transport in three chunks, but materialization
-stopped before decoding: received character lengths were 7,000 / 7,000 / 6,093,
-whereas the declared third chunk was 6,092 (20,092 total). No unverified metadata
-was decompressed, parsed, projected or supplied to the CLI. An exact retransmission
-is required. The author's expected counts are not represented as locally observed
-population evidence. Earlier local source absence and exclusions remain recorded.
+R02/R03 subsequently received and verified a corrected private metadata handoff.
+The local materialization length mismatch was resolved through an exact retransmission,
+not inferred source-byte correction. Compressed and decompressed checksums matched
+before inspection. The actual bounded inventory and evidence-only CLI ran on the
+transferred validation-input subset. Private source data, counts and execution receipts
+remain outside Git; none are packaged with this implementation. Earlier local source
+absence is an inventory checkpoint, superseded by the later verified private handoff.
+No complete decision denominator or historical investment outcome is inferred.
 
 CLI output publication now uses a temporary file in the output directory, flush/fsync
 and atomic replacement, with cleanup on failure. Missing, unreadable, malformed or
@@ -212,3 +214,18 @@ previous report byte-for-byte. That previous file is not a new successful result
 Source and output may not be the same file. Tests exercise permission failures,
 serialization failure and replacement failure without changing real permissions.
 No raw source values are included in CLI error messages.
+
+Retained workflow context is now a separate report projection: original displayed IST
+times, mechanically derived UTC times, source references, historical workflow status
+and retained stage name/status pairs remain distinct from decision completion,
+publication and inputs-available-at evidence. Derived conversions are checked without
+repairing originals. Unknown and In progress times remain unknown. Historical QUEUED
+labels do not imply a currently active worker, and historical COMPLETED labels are
+not investment outcomes. Saved PARTIAL stages remain present; absent stages are not
+automatically diagnosed as skipped or missing.
+
+Source receipts preserve exact-capture unknowns separately from verification-receipt
+times and build context. Declared original source hashes in the transferred receipt
+are not represented as independently verified original bytes. Source and output
+hashes, command, commit, bounded counts and private per-record gap evidence are
+retained locally for the coordinator; real retained metadata is never committed.
