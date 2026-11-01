@@ -115,23 +115,23 @@ export default function ZerodhaEventsPage() {
   const [overview, setOverview] = useState<ZerodhaPortfolioOverviewResponse | null>(null);
   const [analysis, setAnalysis] = useState<ZerodhaEventsAnalysis | null>(null);
   const [loadingPage, setLoadingPage] = useState(true);
+  const [analysisLoaded, setAnalysisLoaded] = useState(false);
   const [syncingPortfolio, setSyncingPortfolio] = useState(false);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const usdInrRate = useUsdInrRate();
 
   const loadStatusAndPortfolio = useCallback(async () => {
-    const [statusResponse, overviewResponse] = await Promise.all([
-      apiService.zerodhaStatus(),
-      apiService.zerodhaPortfolioOverview(),
+    await Promise.all([
+      apiService.zerodhaStatus().then(setStatus),
+      apiService.zerodhaPortfolioOverview().then(setOverview),
     ]);
-    setStatus(statusResponse);
-    setOverview(overviewResponse);
   }, []);
 
   const loadLatestAnalysis = useCallback(async () => {
     const response = await apiService.zerodhaEventsLatest();
     setAnalysis(response.analysis);
+    setAnalysisLoaded(true);
   }, []);
 
   const loadAnalysisJob = useCallback(async (jobId: number) => {
@@ -311,28 +311,34 @@ export default function ZerodhaEventsPage() {
               <Clock3 className="size-3.5" />
               Current Snapshot
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Latest Sync</div>
-                <div className="mt-1 text-sm text-white">{formatTs(latestSnapshot?.captured_at ?? status?.last_portfolio_sync_at)}</div>
+            {!overview ? (
+              <p role="status" className="mt-4 text-sm text-slate-200">
+                Snapshot availability unknown. Saved portfolio has not been loaded.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Latest Sync</div>
+                  <div className="mt-1 text-sm text-white">{formatTs(latestSnapshot?.captured_at ?? status?.last_portfolio_sync_at)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Snapshot Date</div>
+                  <div className="mt-1 text-sm text-white">{latestSnapshot?.snapshot_date ?? status?.last_portfolio_snapshot_date ?? '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Holdings Value</div>
+                  <div className="mt-1 text-sm text-white">{formatInr(latestSnapshot?.holdings_market_value)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Connection</div>
+                  <div className="mt-1 text-sm text-white">{status?.connected ? 'Connected' : 'Disconnected'}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Events Model</div>
+                  <div className="mt-1 text-sm text-white">{analysis ? `${analysis.provider}/${analysis.model}` : 'OpenAI gpt-4o-mini'}</div>
+                </div>
               </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Snapshot Date</div>
-                <div className="mt-1 text-sm text-white">{latestSnapshot?.snapshot_date ?? status?.last_portfolio_snapshot_date ?? '-'}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Holdings Value</div>
-                <div className="mt-1 text-sm text-white">{formatInr(latestSnapshot?.holdings_market_value)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Connection</div>
-                <div className="mt-1 text-sm text-white">{status?.connected ? 'Connected' : 'Disconnected'}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Events Model</div>
-                <div className="mt-1 text-sm text-white">{analysis ? `${analysis.provider}/${analysis.model}` : 'OpenAI gpt-4o-mini'}</div>
-              </div>
-            </div>
+            )}
 
             {topHoldings.length > 0 && (
               <div className="mt-5">
@@ -364,7 +370,7 @@ export default function ZerodhaEventsPage() {
         </div>
       )}
 
-      {!latestSnapshot && (
+      {overview && !latestSnapshot && (
         <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-8 text-sm text-slate-600 shadow-sm">
           <div className="font-semibold text-slate-900">No synced Zerodha portfolio found yet.</div>
           <p className="mt-2 max-w-2xl leading-7">
@@ -377,6 +383,12 @@ export default function ZerodhaEventsPage() {
               <ArrowRight className="ml-2 size-4" />
             </Link>
           </Button>
+        </div>
+      )}
+
+      {!analysisLoaded && !analysis && (
+        <div role="status" className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600">
+          Saved analysis availability unknown. The latest saved analysis has not been loaded.
         </div>
       )}
 
@@ -433,7 +445,7 @@ export default function ZerodhaEventsPage() {
         </>
       ) : null}
 
-      {!analysis && latestSnapshot && (
+      {analysisLoaded && !analysis && latestSnapshot && (
         <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-8 text-sm text-slate-600 shadow-sm">
           <div className="font-semibold text-slate-900">No events scan has been run yet.</div>
           <p className="mt-2 max-w-2xl leading-7">
