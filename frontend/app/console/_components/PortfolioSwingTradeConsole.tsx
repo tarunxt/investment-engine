@@ -80,6 +80,7 @@ export function PortfolioSwingTradeConsole({
 
         <div className="grid gap-6">
           <CreateJobCard
+            showEstimateReadiness
             promptAside={<SwingTradeInvestmentAmountField market={market} />}
             collapsible
             defaultExpanded={false}
