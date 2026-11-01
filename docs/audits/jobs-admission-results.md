@@ -133,3 +133,63 @@ capture-failure assertions against the real transition. A separate real reposito
 regression now asserts that even a stale COMPLETED-to-COMPLETED write cannot
 replace historical response, usage or metadata. This aligns the fixture with the
 new terminal-preservation contract instead of reopening terminal writes.
+
+## A9-R05 private projection/export minimization
+
+Local review-only change on top of cab3b8dc; no publication or release action.
+The supplied synthetic patch was decoded once, verified as 5287 bytes with SHA256
+18376fc601448c69d38814ed2868e616367ff80c7dd9bf74646b1836576389ea, then applied.
+The four parametrized JobResponse serializer failures now pass and their strict
+xfail decorator was removed only after executing them with --runxfail. Original
+acceptance assertions remain unchanged.
+
+JobResponse field serializers minimize error_message, export_error,
+request_context_json and runtime_metadata_json copies. Job list items use that
+same DTO; WebSocket initial/update payloads use the same narrow diagnostic-copy
+projection. Exact credential keys and labeled credential assignments are redacted
+recursively; token counts, financial token IDs, quantities, currencies, source
+IDs/hashes, unknown/null values and safe diagnostics remain. Prompt and response
+provenance are retained. Stored ORM evidence and execution_claim metadata are not
+rewritten; no repository, admission, cancellation, outbox or migration changes.
+This is not a guarantee to identify arbitrary unlabeled secret strings.
+
+export_tables minimizes credential-labeled cells in projected canonical/ancillary
+tables, preserving row count, headers, provenance and normalized source originals.
+Sheets prose/findings and returned error copies minimize labeled credentials.
+_error_text remains bounded original stored diagnostic text; public returns are
+sanitized separately, preserving storage semantics. Tests exercise the actual
+export task with credential, append and notification boundaries mocked.
+
+Corrected fifth-fixture scope: output_contracts/document.py::_separator requires
+more than one column. The supplied one-column token table produces
+unparsed_table_line errors, an unsafe normalization result and a failed export
+before append. Therefore its original success premise is unsupported; the old
+strict xfail and assertions remain intact as historical evidence, not relabeled
+as passed. Per coordinator instruction, parser denial is preserved: no parser
+expansion or policy decision. Separate actual-task acceptance asserts failed
+status and zero append for that exact input. A valid two-column ancillary token
+table exports a minimized copy to mocked append while financial cells, source
+bytes and provenance remain intact.
+
+Validation command: PYTHONPATH=backend python -m pytest -q
+backend/tests/test_audit9_export_minimization_evidence.py
+backend/tests/test_jobs_public_projection.py
+backend/tests/test_google_sheets_output_contracts.py
+backend/tests/test_google_sheets_tasks.py
+backend/tests/test_output_contracts.py
+backend/tests/test_jobs_admission_dispatch.py
+backend/tests/test_historical_partial_provenance.py
+backend/tests/test_recovery_containment.py
+
+No real provider/credential/append/notification call, stored-original rewrite,
+financial mutation, new resource, security setting, parser change, publication,
+merge, migration, relay activation or deployment. Exact private commit/patch is
+returned to the coordinator for independent review before any publication.
+
+Final private validation: 227 passed, 1 historical xfail, zero unexpected failures.
+The retained xfail is only the original one-column success assertion; the new
+explicit denial acceptance and valid two-column ancillary redaction acceptance
+both passed. The original fixture's assertions and retained xfail were not
+weakened or relabeled. No policy question remains: existing denial is required.
+The supplied acceptance source differs only by removal of the first strict xfail
+marker after its four parametrized serializer cases genuinely passed.

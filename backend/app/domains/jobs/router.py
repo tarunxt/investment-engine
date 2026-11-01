@@ -92,7 +92,10 @@ async def list_jobs(
         status=status_filter,
         search=q or None,
     )
-    return result.to_dict()
+    # List responses must use the same public DTO projection as detail/create.
+    payload = result.to_dict()
+    payload["items"] = [JobResponse.model_validate(job).model_dump(mode="json") for job in result.items]
+    return payload
 
 
 @router.get("/{job_id}", response_model=JobResponse)
