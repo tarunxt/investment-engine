@@ -1,0 +1,777 @@
+{
+  "baseline": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+  "gate": "No merge or deployment until coordinator supplies all 20 final heads and verified source-map/visual acceptance",
+  "source_review": "All four native review batches received; native reviewers viewed PDF pixels; integrator did not",
+  "scopes": [
+    {
+      "scope": "API-COST-PROVENANCE",
+      "branch": "visual/api-cost-provenance",
+      "pr": 1345,
+      "observed_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/api-cost-provenance.md",
+        "frontend/app/console/apis/CombinedLlmCostChart.tsx",
+        "frontend/app/console/apis/_components/LlmUsageBreakdown.tsx",
+        "frontend/app/console/apis/page.tsx",
+        "frontend/scripts/api-cost-provenance-playwright.mjs",
+        "frontend/tests/api-usage-failed-versus-empty.test.mjs"
+      ]
+    },
+    {
+      "scope": "AUTO-MODELS-SELECTION",
+      "branch": "visual/auto-models-selection",
+      "pr": null,
+      "observed_head": null,
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional"
+    },
+    {
+      "scope": "AUTO-INPUTS-EVIDENCE",
+      "branch": "visual/auto-inputs-evidence",
+      "pr": 1347,
+      "observed_head": "88fe01d8e370d8f901b1725089e950ce6e7a44a0",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-auto-inputs-evidence.md",
+        "frontend/app/console/dashboard/_components/InputEvidenceRows.tsx",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+        "frontend/tests/input-evidence-offline.mjs",
+        "frontend/tests/rebalance-stage-inputs.test.mjs"
+      ]
+    },
+    {
+      "scope": "AUTO-STAGES-HIERARCHY",
+      "branch": "codex/auto-stages-hierarchy",
+      "pr": null,
+      "observed_head": null,
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional"
+    },
+    {
+      "scope": "AUTO-DURATION-EXPLANATION",
+      "branch": "fix/auto-duration-explanation",
+      "pr": 1356,
+      "observed_head": "e0d47a7c7a452e1dbfb36ed3669546e8efe8a13a",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "frontend/app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
+        "frontend/scripts/duration-explanation-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "AUTO-PROMPT-PREVIEW",
+      "branch": "visual/auto-prompt-preview",
+      "pr": 1350,
+      "observed_head": "a89441ea3d0f9105c262285e3705aeeeec147085",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "frontend/app/console/automated-rebalance/_components/PromptTemplateDialog.tsx",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx"
+      ]
+    },
+    {
+      "scope": "DASH-LAYOUT-SUMMARY",
+      "branch": "visual/dash-layout-summary",
+      "pr": 1357,
+      "observed_head": "84c09d83f63f697758b2a8f473dab80eaf7d0f8e",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/DASH-LAYOUT-SUMMARY.md",
+        "docs/visual-audit/evidence/dash-layout-summary/overview-1180.png",
+        "docs/visual-audit/evidence/dash-layout-summary/overview-390.png",
+        "docs/visual-audit/evidence/dash-layout-summary/refresh-1180.png",
+        "docs/visual-audit/evidence/dash-layout-summary/refresh-390.png",
+        "docs/visual-audit/evidence/dash-layout-summary/results.json",
+        "docs/visual-audit/evidence/dash-layout-summary/sources-1180.png",
+        "docs/visual-audit/evidence/dash-layout-summary/sources-390.png",
+        "frontend/app/console/dashboard/DashboardPageClient.tsx",
+        "frontend/app/console/dashboard/_components/DashboardSkeletons.tsx",
+        "frontend/scripts/dashboard-freshness-playwright.mjs",
+        "frontend/tests/dashboard-portfolio-totals.test.mjs"
+      ]
+    },
+    {
+      "scope": "NAV-SIDEBAR-HIERARCHY",
+      "branch": "fix/nav-sidebar-hierarchy",
+      "pr": 1346,
+      "observed_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "artifacts/nav-sidebar-hierarchy/README.md",
+        "artifacts/nav-sidebar-hierarchy/browser-results.json",
+        "artifacts/nav-sidebar-hierarchy/sidebar-account-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-active-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-390-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-end-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-end-390-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-home-390-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-rebalance-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-rebalance-390-100.png",
+        "frontend/app/console/_components/NavigationDirectory.tsx",
+        "frontend/app/console/_components/SidebarNavigation.tsx",
+        "frontend/scripts/sidebar-space-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "US-SNAPSHOT-PROVENANCE",
+      "branch": "fix/us-snapshot-provenance",
+      "pr": 1352,
+      "observed_head": "c620715dacfbbb79a5b51310e3c750435af99e9e",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/US-SNAPSHOT-PROVENANCE.md",
+        "frontend/app/console/indmoney-us/_components/IndMoneyUsPasteCard.tsx",
+        "frontend/app/console/indmoney-us/_components/IndMoneyUsSnapshotsPanel.tsx",
+        "frontend/app/console/indmoney-us/page.tsx",
+        "frontend/tests/us-snapshot-provenance.test.mjs",
+        "frontend/tests/us-snapshot-rendering.test.mjs"
+      ]
+    },
+    {
+      "scope": "LLM-REPORT-COMPARISON",
+      "branch": "visual/llm-report-comparison",
+      "pr": 1351,
+      "observed_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-llm-report-comparison.md",
+        "frontend/app/console/llms/page.tsx",
+        "frontend/scripts/llm-report-offline-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "VISUAL-MAILS-HISTORY-HIERARCHY",
+      "branch": "visual/mails-history-hierarchy",
+      "pr": null,
+      "observed_head": null,
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional"
+    },
+    {
+      "scope": "USAGE-ERROR-CONSOLIDATION",
+      "branch": "visual/usage-error-consolidation",
+      "pr": 1353,
+      "observed_head": "78a162eaf8f5f341331b93f040f55afd6f2c00a8",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/usage-error-consolidation.md",
+        "frontend/scripts/cost-usage-recovery-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "PREFS-FORM-SCOPE",
+      "branch": "visual/prefs-form-scope",
+      "pr": 1349,
+      "observed_head": "27b7d205af10cd9d76065f7a94329680ce11599d",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/prefs-form-scope/README.md",
+        "docs/visual-audit/prefs-form-scope/after-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/after-375x812.png",
+        "docs/visual-audit/prefs-form-scope/before-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/before-375x812.png",
+        "frontend/app/console/profile/preferences/page.tsx",
+        "frontend/scripts/preferences-scope-offline-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "PROMPTS-LIST-DISCOVERY",
+      "branch": "visual/prompts-list-discovery",
+      "pr": null,
+      "observed_head": null,
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional"
+    },
+    {
+      "scope": "VISUAL-RUNS-STAGES-HIERARCHY",
+      "branch": "visual/runs-stages-hierarchy",
+      "pr": 1354,
+      "observed_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/runs-stages/README.md",
+        "docs/visual-audit/runs-stages/diagnostics-1180.png",
+        "docs/visual-audit/runs-stages/evidence-1180.png",
+        "docs/visual-audit/runs-stages/evidence-390.png",
+        "docs/visual-audit/runs-stages/summary-1180.png",
+        "frontend/app/console/runs/_components/HistoricalStageLedgerRow.tsx",
+        "frontend/app/console/runs/_components/PortfolioWorkflowHistoryCard.tsx",
+        "frontend/app/console/runs/page.tsx",
+        "frontend/tests/portfolio-stage-history.test.mjs",
+        "frontend/tests/runs-stages-browser.mjs"
+      ]
+    },
+    {
+      "scope": "RANKINGS-BROWSER-GROUPING",
+      "branch": "visual/rankings-browser-grouping",
+      "pr": null,
+      "observed_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/rankings-browser-grouping/README.md",
+        "docs/visual-audit/rankings-browser-grouping/empty-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/failed-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/filters-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/filters-narrow.png",
+        "docs/visual-audit/rankings-browser-grouping/loaded-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/loaded-narrow.png",
+        "docs/visual-audit/rankings-browser-grouping/loading-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/partial-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/results.json",
+        "docs/visual-audit/rankings-browser-grouping/stale-desktop.png",
+        "frontend/app/console/sports-rankings/page.tsx",
+        "frontend/scripts/rankings-browser-offline-playwright.mjs",
+        "frontend/tests/sports-rankings-summary.test.mjs"
+      ]
+    },
+    {
+      "scope": "SCANNER-TABLE-COMPARISON",
+      "branch": "visual/scanner-table-comparison",
+      "pr": 1348,
+      "observed_head": "ff7103e616cd868ce5a27dd33c5be4545a423c56",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/visual-audit/scanner-table-comparison.md",
+        "frontend/app/console/technical-setups/page.tsx",
+        "frontend/scripts/scanner-table-offline-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "BOTS-OVERVIEW-RUNTIME",
+      "branch": "visual/bots-overview-runtime",
+      "pr": null,
+      "observed_head": "a9ab619a76c46a4a6f4e33a6b1693743552b809d",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "docs/bots-overview-runtime.md",
+        "docs/evidence/bots-overview-runtime/before-loading-desktop.png",
+        "docs/evidence/bots-overview-runtime/empty-Capital.png",
+        "docs/evidence/bots-overview-runtime/empty-Positions.png",
+        "docs/evidence/bots-overview-runtime/empty-Runtime.png",
+        "docs/evidence/bots-overview-runtime/empty-narrow.png",
+        "docs/evidence/bots-overview-runtime/failed-Capital.png",
+        "docs/evidence/bots-overview-runtime/failed-Positions.png",
+        "docs/evidence/bots-overview-runtime/failed-Runtime.png",
+        "docs/evidence/bots-overview-runtime/failed-narrow.png",
+        "docs/evidence/bots-overview-runtime/loaded-Capital.png",
+        "docs/evidence/bots-overview-runtime/loaded-Positions.png",
+        "docs/evidence/bots-overview-runtime/loaded-Runtime.png",
+        "docs/evidence/bots-overview-runtime/loaded-narrow.png",
+        "docs/evidence/bots-overview-runtime/loading-Capital.png",
+        "docs/evidence/bots-overview-runtime/loading-Positions.png",
+        "docs/evidence/bots-overview-runtime/loading-Runtime.png",
+        "docs/evidence/bots-overview-runtime/loading-narrow.png",
+        "docs/evidence/bots-overview-runtime/partial-Capital.png",
+        "docs/evidence/bots-overview-runtime/partial-Positions.png",
+        "docs/evidence/bots-overview-runtime/partial-Runtime.png",
+        "docs/evidence/bots-overview-runtime/partial-narrow.png",
+        "docs/evidence/bots-overview-runtime/stale-Capital.png",
+        "docs/evidence/bots-overview-runtime/stale-Positions.png",
+        "docs/evidence/bots-overview-runtime/stale-Runtime.png",
+        "docs/evidence/bots-overview-runtime/stale-narrow.png",
+        "frontend/app/console/trading-bots/_components/TradingBotsOverviewPage.tsx",
+        "frontend/scripts/bots-overview-offline-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "INDIA-PORTFOLIO-HIERARCHY",
+      "branch": "visual/india-portfolio-hierarchy",
+      "pr": 1355,
+      "observed_head": "1e14a7f3f6a8ee116bbb5142634ac2fd96776131",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "provisional",
+      "files": [
+        "frontend/app/console/zerodha/_components/PortfolioSnapshotsPanel.tsx",
+        "frontend/app/console/zerodha/_components/ZerodhaConnectionGuide.tsx",
+        "frontend/app/console/zerodha/page.tsx",
+        "frontend/scripts/india-portfolio-hierarchy-playwright.mjs"
+      ]
+    },
+    {
+      "scope": "DB-RECOVERY-PRESERVATION",
+      "branch": null,
+      "pr": null,
+      "observed_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+      "final_head": null,
+      "source_visual_acceptance": "pending",
+      "status": "preserve-only; coordinator reports six tests passed",
+      "files": []
+    }
+  ],
+  "ci_observed": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "API-COST-PROVENANCE",
+        "head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267918563,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1163,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267918563/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267918563/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "AUTO-INPUTS-EVIDENCE",
+        "head": "88fe01d8e370d8f901b1725089e950ce6e7a44a0",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267209294,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1150,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267209294/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267209294/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "AUTO-DURATION-EXPLANATION",
+        "head": "e0d47a7c7a452e1dbfb36ed3669546e8efe8a13a",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267564101,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1160,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267564101/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267564101/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "AUTO-PROMPT-PREVIEW",
+        "head": "a89441ea3d0f9105c262285e3705aeeeec147085",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267373077,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1153,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267373077/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267373077/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "DASH-LAYOUT-SUMMARY",
+        "head": "84c09d83f63f697758b2a8f473dab80eaf7d0f8e",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267592404,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1161,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267592404/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267592404/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "NAV-SIDEBAR-HIERARCHY",
+        "head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267928495,
+                "name": "Pull Request Checks",
+                "status": "in_progress",
+                "conclusion": null,
+                "run_number": 1164,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267928495/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267928495/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "US-SNAPSHOT-PROVENANCE",
+        "head": "c620715dacfbbb79a5b51310e3c750435af99e9e",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267449413,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1155,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267449413/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267449413/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "LLM-REPORT-COMPARISON",
+        "head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267933291,
+                "name": "Pull Request Checks",
+                "status": "in_progress",
+                "conclusion": null,
+                "run_number": 1165,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267933291/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267933291/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "USAGE-ERROR-CONSOLIDATION",
+        "head": "78a162eaf8f5f341331b93f040f55afd6f2c00a8",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267459718,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1156,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267459718/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267459718/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "PREFS-FORM-SCOPE",
+        "head": "27b7d205af10cd9d76065f7a94329680ce11599d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267366016,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1152,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267366016/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267366016/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "VISUAL-RUNS-STAGES-HIERARCHY",
+        "head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41268047585,
+                "name": "Pull Request Checks",
+                "status": "in_progress",
+                "conclusion": null,
+                "run_number": 1167,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41268047585/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41268047585/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "RANKINGS-BROWSER-GROUPING",
+        "head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": []
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "SCANNER-TABLE-COMPARISON",
+        "head": "ff7103e616cd868ce5a27dd33c5be4545a423c56",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267340844,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "failure",
+                "run_number": 1151,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267340844/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267340844/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "BOTS-OVERVIEW-RUNTIME",
+        "head": "a9ab619a76c46a4a6f4e33a6b1693743552b809d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267862627,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1162,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267862627/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267862627/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "INDIA-PORTFOLIO-HIERARCHY",
+        "head": "1e14a7f3f6a8ee116bbb5142634ac2fd96776131",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267476352,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1159,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267476352/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267476352/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    }
+  ]
+}
