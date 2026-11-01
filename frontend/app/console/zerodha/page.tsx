@@ -752,6 +752,16 @@ export default function ZerodhaPage() {
     }
   };
 
+  // The initial status placeholder can delay mounting a bookmarked fragment target.
+  useEffect(() => {
+    if (loadingStatus) return;
+    const id = window.location.hash.slice(1);
+    if (id !== 'saved-portfolio-snapshots' && id !== 'portfolio-top') return;
+    const target = document.getElementById(id);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView();
+  }, [loadingStatus]);
+
   if (loadingStatus) {
     return (
       <div className="flex items-center gap-3 text-sm text-gray-500">
@@ -764,7 +774,7 @@ export default function ZerodhaPage() {
   return (
     <div className="mx-auto flex flex-col gap-6">
       {/* Header */}
-      <header className="flex flex-col gap-3">
+      <header id="portfolio-top" tabIndex={-1} className="flex scroll-mt-6 flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
         <div>
           <div className="inline-flex items-start gap-1">
             <h1 className="text-lg font-semibold tracking-tight text-gray-950">India Portfolio · Zerodha</h1>
@@ -877,6 +887,18 @@ export default function ZerodhaPage() {
         </div>
       ) : null}
 
+      <div className="border border-gray-200 bg-white px-4 py-3 text-sm">
+        <a
+          href="#saved-portfolio-snapshots"
+          className="font-semibold text-violet-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
+        >
+          View saved snapshot
+        </a>
+        <p className="mt-1 text-gray-600">
+          View any saved portfolio data without signing in to Zerodha. Reconnect separately to sync new provider data.
+        </p>
+      </div>
+
       {!status?.connected && (
         <details className="border border-gray-200 bg-white">
           <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
@@ -907,7 +929,15 @@ export default function ZerodhaPage() {
         </details>
       )}
 
-      <section aria-label="Saved portfolio snapshots">
+      <section
+        id="saved-portfolio-snapshots"
+        aria-label="Saved portfolio snapshots"
+        tabIndex={-1}
+        className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
+      >
+        <a href="#portfolio-top" className="mb-3 inline-block text-sm text-violet-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
+          Back to portfolio top
+        </a>
         {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
           <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
             <h2 className="font-semibold">Saved snapshots unavailable</h2>
