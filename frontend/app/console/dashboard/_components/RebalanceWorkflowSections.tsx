@@ -1,5 +1,7 @@
 "use client";
 
+import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunControl";
+
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
 import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
@@ -1594,10 +1596,15 @@ function getAutoRebalancePortfolioKey(portfolio: WorkflowPortfolio): AutoRebalan
 
 async function reserveAutoRebalanceRunMetadata(
   portfolio: WorkflowPortfolio,
+  analysisOnly = false,
 ): Promise<AutoRebalanceRunMetadata> {
   const reserved = await apiService.reserveAutoRebalanceRunLabel(
     getAutoRebalancePortfolioKey(portfolio),
+    analysisOnly,
   );
+  if (analysisOnly && (reserved.side_effect_policy?.version !== 1 || reserved.side_effect_policy.mode !== "analysis_only")) {
+    throw new Error("The server did not confirm notification and export suppression. This run has not started.");
+  }
   return {
     auto_rebalance_portfolio: reserved.portfolio,
     auto_rebalance_sequence: reserved.sequence,
@@ -4553,6 +4560,7 @@ export function RebalanceWorkflowSections({
   const [indMoneySyncOnly, setIndMoneySyncOnly] = useState(false);
   const [now, setNow] = useState(0);
   const [workflowPaused, setWorkflowPaused] = useState(false);
+  const [analysisOnlyRuns, setAnalysisOnlyRuns] = useState<Record<WorkflowPortfolio, boolean>>({ zerodha: false, indmoneyUs: false });
   const [specificMode, setSpecificMode] = useState<
     Record<WorkflowPortfolio, boolean>
   >(() => ({
@@ -6898,7 +6906,7 @@ ${zerodhaExecutionMode === "direct_market"
       let runMetadata: AutoRebalanceRunMetadata;
       let auditSession: AutoRebalanceAuditSession;
       try {
-        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio);
+        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, analysisOnlyRuns[portfolio]);
         assertAutoRebalanceRunMetadata(runMetadata, portfolio === "zerodha" ? "india" : "indmoney_us");
         auditSession = getAuditSession(portfolio, runMetadata);
       } catch (error) {
@@ -7588,6 +7596,7 @@ ${zerodhaExecutionMode === "direct_market"
         // Pauses, cancellations and genuine model failures also retain their
         // pending audit writes until bounded persistence attempts finish.
         await auditSession.drain();
+        setAnalysisOnlyRuns(current => ({ ...current, [portfolio]: false }));
         const wasCancelled = cancelRequestedRef.current;
         activeExecutionRefsRef.current = [];
         delete activeAutoRebalanceMetadataRef.current[portfolio];
@@ -7637,6 +7646,7 @@ ${zerodhaExecutionMode === "direct_market"
       }
     },
     [
+      analysisOnlyRuns,
       buildZerodhaPopupFeatures,
       completeSkippedStage,
       getAuditSession,
@@ -7968,6 +7978,8 @@ ${zerodhaExecutionMode === "direct_market"
                 </Button>
               )}
             </div>
+            <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
+              onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />
             <button
               type="button"
               disabled={isBusy}

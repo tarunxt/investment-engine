@@ -275,6 +275,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     auditResponseHashes: auditHasher,
     ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
     ...modules['@/lib/autoRebalanceAudit'], ...modules['@/lib/outputSourceJobs'], buildOutputSourceJobs: sourceHasher, apiService,
+    analysisOnlyRuns: { indmoneyUs: false }, setAnalysisOnlyRuns: noop,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,
     isWorkflowExecutingRef: { current: false }, activeExecutionRefsRef: { current: [] },
     activeAutoRebalanceMetadataRef: { current: {} }, cancelRequestedRef, pauseRequestedRef: { current: false },

@@ -58,7 +58,7 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
+function harness({ analysisOnly = false, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
@@ -120,7 +120,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     cancelRequestedRef: cancel, pauseRequestedRef: pause,
     setRunningPortfolio: set("running"), setWorkflowPaused: () => {},
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
-    setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
+    analysisOnlyRuns: { zerodha: analysisOnly, indmoneyUs: analysisOnly }, setAnalysisOnlyRuns: () => {}, setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
     onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
     retryWorkflowRead: (read) => read(),
@@ -342,6 +342,7 @@ test("actual workflow card renders pending and failed history independently of o
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
+      analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
@@ -530,3 +531,11 @@ test("final capture uses the retained workflow snapshot on repeated runs", async
     assert.equal(h.view.states.indmoneyUs.actionables.state, "completed");
   }
 });
+for (const analysisOnly of [false, true]) {
+  test(`actual workflow freezes analysis-only selection=${analysisOnly} in reservation`, async () => {
+    const reservations = [];
+    const h = harness({ analysisOnly, reserve: async (portfolio, flag) => { reservations.push({ portfolio, flag }); return metadata(); } });
+    await h.runWorkflow("zerodha");
+    assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
+  });
+}

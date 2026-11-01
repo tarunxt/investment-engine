@@ -791,7 +791,13 @@ export interface RunModelTarget {
 
 export type AutoRebalancePortfolioKey = 'india' | 'indmoney_us';
 
+export interface RunSideEffectPolicy {
+  version: 1;
+  mode: "existing_preferences" | "analysis_only";
+}
+
 export interface AutoRebalanceRunReservationResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -893,6 +899,7 @@ export interface AutoRebalanceRunDetailResponse {
 }
 
 export interface AutoRebalanceHistoryItemResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
