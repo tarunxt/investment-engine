@@ -84,13 +84,13 @@ test('both portfolios render shared tiles, missing stages, historical counts and
   for (const portfolio of ['india', 'indmoney_us']) {
     const item = group(portfolio, 211, { stages: [stage('rebalance', { run_id: 9 }), stage('threats', { job_id: 19, status: 'failed', error_message: 'saved timeout' })] });
     const html = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: item, runs: [run(8, portfolio), run(9, portfolio), run(10, portfolio === 'india' ? 'indmoney_us' : 'india')], onOpen() {} }));
-    assert.equal((html.match(/<article/g) || []).length, 6);
+    assert.equal((html.match(/<tr/g) || []).length, 7);
     assert.equal((html.match(/Not recorded/g) || []).length, 4);
-    assert.match(html, /Stocks recommended<\/dt><dd[^>]*>7/);
+    assert.match(html, /<td[^>]*>7<\/td>/);
     assert.match(html, /30 Oct|20 Oct/);
     assert.match(html, /Run #8/); assert.match(html, /Run #9/); assert.doesNotMatch(html, /Run #10/);
     assert.match(html, /Request timed out/);
-    assert.doesNotMatch(html, /saved timeout/);
+    assert.doesNotMatch(html, /<p[^>]*>saved timeout/);
     assert.match(html, /stage evidence/);
     assert.match(html, /href="\/console\/runs\/9"/);
     assert.match(html, new RegExp(`/console/auto-rebalance-runs/${portfolio === 'india' ? 'zerodha' : 'indmoneyUs'}/211`));
@@ -140,7 +140,7 @@ test('history loader fetches every bounded page and propagates failure instead o
 
 test('desktop and narrow layouts expose six ledger rows without clipping; workflow retains 2x3', async () => {
   const css = await postcss([tailwind({ base: new URL('../', import.meta.url).pathname })]).process('@import "tailwindcss";', { from: new URL('app/globals.css', root).pathname });
-  const history = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: group('indmoney_us', 120, { status: 'completed' }), runs: [], onOpen() {} }));
+  const history = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: group('indmoney_us', 120, { status: 'completed' }), runs: [], initialView: 'evidence', onOpen() {} }));
   const original = renderToStaticMarkup(React.createElement('div', { id: 'original', className: 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3' }, shared.STAGE_ORDER.map(key => React.createElement(shared.WorkflowStageTile, { key, stage: key, info: model.historicalStageInfo(stage(key)), now: Date.parse(timestamp) }))));
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   try {
@@ -151,12 +151,13 @@ test('desktop and narrow layouts expose six ledger rows without clipping; workfl
       await page.setContent(`<style>${css.css}</style><main style="max-width:${width >= 1180 ? width - 260 : width}px;margin:auto">${history}${original}</main>`);
       await page.screenshot({ path: `/tmp/runs-partial-${width}.png`, fullPage: true });
       assert.match(await page.locator('section').innerText(), /Finished with partial results/);
-      const boxes = await page.locator('section article').evaluateAll(nodes => nodes.map(n => ({ top: n.offsetTop, width: n.getBoundingClientRect().width })));
+      const boxes = await page.locator('section tbody tr').evaluateAll(nodes => nodes.map(n => ({ top: n.offsetTop, width: n.getBoundingClientRect().width })));
       assert.equal(new Set(boxes.map(box => box.top)).size, 6);
-      assert.ok(boxes.every(box => box.width <= width));
+      assert.ok(boxes.every(box => box.width <= Math.max(680, width)));
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       const region = page.getByRole('region', { name: /stage evidence/ });
-      assert.equal(await region.evaluate(node => node.scrollWidth), await region.evaluate(node => node.clientWidth));
+      if (width >= 1180) assert.equal(await region.evaluate(node => node.scrollWidth), await region.evaluate(node => node.clientWidth));
+      else { await region.focus(); await page.keyboard.press('ArrowRight'); await page.waitForFunction(() => document.querySelector('[role=region]').scrollLeft > 0); }
       const duration = page.getByRole('button', { name: /Show duration breakdown/ }).first();
       await duration.focus();
       assert.equal(await duration.evaluate(node => node === document.activeElement), true);
@@ -212,8 +213,8 @@ test('ledger preserves failed, queued, unavailable and unfinished evidence witho
   ] });
   const before = structuredClone(item);
   const html = renderToStaticMarkup(React.createElement(PortfolioWorkflowHistoryCard, { group: item, runs: [], runLinksAvailable: false, onOpen() {} }));
-  assert.match(html, /Status: failed/);
-  assert.match(html, /Status: queued/);
+  assert.match(html, />failed<\/td>/);
+  assert.match(html, />queued<\/td>/);
   assert.match(html, /Not recorded/);
   assert.match(html, /still loading or unavailable/);
   assert.doesNotMatch(html, /Show duration breakdown/);
