@@ -40,6 +40,7 @@ import {
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
+import { NavigationDirectory } from './NavigationDirectory';
 import { SidebarThemeToggle } from './SidebarThemeToggle';
 import {
     ACCOUNT_ACTIONS,
@@ -814,6 +815,7 @@ export function SidebarNavigation({
 }: SidebarNavigationProps) {
     const navigationRef = useRef<HTMLElement>(null);
     const [isReordering, setIsReordering] = useState(false);
+    const [directoryOpen, setDirectoryOpen] = useState(false);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
     const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
@@ -1078,6 +1080,7 @@ export function SidebarNavigation({
                         Navigation
                     </span>
                     <div className="flex items-center gap-2">
+                        {!isReordering ? <button type="button" onClick={() => setDirectoryOpen(true)} aria-haspopup="dialog" className="rounded text-[11px] font-medium text-sidebar-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">All destinations</button> : null}
                         {isReordering ? (
                             <button
                                 type="button"
@@ -1154,6 +1157,8 @@ export function SidebarNavigation({
                     user={user}
                 />
             </div>
+
+            <NavigationDirectory open={directoryOpen} pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} />
 
             {contextMenu ? (
                 <>

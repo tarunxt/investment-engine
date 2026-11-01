@@ -49,7 +49,7 @@ try {
     const box=await nav.boundingBox();
     assert.ok(box.height>height/zoom*.60,`navigation should occupy most height: ${box.height}`);
     measurements.push({width,height,zoom,navigationHeight:box.height,viewportHeight:height/zoom});
-    await page.screenshot({path:path.join(output,`sidebar-home-${width}-${Math.round(zoom*100)}.png`)});
+    await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-home-${width}-${Math.round(zoom*100)}.png`)});
     const roots=await page.evaluate(()=>window.sections.flatMap(s=>s.entries.map(e=>({name:e.name,href:e.href,group:e.type==='group',children:e.children?.map(c=>({name:c.name,href:c.href}))}))));
     const groups=await page.evaluate(()=>window.sections.map(s=>s.label));
     for(const label of groups)assert.equal(await nav.getByRole('heading',{name:label,exact:true}).count(),1);
@@ -68,6 +68,41 @@ try {
         await target.focus();await page.keyboard.press(' ');assert.equal(await target.getAttribute('aria-expanded'),'false');
       }
     }
+
+    const directoryButton=page.getByRole('button',{name:'All destinations',exact:true});
+    const portfolios=nav.getByRole('button',{name:'Portfolios',exact:true});
+    await portfolios.click();
+    await directoryButton.click();
+    const directory=page.getByRole('dialog',{name:'All destinations'});
+    await directory.waitFor();
+    const expected=await page.evaluate(()=>[...window.sections.flatMap(s=>s.entries.flatMap(e=>e.type==='group'?e.children:[e])),...window.account].map(e=>e.href));
+    assert.equal(await directory.locator('tbody tr').count(),expected.length);
+    for(const href of expected)assert.equal(await directory.locator(`a[href="${href}"]`).count(),1);
+    assert.equal(await directory.locator('a[href="/console/google-sheets"]').count(),0);
+    assert.ok(await directory.evaluate(el=>el.scrollWidth<=el.clientWidth),'directory must not clip horizontally');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-directory-${width}-${Math.round(zoom*100)}.png`)});
+    const firstDirectoryControl=directory.getByRole('button',{name:'Primary navigation',exact:true});
+    await firstDirectoryControl.focus();await page.keyboard.press('Shift+Tab');
+    assert.ok(await directory.locator('a').last().evaluate(el=>el===document.activeElement),'native modal contains keyboard focus');
+    await directory.locator('a').last().scrollIntoViewIfNeeded();
+    await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-directory-end-${width}-${Math.round(zoom*100)}.png`)});
+    await page.keyboard.press('Escape');await directory.waitFor({state:'hidden'});
+    assert.ok(await directoryButton.evaluate(el=>el===document.activeElement),'Escape restores trigger focus');
+    assert.equal(await portfolios.getAttribute('aria-expanded'),'true','directory preserves group state');
+    await directoryButton.click();await directory.getByRole('button',{name:'Primary navigation',exact:true}).click();
+    await directory.waitFor({state:'hidden'});
+    await directoryButton.click();await directory.getByRole('button',{name:'Return to primary navigation',exact:true}).click();
+    await directory.waitFor({state:'hidden'});
+    await directoryButton.click();
+    await directory.locator('a[href="/console/automated-rebalance"]').focus();await page.keyboard.press('Enter');
+    await directory.waitFor({state:'hidden'});
+    if(await open.isVisible())await open.click();
+    assert.equal(await nav.locator('[aria-current="page"]').getAttribute('href'),'/console/automated-rebalance');
+    await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-rebalance-${width}-${Math.round(zoom*100)}.png`)});
+    await page.goBack();
+    await page.goForward();
+    assert.equal(await nav.locator('[aria-current="page"]').getAttribute('href'),'/console/automated-rebalance');
     // Navigate to a destination low in the list; route transition reveals and highlights it.
     await page.evaluate(()=>{history.pushState({},'','/console/apis');window.dispatchEvent(new Event('popstate'))});
     const active=nav.locator('[aria-current="page"]');await active.waitFor();
@@ -84,7 +119,7 @@ try {
     assert.equal(await activeParent.getAttribute('aria-expanded'),'false');
     assert.equal(await activeParent.evaluate(el=>el.classList.contains('bg-sidebar-accent')),true,'collapsed active group retains route cue');
     await page.keyboard.press('Enter');
-    await page.screenshot({path:path.join(output,`sidebar-active-${width}-${Math.round(zoom*100)}.png`)});
+    await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-active-${width}-${Math.round(zoom*100)}.png`)});
 
     await rootRow.click();
     if(await open.isVisible())await open.click();
@@ -103,8 +138,8 @@ try {
     await page.keyboard.press('Escape');assert.equal(await panel.isVisible(),false);assert.ok(await summary.evaluate(el=>el===document.activeElement));
     assert.deepEqual(await page.evaluate(()=>({...localStorage})),storageBefore,'layout interactions must preserve preferences');
     assert.equal(await page.evaluate(()=>window.profileWrites+window.logoutCalls),0);
-    await page.screenshot({path:path.join(output,`sidebar-${width}-${Math.round(zoom*100)}.png`)});
-    await summary.click();await panel.waitFor();await page.screenshot({path:path.join(output,`sidebar-account-${width}-${Math.round(zoom*100)}.png`)});
+    await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-${width}-${Math.round(zoom*100)}.png`)});
+    await summary.click();await panel.waitFor();await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-account-${width}-${Math.round(zoom*100)}.png`)});
     await page.getByRole('heading',{name:'Navigation layout verification'}).click({force:true});assert.equal(await panel.isVisible(),false);
     await summary.focus();await page.keyboard.press('Enter');await panel.waitFor();
     const preferences=panel.locator('a[href="/console/profile/preferences"]');
@@ -126,5 +161,5 @@ try {
     assert.ok(reachedAccount,'Tab must reach account controls');
   }
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log(JSON.stringify({result:'PASS',measurements,screenshots:output,checks:'all root destinations and named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, zero profile/logout/external requests'},null,2));
+  console.log(JSON.stringify({result:'PASS',measurements,screenshots:output,checks:'all root/child/directory destinations, two-column directory and return controls, modal focus containment/Escape restoration, group-state preservation, back/forward, matched row heights, single active fill, named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, zero profile/logout/external requests'},null,2));
 }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true})}

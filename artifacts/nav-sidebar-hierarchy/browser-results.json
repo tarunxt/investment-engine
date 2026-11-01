@@ -38,5 +38,5 @@
     }
   ],
   "screenshots": "/tmp/credx-sidebar-screenshots",
-  "checks": "all root destinations and named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, zero profile/logout/external requests"
+  "checks": "all root/child/directory destinations, two-column directory and return controls, modal focus containment/Escape restoration, group-state preservation, back/forward, matched row heights, single active fill, named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, zero profile/logout/external requests"
 }
