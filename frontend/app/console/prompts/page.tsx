@@ -985,12 +985,12 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
             <div className="mt-2 rounded-lg bg-slate-950 p-4 text-slate-100" role="region" aria-label={`${prompt.name} preview`}>
               <p className="mb-2 text-xs font-medium text-violet-200">{truncated ? 'Preview · truncated' : 'Preview'}</p>
               <p className="whitespace-pre-wrap break-words text-xs leading-5">{excerpt}{truncated ? '…' : ''}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="secondary" className="h-auto whitespace-normal py-2" onClick={() => {
+              <div className="mt-3 flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:flex-wrap">
+                <Button variant="secondary" className="h-auto min-w-0 max-w-full shrink whitespace-normal break-words py-2" onClick={() => {
                   if (previewRef.current) previewRef.current.open = false;
                   previewTriggerRef.current?.focus({ preventScroll: true });
                 }}>Return to Prompt catalogue</Button>
-                {onEdit && <Button variant="secondary" className="h-auto whitespace-normal py-2" onClick={() => onEdit(prompt)}>Open full prompt</Button>}
+                {onEdit && <Button variant="secondary" className="h-auto min-w-0 max-w-full shrink whitespace-normal break-words py-2" onClick={() => onEdit(prompt)}>Open full prompt</Button>}
               </div>
             </div>
           </details>
