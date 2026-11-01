@@ -79,6 +79,8 @@ import {
 
 import {
   dataAge,
+  SnapshotAvailability,
+  snapshotAvailability,
   type TotalDataStatusInfo,
 } from "./_components/TotalDataStatus";
 
@@ -684,14 +686,11 @@ function PortfolioCommandSummary({
         {status.pending ? "Refreshing… · " : ""}
         {status.complete
           ? "All components available"
-          : "Incomplete · Missing portfolio or cash"}
+          : status.failed || status.pending
+            ? "Incomplete · Portfolio or cash unverified"
+            : "Incomplete · Missing portfolio or cash"}
       </p>
-      {status.failed ? (
-        <p className="font-medium text-amber-900">
-          Refresh failed ·{" "}
-          {status.capturedAt ? "Last available data" : "No snapshot available"}
-        </p>
-      ) : null}
+      <SnapshotAvailability info={status} />
     </div>
   );
   const saved = (row: (typeof rows)[number]) => (
@@ -865,18 +864,7 @@ function PortfolioCommandSummary({
                         </div>
                       </th>
                       <td className="text-xs leading-5">
-                        {status.failed
-                          ? "Refresh failed"
-                          : status.pending
-                            ? "Refreshing…"
-                            : "Saved read"}
-                        {status.failed ? (
-                          <p>
-                            {status.capturedAt
-                              ? "Last available data"
-                              : "No snapshot available"}
-                          </p>
-                        ) : null}
+                        <SnapshotAvailability info={status} />
                       </td>
                       <td>
                         <p className="text-xs leading-5">
@@ -1707,7 +1695,10 @@ function DashboardPageForUser({
     null;
   const totalStatuses: Record<CommandTileInfoKey, TotalDataStatusInfo> = {
     zerodha: {
-      source: `Zerodha · ${indiaSnapshot?.source ?? "No stored snapshot"}`,
+      source: indiaSnapshot?.source ? `Zerodha · ${indiaSnapshot.source}` : "Zerodha",
+      snapshotKnown: indiaSnapshot != null,
+      historyHref: "/console/zerodha#saved-portfolio-snapshots",
+      historyLabel: "View India saved portfolio history",
       capturedAt: indiaSnapshot?.captured_at,
       cachedAt: cacheTimes.zerodhaOverview,
       complete: indiaComplete,
@@ -1715,7 +1706,10 @@ function DashboardPageForUser({
       failed: Boolean(errorsBySection.zerodhaOverview),
     },
     indmoney: {
-      source: `INDmoney · ${usSnapshot?.source ?? "No imported snapshot"}`,
+      source: usSnapshot?.source ? `INDmoney · ${usSnapshot.source}` : "INDmoney",
+      snapshotKnown: usSnapshot != null,
+      historyHref: "/console/indmoney-us#us-snapshot-panel-saved",
+      historyLabel: "View US saved portfolio history",
       capturedAt: usSnapshot?.captured_at,
       cachedAt: cacheTimes.indmoneyOverview,
       complete: usComplete,
@@ -1726,7 +1720,8 @@ function DashboardPageForUser({
       ),
     },
     bullpen: {
-      source: `Bullpen · ${dashboard.bullpenPositions?.positionsSource ?? "No wallet snapshot"}`,
+      source: dashboard.bullpenPositions?.positionsSource ? `Bullpen · ${dashboard.bullpenPositions.positionsSource}` : "Bullpen",
+      snapshotKnown: dashboard.bullpenPositions != null,
       capturedAt: bullpenUpdatedAt,
       cachedAt: cacheTimes.bullpenPositions,
       complete:
@@ -1948,7 +1943,7 @@ function DashboardPageForUser({
                 label: "Snapshot",
                 value: indiaSnapshot
                   ? formatSnapshotDate(indiaSnapshot.snapshot_date)
-                  : "Missing",
+                  : snapshotAvailability(totalStatuses.zerodha),
                 detail: indiaSnapshot
                   ? formatSnapshotTime(indiaSnapshot.captured_at)
                   : undefined,
@@ -1982,7 +1977,7 @@ function DashboardPageForUser({
                 value: formatInr(zerodhaAvailableMargin),
                 detail: indiaSnapshot
                   ? `Captured ${formatTs(indiaSnapshot.captured_at)}`
-                  : "No synced snapshot yet",
+                  : snapshotAvailability(totalStatuses.zerodha),
               },
             ]}
             topHoldings={buildIndiaTopHoldings(dashboard.zerodhaOverview)}
@@ -2034,7 +2029,7 @@ function DashboardPageForUser({
             statusPills={[
               {
                 label: "Parse",
-                value: usSnapshot?.parse_status ?? "Missing",
+                value: usSnapshot?.parse_status ?? "Unverified",
                 tone:
                   usSnapshot?.parse_status?.toLowerCase() === "parsed"
                     ? "success"
@@ -2044,7 +2039,7 @@ function DashboardPageForUser({
                 label: "Snapshot",
                 value: usSnapshot
                   ? formatSnapshotDate(usSnapshot.snapshot_date)
-                  : "Missing",
+                  : snapshotAvailability(totalStatuses.indmoney),
                 detail: usSnapshot
                   ? formatSnapshotTime(usSnapshot.captured_at)
                   : undefined,
@@ -2087,7 +2082,7 @@ function DashboardPageForUser({
                 value: formatUsdValueAsInr(indmoneyAvailableFunds, usdInrRate),
                 detail: usSnapshot
                   ? `Captured ${formatTs(usSnapshot.captured_at)}`
-                  : "No pasted snapshot yet",
+                  : snapshotAvailability(totalStatuses.indmoney),
               },
             ]}
             topHoldings={buildUsTopHoldings(
