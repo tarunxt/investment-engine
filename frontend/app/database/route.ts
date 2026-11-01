@@ -1,10 +1,10 @@
-import { proxyDatabaseDestination } from "@/lib/databaseViewerProxy";
+import { protectedDatabaseDestination } from "@/lib/databaseViewerRoute";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function forward(request: Request) {
-  return proxyDatabaseDestination(request);
+  return protectedDatabaseDestination(request);
 }
 
 export const GET = forward;

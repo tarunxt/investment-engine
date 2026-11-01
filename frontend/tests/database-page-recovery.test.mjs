@@ -51,17 +51,17 @@ test('loading awaits the viewer; successful and confirmed-empty content stay dis
   assert.equal(await empty.text(), '<p>No tables found</p>');
 });
 
-test('authentication, redirects, cookies, query and access denials pass through', async () => {
+test('viewer access denials and query pass through; cookies are suppressed and redirects remain protected', async () => {
   for (const status of [302, 401, 403]) {
     const response = await proxyDatabaseDestination(request(), async (url, init) => {
       assert.equal(url.search, '?view=tables');
-      assert.equal(init.headers.get('cookie'), 'viewer=session');
+      assert.equal(init.headers.get('cookie'), null);
       assert.equal(init.redirect, 'manual');
-      return new Response('Viewer authentication', { status, headers: { location: '/database/login', 'set-cookie': 'viewer=session; HttpOnly' } });
+      return new Response('Viewer authentication', { status, headers: { location: '/login', 'set-cookie': 'viewer=session; HttpOnly' } });
     });
     assert.equal(response.status, status);
     assert.equal(response.headers.get('location'), '/database/login');
-    assert.equal(response.headers.get('set-cookie'), 'viewer=session; HttpOnly');
+    assert.equal(response.headers.get('set-cookie'), null);
     assert.equal(await response.text(), 'Viewer authentication');
   }
 });
@@ -72,10 +72,10 @@ test('HEAD failure has no body and retains failure status', async () => {
   assert.equal(await response.text(), '');
 });
 
-test('the exact destination reaches the handler while child routes keep their rewrite', async () => {
+test('the exact destination reaches the protected handler and child rewrite is removed', async () => {
   const config = await readFile(new URL('../next.config.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(config, /source: "\/database"/);
-  assert.match(config, /source: "\/database\/:path\+"/);
+  assert.doesNotMatch(config, /source: "\/database\/:path\+"/);
   const route = await readFile(new URL('../app/database/route.ts', import.meta.url), 'utf8');
-  assert.match(route, /return proxyDatabaseDestination\(request\)/);
+  assert.match(route, /return protectedDatabaseDestination\(request\)/);
 });

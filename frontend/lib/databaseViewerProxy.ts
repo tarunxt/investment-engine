@@ -23,13 +23,24 @@ export function databaseFailurePage(reference: string) {
 export async function proxyDatabaseDestination(request: Request, fetcher: typeof fetch = fetch) {
   const reference = `DB-${randomUUID()}`;
   const origin = (process.env.DATABASE_VIEWER_INTERNAL_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
-  const headers = forwardingHeaders(request.headers);
+  // Application credentials and identity headers never cross into the viewer.
+  const headers = new Headers();
+  for (const name of ['accept', 'accept-language']) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
   if (!headers.has("x-forwarded-host")) headers.set("x-forwarded-host", new URL(request.url).host);
   if (!headers.has("x-forwarded-proto")) headers.set("x-forwarded-proto", new URL(request.url).protocol.replace(":", ""));
   // Match the existing rewrite: viewer authentication remains upstream-owned.
   const readOnly = request.method === "GET" || request.method === "HEAD";
   try {
     const destination = new URL(origin);
+    const path = new URL(request.url).pathname;
+    if (path !== '/database' && !path.startsWith('/database/')) return new Response(null, { status: 400 });
+    const suffix = path.slice('/database'.length);
+    // Reject ambiguous encoded paths, backslashes and dot segments before URL resolution.
+    if (/[\\%]/.test(suffix) || suffix.split('/').some(part => part === '.' || part === '..')) return new Response(null, { status: 400 });
+    destination.pathname = destination.pathname.replace(/\/$/, '') + (suffix || '/');
     destination.search = new URL(request.url).search;
     const response = await fetcher(destination, {
       method: request.method,
@@ -37,11 +48,18 @@ export async function proxyDatabaseDestination(request: Request, fetcher: typeof
       body: readOnly ? undefined : await request.arrayBuffer(),
       redirect: "manual",
       cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(10_000)]),
     });
     if (response.status < 500) {
       const responseHeaders = forwardingHeaders(response.headers);
       // fetch decompresses response bodies; do not forward stale wire metadata.
+      responseHeaders.delete("set-cookie");
+      const location = responseHeaders.get('location');
+      if (location) {
+        const redirect = new URL(location, destination);
+        if (redirect.origin !== destination.origin) return new Response(null, { status: 502, headers: { 'cache-control': 'no-store' } });
+        responseHeaders.set('location', '/database' + redirect.pathname + redirect.search);
+      }
       responseHeaders.delete("content-encoding");
       responseHeaders.delete("content-length");
       responseHeaders.set("cache-control", "no-store");
