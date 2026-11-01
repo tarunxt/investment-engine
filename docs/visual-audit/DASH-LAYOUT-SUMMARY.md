@@ -44,7 +44,7 @@ Shared-file conflict candidates: `frontend/app/console/dashboard/DashboardPageCl
 
 The specific mapped table views supersede the earlier generic three-card interpretation. Overview now has Portfolio / Portfolio + cash / Snapshot age; Sources and freshness has Source / Refresh / Captured snapshot text / Age / INR; Refresh behaviour is a six-fact description list. The existing source controls, data, masking, omission guards and refresh handlers remain. Table overflow is local, focusable and keyboard scrollable at narrow widths. Loaded and unavailable rows share the same structure. Source text is no longer duplicated within an overview row. No report-only navigation, labels or example values are present.
 
-The local follow-up renders were inspected by this worker against the reviewer's description. Independent comparison against native PDF pixels remains for the visual reviewer and sole integrator. Live authenticated navigation remains untested.
+The local follow-up renders were inspected by this worker against the reviewer's description. The parent subsequently relayed a native actual Dashboard pixel-review pass for scoped hierarchy and all 39 mapped items; final integration remains with the sole integrator. Live authenticated navigation remains untested.
 
 ### Complete preservation map checklist
 
@@ -99,3 +99,17 @@ All values below are runtime-driven; captured sample ages/amounts are never hard
 Scoped ESLint, TypeScript and 19 focused regression tests pass. The expanded offline browser harness exercises all three views for every primary loading/success/empty/failed/partial/stale/FX state at both 1180×757 and 390×757, plus six deferred report states (14 states total). It verifies DPR 1, visual viewport scale 1, no document overflow, reachable rightmost table columns, keyboard scrolling, non-overlapping tabs and currency notice, arrow-key tabs, all three source dialogs/focus return, source refresh event/read semantics, repeated keyboard methodology open/close and persisted masking selection. No real provider/sync actions run.
 
 Updated committed evidence is under `docs/visual-audit/evidence/dash-layout-summary/`. The six principal screenshots are native viewport captures: `overview-1180.png`, `sources-1180.png`, `refresh-1180.png` and corresponding `*-390.png` files. Additional primary-state screenshots and `results.json` support availability readback. Full local evidence remains in `/tmp/dash-native-accepted/`.
+
+## Baseline masking exception verified after native screenshot review
+
+The total-visibility eye is **summary-scoped, not whole-page masking**. Native review observed an unmasked India amount in the retained history chart while the summary was masked. This is unchanged baseline behavior, not a new chart exposure introduced by this task.
+
+Exact source evidence against baseline `1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b`:
+
+- `DashboardPageClient.tsx` baseline lines 603–615 declare `showInvestmentNumbers` inside `PortfolioCommandSummary` and apply it only through that function's `formatPrivateInvestmentValue`. Baseline lines 700–724 bind the eye and combined amount to that local state. Its source-component Portfolio/Cash amounts use the same formatter.
+- Baseline lines 1804–1807 render the separate `PortfolioCommandChart` with only `userId` and `options`; no masking value or callback crosses into the chart. Current lines 1915–1918 retain exactly those chart props. Moving the chart into a separately named history section changed layout, not masking.
+- `PortfolioCommandChart.tsx` has the identical Git blob at baseline and implementation head `7e3831ec3f64a4b3d49f230c2ad105c5c12d3607`: `262e0afc64a44df82fb3a4cc119eb683ab6a700d`. `git diff 1089c6f1 HEAD -- frontend/app/console/dashboard/_components/PortfolioCommandChart.tsx` is empty. Both insufficient-history and populated-history branches render `formatInr(selectedOption.currentValue)` directly at lines 290 and 364. History change/hover values are also independent of the summary eye.
+- Current `PortfolioCommandSummary` lines 583–594 retain the same false initial state and formatter-based masking. The consolidated source totals and source Portfolio/Cash components and combined total still use it. Source timestamps and warnings are readable independent of the eye.
+- The removed duplicate top overview was itself unmasked at baseline; market-detail cards also have independent unmasked financial values. This task makes no whole-page privacy guarantee. Expanding masking to chart/history/market cards requires separate scope and is not part of this preservation change.
+
+A safe fixture regression verifies the actual rendered scope: summary amount contains asterisks and no digits when hidden; Show reveals its synthetic India amount; Hide masks it again; the retained history chart continues displaying the same synthetic India amount throughout. Native 1180×757 screenshots are `masking-scope-summary-hidden-1180.png` and `masking-scope-summary-shown-1180.png`. No financial/chart implementation was changed in response to this observation.

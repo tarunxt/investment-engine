@@ -204,9 +204,23 @@ try {
           .count(),
         1,
       );
+      // Baseline scope: the eye controls summary values only; the independent history chart is unmasked.
+      const summaryBalance = page.getByRole("region", {name:"Portfolio overview table", exact:true}).locator("tbody tr").first().locator("td p").first();
+      const historyBalance = page.getByRole("region", {name:"Portfolio history", exact:true}).getByText("₹1,28,000",{exact:true});
+      assert.match(await summaryBalance.innerText(), /\*/);
+      assert.doesNotMatch(await summaryBalance.innerText(), /[0-9]/);
+      assert.equal(await historyBalance.count(),1);
+      await page.screenshot({path:path.join(out,"masking-scope-summary-hidden-1180.png"),fullPage:false});
       await page
         .getByRole("button", { name: "Show investment numbers", exact: true })
         .click();
+      assert.equal(await summaryBalance.innerText(), "₹1,28,000");
+      assert.equal(await historyBalance.count(),1);
+      await page.screenshot({path:path.join(out,"masking-scope-summary-shown-1180.png"),fullPage:false});
+      await page.getByRole("button",{name:"Hide investment numbers",exact:true}).click();
+      assert.doesNotMatch(await summaryBalance.innerText(), /[0-9]/);
+      assert.equal(await historyBalance.count(),1);
+      await page.getByRole("button",{name:"Show investment numbers",exact:true}).click();
       await page
         .getByRole("tab", { name: "Sources and freshness", exact: true })
         .click();
