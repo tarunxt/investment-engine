@@ -84,3 +84,28 @@ merge SHA, workflow result and live evidence; no success claim from dispatch alo
 `gh` REST and GraphQL API reads returned Forbidden. Git fetch works, and connected
 GitHub workflow tools successfully read CI status/jobs/logs, providing a usable
 read-only fallback. No merge, deploy or PR approval was attempted.
+
+## Second source-reconciled preparation
+
+Coordinator-supplied updated heads for Inputs, Duration, Prompt, Mails, Usage,
+Preferences, Bots and India were fetched and merged locally without further content
+conflicts. Sixteen implementation scopes are now present. Models, Stages and Prompts
+remain absent from this integration; Dashboard and US await newer/final head guidance.
+DB recovery remains preserve-only. Independent visual acceptance is pending.
+The companion `integration-ci-round-2.json` supersedes initial CI observations.
+
+The required 522-test suite and TypeScript passed again. Inputs, Mail History and
+Settings recovery browser harnesses passed with no external requests or mutations.
+The Mail harness writes its screenshots to tracked paths; these generated outputs
+are not worker deliverable changes and are excluded from integration commits.
+
+Sidebar source CI `41267928495` failed runtime JavaScript growth checks after both
+builds succeeded. Webpack transferred 236,311 dashboard bytes against a growth limit
+of 235,942; its fixed limit is 300,000. Commit `f0fbe924` conditionally loads the
+destination directory on demand using Next dynamic import; no budget is increased.
+The fixture server was adapted to serve emitted local chunks so it exercises actual
+lazy opening rather than replacing the component with an eager mock. Runtime and
+keyboard verification results will be recorded after execution.
+
+No denied PR creation or metadata action was retried. Branch inspection and local
+integration do not establish approval of the worker's screenshots or clear release.

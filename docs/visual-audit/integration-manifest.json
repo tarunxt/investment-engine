@@ -9,7 +9,7 @@
       "pr": 1345,
       "observed_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-audit/api-cost-provenance.md",
@@ -18,7 +18,8 @@
         "frontend/app/console/apis/page.tsx",
         "frontend/scripts/api-cost-provenance-playwright.mjs",
         "frontend/tests/api-usage-failed-versus-empty.test.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb"
     },
     {
       "scope": "AUTO-MODELS-SELECTION",
@@ -33,9 +34,9 @@
       "scope": "AUTO-INPUTS-EVIDENCE",
       "branch": "visual/auto-inputs-evidence",
       "pr": 1347,
-      "observed_head": "88fe01d8e370d8f901b1725089e950ce6e7a44a0",
+      "observed_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-auto-inputs-evidence.md",
@@ -43,7 +44,8 @@
         "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
         "frontend/tests/input-evidence-offline.mjs",
         "frontend/tests/rebalance-stage-inputs.test.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f"
     },
     {
       "scope": "AUTO-STAGES-HIERARCHY",
@@ -58,27 +60,29 @@
       "scope": "AUTO-DURATION-EXPLANATION",
       "branch": "fix/auto-duration-explanation",
       "pr": 1356,
-      "observed_head": "e0d47a7c7a452e1dbfb36ed3669546e8efe8a13a",
+      "observed_head": "50f8ab80588e31732097c54583a7d97b849ab042",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "frontend/app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
         "frontend/scripts/duration-explanation-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "50f8ab80588e31732097c54583a7d97b849ab042"
     },
     {
       "scope": "AUTO-PROMPT-PREVIEW",
       "branch": "visual/auto-prompt-preview",
       "pr": 1350,
-      "observed_head": "a89441ea3d0f9105c262285e3705aeeeec147085",
+      "observed_head": "79f33b2fde2135297ead7a99ce042087377ef063",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "frontend/app/console/automated-rebalance/_components/PromptTemplateDialog.tsx",
         "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx"
-      ]
+      ],
+      "coordinator_supplied_head": "79f33b2fde2135297ead7a99ce042087377ef063"
     },
     {
       "scope": "DASH-LAYOUT-SUMMARY",
@@ -109,7 +113,7 @@
       "pr": 1346,
       "observed_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "artifacts/nav-sidebar-hierarchy/README.md",
@@ -126,7 +130,8 @@
         "frontend/app/console/_components/NavigationDirectory.tsx",
         "frontend/app/console/_components/SidebarNavigation.tsx",
         "frontend/scripts/sidebar-space-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "2eefd68654a45d393c682358c2fe68579a9d808d"
     },
     {
       "scope": "US-SNAPSHOT-PROVENANCE",
@@ -151,53 +156,73 @@
       "pr": 1351,
       "observed_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-llm-report-comparison.md",
         "frontend/app/console/llms/page.tsx",
         "frontend/scripts/llm-report-offline-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "442d385f99559457dd462cd6ab6148ca976d1c88"
     },
     {
       "scope": "VISUAL-MAILS-HISTORY-HIERARCHY",
       "branch": "visual/mails-history-hierarchy",
       "pr": null,
-      "observed_head": null,
+      "observed_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
       "final_head": null,
-      "source_visual_acceptance": "pending",
-      "status": "provisional"
+      "source_visual_acceptance": "independent acceptance pending",
+      "status": "provisional",
+      "coordinator_supplied_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
+      "files": [
+        "artifacts/visual-mails-history/desktop-github.png",
+        "artifacts/visual-mails-history/desktop-loaded.png",
+        "artifacts/visual-mails-history/desktop-loading.png",
+        "artifacts/visual-mails-history/desktop-stale.png",
+        "artifacts/visual-mails-history/desktop-unavailable-partial.png",
+        "artifacts/visual-mails-history/desktop-verified-empty.png",
+        "artifacts/visual-mails-history/narrow-unavailable.png",
+        "docs/visual-mails-history-hierarchy.md",
+        "frontend/app/console/mails/page.tsx",
+        "frontend/scripts/mail-history-offline-playwright.mjs"
+      ]
     },
     {
       "scope": "USAGE-ERROR-CONSOLIDATION",
       "branch": "visual/usage-error-consolidation",
       "pr": 1353,
-      "observed_head": "78a162eaf8f5f341331b93f040f55afd6f2c00a8",
+      "observed_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-audit/usage-error-consolidation.md",
+        "frontend/app/console/profile/layout.tsx",
         "frontend/scripts/cost-usage-recovery-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc"
     },
     {
       "scope": "PREFS-FORM-SCOPE",
       "branch": "visual/prefs-form-scope",
       "pr": 1349,
-      "observed_head": "27b7d205af10cd9d76065f7a94329680ce11599d",
+      "observed_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-audit/prefs-form-scope/README.md",
         "docs/visual-audit/prefs-form-scope/after-1180x757.png",
         "docs/visual-audit/prefs-form-scope/after-375x812.png",
+        "docs/visual-audit/prefs-form-scope/after-india-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/after-new-york-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/after-new-york-375x812.png",
         "docs/visual-audit/prefs-form-scope/before-1180x757.png",
         "docs/visual-audit/prefs-form-scope/before-375x812.png",
         "frontend/app/console/profile/preferences/page.tsx",
         "frontend/scripts/preferences-scope-offline-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f"
     },
     {
       "scope": "PROMPTS-LIST-DISCOVERY",
@@ -214,7 +239,7 @@
       "pr": 1354,
       "observed_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-audit/runs-stages/README.md",
@@ -227,7 +252,8 @@
         "frontend/app/console/runs/page.tsx",
         "frontend/tests/portfolio-stage-history.test.mjs",
         "frontend/tests/runs-stages-browser.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d"
     },
     {
       "scope": "RANKINGS-BROWSER-GROUPING",
@@ -235,7 +261,7 @@
       "pr": null,
       "observed_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/visual-audit/rankings-browser-grouping/README.md",
@@ -252,7 +278,8 @@
         "frontend/app/console/sports-rankings/page.tsx",
         "frontend/scripts/rankings-browser-offline-playwright.mjs",
         "frontend/tests/sports-rankings-summary.test.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915"
     },
     {
       "scope": "SCANNER-TABLE-COMPARISON",
@@ -272,55 +299,80 @@
       "scope": "BOTS-OVERVIEW-RUNTIME",
       "branch": "visual/bots-overview-runtime",
       "pr": null,
-      "observed_head": "a9ab619a76c46a4a6f4e33a6b1693743552b809d",
+      "observed_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
         "docs/bots-overview-runtime.md",
         "docs/evidence/bots-overview-runtime/before-loading-desktop.png",
+        "docs/evidence/bots-overview-runtime/dark-Capital.png",
+        "docs/evidence/bots-overview-runtime/dark-Positions.png",
+        "docs/evidence/bots-overview-runtime/dark-Runtime.png",
+        "docs/evidence/bots-overview-runtime/empty-Capital-narrow.png",
         "docs/evidence/bots-overview-runtime/empty-Capital.png",
+        "docs/evidence/bots-overview-runtime/empty-Positions-narrow.png",
         "docs/evidence/bots-overview-runtime/empty-Positions.png",
+        "docs/evidence/bots-overview-runtime/empty-Runtime-narrow.png",
         "docs/evidence/bots-overview-runtime/empty-Runtime.png",
-        "docs/evidence/bots-overview-runtime/empty-narrow.png",
+        "docs/evidence/bots-overview-runtime/failed-Capital-narrow.png",
         "docs/evidence/bots-overview-runtime/failed-Capital.png",
+        "docs/evidence/bots-overview-runtime/failed-Positions-narrow.png",
         "docs/evidence/bots-overview-runtime/failed-Positions.png",
+        "docs/evidence/bots-overview-runtime/failed-Runtime-narrow.png",
         "docs/evidence/bots-overview-runtime/failed-Runtime.png",
-        "docs/evidence/bots-overview-runtime/failed-narrow.png",
+        "docs/evidence/bots-overview-runtime/loaded-Capital-narrow.png",
         "docs/evidence/bots-overview-runtime/loaded-Capital.png",
+        "docs/evidence/bots-overview-runtime/loaded-Positions-narrow.png",
         "docs/evidence/bots-overview-runtime/loaded-Positions.png",
+        "docs/evidence/bots-overview-runtime/loaded-Runtime-narrow.png",
         "docs/evidence/bots-overview-runtime/loaded-Runtime.png",
-        "docs/evidence/bots-overview-runtime/loaded-narrow.png",
+        "docs/evidence/bots-overview-runtime/loading-Capital-narrow.png",
         "docs/evidence/bots-overview-runtime/loading-Capital.png",
+        "docs/evidence/bots-overview-runtime/loading-Positions-narrow.png",
         "docs/evidence/bots-overview-runtime/loading-Positions.png",
+        "docs/evidence/bots-overview-runtime/loading-Runtime-narrow.png",
         "docs/evidence/bots-overview-runtime/loading-Runtime.png",
-        "docs/evidence/bots-overview-runtime/loading-narrow.png",
+        "docs/evidence/bots-overview-runtime/partial-Capital-narrow.png",
         "docs/evidence/bots-overview-runtime/partial-Capital.png",
+        "docs/evidence/bots-overview-runtime/partial-Positions-narrow.png",
         "docs/evidence/bots-overview-runtime/partial-Positions.png",
+        "docs/evidence/bots-overview-runtime/partial-Runtime-narrow.png",
         "docs/evidence/bots-overview-runtime/partial-Runtime.png",
-        "docs/evidence/bots-overview-runtime/partial-narrow.png",
+        "docs/evidence/bots-overview-runtime/stale-Capital-narrow.png",
         "docs/evidence/bots-overview-runtime/stale-Capital.png",
+        "docs/evidence/bots-overview-runtime/stale-Positions-narrow.png",
         "docs/evidence/bots-overview-runtime/stale-Positions.png",
+        "docs/evidence/bots-overview-runtime/stale-Runtime-narrow.png",
         "docs/evidence/bots-overview-runtime/stale-Runtime.png",
-        "docs/evidence/bots-overview-runtime/stale-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Capital.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Positions.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Runtime.png",
         "frontend/app/console/trading-bots/_components/TradingBotsOverviewPage.tsx",
         "frontend/scripts/bots-overview-offline-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980"
     },
     {
       "scope": "INDIA-PORTFOLIO-HIERARCHY",
       "branch": "visual/india-portfolio-hierarchy",
       "pr": 1355,
-      "observed_head": "1e14a7f3f6a8ee116bbb5142634ac2fd96776131",
+      "observed_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
       "final_head": null,
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "independent acceptance pending",
       "status": "provisional",
       "files": [
+        "docs/visual-audit/india-portfolio-hierarchy.md",
+        "frontend/app/console/zerodha/_components/IndiaPortfolioNav.module.css",
         "frontend/app/console/zerodha/_components/PortfolioSnapshotsPanel.tsx",
         "frontend/app/console/zerodha/_components/ZerodhaConnectionGuide.tsx",
         "frontend/app/console/zerodha/page.tsx",
         "frontend/scripts/india-portfolio-hierarchy-playwright.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "62795de2e96b9094fc1e633d620df70ac26d8aff"
     },
     {
       "scope": "DB-RECOVERY-PRESERVATION",
