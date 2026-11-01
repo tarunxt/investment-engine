@@ -11,6 +11,7 @@ const require=createRequire(import.meta.url);
 const frontend=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const temporary=await mkdtemp(path.join(tmpdir(),'auto-stages-ledger-'));
 const evidence=process.env.AUTO_STAGES_EVIDENCE || '/tmp/auto-stages-evidence';
+const mixedFailure=process.env.AUTO_STAGES_MIXED_FAILURE === '1';
 await mkdir(evidence,{recursive:true});
 let server,browser;
 try {
@@ -27,7 +28,7 @@ try {
  const stages=STAGE_ORDER.map((stage,index)=>{
  const partial=market==='US'&&stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
- const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?1:0,failedLlms:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'One saved LLM response was partial.':null};
+ const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?${mixedFailure ? 0 : 1}:0,failedLlms:partial?${mixedFailure ? 1 : 0}:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'${mixedFailure ? 'One provider completed and one provider failed.' : 'One saved LLM response was partial.'}':null};
  return <WorkflowStageTile key={stage} stage={stage} info={info} now={now} selectable={state==='selection'} selected={Boolean(checks[stage])} onClick={state==='selection'?()=>setChecks({...checks,[stage]:!checks[stage]}):call('open:'+stage)} onInfoClick={!['sync','actionables'].includes(stage)?call('models:'+stage):undefined} onInputClick={stage!=='sync'?call('inputs:'+stage):undefined} onPromptClick={!['sync','actionables'].includes(stage)?call('prompt:'+stage):undefined} onOutputClick={call('output:'+stage)} onSyncNowClick={stage==='sync'?call('sync'):undefined} onPlaceOrderClick={stage==='actionables'?call('order:'+market):undefined} placeOrderLabel={market==='US'?'Final Order':'Place Order'} onCalculationsClick={stage==='actionables'?call('calculation'):undefined}/>;
  });
  return <main className="mx-auto max-w-[1380px] p-4 text-slate-700"><h1 className="mb-3 text-xl font-bold text-slate-950">Automated rebalance · offline fixture</h1>
@@ -59,6 +60,7 @@ try {
  await page.screenshot({path:path.join(evidence,'india-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'US stage ledger',exact:true}).focus();await page.keyboard.press('Enter');
  assert.equal(await page.getByRole('status').count(),1);
+ if(mixedFailure){assert.match(await page.locator('tbody').innerText(),/Passed:1/);assert.match(await page.locator('tbody').innerText(),/Failed:1/);}
  assert.match(await page.getByRole('status').innerText(),/Rebalance has partial output/);
  assert.equal(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).count(),1);
  await page.screenshot({path:path.join(evidence,'us-partial-desktop.png'),fullPage:true});
