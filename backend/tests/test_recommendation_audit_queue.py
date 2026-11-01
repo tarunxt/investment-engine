@@ -50,7 +50,8 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     monkeypatch.setattr(settings,"database_url",f"sqlite:///{database}")
     monkeypatch.setattr(settings,"auth_disabled",False)
     monkeypatch.setattr(settings,"environment","test")
-    monkeypatch.setattr(security_module,"SECRET_KEY","disposable-fixture-signing-key-only")
+    from pydantic import SecretStr
+    monkeypatch.setattr(security_module.settings, "jwt_signing_key", SecretStr(bytes(range(32)).hex()))
     monkeypatch.setenv("CREDX_RECOVERY_MODE","1" if recovery else "0")
     with Session(engine) as session:
         session.add_all([User(id=i,email=f"fixture-{i}@invalid.test",username=f"fixture-{i}",password_hash="unused-fixture",role=UserRole.USER,is_active=True) for i in (1,2)])
