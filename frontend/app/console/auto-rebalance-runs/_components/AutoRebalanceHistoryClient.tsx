@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { RUN_HIERARCHY_HELP } from "@/lib/runHierarchy";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -219,7 +220,7 @@ function JobDetails({ job }: { job: AutoRebalanceJobDetailResponse }) {
   return (
     <article className={`rounded-xl border p-4 ${stageCardTone(job.status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><p className="font-semibold text-slate-950">{job.provider} / {job.model}</p><p className="mt-1 text-xs text-slate-600">Job #{job.id} · {formatTime(job.updated_at)} · {formatCost(job.estimated_cost)}</p></div>
+        <div><p className="font-semibold text-slate-950">{job.provider} / {job.model}</p><p className="mt-1 text-xs text-slate-600">Provider job #{job.id} · {formatTime(job.updated_at)} · {formatCost(job.estimated_cost)}</p></div>
         <StatusBadge status={job.status} />
       </div>
       {job.error_message ? <div className={`mt-3 rounded-lg border bg-white/70 p-3 text-sm ${job.status === "partial" ? "border-amber-200 text-amber-800" : "border-rose-200 text-rose-800"}`}>{job.error_message}</div> : null}
@@ -260,6 +261,8 @@ export function AutoRebalanceHistoryDetailClient({
 
   return (
     <section className="mx-auto max-w-7xl space-y-6 pb-10">
+      <nav aria-label="Run hierarchy" className="flex flex-wrap gap-2 text-sm"><Link className="text-blue-700 underline" href={URLs.routes.console.runs()}>All runs</Link><span aria-hidden="true">/</span><span aria-current="page">Workflow · {run?.label || `Run #${sequence}`}</span></nav>
+      <p className="text-xs text-slate-500">{RUN_HIERARCHY_HELP}</p>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><p className="mt-2 text-sm text-slate-600">Stage-by-stage status, the exact errors, and every saved LLM prompt/output.</p></div>
         <div className="flex gap-2"><Button asChild variant="outline" className="rounded-full"><Link href={URLs.routes.console.autoRebalanceRuns(portfolio)}><ArrowLeft className="mr-2 size-4" />All runs</Link></Button><Button type="button" onClick={() => void load()} className="rounded-full bg-slate-950 text-white hover:bg-slate-800"><RefreshCw className="mr-2 size-4" />Refresh</Button></div>
