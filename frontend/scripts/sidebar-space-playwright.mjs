@@ -26,17 +26,19 @@ try {
   await new Promise((resolve,reject)=>w.webpack({mode:'development',devtool:false,entry:path.join(temporary,'entry.tsx'),output:{path:temporary,filename:'bundle.js'},resolve:{extensions:['.tsx','.ts','.js'],modules:[path.join(frontend,'node_modules'),'node_modules'],alias:{'next/navigation$':path.join(temporary,'navigation.tsx'),'next/link$':path.join(temporary,'link.tsx'),'@/hooks/useAuth$':path.join(temporary,'auth.ts'),'@/services/api$':path.join(temporary,'api.ts'),'@':frontend}},module:{rules:[{test:/\.tsx?$/,use:path.join(temporary,'loader.cjs')}]},plugins:[new w.webpack.DefinePlugin({'process.env':JSON.stringify({NODE_ENV:'development'})})]},(error,stats)=>error?reject(error):stats.hasErrors()?reject(Error(stats.toString({all:false,errors:true}))):resolve()));
   const css=(await postcss([tailwind({base:frontend})]).process(await readFile(path.join(frontend,'app/globals.css'),'utf8'),{from:path.join(frontend,'app/globals.css')})).css;
   const bundle=await readFile(path.join(temporary,'bundle.js'));
-  server=createServer((req,res)=>{if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');res.end(bundle)}else {res.setHeader('Content-Type','text/html');res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}body{font-family:Arial,sans-serif}</style><div id="root"></div><script>window.logoutCalls=0;window.profileWrites=0</script><script src="/bundle.js"></script>`)}});
+  server=createServer((req,res)=>{if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');res.end(bundle)}else if(/^\/[a-zA-Z0-9_.-]+\.js$/.test(req.url)){res.setHeader('Content-Type','text/javascript');readFile(path.join(temporary,req.url.slice(1))).then(data=>res.end(data)).catch(()=>{res.statusCode=404;res.end()})}else {res.setHeader('Content-Type','text/html');res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}body{font-family:Arial,sans-serif}</style><div id="root"></div><script>window.logoutCalls=0;window.profileWrites=0</script><script src="/bundle.js"></script>`)}});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const base=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
-  const page=await browser.newPage(); const errors=[],external=[];
+  const page=await browser.newPage(); const errors=[],external=[],scriptRequests=[];
+  page.on('request',request=>{if(request.resourceType()==='script')scriptRequests.push(request.url())});
   page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)});
   await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():(external.push(route.request().url()),route.abort()));
   await page.addInitScript(()=>{localStorage.setItem('investment-engine:theme-preference','system');localStorage.setItem('unrelated-user-preference','preserve-me')});
   const measurements=[];
   for(const [width,height,zoom] of [[1180,757,1],[1165,747,1],[1165,747,.67],[390,747,1],[390,747,.67]]) {
     await page.setViewportSize({width:Math.round(width/zoom),height:Math.round(height/zoom)});
+    scriptRequests.length=0;
     await page.goto(base+'/console/dashboard');
     const nav=page.getByRole('navigation',{name:'Console navigation',includeHidden:true});
     await nav.waitFor({state:'attached'});
@@ -72,9 +74,11 @@ try {
     const directoryButton=page.getByRole('button',{name:'All destinations',exact:true});
     const portfolios=nav.getByRole('button',{name:'Portfolios',exact:true});
     await portfolios.click();
+    assert.ok(scriptRequests.every(url=>url.endsWith('/bundle.js')),'directory chunk must stay off initial route');
     await directoryButton.click();
     const directory=page.getByRole('dialog',{name:'All destinations'});
     await directory.waitFor();
+    assert.ok(scriptRequests.some(url=>!url.endsWith('/bundle.js')),'directory loads on demand');
     const expected=await page.evaluate(()=>[...window.sections.flatMap(s=>s.entries.flatMap(e=>e.type==='group'?e.children:[e])),...window.account].map(e=>e.href));
     assert.equal(await directory.locator('tbody tr').count(),expected.length);
     for(const href of expected)assert.equal(await directory.locator(`a[href="${href}"]`).count(),1);

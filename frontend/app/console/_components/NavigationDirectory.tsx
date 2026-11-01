@@ -17,7 +17,7 @@ type Props = {
     onNavigate: () => void;
 };
 
-export function NavigationDirectory({ open, pathname, sections, onClose, onNavigate }: Props) {
+export default function NavigationDirectory({ open, pathname, sections, onClose, onNavigate }: Props) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     useEffect(() => {
         const dialog = dialogRef.current;
