@@ -1,0 +1,49 @@
+{
+  "checks": 45,
+  "errors": [],
+  "inventory": {
+    "anthropic": [
+      "claude-opus-4-7",
+      "claude-sonnet-4-6",
+      "claude-3-7-sonnet-latest",
+      "claude-3-5-sonnet-latest",
+      "claude-3-5-haiku-latest",
+      "claude-3-opus-latest",
+      "claude-3-sonnet-20240229",
+      "claude-3-haiku-20240307"
+    ],
+    "gemini": [
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-3-flash-preview"
+    ],
+    "openai": [
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4.5-preview",
+      "o4-mini",
+      "o3",
+      "o3-mini"
+    ],
+    "deepseek": [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro"
+    ]
+  },
+  "viewport": {
+    "desktop": [
+      1180,
+      757
+    ],
+    "narrow": [
+      390,
+      844
+    ]
+  },
+  "source": "real StageLlmSelectorDialog extracted with offline history/FX fixtures; real panel, frame and template controls"
+}

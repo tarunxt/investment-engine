@@ -2,13 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { AlertCircle, Copy, Loader2 } from 'lucide-react';
-
-import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
-import { Button } from '@/components/ui/button';
-import { IndMoneyUsPasteCard } from './_components/IndMoneyUsPasteCard';
-import { IndMoneyUsSnapshotsPanel } from './_components/IndMoneyUsSnapshotsPanel';
-import { cn } from '@/lib/utils';
+import { IndMoneyUsSnapshotWorkspace } from './_components/IndMoneyUsSnapshotWorkspace';
 import { apiService, APIError } from '@/services/api';
 import type {
   IndMoneyUsPortfolioOverviewResponse,
@@ -31,7 +25,6 @@ export default function IndMoneyUsPage() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [showManualNote, setShowManualNote] = useState(false);
 
   const applyOverview = useCallback(
     (
@@ -121,6 +114,7 @@ export default function IndMoneyUsPage() {
       const snapshot = await apiService.indmoneyUsCreatePortfolioSnapshot(payload);
       const nextOverview = await apiService.indmoneyUsPortfolioOverview();
       applyOverview(nextOverview, snapshot);
+      setLoadError(null);
     } catch (error) {
       const message = normalizeError(error);
       setSaveError(message);
@@ -130,83 +124,37 @@ export default function IndMoneyUsPage() {
     }
   };
 
-  if (loading && !overview) {
-    return (
-      <div className="flex items-center gap-3 text-sm text-gray-500">
-        <Loader2 className="size-4 animate-spin" />
-        Loading INDmoney US portfolio…
-      </div>
-    );
-  }
+  const handleRefreshDisplayedData = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const nextOverview = await apiService.indmoneyUsPortfolioOverview();
+      const retainedSnapshot = selectedSnapshotId && nextOverview.history.some((item) => item.id === selectedSnapshotId)
+        ? nextOverview.latest?.id === selectedSnapshotId
+          ? nextOverview.latest
+          : await apiService.indmoneyUsPortfolioSnapshot(selectedSnapshotId)
+        : null;
+      applyOverview(nextOverview, retainedSnapshot);
+    } catch (error) {
+      setLoadError(normalizeError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="mx-auto flex flex-col gap-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="inline-flex items-start gap-1">
-            <h1 className="text-lg font-semibold tracking-tight text-gray-950">IndMoney US</h1>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-expanded={showManualNote}
-              aria-controls="indmoney-us-manual-note"
-              aria-label={showManualNote ? 'Hide manual workflow note' : 'Show manual workflow note'}
-              title={showManualNote ? 'Hide manual workflow note' : 'Show manual workflow note'}
-              onClick={() => setShowManualNote((current) => !current)}
-              className={cn(
-                '-mt-1 rounded-full text-amber-700 hover:bg-amber-100 hover:text-amber-800',
-                showManualNote ? 'bg-amber-100 text-amber-900' : '',
-              )}
-            >
-              <Copy className="size-3.5" />
-              <span className="sr-only">
-                {showManualNote ? 'Hide manual workflow note' : 'Show manual workflow note'}
-              </span>
-            </Button>
-          </div>
-          <p className="text-sm text-gray-500">
-            Manual US portfolio tracking for INDmoney when no direct API is available.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 self-start">
-          <PortfolioAnalysisNav portfolio="indmoneyUs" active="portfolio" />
-        </div>
-      </div>
-
-      {showManualNote ? (
-        <div
-          id="indmoney-us-manual-note"
-          className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm"
-        >
-          The flow here is intentionally manual: paste the INDmoney portfolio screen daily, save a timestamped
-          snapshot, and the dashboard will turn that raw text into holdings tables, allocation views, and
-          reconciliation checks as far as the pasted structure allows.
-        </div>
-      ) : null}
-
-      {loadError && !overview ? (
-        <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{loadError}</span>
-        </div>
-      ) : null}
-
-      <IndMoneyUsPasteCard
-        saving={saving}
-        error={saveError}
-        onSubmit={handleCreateSnapshot}
-      />
-
-      <IndMoneyUsSnapshotsPanel
-        overview={overview}
-        selectedSnapshot={selectedSnapshot}
-        selectedSnapshotId={selectedSnapshotId}
-        loading={loading}
-        selecting={selecting}
-        error={loadError}
-        onSelectSnapshot={handleSelectSnapshot}
-      />
-    </div>
+    <IndMoneyUsSnapshotWorkspace
+      overview={overview}
+      selectedSnapshot={selectedSnapshot}
+      selectedSnapshotId={selectedSnapshotId}
+      loading={loading}
+      selecting={selecting}
+      saving={saving}
+      loadError={loadError}
+      saveError={saveError}
+      onRefresh={handleRefreshDisplayedData}
+      onCreateSnapshot={handleCreateSnapshot}
+      onSelectSnapshot={handleSelectSnapshot}
+    />
   );
 }

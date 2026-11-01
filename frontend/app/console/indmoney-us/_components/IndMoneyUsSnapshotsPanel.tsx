@@ -78,11 +78,6 @@ function toneClass(value: number | null | undefined) {
   return 'text-gray-500';
 }
 
-function statusClass(status: string) {
-  if (status === 'parsed') return 'border border-emerald-700 bg-emerald-600 text-white ring-emerald-700';
-  if (status === 'partial') return 'bg-amber-50 text-amber-700 ring-amber-200';
-  return 'bg-gray-50 text-gray-700 ring-gray-200';
-}
 
 type SortDirection = 'asc' | 'desc';
 type IndMoneyHoldingsSortColumn =
@@ -271,7 +266,7 @@ function EmptyState() {
       </div>
       <h3 className="mt-4 text-sm font-semibold text-gray-900">No INDmoney snapshots yet</h3>
       <p className="mt-2 text-sm text-gray-500">
-        Paste your daily INDmoney US Stocks screen above to start building a manual portfolio history.
+        Choose Import snapshot to paste your daily INDmoney US Stocks screen and start building a manual portfolio history.
       </p>
     </div>
   );
@@ -288,13 +283,13 @@ function SnapshotHistoryChart({
 }) {
   const chartData = [...history]
     .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
-    .map((snapshot) => ({
+    .flatMap((snapshot) => snapshot.current_value == null ? [] : [{
       ...snapshot,
-      value: snapshot.current_value || 0,
-    }));
+      value: snapshot.current_value,
+    }]);
 
   if (chartData.length === 0) {
-    return null;
+    return <section className="min-w-0 border-t border-gray-200 px-4 py-4 lg:border-l lg:border-t-0"><h3 className="text-sm font-semibold text-gray-700">Historical trend</h3><p className="mt-2 text-sm text-gray-500">No saved current values are available for the trend.</p></section>;
   }
 
   const values = chartData.map((snapshot) => snapshot.value);
@@ -317,10 +312,10 @@ function SnapshotHistoryChart({
   const selectedPoint = points.find((point) => point.id === selectedSnapshotId) ?? points.at(-1);
 
   return (
-    <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
+    <div className="flex min-w-0 h-full flex-col border-t border-gray-200 px-4 py-4 lg:border-l lg:border-t-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Historical trend</span>
           <p className="mt-1 text-sm text-gray-500">Current value trend across saved INDmoney snapshots.</p>
         </div>
         {selectedPoint ? (
@@ -333,7 +328,7 @@ function SnapshotHistoryChart({
         ) : null}
       </div>
 
-      <div className="mt-4 min-h-[18rem] flex-1 overflow-x-auto">
+      <div className="mt-4 min-h-[18rem] flex-1 overflow-x-auto focus-visible:outline-2 focus-visible:outline-purple-700" tabIndex={0} role="region" aria-label="Saved snapshot trend; scroll to view all dates">
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Daily INDmoney portfolio current value history" className="h-full min-h-[18rem] min-w-[44rem]">
           <defs>
             <linearGradient id="indmoney-history-area" x1="0" x2="0" y1="0" y2="1">
@@ -366,7 +361,12 @@ function SnapshotHistoryChart({
             const isActive = selectedSnapshotId === point.id;
 
             return (
-              <g key={point.id} className="cursor-pointer" onClick={() => onSelect(point.id)}>
+              <g key={point.id} className="cursor-pointer outline-purple-700" role="button" tabIndex={0} aria-label={`View snapshot ${formatSnapshotDate(point.snapshot_date)}, ${formatCurrency(point.value)}`} aria-pressed={isActive} onClick={() => onSelect(point.id)} onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onSelect(point.id);
+                }
+              }}>
                 <title>{`${formatSnapshotDate(point.snapshot_date)} · ${formatCurrency(point.value)}`}</title>
                 <circle
                   cx={point.x}
@@ -626,7 +626,7 @@ export function IndMoneyUsSnapshotsPanel({
 }) {
   const [holdingsSort, setHoldingsSort] = useState<SortState<IndMoneyHoldingsSortColumn>>(null);
 
-  if (loading) {
+  if (loading && !overview) {
     return (
       <div className="flex items-center gap-2 border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
         <Loader2 className="size-4 animate-spin" />
@@ -636,6 +636,8 @@ export function IndMoneyUsSnapshotsPanel({
   }
 
   const history = overview?.history ?? [];
+
+  if (!overview && !loading) return null;
 
   if (!selectedSnapshot && history.length === 0) {
     return <EmptyState />;
@@ -656,23 +658,7 @@ export function IndMoneyUsSnapshotsPanel({
   return (
     <div className="flex flex-col gap-5">
       <div className="border border-gray-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-950">INDmoney US Portfolio Snapshot</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Manual daily snapshots parsed into holdings, allocation, returns, and market context.
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-gray-500">
-            <div>
-              <p>Viewing snapshot</p>
-              <p className="font-medium text-gray-700">{formatCapturedAt(selectedSnapshot.captured_at)}</p>
-            </div>
-            <span className={cn('inline-flex min-w-[6.5rem] items-center justify-center px-2.5 py-1 text-xs font-semibold uppercase tracking-wider ring-1', statusClass(selectedSnapshot.parse_status))}>
-              {selectedSnapshot.parse_status}
-            </span>
-          </div>
-        </div>
+        <h2 className="border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-900">Portfolio totals</h2>
 
         {error ? (
           <div className="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700">
@@ -687,8 +673,8 @@ export function IndMoneyUsSnapshotsPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-2">
-          <div className="grid gap-4">
+        <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
             <MetricCard
               label="Current Value"
               value={formatCurrency(selectedSnapshot.current_value ?? selectedSnapshot.derived.parsed_holdings_current_value)}
@@ -751,7 +737,7 @@ export function IndMoneyUsSnapshotsPanel({
           <div className="border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Snapshot Detail</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Holdings</h3>
                 <p className="mt-2 text-lg font-semibold text-gray-950">
                   {formatSnapshotDate(selectedSnapshot.snapshot_date)}
                 </p>
@@ -866,12 +852,12 @@ export function IndMoneyUsSnapshotsPanel({
             </div>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <ReconciliationTable items={selectedSnapshot.derived.reconciliation} />
             <MarketIndicesTable indices={selectedSnapshot.market_indices} />
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <CompactHoldingsTable title="Top Allocation" holdings={selectedSnapshot.derived.top_allocations} />
             <CompactHoldingsTable title="Top Gainers" holdings={selectedSnapshot.derived.top_gainers} />
             <CompactHoldingsTable title="Laggards" holdings={selectedSnapshot.derived.top_laggards} />

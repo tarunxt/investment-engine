@@ -1,6 +1,6 @@
 'use client';
 
-import { DragEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   Check,
@@ -495,8 +495,8 @@ export default function PromptsPage() {
 
       <Tabs defaultValue="system">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <TabsList className="border border-gray-200 bg-gray-50">
-            <TabsTrigger value="system" className="gap-2">
+          <TabsList className="h-auto max-w-full flex-wrap border border-gray-200 bg-gray-50">
+            <TabsTrigger value="system" className="gap-1 px-2 text-[11px] sm:gap-2 sm:text-xs data-[state=active]:bg-violet-700 data-[state=active]:text-white data-[state=inactive]:bg-violet-50">
               <Shield className="size-3.5" />
               System Prompts
               {systemPrompts.length > 0 && (
@@ -505,7 +505,7 @@ export default function PromptsPage() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="mine" className="gap-2">
+            <TabsTrigger value="mine" className="gap-1 px-2 text-[11px] sm:gap-2 sm:text-xs data-[state=active]:bg-violet-700 data-[state=active]:text-white data-[state=inactive]:bg-violet-50">
               <User className="size-3.5" />
               My Prompts
               {myPrompts.length > 0 && (
@@ -550,7 +550,7 @@ export default function PromptsPage() {
           <PromptGrid
             prompts={systemPrompts}
             loading={loading}
-            emptyMessage="No system prompts configured."
+            emptyMessage={error ? 'System prompts unavailable.' : 'No system prompts configured.'}
             copiedId={copiedId}
             onCopy={copyBody}
             onFork={openFork}
@@ -563,7 +563,7 @@ export default function PromptsPage() {
           <PromptGrid
             prompts={myPrompts}
             loading={loading}
-            emptyMessage="No prompts yet. Click 'New Prompt' to create one."
+            emptyMessage={error ? 'Your prompts are unavailable.' : "No prompts yet. Click 'New Prompt' to create one."}
             copiedId={copiedId}
             onCopy={copyBody}
             onFork={null}
@@ -880,7 +880,7 @@ function PromptGrid({ prompts, loading, emptyMessage, copiedId, onCopy, onFork, 
               {stagePrompts.length} prompt{stagePrompts.length === 1 ? '' : 's'}
             </span>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3">
             {stagePrompts.map(({ prompt, metadata }) => (
               <PromptCard
                 key={prompt.id}
@@ -912,10 +912,14 @@ type PromptCardProps = {
 
 function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDelete }: PromptCardProps) {
   const isCopied = copiedId === prompt.id;
+  const previewRef = useRef<HTMLDetailsElement>(null);
+  const previewTriggerRef = useRef<HTMLElement>(null);
+  const excerpt = prompt.body.slice(0, 600);
+  const truncated = excerpt.length < prompt.body.length;
 
   return (
-    <Card className="flex flex-col border border-gray-200 shadow-sm transition hover:border-gray-300 hover:shadow-md">
-      <CardHeader className="pb-2">
+    <Card className="flex min-w-0 flex-col gap-3 py-4 border border-gray-200 shadow-sm transition hover:border-gray-300 hover:shadow-md">
+      <CardHeader className="px-4 pb-0">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-sm font-semibold leading-snug text-gray-950">
             {prompt.name}
@@ -931,8 +935,14 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
             {prompt.is_system ? 'System' : 'My'} v{prompt.version}
           </span>
         </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+          <span>{metadata.stage.label}</span>
+          <span>Updated {formatDate(prompt.updated_at)}</span>
+          <span>Prompt ID <span className="font-mono">{getPromptLogicalId(prompt.name, prompt.id)}</span></span>
+          {prompt.source_prompt_id && <span>Personal version of #{prompt.source_prompt_id}</span>}
+        </div>
         {metadata.markets.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-1 flex flex-wrap gap-1.5">
             {metadata.markets.map((market) => (
               <span
                 key={market}
@@ -955,7 +965,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
         )}
       </CardHeader>
 
-      <CardContent className="flex flex-1 flex-col gap-3">
+      <CardContent className="flex flex-1 flex-col gap-3 px-4">
         {/* Body preview */}
         <button
           type="button"
@@ -967,19 +977,30 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
         </button>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <span className="text-xs text-gray-400">
-            Updated {formatDate(prompt.updated_at)} · Prompt ID <span className="font-mono text-gray-500">{getPromptLogicalId(prompt.name, prompt.id)}</span>
-            {prompt.source_prompt_id && (
-              <> · Personal version of <span className="font-mono text-gray-500">#{prompt.source_prompt_id}</span></>
-            )}
-          </span>
+        <div className="flex flex-wrap items-start justify-between gap-2 pt-1">
+          <details ref={previewRef} className="min-w-0 flex-1 open:basis-full">
+            <summary ref={previewTriggerRef} className="w-fit cursor-pointer rounded bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-800 focus-visible:outline-2 focus-visible:outline-violet-700">
+              Visible preview
+            </summary>
+            <div className="mt-2 rounded-lg bg-slate-950 p-4 text-slate-100" role="region" aria-label={`${prompt.name} preview`}>
+              <p className="mb-2 text-xs font-medium text-violet-200">{truncated ? 'Preview · truncated' : 'Preview'}</p>
+              <p className="whitespace-pre-wrap break-words text-xs leading-5">{excerpt}{truncated ? '…' : ''}</p>
+              <div className="mt-3 flex min-w-0 flex-col items-start gap-2 sm:flex-row sm:flex-wrap">
+                <Button variant="secondary" className="h-auto min-w-0 max-w-full shrink whitespace-normal break-words py-2" onClick={() => {
+                  if (previewRef.current) previewRef.current.open = false;
+                  previewTriggerRef.current?.focus({ preventScroll: true });
+                }}>Return to Prompt catalogue</Button>
+                {onEdit && <Button variant="secondary" className="h-auto min-w-0 max-w-full shrink whitespace-normal break-words py-2" onClick={() => onEdit(prompt)}>Open full prompt</Button>}
+              </div>
+            </div>
+          </details>
 
           <div className="flex items-center gap-1">
             <Button
               variant={'outline'}
               onClick={() => onCopy(prompt)}
               title="Copy prompt body"
+                aria-label={`Copy prompt body: ${prompt.name}`}
               className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
             >
               {isCopied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
@@ -989,6 +1010,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
                 variant={'outline'}
                 onClick={() => onFork(prompt)}
                 title="Save as my prompt"
+                aria-label={`Save as my prompt: ${prompt.name}`}
                 className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
               >
                 <FilePlus className="size-3.5" />
@@ -999,6 +1021,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
                 variant={'outline'}
                 onClick={() => onEdit(prompt)}
                 title="Edit prompt"
+                aria-label={`Edit prompt: ${prompt.name}`}
                 className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
                 <Pencil className="size-3.5" />
@@ -1008,6 +1031,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
               <Button
                 onClick={() => onDelete(prompt)}
                 title="Delete prompt"
+                aria-label={`Delete prompt: ${prompt.name}`}
                 variant={'outline'}
                 className="h-8 w-8 rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
               >

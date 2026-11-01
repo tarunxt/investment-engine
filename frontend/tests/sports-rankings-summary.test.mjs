@@ -213,3 +213,25 @@ test('summary polling retains the minute interval and aborts reads on unmount', 
   assert.equal(page.timers.size, 0);
   assert.ok(calls.every(call => call.signal.aborted));
 });
+
+test('workspace views retain filters and do not start additional reads', async t => {
+  const calls = [], page = mount(reader(calls));
+  t.after(() => page.unmount());
+  await page.settle();
+  const tab = name => nodes(page.tree, node => node.props.role === 'tab' && text(node) === name)[0];
+  tab('Filters and rules').props.onClick();
+  await page.settle();
+  input(page, 'competition-search').props.onChange({ target: { value: 'Hockey' } });
+  input(page, 'Filter by sport').props.onChange({ target: { value: 'Hockey' } });
+  input(page, 'Filter by ranking availability').props.onChange({ target: { value: 'Connected feeds' } });
+  await page.settle();
+  const before = calls.length;
+  tab('Repository').props.onClick(); await page.settle();
+  tab('Filters and rules').props.onClick(); await page.settle();
+  assert.equal(input(page, 'competition-search').props.value, 'Hockey');
+  assert.equal(input(page, 'Filter by sport').props.value, 'Hockey');
+  assert.equal(input(page, 'Filter by ranking availability').props.value, 'Connected feeds');
+  assert.equal(calls.length, before);
+  assert.equal(tab('Filters and rules').props['aria-selected'], true);
+  assert.equal(tab('Repository').props.tabIndex, -1);
+});

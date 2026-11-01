@@ -13,13 +13,6 @@ export const COMBINED_LLM_PROVIDERS = [
 export type CombinedLlmProviderKey = (typeof COMBINED_LLM_PROVIDERS)[number]['key'];
 export type CombinedLlmVisibility = Record<CombinedLlmProviderKey, boolean>;
 
-function formatCompactInr(value: number) {
-  if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`;
-  if (value >= 1000) return `₹${(value / 1000).toFixed(1)}K`;
-  if (value >= 1) return `₹${value.toFixed(2)}`;
-  return `₹${value.toFixed(4)}`;
-}
-
 function formatChartDayLabel(isoDate: string) {
   const [year, month, day] = isoDate.split('-').map(Number);
   const utcDate = new Date(Date.UTC(year, month - 1, day));
@@ -50,15 +43,12 @@ export function CombinedLlmCostChart({
   const chart = useMemo(() => {
     const availableProviders = COMBINED_LLM_PROVIDERS.filter((provider) => histories[provider.key]);
     const visibleHistories = availableProviders.filter((provider) => visibility[provider.key]).map((provider) => histories[provider.key]!);
-    // Use one currency for every plotted series. Never apply stale or unknown FX.
-    const currency = visibleHistories.length > 0 && visibleHistories.every((history) =>
-      history.fx_status === 'valid' && history.usd_inr_rate != null && history.usd_inr_rate > 0 &&
-      history.days.every((day) => day.estimated_cost_inr != null),
-    ) ? 'INR' : 'USD';
+    // Plot native USD consistently; source FX metadata remains available alongside the chart.
+    const currency = 'USD' as const;
     const dates = Array.from(new Set(visibleHistories.flatMap((history) => history.days.map((day) => day.date)))).sort();
     const valuesByProvider = Object.fromEntries(COMBINED_LLM_PROVIDERS.map((provider) => [
       provider.key, new Map(histories[provider.key]?.days.map((day) => [
-        day.date, currency === 'INR' ? day.estimated_cost_inr! : day.estimated_cost,
+        day.date, day.estimated_cost,
       ]) ?? []),
     ])) as Record<CombinedLlmProviderKey, Map<string, number>>;
 
@@ -72,7 +62,7 @@ export function CombinedLlmCostChart({
     return { dates, valuesByProvider, activeProviders, yMax, currency };
   }, [histories, visibility]);
 
-  const formatCost = (value: number) => chart.currency === 'INR' ? `₹${value.toFixed(4)}` : `$${value.toFixed(6)}`;
+  const formatCost = (value: number) => `$${value.toFixed(6)}`;
   const failedNames = COMBINED_LLM_PROVIDERS.filter((provider) => failures.includes(provider.key)).map((provider) => provider.name).join(', ');
   const hasHistory = Object.keys(histories).length > 0;
   const width = 920;
@@ -103,13 +93,23 @@ export function CombinedLlmCostChart({
     : null;
 
   return (
-    <section className="border border-gray-200 bg-white p-4">
+    <section aria-label="LLM cost trend" className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 text-slate-900 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-indigo-600 [&_input]:focus-visible:outline-2 [&_input]:focus-visible:outline-indigo-600">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-950">Combined LLM API Cost Trend</h2>
           <p className="text-sm text-gray-600">Daily API cost by provider using Asia/Kolkata calendar days. Provider-ledger totals take precedence over reconstructed job estimates. Y-axis: {chart.currency}; X-axis: day.</p>
         </div>
-        <div className="flex flex-wrap gap-3" aria-label="Toggle LLM API cost lines">
+      </div>
+
+      {failures.length > 0 ? (
+        <div role="alert" className="mb-4 border rounded-md border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Cost trend unavailable for {failedNames}. {hasHistory ? 'Available history is shown; previously loaded history for failed providers may be out of date.' : 'Cost history could not be loaded.'}
+          <button type="button" disabled={loading} onClick={onRetry} className="ml-3 rounded-md bg-indigo-600 px-3 py-2 text-white hover:bg-indigo-700 disabled:opacity-50">
+            {loading ? 'Retrying cost trend…' : 'Retry cost trend'}
+          </button>
+        </div>
+      ) : null}
+        <div className="mb-3 flex flex-wrap gap-3" aria-label="Toggle LLM API cost lines">
           {COMBINED_LLM_PROVIDERS.map((provider) => (
             <label key={provider.key} className="inline-flex items-center gap-2 text-sm text-gray-700">
               <input
@@ -125,18 +125,8 @@ export function CombinedLlmCostChart({
             </label>
           ))}
         </div>
-      </div>
-
-      {failures.length > 0 ? (
-        <div role="alert" className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Cost trend unavailable for {failedNames}. {hasHistory ? 'Available history is shown; previously loaded history for failed providers may be out of date.' : 'Cost history could not be loaded.'}
-          <button type="button" disabled={loading} onClick={onRetry} className="ml-3 underline disabled:opacity-50">
-            {loading ? 'Retrying cost trend…' : 'Retry cost trend'}
-          </button>
-        </div>
-      ) : null}
       {hasHistory && chart.currency === 'USD' ? <p className="mb-3 text-xs text-amber-700">Native USD is used for all visible providers when INR conversion is incomplete, stale or unavailable. Stale FX is never applied.</p> : null}
-      {hasHistory ? <details className="mb-4 text-xs text-gray-600">
+      {hasHistory ? <details open className="mb-4 text-xs text-slate-600">
         <summary className="cursor-pointer font-medium">Cost source and FX details</summary>
         <ul className="mt-2 space-y-1" aria-label="Cost trend provenance">
         {COMBINED_LLM_PROVIDERS.map((provider) => {
@@ -185,7 +175,7 @@ export function CombinedLlmCostChart({
                 <g key={value}>
                   <line x1={padding.left} y1={y} x2={padding.left + plotWidth} y2={y} stroke="#eef2f7" />
                   <text x={padding.left - 12} y={y + 4} textAnchor="end" className="fill-gray-500 text-[11px]">
-                    {chart.currency === 'INR' ? formatCompactInr(value) : `$${value.toFixed(6)}`}
+                    {`$${value.toFixed(6)}`}
                   </text>
                 </g>
               );
@@ -237,7 +227,7 @@ export function CombinedLlmCostChart({
                         role="button"
                         tabIndex={0}
                         aria-label={`Show exact value for ${pointLabel}`}
-                        className="cursor-pointer outline-none"
+                        className="cursor-pointer focus-visible:outline-2 focus-visible:outline-indigo-600"
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedPointKey({ provider: provider.key, date: point.date });

@@ -1,8 +1,12 @@
 "use client";
 
+import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
+
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
+import { PromptTemplateDialog } from "@/app/console/automated-rebalance/_components/PromptTemplateDialog";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
 import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
@@ -81,6 +85,7 @@ import {
   INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
   ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
 } from "./dashboardEvents";
+import { ModelPickerDialogFrame } from "@/components/shared/ModelPickerDialogFrame";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
   assertIndmoneyHoldingsSnapshot,
@@ -3623,6 +3628,7 @@ function InputSelectionDialog({
   selectedIds,
   usdInrRate,
   loading,
+  error,
   onToggle,
   onToggleAll,
   onResetDefaults,
@@ -3634,11 +3640,16 @@ function InputSelectionDialog({
   selectedIds: Set<string>;
   usdInrRate: number;
   loading: boolean;
+  error: string | null;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
   onResetDefaults: () => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
   const allSelected =
@@ -3703,6 +3714,24 @@ function InputSelectionDialog({
     }
   }, [allSelected, someSelected]);
 
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]') ?? []);
+    focusable()[0]?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    dialog?.addEventListener("keydown", handleKey);
+    return () => { dialog?.removeEventListener("keydown", handleKey); previous?.focus(); };
+  }, [open]);
+
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
@@ -3714,7 +3743,7 @@ function InputSelectionDialog({
   };
   const rationaleByStage: Record<InputSelectionStage, string> = {
     threats:
-      "Use the upcoming synced portfolio snapshot plus the latest saved snapshot so the threat model can score the freshest holdings and cash context.",
+      "Only selected sources are included. Upcoming output reserves the snapshot from this workflow; select Saved snapshot separately if needed.",
     swing:
       "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
     rebalance:
@@ -3736,17 +3765,17 @@ function InputSelectionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cn("flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] shadow-2xl", stage === "threats" ? "border border-slate-300 bg-[#f5f4fc]" : "bg-white")} onClick={(event) => event.stopPropagation()}>
+        <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
           <div>
-            <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">
+            <h3 id={titleId} className="text-xl font-extrabold sm:text-2xl tracking-tight text-slate-950">
               {titleByStage[stage]}
             </h3>
-            <p className="mt-2 text-base text-slate-500">
+            <p className="mt-2 text-sm text-slate-500 sm:text-base">
               Choose which previous-stage outputs should be included in the next
               prompt.
             </p>
-            <div className="mt-3 max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-800">
+            <div className="mt-2 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 sm:mt-3 sm:px-4 sm:py-3 sm:leading-6 text-amber-900">
               <span className="font-extrabold">Input selection rationale:</span>{" "}
               {rationaleByStage[stage]}
             </div>
@@ -3760,10 +3789,8 @@ function InputSelectionDialog({
             <X className="size-5" />
           </button>
         </div>
-        <div className="mx-6 mb-4 flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
-          <span>
-            {selectedCount} output{selectedCount === 1 ? "" : "s"} selected.
-          </span>
+        <div className="mx-4 mb-3 flex shrink-0 flex-wrap sm:mx-6 sm:mb-4 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 sm:px-4 sm:py-3">
+          {stage === "threats" ? <InputEvidenceSummary candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} /> : <span>{selectedCount} output{selectedCount === 1 ? "" : "s"} selected.</span>}
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-blue-950">
               <input
@@ -3784,8 +3811,8 @@ function InputSelectionDialog({
             </button>
           </div>
         </div>
-        <div className="mx-6 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
-          {loading ? (
+        <div className="mx-4 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-2 sm:mx-6 sm:p-3">
+          {stage === "threats" ? <InputEvidenceRows candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} onToggle={onToggle} formatTimestamp={formatTimestamp} formatCost={(value) => formatUsdAsVerifiedInr(value, usdInrRate)} /> : loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
               outputs…
@@ -3920,7 +3947,7 @@ function InputSelectionDialog({
             </div>
           )}
         </div>
-        <div className="flex shrink-0 justify-end px-6 py-5">
+        <div className="flex shrink-0 justify-end px-4 py-3 sm:px-6 sm:py-5">
           <Button
             type="button"
             onClick={onClose}
@@ -4250,6 +4277,7 @@ function StageLlmSelectorDialog({
 
   if (!open || !stage) return null;
 
+  const organizedPicker = stage === "threats" && portfolio === "zerodha";
   const singleSelect = stage === "threats" || stage === "technical";
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
@@ -4346,9 +4374,8 @@ function StageLlmSelectorDialog({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} onClose={onClose}>
+        <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5", organizedPicker && "shrink-0 px-4 py-3 sm:px-6")}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               {selectorTitle}
@@ -4392,7 +4419,7 @@ function StageLlmSelectorDialog({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className={cn("flex-1 overflow-y-auto px-6 py-5", organizedPicker && "min-h-0 overscroll-contain px-4 py-4 sm:px-6")}>
           {activeHistoryOpen ? (
             <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -4460,12 +4487,14 @@ function StageLlmSelectorDialog({
             </div>
           ) : null}
           <LlmModelSelectionPanel
+            organized={organizedPicker}
+            loading={organizedPicker && loading}
             providers={providers}
             selectedKeys={selectedKeys}
             selectedMultipliers={singleSelect ? undefined : selectedMultipliers}
             onMultiplierChange={singleSelect ? undefined : onMultiplierChange}
             selectionMode={singleSelect ? "single" : "multiple"}
-            emptyMessage="Loading provider models..."
+            emptyMessage={organizedPicker ? "No provider models are available. Retry when provider access is restored." : "Loading provider models..."}
             showBulkActions={!singleSelect}
             modelMixControls={modelMixControls}
             getEstimatedCostInr={getEstimatedCostInr}
@@ -4489,7 +4518,8 @@ function StageLlmSelectorDialog({
           />
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+        <div className={cn("flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4", organizedPicker && "shrink-0 flex-wrap px-4 py-3 sm:px-6")}>
+          {organizedPicker ? <span className="text-sm font-semibold text-slate-700">{selectedKeys.size} selected</span> : null}
           <button
             type="button"
             onClick={onResetDefaults}
@@ -4505,8 +4535,7 @@ function StageLlmSelectorDialog({
             Done
           </Button>
         </div>
-      </div>
-    </div>
+    </ModelPickerDialogFrame>
   );
 }
 
@@ -4516,8 +4545,10 @@ export function RebalanceWorkflowSections({
   // Standalone workflows refresh stage data and dispatch final-actionables-refresh
   // themselves; only embedded consumers need an additional dashboard refresh.
   onDashboardRefresh = NO_DASHBOARD_REFRESH,
+  stageLedger = false,
 }: {
   onDashboardRefresh?: () => Promise<void>;
+  stageLedger?: boolean;
 }) {
   const usdInrRate = useUsdInrRate();
   const { user: basketOwner } = useAuth();
@@ -4536,6 +4567,8 @@ export function RebalanceWorkflowSections({
       ? initialPersisted.states
       : buildInitialStates(),
   );
+  const [ledgerMarket, setLedgerMarket] = useState<WorkflowPortfolio>(() => initialRunningPortfolio ?? "zerodha");
+  const [ledgerView, setLedgerView] = useState<WorkflowLedgerView>("ledger");
   const [runningPortfolio, setRunningPortfolio] =
     useState<WorkflowPortfolio | null>(() => initialRunningPortfolio);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -4687,6 +4720,7 @@ export function RebalanceWorkflowSections({
     InputSelectionCandidate[]
   >([]);
   const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
+  const [inputCandidatesError, setInputCandidatesError] = useState<string | null>(null);
   const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(
     null,
   );
@@ -6170,6 +6204,7 @@ ${zerodhaExecutionMode === "direct_market"
   const loadInputCandidates = useCallback(
     async (portfolio: WorkflowPortfolio, stage: InputSelectionStage) => {
       setInputCandidatesLoading(true);
+      setInputCandidatesError(null);
       try {
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
@@ -6280,6 +6315,7 @@ ${zerodhaExecutionMode === "direct_market"
       setInputDialog({ portfolio, stage: inputStage });
       void loadInputCandidates(portfolio, inputStage).catch((error) => {
         setInputCandidates([]);
+        setInputCandidatesError(normalizeError(error));
         window.alert(
           `Could not load selectable inputs: ${normalizeError(error)}`,
         );
@@ -7808,7 +7844,7 @@ ${zerodhaExecutionMode === "direct_market"
     return (
       <div
         key={section.portfolio}
-        className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-md shadow-slate-200/70"
+        className={stageLedger ? "min-w-0 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4" : "rounded-[28px] border border-slate-200 bg-white p-6 shadow-md shadow-slate-200/70"}
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
@@ -7844,7 +7880,8 @@ ${zerodhaExecutionMode === "direct_market"
             ) : null}
             {emailWarning ? <p role="alert" className="mt-2 text-sm text-amber-800">{emailWarning}</p> : null}
           </div>
-          <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
+          <div aria-label={stageLedger ? "Run controls" : undefined} className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
+            {stageLedger ? <h3 className="text-sm font-semibold text-slate-900">Run controls</h3> : null}
             <div
               className={
                 showPauseKillControls
@@ -8005,7 +8042,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <WorkflowStageLedger enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -8086,7 +8123,7 @@ ${zerodhaExecutionMode === "direct_market"
               }
             />
           ))}
-        </div>
+        </WorkflowStageLedger>
         <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <RebalanceStockFlowTrigger
@@ -8123,9 +8160,10 @@ ${zerodhaExecutionMode === "direct_market"
 
   return (
     <>
-      <section className="grid gap-6 xl:grid-cols-2">
-        {renderSectionCard(zerodhaSection)}
-        {renderSectionCard(indmoneySection)}
+      {stageLedger ? <WorkflowStageLedgerViews market={ledgerMarket} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
+      <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
+        {(!stageLedger || ledgerMarket === "zerodha") && renderSectionCard(zerodhaSection)}
+        {(!stageLedger || ledgerMarket === "indmoneyUs") && renderSectionCard(indmoneySection)}
       </section>
 
       <section className="mt-6">
@@ -8230,6 +8268,7 @@ ${zerodhaExecutionMode === "direct_market"
         }
         usdInrRate={usdInrRate}
         loading={inputCandidatesLoading}
+        error={inputCandidatesError}
         onToggle={toggleInputCandidate}
         onToggleAll={toggleAllInputCandidates}
         onResetDefaults={resetDefaultInputCandidates}
@@ -8316,31 +8355,11 @@ ${zerodhaExecutionMode === "direct_market"
       />
 
       {promptDialog ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={() => setPromptDialog(null)}>
-          <div className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl bg-white shadow-2xl xl:max-w-[95vw]" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">
-                  {promptDialog.title}
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Prompt template used by this Auto-Rebalance stage. Runtime input bundles are added when the workflow runs.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPromptDialog(null)}
-                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Close prompt view"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap p-5 text-sm leading-6 text-slate-700">
-              {promptDialog.body}
-            </pre>
-          </div>
-        </div>
+        <PromptTemplateDialog
+          title={promptDialog.title}
+          body={promptDialog.body}
+          onClose={() => setPromptDialog(null)}
+        />
       ) : null}
 
       {outputDialog ? (

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { UniversalPolymarketScan } from "./UniversalPolymarketScan";
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ChevronDown,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Card,
   CardContent,
@@ -43,6 +44,8 @@ import {
   getTradingBotWarnings,
   type TradingBotsOverviewDetails,
 } from "./tradingBotsOverviewData";
+
+const SUMMARY_TAB_CLASS = "rounded-md bg-violet-50 text-violet-900 data-active:bg-violet-700 data-active:text-white! dark:bg-violet-950 dark:text-violet-200 dark:data-active:bg-violet-600 dark:data-active:text-white!";
 
 const OVERVIEW_CACHE_KEY = "investment-engine:trading-bots-overview:v3";
 const PREFERRED_OVERVIEW_TIMEOUT_MS = 2_000;
@@ -362,35 +365,6 @@ function withTimeout<T>(
   });
 }
 
-function MetricTile({
-  label,
-  value,
-  detail,
-  valueClassName,
-}: {
-  label: string;
-  value: string;
-  detail: string;
-  valueClassName?: string;
-}) {
-  return (
-    <div className="rounded-[24px] border border-white/70 bg-white/85 px-4 py-4 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.55)] backdrop-blur">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-        {label}
-      </p>
-      <p
-        className={cn(
-          "mt-3 text-lg font-semibold tracking-tight text-slate-950",
-          valueClassName,
-        )}
-      >
-        {value}
-      </p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{detail}</p>
-    </div>
-  );
-}
-
 function TradingBotCard({
   bot,
   details,
@@ -506,6 +480,8 @@ function TradingBotCard({
               size="sm"
               variant="outline"
               onClick={onToggle}
+              aria-expanded={expanded}
+              aria-controls={`bot-details-${bot.id}`}
               className="rounded-full border-slate-300 bg-white/90 px-5"
             >
               Details
@@ -588,7 +564,7 @@ function TradingBotCard({
         </div>
 
         {expanded ? (
-          <div className="space-y-6 border-t border-slate-200/80 pt-6">
+          <div id={`bot-details-${bot.id}`} className="space-y-6 border-t border-slate-200/80 pt-6">
             <div className="grid gap-5 lg:grid-cols-2">
               <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white/90 px-5 py-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -747,6 +723,8 @@ export function TradingBotsOverviewPage() {
   const [details, setDetails] =
     useState<TradingBotsOverviewDetails>(INITIAL_DETAILS);
   const [expandedBots, setExpandedBots] = useState<Record<string, boolean>>({});
+  const runtimeTabRef = useRef<HTMLButtonElement>(null);
+  const [summaryView, setSummaryView] = useState("runtime");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingLatest, setIsLoadingLatest] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -948,17 +926,17 @@ export function TradingBotsOverviewPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-8">
-      <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_30%),linear-gradient(180deg,_rgba(255,255,255,0.98)_0%,_rgba(248,250,252,0.98)_100%)] px-6 py-6 shadow-[0_26px_70px_-42px_rgba(15,23,42,0.45)] dark:border-slate-700/80 dark:bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_30%),linear-gradient(180deg,_rgba(15,23,42,0.96)_0%,_rgba(2,6,23,1)_100%)] dark:shadow-[0_26px_70px_-42px_rgba(2,6,23,0.92)] sm:px-7">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-950 sm:p-5">
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-3">
             <div className="inline-flex items-center rounded-full border border-white/80 bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600 shadow-sm">
               Trading Bots Control Center
             </div>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
                 Overview
               </h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600 dark:text-slate-300">
                 One shared operating surface for Bullpen x Polymarket, Polymarket Direct, Bullpen x AI, and Bullpen AI Auto-Live. Review capital, runtime posture, risk signals, and recent activity without losing the dedicated bot consoles.
               </p>
             </div>
@@ -984,11 +962,59 @@ export function TradingBotsOverviewPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {summaryTiles.map((tile) => (
-            <MetricTile key={tile.label} {...tile} />
+        <Tabs value={summaryView} onValueChange={setSummaryView} className="mt-4">
+          <TabsList aria-label="Overview sections" className="grid h-auto! w-full grid-cols-1 gap-1 bg-violet-50/70 dark:bg-violet-950/50 sm:grid-cols-3">
+            <TabsTrigger ref={runtimeTabRef} value="runtime" className={SUMMARY_TAB_CLASS}>Runtime context</TabsTrigger>
+            <TabsTrigger value="capital" className={SUMMARY_TAB_CLASS}>Capital and performance</TabsTrigger>
+            <TabsTrigger value="exposure" className={SUMMARY_TAB_CLASS}>Positions and exposure</TabsTrigger>
+          </TabsList>
+          {[
+            { id: "runtime", title: "Runtime context", labels: ["Bots running", "Bots paused/stopped", "Highest risk bot", "Last updated"] },
+            { id: "capital", title: "Capital and performance", labels: ["Total money invested", "Total current value", "Total P&L", "Total return %"] },
+            { id: "exposure", title: "Positions and exposure", labels: ["Total active positions", "Total trades today", "Live exposure", "Dry-run exposure"] },
+          ].map((section) => (
+            <TabsContent key={section.id} value={section.id}>
+              <h2 className="sr-only">{section.title}</h2>
+              <p className="mb-3 text-sm text-slate-600 dark:text-slate-300" role="status">
+                {isLoadingLatest ? "Loading latest sources. " : ""}
+                {loadError ? "Some source reads failed. " : ""}
+                {usingFallback ? "Cached or unavailable sources; values may be partial or stale. " : "Values reflect available reported sources. "}
+                {section.id === "runtime"
+                  ? "Displayed counts alone do not verify current bot runtime or authorize starting a worker."
+                  : "Unavailable values remain —. Totals reflect only the bot sources that have loaded."}
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                    <tr>
+                      <th scope="col" className="px-3 py-2">Metric</th>
+                      <th scope="col" className="px-3 py-2">Current display</th>
+                      <th scope="col" className="px-3 py-2">Definition</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {section.labels.map((label) => {
+                      const tile = summaryTiles.find((item) => item.label === label)!;
+                      return (
+                        <tr key={label} className="border-t border-slate-200 dark:border-slate-700">
+                          <th scope="row" className="px-3 py-2 font-medium">{tile.label}</th>
+                          <td className={cn("px-3 py-2 font-semibold tabular-nums", tile.valueClassName)}>{tile.value}</td>
+                          <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{tile.detail}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {section.id === "exposure" ? (
+                <Button variant="link" size="sm" onClick={() => {
+                  setSummaryView("runtime");
+                  runtimeTabRef.current?.focus();
+                }}>Return to Runtime context</Button>
+              ) : null}
+            </TabsContent>
           ))}
-        </div>
+        </Tabs>
       </div>
 
       <UniversalPolymarketScan />

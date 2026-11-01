@@ -1,0 +1,22 @@
+{
+  "result": "PASS",
+  "checks": [
+    "failed unknown counters and count",
+    "single recovery banner",
+    "semantic tab keyboard and focus",
+    "filter values survive view changes",
+    "native disclosure keyboard",
+    "return focus",
+    "tab changes do not read data",
+    "loading",
+    "empty success",
+    "loaded detail and source fields",
+    "stale disclosure",
+    "partial polling retains loaded data",
+    "desktop 1180x757 at device scale 1",
+    "narrow 390px no page overflow"
+  ],
+  "forbiddenRequests": [],
+  "pageErrors": [],
+  "scope": "Actual page and production CSS rendered in an isolated fixture host; app shell and production data excluded. Recovery and provider action controls were not clicked."
+}

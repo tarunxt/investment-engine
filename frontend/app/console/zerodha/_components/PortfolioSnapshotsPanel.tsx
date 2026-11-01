@@ -419,7 +419,7 @@ function SnapshotHistoryChart({
     points.at(-1);
 
   return (
-    <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
+    <div className="flex h-full min-w-0 flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
@@ -673,6 +673,9 @@ export function PortfolioSnapshotsPanel({
             <p className="mt-1 text-sm text-gray-500">
               Daywise holdings and positions saved from your Zerodha account.
             </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Source: {selectedSnapshot.source} · Holdings: {formatCount(selectedSnapshot.holdings_count)}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <div className="text-right text-xs text-gray-500">
@@ -705,7 +708,7 @@ export function PortfolioSnapshotsPanel({
             {error}
           </div>
         )}
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 px-5 py-5 xl:grid-cols-2">
           <div className="grid gap-4 sm:grid-cols-2">
             <MetricCard
               label="Holdings Value"

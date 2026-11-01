@@ -27,13 +27,48 @@ const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors
 const fixture=(cost)=>({summary:{monthToDateAwsCost:cost,projectedMonthEndCost:cost},dailyCostTrend:[],dataTransferTrend:[],topServices:[],topUsageTypes:[],costDrivers:[],traffic:[],recommendations:[],inventory:{},debug:{}});
 const settle=async(index,data,fail=false)=>page.evaluate(({index,data,fail})=>{window.requests[index][fail?'reject':'resolve'](fail?Error(data):data)},{index,data,fail});
 try{
-for(const width of [1440,390]){
- await page.setViewportSize({width,height:900});await page.goto(base);await page.getByRole('status').waitFor();await page.waitForFunction(()=>requests.length===1);assert.equal(await page.getByRole('heading',{name:'Settings',exact:true}).count(),1);await settle(0,'backend timeout after 4 seconds',true);
+for(const {width,height} of [{width:1180,height:757},{width:1440,height:900},{width:390,height:844}]){
+ await page.setViewportSize({width,height});await page.goto(base);await page.getByRole('status').waitFor();await page.waitForFunction(()=>requests.length===1);assert.equal(await page.getByRole('heading',{name:'Settings',exact:true}).count(),1);await page.screenshot({path:path.join(output,`loading-${width}.png`)});await settle(0,'backend timeout after 4 seconds',true);
  await page.getByRole('region',{name:'Usage and costs unavailable'}).waitFor();assert.equal(await page.getByRole('alert').count(),1);assert.equal(await page.getByText('backend timeout',{exact:false}).count(),0);assert.equal(await page.getByText('$0.00',{exact:false}).count(),0);assert.equal(await page.getByRole('link',{name:'API cost details'}).getAttribute('href'),'/console/apis');
- await page.getByRole('button',{name:'Retry usage'}).focus();assert.equal(await page.getByRole('button',{name:'Retry usage'}).evaluate(el=>el===document.activeElement),true);await page.screenshot({path:path.join(output,`failed-${width}.png`)});await page.keyboard.press('Enter');await page.getByRole('status').waitFor();await page.waitForFunction(()=>requests.length===2);await settle(1,fixture(12.34));await page.getByRole('heading',{name:'Platform Cost Drivers',exact:true}).waitFor();await page.waitForFunction(()=>requests.length>=3);await settle(2,fixture(8));assert.ok(await page.getByText('$12.34',{exact:true}).count()>0);await page.screenshot({path:path.join(output,`success-${width}.png`)});
+ assert.equal(await page.getByText('Manage your account settings and preferences.',{exact:true}).count(),1);
+ const destinations=[['Profile','/console/profile'],['Preferences','/console/profile/preferences'],['Platform Cost Drivers','/console/profile/cost-drivers'],['Security','/console/profile/security'],['Activity','/console/profile/activity']];
+ for(const [name,href] of destinations){
+   const link=page.getByRole('link',{name,exact:true});
+   assert.equal(await link.count(),1);
+   assert.equal(await link.getAttribute('href'),href);
+   await link.focus();
+   assert.equal(await link.evaluate(el=>el===document.activeElement),true);
+ }
+ assert.ok((await page.getByRole('link',{name:'Platform Cost Drivers',exact:true}).getAttribute('class')).includes('text-primary'));
+ assert.equal(await page.getByText('We couldn’t load usage for this month. Costs are unknown until usage loads successfully.',{exact:true}).count(),1);
+ assert.equal(await page.getByText('No zero-cost inference is made and no retry was triggered.',{exact:true}).count(),0);
+ assert.equal(await page.getByRole('tab').count(),0);
+ assert.equal(await page.evaluate(()=>requests.length),1,'Failure must not automatically retry');
+ assert.equal(await page.getByRole('heading',{name:'Usage and costs unavailable',exact:true}).count(),1);
+ assert.equal(await page.getByRole('button',{name:'Retry usage',exact:true}).count(),1);
+ const recovery=page.getByRole('region',{name:'Usage and costs unavailable'});
+ const bounds=await recovery.boundingBox();
+ assert.ok(bounds.height<250,'Unavailable panel should fit its content');
+ assert.ok(bounds.width<=width-48,'Recovery panel should fit the viewport');
+ assert.ok(bounds.x>=0 && bounds.x+bounds.width<=width,'Keyboard navigation must not leave recovery clipped');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Settings navigation must fit narrow viewports');
+ // Repeated errors must keep one recovery message/action and retain keyboard access.
+ await page.getByRole('button',{name:'Retry usage'}).focus();
+ await page.keyboard.press('Tab');
+ assert.equal(await page.getByRole('link',{name:'API cost details'}).evaluate(el=>el===document.activeElement),true);
+ await page.keyboard.press('Shift+Tab');
+ await page.keyboard.press('Enter');
+ await page.getByRole('status').waitFor();
+ await page.waitForFunction(()=>requests.length===2);
+ await settle(1,'backend timeout again',true);
+ await recovery.waitFor();
+ assert.equal(await page.getByRole('alert').count(),1);
+ assert.equal(await page.getByRole('button',{name:'Retry usage',exact:true}).count(),1);
+ assert.equal(await page.getByText('$0.00',{exact:false}).count(),0);
+ await page.getByRole('button',{name:'Retry usage'}).focus();assert.equal(await page.getByRole('button',{name:'Retry usage'}).evaluate(el=>el===document.activeElement),true);await page.screenshot({path:path.join(output,`failed-${width}.png`)});await page.keyboard.press('Enter');await page.getByRole('status').waitFor();await page.waitForFunction(()=>requests.length===3);await settle(2,fixture(12.34));await page.getByRole('heading',{name:'Platform Cost Drivers',exact:true}).waitFor();await page.waitForFunction(()=>requests.length>=4);await settle(3,fixture(8));assert.ok(await page.getByText('$12.34',{exact:true}).count()>0);await page.screenshot({path:path.join(output,`success-${width}.png`)});
  assert.equal(await page.evaluate(()=>writes),0);
 }
-await page.goto(base);await page.waitForFunction(()=>requests.length===1);await settle(0,fixture(0));await page.getByRole('heading',{name:'Platform Cost Drivers',exact:true}).waitFor();assert.ok(await page.getByText('No AWS Cost Explorer service spend',{exact:false}).count());assert.ok(await page.getByText('$0.00',{exact:true}).count()>0);
+await page.goto(base);await page.waitForFunction(()=>requests.length===1);await settle(0,fixture(0));await page.getByRole('heading',{name:'Platform Cost Drivers',exact:true}).waitFor();assert.ok(await page.getByText('No AWS Cost Explorer service spend',{exact:false}).count());assert.ok(await page.getByText('$0.00',{exact:true}).count()>0);await page.screenshot({path:path.join(output,'empty-390.png')});
 // A late comparison from an unmounted month cannot replace the new month.
-await page.waitForFunction(()=>requests.length>=2);await page.locator('#cost-driver-month').selectOption({index:1});await page.waitForFunction(()=>requests.length>=3);await settle(1,fixture(99999));await settle(2,fixture(44.44));await page.getByRole('heading',{name:'Platform Cost Drivers',exact:true}).waitFor();assert.equal(await page.getByText('$99999.00',{exact:false}).count(),0);assert.ok(await page.getByText('$44.44',{exact:true}).count()>0);await page.goto(base);await page.waitForFunction(()=>requests.length===1);await settle(0,{...fixture(0),summary:{}});await page.getByText('Cost totals are unknown for this month.').waitFor();assert.equal(await page.getByText('$0.00',{exact:true}).count(),0);assert.ok(await page.getByText('Unknown',{exact:true}).count()>0);assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>writes),0);console.log('PASS: loading, single failure, shell, keyboard retry, success, confirmed empty, stale comparison, desktop/mobile; no writes or external calls. Screenshots: '+output);
+await page.waitForFunction(()=>requests.length>=2);await page.locator('#cost-driver-month').selectOption({index:1});await page.waitForFunction(()=>requests.length>=3);await settle(1,fixture(99999));await settle(2,fixture(44.44));await page.getByRole('heading',{name:'Platform Cost Drivers',exact:true}).waitFor();assert.equal(await page.getByText('$99999.00',{exact:false}).count(),0);assert.ok(await page.getByText('$44.44',{exact:true}).count()>0);await page.goto(base);await page.waitForFunction(()=>requests.length===1);await settle(0,{...fixture(0),summary:{}});await page.getByText('Cost totals are unknown for this month.').waitFor();assert.equal(await page.getByText('$0.00',{exact:true}).count(),0);assert.ok(await page.getByText('Unknown',{exact:true}).count()>0);await page.screenshot({path:path.join(output,'partial-390.png')});assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>writes),0);console.log('PASS: loading, repeated failure, all mapped navigation/labels, keyboard retry/details, success, confirmed empty, partial/unknown, stale comparison, desktop/mobile; no writes or external calls. Screenshots: '+output);
 }finally{await browser.close();server.close()}

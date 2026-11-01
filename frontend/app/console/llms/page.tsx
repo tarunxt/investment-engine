@@ -69,7 +69,7 @@ function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-500">LLM</p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">{group.provider} / {group.model}</h2>
-            <p className="mt-1 text-sm text-slate-500">Scan-wise processing and Google Sheets export performance.</p>
+            <p className="mt-1 text-sm text-slate-500">Scan-wise processing and historical Google Sheets export performance.</p>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             <Metric label="Scans" value={group.total_scans.toLocaleString('en-IN')} />
@@ -82,8 +82,8 @@ function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
       </div>
 
       <div className="space-y-6 p-5">
-        <div className="overflow-hidden rounded-xl border border-slate-200">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <div tabIndex={0} role="region" aria-label={`${group.provider} / ${group.model} scan summary`} className="overflow-x-auto rounded-xl border border-slate-200 focus-visible:outline-2 focus-visible:outline-indigo-500">
+          <table className="min-w-[650px] w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">Scan type</th>
@@ -115,7 +115,7 @@ function LlmGroupCard({ group }: { group: LlmPerformanceGroup }) {
               <h3 className="font-semibold text-slate-900">{scanType}</h3>
               <p className="text-xs text-slate-500">Detailed scan rows for {group.provider} / {group.model}</p>
             </div>
-            <div className="overflow-x-auto">
+            <div tabIndex={0} role="region" aria-label={`${group.provider} / ${group.model} ${scanType} scan details`} className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-indigo-500">
               <table className="min-w-[1100px] divide-y divide-slate-200 text-sm">
                 <thead className="bg-white text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <tr>
@@ -190,41 +190,49 @@ export default function LlmsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6 lg:max-w-none lg:px-0">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-500">LLMs</p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">LLM Performance</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Summarised and listwise LLM performance by scan type, with timestamps, runtime, processing pass/fail,
-            Google Sheets export pass/fail, cost, and captured errors.
-          </p>
+      <section aria-label="Report overview" className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-500">LLMs</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">LLM Performance</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              Summarised and listwise LLM performance by scan type, with timestamps, runtime, processing pass/fail,
+              Google Sheets export pass/fail, cost, and captured errors.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Export outcomes are historical report fields. Google Sheets is retired.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={loading}
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
 
-      {error ? (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>
-      ) : null}
+        {error ? (
+          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            {error}
+            <p className="mt-1">{data ? 'Showing the last loaded report; it may be stale. Use Refresh to retry.' : 'Report unavailable. Use Refresh to retry.'}</p>
+          </div>
+        ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="LLMs used" value={(data?.total_llms ?? 0).toLocaleString('en-IN')} />
-        <Metric label="Total scans" value={(data?.total_scans ?? 0).toLocaleString('en-IN')} />
-        <Metric label="Generated" value={formatDateTime(data?.generated_at)} />
-      </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Metric label="LLMs used" value={data ? data.total_llms.toLocaleString('en-IN') : '—'} />
+          <Metric label="Total scans" value={data ? data.total_scans.toLocaleString('en-IN') : '—'} />
+          <Metric label="Generated" value={formatDateTime(data?.generated_at)} />
+        </div>
+      </section>
 
       {loading && !data ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading LLM performance…</div>
+        <div role="status" className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading LLM performance…</div>
       ) : null}
 
-      {!loading && data && data.groups.length === 0 ? (
+      {loading && data ? <p role="status" className="text-sm text-slate-500">Refreshing report… Showing the last loaded results.</p> : null}
+
+      {!loading && !error && data && data.groups.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
           No LLM scans were found for your account yet.
         </div>
