@@ -461,7 +461,12 @@ function SellWorkflowOverview() {
   );
 }
 
-function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
+function SellBatchPreparation({ history, verified, loading, error }: {
+  history: MailHistoryItem[];
+  verified: boolean;
+  loading: boolean;
+  error: string | null;
+}) {
   type BatchRow = {
     key: string;
     event: string;
@@ -544,11 +549,20 @@ function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
     (total, row) => total + (row.expectedProceeds || 0),
     0,
   );
+  const cached = verified && (loading || Boolean(error));
+  const sourceStatus = !verified
+    ? loading
+      ? 'Loading mail-history source. Sell batch counts are unknown.'
+      : 'Mail-history source unavailable. Sell batch counts are unknown.'
+    : cached
+      ? 'Showing cached mail-history records. Current Sell batch state is unverified.'
+      : 'Source: successfully loaded mail-history records. This summary covers those records only.';
 
   return (
     <section
       className="mt-8 overflow-hidden rounded-3xl border border-blue-200 bg-card shadow-sm"
       aria-label="Sell batch preparation"
+      aria-busy={loading}
     >
       <div className="border-b border-blue-200 bg-blue-50/70 px-6 py-5">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
@@ -560,14 +574,15 @@ function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
         <p className="mt-1 text-sm text-muted-foreground">
           Include a position only when its fresh live held-side Bullpen odds are strictly below 80.0%. LLM odds are ignored.
         </p>
+        <p className="mt-3 text-sm text-muted-foreground" role={error ? 'alert' : 'status'}>{sourceStatus}</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <div className="rounded-xl border border-red-200 bg-white p-3"><p className="text-xs text-muted-foreground">Included</p><p className="mt-1 text-2xl font-bold text-red-700">{included.length}</p></div>
-          <div className="rounded-xl border border-emerald-200 bg-white p-3"><p className="text-xs text-muted-foreground">Recovered / excluded</p><p className="mt-1 text-2xl font-bold text-emerald-700">{recovered.length}</p></div>
-          <div className="rounded-xl border border-amber-200 bg-white p-3"><p className="text-xs text-muted-foreground">Awaiting live validation</p><p className="mt-1 text-2xl font-bold text-amber-700">{unverified.length}</p></div>
-          <div className="rounded-xl border border-blue-200 bg-white p-3"><p className="text-xs text-muted-foreground">Expected proceeds</p><p className="mt-1 text-2xl font-bold text-blue-700">${expectedTotal.toFixed(2)}</p></div>
+          <div className="rounded-xl border border-red-200 bg-white p-3"><p className="text-xs text-muted-foreground">Included</p><p className="mt-1 text-2xl font-bold text-red-700">{verified ? included.length : 'Unknown'}</p></div>
+          <div className="rounded-xl border border-emerald-200 bg-white p-3"><p className="text-xs text-muted-foreground">Recovered / excluded</p><p className="mt-1 text-2xl font-bold text-emerald-700">{verified ? recovered.length : 'Unknown'}</p></div>
+          <div className="rounded-xl border border-amber-200 bg-white p-3"><p className="text-xs text-muted-foreground">Awaiting live validation</p><p className="mt-1 text-2xl font-bold text-amber-700">{verified ? unverified.length : 'Unknown'}</p></div>
+          <div className="rounded-xl border border-blue-200 bg-white p-3"><p className="text-xs text-muted-foreground">Expected proceeds</p><p className="mt-1 text-2xl font-bold text-blue-700">{verified ? `$${expectedTotal.toFixed(2)}` : 'Unknown'}</p></div>
         </div>
       </div>
-      {rows.length ? (
+      {verified && rows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-[1380px] w-full text-left text-xs">
             <thead className="border-b border-border bg-muted/50 uppercase tracking-wide text-muted-foreground">
@@ -608,11 +623,11 @@ function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : verified ? (
         <div className="p-6 text-sm text-muted-foreground">
-          No Sell alerts have been evaluated against live Bullpen odds yet.
+          No evaluated Sell alerts are present in these mail-history records.
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -1139,7 +1154,7 @@ export default function MailsPage() {
 
       <SellWorkflowOverview />
 
-      <SellBatchPreparation history={history} />
+      <SellBatchPreparation history={history} verified={historyVerified} loading={historyLoading} error={historyError} />
 
       <section aria-labelledby="mail-history-heading" className="mt-8 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 border-b border-border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
