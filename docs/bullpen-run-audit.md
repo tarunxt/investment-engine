@@ -2752,3 +2752,9 @@ snapshots do not imply zero activity or invite execution; verified empty saved
 snapshots retain zero counts. An overview read settling without data clears only
 its transient loading note, preserving cached values, source notes and timestamps.
 Audit capture, frozen snapshots and execution remain unchanged.
+
+The remaining Stage 1 event-action labels use unknown counts when source evidence
+is not evaluated. Filtered/scanned export names, their tooltips and adjacent
+included-active labels follow the same existing display guard. Verified zero and
+saved known counts remain visible. Action handlers, disabled predicates, audit
+capture, frozen snapshots, calculations and execution remain unchanged.

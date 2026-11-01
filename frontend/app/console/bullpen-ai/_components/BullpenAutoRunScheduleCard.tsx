@@ -2205,11 +2205,11 @@ function StageOneRunStats({
     decisions,
     run,
   );
+  hideNumbers = hideNumbers || stageOneNotEvaluated(stage);
   const includedActiveLabel =
     !hideNumbers && includedActiveCount !== null
       ? ` (Includes ${includedActiveCount} active event${includedActiveCount === 1 ? "" : "s"})`
       : "";
-  hideNumbers = hideNumbers || stageOneNotEvaluated(stage);
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
   const scanScope = readStageOutputString(stage.outputs.scan_scope);
   const scanCompleteness = readStageOutputString(
@@ -2279,10 +2279,17 @@ function StageOneRunStats({
     (isIndependentStageOne
       ? !independentExportId && !onRecoverLegacyExport
       : !run?.id && filteredEventRows.length === 0);
-  const allScannedDownloadLabel = isLegacyExportRecovery
+  const filteredDownloadLabel = hideNumbers
+    ? "Download Excel · filtered event count unknown"
+    : `Download Excel with all ${stats.passedFilters} filtered events`;
+  const allScannedDownloadLabel = hideNumbers
+    ? "Download Excel · scanned event count unknown"
+    : isLegacyExportRecovery
     ? `Rescan and download Excel with all currently active events; legacy scan contained ${stats.totalScanned} events`
     : `Download Excel with all ${stats.totalScanned} scanned events`;
-  const allScannedDownloadTitle = isLegacyExportRecovery
+  const allScannedDownloadTitle = hideNumbers
+    ? "Scanned event count unknown; source evidence unavailable."
+    : isLegacyExportRecovery
     ? "Run a fresh exhaustive scan and download all events Excel"
     : "Download all scanned events Excel";
   const downloadFilteredEvents = () => {
@@ -2324,7 +2331,7 @@ function StageOneRunStats({
           onClick={() => onOpenScanCandidateDialog?.(stage, "fresh-opportunities")}
           disabled={!renderInteractiveRows || !onOpenScanCandidateDialog}
           className="group flex w-full items-center gap-3 rounded-xl border border-emerald-200/80 bg-white/80 p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:pointer-events-none"
-          aria-label={`Open ${stats.passedFilters} events that passed filters`}
+          aria-label={hideNumbers ? "Open events that passed filters · count unknown" : `Open ${stats.passedFilters} events that passed filters`}
         >
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-200">
             <Filter className="h-5 w-5" />
@@ -2359,7 +2366,7 @@ function StageOneRunStats({
               onClick={downloadFilteredEvents}
               disabled={filteredDownloadUnavailable}
               className="p-3 text-left disabled:cursor-not-allowed disabled:opacity-45"
-              aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+              aria-label={filteredDownloadLabel}
               title="Download filtered events Excel"
             >
               <div className="flex items-center gap-2 text-emerald-700">
@@ -2525,7 +2532,7 @@ function StageOneRunStats({
               onClick={downloadFilteredEvents}
               disabled={filteredDownloadUnavailable}
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+              aria-label={filteredDownloadLabel}
               title="Download Excel"
             >
               <FileSpreadsheet className="h-4 w-4" />
@@ -2557,7 +2564,7 @@ function StageOneRunStats({
               onClick={downloadFilteredEvents}
               disabled={filteredDownloadUnavailable}
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+              aria-label={filteredDownloadLabel}
               title="Download Excel"
             >
               <FileSpreadsheet className="h-4 w-4" />
