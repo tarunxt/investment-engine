@@ -38,12 +38,19 @@ deployment. A green PR alone is insufficient to authorize that trigger.
    ExecStartPre, and all deployment/rollback commands. The checked-in backend unit
    template invokes `sync-bullpen-operator-credentials.sh` before start, which can
    invoke the Bullpen CLI. Actual recovery units must have the reviewed contained
-   behavior; refuse unreviewed hooks. Do not run the ordinary broad redeploy:
+   behavior; refuse unreviewed hooks. The coordinator's read-only host preflight
+   found no actual pre-start/stop hooks or worker-start dependencies. The existing
+   credential wrapper remains part of restart; honor any runtime denial rather
+   than replacing or bypassing it. Do not run the ordinary broad redeploy:
    it executes migrations and restarts financial services.
 3. Resolve the existing root-owned backend EnvironmentFile privately on the
    server (canonical production path `/etc/investor/backend.env`). The sole local
    operator generates the key there using a CSPRNG and performs a permission-
-   preserving private update. Remove legacy aliases, including stale placeholders.
+   preserving private atomic update that retains unrelated bytes. Remove legacy
+   aliases, including stale placeholders. Check later EnvironmentFile overlays
+   privately for all three names: none may replace the canonical key or supply
+   a blank/conflicting alias. The later recovery environment file is not suitable
+   for storing the private key. Recheck root ownership, permissions and metadata.
    Never display, hash, log, upload, transmit through chat or commit the key.
    No existing secret retrieval or external credential grants are required.
 4. Before starting any promotion, ensure rollback cannot restore fixed-key code.
@@ -54,7 +61,8 @@ deployment. A green PR alone is insufficient to authorize that trigger.
    signing value, old fallback, or pre-remediation authentication artifact.
 5. Under the production deployment lock, verify the stopped financial services,
    then promote only reviewed source and restart only the necessary backend and
-   isolated recovery processes. Preserve recovery queue policy, units, owner
+   isolated recovery processes: backend first, verify readiness, then recovery.
+   Preserve recovery queue policy, units, owner
    boundaries and environment permissions. No migrations, broad deploy, financial
    worker starts, provider calls, trades or paid runs.
 6. Verify the loaded revision and readiness, absence of key material in outputs,
