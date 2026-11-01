@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { Clock3, Loader2, X } from "lucide-react";
 
+import { parseApiTimestamp } from "@/lib/datetime";
 import { apiService } from "@/services/api";
 import type { JobResponse, RunResponse } from "@/types/api";
 
@@ -35,13 +36,13 @@ type DurationBreakdown = {
 
 function parseTimestampMs(value?: string | null) {
   if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseApiTimestamp(value)?.getTime() ?? null;
 }
 
 function formatDurationMs(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "n/a";
-  const totalSeconds = Math.max(0, Math.floor(value / 1000));
+  if (value < 0) return "Invalid interval (end before start)";
+  const totalSeconds = Math.floor(value / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -52,7 +53,7 @@ function formatDurationMs(value: number | null) {
 
 function getDurationMs(startMs: number | null, endMs: number | null) {
   if (startMs === null || endMs === null) return null;
-  return Math.max(0, endMs - startMs);
+  return endMs - startMs;
 }
 
 function isActiveStatus(status?: string | null) {
@@ -63,7 +64,7 @@ function isActiveStatus(status?: string | null) {
 
 function getJobEndMs(job: JobResponse, now: number) {
   if (isActiveStatus(job.status)) return now;
-  return parseTimestampMs(job.updated_at) ?? now;
+  return parseTimestampMs(job.updated_at);
 }
 
 function buildFallbackBreakdown(
@@ -83,7 +84,7 @@ function buildFallbackBreakdown(
       },
       {
         id: "execution",
-        label: llmLabel ? `LLM execution · ${llmLabel}` : "LLM execution and stage processing",
+        label: llmLabel ? `Stage wall-clock · ${llmLabel}` : "Stage wall-clock (phases not recorded)",
         duration: totalDuration,
         detail:
           "The available timestamps cover the complete execution window, including provider processing and any queue time.",
@@ -131,10 +132,10 @@ function buildDurationBreakdown(
   const jobEndValues = jobWindows
     .map((window) => window.endMs)
     .filter((value): value is number => value !== null);
-  const earliestJobStartMs = jobStartValues.length
+  const earliestJobStartMs = jobStartValues.length === jobs.length
     ? Math.min(...jobStartValues)
     : null;
-  const latestJobEndMs = jobEndValues.length ? Math.max(...jobEndValues) : null;
+  const latestJobEndMs = jobEndValues.length === jobs.length ? Math.max(...jobEndValues) : null;
 
   const steps: DurationBreakdownStep[] = [
     {
@@ -153,9 +154,9 @@ function buildDurationBreakdown(
     })),
     {
       id: "finalisation",
-      label: "Validation, aggregation and finalisation",
+      label: "Unattributed time after last job update",
       duration: formatDurationMs(getDurationMs(latestJobEndMs, stageEndMs)),
-      detail: "Time after the last LLM job update until the stage reached its recorded end.",
+      detail: "Gap between the last job update and recorded stage end. Validation, aggregation and finalisation phases were not separately recorded; this gap is not a measured phase duration.",
     },
   ];
 
@@ -263,6 +264,12 @@ export function StageDurationBreakdownDialog({
             <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-950">
               {breakdown.totalDuration}
             </p>
+            {info.startedAt || info.endedAt || info.completedAt ? (
+              <p className="mt-2 break-words text-xs text-slate-600">
+                Recorded start: {info.startedAt ?? "Not recorded"} · Recorded end: {info.endedAt ?? info.completedAt ?? "Not recorded"}.
+                Timestamps without an offset are interpreted as UTC. Invalid intervals preserve the recorded values and require source-event reconciliation.
+              </p>
+            ) : null}
             <p className="mt-2 text-sm leading-5 text-slate-600">
               The complete execution window includes provider processing and queue time.
               Separate phases are shown only where timestamps were recorded.
