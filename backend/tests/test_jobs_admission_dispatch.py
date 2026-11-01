@@ -172,6 +172,10 @@ async def test_owner_query_filters_pagination_and_http(database, monkeypatch):
         assert await repo.get_for_user(999999, 1) is None
         filtered = await repo.list_for_user(1, PagedQuery(), status=JobStatus.PARTIAL)
         assert filtered.total == 1 and filtered.items[0].status == JobStatus.PARTIAL
+        pending_id = (await repo.list_for_user(1, PagedQuery(), status=JobStatus.PENDING)).items[0].id
+        terminal_id = filtered.items[0].id
+    monkeypatch.setattr("app.domains.jobs.router.revoke_registered_job_task", AsyncMock())
+    monkeypatch.setattr("app.domains.jobs.tasks._publish_job_update", lambda job: None)
     app = FastAPI(); app.include_router(router)
     async def session():
         async with database() as db: yield db
@@ -183,6 +187,13 @@ async def test_owner_query_filters_pagination_and_http(database, monkeypatch):
             assert result.status_code == 404 and result.json() == {"detail": "Job not found"}
         assert (await client.get("/jobs?limit=100")).json()["total"] == len(JobStatus)
         assert (await client.get("/jobs?limit=101")).status_code == 422
+        assert (await client.get("/jobs?limit=0")).status_code == 422
+        assert (await client.get("/jobs?limit=1")).status_code == 200
+        canceled = await client.post(f"/jobs/{pending_id}/cancel")
+        assert canceled.status_code == 200 and canceled.json()["status"] == "failed"
+        assert canceled.json()["error_message"] == "Cancelled by user"
+        terminal = await client.post(f"/jobs/{terminal_id}/cancel")
+        assert terminal.status_code == 200 and terminal.json()["status"] == "partial"
         assert (await client.get("/jobs?status=unknown")).status_code == 400
         assert (await client.post(f"/jobs/{foreign_id}/cancel")).status_code == 404
         def anonymous(): raise HTTPException(401, "Unauthorized")
