@@ -45,3 +45,54 @@ Mapper registration occurs before measurement; first-statement compilation still
 ## Integration boundary
 
 Coordinator owns auth-first serialization, independent review, exact-head CI, merge, deployment and safe live evidence. Neither recommendation is closed. No formal PR approval is supplied. No runtime access or separate security/policy authorization is requested by this checkpoint.
+
+## Follow-up: provenance, full selected-window read and actual-page acceptance
+
+This section supersedes the implementation gaps in the initial checkpoint above. Fresh main remains `8d25f34a` on re-fetch. No live/provider/billing access occurred.
+
+| Action | Current result |
+| --- | --- |
+| A12-001.01 | Fresh source inspected; loaded-runtime comparison remains coordinator acceptance. |
+| A12-001.02 | New metered adapter attempts persist schema-v1 tariff provenance with deterministic rate-snapshot hash, USD-per-million units, unknown effective date, unverified repository freshness and null billed charge. Existing legacy tariff_version and numeric fields remain untouched. Actual DeepSeek adapter tests use mocked SDK responses, including missing/zero/malformed cache usage. |
+| A12-001.03 | Complete selected persisted event window uses one streaming SQL statement, 1000-row driver batches, read cutoff and no accounting LIMIT. Started events use start time; finished events use finish time, including cross-midnight failures. Full persisted read is distinct from unknown invocation/invoice completeness. Interrupted reads fail instead of returning complete/zero data. |
+| A12-001.04 | Shared incremental accumulator retains lifecycle and provider identity state across fetch batches. The original 31 bounded pure tests still pass. 10005 persisted events verify no truncation, exact deduplicated subtotals, independent samples, errors/cancellations and ownership/provider boundaries. Attempt estimates remain separate from legacy totals. |
+| A12-001.05 | Actual breakdown component displays reported versus inferred cache tokens (including reported zero), version/freshness, read cutoff and complete persisted-read versus unknown invoice coverage. Existing stale/error/retry/native USD/nullable FX/run history behavior retained. Historical fields without source evidence remain unknown. |
+| A12-001.06 | 144 relevant backend tests pass, including real SQLite persisted reads, mocked actual DeepSeek execution, prior reconciliation/timezone/identity tests and comparative projection fixtures. Actual component failure/keyboard/narrow and provenance-label fixture passes. |
+| A12-001.07 | Offline keyboard/narrow acceptance passes. Deployed identity and safe live acceptance remain coordinator release gates. |
+| A12-002.01 | Actual persisted synthetic SQLite fixtures compare four-provider baseline and compact reads at 1/10/1000 jobs per provider, with SQL statements, selected-value JSON size, hydrated entities, daily-total serialization and instrumented peak memory measured. |
+| A12-002.02 | Owner/provider-filtered compact reads complete; 16 accounting statements across four providers for either path, without all-provider entity hydration in the compact path. |
+| A12-002.03 | Chart selects zero prompt/response columns. Exact provider/day totals match baseline; legacy history/detail paths and source precedence retained. |
+| A12-002.04 | Complete selected day-window scans are independent of run_limit. Full streaming attempt coverage has no row cap. Legacy run pagination remains bounded and unchanged. |
+| A12-002.05 | Actual ApisPage and CombinedLlmCostChart fixture proves one provider is usable while three peers remain pending, all four keyboard controls, partial failure, empty provider, retry and stale retention at 1180/375px. Zero external requests/writes/errors. |
+| A12-002.06 | Comparative persisted fixtures assert exact provider/day and aggregate totals; actual page lifecycle fixture passes. Measurements below are synthetic, not production claims. |
+| A12-002.07 | Runtime trend trace/root cause and comparable safe live route latency remain unverified; no paid or live measurement performed. |
+
+### Shared source contract for cost-dashboard ownership
+
+No cost-dashboard-owned files or database schemas were changed. Consumers can reuse:
+
+- `api_usage.provenance.tariff_provenance(rates)` and `cache_provenance(reported, inferred)`; schema version 1. New attempts store these in existing `inferred_usage.accounting_provenance` and `inferred_usage.cache_fields`. The legacy top-level tariff tag remains backward compatible; `rate_version` identifies exact stored numeric rate snapshots. Effective dates and settlement are explicitly unknown.
+- `api_usage.window_coverage.load_window_attempt_coverage(...)`; schema version 1. `persisted_read_state=complete` means the entire selected statement snapshot was consumed, while `invocation_coverage_state=unknown` and `invoice_total_usd=null` remain separate. Lifecycle/identity state grows with unique attempts to preserve exact reconciliation; only driver fetch batches are fixed-size. Consumers must not sum independently deduplicated batch reports or add attempt estimates to legacy provider-day totals.
+
+No missing billing evidence blocks completion of these code contracts. Historical provider invoice completeness, verified tariff effective dates, hidden SDK retries and original absent fields cannot be manufactured from saved telemetry. They remain explicit unknowns; no backfill or billing export was performed.
+
+### Comparative persisted fixture evidence
+
+These are Python JSON encodings of selected synthetic values, not database wire bytes. Memory includes test instrumentation and first-query setup; no production speedup is claimed.
+
+| Rows/provider | Statements baseline/compact | Selected JSON bytes baseline/compact | Peak bytes baseline/compact | Identical daily totals JSON bytes |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 16 / 16 | 80764 / 457 | 7954803 / 240506 | 421 |
+| 10 | 16 / 16 | 807308 / 4385 | 985135 / 178547 | 429 |
+| 1000 | 16 / 16 | 80759596 / 443917 | 71724242 / 2470130 | 849 |
+
+At 1000 rows/provider, baseline hydrated 16000 full job entities across the fan-out; compact hydrated zero job entities and selected no prompt/response. Both retained identical provider/day values, including failed jobs, request-attempt counts and owner filtering.
+
+Additional runnable fixtures:
+
+```
+PYTHONPATH=backend /tmp/a12-venv/bin/python -m pytest backend/tests/test_api_usage_selected_window.py backend/tests/test_api_usage_projection_comparison.py -q -s
+CHROMIUM_PATH=/usr/bin/chromium node frontend/scripts/api-accounting-page-offline-playwright.mjs
+```
+
+The test environment uses aiosqlite 0.22.1, already listed in repository CI dependency installation. Browser evidence is synthetic only under `/tmp/a12-api-page-evidence/`; it was not published. TypeScript noEmit and changed-file ESLint checks pass. The initial PR creation returned GitHub GraphQL Forbidden; it was not retried through any route. Neither recommendation is closed without coordinated deployed acceptance.
