@@ -6,6 +6,7 @@ import { type WorkflowStageKey, type StageState, type StageErrorDetail, type Sta
 
 import Link from "next/link";
 import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
+import { threatInputRationale } from "./threatInputRationale";
 import { PromptTemplateDialog } from "@/app/console/automated-rebalance/_components/PromptTemplateDialog";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
@@ -3743,7 +3744,7 @@ function InputSelectionDialog({
   };
   const rationaleByStage: Record<InputSelectionStage, string> = {
     threats:
-      "Only selected sources are included. Upcoming output reserves the snapshot from this workflow; select Saved snapshot separately if needed.",
+      threatInputRationale(candidates, selectedIds, loading, error),
     swing:
       "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
     rebalance:
