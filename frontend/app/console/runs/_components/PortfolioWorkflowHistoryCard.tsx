@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { STAGE_ORDER, WorkflowStageTile } from '@/components/shared/WorkflowStageTile';
+import { STAGE_ORDER } from '@/components/shared/WorkflowStageTile';
+import { HistoricalStageLedgerRow } from './HistoricalStageLedgerRow';
 import { historicalStageInfo, portfolioResultCompleteness } from '@/lib/portfolioStageHistory';
 import { getRunDetailPathFromPrompt } from '@/lib/runPresentation';
 import { formatCompactStageTime } from '@/lib/datetime';
@@ -26,14 +27,14 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
           <p className="text-xs text-gray-500">Execution: {group.status.replaceAll('_', ' ')}</p>
         </div>
       </div>
-      <div role="region" aria-label={`${group.label} six stages; scroll horizontally`} tabIndex={0}
-        className="mt-4 overflow-x-auto rounded-xl pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-        <div className="grid grid-flow-col auto-cols-[minmax(17rem,1fr)] gap-4">
+      <div role="region" aria-label={`${group.label} stage evidence`}
+        className="mt-4 rounded-xl border border-gray-200">
+        <div className="divide-y divide-gray-200">
           {STAGE_ORDER.map(key => {
             const stage = group.stages.find(item => item.stage === key);
             const source = children.find(run => run.id === stage?.run_id);
             const path = stage?.run_id ? getRunDetailPathFromPrompt(stage.run_id, source?.prompt_preview) : detailPath;
-            return <WorkflowStageTile key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)} historical
+            return <HistoricalStageLedgerRow key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)}
               onClick={stage ? () => onOpen(path) : undefined}
               onOutputClick={stage ? () => onOpen(path) : undefined}
               onPromptClick={stage?.run_id ? () => onOpen(path) : undefined} />;
