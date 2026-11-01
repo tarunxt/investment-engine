@@ -11,6 +11,7 @@ const require=createRequire(import.meta.url);
 const frontend=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const temporary=await mkdtemp(path.join(tmpdir(),'auto-stages-ledger-'));
 const evidence=process.env.AUTO_STAGES_EVIDENCE || '/tmp/auto-stages-evidence';
+const mixedFailure=process.env.AUTO_STAGES_MIXED_FAILURE === '1';
 await mkdir(evidence,{recursive:true});
 let server,browser;
 try {
@@ -22,17 +23,22 @@ try {
  window.actions=[];
  const now=Date.parse('2026-11-01T03:00:00Z');
  function Fixture(){
- const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState('loaded'),[checks,setChecks]=useState({});
+ const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState(new URLSearchParams(location.search).get('fixture')||'loaded'),[checks,setChecks]=useState({});
  const call=(name)=>()=>window.actions.push(name);
  const stages=STAGE_ORDER.map((stage,index)=>{
  const partial=market==='US'&&stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
- const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?1:0,failedLlms:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'One saved LLM response was partial.':null};
+ const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?${mixedFailure ? 0 : 1}:0,failedLlms:partial?${mixedFailure ? 1 : 0}:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'${mixedFailure ? 'One provider completed and one provider failed.' : 'One saved LLM response was partial.'}':null};
+ if(state==='derived'){
+   info.state=stage==='technical'?'failed':'idle';
+   info.runStatus=stage==='technical'?'failed':stage==='actionables'?'derived from latest rebalance/technical scan':'completed';
+   info.evidence=stage==='actionables'?{kind:'derived',references:['Timestamp source: run #102 · failed · 2026-11-01T12:00:00Z','Stock-count source: run #101 · completed · 2026-10-30T12:00:00Z']}:{kind:'saved',references:['india workflow #7 · '+stage+' · '+info.runStatus+' · 2026-10-30T12:00:00Z']};
+ }
  return <WorkflowStageTile key={stage} stage={stage} info={info} now={now} selectable={state==='selection'} selected={Boolean(checks[stage])} onClick={state==='selection'?()=>setChecks({...checks,[stage]:!checks[stage]}):call('open:'+stage)} onInfoClick={!['sync','actionables'].includes(stage)?call('models:'+stage):undefined} onInputClick={stage!=='sync'?call('inputs:'+stage):undefined} onPromptClick={!['sync','actionables'].includes(stage)?call('prompt:'+stage):undefined} onOutputClick={call('output:'+stage)} onSyncNowClick={stage==='sync'?call('sync'):undefined} onPlaceOrderClick={stage==='actionables'?call('order:'+market):undefined} placeOrderLabel={market==='US'?'Final Order':'Place Order'} onCalculationsClick={stage==='actionables'?call('calculation'):undefined}/>;
  });
  return <main className="mx-auto max-w-[1380px] p-4 text-slate-700"><h1 className="mb-3 text-xl font-bold text-slate-950">Automated rebalance · offline fixture</h1>
  <WorkflowStageLedgerViews market={market==='India'?'zerodha':'indmoneyUs'} view={view} onChange={(m,v)=>{setMarket(m==='zerodha'?'India':'US');setView(v)}}/>
- <label className="mb-3 block text-xs">Fixture state <select value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','stale','zero','selection'].map(s=><option key={s}>{s}</option>)}</select></label>
+ <label className="mb-3 block text-xs">Fixture state <select value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','stale','zero','selection','derived'].map(s=><option key={s}>{s}</option>)}</select></label>
  <article className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4"><div className="flex justify-between gap-3"><div><h2 className="text-xl font-bold text-slate-950">Run {market==='India'?'Zerodha':'Indmoney'} Auto-Rebalance</h2><p className="mt-2 text-sm">Last run: {state==='empty'?'n/a':'30 Oct 19:43'}</p></div><section aria-label="Run controls"><h3 className="text-sm font-semibold">Run controls</h3><button className="mt-2 rounded-lg bg-indigo-700 px-4 py-2 text-white" onClick={call('run')}>Run</button></section></div>
  <WorkflowStageLedger enabled view={view} historyHref="#history" onStockFlowClick={call('flow')}>{stages}</WorkflowStageLedger>
  <footer className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm">Cumulative LLM time: 00:08:39 · Total cost incurred in last Auto-rebalance: n/a</footer></article><p id="history">Offline fixture history destination</p></main>;
@@ -48,17 +54,18 @@ try {
  server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/bundle.js'?'text/javascript':req.url==='/style.css'?'text/css':'text/html');res.end(req.url==='/bundle.js'?bundle:req.url==='/style.css'?css:'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline stage ledger</title><link rel="stylesheet" href="/style.css"><div id="root"></div><script src="/bundle.js"></script>');});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const origin=`http://127.0.0.1:${server.address().port}`;
- browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+ browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||chromium.executablePath(),headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:1180,height:757},deviceScaleFactor:1});
  const consoleErrors=[];page.on('pageerror',error=>consoleErrors.push(error.message));
  await page.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
  await page.goto(origin);await page.getByRole('table').waitFor();
  assert.equal(await page.locator('tbody tr').count(),6);
- assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Saved time','Completion / inputs','Stocks','Duration','Error']);
+ assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Evidence time','Completion / inputs','Stocks','Duration','Error']);
  assert.equal(await page.getByRole('status').count(),0);
  await page.screenshot({path:path.join(evidence,'india-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'US stage ledger',exact:true}).focus();await page.keyboard.press('Enter');
  assert.equal(await page.getByRole('status').count(),1);
+ if(mixedFailure){assert.match(await page.locator('tbody').innerText(),/Passed:1/);assert.match(await page.locator('tbody').innerText(),/Failed:1/);}
  assert.match(await page.getByRole('status').innerText(),/Rebalance has partial output/);
  assert.equal(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).count(),1);
  await page.screenshot({path:path.join(evidence,'us-partial-desktop.png'),fullPage:true});
@@ -95,6 +102,20 @@ try {
  assert.equal(await region.evaluate(el=>el.scrollLeft>0),true);
  await page.screenshot({path:path.join(evidence,'us-partial-narrow.png'),fullPage:true});
  await page.getByRole('button',{name:/06 Actionables/}).click();await page.getByRole('button',{name:'Calculation',exact:true}).focus();await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.actions.at(-1)),'calculation');
+ // Reload and repeated stage selection retain separate failed/historical/derived labels.
+ await page.goto(origin+'/?fixture=derived');
+ for(let i=0;i<2;i++){
+ await page.getByRole('button',{name:/06 Actionables/}).click();
+ assert.match(await page.locator('tbody tr').last().innerText(),/Derived summary · saved final execution not established/);
+ const sources=page.getByRole('list',{name:'Evidence sources'});
+ assert.match(await sources.innerText(),/Timestamp source: run #102 · failed/);
+ assert.match(await sources.innerText(),/Stock-count source: run #101 · completed/);
+ await page.getByRole('button',{name:/05 Technical/}).click();
+ assert.match(await page.getByRole('list',{name:'Evidence sources'}).innerText(),/india workflow #7 · technical · failed/);
+ await page.reload();await page.getByRole('table').waitFor();
+ }
+ assert.equal(await page.evaluate(()=>window.actions.length),0);
+ await page.screenshot({path:path.join(evidence,'derived-provenance.png'),fullPage:true});
  assert.deepEqual(consoleErrors,[]);
  console.log('PASS: 6 rows; value inventory; India/US; partial row and summary; all evidence callbacks; loading/empty/failed/stale/zero/selection; repeated dialogs; Escape/focus/keyboard; back navigation; narrow scroll; market-specific orders; no execution callbacks triggered.');
  console.log('Screenshots: '+evidence);

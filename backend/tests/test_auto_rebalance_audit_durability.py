@@ -853,6 +853,13 @@ async def test_final_capture_validates_revisions_and_preserves_first_snapshot(au
     bad = {**payload, 'response_hashes':{}}
     with pytest.raises(HTTPException):
         await write(audit_db,'actionables','completed',summary={'frozen_final':bad})
+    # Existing v1 history is preserved; the new-save path requires v2.
+    await write(audit_db,'actionables','completed',summary={})
+    async with audit_db.sessions() as db:
+        stage = (await db.execute(select(AutoRebalanceWorkflowStage).where(
+            AutoRebalanceWorkflowStage.stage == 'actionables'))).scalar_one()
+        stage.summary_json = {'frozen_final': payload}
+        await db.commit()
     first = await write(audit_db,'actionables','completed',summary={'frozen_final':payload})
     changed = {**payload,'rows':[{'exchange':'NSE','symbol':'BEL','score':3,'action':'Buy New'}]}
     replay = await write(audit_db,'actionables','completed',summary={'frozen_final':changed})

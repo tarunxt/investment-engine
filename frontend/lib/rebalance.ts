@@ -41,6 +41,17 @@ export function assertIndmoneyHoldingsSnapshot(snapshot: IndMoneyUsPortfolioSnap
   }
 }
 
+export function assertZerodhaNumericExposure(snapshot: ZerodhaPortfolioSnapshotDetail | null) {
+  if (!snapshot) return; // Existing no-portfolio workflow remains supported.
+  const finite = (value: unknown) => typeof value === "number" && Number.isFinite(value);
+  if (!finite(snapshot.available_margin) || !Array.isArray(snapshot.holdings) || !Array.isArray(snapshot.positions?.net)
+      || snapshot.holdings_count !== snapshot.holdings.length
+      || !snapshot.holdings.every(holding => [holding.quantity, holding.t1_quantity, holding.last_price].every(finite))
+      || !snapshot.positions.net.every(position => [position.quantity, position.last_price, position.value].every(finite))) {
+    throw new Error("Zerodha snapshot has unknown numeric exposure or available margin. Use a complete portfolio snapshot before analysis.");
+  }
+}
+
 const MARKET_COPY: Record<
   SwingTradeMarket,
   {
@@ -213,6 +224,15 @@ function parseApiDate(value?: string | null) {
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
+// Capture age is evidence about a saved record, never proof of price freshness.
+export function describeRebalanceSourceAge(value: string | null | undefined, now: Date) {
+  const parsed = parseApiDate(value);
+  if (!parsed) return `source timestamp: ${value || "unknown"}; age: unknown`;
+  const elapsed = now.getTime() - parsed.getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 0) return `source timestamp: ${value}; age: unknown (future or invalid reference time)`;
+  return `source timestamp: ${value}; age: ${elapsed} ms at ${now.toISOString()}`;
+}
+
 function formatDateTimeForMarket(date: Date, market: SwingTradeMarket) {
   const timeZone = MARKET_COPY[market].timezone;
   const local = date.toLocaleString("en-IN", {
@@ -293,7 +313,7 @@ Convert my current portfolio into the best possible aggressive 1–3 month swing
 
 Inputs you will receive in this prompt:
 1. Latest portfolio snapshot with current units.
-2. Consolidated LLM swing-trade recommendation tables from all completed ${copy.label} swing-trade runs created after the previous market close.
+2. Consolidated LLM swing-trade recommendation tables from the completed ${copy.label} swing-trade runs explicitly selected for this input bundle. Selections may be historical; inspect their source timestamps.
 3. Latest Threats report output.
 
 [REBALANCE_UNIVERSE_V1]
@@ -393,6 +413,22 @@ function preserveSwingRecommendationResponse(response?: string | null) {
   return response?.trim() ? response : "_No response captured yet._";
 }
 
+export function formatRebalanceFunds(market: SwingTradeMarket, snapshot: PortfolioSnapshot) {
+  const field = market === "india" ? "available_margin" : "wallet_balance";
+  const value = snapshot && field in snapshot
+    ? (snapshot as unknown as Record<string, unknown>)[field] : undefined;
+  const amount = typeof value === "number" && Number.isFinite(value) ? String(value) : "Unknown (missing or invalid)";
+  return [
+    "Funds context contract: rebalance-funds/v1",
+    `Source: ${market === "india" ? "Zerodha" : "INDmoney US"} portfolio snapshot.${field}; currency: ${market === "india" ? "INR" : "USD"}; stored value: ${amount}`,
+    `Snapshot date: ${snapshot?.snapshot_date ?? "Unknown"}; captured at: ${snapshot?.captured_at ?? "Unknown"}. Snapshot values are not a live funds refresh.`,
+    market === "india"
+      ? "Available margin is not verified cash or a deployable budget. Snapshot ingestion can default unavailable margin to zero; a stored zero does not prove broker-confirmed zero. Wallet cash and buying power are unknown."
+      : "Wallet balance is the captured wallet value, not verified buying power or a deployable budget. Buying power and margin are unknown.",
+    "Budget policy: no deployable-budget rule is established by this contract. Do not equate cash, margin or buying power, infer a budget from holdings value, or treat Swing ideation capital as actual funds. Funded sizing remains unverified; existing order eligibility and affordability checks remain required.",
+  ].join("\n");
+}
+
 function formatPortfolioSnapshot(
   market: SwingTradeMarket,
   snapshot: PortfolioSnapshot,
@@ -404,23 +440,23 @@ function formatPortfolioSnapshot(
     const rows = indiaSnapshot.holdings.map((holding) => [
       holding.exchange,
       holding.tradingsymbol,
-      holding.quantity + holding.t1_quantity,
+      holding.quantity != null && holding.t1_quantity != null ? holding.quantity + holding.t1_quantity : null,
       holding.average_price,
       holding.last_price,
-      (holding.quantity + holding.t1_quantity) * holding.last_price,
+      holding.quantity != null && holding.t1_quantity != null && holding.last_price != null ? (holding.quantity + holding.t1_quantity) * holding.last_price : null,
       holding.pnl,
       holding.day_change_percentage,
       holding.t1_quantity,
       holding.quantity,
     ]);
-    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\nCurrent Units includes settled + T1 exposure. T1 is not automatically sellable; order eligibility is separately checked. Market Value is total exposure times the captured last price.\n\n${asMarkdownTable(
+    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\nCurrent Units includes settled + T1 exposure. T1 is not automatically sellable; order eligibility is separately checked. Exposure Market Value is total exposure times the captured last price.\n\n${asMarkdownTable(
       [
         "Exchange",
         "Stock Symbol",
         "Current Units",
         "Average Price",
         "Last Price",
-        "Market Value",
+        "Exposure Market Value (settled + T1)",
         "PnL",
         "Day Change %",
         "T1 Units",
@@ -498,13 +534,13 @@ function formatSwingRuns(
   market: SwingTradeMarket,
   displayMode: "full" | "summary",
 ) {
-  const previousCloseLine = `Previous market close cutoff: ${formatPreviousMarketClose(
+  const previousCloseLine = `Estimated weekday close cutoff (exchange holidays and early closes are not validated): ${formatPreviousMarketClose(
     market,
     previousClose,
   )}`;
 
   if (runs.length === 0) {
-    return `${previousCloseLine}\n\n_No completed ${MARKET_COPY[market].label} swing-trade runs found after previous market close._`;
+    return `${previousCloseLine}\n\n_No completed ${MARKET_COPY[market].label} swing-trade runs selected._`;
   }
 
   if (displayMode === "summary") {
@@ -544,6 +580,7 @@ export function buildRebalanceInputBundle({
   threats,
   previousClose,
   swingDisplayMode = "full",
+  now = new Date(),
 }: {
   market: SwingTradeMarket;
   portfolio: PortfolioSnapshot;
@@ -551,22 +588,33 @@ export function buildRebalanceInputBundle({
   threats: ThreatAnalysis;
   previousClose: Date;
   swingDisplayMode?: "full" | "summary";
+  now?: Date;
 }) {
   if (market === "us") assertIndmoneyHoldingsSnapshot(portfolio as IndMoneyUsPortfolioSnapshotDetail | null);
+  if (market === "india") assertZerodhaNumericExposure(portfolio as ZerodhaPortfolioSnapshotDetail | null);
   const copy = MARKET_COPY[market];
   const uniqueSwingRuns = deduplicateStageRunInputs(swingRuns, { market, stage: "swing" });
   return `# Inputs considered at current time
 
 Market: ${copy.label}
-Previous market close cutoff: ${formatPreviousMarketClose(market, previousClose)}
-Generated at: ${new Date().toISOString()}
+Estimated weekday close cutoff (exchange holidays and early closes are not validated): ${formatPreviousMarketClose(market, previousClose)}
+Generated at: ${now.toISOString()}
+Capture and creation ages below describe saved records. Price as-of freshness and exchange-session age are unknown unless independently validated against source price timestamps and an exchange calendar. A recent capture does not prove current prices. Explicit selections may be historical.
 
 ${REBALANCE_INPUT_SECTION_MARKERS.portfolio}
+Portfolio capture: ${describeRebalanceSourceAge(portfolio?.captured_at, now)}
+Price as-of and exchange-session age: unknown; capture time does not prove price freshness.
 ${formatPortfolioSnapshot(market, portfolio)}
 
+${formatRebalanceFunds(market, portfolio)}
+
 ${REBALANCE_INPUT_SECTION_MARKERS.swing}
+${uniqueSwingRuns.map((run) => `Swing run #${run.id} creation: ${describeRebalanceSourceAge(run.created_at, now)}`).join("\n")}
+Explicit selections may be historical. Run creation does not prove price freshness.
 ${formatSwingRuns(uniqueSwingRuns, previousClose, market, swingDisplayMode)}
 
 ${REBALANCE_INPUT_SECTION_MARKERS.threats}
+Threat report creation: ${describeRebalanceSourceAge(threats?.created_at, now)}
+Report creation does not prove underlying price freshness.
 ${formatPortfolioThreats(threats)}`;
 }

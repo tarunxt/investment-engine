@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
+import math
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -17,22 +18,51 @@ def snapshot_date_from_datetime(value: datetime) -> date:
     return value.astimezone(IST).date()
 
 
-def _as_float(value: Any) -> float:
+def _as_float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
     try:
-        if value is None or value == "":
-            return 0.0
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
+        result = float(value)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
-def _as_int(value: Any) -> int:
+def _as_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
     try:
-        if value is None or value == "":
-            return 0
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
+        if isinstance(value, str):
+            return int(value)
+        if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+            return int(value)
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return None
+
+
+def _product(left: float | None, right: float | None) -> float | None:
+    return _as_float(round(left * right, 2)) if left is not None and right is not None else None
+
+
+def _require_numbers(record: dict[str, Any], fields: tuple[str, ...], path: str) -> None:
+    for field in fields:
+        if _as_float(record.get(field)) is None:
+            # Field paths preserve missing/invalid provenance without leaking broker data.
+            raise ValueError(f"Unusable broker numeric input: {path}.{field}")
+
+
+def _with_numeric_provenance(item: dict[str, Any], normalized: dict[str, Any]) -> dict[str, Any]:
+    derived = {"market_value", "invested_value", "day_change_value"}
+    normalized["numeric_input_status"] = {
+        key: ("known" if value is not None else "missing" if item.get(key) in (None, "") else "invalid")
+        for key, value in normalized.items()
+        if key not in derived and (value is None or isinstance(value, (int, float)))
+        and key not in {"isin", "product", "authorised_date", "collateral_type", "discrepancy"}
+    }
+    return normalized
 
 
 def _as_str(value: Any) -> str | None:
@@ -58,7 +88,7 @@ def normalize_holding(item: dict[str, Any]) -> dict[str, Any]:
     average_price = _as_float(item.get("average_price"))
     day_change = _as_float(item.get("day_change"))
 
-    return {
+    return _with_numeric_provenance(item, {
         "tradingsymbol": _as_str(item.get("tradingsymbol")) or "",
         "exchange": _as_str(item.get("exchange")) or "",
         "instrument_token": _as_int(item.get("instrument_token")) or None,
@@ -81,14 +111,14 @@ def normalize_holding(item: dict[str, Any]) -> dict[str, Any]:
         "pnl": _as_float(item.get("pnl")),
         "day_change": day_change,
         "day_change_percentage": _as_float(item.get("day_change_percentage")),
-        "market_value": round(quantity * last_price, 2),
-        "invested_value": round(quantity * average_price, 2),
-        "day_change_value": round(quantity * day_change, 2),
-    }
+        "market_value": _product(quantity, last_price),
+        "invested_value": _product(quantity, average_price),
+        "day_change_value": _product(quantity, day_change),
+    })
 
 
 def normalize_position(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+    return _with_numeric_provenance(item, {
         "tradingsymbol": _as_str(item.get("tradingsymbol")) or "",
         "exchange": _as_str(item.get("exchange")) or "",
         "instrument_token": _as_int(item.get("instrument_token")) or None,
@@ -118,7 +148,7 @@ def normalize_position(item: dict[str, Any]) -> dict[str, Any]:
         "day_sell_quantity": _as_int(item.get("day_sell_quantity")),
         "day_sell_price": _as_float(item.get("day_sell_price")),
         "day_sell_value": _as_float(item.get("day_sell_value")),
-    }
+    })
 
 
 def build_portfolio_snapshot(
@@ -134,12 +164,18 @@ def build_portfolio_snapshot(
         captured_at = captured_at.replace(tzinfo=timezone.utc)
 
     holdings = [normalize_holding(item) for item in holdings_payload]
+    for index, holding in enumerate(holdings):
+        _require_numbers(holding, ("quantity", "t1_quantity", "last_price", "average_price", "pnl", "day_change", "market_value", "invested_value", "day_change_value"), f"holdings[{index}]")
     holdings.sort(key=lambda item: item["market_value"], reverse=True)
 
     net_positions = [normalize_position(item) for item in positions_payload.get("net", [])]
+    for index, position in enumerate(net_positions):
+        _require_numbers(position, ("quantity", "last_price", "value", "pnl", "m2m"), f"net_positions[{index}]")
     net_positions.sort(key=lambda item: abs(item["value"]), reverse=True)
 
     day_positions = [normalize_position(item) for item in positions_payload.get("day", [])]
+    for index, position in enumerate(day_positions):
+        _require_numbers(position, ("day_buy_value", "day_sell_value"), f"day_positions[{index}]")
     day_positions.sort(
         key=lambda item: abs(item["day_buy_value"]) + abs(item["day_sell_value"]),
         reverse=True,
@@ -152,7 +188,9 @@ def build_portfolio_snapshot(
         else equity_margins.get("available_margin")
     )
 
-    return {
+    _require_numbers({"available_margin": available_margin}, ("available_margin",), "margins.equity")
+
+    snapshot = {
         "snapshot_date": snapshot_date_from_datetime(captured_at),
         "captured_at": captured_at,
         "source": source,
@@ -171,3 +209,5 @@ def build_portfolio_snapshot(
         "net_positions": net_positions,
         "day_positions": day_positions,
     }
+    _require_numbers(snapshot, ("holdings_market_value", "holdings_pnl", "holdings_day_change_value", "available_margin", "positions_pnl", "positions_m2m"), "snapshot")
+    return snapshot

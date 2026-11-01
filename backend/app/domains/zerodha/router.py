@@ -244,7 +244,7 @@ def _snapshot_summary(
         holdings_invested_value=snapshot.holdings_invested_value,
         holdings_pnl=snapshot.holdings_pnl,
         holdings_day_change_value=snapshot.holdings_day_change_value,
-        available_margin=snapshot.available_margin or 0.0,
+        available_margin=snapshot.available_margin,
         positions_pnl=snapshot.positions_pnl,
         positions_m2m=snapshot.positions_m2m,
     )

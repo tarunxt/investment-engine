@@ -92,7 +92,10 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         f"- Parse warnings: {', '.join(snapshot.parse_warnings or []) if snapshot.parse_warnings else 'None'}",
         f"- Reported holdings count: {snapshot.reported_holdings_count if snapshot.reported_holdings_count is not None else 'Not found'}",
         f"- Parsed holdings count: {snapshot.holdings_count}",
-        f"- Wallet balance (USD): {_fmt_num(snapshot.wallet_balance)}",
+        f"- Wallet balance (USD): {_fmt_wallet_balance(snapshot)}",
+        "Wallet balance is sourced only from the snapshot wallet_balance field. Unknown means absent or null, not zero. "
+        "When wallet balance is unknown, keep it unknown in the report; do not claim a zero cash buffer or calculate a cash-based invested percentage. "
+        "Buying power is distinct from wallet cash and must never be substituted for wallet balance.",
         f"- Current value (USD): {_fmt_num(snapshot.current_value)}",
         f"- Invested value (USD): {_fmt_num(snapshot.invested_value)}",
         f"- 1D return value (USD): {_fmt_num(snapshot.day_return_value)}",
@@ -240,6 +243,11 @@ def _build_holdings_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str
             + " |"
         )
     return "\n".join(lines)
+
+
+def _fmt_wallet_balance(snapshot: IndMoneyUsPortfolioSnapshot) -> str:
+    value = getattr(snapshot, "wallet_balance", None)
+    return "Unknown (not supplied in snapshot)" if value is None else _fmt_num(value)
 
 
 def _fmt_num(value: float | int | None) -> str:

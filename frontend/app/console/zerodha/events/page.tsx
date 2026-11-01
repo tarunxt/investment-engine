@@ -240,7 +240,7 @@ export default function ZerodhaEventsPage() {
     latestSnapshot?.holdings_market_value ?? 0,
   );
   const topHoldings = [...(latestSnapshot?.holdings ?? [])]
-    .sort((left, right) => right.market_value - left.market_value)
+    .sort((left, right) => (right.market_value ?? -Infinity) - (left.market_value ?? -Infinity))
     .slice(0, 5);
 
   if (loadingPage) {
@@ -326,7 +326,7 @@ export default function ZerodhaEventsPage() {
                   <div className="mt-1 text-sm text-white">{latestSnapshot?.snapshot_date ?? status?.last_portfolio_snapshot_date ?? '-'}</div>
                 </div>
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Holdings Value</div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Settled Holdings Value (excludes T1)</div>
                   <div className="mt-1 text-sm text-white">{formatInr(latestSnapshot?.holdings_market_value)}</div>
                 </div>
                 <div>

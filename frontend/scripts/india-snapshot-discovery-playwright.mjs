@@ -93,6 +93,8 @@ zerodhaOrders:()=>read('orders',{data:[]})
     await saved().waitFor();
     await page.waitForFunction(()=>document.activeElement?.id==='saved-portfolio-snapshots');
     assert.match(await saved().textContent(),/Source: offline_fixture/);
+    await saved().getByText("Settled Holdings Value (excludes T1)", {exact:true}).waitFor();
+    await saved().getByText("Settled holdings value trend (excludes T1) across saved portfolio snapshots.", {exact:true}).waitFor();
     await page.getByRole('link',{name:'Back to portfolio top'}).click();
     await guidance().click();
     await page.getByRole('button',{name:'Connect With Zerodha',exact:true}).waitFor();

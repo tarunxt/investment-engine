@@ -103,7 +103,7 @@ const INPUT_SECTION_META: Array<{
     title: "Swing",
     eyebrow: "Post-close runs",
     description:
-      "Completed swing-trade model outputs created after the prior market-close cutoff.",
+      "Explicitly selected completed swing-trade model outputs; selections may be historical.",
     Icon: TrendingUp,
     shellClassName: "border-emerald-200 bg-emerald-50/70",
     iconClassName: "bg-emerald-600 text-white",
@@ -231,10 +231,11 @@ function getSelectedSwingRuns(
 }
 
 function buildRebalanceInputPreviews(inputs: Parameters<typeof buildRebalanceInputBundle>[0]) {
+  const now = inputs.now ?? new Date();
   try {
     return {
-      prompt: buildRebalanceInputBundle({ ...inputs, swingDisplayMode: "full" }),
-      display: buildRebalanceInputBundle({ ...inputs, swingDisplayMode: "summary" }),
+      prompt: buildRebalanceInputBundle({ ...inputs, now, swingDisplayMode: "full" }),
+      display: buildRebalanceInputBundle({ ...inputs, now, swingDisplayMode: "summary" }),
       error: null,
     };
   } catch (error) {
@@ -714,7 +715,7 @@ function RebalanceInputBox({
                 ) : swingRuns.length === 0 ? (
                   <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-emerald-100 bg-white/70 p-4 font-mono text-xs leading-5 text-gray-800">
                     {swingInputSection.content ||
-                      "No completed swing-trade runs found after previous market close."}
+                      "No completed swing-trade runs selected."}
                   </pre>
                 ) : (
                   swingRuns.map((run) => {

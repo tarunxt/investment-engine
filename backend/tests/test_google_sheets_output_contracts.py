@@ -67,7 +67,7 @@ def export_job(source):
     with ExitStack() as stack:
         session = stack.enter_context(patch.object(tasks, "SyncSessionLocal"))
         db = session.return_value.__enter__.return_value
-        db.execute.side_effect = [Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None)), Result(source)]
+        db.execute.side_effect = [Result(source), Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None))]
         repository = stack.enter_context(patch.object(tasks, "SyncJobRepository"))
         stack.enter_context(patch.object(tasks, "SyncRunRepository"))
         stack.enter_context(patch.object(tasks, "decrypt_token", return_value="mocked"))
@@ -238,7 +238,7 @@ def test_run_keeps_independent_samples_and_blocks_invalid_current_outputs(invali
         session = stack.enter_context(patch.object(tasks, "SyncSessionLocal"))
         db = session.return_value.__enter__.return_value
         db.execute.side_effect = [
-            Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None)), Result(run),
+            Result(run), Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None)),
             Result([SimpleNamespace(job=source, stage=1) for source in sources]),
         ]
         stack.enter_context(patch.object(tasks, "SyncRunRepository"))
