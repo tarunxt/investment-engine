@@ -110,3 +110,21 @@ Zero manager records does not establish zero executions, failures or incidents.
 Do not mix this ledger with the synthetic classifier tests or task-history sample;
 task terminal outcomes, lag, queue health and heartbeat evidence remain unknown
 until their own qualified records are supplied.
+
+## Retained workflow projection tooling
+
+`scripts/a11_006_retained_evidence.py` processes an explicitly supplied, bounded
+JSON/gzip projection offline, verifying input and decompressed hashes. It writes
+aggregate evidence only to an exclusive private output outside this repository
+(mode 0600). It performs no collection and prints no records or identifiers.
+Actual input, hashes, coverage declarations and output belong in the private
+handoff, separate from this source inventory. Tests use synthetic rows only.
+
+The tool separates primary market/run keys from older overlapping observations,
+counts historical display labels and usable timestamp fields, and preserves
+pagination/population uncertainty. It does not compute execution duration or cost.
+Display-derived start/finish text cannot establish task receipt, an approved
+expected start, an investment decision or outcome. Without an authenticated task/
+dispatch-to-obligation mapping, schedule linkage, start lag and missed obligations
+remain unknown even when a saved summary says COMPLETED. The source inventory's
+zero task-receipt sample is not a claim that no retained workflow summaries exist.
