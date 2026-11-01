@@ -5,9 +5,9 @@ import ts from 'typescript';
 const source = readFileSync(new URL('../app/console/_components/FinalActionablesConsole.tsx', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('console.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const fn = ast.statements.find(node => node.name?.text === 'calculationsCountSummary');
-const module = { exports: {} };
-new Function('exports', ts.transpileModule(fn.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(module.exports);
-const summary = module.exports.calculationsCountSummary;
+const fixtureModule = { exports: {} };
+new Function('exports', ts.transpileModule(fn.getText(ast), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(fixtureModule.exports);
+const summary = fixtureModule.exports.calculationsCountSummary;
 test('slow and failed reads never fabricate empty counts', () => {
   for (const [loading, error] of [[true, null], [false, 'Request timed out'], [false, 'Unavailable']]) {
     assert.doesNotMatch(summary([], loading, error), /: 0|No stocks|No calculations/);

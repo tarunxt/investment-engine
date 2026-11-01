@@ -9,10 +9,10 @@ const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../app/console/apis/page.tsx', import.meta.url), 'utf8');
 const modal = source.slice(source.indexOf('function LlmCostHistoryModal('), source.indexOf('export default function ApisPage'));
 const compiled = ts.transpileModule(`const API_TIMEZONE='Asia/Kolkata'; const X=()=>null; const formatFxTimestamp=()=>null; const getTodayIso=()=>''; const formatCalendarDate=x=>x; const formatConvertedCost=(inr,usd)=>'$'+usd; const formatHistoryTimestamp=x=>x; ${modal}; exports.Modal=LlmCostHistoryModal`, {compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
-const module = {exports:{}};
-new Function('require','module','exports',compiled)(require,module,module.exports);
+const fixtureModule = {exports:{}};
+new Function('require','module','exports',compiled)(require,fixtureModule,fixtureModule.exports);
 const history={name:'Synthetic provider',timezone:'Asia/Kolkata',fx_status:'unavailable',days:[],runs:[]};
-const render=(props)=>renderToStaticMarkup(React.createElement(module.exports.Modal,{history:null,loading:false,error:null,activeTab:'day-wise',onTabChange(){},onClose(){},onSeeMoreDays(){},onSeeMoreRuns(){},...props}));
+const render=(props)=>renderToStaticMarkup(React.createElement(fixtureModule.exports.Modal,{history:null,loading:false,error:null,activeTab:'day-wise',onTabChange(){},onClose(){},onSeeMoreDays(){},onSeeMoreRuns(){},...props}));
 for (const activeTab of ['day-wise','all-runs']) {
  test(`${activeTab}: loading, timeout, cached empty, recovery and populated retention`,()=>{
   assert.match(render({activeTab,loading:true}),/Loading LLM cost history/);
