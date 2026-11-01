@@ -45,6 +45,8 @@ import {
   type TradingBotsOverviewDetails,
 } from "./tradingBotsOverviewData";
 
+const SUMMARY_TAB_CLASS = "rounded-md bg-violet-50 text-violet-900 data-active:bg-violet-700 data-active:text-white! dark:bg-violet-950 dark:text-violet-200 dark:data-active:bg-violet-600 dark:data-active:text-white!";
+
 const OVERVIEW_CACHE_KEY = "investment-engine:trading-bots-overview:v3";
 const PREFERRED_OVERVIEW_TIMEOUT_MS = 2_000;
 const FAST_BOT_TIMEOUT_MS = 2_500;
@@ -931,10 +933,10 @@ export function TradingBotsOverviewPage() {
               Trading Bots Control Center
             </div>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
                 Overview
               </h1>
-              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600">
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-600 dark:text-slate-300">
                 One shared operating surface for Bullpen x Polymarket, Polymarket Direct, Bullpen x AI, and Bullpen AI Auto-Live. Review capital, runtime posture, risk signals, and recent activity without losing the dedicated bot consoles.
               </p>
             </div>
@@ -961,10 +963,10 @@ export function TradingBotsOverviewPage() {
         </div>
 
         <Tabs value={summaryView} onValueChange={setSummaryView} className="mt-4">
-          <TabsList aria-label="Overview sections" className="grid h-auto! w-full grid-cols-1 sm:grid-cols-3">
-            <TabsTrigger ref={runtimeTabRef} value="runtime">Runtime context</TabsTrigger>
-            <TabsTrigger value="capital">Capital and performance</TabsTrigger>
-            <TabsTrigger value="exposure">Positions and exposure</TabsTrigger>
+          <TabsList aria-label="Overview sections" className="grid h-auto! w-full grid-cols-1 gap-1 bg-violet-50/70 dark:bg-violet-950/50 sm:grid-cols-3">
+            <TabsTrigger ref={runtimeTabRef} value="runtime" className={SUMMARY_TAB_CLASS}>Runtime context</TabsTrigger>
+            <TabsTrigger value="capital" className={SUMMARY_TAB_CLASS}>Capital and performance</TabsTrigger>
+            <TabsTrigger value="exposure" className={SUMMARY_TAB_CLASS}>Positions and exposure</TabsTrigger>
           </TabsList>
           {[
             { id: "runtime", title: "Runtime context", labels: ["Bots running", "Bots paused/stopped", "Highest risk bot", "Last updated"] },
