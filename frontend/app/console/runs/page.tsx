@@ -394,6 +394,12 @@ export default function RunsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function adjacentPortfolioGroups(group: AutoRebalanceHistoryItemResponse) {
+    const groups = groupedRuns[group.portfolio === 'india' ? 'zerodha' : 'indmoney'].flatMap(entry => entry.group ? [entry.group] : []);
+    const index = groups.findIndex(item => item.portfolio === group.portfolio && item.sequence === group.sequence);
+    return [groups[index - 1], groups[index + 1]].filter((item): item is AutoRebalanceHistoryItemResponse => Boolean(item));
+  }
+
   const from = selectedItems.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const to = Math.min(safePage * PAGE_SIZE, selectedItems.length);
 
@@ -483,7 +489,7 @@ export default function RunsPage() {
           ))
         ) : (
           (visibleItems as ReturnType<typeof buildPortfolioHistoryEntries>).map((entry) => entry.group ? (
-            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} runLinksAvailable={!loading && !sourceErrors.portfolio} onOpen={path => router.push(path)} />
+            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} runLinksAvailable={!loading && !sourceErrors.portfolio} lastRefreshed={lastUpdated?.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })} adjacentGroups={adjacentPortfolioGroups(entry.group)} onOpen={path => router.push(path)} />
           ) : entry.run ? (
             <PortfolioRunTile key={entry.key} run={entry.run} onOpen={() => router.push(getRunDetailPathFromPrompt(entry.run.id, entry.run.prompt_preview))} />
           ) : null)
