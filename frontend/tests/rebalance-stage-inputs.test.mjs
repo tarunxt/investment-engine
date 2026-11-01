@@ -452,7 +452,7 @@ test('opening the Rebalance picker exposes saved jobs even after market close wi
   let candidates = [], reads = 0;
   const callback = declarations.get('loadInputCandidates').initializer.arguments[0].getText(ast);
   const { openPicker } = load(`export const openPicker = ${callback};`, {
-    setInputCandidatesLoading: () => {}, setInputCandidates: value => { candidates = value; },
+    setInputCandidatesLoading: () => {}, setInputCandidatesError: () => {}, setInputCandidates: value => { candidates = value; },
     setSelectedInputs: () => { throw new Error('Opening a picker must not alter selection'); },
     buildNextCandidate: stage => ({ id: `${stage}:next`, source: 'next' }),
     fetchAllFullRuns: () => { throw new Error('Unbounded history fetch'); },

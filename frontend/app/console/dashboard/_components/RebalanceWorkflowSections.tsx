@@ -3,6 +3,7 @@
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
 import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
@@ -3623,6 +3624,7 @@ function InputSelectionDialog({
   selectedIds,
   usdInrRate,
   loading,
+  error,
   onToggle,
   onToggleAll,
   onResetDefaults,
@@ -3634,11 +3636,16 @@ function InputSelectionDialog({
   selectedIds: Set<string>;
   usdInrRate: number;
   loading: boolean;
+  error: string | null;
   onToggle: (id: string) => void;
   onToggleAll: () => void;
   onResetDefaults: () => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
   const allSelected =
@@ -3703,6 +3710,24 @@ function InputSelectionDialog({
     }
   }, [allSelected, someSelected]);
 
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]') ?? []);
+    focusable()[0]?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    dialog?.addEventListener("keydown", handleKey);
+    return () => { dialog?.removeEventListener("keydown", handleKey); previous?.focus(); };
+  }, [open]);
+
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
@@ -3714,7 +3739,7 @@ function InputSelectionDialog({
   };
   const rationaleByStage: Record<InputSelectionStage, string> = {
     threats:
-      "Use the upcoming synced portfolio snapshot plus the latest saved snapshot so the threat model can score the freshest holdings and cash context.",
+      "Only selected sources are included. Upcoming output reserves the snapshot from this workflow; select Saved snapshot separately if needed.",
     swing:
       "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
     rebalance:
@@ -3736,17 +3761,17 @@ function InputSelectionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
           <div>
-            <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">
+            <h3 id={titleId} className="text-2xl font-extrabold tracking-tight text-slate-950">
               {titleByStage[stage]}
             </h3>
             <p className="mt-2 text-base text-slate-500">
               Choose which previous-stage outputs should be included in the next
               prompt.
             </p>
-            <div className="mt-3 max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-800">
+            <div className="mt-3 max-w-3xl rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
               <span className="font-extrabold">Input selection rationale:</span>{" "}
               {rationaleByStage[stage]}
             </div>
@@ -3760,10 +3785,8 @@ function InputSelectionDialog({
             <X className="size-5" />
           </button>
         </div>
-        <div className="mx-6 mb-4 flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
-          <span>
-            {selectedCount} output{selectedCount === 1 ? "" : "s"} selected.
-          </span>
+        <div className="mx-6 mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900">
+          {stage === "threats" ? <InputEvidenceSummary candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} /> : <span>{selectedCount} output{selectedCount === 1 ? "" : "s"} selected.</span>}
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-blue-950">
               <input
@@ -3785,7 +3808,7 @@ function InputSelectionDialog({
           </div>
         </div>
         <div className="mx-6 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
-          {loading ? (
+          {stage === "threats" ? <InputEvidenceRows candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} onToggle={onToggle} formatTimestamp={formatTimestamp} /> : loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
               outputs…
@@ -4687,6 +4710,7 @@ export function RebalanceWorkflowSections({
     InputSelectionCandidate[]
   >([]);
   const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
+  const [inputCandidatesError, setInputCandidatesError] = useState<string | null>(null);
   const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(
     null,
   );
@@ -6170,6 +6194,7 @@ ${zerodhaExecutionMode === "direct_market"
   const loadInputCandidates = useCallback(
     async (portfolio: WorkflowPortfolio, stage: InputSelectionStage) => {
       setInputCandidatesLoading(true);
+      setInputCandidatesError(null);
       try {
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
@@ -6280,6 +6305,7 @@ ${zerodhaExecutionMode === "direct_market"
       setInputDialog({ portfolio, stage: inputStage });
       void loadInputCandidates(portfolio, inputStage).catch((error) => {
         setInputCandidates([]);
+        setInputCandidatesError(normalizeError(error));
         window.alert(
           `Could not load selectable inputs: ${normalizeError(error)}`,
         );
@@ -8230,6 +8256,7 @@ ${zerodhaExecutionMode === "direct_market"
         }
         usdInrRate={usdInrRate}
         loading={inputCandidatesLoading}
+        error={inputCandidatesError}
         onToggle={toggleInputCandidate}
         onToggleAll={toggleAllInputCandidates}
         onResetDefaults={resetDefaultInputCandidates}
