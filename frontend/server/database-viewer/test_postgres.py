@@ -132,7 +132,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
     async def reject(self, operation):
         await self.connection.exec_driver_sql('SAVEPOINT denied_operation')
         try:
-            with self.assertRaises(Exception):
+            with self.assertRaises(Exception, msg=operation):
                 await self.connection.exec_driver_sql(operation)
         finally:
             await self.connection.exec_driver_sql('ROLLBACK TO SAVEPOINT denied_operation')
@@ -147,7 +147,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ids, expected, name)
             self.assertIsNone(await self.connection.scalar(text(f'SELECT id FROM credx_viewer."{name}" WHERE id=201')))
 
-    async def test_real_role_denies_base_forbidden_columns_writes_ddl_sequence_and_set_role(self):
+    async def test_effective_role_denies_base_forbidden_columns_writes_ddl_sequence(self):
         await self.provision()
         await self.connection.exec_driver_sql('CREATE SEQUENCE public.fixture_sequence')
         await self.connection.exec_driver_sql('SET LOCAL ROLE credx_viewer_read')
@@ -160,7 +160,8 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
             "UPDATE public.jobs SET status='changed' WHERE id=101",
             'CREATE TABLE public.viewer_forbidden(id int)', 'CREATE TEMP TABLE viewer_forbidden(id int)',
             'CREATE SCHEMA viewer_forbidden', "SELECT nextval('public.fixture_sequence')",
-            'SET ROLE credx_viewer_views', 'SET ROLE viewer_fixture_admin',
+            # SET ROLE authority follows session_user, so switching denial is
+            # tested below using an actual authenticated viewer connection.
         ]:
             await self.reject(statement)
         await self.connection.exec_driver_sql('RESET ROLE')
@@ -222,6 +223,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
     async def test_actual_viewer_login_is_restricted_even_in_readwrite_transaction(self):
         await self.provision()
         await self.connection.exec_driver_sql("ALTER ROLE credx_viewer_read PASSWORD 'synthetic-viewer-password'")
+        await self.connection.exec_driver_sql('CREATE SEQUENCE public.fixture_sequence')
         await self.transaction.commit()  # only in the explicitly disposable fixture cluster
         reader = create_async_engine(self.url.set(username='credx_viewer_read',password='synthetic-viewer-password'),poolclass=NullPool,hide_parameters=True)
         service = None
@@ -236,15 +238,20 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual({int(row['id']) for row in records},expected)
             await service.close();service=None
             async with reader.connect() as connection:
-                self.assertEqual(await connection.scalar(text('SELECT current_user')),'credx_viewer_read')
+                self.assertEqual(await connection.scalar(text('SELECT session_user')),'credx_viewer_read')
+                self.assertEqual(await connection.scalar(text('SHOW default_transaction_read_only')),'on')
                 ids=set((await connection.execute(text('SELECT id FROM credx_viewer.jobs'))).scalars())
                 self.assertEqual(ids,{101})
             for statement in ['SELECT id FROM public.jobs', 'SELECT forbidden_payload FROM public.jobs',
-                "UPDATE credx_viewer.jobs SET status='changed'", 'CREATE TABLE public.forbidden(id int)',
-                'CREATE TEMP TABLE forbidden(id int)', 'SET ROLE credx_viewer_views', 'SET ROLE viewer_fixture_admin']:
+                'SELECT forbidden_payload FROM credx_viewer.jobs',
+                "UPDATE credx_viewer.jobs SET status='changed'", "UPDATE public.jobs SET status='changed'",
+                'CREATE TABLE public.forbidden(id int)', 'CREATE TEMP TABLE forbidden(id int)',
+                'CREATE SCHEMA viewer_forbidden', "SELECT nextval('public.fixture_sequence')",
+                'SET ROLE credx_viewer_views', 'SET ROLE viewer_fixture_admin']:
                 async with reader.connect() as connection:
                     await connection.exec_driver_sql('SET TRANSACTION READ WRITE')
-                    with self.assertRaises(Exception):
+                    self.assertEqual(await connection.scalar(text('SHOW transaction_read_only')),'off')
+                    with self.assertRaises(Exception, msg=statement):
                         await connection.exec_driver_sql(statement)
         finally:
             if service is not None:
@@ -256,6 +263,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
                     await connection.exec_driver_sql('DROP VIEW credx_viewer."'+item['relation']+'"')
                 await connection.exec_driver_sql('DROP SCHEMA credx_viewer')
                 await connection.run_sync(self.metadata.drop_all)
+                await connection.exec_driver_sql('DROP SEQUENCE public.fixture_sequence')
                 database=connection.dialect.identifier_preparer.quote(self.url.database)
                 await connection.exec_driver_sql('REVOKE CONNECT ON DATABASE '+database+' FROM credx_viewer_read')
                 await connection.exec_driver_sql('REVOKE USAGE ON SCHEMA public FROM credx_viewer_views')

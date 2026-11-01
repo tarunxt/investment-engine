@@ -175,7 +175,11 @@ source checksum URL failed with `Tunnel connection failed: 403 Forbidden`.
 No escalation, alternate PostgreSQL download route or production fallback was
 attempted. The proposed private CI job uses an explicitly disposable PostgreSQL18
 service, validates its actual major version and fails if any database test skips.
-It has NOT run because this branch remains unpublished pending review.
+The first published CI run executed all six PG18 cases without skips: five passed,
+and an escalation-denial assertion failed because it used a session authenticated
+as the fixture superuser. That test context is corrected; actual viewer-login
+escalation coverage remains mandatory and is expanded. The next exact-head CI
+result is required before any grant or deployment.
 
 ### Independent SQL review corrections
 
@@ -198,8 +202,9 @@ administrator/database/host. None has run against any real database here.
 
 The final diff is frontend/docs plus the existing specifically reviewed
 .github/workflows/pr-checks.yml path, so orchestration changes hold automatic
-production delivery. Do not publish or request a host grant until the corrected
-SQL/HTTP/socket review and real PG18 execution gate are resolved. No required
+production delivery. CI-only draft publication is approved so the disposable PG18 gate can execute.
+Do not merge or request a host grant until the corrected SQL/HTTP/socket review
+and exact-head real PG18 execution gate are resolved. No required
 check is disabled. Keep the current unavailable state on any unresolved privilege,
 RLS, schema, native-runtime or source-provenance mismatch. No global PUBLIC
 revocation or full-stack/recovery delivery is an acceptable workaround.
