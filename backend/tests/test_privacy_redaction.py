@@ -51,6 +51,63 @@ class PrivacyRedactionTests(unittest.TestCase):
             for diagnostic in ('job=42', 'ValueError', 'Traceback', 'cache.invalid/0'):
                 self.assertIn(diagnostic, output)
 
+    def test_underscore_credentials_in_assignments_and_mapping_values(self):
+        names = ('JWT_SIGNING_KEY', 'JWT_SECRET', 'SECRET_KEY', 'OPENAI_API_KEY')
+        for name in names:
+            sentinel = f'synthetic-sentinel-{name.lower()}'
+            cases = (
+                f'{name}={sentinel} job=42',
+                f'{name.lower()}: "{sentinel} with spaces" status=503',
+                str({name: sentinel, 'job': 42}),
+                json.dumps({'credentials': {name: sentinel}, 'status': 503}),
+            )
+            for value in cases:
+                with self.subTest(name=name, value=value):
+                    output = redact_sensitive_text(value)
+                    self.assertNotIn(sentinel, output)
+                    self.assertIn(name.lower(), output.lower())
+                    self.assertIn('[REDACTED]', output)
+            self.assertEqual(redact_sensitive_text(f'{name}={sentinel} job=42'),
+                             f'{name}=[REDACTED] job=42')
+        safe = 'job=42 status=503 retry=2 token_count=123 secret_hash=abc key_id=7'
+        self.assertEqual(redact_sensitive_text(safe), safe)
+
+    def test_underscore_credentials_at_every_configured_handler_output(self):
+        # Read configuration syntax only; never import application settings.
+        path = Path(__file__).resolve().parents[1] / 'app/core/logging.py'
+        tree = ast.parse(path.read_text())
+        assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
+                          and any(isinstance(target, ast.Name) and target.id == 'LOGGING_CONFIG' for target in node.targets))
+        config = eval(compile(ast.Expression(assignment.value), str(path), 'eval'),
+                      {'settings': SimpleNamespace(log_level='INFO')})
+        logger = logging.Logger('synthetic-underscore')
+        streams = {}
+        for name, handler_config in config['handlers'].items():
+            stream = streams[name] = io.StringIO()
+            handler = logging.StreamHandler(stream)
+            formatter_config = config['formatters'][handler_config['formatter']]
+            self.assertEqual(formatter_config['()'], 'app.core.redaction.RedactingFormatter')
+            handler.setFormatter(RedactingFormatter(formatter_config['format']))
+            logger.addHandler(handler)
+        names = ('JWT_SIGNING_KEY', 'JWT_SECRET', 'SECRET_KEY', 'OPENAI_API_KEY')
+        sentinels = [f'synthetic-output-sentinel-{name.lower()}' for name in names]
+        for name, sentinel in zip(names, sentinels):
+            logger.info('assignment %s=%s job=42', name, sentinel)
+            logger.info('mapping %s job=42', {name: sentinel})
+            logger.info('named %s=%%(credential)s job=42' % name, {'credential': sentinel})
+            try:
+                raise ValueError(f'{name}={sentinel} status=503')
+            except ValueError:
+                logger.exception('exception job=42')
+        for name, stream in streams.items():
+            with self.subTest(handler=name):
+                output = stream.getvalue()
+                for sentinel in sentinels:
+                    self.assertNotIn(sentinel, output)
+                for diagnostic in ('assignment', 'mapping', 'named', 'job=42', 'status=503', 'ValueError', 'Traceback'):
+                    self.assertIn(diagnostic, output)
+                self.assertGreaterEqual(output.count('[REDACTED]'), 16)
+
     def test_all_configured_handlers_use_redacting_formatter(self):
         path = Path(__file__).resolve().parents[1] / 'app/core/logging.py'
         tree = ast.parse(path.read_text())

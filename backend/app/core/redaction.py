@@ -5,8 +5,10 @@ import re
 # Cover credential-bearing connection URLs without parsing or emitting userinfo.
 _USERINFO = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/<>]*@")
 _BEARER = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s,;\"'<>]+")
+# Underscores are word characters: explicitly match environment-style prefixes
+# and credential suffixes rather than relying on a boundary before "secret".
 _FIELDS = re.compile(
-    r'''(?ix)(\b(?:authorization|api[-_\ ]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|cookie)\b["']?\s*[:=]\s*)'''
+    r'''(?ix)(\b(?:(?:[a-z0-9]+_)*(?:authorization|api[-_\ ]?key|signing[-_]?key|private[-_]?key|secret[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|cookie))\b["']?\s*[:=]\s*)'''
     r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&}\]<>]+)'''
 )
 
