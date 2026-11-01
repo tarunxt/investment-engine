@@ -63,6 +63,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
   const auditWrites = [];
   const emails = [];
   const modelCalls = [];
+  const consensusCalls = [];
   const delays = [];
   const timers = [];
   const updates = [];
@@ -98,6 +99,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     },
     getProviders: async () => [{ provider: "existing", model: "chosen" }],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
+    indmoneyUsThreatsLatest: async () => ({ analysis: { captured_at: snapshot?.captured_at } }),
     zerodhaPortfolioOverview: async () => ({ latest: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaThreatsLatest: async () => ({ analysis: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaDisplayQuotes: quoteRead ?? (async () => ({ quotes: [], missing: [] })),
@@ -130,7 +132,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     buildRebalanceInputBundle: () => "snapshot", ensureRebalanceFlowMarker: p => p,
     buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
-    buildConsensusRows: () => [{ exchange: "NSE", symbol: "TEST" }],
+    buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST" }]; },
     buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
     buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore: 0, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
@@ -141,7 +143,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     window: { setTimeout: (fn) => { timers.push(fn); }, dispatchEvent: () => {}, alert: (message) => { alerts.push(message); } },
     CustomEvent: class {}, console: { error: () => {} },
   };
-  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, delays, timers, durable, updates, alerts };
+  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, consensusCalls, delays, timers, durable, updates, alerts };
 }
 
 for (const rejectedStage of ["sync", "actionables"]) {
@@ -513,4 +515,18 @@ test("Personal API denial still creates Technical and completes frozen Actionabl
   assert.doesNotMatch(technical.prompt,/TECHNICAL_PRICE_ANCHORS_V1/);
   assert.equal(h.view.states.zerodha.technical.state,"completed");
   assert.equal(h.view.states.zerodha.actionables.state,"completed");
+});
+
+
+test("final capture uses the retained workflow snapshot on repeated runs", async () => {
+  const retained = { ...holdingsSnapshot, holdings: [{ symbol: "TEST", quantity: 6 }] };
+  const h = harness({ snapshot: retained });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await h.runWorkflow("indmoneyUs");
+    const finalCall = h.consensusCalls.at(-1);
+    assert.ok(finalCall, JSON.stringify(h.updates.filter(x => x.info.error)));
+    assert.equal(finalCall[1], "us");
+    assert.equal(finalCall[2], retained, "final calculation uses the exact retained snapshot");
+    assert.equal(h.view.states.indmoneyUs.actionables.state, "completed");
+  }
 });

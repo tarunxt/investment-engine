@@ -7436,7 +7436,10 @@ ${zerodhaExecutionMode === "direct_market"
           if (!finalRebalanceInputs.length || !generatedTechnicalRun) {
             throw new Error("Final capture requires Rebalance and Technical outputs from this workflow. Run these stages together.");
           }
-          const finalConsensus = buildConsensusRows(finalRebalanceInputs, market);
+          if (!workflowSnapshot) {
+            throw new Error("Final capture requires the workflow portfolio snapshot to resolve holdings context.");
+          }
+          const finalConsensus = buildConsensusRows(finalRebalanceInputs, market, workflowSnapshot);
           const actionablesCompletedAt = new Date().toISOString();
           const finalRows = buildDashboardActionRows(finalConsensus, market,
             buildTechnicalScanMap([generatedTechnicalRun]), scoreMatrixFormulaConfig)
