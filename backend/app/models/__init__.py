@@ -159,3 +159,5 @@ __all__ = [
 from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
+
+from app.domains.jobs.admission import JobAdmission  # noqa: F401
