@@ -23,10 +23,27 @@ POLICY_FIELDS = (
 )
 
 
+class CurrentStrategyContext(StrictModel):
+    """Current repository text, never relabelled as an original historical prompt."""
+    source_kind: Literal["repository_prompt_snapshot"] = "repository_prompt_snapshot"
+    repository_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    prompt_path: str
+    prompt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    original_objective: str
+    original_horizon: str
+    original_market_scope: str
+    original_coverage_rules: str
+    original_capital_unit_rules: str
+    original_fallback_rules: str
+    historical_prompt_version: str | None = None
+    investment_validation: Literal["not_established"] = "not_established"
+
+
 class ValidationContract(StrictModel):
     """A new market/strategy/version contract, independent of historical prompts."""
     schema_version: Literal["investment-validation-v1"] = VERSION
     version: str = Field(min_length=1)
+    current_strategy_context: CurrentStrategyContext | None = None
     market: str | None = None
     strategy: str | None = None
     choices: dict[str, str | None] = Field(default_factory=lambda: dict.fromkeys(POLICY_FIELDS))
@@ -151,6 +168,8 @@ def inventory(records, population=None):
         rows.append({"evidence": metadata_projection(record),
                      "population_state": record.get("population_state") if record.get("population_state") in states else "unknown",
                      "outcome_state": record.get("outcome_state") if record.get("outcome_state") in {"known", "unknown", "unresolved", "censored", "pending_maturity"} else "unknown",
+                     "freshness": freshness_assessment(record),
+                     "capture_coverage": capture_coverage(record),
                      "lineage_gaps": gaps, "lineage_checks_passed": not gaps,
                      "cost_coverage": cost_coverage(record.get("execution_costs") or {}),
                      "representation": "stored_metadata_projection_not_provider_bytes"})
@@ -213,15 +232,75 @@ def cost_coverage(costs):
     return {"components": states, "complete": all(s in {"known", "known_zero"} for s in states.values())}
 
 
+def capture_coverage(record):
+    coverage = record.get("coverage") or {}
+    counts = {key: value if type(value := coverage.get(key)) is int and value >= 0 else None
+              for key in ("attempted", "successful", "captured_terminal")}
+    if any(f.get("severity") == "error" for f in (record.get("calculation") or {}).get("findings", [])):
+        state, reason = "failed", "original_deterministic_capture_gate_failed"
+    elif any(value is None for value in counts.values()):
+        state, reason = "unknown", "original_capture_counts_missing"
+    elif counts["successful"] > counts["attempted"] or counts["captured_terminal"] > counts["attempted"]:
+        state, reason = "failed", "original_capture_counts_inconsistent"
+    elif counts["successful"] < counts["attempted"] or counts["captured_terminal"] < counts["attempted"]:
+        state, reason = "partial", "original_capture_coverage_incomplete"
+    elif counts["attempted"] == 0:
+        state, reason = "unknown", "no_attempted_outputs_recorded"
+    else:
+        state, reason = "covered", "declared_capture_counts_reconciled"
+    return {"state": state, "reason": reason, **counts}
+
+
+def freshness_assessment(record):
+    state = record.get("freshness_state")
+    policy = record.get("freshness_policy_version")
+    reason = record.get("freshness_reason_code")
+    valid = lambda v: isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", v) is not None
+    if state in {"current", "stale"} and valid(policy) and valid(reason):
+        return {"state": state, "policy_version": policy, "reason_code": reason,
+                "basis": "supplied_declaration_not_independently_verified"}
+    return {"state": "unknown", "policy_version": None, "reason_code": "freshness_policy_or_assessment_missing",
+            "basis": "no_age_threshold_invented"}
+
+
+def evidence_states(population, contract_reasons):
+    """Separate evidence states from economic verdicts; preserve overlapping gaps."""
+    states = {"not_established"}
+    if contract_reasons:
+        states.add("contract_undefined")
+    if not population["reconciled"] or any(not r["lineage_checks_passed"] for r in population["records"]):
+        states.add("missing_evidence")
+    for row in population["records"]:
+        if row["population_state"] in {"failed", "partial"}:
+            states.add(row["population_state"])
+        if row["capture_coverage"]["state"] in {"failed", "partial"}:
+            states.add(row["capture_coverage"]["state"])
+        if row["freshness"]["state"] == "stale":
+            states.add("stale")
+        if row["outcome_state"] == "pending_maturity":
+            states.add("pending_maturity")
+    return sorted(states)
+
+
 def validation_report(data):
     contract = ValidationContract.model_validate(data.get("validation_contract") or {"version": "draft-unapproved"})
     population = inventory(data["records"], data.get("population"))
     split = data.get("split") or {}
     chronology_gaps = split_gaps(split.get("rows", []), frozen_at=split.get("frozen_at"),
                                  embargo_seconds=split.get("embargo_seconds"), embargo_reason=split.get("embargo_reason"))
-    reasons = contract_gaps(contract) + population["population_gaps"] + chronology_gaps
+    policy_gaps = contract_gaps(contract)
+    reasons = policy_gaps + population["population_gaps"] + chronology_gaps
     if any(not row["lineage_checks_passed"] for row in population["records"]):
         reasons.append("population_has_ineligible_or_unknown_lineage")
+    for index, row in enumerate(population["records"]):
+        if row["population_state"] in {"failed", "partial"}:
+            reasons.append(f"population.record.{index}.{row['population_state']}")
+        if row["capture_coverage"]["state"] in {"failed", "partial", "unknown"}:
+            reasons.append(f"population.record.{index}.{row['capture_coverage']['reason']}")
+        if row["freshness"]["state"] == "stale":
+            reasons.append(f"population.record.{index}.stale:{row['freshness']['reason_code']}")
+        if row["outcome_state"] == "pending_maturity":
+            reasons.append(f"population.record.{index}.outcome_pending_maturity")
     # Tooling does not perform or attest an independent economic evaluation.
     reasons.extend(["authorized_outcomes_and_execution_costs_not_reconciled",
                     "independent_untouched_test_not_performed", "confidence_event_and_labelled_cohort_not_established"])
@@ -229,6 +308,7 @@ def validation_report(data):
             "corpus_version": "content-addressed-by-corpus-hash",
             "contract_hash": digest(contract.model_dump(mode="json")),
             "corpus_hash": digest(data["records"]), "status": "not_established",
+            "evidence_states": evidence_states(population, policy_gaps),
             "reasons": reasons, "population": population,
             "dimensions": {"workflow_completion": "not_assessed", "deterministic_correctness": "separate_replay",
                            "model_robustness": "not_established", "confidence_calibration": "not_established",

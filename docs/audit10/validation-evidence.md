@@ -60,13 +60,13 @@ claim verdict and a passing synthetic test cannot establish investment effective
 
 | ID | Delivered here | Remaining acceptance / blocker |
 | --- | --- | --- |
-| A10-001-R01 | Versioned draft contract and approval ordering checks | Owner must approve every policy choice before results; no approved contract supplied |
+| A10-001-R01 | Separate current-context India/US draft contracts, pinned prompt hashes and approval ordering checks | Owner must approve every policy choice before results; no approved contract supplied |
 | A10-001-R02 | Read-only metadata projection, denominator/gap checks | Authorized complete original population/universe/pagination corpus unavailable; declaration cannot prove completeness |
 | A10-001-R03 | Conservative original lineage eligibility checks and synthetic timing/identity/action/FX cases | Actual canonical mapping, source/adjustment vintages and original evidence unavailable; original T05–T17 assertions now rerun unchanged from the checksum-verified author handoff (see local follow-up receipt) |
 | A10-001-R04 | Explicit chronology/dependency/overlap/embargo checker and tuning-ledger protocol | Populated frozen split, maturity, dependency/embargo rationale and independent holdout blocked on contract/corpus |
 | A10-001-R05 | Known-zero/unknown/partial cost coverage checker and reconciliation requirements | No actual execution feasibility, outcomes, all-in costs or comparator reconciliation; calendar/illiquidity/partial-fill runner now implemented with supplied-evidence checks; actual reconciled inputs unavailable |
 | A10-001-R06 | Reproducible hashes and honest `not_established` status | Independent frozen historical evaluation blocked; this is tooling, not empirical closure |
-| A10-001-R07 | Versioned formula hash, action boundaries, boundary margin and deterministic sensitivity | New labelled synthetic 35 baseline / 665 scenario grid; existing boundary/failure tests retained. Original T21–T28 assertions also pass from the author handoff; the 35/665 grid remains newly constructed synthetic coverage, not the original grid or prompt/model robustness evidence |
+| A10-001-R07 | Versioned formula hash, action boundaries, boundary margin and deterministic sensitivity | Original checksum-verified 35 baseline / 665 scenario grid and original T21–T28 guards now rerun; original baseline/scenario outputs preserved. Newly constructed tests remain separately labelled synthetic; neither establishes prompt/model robustness |
 | A10-001-R08 | CLI status, exact gaps, per-record coverage and separate validation dimensions | No economic-validation success state until independent evaluation; stale/failed corpus adjudication needs original evidence |
 
 No parent finding is closed. External task IDs/dedupe remain with the sole task writer.
@@ -147,3 +147,68 @@ costs and approved comparator evidence remain genuine data gates.
 
 Publication of this follow-up is held by the coordinator. No push, PR attempt,
 merge, deployment, provider call, live export or host action is authorized here.
+
+## Current-context draft and CLI status acceptance follow-up
+
+R01 now has separate `validation-contract-india-draft.json` and
+`validation-contract-us-draft.json`, each versioned independently and pinned to the
+current prompt at repository commit `8d25f34a33242adcaab092afdb07af7956f327bd`.
+Their source context retains the exact objective, qualitative horizon, market and
+exchange scope, coverage, capital/unit and fallback rules, plus the prompt file
+SHA-256. Tests compare those hashes to both the pinned commit bytes and the current
+unchanged files. This source is labelled `repository_prompt_snapshot`; the historical
+prompt version remains unknown. It is not asserted to be original provider input.
+
+These drafts identify the existing aggressive swing-trade rebalance strategy and
+market. The qualitative `2–12 weeks / 1–3 months` source horizon does not select a
+label maturity convention, and a named exchange scope does not establish original
+candidate membership. Every measurable validation choice remains explicitly unset,
+including objective, constraints, horizon, eligible universe, currency, investable
+benchmark, outcome, costs, promotion/withdrawal, effective sample, uncertainty and
+abstention/deterioration criteria. Approval identity/time, freeze time and result
+inspection time remain unknown. The existing strategy is preserved; no current
+policy question blocks implementation of these conservative artifacts.
+
+R08 CLI acceptance now exercises original failed deterministic capture gates,
+incomplete attempted/successful/terminal counts, inconsistent counts, explicitly
+declared stale evidence, overlapping failed/partial/stale/pending-maturity cases and
+invalid contracts. Reports retain every supplied case and exact reason, plus corpus
+hash and contract version. Evidence states remain separate from the invariant
+`not_established` investment verdict. An invalid contract produces a nonzero CLI
+exit and no new report; successful inventory execution is not an investment success.
+No replay or simulation runs under `--evidence-only`.
+
+Freshness declarations require state, policy version and reason code. They are
+explicitly labelled supplied declarations, not independently verified assessments.
+Missing freshness rules or an old timestamp remain `unknown`; no retention or
+monitoring SLA is invented. No sample sufficiency, economic validation or calibrated
+confidence state can be inferred from these component tests.
+
+R07 now also exercises the original sensitivity-grid source from the author handoff.
+The 1,926-byte source verified SHA-256
+`f0764b24604d8158edb7231dc0c04ef246146201072e874a82bf357eca8b1761`.
+The transport's escaped greater-than operator was restored before checksum
+verification. Only checkout ROOT and the local output destination were adapted;
+original input tuples, formula, 35 baselines and 665 scenarios were unchanged.
+The observed summary matches the author: 5 cases with action changes, 20 changed
+scenarios, case IDs G03/G10/G12/G25/G27. A separate baseline harness loaded the
+pinned `8d25f34` evaluation source and verified that its deterministic/schema
+dependencies are byte-identical to the receiving checkout. All 35 original baseline
+actions and all 665 scenario outputs match; additive diagnostic metadata and
+execution timestamps are reported separately. This is not a market or prompt/model
+robustness result. Private source and result files remain outside Git.
+
+R02/R03 received the bounded metadata transport in three chunks, but materialization
+stopped before decoding: received character lengths were 7,000 / 7,000 / 6,093,
+whereas the declared third chunk was 6,092 (20,092 total). No unverified metadata
+was decompressed, parsed, projected or supplied to the CLI. An exact retransmission
+is required. The author's expected counts are not represented as locally observed
+population evidence. Earlier local source absence and exclusions remain recorded.
+
+CLI output publication now uses a temporary file in the output directory, flush/fsync
+and atomic replacement, with cleanup on failure. Missing, unreadable, malformed or
+invalid-contract input exits nonzero with a sanitized error class and preserves any
+previous report byte-for-byte. That previous file is not a new successful result.
+Source and output may not be the same file. Tests exercise permission failures,
+serialization failure and replacement failure without changing real permissions.
+No raw source values are included in CLI error messages.
