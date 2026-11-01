@@ -64,14 +64,15 @@ const formatUsdAsVerifiedInr=()=> 'Unavailable';
 ${extract('InputSelectionDialog')}
 
 function App(){
+ const [market,setMarket]=useState('zerodha'),[stage,setStage]=useState('threats');
  const [promptOpen,setPromptOpen]=useState(false);
  const [inputOpen,setInputOpen]=useState(false),[ids,setIds]=useState(new Set(['fixture-0']));
  const [open,setOpen]=useState(false),[state,setState]=useState('loaded'),[selected,setSelected]=useState(new Set(['openai::gpt-4o-mini']));
  const providers=state==='empty'||state==='failed'||state==='loading'?[]:catalog;
- return <><main><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ return <><main><select aria-label="Fixture market" value={market} onChange={e=>setMarket(e.target.value)}>{['zerodha','indmoneyUs'].map(v=><option key={v}>{v}</option>)}</select><select aria-label="Fixture stage" value={stage} onChange={e=>setStage(e.target.value)}>{['threats','swing','rebalance','technical'].map(v=><option key={v}>{v}</option>)}</select><output id="selection">{Array.from(selected).join(',')}</output><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
  {promptOpen&&<PromptTemplateDialog title="Rebalance template" body="FIXTURE_ONLY" onClose={()=>setPromptOpen(false)} onReviewInputs={()=>{setPromptOpen(false);setInputOpen(true)}}/>}
  <InputSelectionDialog open={inputOpen} stage="rebalance" candidates={state==='empty'||state==='failed'||state==='loading'?[]:Array.from({length:40},(_,i)=>({id:'fixture-'+i,jobNo:'Fixture '+i,label:'Saved input '+i,status:i%2?'partial':'completed',source:'saved',timestamp:null}))} selectedIds={ids} usdInrRate={0} loading={state==='loading'} error={state==='failed'?'Fixture input read failed':state==='partial'?'Fixture partial input read':null} onToggle={id=>setIds(old=>{const next=new Set(old);next.has(id)?next.delete(id):next.add(id);return next;})} onToggleAll={()=>{}} onResetDefaults={()=>{}} onClose={()=>setInputOpen(false)}/>
- <StageLlmSelectorDialog open={open} stage="threats" portfolio="zerodha" providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
+ <StageLlmSelectorDialog open={open} stage={stage} portfolio={market} providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
 `);
@@ -219,6 +220,42 @@ try {
  await page.locator('#input-open').click();await page.keyboard.press('Escape');
  assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true);checks++;
  writeFileSync(resolve(output,'input-focus-evidence.json'),JSON.stringify(focusEvidence,null,2));
+ const matrix=[];
+ await page.setViewportSize({width:1180,height:757});
+ const retained=await page.locator('#selection').innerText();
+ for(const market of ['indmoneyUs','zerodha']) for(const stage of ['threats','swing','rebalance','technical']){
+  await page.getByRole('combobox',{name:'Fixture market'}).selectOption(market);
+  await page.getByRole('combobox',{name:'Fixture stage'}).selectOption(stage);
+  for(const state of ['loaded','loading','empty','failed','partial']){
+   await page.getByRole('combobox',{name:'Fixture state'}).selectOption(state);
+   for(let repeat=0;repeat<2;repeat++){
+    await page.locator('#open').focus();await page.keyboard.press('Enter');
+    if(market==='indmoneyUs'&&stage==='threats'&&state==='loaded'&&repeat===0) await shot('us-threats-current');
+    const dialog=page.getByRole('dialog');
+    if(await dialog.count()!==1) writeFileSync(resolve(output,'missing-dialog.json'),JSON.stringify({market,stage,state,focus:await page.evaluate(()=>document.activeElement.outerHTML),dialogs:await dialog.count()}));
+    assert.equal(await dialog.count(),1,market+' '+stage+' '+state);
+    assert.equal(await dialog.getAttribute('aria-modal'),'true');
+    assert.equal(await page.getByRole('button',{name:'Close LLM selector'}).evaluate(el=>el===document.activeElement),true);
+    await page.getByRole('button',{name:/Show LLM run history/}).focus();await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.getByRole('button',{name:'Done',exact:true}).evaluate(el=>el===document.activeElement),true);
+    await page.keyboard.press('Tab');assert.equal(await page.getByRole('button',{name:/Show LLM run history/}).evaluate(el=>el===document.activeElement),true);
+    if(state==='loaded'&&repeat===1){
+     await page.setViewportSize({width:390,height:844});
+     const inputs=dialog.locator('input:not(:disabled)');
+     if(await inputs.count()) await inputs.last().scrollIntoViewIfNeeded();
+     assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+     await shot(market+'-'+stage+'-narrow-end');checks++;
+    }
+    matrix.push({market,stage,state,repeat,snapshot:await dialog.ariaSnapshot()});
+    await page.keyboard.press('Escape');assert.equal(await page.locator('#open').evaluate(el=>el===document.activeElement),true);
+    assert.equal(await page.locator('#selection').innerText(),retained);await page.setViewportSize({width:1180,height:757});checks+=7;
+   }
+  }
+ }
+ await page.locator('#open').click();await page.locator('#open').evaluate(el=>el.remove());
+ await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);
+ assert.equal(await page.locator('main').evaluate(el=>!el.closest('[inert]')),true);checks+=2;
+ writeFileSync(resolve(output,'both-market-model-matrix.json'),JSON.stringify(matrix,null,2));
  assert.deepEqual(errors,[]);checks++;
  writeFileSync(resolve(output,'results.json'),JSON.stringify({checks,errors,inventory,viewport:{desktop:[1180,757],narrow:[390,844]},source:'real StageLlmSelectorDialog extracted with offline history/FX fixtures; real panel, frame and template controls'},null,2));
  console.log(JSON.stringify({checks,output,errors}));
