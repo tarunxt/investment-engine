@@ -13,7 +13,7 @@ from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 
-from sqlalchemy import create_engine, Integer, JSON, String
+from sqlalchemy import create_engine, Integer, JSON, String, Float, Text, Boolean
 from sqlalchemy.orm import DeclarativeBase, mapped_column, Session
 from sqlalchemy.dialects import postgresql
 
@@ -25,6 +25,20 @@ class Job(Base):
     id = mapped_column(Integer, primary_key=True)
     status = mapped_column(String)
     runtime_metadata_json = mapped_column(JSON)
+    prompt = mapped_column(Text, default='synthetic prompt')
+    provider = mapped_column(String, default='synthetic')
+    model = mapped_column(String, default='synthetic-model')
+    user_id = mapped_column(Integer, nullable=True)
+    response = mapped_column(Text, nullable=True)
+    error_message = mapped_column(Text, nullable=True)
+    tokens_in = mapped_column(Integer, nullable=True)
+    tokens_out = mapped_column(Integer, nullable=True)
+    estimated_cost = mapped_column(Float, nullable=True)
+    web_search_used = mapped_column(Boolean, nullable=True)
+    web_search_queries = mapped_column(JSON, nullable=True)
+    web_sources = mapped_column(JSON, nullable=True)
+    request_context_json = mapped_column(JSON, nullable=True)
+
 
 spec = importlib.util.spec_from_file_location('isolated_claim', Path(__file__).parents[2] / 'app/domains/jobs/execution_claim.py')
 claim = importlib.util.module_from_spec(spec)
