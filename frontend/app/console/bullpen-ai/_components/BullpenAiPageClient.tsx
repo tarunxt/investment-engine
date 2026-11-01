@@ -4301,9 +4301,7 @@ function BullpenAiPageContent({
     ? "Scanning Bullpen..."
     : activeVisibleSnapshot
       ? "No saved questions are available in this snapshot."
-      : isManualScanView
-        ? "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions."
-        : "No auto scan results yet. Run Scans and Invest Now above to populate this tab.";
+      : "Event results unknown. No saved source snapshot is available; current scan activity is unverified.";
   const [isBullpenIntroDialogOpen, setIsBullpenIntroDialogOpen] = useState(false);
   const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
   const [isBullpenAccountDialogOpen, setIsBullpenAccountDialogOpen] =
@@ -5398,11 +5396,12 @@ function BullpenAiPageContent({
                         <div className="space-y-0.5 text-xs font-medium leading-5 text-slate-600">
                           {activeSnapshotSource === tab.source ? (
                             <>
+                              <p>{tabSnapshot ? `Saved snapshot · ${formatApiTimestamp(tabSnapshot.scannedAt)} · current freshness unverified` : "Source unavailable · observation age unknown"}</p>
                               <p>
-                                Total Events Scanned: {tabSnapshot?.totalCandidates ?? 0}
+                                Total Events Scanned: {tabSnapshot?.totalCandidates ?? "—"}
                               </p>
                               <p>
-                                Events that passed Filters: {tabSnapshot?.questions.length ?? 0}
+                                Events that passed Filters: {tabSnapshot?.questions.length ?? "—"}
                               </p>
                             </>
                           ) : null}

@@ -7918,6 +7918,29 @@ export function StageTwoLlmRunDetailsDialog({
     });
   };
 
+  const unknownStageEvidence = !state.run && !state.stage.timerStartedAt && Object.keys(state.stage.outputs).length === 0;
+  const diagnosticsReturnFocus = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
+  useEffect(() => {
+    if (!unknownStageEvidence) return;
+    const target = diagnosticsReturnFocus.current;
+    return () => target?.focus();
+  }, [unknownStageEvidence]);
+
+  if (unknownStageEvidence) {
+    return (
+      <div data-testid="stage-two-llm-run-dialog" role="dialog" aria-modal="true" aria-label="Stage 2 LLM diagnostics" onKeyDown={(event) => { if (event.key === "Escape") onClose(); if (event.key === "Tab") event.preventDefault(); }} className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 text-slate-950 shadow-xl">
+          <h2 className="text-xl font-semibold">Stage 2 evidence unknown</h2>
+          <p className="mt-3 text-sm">No saved run or stage evidence is available. LLM row counts, completion, runtime and position counts are unknown.</p>
+          <p className="mt-2 text-xs text-slate-600">Source unavailable · observation age unknown. This view does not start or retry work.</p>
+          <Button autoFocus className="mt-4" onClick={onClose} aria-label="Close LLM run details">Close</Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid="stage-two-llm-run-dialog"
@@ -14911,7 +14934,7 @@ export function BullpenAutoRunScheduleCard({
               </p>
             ) : (
               <p className="mt-1 text-xs text-slate-600">
-                {latestTerminalRunOverview || "No auto-run result yet."}
+                {latestTerminalRunOverview || (summary ? "No saved auto-run result returned by this snapshot." : "Run history unknown · source unavailable.")}
               </p>
             )}
           </div>
@@ -14923,7 +14946,7 @@ export function BullpenAutoRunScheduleCard({
             <p className="mt-2 text-sm font-semibold text-slate-950">
               {consoleProfileSelected
                 ? "Bullpen console top-10"
-                : "Not active yet"}
+                : summary || visiblePersistedAutoRunStatus ? "Not active yet" : "Unknown · source unavailable"}
             </p>
             <p className="mt-1 text-xs text-slate-600">
               Live orders still require Bullpen doctor, balance, and runtime
@@ -15478,7 +15501,7 @@ export function BullpenAutoRunScheduleCard({
                         title="Time taken to run this stage"
                       >
                         <Clock3 className="h-3 w-3" />
-                        {formatStageElapsedTime(
+                        {!showStageNumbers ? "Unknown" : formatStageElapsedTime(
                           displayedStageTimerStartedAt,
                           displayedStageTimerCompletedAt,
                           timerNowMs,
@@ -15494,7 +15517,7 @@ export function BullpenAutoRunScheduleCard({
                       <div>
                         Last stage run:{" "}
                         <span className="font-semibold tabular-nums">
-                          {formatStageLastRunLabel(
+                          {!showStageNumbers ? "Unknown" : formatStageLastRunLabel(
                             displayedStageTimerCompletedAt ??
                               displayedStageTimerStartedAt,
                           )}
@@ -15503,7 +15526,7 @@ export function BullpenAutoRunScheduleCard({
                       <div>
                         Time taken:{" "}
                         <span className="font-semibold tabular-nums">
-                          {formatStageElapsedTime(
+                          {!showStageNumbers ? "Unknown" : formatStageElapsedTime(
                             displayedStageTimerStartedAt,
                             displayedStageTimerCompletedAt,
                             timerNowMs,
