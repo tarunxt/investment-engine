@@ -131,6 +131,7 @@ try {
     const before=await nav.boundingBox();assert.equal(before.height,box.height,'expanded account must not shrink navigation');
     for(const item of await page.evaluate(()=>window.account))assert.equal(await panel.locator(`a[href="${item.href}"]`).count(),1);
     const appearance=panel.locator('summary');await appearance.focus();await page.keyboard.press(' ');
+    await panel.getByRole('button',{name:'Light',exact:true}).waitFor({state:'visible'});
     assert.ok(await panel.getByRole('button',{name:'Light',exact:true}).isVisible());
     assert.ok(await panel.getByRole('button',{name:'Dark',exact:true}).isVisible());
     await panel.getByRole('button',{name:'Dark',exact:true}).focus();

@@ -151,3 +151,30 @@ successful at `7e3831ec3f64a4b3d49f230c2ad105c5c12d3607`.
 Coordinator confirms all nineteen change branches now have draft PRs, including
 Models #1361, Mails #1362, Rankings #1360 and Stages #1363. This integrator did not
 retry their previously denied publication actions or optional metadata updates.
+
+## Exact final-head runtime correction
+
+Rebuilt/stamped `5dae09a4390d738766846c2f71366292c3cd7151` reproduced the failure:
+Dashboard 236,322 transferred / 762,939 decoded bytes. Build and packaging passed;
+the unchanged runtime gate rejected JavaScript growth, confirming the old-artifact
+failure was still present on the final integrated source.
+
+Local correction `c928a8863c737a20f8a22e385d77728f681db541` loads existing Appearance
+controls only when their disclosure opens. Theme persistence/handlers, account
+navigation and permissions are unchanged. The fixture waits for the deferred controls
+before asserting their visibility. All sidebar keyboard/focus, routes, footer,
+back/forward and zero-write checks pass. Eleven navigation tests and focused lint pass.
+
+The correction's exact stamped Webpack artifact passed the unchanged verifier:
+Login 193,809 transferred / 616,448 decoded; Dashboard 235,522 / 759,896;
+Bullpen 252,752 / 816,746; Automated Rebalance 713,836 / 2,261,269 bytes.
+Fingerprint, authentication boundary, mock backend proxy, route assets and standalone
+runtime passed. Budget constants and verifier assertions were not edited.
+
+Fresh integrated fixture screenshots cover Models, Inputs, Stage Ledger, Sidebar,
+Preferences inside the corrected Settings shell, and Cost Drivers inside that shell.
+Models passed 45 checks, Stage Ledger six-row India/US checks, Inputs both mapped
+views and states, Settings narrow wrapping and all controls. All are synthetic local
+fixture captures, not production or independent PDF comparisons. Sidebar's supplied
+native acceptance applies to its original reviewed branch; integrated acceptance
+remains with the coordinator.
