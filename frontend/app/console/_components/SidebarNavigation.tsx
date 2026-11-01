@@ -1,6 +1,8 @@
 'use client';
 
 import {
+    lazy,
+    Suspense,
     useEffect,
     useMemo,
     useRef,
@@ -10,7 +12,6 @@ import {
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
 import {
     DndContext,
     KeyboardSensor,
@@ -41,7 +42,7 @@ import {
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
-const NavigationDirectory = dynamic(() => import('./NavigationDirectory').then((module) => module.NavigationDirectory));
+const NavigationDirectory = lazy(() => import('./NavigationDirectory').then((module) => ({ default: module.NavigationDirectory })));
 import { SidebarThemeToggle } from './SidebarThemeToggle';
 import {
     ACCOUNT_ACTIONS,
@@ -1159,7 +1160,7 @@ export function SidebarNavigation({
                 />
             </div>
 
-            {directoryOpen ? <NavigationDirectory open pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} /> : null}
+            {directoryOpen ? <Suspense fallback={null}><NavigationDirectory open pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} /></Suspense> : null}
 
             {contextMenu ? (
                 <>
