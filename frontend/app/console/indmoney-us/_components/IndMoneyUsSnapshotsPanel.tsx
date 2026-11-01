@@ -317,10 +317,10 @@ function SnapshotHistoryChart({
   const selectedPoint = points.find((point) => point.id === selectedSnapshotId) ?? points.at(-1);
 
   return (
-    <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
+    <div className="flex min-w-0 h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Daily History</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Historical trend</span>
           <p className="mt-1 text-sm text-gray-500">Current value trend across saved INDmoney snapshots.</p>
         </div>
         {selectedPoint ? (
@@ -626,7 +626,7 @@ export function IndMoneyUsSnapshotsPanel({
 }) {
   const [holdingsSort, setHoldingsSort] = useState<SortState<IndMoneyHoldingsSortColumn>>(null);
 
-  if (loading) {
+  if (loading && !overview) {
     return (
       <div className="flex items-center gap-2 border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
         <Loader2 className="size-4 animate-spin" />
@@ -636,6 +636,8 @@ export function IndMoneyUsSnapshotsPanel({
   }
 
   const history = overview?.history ?? [];
+
+  if (!overview && error) return null;
 
   if (!selectedSnapshot && history.length === 0) {
     return <EmptyState />;
@@ -658,14 +660,14 @@ export function IndMoneyUsSnapshotsPanel({
       <div className="border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-950">INDmoney US Portfolio Snapshot</h2>
+            <h2 className="text-lg font-semibold text-gray-950">Saved portfolio summary</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Manual daily snapshots parsed into holdings, allocation, returns, and market context.
+              Manual import · holdings, allocation, returns, and market context. Parsed does not mean current prices.
             </p>
           </div>
-          <div className="flex items-center gap-3 text-sm text-gray-500">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
             <div>
-              <p>Viewing snapshot</p>
+              <p>Manual snapshot · saved</p>
               <p className="font-medium text-gray-700">{formatCapturedAt(selectedSnapshot.captured_at)}</p>
             </div>
             <span className={cn('inline-flex min-w-[6.5rem] items-center justify-center px-2.5 py-1 text-xs font-semibold uppercase tracking-wider ring-1', statusClass(selectedSnapshot.parse_status))}>
@@ -687,7 +689,7 @@ export function IndMoneyUsSnapshotsPanel({
           </div>
         ) : null}
 
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-5 px-5 py-5 xl:grid-cols-2">
           <div className="grid gap-4">
             <MetricCard
               label="Current Value"
@@ -751,7 +753,7 @@ export function IndMoneyUsSnapshotsPanel({
           <div className="border border-gray-200 bg-white shadow-sm">
             <div className="flex flex-col gap-2 border-b border-gray-200 px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Snapshot Detail</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Holdings</h3>
                 <p className="mt-2 text-lg font-semibold text-gray-950">
                   {formatSnapshotDate(selectedSnapshot.snapshot_date)}
                 </p>
@@ -866,12 +868,12 @@ export function IndMoneyUsSnapshotsPanel({
             </div>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
             <ReconciliationTable items={selectedSnapshot.derived.reconciliation} />
             <MarketIndicesTable indices={selectedSnapshot.market_indices} />
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
             <CompactHoldingsTable title="Top Allocation" holdings={selectedSnapshot.derived.top_allocations} />
             <CompactHoldingsTable title="Top Gainers" holdings={selectedSnapshot.derived.top_gainers} />
             <CompactHoldingsTable title="Laggards" holdings={selectedSnapshot.derived.top_laggards} />

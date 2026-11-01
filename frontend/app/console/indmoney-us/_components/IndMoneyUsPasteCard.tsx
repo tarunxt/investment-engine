@@ -51,42 +51,44 @@ export function IndMoneyUsPasteCard({
 
       setRawText('');
       setCapturedAt(buildLocalDateTimeValue());
-      setSuccessMessage('Snapshot saved and parsed.');
+      setSuccessMessage('Snapshot saved. Check its parse status and reconciliation warnings below.');
     } catch {
       // The parent already surfaces the save error inline.
     }
   };
 
   return (
-    <div className="border border-blue-200 bg-blue-50 shadow-sm">
+    <div className="border border-gray-200 bg-white shadow-sm">
       <button
         type="button"
         onClick={() => setIsOpen((current) => !current)}
-        className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left"
+        aria-expanded={isOpen}
+        aria-controls="indmoney-us-import-form"
+        className="flex w-full items-start justify-between gap-4 px-5 py-3 text-left focus-visible:outline-2 focus-visible:outline-blue-600"
       >
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-full bg-white p-2 text-blue-600 shadow-sm">
+          <div className="mt-0.5 rounded-full bg-white p-2 text-gray-600 shadow-sm">
             <ClipboardPaste className="size-4" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-950">Paste INDmoney snapshot</h2>
-            <p className="mt-1 text-sm text-blue-900/80">
-              Click to open the daily paste box and save a manual snapshot.
+            <h2 className="text-sm font-semibold text-slate-950">Import snapshot</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Paste INDmoney data and save a timestamped manual snapshot.
             </p>
           </div>
         </div>
-        <span className="rounded-full bg-white p-2 text-blue-600 shadow-sm">
+        <span className="rounded-full bg-white p-2 text-gray-600 shadow-sm">
           {isOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
         </span>
       </button>
 
       {isOpen ? (
-        <form onSubmit={handleSubmit} className="space-y-4 border-t border-blue-200 px-5 py-5">
-        <div className="grid gap-4 lg:grid-cols-[16rem,minmax(0,1fr)]">
+        <form id="indmoney-us-import-form" onSubmit={handleSubmit} className="space-y-4 border-t border-gray-200 px-5 py-5">
+        <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
           <div className="space-y-2">
             <label
               htmlFor="indmoney-captured-at"
-              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-900/80"
+              className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-600"
             >
               <CalendarDays className="size-3.5" />
               Snapshot timestamp
@@ -96,9 +98,9 @@ export function IndMoneyUsPasteCard({
               type="datetime-local"
               value={capturedAt}
               onChange={(event) => setCapturedAt(event.target.value)}
-              className="w-full border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition focus:border-blue-400"
+              className="w-full border border-gray-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-0 transition focus:border-blue-400"
             />
-            <p className="text-xs text-blue-900/70">
+            <p className="text-xs text-gray-600">
               Use the time when you copied the INDmoney screen so history stays meaningful.
             </p>
           </div>
@@ -106,7 +108,7 @@ export function IndMoneyUsPasteCard({
           <div className="space-y-2">
             <label
               htmlFor="indmoney-raw-text"
-              className="text-xs font-semibold uppercase tracking-wider text-blue-900/80"
+              className="text-xs font-semibold uppercase tracking-wider text-gray-600"
             >
               Paste IndMoney data here
             </label>
@@ -118,9 +120,9 @@ export function IndMoneyUsPasteCard({
                 setSuccessMessage(null);
               }}
               placeholder="Paste the copied INDmoney portfolio text here..."
-              className="min-h-[16rem] w-full resize-y border border-blue-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400"
+              className="min-h-[16rem] w-full resize-y border border-gray-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-blue-400"
             />
-            <div className="flex items-center justify-between text-xs text-blue-900/70">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
               <span>Best results come from pasting the full portfolio screen, including the holdings list.</span>
               <span>{rawText.trim().length.toLocaleString('en-IN')} chars</span>
             </div>
@@ -140,8 +142,8 @@ export function IndMoneyUsPasteCard({
           </div>
         )}
 
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-blue-900/70">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-gray-600">
             Partial parsing is okay. We still keep the raw snapshot and show warnings when totals do not reconcile.
           </p>
           <Button type="submit" disabled={saving || !rawText.trim()} className="bg-blue-600 hover:bg-blue-700">
