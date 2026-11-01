@@ -18,6 +18,7 @@ class JobRepository(Protocol):
     async def create(self, job: Job) -> Job: ...
     async def get(self, job_id: JobId) -> Job | None: ...
     async def get_for_user(self, job_id: JobId, user_id: UserId) -> Job | None: ...
+    async def cancel_for_user(self, job_id: JobId, user_id: UserId) -> tuple[Job | None, bool]: ...
     async def list_for_user(self, user_id: UserId, query: PagedQuery,
                             status: JobStatus | None = None,
                             search: str | None = None) -> PagedResult[Job]: ...
@@ -75,6 +76,31 @@ class PostgresJobRepository:
         job, state = row
         job.dispatch_status = state  # Additive projection; legacy rows stay unknown.
         return job
+
+    async def cancel_for_user(self, job_id: JobId, user_id: UserId) -> tuple[Job | None, bool]:
+        """Serialize cancellation against completion; caller commits the transition.
+
+        Refresh under the row lock so a stale API identity cannot replace a
+        previously committed terminal output. Worker terminal writes use the same
+        row lock (and, after A11-002 integration, execution ownership).
+        """
+        if user_id is None:
+            return None, False
+        with self._session.no_autoflush:
+            result = await self._session.execute(
+                select(Job).where(Job.id == job_id, Job.user_id == user_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )
+        job = result.scalar_one_or_none()
+        if job is None or job.status not in JobStatus.active():
+            return job, False
+        job.status = JobStatus.FAILED
+        job.error_message = "Cancelled by user"
+        if (job.export_status or "").lower() in {"", "pending", "queued", "processing"}:
+            job.export_status = "failed"
+            job.export_error = "Cancelled by user"
+        await self._session.flush()
+        return job, True
 
     async def list_for_user(
         self, user_id: UserId, query: PagedQuery,
@@ -192,6 +218,16 @@ class SyncJobRepository:
         web_sources: list[str] | None = None,
         runtime_metadata_json: dict | None = None,
     ) -> None:
+        with self._session.no_autoflush:
+            current = self._session.execute(
+                select(Job).where(Job.id == job.id).with_for_update()
+                .execution_options(populate_existing=True)
+            ).scalar_one_or_none()
+        if current is None or current.status in JobStatus.terminal():
+            # A committed terminal result/cancellation wins over stale workers.
+            self._session.commit()
+            return
+        job = current
         job.status = status
         if response is not None:
             job.response = response

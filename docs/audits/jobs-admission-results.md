@@ -75,3 +75,53 @@ observed running at 08c4720b; subsequent fixture-only publication creates a new
 head and requires fresh CI. No green exact-head CI or independent approval is
 claimed. The prohibition above on Alembic execution refers to manual/local and
 production operations; ordinary PR CI runs its existing isolated migration job.
+
+## Independent cancellation-race review follow-up
+
+The prior HTTP read/modify/commit could replace a completion committed between
+its initial read and cancellation write. A stale worker could likewise replace a
+committed cancellation. cancel_for_user now refreshes the actor-scoped Job under
+SELECT FOR UPDATE, transitions only an active row, and holds the lock through the
+route commit. The synchronous worker writer refreshes under the same row lock
+and preserves terminal rows. no_autoflush prevents stale ORM dirtiness from being
+written before the locking refresh. Only a successful cancellation revokes the
+task and publishes the update; a completed/partial/failed winner remains intact.
+
+Genuine PostgreSQL 16.2 evidence: both tests in
+backend/tests/test_jobs_cancellation_postgres.py passed (2 passed, zero skips).
+Two contender sessions plus a read-only lock observer require pg_blocking_pids
+to report real contention before releasing the winner's barrier. Completion-first
+preserves response, tokens, cost, source context and metadata, without revocation.
+Cancellation-first preserves FAILED/cancellation and export suppression; the stale
+worker cannot add output, usage or metadata after the cancellation commit.
+The actual route and actual synchronous repository are exercised, not FakeDB.
+Related synthetic/retained-behavior tests: 139 passed.
+
+Local test dependencies were temporary only (including pgserver 0.1.4's packaged
+PostgreSQL binaries). A new disposable cluster in /tmp/jobs-cancel-pgdata listened
+only on /tmp/jobs-cancel-pg-socket, port 55439, with listen_addresses empty and
+0700 socket access. The explicit acknowledgement is
+CREDX_JOBS_CANCEL_PG_TEST=synthetic-socket-only plus the JOBS_SYNTHETIC_ONLY marker.
+No application DATABASE_URL is read. Each test creates/drops its random synthetic
+schema. No Alembic, provider, broker, send or production operation is involved.
+Tests also support the existing guarded disposable LOCAL CI database and are
+added to its existing PR concurrency job; no service/resource/environment is
+added and the disabled deployment workflow is untouched.
+
+A11-002 integration note: reviewed consumer head
+72ca85e614e612b9fd50a1e4d066d08e64620b5d. Admission/outbox does not mutate the
+reserved execution_claim metadata. Job IDs and stable outbox delivery IDs match.
+The cancellation fix now overlaps the entry of SyncJobRepository.update_status:
+the integrator must retain the consumer's stronger token/ownership checks,
+locked fresh read and metadata merging, with terminal preservation for unclaimed
+writes; do not replace consumer fencing with this lane's simpler guard. Preserve
+this lane's new actor-scoped cancel_for_user and HTTP route transition. This is a
+source integration overlap requiring joint tests, not a schema incompatibility.
+Hidden SDK retries and exactly-once external effects remain unproven. Relay stays
+disabled; no claim of activation or production acceptance follows from these tests.
+
+CI correction preceding this follow-up: f43b0434 passed both API Attempt Migration
+41342110955 and Pull Request Checks 41342110866. The failing assertion on e7e41e2d
+was the verifier's unregistered additive outbox schema, not failed DDL. The exact
+registered addition contract now checks preservation of a seeded legacy outbox
+row and rejects altered old facts. This new cancellation head needs fresh CI.

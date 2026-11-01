@@ -115,28 +115,17 @@ async def cancel_job(
     current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get_for_user(JobId(job_id), UserId(current_user.id))
+    job, changed = await repo.cancel_for_user(JobId(job_id), UserId(current_user.id))
     if not job:
         raise HTTPException(404, detail="Job not found")
-
-    if job.status not in JobStatus.active():
-        return job
-
-    job.status = JobStatus.FAILED
-    job.error_message = "Cancelled by user"
-    if (job.export_status or "").lower() in {"", "pending", "queued", "processing"}:
-        job.export_status = "failed"
-        job.export_error = "Cancelled by user"
-
     await db.commit()
 
     job = await repo.get_for_user(JobId(job_id), UserId(current_user.id))
     if not job:
         raise HTTPException(404, detail="Job not found")
 
-    await revoke_registered_job_task(job_id)
-
-    from app.domains.jobs.tasks import _publish_job_update
-
-    _publish_job_update(job)
+    if changed:
+        await revoke_registered_job_task(job_id)
+        from app.domains.jobs.tasks import _publish_job_update
+        _publish_job_update(job)
     return job
