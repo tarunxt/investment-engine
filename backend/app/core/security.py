@@ -134,11 +134,30 @@ class JWTUtils:
             Token payload if valid, None otherwise
         """
         try:
-            payload = jwt.decode(token, settings.jwt_signing_key.get_secret_value(), algorithms=[ALGORITHM])
+            payload = jwt.decode(
+                token, settings.jwt_signing_key.get_secret_value(),
+                algorithms=[ALGORITHM], options={"require_exp": True},
+            )
             return payload
-        except JWTError:
+        except (JWTError, TypeError, ValueError, OverflowError):
             return None
     
+    @staticmethod
+    def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
+        """Accept the existing access shape, which has no type claim."""
+        payload = JWTUtils.verify_token(token)
+        if payload is None or "type" in payload:
+            return None
+        return payload
+
+    @staticmethod
+    def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
+        """Accept only the existing explicitly typed refresh shape."""
+        payload = JWTUtils.verify_token(token)
+        if payload is None or payload.get("type") != "refresh":
+            return None
+        return payload
+
     @staticmethod
     def decode_token(token: str) -> Optional[Dict[str, Any]]:
         """
