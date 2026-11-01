@@ -25,8 +25,10 @@ Beat entries without importing application modules or executing tasks.
   current timer state, last successful observation and delivery are unknown here.
   Do not run it to fill gaps: configured webhook execution can send an alert.
 
-The inventory contains no runtime history. Count=0 is the number sampled, not a
-workload count. No last expected/actual start, terminal outcome, lag or evidence
+The published inventory contains no task execution history. Count=0 is the number
+of task records sampled, not a workload count or a claim that no operational
+metadata exists. Supplied service observations belong in a separate private
+evidence ledger. No last expected/actual start, terminal outcome, lag or evidence
 window is independently known. No raw receipts, financial rows or identities are
 included. Source declarations cannot establish loaded worker module identity.
 
@@ -88,3 +90,23 @@ one finding open until all substeps .01-.09 and T01-T04 are supported, integrati
 with A11-004/A11-005 is reviewed, and independent read-back is recorded.
 No scheduler, schedule, service, alert, infrastructure, retention, history or
 manual prerequisite is changed by this contract.
+
+## Private observation reconciliation boundary
+
+Keep actual operational receipts outside the repository and PR. A private ledger
+must map canonical `.service` unit names to expected containment and observed
+state, receipt provenance, observation instant and successful/failed query count.
+Preserve active/inactive enter/exit and main-process start timestamps as distinct
+fields; empty timestamps remain null. A stopped worker that matches intentional
+containment is not a missed obligation. A running service alone proves no task
+completion or availability objective.
+
+For bounded journal projections record window, PID filter, unit scope, requested
+fields, cap, returned count, cap-hit flag, normalization corrections and retained
+history limitations. Account for every returned record across normalized units.
+PID 1 manager-record counts are not classified restart counts. `NRestarts` is a
+current systemd counter, not a lifetime total. Neither supplies uptime or RPO/RTO.
+Zero manager records does not establish zero executions, failures or incidents.
+Do not mix this ledger with the synthetic classifier tests or task-history sample;
+task terminal outcomes, lag, queue health and heartbeat evidence remain unknown
+until their own qualified records are supplied.

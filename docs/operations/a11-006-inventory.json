@@ -2,14 +2,14 @@
   "finding": "A11-006",
   "status": "open: owner decisions and independent evidence pending",
   "source_revision": "8d25f34a33242adcaab092afdb07af7956f327bd",
-  "evidence_scope": "repository-only; no host, broker, database, provider or alert access",
+  "evidence_scope": "Public source inventory only; supplied runtime metadata must be reconciled in a separate private evidence ledger, never embedded here",
   "history_sample": {
     "count": 0,
     "total": null,
     "pages_read": 0,
     "next_cursor": null,
     "complete": false,
-    "limitation": "No authorized retained history supplied; zero sampled is not zero executions"
+    "limitation": "No task execution history sampled; service-state and PID1 manager observations are separate evidence and cannot populate task outcomes"
   },
   "workflows": [
     {
