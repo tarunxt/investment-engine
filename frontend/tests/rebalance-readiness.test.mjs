@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import * as React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import * as icons from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
-const modules = { 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons, '@/lib/utils': { cn: (...args) => args.filter(x => typeof x === 'string').join(' ') } };
+const modules = { react: React, 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons, '@/lib/utils': { cn: (...args) => args.filter(x => typeof x === 'string').join(' ') } };
 function load(source, bindings = {}) {
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exports = {};
@@ -47,7 +48,7 @@ test('missing optional context remains eligible, while actual input, model and p
 });
 
 function modelPanel(estimates, props = {}) {
-  return renderToStaticMarkup(LlmModelSelectionPanel({ providers: [{ name: 'openai', configured: true, models: ['a', 'b'], model_estimated_cost_inr: estimates }], selectedKeys: new Set(['openai::a', 'openai::b']), onToggle() {}, showEstimateReadiness: true, ...props }));
+  return renderToStaticMarkup(React.createElement(LlmModelSelectionPanel, { providers: [{ name: 'openai', configured: true, models: ['a', 'b'], model_estimated_cost_inr: estimates }], selectedKeys: new Set(['openai::a', 'openai::b']), onToggle() {}, showEstimateReadiness: true, ...props }));
 }
 test('unknown, partial, stale selection, loading and explicit zero estimates stay distinct', () => {
   for (const value of [undefined, null, NaN, Infinity, -1]) assert.equal(readiness.isKnownEstimate(value), false);
