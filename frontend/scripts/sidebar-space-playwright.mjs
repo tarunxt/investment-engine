@@ -35,7 +35,7 @@ try {
   await page.route('**/*',route=>route.request().url().startsWith(base)?route.continue():(external.push(route.request().url()),route.abort()));
   await page.addInitScript(()=>{localStorage.setItem('investment-engine:theme-preference','system');localStorage.setItem('unrelated-user-preference','preserve-me')});
   const measurements=[];
-  for(const [width,height,zoom] of [[1165,747,1],[1165,747,.67],[390,747,1],[390,747,.67]]) {
+  for(const [width,height,zoom] of [[1180,757,1],[1165,747,1],[1165,747,.67],[390,747,1],[390,747,.67]]) {
     await page.setViewportSize({width:Math.round(width/zoom),height:Math.round(height/zoom)});
     await page.goto(base+'/console/dashboard');
     const nav=page.getByRole('navigation',{name:'Console navigation',includeHidden:true});
@@ -50,7 +50,7 @@ try {
     assert.ok(box.height>height/zoom*.60,`navigation should occupy most height: ${box.height}`);
     measurements.push({width,height,zoom,navigationHeight:box.height,viewportHeight:height/zoom});
     await page.screenshot({path:path.join(output,`sidebar-home-${width}-${Math.round(zoom*100)}.png`)});
-    const roots=await page.evaluate(()=>window.sections.flatMap(s=>s.entries.map(e=>({name:e.name,href:e.href,group:e.type==='group'}))));
+    const roots=await page.evaluate(()=>window.sections.flatMap(s=>s.entries.map(e=>({name:e.name,href:e.href,group:e.type==='group',children:e.children?.map(c=>({name:c.name,href:c.href}))}))));
     const groups=await page.evaluate(()=>window.sections.map(s=>s.label));
     for(const label of groups)assert.equal(await nav.getByRole('heading',{name:label,exact:true}).count(),1);
     for(const entry of roots){
@@ -58,13 +58,38 @@ try {
       await target.scrollIntoViewIfNeeded();await target.focus();
       assert.ok(await target.evaluate(el=>document.activeElement===el));
       const r=await target.boundingBox(),n=await nav.boundingBox();assert.ok(r.y>=n.y-1&&r.y+r.height<=n.y+n.height+1,entry.name);
-      if(entry.group){await page.keyboard.press('Enter');assert.equal(await target.getAttribute('aria-expanded'),'true');await page.keyboard.press(' ');assert.equal(await target.getAttribute('aria-expanded'),'false');}
+      if(entry.group){
+        await page.keyboard.press('Enter');assert.equal(await target.getAttribute('aria-expanded'),'true');
+        for(const child of entry.children){
+          const link=nav.locator(`a[href="${child.href}"]`);
+          assert.equal(await link.count(),1,`${child.name} remains reachable`);
+          await link.focus();assert.ok(await link.evaluate(el=>document.activeElement===el));
+        }
+        await target.focus();await page.keyboard.press(' ');assert.equal(await target.getAttribute('aria-expanded'),'false');
+      }
     }
     // Navigate to a destination low in the list; route transition reveals and highlights it.
     await page.evaluate(()=>{history.pushState({},'','/console/apis');window.dispatchEvent(new Event('popstate'))});
     const active=nav.locator('[aria-current="page"]');await active.waitFor();
     await page.waitForFunction(()=>{const nav=document.querySelector('nav'),a=nav.querySelector('[aria-current="page"]');const n=nav.getBoundingClientRect(),r=a.getBoundingClientRect();return r.top>=n.top&&r.bottom<=n.bottom});
     assert.equal(await active.getAttribute('href'),'/console/apis');
+    const activeParent=nav.getByRole('button',{name:'Integrations',exact:true});
+    assert.equal(await activeParent.getAttribute('aria-expanded'),'true');
+    assert.equal(await activeParent.evaluate(el=>el.classList.contains('bg-sidebar-accent')),false,'expanded parent must leave filled selection on destination');
+    assert.equal(await active.evaluate(el=>el.classList.contains('bg-sidebar-accent')),true);
+    const rootRow=nav.locator('a[href="/console/dashboard"]');
+    const heights=await Promise.all([rootRow,activeParent,active].map(el=>el.evaluate(node=>node.getBoundingClientRect().height)));
+    assert.ok(heights.every(h=>Math.abs(h-heights[0])<1),'root, group and child use the same row height');
+    await activeParent.focus();await page.keyboard.press('Enter');
+    assert.equal(await activeParent.getAttribute('aria-expanded'),'false');
+    assert.equal(await activeParent.evaluate(el=>el.classList.contains('bg-sidebar-accent')),true,'collapsed active group retains route cue');
+    await page.keyboard.press('Enter');
+    await page.screenshot({path:path.join(output,`sidebar-active-${width}-${Math.round(zoom*100)}.png`)});
+
+    await rootRow.click();
+    if(await open.isVisible())await open.click();
+    await page.goBack();
+    assert.equal(await nav.locator('[aria-current="page"]').getAttribute('href'),'/console/apis','Back restores destination and group');
     const summary=page.locator('summary').filter({hasText:'Account'});
     await summary.focus();await page.keyboard.press('Enter');
     const panel=page.getByRole('region',{name:'Account and appearance'});await panel.waitFor();
