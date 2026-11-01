@@ -625,9 +625,13 @@ export default function MailsPage() {
   const [history, setHistory] = useState<MailHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyVerified, setHistoryVerified] = useState(false);
+  const historyRequest = useRef(0);
   const [githubRuns, setGithubRuns] = useState<GitHubWorkflowRun[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
   const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubVerified, setGithubVerified] = useState(false);
+  const githubRequest = useRef(0);
   const [historyTab, setHistoryTab] = useState<MailHistoryTab>('all');
   const [preferences, setPreferences] = useState<MailPreference[]>([]);
   const [preferencesLoadState, setPreferencesLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -729,6 +733,7 @@ export default function MailsPage() {
   }
 
   const loadHistory = useCallback(async () => {
+    const request = ++historyRequest.current;
     setHistoryLoading(true);
     setHistoryError(null);
     try {
@@ -742,15 +747,18 @@ export default function MailsPage() {
       if (!response.ok || !Array.isArray(payload?.items)) {
         throw new Error('Mail history could not be loaded.');
       }
+      if (request !== historyRequest.current) return;
       setHistory(payload.items);
+      setHistoryVerified(true);
     } catch (historyFailure) {
+      if (request !== historyRequest.current) return;
       setHistoryError(
         historyFailure instanceof Error
           ? historyFailure.message
           : 'Mail history could not be loaded.',
       );
     } finally {
-      setHistoryLoading(false);
+      if (request === historyRequest.current) setHistoryLoading(false);
     }
   }, []);
 
@@ -771,6 +779,7 @@ export default function MailsPage() {
   }, [historyLoading, history]);
 
   const loadGitHubRuns = useCallback(async () => {
+    const request = ++githubRequest.current;
     setGithubLoading(true);
     setGithubError(null);
     try {
@@ -790,15 +799,18 @@ export default function MailsPage() {
       if (!response.ok || !Array.isArray(payload?.workflow_runs)) {
         throw new Error(payload?.message || 'GitHub workflow history could not be loaded.');
       }
+      if (request !== githubRequest.current) return;
       setGithubRuns(payload.workflow_runs);
+      setGithubVerified(true);
     } catch (githubFailure) {
+      if (request !== githubRequest.current) return;
       setGithubError(
         githubFailure instanceof Error
           ? githubFailure.message
           : 'GitHub workflow history could not be loaded.',
       );
     } finally {
-      setGithubLoading(false);
+      if (request === githubRequest.current) setGithubLoading(false);
     }
   }, []);
 
@@ -876,6 +888,21 @@ export default function MailsPage() {
       : `No ${historyTabs
           .find((tab) => tab.id === historyTab)
           ?.label.toLowerCase()} mails have been recorded yet.`;
+
+  // STATE-Mails-History-FailedVersusEmpty: only a verified, current success
+  // can establish emptiness. Failed refreshes retain the last successful rows.
+  const selectedGitHub = historyTab === 'github';
+  const resultsLoading = selectedGitHub ? githubLoading : historyLoading;
+  const resultsError = selectedGitHub ? githubError : historyError;
+  const resultsVerified = selectedGitHub ? githubVerified : historyVerified;
+  const resultsCount = selectedGitHub ? githubRuns.length : visibleHistory.length;
+  const historyStatus = resultsLoading
+    ? `${selectedGitHub ? 'Loading GitHub workflow history' : 'Loading mail history'}…${resultsVerified ? ' Previously loaded results and counts remain visible.' : ''}`
+    : resultsError
+      ? `${resultsError} ${resultsVerified ? 'Previously loaded results and counts remain visible and may be out of date.' : 'No empty-history conclusion is available.'}`
+      : resultsVerified && resultsCount === 0
+        ? selectedGitHub ? 'No GitHub workflow notifications are available.' : emptyHistoryMessage
+        : null;
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 lg:max-w-none lg:px-0">
@@ -1107,13 +1134,13 @@ export default function MailsPage() {
 
       <SellBatchPreparation history={history} />
 
-      <section className="mt-8 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+      <section aria-labelledby="mail-history-heading" className="mt-8 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 border-b border-border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">
               Delivery audit
             </p>
-            <h2 className="mt-1 text-xl font-bold text-foreground">Sent mail history</h2>
+            <h2 id="mail-history-heading" className="mt-1 text-xl font-bold text-foreground">Sent mail history</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Every email sent through Cred-X SMTP, grouped by purpose. New mail types appear in All Cred-X automatically.
             </p>
@@ -1129,31 +1156,49 @@ export default function MailsPage() {
           </button>
         </div>
 
-        <div className="border-b border-border px-6 pt-4">
-          <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="Mail history categories">
-            {historyTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={historyTab === tab.id}
-                onClick={() => setHistoryTab(tab.id)}
-                className={`shrink-0 border-b-2 px-4 py-3 text-sm font-semibold transition ${
-                  historyTab === tab.id
-                    ? 'border-violet-600 text-violet-700'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {tab.label}
-                <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">
-                  {tab.count}
-                </span>
-              </button>
-            ))}
+        <div className="border-b border-border bg-muted/20 px-4 py-4 sm:px-6">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-t-xl border border-border bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 dark:bg-muted dark:text-muted-foreground" aria-hidden="true">
+            <span>Category</span><span>Displayed count</span>
+          </div>
+          <div className="overflow-hidden rounded-b-xl border-x border-b border-border bg-card" role="tablist" aria-orientation="vertical" aria-label="Mail history categories">
+            {historyTabs.map((tab, index) => {
+              const verified = tab.id === 'github' ? githubVerified : historyVerified;
+              const cached = verified && (tab.id === 'github' ? githubLoading || !!githubError : historyLoading || !!historyError);
+              return (
+                <button
+                  key={tab.id}
+                  id={`mail-history-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-controls="mail-history-results"
+                  aria-selected={historyTab === tab.id}
+                  tabIndex={historyTab === tab.id ? 0 : -1}
+                  onClick={() => setHistoryTab(tab.id)}
+                  onKeyDown={(event) => {
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? historyTabs.length - 1 : event.key === 'ArrowDown' ? (index + 1) % historyTabs.length : event.key === 'ArrowUp' ? (index + historyTabs.length - 1) % historyTabs.length : null;
+                    if (next === null) return;
+                    event.preventDefault();
+                    setHistoryTab(historyTabs[next].id);
+                    document.getElementById(`mail-history-tab-${historyTabs[next].id}`)?.focus();
+                  }}
+                  className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-border px-4 py-2 text-left text-sm transition last:border-b-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet-600 ${historyTab === tab.id ? 'bg-violet-50 font-semibold text-violet-800 dark:bg-violet-950 dark:text-violet-200' : 'text-foreground hover:bg-muted'}`}
+                >
+                  <span>{tab.label}</span>
+                  <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
+                    {verified ? tab.count : 'Unavailable'}{cached ? ' · cached' : ''}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="space-y-4 p-6">
+        <div id="mail-history-results" role="tabpanel" aria-labelledby={`mail-history-tab-${historyTab}`} tabIndex={0} aria-busy={resultsLoading} className="space-y-4 p-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet-600 sm:p-6">
+          {historyStatus ? (
+            <div role={resultsError ? 'alert' : 'status'} className={`rounded-xl border px-4 py-3 text-sm ${resultsError ? 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100' : 'border-border bg-muted/30 text-muted-foreground'}`}>
+              {historyStatus}
+            </div>
+          ) : null}
           {historyTab === 'github' ? (
             <>
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
@@ -1165,16 +1210,6 @@ export default function MailsPage() {
                   These are the live workflow records behind GitHub PR and deployment emails. They are shown separately because GitHub—not Cred-X SMTP—sends those messages.
                 </p>
               </div>
-              {githubError ? (
-                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                  {githubError}
-                </div>
-              ) : null}
-              {!githubLoading && !githubError && githubRuns.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                  No GitHub workflow notifications are available.
-                </div>
-              ) : null}
               {githubRuns.map((run) => {
                 const failed = run.conclusion === 'failure';
                 const complete = run.status === 'completed';
@@ -1220,18 +1255,6 @@ export default function MailsPage() {
                 );
               })}
             </>
-          ) : null}
-
-          {historyTab !== 'github' && historyError ? (
-            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {historyError}
-            </div>
-          ) : null}
-
-          {historyTab !== 'github' && !historyLoading && visibleHistory.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              {emptyHistoryMessage}
-            </div>
           ) : null}
 
           {visibleHistory.map((item) => {
