@@ -18,10 +18,12 @@ const end = source.indexOf('  useEffect(() => {\n    const handleOpenStageOutput
 assert.ok(start > 0 && end > start);
 const loader = source.slice(start, end);
 const tileAst = ts.createSourceFile('tile.tsx', await readFile(path.join(frontend, 'components/shared/WorkflowStageTile.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const stageLabelSource = tileAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'getStageTileLabel').getText(tileAst).replace(/^export /, '');
 const stageMetadata = tileAst.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(d => d.name.getText(tileAst) === 'STAGE_METADATA')).getText(tileAst).replace(/^export /, '');
 const entry = `import React,{useState,useRef,useCallback} from 'react';
 import {createRoot} from 'react-dom/client';
 import {SavedOutputDialog} from ${JSON.stringify(path.join(frontend,'components/shared/SavedOutputDialog.tsx'))};
+${stageLabelSource}
 ${stageMetadata}
 const getStageOutputRoute=(portfolio,stage)=>'/console/'+portfolio+'/'+stage;
 const normalizeError=e=>e.message;
@@ -37,7 +39,7 @@ const fetchAllFullRuns=async()=>[{id:17,market:'india',updated_at:'2026-10-30T00
 function App(){const [outputDialog,setOutputDialog]=useState(null);const outputRequestRef=useRef(0);
 ${loader}
 const close=()=>{outputRequestRef.current++;setOutputDialog(null)};
-return <><button onClick={()=>showStageOutput('zerodha','threats')}>Open India</button><button onClick={()=>showStageOutput('indmoneyUs','threats')}>Open US</button><button onClick={()=>showStageOutput('zerodha','sync')}>Open Sync</button><button onClick={()=>showStageOutput('zerodha','rebalance',17)}>Open Historical</button><button onClick={()=>showStageOutput('indmoneyUs','rebalance',17)}>Wrong Market</button>
+return <>{['zerodha','indmoneyUs'].flatMap(portfolio=>Object.keys(STAGE_METADATA).map(stage=><button key={portfolio+stage} data-stage={portfolio+'-'+stage} onClick={()=>showStageOutput(portfolio,stage)}>Stage {portfolio} {stage}</button>))}<button onClick={()=>showStageOutput('zerodha','threats')}>Open India</button><button onClick={()=>showStageOutput('indmoneyUs','threats')}>Open US</button><button onClick={()=>showStageOutput('zerodha','sync')}>Open Sync</button><button onClick={()=>showStageOutput('zerodha','rebalance',17)}>Open Historical</button><button onClick={()=>showStageOutput('indmoneyUs','rebalance',17)}>Wrong Market</button>
 {outputDialog&&<SavedOutputDialog {...outputDialog} onClose={close} onRetry={()=>showStageOutput(outputDialog.portfolio,outputDialog.stage,outputDialog.requestedRunId)}><div>{outputDialog.loading?<p role='status'>Loading output…</p>:outputDialog.error?<p role='alert'>{outputDialog.error}</p>:<pre>{outputDialog.body}</pre>}</div></SavedOutputDialog>}</>};createRoot(document.getElementById('root')).render(<App/>);`;
 let browser, server;
 try {
@@ -95,5 +97,21 @@ try {
   const artifact=process.env.SAVED_OUTPUT_ARTIFACT_DIR||'/tmp/saved-output-evidence';await mkdir(artifact,{recursive:true});
   await page.evaluate(()=>window.fixture={mode:'success',delay:0});await page.getByText('Open India',{exact:true}).click();await dialog.getByText(/Saved threat report for zerodha/).waitFor();await page.screenshot({path:path.join(artifact,'saved-output-success.png')});
   const result={result:'PASS',checks:['loading','success','confirmed-empty','403-failure','retry','saved-job-failure','structured-report','timestamp-and-provenance','escaped-output','safe-new-tab-link','keyboard-close','focus-cycle-and-restore','repeated-open','late-response-does-not-reopen-or-replace','snapshot-empty','historical-run-retry-preserves-id','historical-run-market-filter'],externalRequests:external,errors};
+  await close.click();await dialog.waitFor({state:'detached'});
+  const canonical={sync:'Sync Portfolio',threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',actionables:'Actionables'};
+  for(const width of [1180,390]){
+    await page.setViewportSize({width,height:844});
+    for(const portfolio of ['zerodha','indmoneyUs']){
+    for(const [stage,label] of Object.entries(canonical)){
+      await page.locator('[data-stage="'+portfolio+'-'+stage+'"]').click();
+      await dialog.getByRole('heading',{name:(portfolio==='zerodha'?'Zerodha India':'INDmoney US')+' · '+label+' Output',exact:true}).waitFor();
+      await page.getByRole('status').waitFor({state:'detached'});
+      await page.screenshot({path:path.join(artifact,'canonical-output-'+width+'-'+portfolio+'-'+stage+'.png')});
+      await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
+      assert.equal(await page.locator('[data-stage="'+portfolio+'-'+stage+'"]').evaluate(el=>el===document.activeElement),true);
+    }
+    }
+  }
+  assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
   await writeFile(path.join(artifact,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 } finally {await browser?.close();if(server)await new Promise(r=>server.close(r));await rm(temporary,{recursive:true,force:true});}
