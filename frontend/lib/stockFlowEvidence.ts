@@ -78,7 +78,7 @@ export function sameFlowSequence(a: RunResponse | undefined, b: RunResponse | un
   return Boolean(a && b && a.auto_rebalance_portfolio && a.auto_rebalance_portfolio === b.auto_rebalance_portfolio && typeof a.auto_rebalance_sequence === "number" && a.auto_rebalance_sequence === b.auto_rebalance_sequence);
 }
 
-export function mergeStageEvidence<T extends { completedAt?: string | null }>(observed: T, history: T): T {
+export function mergeStageEvidence<T extends { completedAt?: string | null }>(observed: T, history: T, preferHistoryOnTie = false): T {
   const observedAt = Date.parse(observed.completedAt ?? ""), historyAt = Date.parse(history.completedAt ?? "");
-  return Number.isFinite(historyAt) && (!Number.isFinite(observedAt) || historyAt > observedAt) ? { ...history } : { ...observed };
+  return Number.isFinite(historyAt) && (!Number.isFinite(observedAt) || historyAt > observedAt || (preferHistoryOnTie && historyAt === observedAt)) ? { ...history } : { ...observed };
 }

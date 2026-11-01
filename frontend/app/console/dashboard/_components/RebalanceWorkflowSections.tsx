@@ -1906,6 +1906,7 @@ function summarizeRunForIdleTile(
       startedAt: run.created_at,
       completedAt: isActiveRun ? null : getLatestRunTimestamp(run),
       lastRunId: run.id,
+      evidence: { kind: "saved", references: [`Run #${run.id} · ${run.status} · ${getLatestRunTimestamp(run) ?? run.created_at}`] },
       recommendedStocks: recommendedStocks ?? null,
     },
     usdInrRate,
@@ -1967,6 +1968,12 @@ function summarizeAutoRebalanceHistoryStage(
       costInr: getAutoRebalanceSummaryNumber(summary, "cost_inr"),
       error: item.error_message ?? null,
       lastRunId: item.run_id ?? null,
+      jobId: item.job_id ?? null,
+      evidence: { kind: "saved", references: [
+        `${history?.portfolio} workflow #${history?.sequence} · ${stage} · ${item.status} · ${item.completed_at ?? item.started_at ?? "stage time unavailable"}`,
+        ...(item.run_id ? [`Run #${item.run_id}`] : []),
+        ...(item.job_id ? [`Job #${item.job_id}`] : []),
+      ] },
       completedLlms,
       passedLlms: getAutoRebalanceSummaryNumber(summary, "passed_llms") ?? Math.max(0, (item.completed_provider_count ?? 0) - (item.partial_provider_count ?? 0)),
       partialLlms: getAutoRebalanceSummaryNumber(summary, "partial_llms") ?? item.partial_provider_count ?? 0,
@@ -5502,6 +5509,7 @@ ${zerodhaExecutionMode === "direct_market"
           sync: {
             completedAt: overview?.latest?.captured_at ?? null,
             runStatus: overview?.latest ? syncStatus : null,
+            evidence: overview?.latest ? { kind: "saved", references: [`Portfolio snapshot · ${overview.latest.captured_at}`] } : undefined,
             ...historyInfo("sync"),
           },
           swing: mergeStageEvidence(
@@ -5517,6 +5525,7 @@ ${zerodhaExecutionMode === "direct_market"
               ? withInrCost(
                   {
                     ...summarizeThreat(threat),
+                    evidence: { kind: "saved", references: [`Threat analysis · ${threat.status} · ${threat.updated_at ?? threat.created_at}`, ...(threat.job_id ? [`Job #${threat.job_id}`] : [])] },
                     completedLlms:
                       (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
                     passedLlms:
@@ -5551,6 +5560,17 @@ ${zerodhaExecutionMode === "direct_market"
             historyInfo("technical"),
           ),
           actionables: mergeStageEvidence({
+            evidence: latestActionablesTimestamp || historyActionablesTimestamp ? { kind: "derived", references: [
+              ...(latestActionablesTimestamp
+                ? [latestTechnicalRun, latestRebalanceRun].filter(run => run && getLatestRunTimestamp(run) === latestActionablesTimestamp).map(run => `Timestamp source: run #${run!.id} · ${run!.status} · ${latestActionablesTimestamp}`)
+                : [latestHistoryActionables, latestHistoryTechnical, latestHistoryRebalance].filter(info => info.completedAt === historyActionablesTimestamp).flatMap(info => (info.evidence?.references ?? []).map(reference => `Timestamp source: ${reference}`))),
+              ...(latestActionableStocks.length
+                ? latestRebalanceRuns.map(run => `Stock-count source: run #${run.id} · ${run.status} · ${getLatestRunTimestamp(run) ?? run.created_at}`)
+                : ((latestHistoryRebalance.recommendedStocks ? latestHistoryRebalance : latestHistoryTechnical.recommendedStocks ? latestHistoryTechnical : {}).evidence?.references ?? []).map(reference => `Stock-count source: ${reference}`)),
+              ...(latestRebalanceRuns.length
+                ? latestRebalanceRuns.map(run => `Rebalance-input source: run #${run.id} · ${run.status}`)
+                : latestHistoryRebalance.completedAt ? (latestHistoryRebalance.evidence?.references ?? []).map(reference => `Rebalance-input source: ${reference}`) : []),
+            ] } : undefined,
             completedAt:
               latestActionablesTimestamp ?? historyActionablesTimestamp,
             runStatus:
@@ -5565,7 +5585,7 @@ ${zerodhaExecutionMode === "direct_market"
               latestHistoryRebalance.recommendedStocks ||
               latestHistoryTechnical.recommendedStocks ||
               null,
-          }, latestHistoryActionables),
+          }, latestHistoryActionables, true),
         };
         return acc;
       },
@@ -5616,7 +5636,7 @@ ${zerodhaExecutionMode === "direct_market"
           ...current,
           [portfolio]: {
             ...current[portfolio],
-            [stage]: { ...current[portfolio][stage], ...info },
+            [stage]: { ...current[portfolio][stage], evidence: undefined, ...info },
           },
         };
         const persisted = readPersistedWorkflow();
