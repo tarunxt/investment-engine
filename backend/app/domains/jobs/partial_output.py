@@ -53,9 +53,11 @@ def project_partial_output(job):
           and "invalid output contract" in (job.error_message or "").lower()):
         recovered = recover_missing_cells(job.prompt, job.response)
         if recovered is not None:
+            # Keep dated validation evidence separate from the read projection's findings.
             job.runtime_metadata_json = {**(job.runtime_metadata_json or {}),
                 "partial_recovery": {"original_status": "failed", "original_error": job.error_message,
                                      "policy": "missing-cell-read-projection-v1",
+                                     "original_deterministic_output": (job.runtime_metadata_json or {}).get("deterministic_output"),
                                      "original_response_hash": source_hash(job.response)},
                 "deterministic_output": {"status": "valid", "safe_to_render": True,
                     "usage_status": "partial", "coverage": asdict(recovered.coverage),
