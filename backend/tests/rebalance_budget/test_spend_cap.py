@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal as D
 from threading import Barrier
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -14,6 +15,17 @@ from app.domains.api_usage.metering import ApiAttempt, metered_call
 
 def bind(factory, user=1, market="india", sequence=1):
     with factory() as db:
+        # Test setup explicitly authorizes continuations. Production workers
+        # never perform this step or implicitly grant an absent binding.
+        from app.domains.rebalance_budget.models import RebalanceSpendBinding
+        existing = db.scalar(select(RebalanceSpendBinding).where(RebalanceSpendBinding.user_id == user,
+            RebalanceSpendBinding.portfolio == market, RebalanceSpendBinding.sequence == sequence))
+        if existing is None:
+            prior = db.scalar(select(RebalanceSpendScope).where(RebalanceSpendScope.user_id == user,
+                RebalanceSpendScope.portfolio == market).order_by(RebalanceSpendScope.id))
+            ledger.authorize_workflow(db, user_id=user, portfolio=market, sequence=sequence,
+                request_key=str(uuid4()), intent="continue_workflow" if prior else "new_workflow",
+                scope_id=prior.id if prior else None)
         scope = ledger.bind_scope(db, user_id=user, portfolio=market, sequence=sequence)
         db.commit()
         return scope.id
@@ -161,6 +173,7 @@ def test_ambiguous_mocked_call_blocks_redelivery_and_continuation(cap_db, monkey
     finally:
         runtime.reset_job(token)
     for next_job, retry in [(job(), 0), (job(), 1), (job(sequence=2, job_id=2), 0)]:
+        bind(f, sequence=next_job.auto_rebalance_sequence)
         token = runtime.configure_job(next_job, retry)
         try:
             with pytest.raises(ledger.SpendCapBlocked):
@@ -301,13 +314,116 @@ def test_concurrent_first_bind_does_not_mint_extra_allowances(cap_db):
     if engine.dialect.name != "postgresql":
         pytest.skip("requires explicitly configured disposable PostgreSQL")
     barrier = Barrier(4)
+    key = str(uuid4())
     def contender(sequence):
         barrier.wait()
-        return bind(f, sequence=sequence)
+        with f() as db:
+            binding = ledger.authorize_workflow(db, user_id=2, portfolio="indmoney_us", sequence=sequence,
+                request_key=key, intent="new_workflow")
+            scope_id = binding.scope_id
+            db.commit()
+            return scope_id
     with ThreadPoolExecutor(max_workers=4) as pool:
         ids = list(pool.map(contender, range(1, 5)))
     assert len(set(ids)) == 1
     assert state(f, ids[0]) == (D(0), D(0), "open")
+
+
+def test_new_explicit_workflow_gets_separate_scope_and_retry_reuses_it(cap_db):
+    f, _ = cap_db
+    first = bind(f)
+    reserve(f, first, amount="20")
+    key = str(uuid4())
+    with f() as db:
+        new = ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=3,
+            request_key=key, intent="new_workflow")
+        second = new.scope_id
+        db.commit()
+    assert first != second
+    reserve(f, second, amount="20", job=5)
+    with f() as db:
+        replay = ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=99,
+            request_key=key, intent="new_workflow")
+        assert replay.sequence == 3 and replay.scope_id == second
+        db.commit()
+    assert state(f, second)[1] == D("20")
+
+
+def test_worker_missing_binding_cannot_mint_new_grant(cap_db):
+    f, _ = cap_db
+    with pytest.raises(ledger.SpendCapBlocked, match="no spending authorization"):
+        runtime.configure_job(job(sequence=99), 0)
+    with f() as db:
+        assert len(db.scalars(select(RebalanceSpendScope).where(RebalanceSpendScope.user_id == 1,
+            RebalanceSpendScope.portfolio == "india")).all()) == 1
+
+
+@pytest.mark.parametrize("intent,key,scope", [(None, None, None), ("new_workflow", "not-uuid", None),
+    ("continue_workflow", str(uuid4()), None), ("new_workflow", str(uuid4()), 1)])
+def test_invalid_authorization_never_grants(cap_db, intent, key, scope):
+    f, _ = cap_db
+    with f() as db, pytest.raises(ledger.SpendCapBlocked):
+        ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=42,
+            request_key=key, intent=intent, scope_id=scope)
+
+
+def test_continuation_cannot_use_foreign_owner_market_or_reset_sequence(cap_db):
+    f, _ = cap_db
+    first = bind(f)
+    for owner, market in [(2, "india"), (1, "indmoney_us")]:
+        with f() as db, pytest.raises(ledger.SpendCapBlocked, match="owner and market"):
+            ledger.authorize_workflow(db, user_id=owner, portfolio=market, sequence=2,
+                request_key=str(uuid4()), intent="continue_workflow", scope_id=first)
+    with f() as db, pytest.raises(ledger.SpendCapBlocked, match="cannot reset"):
+        ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=1,
+            request_key=str(uuid4()), intent="new_workflow")
+
+
+def test_legacy_run_request_denied_before_label_or_job_dispatch(monkeypatch):
+    import asyncio
+    from fastapi import HTTPException
+    from app.domains.runs import router
+    from app.domains.runs.schemas import AutoRebalanceRunReservationRequest
+    monkeypatch.setattr(router, "_get_redis", lambda: pytest.fail("no reservation without explicit intent"))
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(router.reserve_auto_rebalance_label(
+            AutoRebalanceRunReservationRequest(portfolio="india"), db=None, current_user=SimpleNamespace(id=1)))
+    assert error.value.status_code == 422
+    assert "New workflow" in str(error.value.detail)
+
+
+def test_existing_label_route_authorizes_new_and_replays_same_workflow(cap_db, monkeypatch):
+    import asyncio
+    from app.domains.runs import router
+    from app.domains.runs.schemas import AutoRebalanceRunReservationRequest
+    f, _ = cap_db
+    sequence = [50]
+    async def allocate(*args):
+        sequence[0] += 1
+        return sequence[0]
+    async def close():
+        pass
+    monkeypatch.setattr(router, "_get_redis", lambda: SimpleNamespace(aclose=close))
+    monkeypatch.setattr(router, "_reserve_auto_rebalance_sequence", allocate)
+    class Bridge:
+        def __init__(self, db): self.db = db
+        async def run_sync(self, fn): return fn(self.db)
+        async def execute(self, query): return self.db.execute(query)
+        def add(self, row): self.db.add(row)
+        async def commit(self): self.db.commit()
+    body = AutoRebalanceRunReservationRequest(portfolio="india", spend_intent="new_workflow",
+        spend_request_id=str(uuid4()))
+    with f() as db:
+        first = asyncio.run(router.reserve_auto_rebalance_label(body, Bridge(db), SimpleNamespace(id=1)))
+    with f() as db:
+        replay = asyncio.run(router.reserve_auto_rebalance_label(body, Bridge(db), SimpleNamespace(id=1)))
+    assert first.sequence == replay.sequence == 51
+    assert first.spend_scope_id == replay.spend_scope_id
+    continuation = AutoRebalanceRunReservationRequest(portfolio="india", spend_intent="continue_workflow",
+        spend_request_id=str(uuid4()), spend_scope_id=first.spend_scope_id)
+    with f() as db:
+        next_run = asyncio.run(router.reserve_auto_rebalance_label(continuation, Bridge(db), SimpleNamespace(id=1)))
+    assert next_run.sequence == 53 and next_run.spend_scope_id == first.spend_scope_id
 
 
 def test_concurrent_duplicate_settlement_counts_charge_once(cap_db):

@@ -16,13 +16,14 @@ def utcnow():
 class RebalanceSpendScope(Base):
     __tablename__ = "rebalance_spend_scopes"
     __table_args__ = (
-        UniqueConstraint("user_id", "portfolio", name="uq_rebalance_spend_owner_market"),
+        UniqueConstraint("user_id", "authorization_key", name="uq_rebalance_spend_grant"),
         CheckConstraint("portfolio IN ('india', 'indmoney_us')", name="ck_rebalance_spend_market"),
         CheckConstraint("cap_inr = 20 AND settled_inr >= 0 AND reserved_inr >= 0", name="ck_rebalance_spend_amounts"),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     portfolio: Mapped[str] = mapped_column(String(32), nullable=False)
+    authorization_key: Mapped[str] = mapped_column(String(36), nullable=False)
     cap_inr: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False, default=Decimal("20"))
     settled_inr: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False, default=Decimal(0))
     reserved_inr: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False, default=Decimal(0))
@@ -35,6 +36,7 @@ class RebalanceSpendBinding(Base):
     __tablename__ = "rebalance_spend_bindings"
     __table_args__ = (
         UniqueConstraint("user_id", "portfolio", "sequence", name="uq_rebalance_spend_workflow"),
+        UniqueConstraint("user_id", "request_key", name="uq_rebalance_spend_request"),
         CheckConstraint("sequence > 0", name="ck_rebalance_spend_sequence"),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -42,6 +44,8 @@ class RebalanceSpendBinding(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     portfolio: Mapped[str] = mapped_column(String(32), nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_key: Mapped[str] = mapped_column(String(36), nullable=False)
+    intent: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 class RebalanceSpendAttempt(Base):

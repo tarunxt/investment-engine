@@ -11,6 +11,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.domains.rebalance_budget import ledger, runtime
 from app.domains.rebalance_budget.models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendScope
+from app.domains.runs.models import AutoRebalanceWorkflow
 
 
 def guarded_url(raw):
@@ -38,7 +39,7 @@ def cap_db(monkeypatch):
     jobs = Table("jobs", metadata, Column("id", Integer, primary_key=True),
         Column("user_id", Integer, ForeignKey("users.id")),
         Column("auto_rebalance_portfolio", String(32)), Column("auto_rebalance_sequence", Integer))
-    for model in (RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt):
+    for model in (RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, AutoRebalanceWorkflow):
         model.__table__.to_metadata(metadata)
     metadata.create_all(engine)
     with engine.begin() as connection:
@@ -48,10 +49,17 @@ def cap_db(monkeypatch):
             {"id": 2, "user_id": 1, "auto_rebalance_portfolio": "india", "auto_rebalance_sequence": 2},
             {"id": 3, "user_id": 1, "auto_rebalance_portfolio": "indmoney_us", "auto_rebalance_sequence": 1},
             {"id": 4, "user_id": 2, "auto_rebalance_portfolio": "india", "auto_rebalance_sequence": 1},
+            {"id": 5, "user_id": 1, "auto_rebalance_portfolio": "india", "auto_rebalance_sequence": 3},
         ])
     factory = sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(ledger, "job_table", lambda: jobs)
+    monkeypatch.setattr(ledger, "user_table", lambda: users)
     monkeypatch.setattr(runtime, "sessions", factory)
+    with factory() as db:
+        for owner, portfolio in [(1, "india"), (1, "indmoney_us"), (2, "india")]:
+            ledger.authorize_workflow(db, user_id=owner, portfolio=portfolio, sequence=1,
+                request_key=str(uuid.uuid4()), intent="new_workflow")
+        db.commit()
     try:
         yield factory, engine
     finally:

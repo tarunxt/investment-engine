@@ -1,8 +1,8 @@
 """Atomic admission; unresolved/ambiguous calls never release their allowance."""
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
+from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 
 from .models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendScope, utcnow
 
@@ -19,6 +19,11 @@ def job_table():
     return Job.__table__
 
 
+def user_table():
+    from app.domains.auth.models import User
+    return User.__table__
+
+
 def money(value, *, positive=False):
     try:
         if isinstance(value, (bool, float)):
@@ -31,40 +36,77 @@ def money(value, *, positive=False):
         raise SpendCapBlocked("Invalid exact INR charge or request upper bound") from None
 
 
-def bind_scope(db, *, user_id, portfolio, sequence):
-    """One authorized allowance per owner/market; a new sequence is NOT a grant.
-
-    No reset, renewal or billing-configuration API exists here. Exhaustion stays
-    blocked until a separately authorized future allowance lifecycle is added.
-    """
+def validate_identity(user_id, portfolio, sequence):
     if (isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0
             or portfolio not in {"india", "indmoney_us"}
             or isinstance(sequence, bool) or not isinstance(sequence, int) or sequence <= 0):
         raise SpendCapBlocked("Automated rebalance requires an owned market and workflow sequence")
-    scope = db.scalar(select(RebalanceSpendScope).where(
-        RebalanceSpendScope.user_id == user_id, RebalanceSpendScope.portfolio == portfolio,
-    ).with_for_update())
-    if scope is None:
-        try:
-            with db.begin_nested():
-                db.add(RebalanceSpendScope(user_id=user_id, portfolio=portfolio,
-                    cap_inr=CAP_INR, settled_inr=Decimal(0), reserved_inr=Decimal(0)))
-                db.flush()
-        except IntegrityError:
-            pass  # unique owner/market arbitrates concurrent first workflows
-        scope = db.scalar(select(RebalanceSpendScope).where(
-            RebalanceSpendScope.user_id == user_id, RebalanceSpendScope.portfolio == portfolio,
-        ).with_for_update())
-    if scope is None or scope.cap_inr != CAP_INR:
-        raise SpendCapBlocked("Verified ₹20 rebalance allowance unavailable")
+
+
+def authorize_workflow(db, *, user_id, portfolio, sequence, request_key, intent, scope_id=None):
+    """Explicit new-operation grant or continuation; idempotent across Run retry.
+
+    Called only by the authenticated existing label-reservation route. A worker
+    can consume a binding but cannot mint a grant. Caller commits grant, binding
+    and workflow label together. No sequence, retry or browser reload is consent.
+    """
+    validate_identity(user_id, portfolio, sequence)
+    try:
+        key = str(UUID(str(request_key)))
+    except (ValueError, TypeError, AttributeError):
+        raise SpendCapBlocked("A stable authorization request UUID is required") from None
+    if intent not in {"new_workflow", "continue_workflow"}:
+        raise SpendCapBlocked("Choose an explicitly authorized new workflow or an existing continuation")
+    if intent == "new_workflow" and scope_id is not None:
+        raise SpendCapBlocked("A new workflow cannot replace an existing scope")
+    if intent == "continue_workflow" and (isinstance(scope_id, bool) or not isinstance(scope_id, int) or scope_id <= 0):
+        raise SpendCapBlocked("Continuation requires its existing spending scope")
+    users = user_table()
+    if db.scalar(select(users.c.id).where(users.c.id == user_id).with_for_update()) is None:
+        raise SpendCapBlocked("Owned spending authorization unavailable")
+    replay = db.scalar(select(RebalanceSpendBinding).where(
+        RebalanceSpendBinding.user_id == user_id, RebalanceSpendBinding.request_key == key,
+    ))
+    if replay is not None:
+        if (replay.portfolio != portfolio or replay.intent != intent
+                or (intent == "continue_workflow" and replay.scope_id != scope_id)):
+            raise SpendCapBlocked("Authorization request was already used for different workflow intent")
+        return replay
+    existing = db.scalar(select(RebalanceSpendBinding.id).where(
+        RebalanceSpendBinding.user_id == user_id, RebalanceSpendBinding.portfolio == portfolio,
+        RebalanceSpendBinding.sequence == sequence,
+    ))
+    if existing is not None:
+        raise SpendCapBlocked("Sequence already has a spending authorization; cannot reset it")
+    if intent == "new_workflow":
+        scope = RebalanceSpendScope(user_id=user_id, portfolio=portfolio, authorization_key=key,
+            cap_inr=CAP_INR, settled_inr=Decimal(0), reserved_inr=Decimal(0))
+        db.add(scope)
+        db.flush()
+    else:
+        scope = db.scalar(select(RebalanceSpendScope).where(RebalanceSpendScope.id == scope_id,
+            RebalanceSpendScope.user_id == user_id, RebalanceSpendScope.portfolio == portfolio).with_for_update())
+        if scope is None or scope.cap_inr != CAP_INR:
+            raise SpendCapBlocked("Continuation scope does not belong to this owner and market")
+    binding = RebalanceSpendBinding(user_id=user_id, portfolio=portfolio, sequence=sequence,
+        scope_id=scope.id, request_key=key, intent=intent)
+    db.add(binding)
+    db.flush()
+    return binding
+
+
+def bind_scope(db, *, user_id, portfolio, sequence):
+    """Workers resolve only an explicitly authorized binding; never create one."""
+    validate_identity(user_id, portfolio, sequence)
     binding = db.scalar(select(RebalanceSpendBinding).where(
         RebalanceSpendBinding.user_id == user_id, RebalanceSpendBinding.portfolio == portfolio,
         RebalanceSpendBinding.sequence == sequence,
     ))
     if binding is None:
-        db.add(RebalanceSpendBinding(user_id=user_id, portfolio=portfolio, sequence=sequence, scope_id=scope.id))
-        db.flush()
-    elif binding.scope_id != scope.id:
+        raise SpendCapBlocked("Workflow has no spending authorization. Explicitly choose New workflow or Continue; no paid call was made")
+    scope = db.scalar(select(RebalanceSpendScope).where(RebalanceSpendScope.id == binding.scope_id,
+        RebalanceSpendScope.user_id == user_id, RebalanceSpendScope.portfolio == portfolio).with_for_update())
+    if scope is None or scope.cap_inr != CAP_INR:
         raise SpendCapBlocked("Workflow spending scope conflicts with its persisted allowance")
     return scope
 

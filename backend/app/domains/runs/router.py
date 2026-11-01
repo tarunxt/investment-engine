@@ -597,11 +597,33 @@ async def reserve_auto_rebalance_label(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.domains.rebalance_budget.ledger import authorize_workflow, SpendCapBlocked
+    # The old request {portfolio} cannot silently authorize fresh spending.
+    if body.spend_intent is None or body.spend_request_id is None:
+        raise HTTPException(422, "Choose New workflow (new ₹20 allowance) or Continue workflow (existing allowance), with a stable request UUID")
     redis = _get_redis()
     try:
         sequence = await _reserve_auto_rebalance_sequence(db, redis, body.portfolio)
     finally:
         await redis.aclose()
+    try:
+        binding = await db.run_sync(lambda session: authorize_workflow(session,
+            user_id=current_user.id, portfolio=body.portfolio, sequence=sequence,
+            request_key=body.spend_request_id, intent=body.spend_intent, scope_id=body.spend_scope_id))
+    except SpendCapBlocked as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if binding.sequence != sequence:
+        # A retried authorization reuses the first workflow/allowance. Redis
+        # sequence gaps are harmless; a duplicate allowance is not.
+        existing = (await db.execute(select(AutoRebalanceWorkflow).where(
+            AutoRebalanceWorkflow.user_id == current_user.id,
+            AutoRebalanceWorkflow.portfolio == body.portfolio,
+            AutoRebalanceWorkflow.sequence == binding.sequence,
+        ))).scalar_one_or_none()
+        if existing is None:
+            raise HTTPException(409, "Spending authorization exists without its workflow; reconcile before retrying")
+        return AutoRebalanceRunReservationResponse(portfolio=body.portfolio, sequence=existing.sequence,
+            label=existing.label, spend_scope_id=binding.scope_id)
     workflow = AutoRebalanceWorkflow(
         user_id=current_user.id,
         portfolio=body.portfolio,
@@ -616,6 +638,7 @@ async def reserve_auto_rebalance_label(
         portfolio=body.portfolio,
         sequence=sequence,
         label=workflow.label,
+        spend_scope_id=binding.scope_id,
     )
 
 
