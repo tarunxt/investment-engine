@@ -1,4 +1,6 @@
 "use client";
+import { IndMoneySnapshotDialog } from "./IndMoneySnapshotDialog";
+import { readIndmoneySnapshotSource } from "@/lib/indmoneySnapshotSource";
 
 import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunControl";
 
@@ -3464,167 +3466,6 @@ function ScopedZerodhaBasketPreviewDialog({
   );
 }
 
-function IndMoneySnapshotDialog({
-  open,
-  saving,
-  error,
-  historicalSyncAt,
-  onClose,
-  onContinue,
-}: {
-  open: boolean;
-  saving: boolean;
-  error: string | null;
-  historicalSyncAt: string | null | undefined;
-  onClose: () => void;
-  onContinue: (
-    mode: IndMoneySyncMode,
-    payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
-  ) => void;
-}) {
-  const [mode, setMode] = useState<IndMoneySyncMode>("paste");
-  const [rawText, setRawText] = useState("");
-  const pasteInputRef = useRef<HTMLTextAreaElement | null>(null);
-
-  const handleContinue = useCallback(() => {
-    onContinue(
-      mode,
-      mode === "paste"
-        ? {
-            raw_text: rawText.trim(),
-            captured_at: new Date().toISOString(),
-          }
-        : undefined,
-    );
-  }, [mode, onContinue, rawText]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    window.requestAnimationFrame(() => {
-      const pasteInput = pasteInputRef.current;
-      pasteInput?.focus();
-      pasteInput?.select();
-    });
-  }, [open]);
-
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-950">
-              Sync INDmoney US Portfolio
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Continue with the last saved snapshot or paste the latest INDmoney
-              screen before the rebalance workflow runs.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <label
-            className={cn(
-              "rounded-2xl border p-4 text-sm font-semibold",
-              mode === "paste"
-                ? "border-blue-200 bg-blue-50 text-blue-900"
-                : "border-slate-200 text-slate-800",
-            )}
-          >
-            <input
-              className="mr-2"
-              type="radio"
-              checked={mode === "paste"}
-              onChange={() => setMode("paste")}
-            />
-            Paste latest INDmoney snapshot
-          </label>
-          <label
-            className={cn(
-              "rounded-2xl border p-4 text-sm font-semibold",
-              mode === "reuse"
-                ? "border-blue-200 bg-blue-50 text-blue-900"
-                : "border-slate-200 text-slate-800",
-            )}
-          >
-            <span className="flex items-start gap-2">
-              <input
-                className="mt-0.5"
-                type="radio"
-                checked={mode === "reuse"}
-                onChange={() => setMode("reuse")}
-              />
-              <span>
-                Continue with latest snapshot
-                <span className="mt-1 block text-xs font-medium text-slate-500">
-                  Historical workflow Sync: {formatTimestamp(historicalSyncAt)}
-                  <span className="mt-1 block">
-                    This is past workflow evidence. The latest saved portfolio is resolved when you continue; this timestamp does not identify that snapshot.
-                  </span>
-                </span>
-              </span>
-            </span>
-          </label>
-        </div>
-
-        {mode === "paste" ? (
-          <textarea
-            ref={pasteInputRef}
-            value={rawText}
-            onChange={(event) => setRawText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || !rawText.trim() || saving) {
-                return;
-              }
-
-              event.preventDefault();
-              handleContinue();
-            }}
-            placeholder="Paste the copied INDmoney portfolio screen here..."
-            className="mt-4 min-h-64 w-full resize-y rounded-2xl border border-blue-200 bg-white p-3 text-sm outline-none focus:border-blue-400"
-          />
-        ) : null}
-
-        {error ? (
-          <div className="mt-4 flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <span>{error}</span>
-          </div>
-        ) : null}
-
-        <div className="mt-5 flex justify-end gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            disabled={saving}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            disabled={saving || (mode === "paste" && !rawText.trim())}
-            onClick={handleContinue}
-            className="rounded-full bg-slate-950 px-7 font-extrabold uppercase tracking-[0.18em] text-white hover:bg-slate-800"
-          >
-            {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-            Continue Rebalance
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function InputSelectionDialog({
   open,
@@ -4525,6 +4366,8 @@ function StageLlmSelectorDialog({
     </ModelPickerDialogFrame>
   );
 }
+
+const readLatestIndmoneySnapshot = () => apiService.indmoneyUsPortfolioOverview();
 
 const NO_DASHBOARD_REFRESH = async () => {};
 
@@ -6860,6 +6703,7 @@ ${zerodhaExecutionMode === "direct_market"
     async (
       portfolio: WorkflowPortfolio,
       indmoneyPayload?: IndMoneyUsPortfolioSnapshotCreateRequest,
+      savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
     ) => {
       // Kill may clear the visible running portfolio before its asynchronous
       // work has unwound. Do not let a new run steal that work's identity.
@@ -7029,6 +6873,9 @@ ${zerodhaExecutionMode === "direct_market"
       let workflowSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null = null;
 
       try {
+        if (portfolio === "indmoneyUs" && savedSnapshot && !indmoneyPayload) {
+          workflowSnapshot = await readIndmoneySnapshotSource(readLatestIndmoneySnapshot, savedSnapshot);
+        }
         if (stopIfRequested()) {
           zerodhaPopup?.close();
           return;
@@ -7064,12 +6911,11 @@ ${zerodhaExecutionMode === "direct_market"
               runStatus: snapshot.parse_status,
             });
           } else {
-            const overview = await retryWorkflowRead(
-              () => apiService.indmoneyUsPortfolioOverview(),
+            const overview = { latest: workflowSnapshot ?? await retryWorkflowRead(
+              () => readIndmoneySnapshotSource(readLatestIndmoneySnapshot),
               "IndMoney portfolio overview",
               () => cancelRequestedRef.current,
-            );
-            assertIndmoneyHoldingsSnapshot(overview.latest);
+            ) };
             workflowSnapshot = overview.latest;
             await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
@@ -7171,7 +7017,10 @@ ${zerodhaExecutionMode === "direct_market"
             const queuedThreat =
               portfolio === "zerodha"
                 ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata })
-                : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata });
+                : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata, ...(workflowSnapshot && "id" in workflowSnapshot ? { expected_snapshot_id: workflowSnapshot.id } : {}) });
+            if (portfolio === "indmoneyUs" && workflowSnapshot && "id" in workflowSnapshot && (!("snapshot_id" in queuedThreat) || queuedThreat.snapshot_id !== workflowSnapshot.id)) {
+              throw new Error("Threats scan source does not match the reviewed portfolio snapshot.");
+            }
             activeExecutionRefsRef.current = [
               ...activeExecutionRefsRef.current.filter(
                 (entry) => !(entry.kind === "job" && entry.id === queuedThreat.job_id),
@@ -7322,7 +7171,8 @@ ${zerodhaExecutionMode === "direct_market"
             () => portfolio === "zerodha" ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
             "threat report", () => cancelRequestedRef.current,
           );
-          if (!threatsRes.analysis?.captured_at || Date.parse(threatsRes.analysis.captured_at) !== Date.parse(workflowSnapshot.captured_at)) {
+          if (!threatsRes.analysis?.captured_at || Date.parse(threatsRes.analysis.captured_at) !== Date.parse(workflowSnapshot.captured_at) ||
+              (portfolio === "indmoneyUs" && "id" in workflowSnapshot && (!("snapshot_id" in threatsRes.analysis) || threatsRes.analysis.snapshot_id !== workflowSnapshot.id))) {
             throw new Error("Threat report and holdings use different snapshots. Run Threats against this workflow snapshot before Rebalance.");
           }
           const previousClose = getPreviousMarketClose(market);
@@ -7672,6 +7522,7 @@ ${zerodhaExecutionMode === "direct_market"
     async (
       portfolio: WorkflowPortfolio,
       payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
+      savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
     ) => {
       const zerodhaPopup =
         portfolio === "zerodha"
@@ -7702,8 +7553,7 @@ ${zerodhaExecutionMode === "direct_market"
             runStatus: snapshot.parse_status,
           });
         } else {
-          const overview = await apiService.indmoneyUsPortfolioOverview();
-          assertIndmoneyHoldingsSnapshot(overview.latest);
+          const overview = { latest: await readIndmoneySnapshotSource(readLatestIndmoneySnapshot, savedSnapshot) };
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
             runStatus: overview.latest?.parse_status ?? "last snapshot",
@@ -7764,6 +7614,7 @@ ${zerodhaExecutionMode === "direct_market"
     (
       mode: IndMoneySyncMode,
       payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
+      savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
     ) => {
       setDialogError(null);
       setDialogOpen(false);
@@ -7772,10 +7623,11 @@ ${zerodhaExecutionMode === "direct_market"
         void syncPortfolioNow(
           "indmoneyUs",
           mode === "paste" ? payload : undefined,
+          mode === "reuse" ? savedSnapshot : undefined,
         );
         return;
       }
-      void runWorkflow("indmoneyUs", mode === "paste" ? payload : undefined);
+      void runWorkflow("indmoneyUs", mode === "paste" ? payload : undefined, mode === "reuse" ? savedSnapshot : undefined);
     },
     [indMoneySyncOnly, runWorkflow, syncPortfolioNow],
   );
@@ -8409,7 +8261,7 @@ ${zerodhaExecutionMode === "direct_market"
           open={dialogOpen}
           saving={runningPortfolio === "indmoneyUs"}
           error={dialogError}
-          historicalSyncAt={states.indmoneyUs.sync.completedAt}
+          loadSnapshot={readLatestIndmoneySnapshot}
           onClose={() => {
             if (runningPortfolio === "indmoneyUs") return;
             setDialogOpen(false);

@@ -241,7 +241,7 @@ export interface IApiService {
     indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse>;
     indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse>;
     indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis>;
-    indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse>;
+    indmoneyUsRunThreats(data?: PortfolioEventRunRequest & { expected_snapshot_id?: number }): Promise<IndMoneyUsThreatRunResponse>;
 
     // Polymarket endpoints
     polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState>;

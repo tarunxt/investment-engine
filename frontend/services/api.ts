@@ -1452,7 +1452,7 @@ class apiServiceClass implements IApiService {
   }
 
   indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
-    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio());
+    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio(), { cache: "no-store" });
   }
 
   indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail> {
@@ -1559,7 +1559,7 @@ class apiServiceClass implements IApiService {
   }
 
   async indmoneyUsRunThreats(
-    data?: PortfolioEventRunRequest,
+    data?: PortfolioEventRunRequest & { expected_snapshot_id?: number },
   ): Promise<IndMoneyUsThreatRunResponse> {
     try {
       return await this.post<IndMoneyUsThreatRunResponse>(
@@ -1581,6 +1581,9 @@ class apiServiceClass implements IApiService {
             throw new Error(
               "Queued INDmoney threats job is missing snapshot metadata.",
             );
+          }
+          if (data?.expected_snapshot_id != null && analysis.snapshot_id !== data.expected_snapshot_id) {
+            throw new Error("Queued INDmoney threats job uses a different snapshot than the reviewed source.");
           }
           return {
             job_id: analysis.job_id,
