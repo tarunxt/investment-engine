@@ -125,3 +125,11 @@ CI correction preceding this follow-up: f43b0434 passed both API Attempt Migrati
 was the verifier's unregistered additive outbox schema, not failed DDL. The exact
 registered addition contract now checks preservation of a seeded legacy outbox
 row and rejects altered old facts. This new cancellation head needs fresh CI.
+
+Terminal-preservation follow-up: the advisory-capture failure fixture formerly
+called update_status on an already COMPLETED synthetic source solely to trigger
+capture. It now establishes PROCESSING before the completion call, retaining all
+capture-failure assertions against the real transition. A separate real repository
+regression now asserts that even a stale COMPLETED-to-COMPLETED write cannot
+replace historical response, usage or metadata. This aligns the fixture with the
+new terminal-preservation contract instead of reopening terminal writes.
