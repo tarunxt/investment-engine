@@ -773,7 +773,10 @@ async def update_auto_rebalance_stage(
             raise HTTPException(422, detail="Final capture belongs only to the actionables stage")
         from .frozen_final import validate_frozen_final
         await validate_frozen_final(db, body.summary["frozen_final"], user_id=current_user.id,
-                                   portfolio=portfolio, sequence=sequence)
+                                   portfolio=portfolio, sequence=sequence,
+                                   allow_legacy=bool(was_terminal and stage_record
+                                       and isinstance((stage_record.summary_json or {}).get("frozen_final"), dict)
+                                       and stage_record.summary_json["frozen_final"].get("schema") == "workflow-final-v1"))
     if stage_record is None:
         # Defaults run at flush; linking the relationship also keeps the
         # loaded stages collection current for first-write serialization.

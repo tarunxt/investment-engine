@@ -7328,7 +7328,8 @@ ${zerodhaExecutionMode === "direct_market"
             buildTechnicalScanMap([generatedTechnicalRun]), scoreMatrixFormulaConfig)
             .map(row => ({ ...row, coveredAt: actionablesCompletedAt, runId: finalRebalanceInputs[0].id }));
           const frozenFinal = {
-            schema: "workflow-final-v1", formula_version: "score-matrix-v1",
+            schema: "workflow-final-v2", formula_version: "score-matrix-v1",
+            scorePolicy: "score-matrix-raw-effective-v2",
             captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
             rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
             response_hashes: await auditResponseHashes([...finalRebalanceInputs, generatedTechnicalRun]),
@@ -7336,7 +7337,10 @@ ${zerodhaExecutionMode === "direct_market"
             excluded_non_buy_listings: finalConsensus.filter(stock => !finalRows.some(row => row.stock.key === stock.key))
               .map(stock => ({ exchange: stock.exchange, symbol: stock.symbol, reason: "All valid models returned zero-position non-buy; no executable allocation" })),
             rows: finalRows.map(row => ({ exchange: row.stock.exchange, symbol: row.stock.symbol,
-              action: row.formulaAction, score: row.formulaScore, estimate: row.formulaEstimate,
+              action: row.formulaAction, score: row.formulaScore,
+              rawScore: row.formulaScore,
+              effectiveScore: row.formulaScore === null ? null : Math.max(-3, Math.min(3, row.formulaScore)),
+              scorePolicy: "score-matrix-raw-effective-v2", estimate: row.formulaEstimate,
               formula_inputs: row.detail, valid_suggestions: row.stock.totalSuggestions })),
           };
           markRunning(portfolio, "actionables", { rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length });

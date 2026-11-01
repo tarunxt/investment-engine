@@ -61,7 +61,7 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ analysisOnly = false, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
+function harness({ analysisOnly = false, formulaScore = 0, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
@@ -138,7 +138,7 @@ function harness({ analysisOnly = false, intercept, read, email, reserve, quoteR
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
     buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST" }]; },
     buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
-    buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore: 0, formulaEstimate: {}, detail: {} })),
+    buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
     buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1,
     getStageTileLabel: (stage) => stage, normalizeError: (error) => error.message,
@@ -555,3 +555,17 @@ test("stale India quotes stop the actual workflow before Technical job creation 
   assert.equal(h.emails.length,0);
   assert.equal(h.durable.get("india:42:technical").status,"failed");
 });
+for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
+  test(`actual workflow freezes explicit v2 raw/effective evidence for ${rawScore}`, async () => {
+    const h = harness({ formulaScore: rawScore });
+    await h.runWorkflow("zerodha");
+    const frozen = h.durable.get("india:42:actionables").summary.frozen_final;
+    assert.equal(frozen.schema, "workflow-final-v2");
+    assert.equal(frozen.formula_version, "score-matrix-v1");
+    assert.equal(frozen.scorePolicy, "score-matrix-raw-effective-v2");
+    assert.equal(frozen.rows[0].score, rawScore);
+    assert.equal(frozen.rows[0].rawScore, rawScore);
+    assert.equal(frozen.rows[0].effectiveScore, rawScore === null ? null : Math.max(-3, Math.min(3, rawScore)));
+    assert.equal(frozen.rows[0].scorePolicy, frozen.scorePolicy);
+  });
+}

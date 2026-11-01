@@ -71,6 +71,10 @@ jobs:
           backend/tests/test_rebalance_side_effect_policy.py
           backend/tests/test_rebalance_side_effect_policy_migration.py
           backend/tests/test_indmoney_snapshot_source_precondition.py
+          backend/tests/test_final_recompute.py
+          backend/tests/test_final_score_math.py
+          backend/tests/test_frozen_final_v2_routes.py
+          backend/tests/test_frozen_final_validation_gap.py
           backend/tests/test_run_completion_email.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_indmoney_us_parser.py
