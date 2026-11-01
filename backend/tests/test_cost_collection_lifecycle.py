@@ -232,8 +232,8 @@ def test_crashed_process_leaves_nonexpiring_ownership_for_operator(monkeypatch):
                 owner.join(3)
 
 
-def test_redis_lock_loss_can_overlap_an_already_inflight_request(shared):
-    """Known acceptance gap: Redis ownership cannot fence a remote AWS request."""
+def test_redis_lock_alone_can_overlap_an_already_inflight_request(shared):
+    """Redis-only regression evidence; production now also requires durable admission."""
     from threading import Event
     from concurrent.futures import ThreadPoolExecutor
     entered, finish = Event(), Event()

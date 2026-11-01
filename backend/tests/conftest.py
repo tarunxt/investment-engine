@@ -22,3 +22,19 @@ def isolate_api_usage_telemetry(monkeypatch):
     from app.domains.api_usage import metering
 
     monkeypatch.setattr(metering, "_persist_attempt", lambda values: None)
+
+
+@pytest.fixture(autouse=True)
+def isolate_cost_collection_intents(request, monkeypatch, tmp_path):
+    """Cost tests use an isolated synthetic ledger, never a runtime database."""
+    if not request.node.path.name.startswith("test_cost"):
+        return
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.domains.cost_drivers import admission
+    from app.domains.cost_drivers.models import CostCollectionIntent
+    engine = create_engine(f"sqlite:///{tmp_path / 'collection-intents.db'}", connect_args={"timeout": 3})
+    CostCollectionIntent.__table__.create(engine)
+    monkeypatch.setattr(admission, "SyncSessionLocal", sessionmaker(bind=engine))
+    yield
+    engine.dispose()

@@ -141,7 +141,9 @@ def test_get_dashboard_preserves_stale_good_data_when_live_refresh_fails(monkeyp
     states = iter([live_good, live_failed])
     monkeypatch.setattr(service, "_live_dashboard", lambda month=None: next(states))
 
-    seeded = service.get_dashboard(force_refresh=True, month="2026-07")
+    cache.store_dashboard("2026-07:live", live_good, 60)
+    seeded = service.get_dashboard(month="2026-07")
+    next(states)  # seeded the good snapshot directly; refresh now fails
     fallback = service.get_dashboard(force_refresh=True, month="2026-07")
 
     assert seeded["summary"]["monthToDateAwsCost"] == 42

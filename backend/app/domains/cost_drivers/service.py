@@ -25,7 +25,8 @@ from .cache import (
 from .estimators import classify_traffic_path, estimate_data_transfer_cost, estimate_projected_month_end
 from .models import TrafficCostRollup
 from .billing import collect_query, grouped_rows, amount
-from .collection import MeteredClient, collection_budget
+from .collection import MeteredClient, collection_budget, require_durable_budget
+from .admission import durable_collection
 from .storage_pricing import estimate_storage
 from .recommendations import (
     generateCloudWatchLogsRecommendation,
@@ -103,6 +104,7 @@ def _month_window(
 
 
 def _aws_client(service: str, region: str):
+    require_durable_budget()
     try:
         import boto3  # type: ignore
         from botocore.config import Config  # type: ignore
@@ -1516,7 +1518,7 @@ def get_dashboard(force_refresh: bool = False, month: str | None = None) -> dict
     ttl_seconds = dashboard_cache_ttl_seconds(is_current_month)
     cache_key = f"{selected_month}:{'mock' if mock else 'live'}"
 
-    with (_dashboard_lock(cache_key) if force_refresh else nullcontext()), (collection_lease(cache_key) if force_refresh and not mock else nullcontext()) as require_ownership:
+    with (_dashboard_lock(cache_key) if force_refresh else nullcontext()), (durable_collection(cache_key) if force_refresh and not mock else nullcontext()) as intent, (collection_lease(cache_key) if force_refresh and not mock else nullcontext()) as require_ownership:
         if force_refresh:
             claim_refresh_cooldown(cache_key)
         else:
@@ -1546,7 +1548,7 @@ def get_dashboard(force_refresh: bool = False, month: str | None = None) -> dict
             data = _mock_dashboard(selected_month)
             data["debug"]["mockMode"] = True
         else:
-            with collection_budget(require_ownership) as provider_meter:
+            with collection_budget(require_ownership, intent) as provider_meter:
                 try:
                     data = _live_dashboard(selected_month)
                 except Exception:
@@ -1556,6 +1558,7 @@ def get_dashboard(force_refresh: bool = False, month: str | None = None) -> dict
                     data["diagnostics"] = [{"service": "Cost Explorer", "status": "error",
                                             "message": "Collection failed; costs remain unknown."}]
             require_ownership()  # Lost/uncertain ownership must not publish a new snapshot.
+            intent.require_owned()
             data.setdefault("debug", {})["providerMeter"] = provider_meter
             stale = load_stale_good_dashboard(cache_key)
             if _should_use_stale_dashboard(

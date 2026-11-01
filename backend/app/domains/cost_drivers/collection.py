@@ -9,13 +9,21 @@ MAX_COLLECTION_SECONDS = 240
 
 
 @contextmanager
-def collection_budget(require_ownership=None):
+def collection_budget(require_ownership=None, intent=None):
     meter = {"requests": 0, "requestCap": MAX_PROVIDER_REQUESTS, "sdkRetries": 0, "byService": {}, "budgetExceeded": False}
-    token = _ACTIVE.set((meter, monotonic() + MAX_COLLECTION_SECONDS, require_ownership))
+    token = _ACTIVE.set((meter, monotonic() + MAX_COLLECTION_SECONDS, require_ownership, intent))
     try:
         yield meter
     finally:
         _ACTIVE.reset(token)
+
+
+def require_durable_budget():
+    """Production client construction cannot bypass admission via a bare budget."""
+    active = _ACTIVE.get()
+    if active is None or active[3] is None:
+        raise RuntimeError("AWS cost client requires durable admission and an explicit budget")
+    active[3].require_owned()
 
 
 class MeteredClient:
@@ -31,13 +39,23 @@ class MeteredClient:
             active = _ACTIVE.get()
             if active is None:
                 raise RuntimeError("AWS cost collection requires an explicit collection budget")
-            meter, deadline, require_ownership = active
+            meter, deadline, require_ownership, intent = active
             if require_ownership is not None:
                 require_ownership()
             if meter["requests"] >= MAX_PROVIDER_REQUESTS or monotonic() >= deadline:
                 meter["budgetExceeded"] = True
                 raise RuntimeError("Cost collection request/time budget exhausted")
+            if intent is not None:
+                intent.begin_request()
             meter["requests"] += 1
             meter["byService"][self.service] = meter["byService"].get(self.service, 0) + 1
-            return value(*args, **kwargs)
+            try:
+                result = value(*args, **kwargs)
+                if intent is not None:
+                    intent.finish_request()
+                return result
+            except BaseException:
+                if intent is not None:
+                    intent.mark_uncertain()
+                raise
         return call
