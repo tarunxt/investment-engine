@@ -134,7 +134,13 @@ startup/settings/session/worker imports. All browser paths retain the existing
 current-owner check, GET/HEAD-only methods and cookie/bearer stripping.
 The frontend transport uses only a private Unix socket; there is no TCP fallback.
 
-The socket template is owned by frontend `investor:investor`, mode0600. The
+The socket template is owned by frontend `investor:investor`, mode0600. This
+authorizes every process sharing the investor UID, not exclusively the frontend
+process. The browser-facing owner boundary remains mandatory. Root and the
+existing application Unix identity are trusted local actors; exclusive process
+isolation would require a separately reviewed identity/capability design.
+Host identity and package metadata are verified; immutable artifact and actual
+socket ownership/permissions remain operator staging checks. The
 separate socket-activated service uses `DynamicUser`, systemd credential delivery,
 resource/sandbox limits and no application environment or financial-service
 startup dependency. The executable artifact path is a deliberate unresolved
@@ -177,8 +183,11 @@ attempted. The proposed private CI job uses an explicitly disposable PostgreSQL1
 service, validates its actual major version and fails if any database test skips.
 The first published CI run executed all six PG18 cases without skips: five passed,
 and an escalation-denial assertion failed because it used a session authenticated
-as the fixture superuser. That test context is corrected; actual viewer-login
-escalation coverage remains mandatory and is expanded. The next exact-head CI
+as the fixture superuser. The exact failed statement was `SET ROLE credx_viewer_views`: the authenticated
+`session_user` remained the fixture superuser. The corrected suite now requires
+`session_user=current_user=credx_viewer_read`, actual privilege SQLSTATE42501,
+and separate SQLSTATE42703 schema-exclusion assertions. No privilege audit is
+weakened. The next exact-head CI
 result is required before any grant or deployment.
 
 ### Independent SQL review corrections

@@ -12,6 +12,7 @@ from sqlalchemy import BigInteger, Boolean, Column, MetaData, Table, Text, inser
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
+from sqlalchemy.exc import DBAPIError
 
 HERE = Path(__file__).parent
 spec = importlib.util.spec_from_file_location('pg_viewer_plan', HERE / 'plan_sql.py')
@@ -129,11 +130,13 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
                 continue
             await self.connection.exec_driver_sql(statement)
 
-    async def reject(self, operation):
+    async def reject(self, operation, state='42501'):
         await self.connection.exec_driver_sql('SAVEPOINT denied_operation')
         try:
-            with self.assertRaises(Exception, msg=operation):
-                await self.connection.exec_driver_sql(operation)
+            with self.subTest(operation=operation, expected_sqlstate=state):
+                with self.assertRaises(DBAPIError, msg=operation) as denied:
+                    await self.connection.exec_driver_sql(operation)
+                self.assertEqual(denied.exception.orig.sqlstate, state)
         finally:
             await self.connection.exec_driver_sql('ROLLBACK TO SAVEPOINT denied_operation')
 
@@ -155,7 +158,6 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
         # from the additional default_transaction_read_only safeguard.
         for statement in [
             'SELECT id FROM public.jobs', 'SELECT forbidden_payload FROM public.jobs',
-            'SELECT forbidden_payload FROM credx_viewer.jobs',
             "UPDATE credx_viewer.jobs SET status='changed' WHERE id=101",
             "UPDATE public.jobs SET status='changed' WHERE id=101",
             'CREATE TABLE public.viewer_forbidden(id int)', 'CREATE TEMP TABLE viewer_forbidden(id int)',
@@ -168,6 +170,12 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
         await self.connection.exec_driver_sql('SET LOCAL ROLE credx_viewer_views')
         await self.reject('SELECT forbidden_payload FROM public.jobs')
         await self.reject('SELECT id,forbidden_payload FROM public.jobs')
+
+    async def test_projected_schema_excludes_forbidden_columns(self):
+        await self.provision()
+        await self.connection.exec_driver_sql('SET LOCAL ROLE credx_viewer_read')
+        for item in plan.catalog()['relations']:
+            await self.reject('SELECT forbidden_payload FROM credx_viewer."'+item['relation']+'"',state='42703')
 
     async def test_public_and_role_hazards_fail_closed_without_global_production_changes(self):
         await self.provision()
@@ -192,8 +200,10 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
         for hazard in hazards:
             await self.connection.exec_driver_sql('SAVEPOINT hazard')
             await self.connection.exec_driver_sql(hazard)
-            with self.assertRaises(Exception, msg=hazard):
-                await self.connection.exec_driver_sql(self.audit)
+            with self.subTest(hazard=hazard):
+                with self.assertRaises(DBAPIError) as rejected:
+                    await self.connection.exec_driver_sql(self.audit)
+                self.assertEqual(rejected.exception.orig.sqlstate,'P0001')
             await self.connection.exec_driver_sql('ROLLBACK TO SAVEPOINT hazard')
             await self.connection.exec_driver_sql(self.audit)
 
@@ -206,15 +216,18 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
                 hook='ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO viewer_fixture_other'
             else:
                 hook='ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO credx_viewer_read WITH GRANT OPTION'
-            with self.assertRaises(Exception):
-                await self.provision(before_schema=hook)
+            with self.subTest(default_acl=kind):
+                with self.assertRaises(DBAPIError) as rejected:
+                    await self.provision(before_schema=hook)
+                self.assertEqual(rejected.exception.orig.sqlstate,'P0001')
             await self.connection.exec_driver_sql('ROLLBACK TO SAVEPOINT default_acl')
 
     async def test_audit_failure_rolls_back_roles_and_schema(self):
         database = self.connection.dialect.identifier_preparer.quote(self.url.database)
         await self.connection.exec_driver_sql(f'GRANT TEMP ON DATABASE {database} TO PUBLIC')
-        with self.assertRaises(Exception):
+        with self.assertRaises(DBAPIError) as rejected:
             await self.provision()
+        self.assertEqual(rejected.exception.orig.sqlstate,'P0001')
         await self.connection.exec_driver_sql('ROLLBACK TO SAVEPOINT before_provision')
         self.assertEqual(await self.connection.scalar(text("SELECT count(*) FROM pg_roles WHERE rolname IN ('credx_viewer_read','credx_viewer_views')")), 0)
         self.assertEqual(await self.connection.scalar(text("SELECT count(*) FROM pg_namespace WHERE nspname='credx_viewer'")), 0)
@@ -238,21 +251,23 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual({int(row['id']) for row in records},expected)
             await service.close();service=None
             async with reader.connect() as connection:
-                self.assertEqual(await connection.scalar(text('SELECT session_user')),'credx_viewer_read')
+                self.assertEqual(tuple((await connection.execute(text('SELECT session_user,current_user'))).one()),('credx_viewer_read','credx_viewer_read'))
                 self.assertEqual(await connection.scalar(text('SHOW default_transaction_read_only')),'on')
                 ids=set((await connection.execute(text('SELECT id FROM credx_viewer.jobs'))).scalars())
                 self.assertEqual(ids,{101})
             for statement in ['SELECT id FROM public.jobs', 'SELECT forbidden_payload FROM public.jobs',
-                'SELECT forbidden_payload FROM credx_viewer.jobs',
-                "UPDATE credx_viewer.jobs SET status='changed'", "UPDATE public.jobs SET status='changed'",
+                    "UPDATE credx_viewer.jobs SET status='changed'", "UPDATE public.jobs SET status='changed'",
                 'CREATE TABLE public.forbidden(id int)', 'CREATE TEMP TABLE forbidden(id int)',
                 'CREATE SCHEMA viewer_forbidden', "SELECT nextval('public.fixture_sequence')",
                 'SET ROLE credx_viewer_views', 'SET ROLE viewer_fixture_admin']:
                 async with reader.connect() as connection:
                     await connection.exec_driver_sql('SET TRANSACTION READ WRITE')
                     self.assertEqual(await connection.scalar(text('SHOW transaction_read_only')),'off')
-                    with self.assertRaises(Exception, msg=statement):
-                        await connection.exec_driver_sql(statement)
+                    self.assertEqual(tuple((await connection.execute(text('SELECT session_user,current_user'))).one()),('credx_viewer_read','credx_viewer_read'))
+                    with self.subTest(viewer_login_statement=statement):
+                        with self.assertRaises(DBAPIError, msg=statement) as denied:
+                            await connection.exec_driver_sql(statement)
+                        self.assertEqual(denied.exception.orig.sqlstate,'42501')
         finally:
             if service is not None:
                 await service.close()
