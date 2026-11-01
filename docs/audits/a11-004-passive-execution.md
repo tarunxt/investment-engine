@@ -40,3 +40,39 @@ performed by this task.
 
 Offline verification: `python -m unittest discover -s backend/tests -p
  'test_execution_health_passive.py' -v` (run command on one line).
+
+## Contract review and local projection adapter
+
+Reviewed admission/dispatch cab3b8dc4783c76a9f063946831b090525d53005 and fencing
+72ca85e614e612b9fd50a1e4d066d08e64620b5d using Git object reads only. The combined
+private 24c3c9ee revision was not available locally and was not fetched remotely.
+No admission/fencing-owned file is changed.
+
+`summarize_durable` accepts safe projected values only and consumes at most 101
+rows, retaining 100. Its explicitly named sample counts distinguish pending,
+uncertain, delivered, suppressed, dead_letter, owned, expired claims and
+reconciliation_needed. Incomplete/truncated scope does not claim aggregate totals.
+Delivered does not prove receipt; owned is per-job lease evidence, not consumer
+heartbeat; dead_letter includes RecoveryPolicyBlocked and does not prove retry
+exhaustion. Receipt, consumer and service state therefore remain unknown.
+
+Coordinator integration requirements: a scoped SQLAlchemy projection must select
+only analysis.dispatch.v1 rows joined to the allowed recovery job population;
+project outbox state/created_at plus execution_claim state/expires_at from
+runtime_metadata_json, and terminal job status. Do not load payloads, tokens,
+request metadata or whole ORM rows. Normalize timestamps to UTC epochs. Use a
+100+1 limit and native statement/pool deadlines within the existing outer budget.
+A sample cannot verify backlog totals or global oldest age. Full aggregate counts
+need a separately bounded, reviewed query plan; no unbounded scan is authorized.
+Consumer heartbeat, broker receipt and actual stopped-service evidence require
+independent existing telemetry and cannot be reconstructed from these contracts.
+The projection adapter is fixture-ready but intentionally not wired into HTTP
+until the scoped reader and its query plan are available on the integration lane.
+
+Substep status: .01 advisory policy documented; .02 durable projection implemented,
+heartbeat/HTTP reader integration pending; .03 bounded adapter/redaction complete,
+native DB query plan pending; .04 synthetic states modeled; .05 existing paths and
+recovery configuration unchanged; .06 no publication/provider/service operations;
+.07 seven offline tests pass, existing full application suite unavailable without
+pytest; .08 owner/threshold remain unset pending approval. Live artifact identity,
+read-only telemetry and independent acceptance remain external for all claims.

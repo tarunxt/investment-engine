@@ -89,3 +89,75 @@ async def execution_diagnostics(
     except Exception:
         # Do not return exception strings, topology, correlation input or payloads.
         return summarize(ExecutionSnapshot(), recovery=recovery)
+
+
+@dataclass(frozen=True)
+class DurableProjection:
+    """Safe fields projected by the future scoped SQLAlchemy reader.
+
+    Excludes IDs, payload, owner/claim tokens, provider metadata and errors.
+    Epoch values must be normalized to UTC by that reader.
+    """
+    dispatch_state: str | None = None
+    created_at: float | None = None
+    claim_state: str | None = None
+    claim_expires_at: float | None = None
+    terminal: bool = False
+
+
+def summarize_durable(rows, *, now: float, complete: bool = False) -> dict[str, object]:
+    """Bounded projection of A11-003 outbox/A11-002 claim evidence.
+
+    `complete` asserts caller scope/query completeness, never heartbeat freshness.
+    At most 101 rows are consumed; a 101st row marks a truncated sample. Counts
+    from incomplete samples remain unknown (sample counts are named explicitly).
+    Dead letters include policy failures, so never infer exhausted retry counts.
+    """
+    from itertools import islice
+    from math import isfinite
+
+    sample = list(islice(rows, 101))
+    truncated = len(sample) > 100
+    sample = sample[:100]
+    counters = {name: 0 for name in (
+        "pending", "uncertain", "delivered", "suppressed", "dead_letter",
+        "owned", "expired_claim", "reconciliation_needed", "unknown_dispatch",
+    )}
+    ages = []
+    valid_now = type(now) in (int, float) and isfinite(now)
+    valid = valid_now and not truncated and complete is True
+    for row in sample:
+        state = row.dispatch_state
+        if state in {"pending", "uncertain", "delivered", "suppressed", "dead_letter"}:
+            counters[state] += 1
+        else:
+            counters["unknown_dispatch"] += 1
+            valid = False
+        if state in {"pending", "uncertain"} and not row.terminal:
+            created = row.created_at
+            if (valid_now and type(created) in (int, float)
+                    and isfinite(created) and created <= now):
+                ages.append(now - created)
+            else:
+                valid = False
+        if row.claim_state == "reconciliation_needed":
+            counters["reconciliation_needed"] += 1
+        elif row.claim_state == "owned":
+            expires = row.claim_expires_at
+            if valid_now and type(expires) in (int, float) and isfinite(expires):
+                counters["owned" if expires > now else "expired_claim"] += 1
+            else:
+                valid = False
+        elif row.claim_state is not None:
+            valid = False
+    return {
+        "scope_complete": valid,
+        "sample_size": len(sample),
+        "truncated": truncated,
+        "sample_counts": counters,
+        "oldest_unresolved_age_seconds": max(ages) if valid and ages else None,
+        "consumer": "unknown",
+        "receipt": "unknown",
+        "service_state": "unknown",
+        "exhausted_retry_count": None,
+    }

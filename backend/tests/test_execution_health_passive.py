@@ -85,12 +85,48 @@ class ExecutionHealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["progress"], "unknown")
         self.assertNotEqual(result["status"], "healthy")
 
+    def test_durable_states_are_not_receipt_or_heartbeat(self):
+        Row = module.DurableProjection
+        result = module.summarize_durable([
+            Row("pending", 90), Row("uncertain", 80), Row("delivered", 70, "owned", 110),
+            Row("dead_letter", 60, "reconciliation_needed"),
+            Row("suppressed", 50, "owned", 99, True),
+        ], now=100, complete=True)
+        self.assertTrue(result["scope_complete"])
+        self.assertEqual(result["oldest_unresolved_age_seconds"], 20)
+        self.assertEqual(result["sample_counts"]["expired_claim"], 1)
+        self.assertEqual(result["sample_counts"]["reconciliation_needed"], 1)
+        for key in ("consumer", "receipt", "service_state"):
+            self.assertEqual(result[key], "unknown")
+        self.assertIsNone(result["exhausted_retry_count"])
+
+    def test_durable_projection_caps_iteration_and_keeps_unknown(self):
+        consumed = []
+
+        def rows():
+            for i in range(1000):
+                consumed.append(i)
+                yield module.DurableProjection("pending", 90)
+
+        result = module.summarize_durable(rows(), now=100, complete=True)
+        self.assertEqual(len(consumed), 101)
+        self.assertTrue(result["truncated"])
+        self.assertFalse(result["scope_complete"])
+        self.assertIsNone(result["oldest_unresolved_age_seconds"])
+        result = module.summarize_durable([], now=100)
+        self.assertFalse(result["scope_complete"])
+        for row in (module.DurableProjection("new_state", 90),
+                    module.DurableProjection("pending", float("nan")),
+                    module.DurableProjection("pending", 101)):
+            self.assertFalse(module.summarize_durable(
+                [row], now=100, complete=True)["scope_complete"])
+
     def test_no_mutation_or_external_imports(self):
         tree = ast.parse(PATH.read_text())
         imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         imports.update(alias.name for node in ast.walk(tree) if isinstance(node, ast.Import)
                        for alias in node.names)
-        self.assertLessEqual(imports, {"__future__", "asyncio", "dataclasses", "typing", "math"})
+        self.assertLessEqual(imports, {"__future__", "asyncio", "dataclasses", "typing", "math", "itertools"})
         forbidden = {"send_task", "apply_async", "delay", "publish", "execute", "commit",
                      "refresh", "inspect", "get_provider", "system", "Popen"}
         for node in ast.walk(tree):
