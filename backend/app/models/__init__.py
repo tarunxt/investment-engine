@@ -1,5 +1,7 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
+from app.domains.rebalance_budget.models import RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt
+
 from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
 from app.domains.api_usage.models import (
     ApiUsageAttemptEvent,
