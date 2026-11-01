@@ -83,6 +83,16 @@ try{
  assert.deepEqual(await page.getByRole('dialog',{name:'Behind the number',exact:true}).getByRole('region',{name:'Allocation disclosure'}).locator('tr').allTextContents(),aggregateRows);
  await page.keyboard.press('Escape');
  await page.keyboard.press('Escape');results.push('actual allocation table and target popup share cap, residual cash and rounded aggregate; formulas unchanged');
+ const executableBaseline=await page.getByTestId('executable').textContent();
+ // F10: original Trim holdings are 5 × ₹100, while target .095 × ₹1000 rounds to 1 share.
+ for(const [kind,expected] of [['Target Zerodha Stocks','1'],['Target Zerodha Amount','₹100']]){
+  const cell=page.getByLabel('BBB '+kind+' calculation',{exact:true});assert.equal(await cell.textContent(),expected);
+  for(let attempt=0;attempt<2;attempt++){
+   await cell.click();const popup=page.getByRole('dialog',{name:kind,exact:true});await popup.waitFor();assert.match(await popup.textContent(),kind.endsWith('Stocks')?/Calculated shares/:/Calculated allocation amount/);
+   await popup.getByRole('button',{name:'Calculation details',exact:true}).click();const details=page.getByRole('dialog',{name:'Behind the number',exact:true});await details.waitFor();const held=details.getByRole('region',{name:'Current holdings',exact:true});assert.match(await held.textContent(),/Current holding quantity: 5/);assert.match(await held.textContent(),/Current holding value: ₹500/);assert.match(await details.textContent(),/Target Zerodha Stocks = ROUND/);assert.match(await details.textContent(),/Current holdings are separate from Target sizing/);await details.getByRole('button',{name:'Back to summary',exact:true}).click();await page.keyboard.press('Escape');await popup.waitFor({state:'detached'});assert.equal(await cell.textContent(),expected);assert.equal(await page.getByTestId('executable').textContent(),executableBaseline);
+  }
+ }
+ results.push('F10 original Trim target cells, summary and detail use target sizing; held 5/₹500 remain separate through repeated open/close');
  const noticeQuoteBaseline=counters.quotes;const tag=page.getByRole('button',{name:'Markets closed',exact:true});
  for(const dismiss of ['Escape','Done','Close metric summary','backdrop']){
   await tag.click();const notice=page.getByRole('dialog',{name:'Markets closed',exact:true});await notice.waitFor();assert.match(await notice.textContent(),/Protected MARKET orders can be submitted only during regular market hours/);assert.doesNotMatch(await notice.textContent(),/submitted as Zerodha AMO/);assert.equal(await page.getByTestId('basket').evaluate(el=>el.inert),true);

@@ -432,13 +432,17 @@ test('column picker hides complete columns, preserves controls, and keeps its ha
  const empty=React.createElement('table',{},table.props.children[0],React.createElement('tbody',{},React.createElement('tr',{},React.createElement('td',{colSpan:21},'No basket rows available.'))));assert.ok(find(component.BasketColumnTable({children:empty,hidden:['Status'],onOpen:()=>{}}),node=>node.props?.['aria-label']==='Choose basket columns'));
 });
 
-test('Sell All and Trim show actual exact-venue holdings and genuine price preference without sizing orders',async()=>{
+test('Sell All and Trim retain exact-venue holding evidence without substituting it for target sizing',async()=>{
  const snapshot={holdings_count:3,captured_at:end,holdings:[{tradingsymbol:'HAL',exchange:'NSE',quantity:3,t1_quantity:1},{tradingsymbol:'HAL',exchange:'NSE',quantity:.5,t1_quantity:.5},{tradingsymbol:'HAL',exchange:'BSE',quantity:99,t1_quantity:0}]};
  const holding=math.kiteHoldingQuantity(snapshot,'HAL','NSE');assert.equal(holding.quantity,5);assert.equal(math.kiteHoldingQuantity(snapshot,'OTHER','NSE').quantity,0);assert.equal(math.kiteHoldingQuantity(null,'HAL','NSE'),null);assert.equal(math.kiteHoldingQuantity({...snapshot,holdings_count:4},'HAL','NSE'),null);assert.equal(math.kiteHoldingQuantity({...snapshot,holdings:[{...snapshot.holdings[0],quantity:NaN}],holdings_count:1},'HAL','NSE'),null);
  for(const action of ['Sell All','Trim']){
    const stock={symbol:'HAL',exchange:'NSE',action,score:-1,currentValue:1000,holdingQuantity:holding.quantity,holdingAsOf:holding.asOf,holdingSource:holding.source,ltp:200,ltpAsOf:end,ltpSource:'Kite exact venue',upstoxLtp:210,upstoxAsOf:end,upstoxSource:'Upstox exact venue',limitPrice:999};
    assert.equal(math.sellHoldingDisplay(stock).amount,1000);assert.equal(math.sellHoldingDisplay({...stock,ltp:null}).amount,1050);assert.equal(math.sellHoldingDisplay({...stock,ltp:null,upstoxLtp:null}).amount,null);assert.equal(math.sellHoldingDisplay({...stock,holdingQuantity:0}).amount,0);assert.equal(math.sellHoldingDisplay({...stock,holdingQuantity:null}).stocks,null);
-   const h=hooks();const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:()=>new Promise(()=>{})},createPortal:node=>node});const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],10000,end,'Zerodha');};let state=render();const shares=find(state.cells({symbol:'HAL',exchange:'NSE',score:-1,ltp:200}),node=>node.props?.['aria-label']==='HAL Target Zerodha Stocks calculation');assert.equal(shares.props.children,'5');const amount=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation');assert.match(amount.props.children,/1,000/);amount.props.onClick();state=render();assert.match(state.popup.props.summary.label,/Current Kite holding value/);assert.match(JSON.stringify(state.popup.props.children),/No Limit Price estimate/);assert.match(state.popup.props.summary.subtitle,/5 ×/);
+   const h=hooks();const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:()=>Promise.resolve(history([observation(1,2)]))},createPortal:node=>node});const render=()=>{h.start();return component.useBasketDisplayCalculations(true,'india',[stock],10000,end,'Zerodha');};let state=render();assert.equal(find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Target Zerodha Stocks calculation'),null);h.flush();await tick();state=render();
+   // Mean (-1 + 2)/2 = .5; capped target .095 × 10000 / 200 rounds to 5.
+   // Choose assets 10000 and price 200 here; a separate matrix below proves divergence.
+   const amount=find(state.cells(stock),node=>node.props?.['aria-label']==='HAL Target Zerodha Amount calculation');assert.equal(amount.props.children,'₹1,000');amount.props.onClick();state=render();assert.equal(state.popup.props.summary.label,'Calculated allocation amount');assert.equal(state.popup.props.summary.value,'₹1,000');assert.match(JSON.stringify(state.popup.props.children),/Current Holdings/);assert.match(JSON.stringify(state.popup.props.children),/No Limit Price estimate/);
+
  }
  for(const action of ['Buy New','Add more','Hold'])assert.equal(math.sellHoldingDisplay({action,holdingQuantity:5,ltp:200}),null);
 });
@@ -671,4 +675,41 @@ test('disclosure table and popup share totals; missing, interrupted, repeated an
  state.retry();state=render();h.flush();pending.shift().resolve({...history([observation(1,2)]),truncated:true});await tick();state=render();assert.match(JSON.stringify(state.controls),/Unavailable/);
  state.retry();state=render();h.flush();pending.shift().resolve(history([]));await tick();state=render();assert.match(JSON.stringify(state.controls),/Unavailable/);
  state.retry();state=render();h.flush();pending.shift().resolve(history([observation(1,0)]));await tick();state=render();assert.match(JSON.stringify(state.controls),/100%/);assert.match(JSON.stringify(state.controls),/₹0.00/);
+});
+
+const syntheticHistory = rows => ({...history(rows), symbols:['SYNTHF10'], observations:rows.map(row=>({...row,symbol:'SYNTHF10'}))});
+
+test('F10 target cells, summary and details agree for original sell rows across partial and missing inputs',async()=>{
+ for(const action of ['Sell All','Trim']) for(const fixture of [
+  {ltp:100,holdingQuantity:20,assets:10000,expectedStocks:10,expectedAmount:1000},
+  {ltp:100,holdingQuantity:0,assets:10000,expectedStocks:10,expectedAmount:1000},
+  {ltp:100,holdingQuantity:null,assets:10000,expectedStocks:10,expectedAmount:1000},
+  {ltp:null,holdingQuantity:20,assets:10000,expectedStocks:null,expectedAmount:null},
+  {ltp:null,limitPrice:200,holdingQuantity:20,assets:10000,expectedStocks:5,expectedAmount:1000},
+  {ltp:100,holdingQuantity:20,assets:null,expectedStocks:null,expectedAmount:null},
+  {ltp:100,holdingQuantity:20,assets:0,expectedStocks:0,expectedAmount:0},
+ ]){
+  const stock={symbol:'SYNTHF10',exchange:'NSE',action,score:2,currentValue:2000,holdingAsOf:end,holdingSource:'Synthetic exact venue',ltpAsOf:end,ltpSource:'Synthetic quote',...fixture};const original=JSON.stringify(stock);
+  const h=hooks();let resolve;const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:()=>new Promise(r=>resolve=r)}});
+  const render=(open=true)=>{h.start();return component.useBasketDisplayCalculations(open,'india',[stock],fixture.assets,end,'Zerodha');};let state=render();h.flush();resolve(syntheticHistory([observation(1,2,{run_status:'partial',completed:false,eligible:true})]));await tick();state=render();
+  assert.equal(state.metrics(stock).target,.095);
+  assert.equal(state.metrics(stock).shown?.stocks??null,fixture.expectedStocks);assert.equal(state.metrics(stock).shown?.amount??null,fixture.expectedAmount);
+  for(const kind of ['Target Zerodha Stocks','Target Zerodha Amount']){
+   const button=find(state.cells(stock),n=>n.props?.['aria-label']===`SYNTHF10 ${kind} calculation`);
+   const expected=kind.endsWith('Stocks')?fixture.expectedStocks===null?'Unavailable':String(fixture.expectedStocks):fixture.expectedAmount===null?'Unavailable':math.formatBasketIntegerCurrency(fixture.expectedAmount);
+   assert.equal(button.props.children,expected);button.props.onClick();state=render();assert.equal(state.popup.props.summary.value,expected);assert.match(JSON.stringify(state.popup.props.children),/Target Zerodha Stocks = ROUND/);assert.match(JSON.stringify(state.popup.props.children),/Current holdings are separate from Target sizing/);state.popup.props.onClose();state=render();
+  }
+  render(false);h.flush();assert.equal(render(false).popupOpen,false);assert.equal(JSON.stringify(stock),original);h.unmount();
+ }
+});
+
+
+test('F10 interrupted, stale, failed and truncated history never substitutes holdings for targets',async()=>{
+ const stock={symbol:'SYNTHF10',exchange:'NSE',action:'Trim',score:2,ltp:100,holdingQuantity:20};const h=hooks(),pending=[];
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:()=>new Promise((resolve,reject)=>pending.push({resolve,reject}))}});
+ const render=(open=true)=>{h.start();return component.useBasketDisplayCalculations(open,'india',[stock],10000,end,'Zerodha');};
+ const absent=state=>{assert.equal(state.metrics(stock).shown,null);assert.equal(find(state.cells(stock),n=>n.props?.['aria-label']==='SYNTHF10 Target Zerodha Stocks calculation'),null);};
+ let state=render();h.flush();absent(state);const stale=pending.shift();render(false);h.flush();render();h.flush();stale.resolve(syntheticHistory([observation(1,2)]));await tick();absent(render());
+ pending.shift().reject(new Error('Synthetic history failure'));await tick();state=render();assert.equal(state.error,'Synthetic history failure');absent(state);
+ state.retry();render();h.flush();pending.shift().resolve({...syntheticHistory([observation(2,2)]),truncated:true});await tick();absent(render());h.unmount();
 });
