@@ -8358,6 +8358,11 @@ ${zerodhaExecutionMode === "direct_market"
         <PromptTemplateDialog
           title={promptDialog.title}
           body={promptDialog.body}
+          onReviewInputs={() => {
+            const { portfolio, stage } = promptDialog;
+            setPromptDialog(null);
+            void openInputSelection(portfolio, stage);
+          }}
           onClose={() => setPromptDialog(null)}
         />
       ) : null}

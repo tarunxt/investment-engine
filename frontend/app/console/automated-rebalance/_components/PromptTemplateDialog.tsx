@@ -4,10 +4,11 @@ import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 /** Read-only template inspection. This component never assembles runtime inputs. */
-export function PromptTemplateDialog({ title, body, onClose }: {
+export function PromptTemplateDialog({ title, body, onClose, onReviewInputs }: {
   title: string;
   body: string;
   onClose: () => void;
+  onReviewInputs: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -50,10 +51,13 @@ export function PromptTemplateDialog({ title, body, onClose }: {
       <div className="flex max-h-[85dvh] flex-col">
         <div className="flex shrink-0 items-start justify-between gap-4 p-5">
           <div className="min-w-0">
+            <p className="text-xs font-semibold text-violet-700">Template only</p>
             <h3 id={titleId} className="text-lg font-semibold text-slate-950">{title}</h3>
             <p id={descriptionId} className="mt-1 text-sm text-slate-600">
               Prompt template used by this Auto-Rebalance stage. Runtime input bundles are added when the workflow runs.
             </p>
+            <p className="mt-2 text-sm text-slate-700">This stage analyzes the portfolio and scan results selected for the workflow. This read-only preview is not the eventual request: selected data is added only when the workflow runs.</p>
+            <button type="button" onClick={onReviewInputs} className="mt-2 rounded text-sm font-medium text-violet-800 underline focus-visible:outline-2 focus-visible:outline-blue-600">Review selected inputs</button>
           </div>
           <button type="button" onClick={onClose} aria-label="Close prompt view"
             className="shrink-0 rounded-full px-3 py-1 text-sm hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
@@ -61,7 +65,10 @@ export function PromptTemplateDialog({ title, body, onClose }: {
           </button>
         </div>
         <div className="mx-5 mb-5 min-h-0 overflow-y-auto overscroll-contain rounded-xl bg-slate-950 p-5 text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600" tabIndex={0} aria-label="Prompt template text">
+          <details>
+            <summary tabIndex={0} className="cursor-pointer text-sm font-medium">Advanced: raw prompt template</summary>
           <pre className="max-w-[100ch] whitespace-pre-wrap break-words font-mono text-sm leading-6 [overflow-wrap:anywhere]">{body}</pre>
+          </details>
         </div>
       </div>
     </dialog>,
