@@ -75,7 +75,8 @@ test('cold and unavailable states keep unknown metrics, mode and risk without st
   assert.equal(presentation.getTradingBotRiskStatus(card, details).label, 'Unknown');
   assert.match(presentation.getTradingBotExecutionModeDetail(card), /unavailable/);
   const total = presentation.buildTradingBotsPortfolioSummary([card], details, null);
-  assert.equal(total.botsPausedStopped, 0);
+  assert.equal(total.botsPausedStopped, null);
+  assert.equal(total.botsRunning, null);
   assert.equal(total.totalMoneyInvested, null);
   assert.match(source, /unavailable: "Unavailable"/);
   assert.match(source, /unknown: "Unknown"/);
@@ -93,3 +94,15 @@ test('saved CopyTrader evidence never emits live doctor/lock/armed warnings', ()
   assert.equal(warnings[0].label, 'Runtime unavailable');
   assert.equal(warnings[0].tone, 'warning');
 });
+
+for (const fixture of ['loading', 'failed', 'partial', 'success-zero', 'populated', 'stale-response']) {
+  test(`runtime totals retain unknown versus reported counts: ${fixture}`, () => {
+    const bot = helpers.buildTradingBotsOverviewShell().bots[0];
+    const known = { ...bot, status: 'stopped', source: fixture === 'stale-response' ? 'fallback' : 'api', activePositionsCount: 0 };
+    const bots = fixture === 'partial' ? [known, bot] : ['loading', 'failed'].includes(fixture) ? [bot] : [{ ...known, status: fixture === 'populated' ? 'running' : 'stopped' }];
+    const summary = presentation.buildTradingBotsPortfolioSummary(bots, {}, '2026-11-01T00:00:00Z');
+    const unknown = ['loading', 'failed', 'partial'].includes(fixture);
+    assert.equal(summary.botsRunning, unknown ? null : fixture === 'populated' ? 1 : 0);
+    assert.equal(summary.botsPausedStopped, unknown ? null : fixture === 'populated' ? 0 : 1);
+  });
+}

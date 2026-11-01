@@ -1,5 +1,7 @@
 'use client';
 
+import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
+
 import { useState } from 'react';
 import Link from 'next/link';
 import { ClipboardPaste, Loader2, RefreshCw } from 'lucide-react';
@@ -72,9 +74,9 @@ export function IndMoneyUsSnapshotWorkspace({
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-600">
               <span className="font-medium">Manual snapshot</span>
               <span aria-live="polite">
-                {selectedSnapshot ? <>Saved: <time dateTime={selectedSnapshot.captured_at}>{new Date(selectedSnapshot.captured_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</time></> : loading ? 'Loading saved snapshot…' : overview ? 'No saved snapshot yet.' : 'Saved snapshot unavailable.'}
+                {selectedSnapshot ? <>Captured: <time dateTime={selectedSnapshot.captured_at}>{formatPortfolioTimestamp(selectedSnapshot.captured_at)}</time></> : loading ? 'Loading saved snapshot…' : overview ? 'No saved snapshot yet.' : 'Saved snapshot unavailable.'}
               </span>
-              {selectedSnapshot ? <span className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-700">Parse status: <span className="capitalize">{selectedSnapshot.parse_status}</span></span> : null}
+              {selectedSnapshot ? <span className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-700">Holdings parse status: <span className="capitalize">{selectedSnapshot.parse_status}</span></span> : null}
               <details className="text-sm">
                 <summary className="cursor-pointer rounded text-purple-800 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-purple-700">Source details</summary>
                 <div className="mt-2 max-w-xl rounded border border-gray-200 bg-white p-3 text-gray-600">
@@ -97,7 +99,7 @@ export function IndMoneyUsSnapshotWorkspace({
         </header>
 
         <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Saved snapshot is not a live market feed. Parsed does not mean current prices or a live broker connection.
+          Saved snapshot is not a live market feed. Parsed does not mean current prices or a live broker connection. Totals and wallet values belong to the selected historical snapshot, not live account balance or buying power.
         </p>
         {loadError ? (
           <div role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">

@@ -369,11 +369,13 @@ function TradingBotCard({
   bot,
   details,
   expanded,
+  snapshotAt,
   onToggle,
 }: {
   bot: TradingBotSummary;
   details: TradingBotsOverviewDetails;
   expanded: boolean;
+  snapshotAt: string;
   onToggle: () => void;
 }) {
   const presentation = getTradingBotPresentation(bot.id);
@@ -444,8 +446,11 @@ function TradingBotCard({
                     {MODE_LABELS[bot.mode]}
                   </span>
                 </div>
+                <p className="text-xs leading-5 text-slate-600">
+                  {bot.source === "placeholder" ? "Source unavailable · observation time unknown" : `${bot.source === "api" ? "Reported API snapshot" : "Cached / saved snapshot"} · Overview snapshot ${formatDateTime(snapshotAt)} · Source observation age unknown`}
+                </p>
                 <CardDescription className="max-w-3xl text-sm leading-6 text-slate-600">
-                  {presentation.strategy}
+                  Workflow description: {presentation.strategy}
                 </CardDescription>
               </div>
             </div>
@@ -893,12 +898,12 @@ export function TradingBotsOverviewPage() {
     {
       label: "Bots running",
       value: formatCount(portfolioSummary.botsRunning),
-      detail: `Currently active bots out of ${bots.length} total.`,
+      detail: `Reported running statuses out of ${bots.length} bots; unknown sources leave this total unknown.`,
     },
     {
       label: "Bots paused/stopped",
       value: formatCount(portfolioSummary.botsPausedStopped),
-      detail: "Includes paused, stopped, error, and setup-needed bots.",
+      detail: "Reported paused or stopped statuses; unknown sources leave this total unknown.",
     },
     {
       label: "Live exposure",
@@ -1070,6 +1075,7 @@ export function TradingBotsOverviewPage() {
       <div className="grid gap-5">
         {bots.map((bot) => (
           <TradingBotCard
+            snapshotAt={overview.generatedAt}
             key={bot.id}
             bot={bot}
             details={details}

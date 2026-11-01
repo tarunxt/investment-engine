@@ -69,8 +69,8 @@ export type TradingBotsPortfolioSummary = {
   totalReturnPct: number | null;
   totalActivePositions: number | null;
   totalTradesToday: number | null;
-  botsRunning: number;
-  botsPausedStopped: number;
+  botsRunning: number | null;
+  botsPausedStopped: number | null;
   liveExposure: number | null;
   dryRunExposure: number | null;
   highestRiskBot: TradingBotSummary | null;
@@ -616,8 +616,10 @@ export function buildTradingBotsPortfolioSummary(
       bots.map((bot) => bot.activePositionsCount ?? null),
     ),
     totalTradesToday: sumNumbers(bots.map((bot) => bot.tradesToday ?? null)),
-    botsRunning: bots.filter((bot) => bot.status === "running").length,
-    botsPausedStopped: bots.filter((bot) => bot.status === "paused" || bot.status === "stopped").length,
+    botsRunning: bots.some((bot) => bot.status === "unavailable" || bot.source === "placeholder")
+      ? null : bots.filter((bot) => bot.status === "running").length,
+    botsPausedStopped: bots.some((bot) => bot.status === "unavailable" || bot.source === "placeholder")
+      ? null : bots.filter((bot) => bot.status === "paused" || bot.status === "stopped").length,
     liveExposure,
     dryRunExposure,
     highestRiskBot: highestRiskEntry?.bot ?? null,

@@ -2,7 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { DashboardPageClient } from '../../app/console/dashboard/DashboardPageClient';
 const state=new URLSearchParams(location.search).get('state');
-const stamp=new Date(Date.now()-3*3600000).toISOString();
+const stamp=new Date(Date.now()-(state==='stale-response'?30*24:3)*3600000).toISOString();
 const fx={pair:'USD/INR',value:84,source:'Fixture verified FX',as_of:new Date().toISOString(),age_seconds:0,stale_after_seconds:3600,status:'valid'};
 const india={snapshot_date:stamp.slice(0,10),captured_at:stamp,source:'stored-kite-snapshot',holdings_count:0,holdings_market_value:120000,holdings_invested_value:100000,holdings_pnl:20000,holdings_day_change_value:100,available_margin:8000,top_holdings:[],history:[]};
 const us={snapshot_date:stamp.slice(0,10),captured_at:stamp,source:'manual-import',parse_status:'parsed',holdings_count:0,wallet_balance:50,current_value:1000,invested_value:900,day_return_value:1,day_return_percent:0.1,total_return_value:100,total_return_percent:10,top_holdings:[],history:[]};

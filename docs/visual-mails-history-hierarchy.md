@@ -16,7 +16,7 @@ Only the sent-history presentation and its read-state prerequisite change. Recip
 | Sent mail history | Same heading; named history region |
 | Scope: every email sent through Cred-X SMTP, grouped by purpose | Existing subtitle retained verbatim |
 | New mail types appear in All Cred-X automatically | Existing subtitle and all-history collection retained |
-| Refresh | Same button, existing two reads, disabled during either active read; keyboard Enter tested |
+| Refresh | Same button, existing two reads, aria-disabled during either active read with a synchronous retry guard; keyboard Enter tested |
 | One unavailable status; no empty conclusion on failure | Single amber alert above results; canonical condition uses loading/error/verified success, never empty inference from failure |
 | Category / Displayed count | Compact two-column hierarchy, pale neutral heading, bordered white rows; row remains a category filter |
 | All Cred-X | Preserved independently; actual successful response count |
@@ -46,3 +46,20 @@ The overview's combined risk/security example is not used. A single status regio
 ## Integration note
 
 Shared-file conflict: `frontend/app/console/mails/page.tsx` is also used by mail-preferences work. Changes here are limited to history state/read guards and the final sent-history section. Preserve other task edits when integrating. No shared stylesheet or dependency/lockfile changes.
+
+## Trust and Recovery re-verification — 2026-11-01
+
+Checked current fetched `origin/main` and HEAD `8212f9e93772a8f5a91f3f782640aeeff0fe7cc8` at 2026-11-01 06:19 UTC. The failed-versus-empty rendering fix remains present. Initial actual-component verification exposed one remaining keyboard regression: the native disabled Refresh button lost focus when a read began. Refresh now retains focus through `aria-disabled`; loading state and a synchronous in-flight ref prevent duplicate reads, including repeated Enter. No mail or preferences mutation was performed.
+
+Verification completed 2026-11-01 06:21 UTC:
+
+- Six Node tests passed: four mail regression tests and two API failed-versus-empty tests; zero failed/skipped.
+- Actual-component offline browser suite passed: loading, failed initial read, independent partial sources, populated results, verified empty, cached results/counts, retry, retained category and Refresh focus, keyboard category navigation, repeated details expansion, narrow layout and browser back. All fetches stubbed; zero external requests, mutations or browser errors.
+- New adversarial StrictMode fixtures settle the newer mail failure before an older mail success, and the newer GitHub success before an older GitHub failure. Neither older response replaces the newest state.
+- Repeated Enter while Refresh is aria-disabled creates no extra reads.
+- ESLint, TypeScript `--noEmit`, and `git diff --check` passed.
+- Seven screenshots saved and read back from `artifacts/visual-mails-history/`. Desktop remains 1180×757, browser default zoom 100%, device scale 1; narrow remains 375×812. Desktop partial/unavailable and narrow stale/empty-cache screenshots visually inspected. Screenshots contain synthetic records only.
+
+Shared-helper assessment: API summary and mail source-state lifecycles are currently distinct; mail has two independent verified collections and per-source sequence guards, whereas API summary has period-dependent data plus separate combined-provider cost state. A pure shared state classifier could be introduced in a separate refactor, but changing both lifecycles adds no safety benefit for this focused rendering/recovery verification. No common backend cause is inferred and no shared helper is introduced.
+
+Release limitation: this worker prepares a focused draft PR only. The batch integrator owns merge, deploy and production verification. No live delivery inference, sends, test sends, settings changes, record deletion, schedule changes or production operations occurred.

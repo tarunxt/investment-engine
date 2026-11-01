@@ -25,6 +25,7 @@ try {
       if(source)return new Promise(resolve=>window.reads.push({source,resolve}));
       return Promise.resolve(new Response(JSON.stringify({items:[]}),{status:200}));
     };
+    window.settleOne=(source,index,status,items)=>{const r=window.reads.filter(r=>r.source===source)[index];if(!r||r.done)throw new Error('Missing pending fixture read');r.done=true;r.resolve(new Response(JSON.stringify(source==='github'?{workflow_runs:items}:{items}),{status}));};
     window.settle=(source,status,items)=>window.reads.filter(r=>r.source===source&&!r.done).forEach(r=>{r.done=true;r.resolve(new Response(JSON.stringify(source==='github'?{workflow_runs:items}:{items}),{status}));});
     createRoot(document.getElementById('root')).render(<React.StrictMode><MailsPage/></React.StrictMode>);
   `);
@@ -56,17 +57,30 @@ try {
   const item=(id,category)=>({id,category,status:'sent',trigger:'Fixture only',subject:'Saved '+category+' notification',created_at:'2026-11-01T00:00:00Z',recipients:[],message:'Local fixture',remarks:'Fixture',warnings:[]});
   const run={id:1,name:'Fixture checks',run_number:7,status:'completed',conclusion:'success',display_title:'Local workflow result',event:'pull_request',head_branch:'fixture',head_sha:'12345678',created_at:'2026-11-01T00:00:00Z',html_url:origin+'/workflow'};
   await page.goto(origin);await results.getByRole('status').waitFor();
-  assert.equal(await panel.getByRole('tab').count(),5);assert.match(await tab('All Cred-X').textContent(),/Unavailable/);assert.equal(await refresh.isDisabled(),true);await noEmpty();await shot('desktop-loading');
-  await settle('mail',503);await settle('github',200,[run]);await results.getByRole('alert').waitFor();await noEmpty();assert.match(await tab('GitHub checks').textContent(),/1/);await shot('desktop-unavailable-partial');
+  assert.equal(await panel.getByRole('tab').count(),5);assert.match(await tab('All Cred-X').textContent(),/Unavailable/);assert.equal(await refresh.getAttribute('aria-disabled'),'true');await noEmpty();await shot('desktop-loading');
+  // StrictMode creates two reads per source: resolve the latest before the older one.
+  await page.waitForFunction(()=>window.reads.filter(r=>r.source==='mail').length===2&&window.reads.filter(r=>r.source==='github').length===2);
+  await page.evaluate(({run})=>{window.settleOne('mail',1,503,[]);window.settleOne('github',1,200,[run]);},{run});
+  await results.getByRole('alert').waitFor();
+  await page.evaluate(({item})=>{window.settleOne('mail',0,200,[item]);window.settleOne('github',0,503,[]);},{item:item(99,'runs')});
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await results.locator('article').count(),0);assert.match(await tab('All Cred-X').textContent(),/Unavailable/);
+  await results.getByRole('alert').waitFor();await noEmpty();assert.match(await tab('GitHub checks').textContent(),/1/);await shot('desktop-unavailable-partial');
   await tab('GitHub checks').click();await results.getByText('Local workflow result',{exact:true}).waitFor();assert.equal(await results.getByRole('alert').count(),0);await shot('desktop-github');
   await tab('GitHub checks').focus();
   for(const [key,name] of [['Home','All Cred-X'],['ArrowDown','Run notifications'],['End','GitHub checks'],['ArrowDown','All Cred-X']]){await page.keyboard.press(key);assert.equal(await tab(name).getAttribute('aria-selected'),'true');assert.equal(await tab(name).evaluate(e=>e===document.activeElement),true);}
-  await refresh.focus();await page.keyboard.press('Enter');await results.getByRole('status').waitFor();await noEmpty();assert.equal(await refresh.isDisabled(),true);
+  await refresh.focus();await page.keyboard.press('Enter');await results.getByRole('status').waitFor();await noEmpty();assert.equal(await refresh.getAttribute('aria-disabled'),'true');
+  const pendingReads=await page.evaluate(()=>window.reads.length);await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.reads.length),pendingReads);
   await settle('mail',200,[item(1,'runs'),item(2,'alerts'),item(3,'account')]);await settle('github',200,[run]);await results.getByText('Saved runs notification',{exact:true}).waitFor();assert.equal(await results.locator('article').count(),3);assert.match(await tab('All Cred-X').textContent(),/3/);
   for(const name of ['Run notifications','Risk alerts & tests','Account & security']){await tab(name).click();assert.equal(await results.locator('article').count(),1);}
   const details=results.locator('details');for(let i=0;i<2;i++){await details.locator('summary').click();assert.equal(await details.getAttribute('open'),'');await details.locator('summary').click();assert.equal(await details.getAttribute('open'),null);}
   await tab('All Cred-X').click();await shot('desktop-loaded');
-  await refresh.click();await settle('mail',503);await settle('github',503);await results.getByRole('alert').waitFor();await noEmpty();assert.equal(await results.locator('article').count(),3);assert.match(await tab('All Cred-X').textContent(),/3 · cached/);assert.match(await results.getByRole('alert').textContent(),/may be out of date/);await shot('desktop-stale');
+  await tab('Risk alerts & tests').click();await refresh.focus();await page.keyboard.press('Enter');
+  assert.equal(await tab('Risk alerts & tests').getAttribute('aria-selected'),'true');
+  await settle('mail',503);await settle('github',503);await results.getByRole('alert').waitFor();await noEmpty();
+  assert.equal(await tab('Risk alerts & tests').getAttribute('aria-selected'),'true');
+  assert.equal(await refresh.evaluate(e=>e===document.activeElement),true);
+  await tab('All Cred-X').click();assert.equal(await results.locator('article').count(),3);assert.match(await tab('All Cred-X').textContent(),/3 · cached/);assert.match(await results.getByRole('alert').textContent(),/may be out of date/);await shot('desktop-stale');
   await refresh.click();await settle('mail',200);await settle('github',200);await results.getByText('No Cred-X mail attempts have been recorded yet.',{exact:true}).waitFor();assert.equal(await results.getByRole('alert').count(),0);await shot('desktop-verified-empty');
   await refresh.click();await settle('mail',503);await settle('github',503);await results.getByRole('alert').waitFor();await noEmpty();
   for(const name of ['Run notifications','Risk alerts & tests','Account & security','GitHub checks']){await tab(name).click();await noEmpty();assert.equal(await results.getByRole('alert').count(),1);}
@@ -74,5 +88,5 @@ try {
   for(const button of await panel.getByRole('tab').all()){const box=await button.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=375);}
   await page.goto(origin+'/other');await page.goBack();await settle('mail',200);await settle('github',200);await results.getByText('No Cred-X mail attempts have been recorded yet.',{exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.mutations),[]);assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
-  console.log('PASS loading, failure, partial sources, filters/counts, loaded, stale, verified-empty, retries, keyboard, repeated details, narrow/back; no external requests or mutations. '+output);
+  console.log('PASS loading, failure, partial sources, out-of-order responses, retained category/focus, filters/counts, loaded, stale, verified-empty, retries, keyboard, repeated details, narrow/back; no external requests or mutations. '+output);
 }finally{await browser?.close();await new Promise(resolve=>server?server.close(resolve):resolve());await rm(temporary,{recursive:true,force:true});}

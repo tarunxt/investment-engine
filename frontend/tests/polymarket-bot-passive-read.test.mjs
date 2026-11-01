@@ -90,8 +90,8 @@ test("explicit refresh and start controls remain while missing runtime status is
   }
 });
 
-function renderColdPage(readSource, screen) {
-  const numericDefaults = (values) => new Proxy(values, { get: (target, key) => key in target ? target[key] : 0 });
+function renderColdPage(readSource, screen, options = {}) {
+  const numericDefaults = (values) => new Proxy(values, { get: (target, key) => key in target ? target[key] : options.populated ? 123 : 0 });
   const state = {
     read_source: readSource, read_message: "Current runtime evidence is unavailable.",
     running: false, paused: false, mode: "live-read", server_now: "2026-10-03T00:00:00Z",
@@ -113,7 +113,7 @@ function renderColdPage(readSource, screen) {
     react: {
       useState(initial) {
         const index = hook++;
-        const value = index === 0 ? state : index === 1 ? false : index === 6 ? screen : typeof initial === "function" ? initial() : initial;
+        const value = index === 0 ? (options.noState ? null : state) : index === 1 ? Boolean(options.loading) : index === 2 ? (options.error || null) : index === 6 ? screen : typeof initial === "function" ? initial() : initial;
         return [value, () => {}];
       },
       useEffect() {}, useMemo: (fn) => fn(), useRef: (value) => ({ current: value }), useDeferredValue: (value) => value,
@@ -125,11 +125,19 @@ function renderColdPage(readSource, screen) {
     "lucide-react": new Proxy({}, { get: () => () => null }),
     "@/components/ui/card": new Proxy({}, { get: () => passthrough }),
     "@/components/ui/button": { Button: passthrough },
+    "@/components/console/BotStateReadError": (() => {
+      const module = { exports: {} };
+      const code = ts.transpileModule(readFileSync(new URL("../components/console/BotStateReadError.tsx", import.meta.url), "utf8"), {compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+      new Function("exports", "require", code)(module.exports, () => ({ jsx:element, jsxs:element }));
+      return module.exports;
+    })(),
     "@/services/api": { APIError: class extends Error {}, apiService: new Proxy({}, { get: (_target, name) => () => { throw new Error(`Unexpected API action ${String(name)}`); } }) },
     "@/lib/datetime": { parseApiTimestamp: (value) => value ? new Date(value) : null },
-    "./_components/PolymarketBotPageSkeleton": new Proxy({}, { get: () => () => null }),
+    "./_components/MetricGrid": { MetricGrid: ({items}) => items.map(item => `${item.label}: ${item.value}`) },
+    "./_components/TraderTables": new Proxy({}, { get: () => () => null }),
+    "./_components/PolymarketBotPageSkeleton": new Proxy({}, { get: () => () => "Loading fixture" }),
   };
-  const compiled = ts.transpileModule(source, {
+  const compiled = ts.transpileModule(options.direct ? readFileSync(new URL("../app/console/polymarket-direct-bot/page.tsx", import.meta.url), "utf8") : source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
   }).outputText;
   const loaded = { exports: {} };
@@ -166,3 +174,38 @@ for (const readSource of ["persisted", "unavailable"]) {
     assert.match(main.text, /Stop Bot/);
   });
 }
+
+for (const direct of [false, true]) {
+  const label = direct ? "direct" : "copy";
+  test(`${label}: actual page failed read identifies page, unknown state and console exit`, () => {
+    const result = renderColdPage("runtime", "main", {direct, noState:true, error:"HTTP 503 fixture"});
+    assert.match(result.text, direct ? /Polymarket Direct Bot/ : /Polymarket Copy Bot/);
+    assert.match(result.text, /data could not be checked/);
+    assert.match(result.text, /execution status are unknown/);
+    assert.match(result.text, /Back to console/);
+    assert.match(result.text, /HTTP 503 fixture/);
+    assert.doesNotMatch(result.text, /Stopped|No positions|Start Bot/);
+  });
+  test(`${label}: actual page loading remains separate from failure`, () => {
+    const result = renderColdPage("runtime", "main", {direct,noState:true,loading:true});
+    assert.match(result.text, /Loading/);
+    assert.doesNotMatch(result.text, /state unavailable|Back to console/);
+  });
+  test(`${label}: verified empty success does not show recovery`, () => {
+    const result = renderColdPage("runtime", "main", {direct});
+    assert.match(result.text, /Copy trading Bots/);
+    assert.doesNotMatch(result.text, /state unavailable|data could not be checked/);
+  });
+  test(`${label}: later failed read retains successful snapshot`, () => {
+    const result = renderColdPage("runtime", "main", {direct,error:"HTTP 503 fixture"});
+    assert.match(result.text, /Previously loaded data remains below/);
+    assert.match(result.text, /Copy trading Bots/);
+    assert.match(result.text, /Start/);
+  });
+}
+
+for (const direct of [false,true]) test(`${direct ? "direct" : "copy"}: populated success retains verified fixture metrics`, () => {
+ const result = renderColdPage("runtime", "settings", {direct,populated:true});
+ assert.match(result.text, /123/);
+ assert.doesNotMatch(result.text, /state unavailable|data could not be checked/);
+});

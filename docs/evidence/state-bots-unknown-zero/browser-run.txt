@@ -1,0 +1,1 @@
+PASS: 8 actual-card fixtures, desktop, narrow, keyboard; no operational requests
