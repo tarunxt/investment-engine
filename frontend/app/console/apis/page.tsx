@@ -190,11 +190,17 @@ function LlmCostHistoryModal({
 
         <div className="max-h-[65vh] overflow-y-auto p-5">
           {error ? (
-            <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+            <div role="alert" className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error} History is unverified; this is not a no-runs result.</div>
+          ) : null}
+
+          {history && (loading || error) ? (
+            <p role="status" className="mb-4 text-sm text-amber-700">Showing previously loaded history; {loading ? 'refreshing…' : 'the latest request failed and these values may be out of date.'}</p>
           ) : null}
 
           {loading && !history ? (
             <div className="py-10 text-center text-sm text-gray-500">Loading LLM cost history...</div>
+          ) : !history || (history.days.length === 0 && history.runs.length === 0 && (error || loading)) ? (
+            <p role="status" className="py-10 text-center text-sm text-gray-500">Cost history is unavailable. Close and reopen history to retry.</p>
           ) : activeTab === 'day-wise' ? (
             <>
               <table className="min-w-full text-sm">
@@ -208,7 +214,9 @@ function LlmCostHistoryModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {history?.days.map((day) => (
+                  {history.days.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">{error || loading ? 'Day-wise history is unverified.' : 'No daily history recorded for this LLM yet.'}</td></tr>
+                  ) : history.days.map((day) => (
                     <tr key={day.date}>
                       <td className="px-4 py-3 font-medium text-gray-900">
                         {formatCalendarDate(day.date)}
@@ -265,7 +273,7 @@ function LlmCostHistoryModal({
                   ) : (
                     <tr>
                       <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
-                        No runs recorded for this LLM yet.
+                        {error || loading ? 'Run history is unverified.' : 'No runs recorded for this LLM yet.'}
                       </td>
                     </tr>
                   )}
@@ -300,6 +308,7 @@ export default function ApisPage() {
   const [customEnd, setCustomEnd] = useState('');
   const [showAllGeminiKeys, setShowAllGeminiKeys] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => getTodayIso(API_TIMEZONE));
+  const costHistoryRequest = useRef(0);
   const [costHistoryProvider, setCostHistoryProvider] = useState<string | null>(null);
   const [costHistory, setCostHistory] = useState<LlmCostHistoryResponse | null>(null);
   const [costHistoryLoading, setCostHistoryLoading] = useState(false);
@@ -388,6 +397,7 @@ export default function ApisPage() {
   }, [loadCombinedCostHistories]);
 
   const loadCostHistory = useCallback(async (provider: string, dayLimit: number, runLimit: number) => {
+    const request = ++costHistoryRequest.current;
     setCostHistoryLoading(true);
     setCostHistoryError(null);
     try {
@@ -396,11 +406,13 @@ export default function ApisPage() {
         day_limit: dayLimit,
         run_limit: runLimit,
       });
+      if (request !== costHistoryRequest.current) return;
       setCostHistory(res);
     } catch (err) {
+      if (request !== costHistoryRequest.current) return;
       setCostHistoryError(err instanceof Error ? err.message : 'Failed to load LLM cost history');
     } finally {
-      setCostHistoryLoading(false);
+      if (request === costHistoryRequest.current) setCostHistoryLoading(false);
     }
   }, []);
 
@@ -416,6 +428,7 @@ export default function ApisPage() {
   }, [loadCostHistory]);
 
   const closeCostHistory = useCallback(() => {
+    costHistoryRequest.current += 1;
     setCostHistoryProvider(null);
     setCostHistory(null);
     setCostHistoryError(null);
