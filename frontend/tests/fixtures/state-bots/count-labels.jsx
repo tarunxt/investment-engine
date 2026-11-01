@@ -1,0 +1,11 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { StageOneRunStats } from '../../../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard';
+import { buildBullpenAutoRunWorkflowView } from '../../../app/console/bullpen-ai/_components/bullpenAutoRunProgress';
+const fixture = location.hash.slice(1) || 'failed';
+const base = buildBullpenAutoRunWorkflowView(null).stages[0];
+const unknown = ['loading', 'failed', 'failed-independent'].includes(fixture);
+const count = fixture === 'cached-known' ? 12 : 0;
+const stage = { ...base, outputs: {total_items: count, accepted_candidates_count: count, ...(fixture.startsWith('failed') ? {phase_status: 'failed'} : {}), ...(fixture === 'failed-independent' ? {independent_stage1_scan:true} : {})}, timerCompletedAt: unknown ? null : '2026-11-01T00:00:00Z' };
+const props = { stage, hideNumbers: fixture === 'loading', renderInteractiveRows:true, onOpenScanCandidateDialog: () => { window.__openDetails = true; }, onOpenExcelHistory: () => {}, run: unknown ? null : {id:'synthetic-saved-run', stage_results:[], started_at:'2026-11-01T00:00:00Z'} };
+createRoot(document.getElementById('root')).render(<main className="mx-auto max-w-5xl space-y-5 p-4"><h1>{fixture} event-count labels</h1><section aria-label="Filters-only labels"><StageOneRunStats {...props} filtersOnly /></section><section aria-label="All adjacent count labels"><StageOneRunStats {...props} /></section><section aria-label="Noninteractive export labels"><StageOneRunStats {...props} renderInteractiveRows={false} /></section></main>);
