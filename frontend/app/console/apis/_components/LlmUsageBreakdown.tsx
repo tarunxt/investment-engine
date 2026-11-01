@@ -381,9 +381,9 @@ export default function LlmUsageBreakdown() {
         </label>
         <button
           type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex h-9 items-center border rounded-md border-indigo-600 bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={() => { if (!loading) void load(); }}
+          aria-disabled={loading}
+          className="inline-flex h-9 items-center border rounded-md border-indigo-600 bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh

@@ -61,5 +61,22 @@ try{
  await usage().getByRole('button',{name:'Show previous breakdown day'}).click();await page.waitForFunction(()=>breakdowns.length===2);
  await usage().getByRole('button',{name:'Show next breakdown day'}).click();await page.waitForFunction(()=>breakdowns.length===3);
  await respond(2,[]);await usage().getByText(/No non-zero/).waitFor();await respond(1,[item]);await page.waitForTimeout(30);assert.equal(await usage().getByText('OpenAI · fixture-model').count(),0);
- assert.deepEqual(errors,[]);console.log('PASS: actual components at 1180x757 and 390x757: loading, failed, verified empty, failed-after-empty, loaded, cached stale, date back/forward, keyboard retry/points, four filters, USD, no clipping, no external calls/writes. '+output);
+ // Isolated focus/input persistence across asynchronous state updates.
+ for(const width of [1180,390]){
+  await page.setViewportSize({width,height:757});await start();
+  const dateInput=usage().locator('input[aria-label="Breakdown date"]');
+  const refresh=usage().getByRole('button',{name:'Refresh',exact:true});
+  const selected=await dateInput.inputValue();
+  const focused=async control=>assert.equal(await control.evaluate(e=>e===document.activeElement),true);
+  await dateInput.focus();await respond(0,[],true);await usage().getByRole('alert').waitFor();await focused(dateInput);assert.equal(await dateInput.inputValue(),selected);
+  await refresh.focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>breakdowns.length===2);
+  await focused(refresh);assert.equal(await refresh.getAttribute('aria-disabled'),'true');await page.keyboard.press('Enter');await page.keyboard.press('Space');assert.equal(await page.evaluate(()=>breakdowns.length),2);await respond(1,[item]);await usage().getByText('OpenAI · fixture-model').waitFor();await focused(refresh);
+  await page.keyboard.press('Enter');await page.waitForFunction(()=>breakdowns.length===3);await focused(refresh);
+  await respond(2,[],true);await usage().getByRole('alert').waitFor();await focused(refresh);assert.equal(await dateInput.inputValue(),selected);
+  await usage().getByText('OpenAI · fixture-model').waitFor();
+  await page.keyboard.press('Enter');await page.waitForFunction(()=>breakdowns.length===4);await respond(3,[]);await usage().getByText(/No non-zero/).waitFor();await focused(refresh);await page.screenshot({path:path.join(output,`focus-recovered-${width}.png`),fullPage:true});
+  await dateInput.focus();await dateInput.fill('2026-10-30');await page.waitForFunction(()=>breakdowns.length===5);await focused(dateInput);await respond(4,[item]);await usage().getByText('OpenAI · fixture-model').waitFor();await focused(dateInput);assert.equal(await dateInput.inputValue(),'2026-10-30');
+  assert.deepEqual(await page.evaluate(()=>breakdowns.map(({url,options})=>{const q=new URL(url,location.href).searchParams;return {path:new URL(url,location.href).pathname,method:options.method,cache:options.cache,credentials:options.credentials,period:q.get('period'),sameDay:q.get('custom_start')===q.get('custom_end')};})),Array(5).fill({path:'/backend-api/api-usage/llms/breakdown',method:'GET',cache:'no-store',credentials:'same-origin',period:'custom',sameDay:true}));
+ }
+ assert.deepEqual(errors,[]);console.log('PASS: actual components at 1180x757 and 390x757: loading, failed, verified empty, failed-after-empty, loaded, cached stale, date back/forward, keyboard retry/points, four filters, USD, no clipping, focus/input retention, duplicate retry suppression, exact read-only GET contract, no external calls/writes. '+output);
 }finally{await browser.close();server.close()}
