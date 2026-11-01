@@ -4356,7 +4356,7 @@ function StageLlmSelectorDialog({
   );
 
   return (
-    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} titleId={selectorTitleId} onClose={onClose}>
+    <ModelPickerDialogFrame enabled title={selectorTitle} titleId={selectorTitleId} onClose={onClose}>
         <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5", organizedPicker && "shrink-0 px-4 py-3 sm:px-6")}>
           <div>
             <p id={selectorTitleId} className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
