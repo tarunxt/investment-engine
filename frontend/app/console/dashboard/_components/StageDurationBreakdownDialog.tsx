@@ -244,7 +244,7 @@ export function StageDurationBreakdownDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="stage-duration-breakdown-title"
-        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-blue-100 bg-indigo-50 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
@@ -263,7 +263,7 @@ export function StageDurationBreakdownDialog({
               {breakdown.totalDuration}
             </p>
             <p className="mt-2 text-sm leading-5 text-slate-600">
-              Measured stage interval includes processing and possible queue time.
+              The complete execution window includes provider processing and queue time.
               Separate phases are shown only where timestamps were recorded.
             </p>
           </div>
@@ -289,24 +289,15 @@ export function StageDurationBreakdownDialog({
             </div>
           ) : null}
 
-          <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200">
-            {[
-              { label: "Setup and dispatch", steps: breakdown.steps.slice(0, 1) },
-              { label: "Model processing", steps: breakdown.steps.slice(1, -1) },
-              { label: "Validation and persistence", steps: breakdown.steps.slice(-1) },
-            ].map((phase) => (
-              <div key={phase.label} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] sm:gap-4">
-                <dt className="text-sm font-medium text-slate-700">{phase.label}</dt>
-                <dd className="min-w-0 space-y-2 text-sm text-slate-950 sm:text-right">
-                  {phase.steps.map((step) => (
-                    <div key={step.id}>
-                      {phase.label === "Model processing" ? (
-                        <p className="mb-1 break-words text-xs text-slate-600">{step.label}</p>
-                      ) : null}
-                      <p className="font-mono font-semibold tabular-nums">{step.duration}</p>
-                    </div>
-                  ))}
-                </dd>
+          <div className="hidden grid-cols-[minmax(0,1.3fr)_7rem_minmax(0,1fr)] gap-4 px-4 pb-2 text-xs font-semibold text-slate-600 sm:grid" aria-hidden="true">
+            <span>Component</span><span>Duration</span><span>Measurement</span>
+          </div>
+          <dl className="divide-y divide-blue-100 overflow-hidden rounded-xl border border-blue-100 bg-white">
+            {breakdown.steps.map((step) => (
+              <div key={step.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1.3fr)_7rem_minmax(0,1fr)] sm:gap-4">
+                <dt className="min-w-0 break-words text-sm font-medium text-slate-800">{step.label}</dt>
+                <dd className="font-mono text-sm font-semibold tabular-nums text-slate-950">{step.duration}</dd>
+                <dd className="text-xs leading-5 text-slate-600">{step.detail}</dd>
               </div>
             ))}
           </dl>

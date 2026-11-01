@@ -40,15 +40,15 @@ createRoot(document.getElementById('root')).render(<Fixture/>);`);
       await page.getByLabel('Fixture').selectOption(mode);
       const trigger=page.getByRole('button',{name:'Open duration'});await trigger.focus();await page.keyboard.press('Enter');
       const dialog=page.getByRole('dialog');await dialog.waitFor();
-      if(['loaded','partial'].includes(mode))await dialog.locator('dd').getByText('Second exact model',{exact:false}).waitFor();
+      if(['loaded','partial'].includes(mode))await dialog.locator('dt').getByText('Second exact model',{exact:false}).waitFor();
       if(mode==='failed')await dialog.getByText(/Fixture read failure/).waitFor();
       if(mode==='loading')await dialog.getByText('Loading detailed LLM timings…').waitFor();
-      assert.equal(await dialog.locator('dt').count(),3);
+      assert.equal(await dialog.locator('dt').count(),['loaded','partial'].includes(mode)?4:3);
       if(['loaded','partial'].includes(mode)){
         for(const duration of ['00:00:09','00:01:30','00:01:20','00:00:10'])assert.match(await dialog.locator('dl').innerText(),new RegExp(duration));
         assert.match(await dialog.locator('dl').innerText(),/Exact fixture model/);
       }
-      assert.match(await dialog.innerText(),/processing and possible queue time/);
+      assert.match(await dialog.innerText(),/includes provider processing and queue time/);
       assert.equal(await dialog.locator('details').getAttribute('open'),null);
       if(['fallback','failed','active','loading'].includes(mode))assert.equal(await dialog.getByText('Not recorded',{exact:true}).count(),2);
       if(mode==='empty')assert.match(await dialog.locator('header').innerText(),/n\/a/);
