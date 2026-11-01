@@ -345,6 +345,8 @@ test("actual workflow card renders pending and failed history independently of o
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
       formatTimestamp: () => "03 Oct", formatCompactStageTime: () => "03 Oct 00:00", lastRunByPortfolio: { zerodha: null }, isBusy: false, STAGE_ORDER: stages, now: 0,
       WorkflowStageTile: ({ stage }) => createElement("button", null, `View output ${stage}`),
+      stageLedger: false, ledgerView: "ledger",
+      WorkflowStageLedger: ({ children }) => createElement("div", null, children),
       RebalanceStockFlowTrigger: () => null, getWorkflowRunDuration: () => null,
       getWorkflowRunCost: () => 0, formatInrCost: () => "0", usdInrRate: 1, lastAutoRebalanceCosts: { zerodha: 0 },
     };
