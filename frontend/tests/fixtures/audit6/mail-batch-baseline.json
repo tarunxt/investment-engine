@@ -1,0 +1,78 @@
+{
+  "base": "968ac9c16ca0f88df4c68732c13792787cc66e60",
+  "history": [
+    {
+      "id": 1,
+      "subject": "Synthetic included",
+      "created_at": "2026-11-01T00:00:00Z",
+      "warnings": [],
+      "sell_action": {
+        "status": "detected",
+        "evaluated_at": "2026-11-01T00:01:00Z",
+        "evaluated_market_id": "included",
+        "market_question": "Synthetic included",
+        "position_side": "YES",
+        "live_held_side_bullpen_odds": 70,
+        "sell_threshold": 80,
+        "shares": 10,
+        "average_sell_price": 50,
+        "expected_proceeds": 12.5
+      }
+    },
+    {
+      "id": 2,
+      "subject": "Synthetic recovered",
+      "created_at": "2026-11-01T00:00:00Z",
+      "warnings": [],
+      "sell_action": {
+        "status": "detected",
+        "evaluated_at": "2026-11-01T00:01:00Z",
+        "evaluated_market_id": "recovered",
+        "market_question": "Synthetic recovered",
+        "position_side": "YES",
+        "live_held_side_bullpen_odds": 85,
+        "sell_threshold": 80,
+        "shares": 10,
+        "average_sell_price": 50,
+        "expected_proceeds": 8
+      }
+    },
+    {
+      "id": 3,
+      "subject": "Synthetic unverified",
+      "created_at": "2026-11-01T00:00:00Z",
+      "warnings": [],
+      "sell_action": {
+        "status": "detected",
+        "evaluated_at": "2026-11-01T00:01:00Z",
+        "evaluated_market_id": "unverified",
+        "market_question": "Synthetic unverified",
+        "position_side": "YES",
+        "sell_threshold": 80,
+        "shares": 10,
+        "average_sell_price": 50,
+        "expected_proceeds": 4
+      }
+    }
+  ],
+  "table": "<tbody class=\"divide-y divide-border\"><tr class=\"bg-red-50/50\"><td class=\"max-w-sm px-4 py-3 font-semibold text-foreground\">Synthetic included</td><td class=\"px-4 py-3 font-mono\">included</td><td class=\"px-4 py-3 font-bold\">YES</td><td class=\"px-4 py-3\">Unavailable<span class=\"mt-1 block text-[10px] text-muted-foreground\">1/11/2026, 12:00:00 am</span></td><td class=\"px-4 py-3 font-bold\">70.0%</td><td class=\"px-4 py-3\">1/11/2026, 12:01:00 am</td><td class=\"px-4 py-3\"><span class=\"rounded-full border px-2 py-1 font-bold border-red-200 bg-red-100 text-red-800\">INCLUDE · &lt; 80.0%</span></td><td class=\"px-4 py-3\">10</td><td class=\"px-4 py-3\">50.0¢</td><td class=\"px-4 py-3\">12.50</td><td class=\"px-4 py-3 font-mono\">—</td><td class=\"px-4 py-3\">#1</td><td class=\"px-4 py-3 capitalize\">detected</td></tr><tr class=\"bg-emerald-50/40\"><td class=\"max-w-sm px-4 py-3 font-semibold text-foreground\">Synthetic recovered</td><td class=\"px-4 py-3 font-mono\">recovered</td><td class=\"px-4 py-3 font-bold\">YES</td><td class=\"px-4 py-3\">Unavailable<span class=\"mt-1 block text-[10px] text-muted-foreground\">1/11/2026, 12:00:00 am</span></td><td class=\"px-4 py-3 font-bold\">85.0%</td><td class=\"px-4 py-3\">1/11/2026, 12:01:00 am</td><td class=\"px-4 py-3\"><span class=\"rounded-full border px-2 py-1 font-bold border-emerald-200 bg-emerald-100 text-emerald-800\">EXCLUDE · ≥ 80.0%</span></td><td class=\"px-4 py-3\">10</td><td class=\"px-4 py-3\">50.0¢</td><td class=\"px-4 py-3\">8.00</td><td class=\"px-4 py-3 font-mono\">—</td><td class=\"px-4 py-3\">#2</td><td class=\"px-4 py-3 capitalize\">detected</td></tr><tr class=\"bg-amber-50/40\"><td class=\"max-w-sm px-4 py-3 font-semibold text-foreground\">Synthetic unverified</td><td class=\"px-4 py-3 font-mono\">unverified</td><td class=\"px-4 py-3 font-bold\">YES</td><td class=\"px-4 py-3\">Unavailable<span class=\"mt-1 block text-[10px] text-muted-foreground\">1/11/2026, 12:00:00 am</span></td><td class=\"px-4 py-3 font-bold\">Not read</td><td class=\"px-4 py-3\">1/11/2026, 12:01:00 am</td><td class=\"px-4 py-3\"><span class=\"rounded-full border px-2 py-1 font-bold border-amber-200 bg-amber-100 text-amber-800\">UNVERIFIED</span></td><td class=\"px-4 py-3\">10</td><td class=\"px-4 py-3\">50.0¢</td><td class=\"px-4 py-3\">4.00</td><td class=\"px-4 py-3 font-mono\">—</td><td class=\"px-4 py-3\">#3</td><td class=\"px-4 py-3 capitalize\">detected</td></tr></tbody>",
+  "attributes": [
+    "disabled={updating}",
+    "onClick={() => void updateStatus(action.status)}",
+    "disabled={updating}",
+    "onClick={() => void updateStatus(nextStatus)}",
+    "onClick={() => setAllPreferences(true)}",
+    "disabled={preferencesUnavailable || preferencesSaving}",
+    "onClick={() => setAllPreferences(false)}",
+    "disabled={preferencesUnavailable || preferencesSaving}",
+    "disabled={preferencesUnavailable || preferencesSaving}",
+    "disabled={preferencesUnavailable || preferencesSaving}",
+    "onClick={() => void loadPreferences()}",
+    "onClick={() => void savePreferences()}",
+    "disabled={preferencesUnavailable || preferencesSaving || !preferencesDirty}",
+    "onClick={() => void sendMail()}",
+    "disabled={!selected || sending}",
+    "onClick={() => void refreshHistory()}",
+    "onClick={() => setHistoryTab(tab.id)}"
+  ]
+}
