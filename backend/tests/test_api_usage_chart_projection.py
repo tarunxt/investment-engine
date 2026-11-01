@@ -27,7 +27,7 @@ async def test_chart_projection_is_provider_owned_complete_and_bounded(size):
             assert 'user_id' in sql and 'provider =' in sql
             assert 17 in compiled.params.values() and 'deepseek' in compiled.params.values()
             selected = ' '.join(str(column) for column in statement.selected_columns)
-            assert 'prompt' not in selected and 'output' not in selected
+            assert 'prompt' not in selected and 'output' not in selected and '.response' not in selected
             assert 'LIMIT' not in sql  # run_limit never truncates accounting rows
             if 'FROM jobs' in sql:
                 records = [(i, 'deepseek', 'model', 100, 10, .125, timestamp, {}, []) for i in range(size)]
@@ -81,17 +81,25 @@ async def test_four_provider_baseline_hydrates_all_provider_entities():
 @pytest.mark.asyncio
 async def test_attempt_window_is_bounded_owned_and_kept_separate():
     from app.domains.api_usage.corrected_router import _window_attempt_coverage
-    from app.domains.api_usage.coverage import MAX_EVENT_ROWS
 
     class FakeDB:
-        async def execute(self, statement):
+        async def stream_scalars(self, statement):
             compiled = statement.compile(dialect=postgresql.dialect())
-            assert MAX_EVENT_ROWS + 1 in compiled.params.values()
+            assert "LIMIT" not in str(compiled)
+            assert statement.get_execution_options()["yield_per"] == 1000
             assert 17 in compiled.params.values()
             assert 'deepseek' in compiled.params.values()
             assert 'started_at >=' in str(compiled) and 'started_at <' in str(compiled)
-            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: []))
+            class EmptyStream:
+                async def close(self):
+                    pass
+                async def __aiter__(self):
+                    for row in []:
+                        yield row
+            return EmptyStream()
 
     coverage = await _window_attempt_coverage(FakeDB(), user_id=17, provider='deepseek',
         start_utc=datetime(2026, 10, 31), end_utc=datetime(2026, 11, 1))
     assert coverage['summary']['attempts'] == 0
+    assert coverage['persisted_read_state'] == 'complete'
+    assert coverage['invocation_coverage_state'] == 'unknown'

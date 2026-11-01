@@ -17,11 +17,10 @@ from app.domains.api_usage.router import (
     api_usage_summary as legacy_api_usage_summary,
     llm_cost_history as legacy_llm_cost_history,
 )
-from app.domains.api_usage.coverage import MAX_EVENT_ROWS, summarize_attempt_coverage
+from app.domains.api_usage.window_coverage import load_window_attempt_coverage as _window_attempt_coverage
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.api_usage.models import (
-    ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
     LlmProviderUsageDailySnapshot,
 )
@@ -65,19 +64,6 @@ def _accounting_window(start_utc: datetime, end_utc: datetime) -> dict[str, Any]
     }
 
 
-async def _window_attempt_coverage(db: AsyncSession, *, user_id: int,
-                                   start_utc: datetime, end_utc: datetime,
-                                   provider: str | None = None) -> dict[str, Any]:
-    # These estimates remain separate from legacy/daily totals: adding them
-    # would double count responses represented in both ledgers.
-    statement = select(ApiUsageAttemptEvent).where(
-        ApiUsageAttemptEvent.user_id == user_id,
-        ApiUsageAttemptEvent.started_at >= start_utc.replace(tzinfo=UTC),
-        ApiUsageAttemptEvent.started_at < end_utc.replace(tzinfo=UTC),
-        *([ApiUsageAttemptEvent.actual_provider == provider] if provider else []),
-    ).order_by(ApiUsageAttemptEvent.started_at, ApiUsageAttemptEvent.event_id).limit(MAX_EVENT_ROWS + 1)
-    events = (await db.execute(statement)).scalars().all()
-    return summarize_attempt_coverage(events)
 
 
 def _safe_int(value: object, default: int = 0) -> int:

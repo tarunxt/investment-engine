@@ -61,12 +61,15 @@ try {
     const day = document.querySelector('input[type=date]').value;
     const row = {provider:'deepseek',provider_name:'DeepSeek',model:'fixture',source:'bullpen',source_label:'Bullpen',workflow:'Synthetic workflow',requests:1,tokens_in:100,tokens_out:10,estimated_cost:.125,estimated_cost_inr:null,measurement:'estimated'};
     const runs = ['estimated','actual','reconciled'].map((measurement,index)=>({...row,measurement,run_label:'Synthetic run '+index,run_number:index+1,job_id:index+1,status:'failed',timestamp:day+'T06:00:00Z'}));
-    window.reads[1].resolve(new Response(JSON.stringify({timezone:'Asia/Kolkata',from_date:day,to_date:day,usd_inr_rate:null,fx_status:'stale',items:[row],runs,coverage_note:'Synthetic coverage unknown; hidden retries unknown'}),{status:200}));
+    window.reads[1].resolve(new Response(JSON.stringify({timezone:'Asia/Kolkata',from_date:day,to_date:day,usd_inr_rate:null,fx_status:'stale',items:[row],runs,coverage_note:'Synthetic coverage unknown; hidden retries unknown',attempt_coverage:{persisted_read_state:'complete',processed_event_rows:3,summary:{tariff_freshness:'repository_snapshot_unverified',tariff_versions:{'repository-sha256-fixture':2},cache_fields:{cache_read_input_tokens:{reported_tokens:0,inferred_tokens:20,reported_attempts:1,inferred_attempts:1,unknown_attempts:1}}}}}),{status:200}));
   });
   await region.getByText('Tariff estimate',{exact:true}).waitFor();
   await region.getByText('Provider day total · settlement unknown',{exact:true}).waitFor();
   await region.getByText('Allocated provider day total',{exact:true}).waitFor();
   assert.equal(await region.getByText('Actual',{exact:true}).count(),0);
+  await region.getByText(/Cache read tokens: reported 0, inferred 20/).waitFor();
+  await region.getByText(/Selected persisted read: complete/).waitFor();
+  await region.getByText(/Tariff freshness: repository_snapshot_unverified/).waitFor();
   await page.setViewportSize({width:375,height:900});
   await refresh.focus(); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.reads.length === 3);

@@ -53,6 +53,20 @@ type LlmUsageBreakdownResponse = {
   fx_status: string;
   request_metric: string;
   coverage_note: string;
+  attempt_coverage?: {
+    persisted_read_state?: string;
+    invocation_coverage_state?: string;
+    processed_event_rows: number;
+    read_cutoff?: string;
+    summary: {
+      tariff_freshness?: string;
+      tariff_versions?: Record<string, number>;
+      cache_fields?: Record<string, {
+        reported_tokens: number | null; inferred_tokens: number | null;
+        reported_attempts: number; inferred_attempts: number; unknown_attempts: number;
+      }>;
+    };
+  };
   items: LlmUsageBreakdownItem[];
   runs: LlmUsageRunItem[];
 };
@@ -523,6 +537,29 @@ export default function LlmUsageBreakdown() {
         </div>
       )}
 
+      {data?.attempt_coverage ? (
+        <details className="mt-3 text-xs text-gray-600" open>
+          <summary>Saved attempt coverage and tariff provenance</summary>
+          <p role="status">
+            Selected persisted read: {data.attempt_coverage.persisted_read_state ?? 'unknown'}
+            {' · '}{data.attempt_coverage.processed_event_rows} saved events.
+            {' '}Invocation and billed-charge completeness remain unknown.
+            {data.attempt_coverage.read_cutoff ? ` Read cutoff ${formatTimestamp(data.attempt_coverage.read_cutoff)}.` : ''}
+          </p>
+          <p>Tariff freshness: {data.attempt_coverage.summary.tariff_freshness ?? 'unknown'}; effective date unknown.</p>
+          {Object.entries(data.attempt_coverage.summary.tariff_versions ?? {}).map(([version, count]) => (
+            <p key={version} className="break-all">{version}: {count} attempts</p>
+          ))}
+          {Object.entries(data.attempt_coverage.summary.cache_fields ?? {}).map(([field, values]) => (
+            <p key={field}>
+              {field === 'cache_read_input_tokens' ? 'Cache read' : 'Cache miss'} tokens:
+              {' '}reported {values.reported_tokens ?? 'unknown'}, inferred {values.inferred_tokens ?? 'unknown'}
+              {' · '}{values.unknown_attempts} attempts without this field.
+            </p>
+          ))}
+          <p>Attempt estimates are separate from daily totals and are never added to them.</p>
+        </details>
+      ) : null}
       {data?.coverage_note ? (
         <p className="mt-3 text-xs text-gray-500">{data.coverage_note}</p>
       ) : null}
