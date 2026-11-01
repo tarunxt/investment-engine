@@ -40,7 +40,17 @@ Coordinate this correction with the Scanner worker to avoid duplicate changes.
 
 - Run the exact frontend dashboard CI suite plus changed-scope tests. Current
   integrated run: 522 tests passed, zero failed or skipped.
-- Run TypeScript and the production Webpack build; preserve actual logs/results.
+- TypeScript `tsc --noEmit` passed. Production `npm run build` (Webpack) passed,
+  including generation of all 49 static pages and postbuild runtime-artifact repair.
+- Scanner and Bots offline Playwright harnesses passed using system Chromium.
+  Scanner: 45 catalogue rows, five columns, shared loading status, sorting, real
+  loaded counts/actions, reopen, desktop/narrow, empty, failed/retry and partial
+  fixtures. Bots: six source states, three views, keyboard, repeated details,
+  four console links, desktop/narrow. Both reported zero external requests.
+- The broader test glob initially had 955/969 passing. The untouched baseline
+  had 946/959 passing with exactly the same thirteen unrelated failures. The
+  sole additional failure was the Scanner assertion fixed in `f9a19e8d`; its
+  focused tests and the 522-test required suite pass after that correction.
 - Run scope browser harnesses only after checking they bundle real components with
   local fixtures and block external requests. Use system Chromium explicitly where
   a harness otherwise expects an uninstalled Playwright browser.
