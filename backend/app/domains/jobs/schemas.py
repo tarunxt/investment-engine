@@ -19,6 +19,7 @@ class JobResponse(BaseModel):
     provider: str
     model: str
     status: JobStatus
+    dispatch_status: Optional[str] = None
     response: Optional[str] = None
     error_message: Optional[str] = None
     tokens_in: Optional[int] = None

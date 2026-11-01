@@ -49,8 +49,11 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
     # job still receive the final status (Redis pub/sub drops events with no subscriber).
     try:
         async with AsyncSessionLocal() as db:
-            job = await PostgresJobRepository(db).get(job_id)
-            if job and job.user_id == user_id:
+            job = await PostgresJobRepository(db).get_for_user(job_id, user_id)
+            if job is None:
+                await websocket.close(code=1008, reason="Job unavailable")
+                return
+            if job is not None:
                 status_val = (
                     job.status.value if hasattr(job.status, "value") else str(job.status)
                 )
@@ -73,6 +76,8 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
                 )
     except Exception:
         logger.warning("Failed to send initial state for job %d", job_id, exc_info=True)
+        await websocket.close(code=1011, reason="Job unavailable")
+        return
 
     try:
         await relay_channel(websocket, f"job_updates:{job_id}")
