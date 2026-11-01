@@ -542,7 +542,7 @@ export default function ApisPage() {
       </div>
 
       {error ? (
-        <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error} Usage for the selected period is unverified; this is not a zero-usage result. Use Refresh to retry.</div>
       ) : null}
 
       <div className="overflow-x-auto border border-gray-200 bg-white">
@@ -578,7 +578,7 @@ export default function ApisPage() {
                   Loading API usage...
                 </td>
               </tr>
-            ) : error && !data ? (
+            ) : error ? (
               <tr><td colSpan={9} className="px-4 py-8 text-center text-red-700">API usage is unavailable. Use Refresh to retry.</td></tr>
             ) : data && data.items.length > 0 ? (
               data.items
