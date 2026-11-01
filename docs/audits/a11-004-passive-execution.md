@@ -108,3 +108,40 @@ in a disposable /tmp virtual environment. No runtime database/broker/provider us
 This supersedes the earlier absence of a source reader, but not runtime integration
 or acceptance. HTTP still uses the safe unknown default. Sampling completeness,
 consumer/receipt/service status and retry exhaustion remain explicitly unverified.
+
+## Native isolated acceptance follow-up
+
+Official PostgreSQL 18.6 fixture was available and tested successfully. Image:
+`postgres@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81`.
+Server reported 18.6; disposable container used network none, tmpfs data and a
+single Unix-socket directory `/tmp/a11-004-pg-socket` mounted to container
+`/var/run/postgresql`, port 55434. No published port or application URL. Startup
+needed the default container socket location for official entrypoint initialization;
+initial attempts with a custom internal socket exited during initialization and
+were removed. No denied download or alternate feed was used.
+
+Six native tests pass: actual query plan/UUID+JSON projection wiring, 101-row cap
+and actor 7/8 isolation; statement timeout; lock timeout; outer pool deadline;
+in-flight cancellation cleanup; read-only rejection with unchanged synthetic rows.
+Each test owns a random schema and removes it afterward. Transaction-local settings
+were checked reset after successful reads and error/cancellation cases. Fixture
+schema uses the reviewed contract's projected column names/types and relevant
+indexes; it does not claim to execute the full combined migrations or application
+ORM bootstrap. Native synthetic EXPLAIN node types: Limit, Sort, Nested Loop,
+Index Scan. The observed Sort qualifies the earlier static-order hypothesis:
+LIMIT does not ensure index-only or constant work. Deadlines remain essential.
+No extrapolation to deployed row counts/indexes or runtime plan is justified.
+
+Reproducible native test entrypoint:
+`PYTHONPATH=backend /tmp/a11-health-venv/bin/python -m unittest discover -s backend/tests/isolated -p 'test_execution_health_postgres.py' -v`.
+Disposable test dependencies were SQLAlchemy 2.1.6, asyncpg 0.32.0 and greenlet
+3.5.6. Eleven earlier tests also reran successfully. The container was stopped
+and removed; no collector remains running. Test fixture code remains opt-in to
+the fixed disposable socket and validates server version before creating schema.
+
+R01 native projection/session wiring now verified against the minimal published
+column contract; exact integrated migrations/ORM release wiring remains pending.
+R02 native read-only/deadline/cancellation behavior verified with synthetic rows;
+production plan, deployed artifact read-back and existing independent heartbeat /
+receipt / service telemetry remain external evidence. No heartbeat is inferred,
+no thresholds approved, no alert sent, no source publication performed.
