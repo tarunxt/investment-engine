@@ -9,7 +9,7 @@ import { compile } from '@tailwindcss/node';
 import { Scanner } from '@tailwindcss/oxide';
 
 const root = resolve(import.meta.dirname, '..');
-const temp = resolve(root, 'node_modules/.cache/input-evidence-test');
+const temp = resolve(root, 'node_modules/.cache/input-evidence-test-'+process.pid);
 mkdirSync(temp, { recursive: true });
 const workflow = readFileSync(resolve(root, 'app/console/dashboard/_components/RebalanceWorkflowSections.tsx'), 'utf8');
 const rows = readFileSync(resolve(root, 'app/console/dashboard/_components/InputEvidenceRows.tsx'), 'utf8');
@@ -35,11 +35,13 @@ const candidates = new Scanner({}).scanFiles([{content:dialog+rows,extension:'ts
 const css=compiler.build(candidates);
 const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end(`<style>${css}</style><div id="root"></div><script>${readFileSync(resolve(temp,'fixture.js'),'utf8')}</script>`)});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || '/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+const browser=await chromium.launchPersistentContext(resolve(temp,'profile'),{executablePath:process.env.CHROMIUM_PATH || '/usr/bin/chromium',headless:true,args:['--no-sandbox']});
 const page=await browser.newPage({viewport:{width:1180,height:757}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 try {
+  if(process.env.INPUT_BROWSER_ZOOM==='2'){await page.goto('chrome://settings/appearance');await page.evaluate(()=>chrome.settingsPrivate.setDefaultZoom(2));}
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  if(process.env.INPUT_BROWSER_ZOOM==='2')assert.equal(await page.evaluate(()=>devicePixelRatio),2);
   const open=()=>page.getByRole('button',{name:'Choose evidence',exact:true}).click();
   const summary=page.getByRole('status');
   const rationale=()=>page.getByText('Input selection rationale:',{exact:true}).locator('..').innerText();
@@ -100,7 +102,7 @@ try {
   assert.equal(await page.getByRole('tab',{name:'Included evidence',exact:true}).getAttribute('aria-selected'),'true');
   await page.getByRole('button',{name:'Return to Select sources',exact:true}).click();
   await page.getByRole('button',{name:'Collapse Latest snapshot',exact:true}).click();
-  await page.setViewportSize({width:390,height:844});
+  await page.setViewportSize({width:process.env.INPUT_BROWSER_ZOOM==='2'?1180:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:resolve(evidence,'narrow-390x844.png')});
   await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).scrollIntoViewIfNeeded();
@@ -116,11 +118,13 @@ try {
   const lastSource=page.getByRole('checkbox',{name:'Select Latest Zerodha portfolio snapshot',exact:true});
   await lastSource.scrollIntoViewIfNeeded();await lastSource.focus();
   assert.equal(await lastSource.evaluate(el=>el===document.activeElement),true);
+  await page.screenshot({path:resolve(evidence,'mixed-narrow-last-source.png')});
+  writeFileSync(resolve(evidence,'scroll-metrics.json'),JSON.stringify(await page.evaluate(()=>({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,cssZoom:getComputedStyle(document.body).zoom})),null,2));
   await scroller.evaluate(el=>el.scrollTop=0);
   assert.equal(await scroller.evaluate(el=>el.scrollTop),0);
   for(const name of ['Close input selection','Done']){
     const control=page.getByRole('button',{name,exact:true});
-    const box=await control.boundingBox();assert.ok(box.y>=0 && box.y+box.height<=844);
+    const box=await control.boundingBox();assert.ok(box.y>=0 && box.y+box.height<=await page.evaluate(()=>innerHeight));
     await control.focus();assert.equal(await control.evaluate(el=>el===document.activeElement),true);
   }
   await page.screenshot({path:resolve(evidence,'mixed-narrow-scroll-controls.png')});

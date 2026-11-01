@@ -14,7 +14,7 @@ import { chromium } from 'playwright';
 const require = createRequire(import.meta.url);
 const frontend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'saved-output-fixture-'));
-const entry = `import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {PromptTemplateDialog} from ${JSON.stringify(path.join(frontend,'app/console/automated-rebalance/_components/PromptTemplateDialog.tsx'))};function App(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>Open preview</button>{open&&<PromptTemplateDialog title="Threat scan prompt" body="TOKEN_FIXTURE_ONLY" onClose={()=>setOpen(false)} onReviewInputs={()=>{window.reviewed=true;setOpen(false)}}/>}</>}createRoot(document.getElementById('root')).render(<App/>);`;
+const entry = `import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {PromptTemplateDialog} from ${JSON.stringify(path.join(frontend,'app/console/automated-rebalance/_components/PromptTemplateDialog.tsx'))};function App(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>Open preview</button>{open&&<PromptTemplateDialog title="Zerodha Threats Scan prompt" body="TOKEN_FIXTURE_ONLY" onClose={()=>setOpen(false)} onReviewInputs={()=>{window.reviewed=true;setOpen(false)}}/>}</>}createRoot(document.getElementById('root')).render(<App/>);`;
 let browser, server;
 try {
   await writeFile(path.join(temporary,'entry.tsx'),entry);
