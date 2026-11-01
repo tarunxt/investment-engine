@@ -1,5 +1,13 @@
-export type SavedScoreObservation = { id: number | string; run_id: number; symbol: string; exchange: string | null; covered_at: string; score: number | null; action: string | null; formula_version: string; completed: boolean; eligible?: boolean; run_status?: string; coverage_status: string; source_run_ids?: number[] };
-export type CurrentScoreCalculation = { symbol: string; exchange: string; market: 'india' | 'us'; score: number | null; action?: string | null; calculatedAt: string; sources: { runId: number; createdAt: string; completed: boolean; status?: string; market: 'india' | 'us' | null }[] };
+/** Versioned allocation interpretation only. Raw formula arithmetic and frozen snapshots are unchanged. */
+export const ALLOCATION_SCORE_POLICY = 'score-matrix-raw-effective-v2' as const;
+export function allocationScoreContract(rawScore: number | null | undefined) {
+  const raw = typeof rawScore === 'number' && Number.isFinite(rawScore) ? rawScore : null;
+  return { scorePolicy: ALLOCATION_SCORE_POLICY, rawScore: raw, effectiveScore: raw === null ? null : Math.min(3, Math.max(-3, raw)) };
+}
+export type AllocationScoreContract = ReturnType<typeof allocationScoreContract>;
+export type ExcludedScoreObservation = { row: SavedScoreObservation; reason: string };
+export type SavedScoreObservation = { id: number | string; run_id: number; symbol: string; exchange: string | null; covered_at: string; score: number | null; action: string | null; formula_version: string; completed: boolean; eligible?: boolean; run_status?: string; coverage_status: string; source_run_ids?: number[]; rawScore?: number | null; effectiveScore?: number | null; scorePolicy?: string };
+export type CurrentScoreCalculation = Partial<AllocationScoreContract> & { symbol: string; exchange: string; market: 'india' | 'us'; score: number | null; action?: string | null; calculatedAt: string; sources: { runId: number; createdAt: string; completed: boolean; status?: string; market: 'india' | 'us' | null }[] };
 export type BasketScoreHistory = { market: 'india' | 'us'; symbols: string[]; as_of: string; window_start: string; timezone: string; days: number; truncated: boolean; observations: SavedScoreObservation[]; notes: string[] };
 export type DisplayParameters = { maximumStocks: number; days: number; cash: number; normalised: number; valid: boolean };
 export const defaultDisplayParameters = (): DisplayParameters => ({ maximumStocks: 20, days: 5, cash: 5, normalised: 9.5, valid: true });
@@ -7,19 +15,31 @@ export const stockIdentity = (symbol: string, exchange: string) => `${exchange.t
 export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation) {
   const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
   const seen = new Set<number>();
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || !Array.isArray(history.observations)) return { rows: [], sum: 0, score: null };
+  const excludedRows: ExcludedScoreObservation[] = [];
+  // New current observations explicitly opt into the versioned effective-score contract.
+  // No such interpretation is ever applied to original saved observations.
+  const contract = allocationScoreContract(current?.score);
+  const effectiveCurrent = current?.scorePolicy === ALLOCATION_SCORE_POLICY
+    && current.rawScore === current.score && current.effectiveScore === contract.effectiveScore;
+  const currentScore = effectiveCurrent ? contract.effectiveScore : current?.score;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start || !Array.isArray(history.observations)) return { rows: [], sum: 0, score: null, excludedRows };
   const currentTime = Date.parse(current?.calculatedAt ?? '');
-  const validCurrent = current && current.symbol.toUpperCase() === symbol.toUpperCase() && current.exchange.toUpperCase() === exchange.toUpperCase() && current.market === history.market && typeof current.score === 'number' && Number.isFinite(current.score) && current.score >= -3 && current.score <= 3 && currentTime > start && currentTime <= end && current.sources.length > 0 && current.sources.every(source => Number.isSafeInteger(source.runId) && source.runId > 0 && (source.completed === true || source.status === 'partial') && source.market === history.market && Date.parse(source.createdAt) > start && Date.parse(source.createdAt) <= end);
+  const validCurrent = current && current.symbol.toUpperCase() === symbol.toUpperCase() && current.exchange.toUpperCase() === exchange.toUpperCase() && current.market === history.market && typeof currentScore === 'number' && Number.isFinite(currentScore) && currentScore >= -3 && currentScore <= 3 && (!current.scorePolicy || effectiveCurrent) && currentTime > start && currentTime <= end && current.sources.length > 0 && current.sources.every(source => Number.isSafeInteger(source.runId) && source.runId > 0 && (source.completed === true || source.status === 'partial') && source.market === history.market && Date.parse(source.createdAt) > start && Date.parse(source.createdAt) <= end);
   const currentIds = new Set(validCurrent ? current.sources.map(source => source.runId) : []);
   const rows = history.observations.filter(row => {
+    if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string') return false;
     const time = Date.parse(row.covered_at);
+    if (row.symbol?.toUpperCase() === symbol.toUpperCase() && row.exchange?.toUpperCase() === exchange.toUpperCase()
+      && Number.isFinite(time) && time > start && time <= end && typeof row.score === 'number' && Number.isFinite(row.score) && (row.score < -3 || row.score > 3)) {
+      excludedRows.push({ row, reason: 'Original saved score is outside −3 through +3. Legacy eligibility is unchanged; no effective score has been substituted.' });
+    }
     if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string' || !Number.isSafeInteger(row.run_id) || seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || row.exchange?.toUpperCase() !== exchange.toUpperCase() || (row.completed !== true && row.eligible !== true) || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
     if (currentIds.has(row.run_id)) return false;
     seen.add(row.run_id); return true;
   });
-  if (validCurrent) rows.unshift({ id: `current:${[...currentIds].sort((a,b)=>a-b).join(',')}`, run_id: Math.max(...currentIds), source_run_ids: [...currentIds].sort((a,b)=>a-b), symbol, exchange, covered_at: current.calculatedAt, score: current.score, action: ['Sell All', 'Trim', 'Hold', 'Add more', 'Buy New'].includes(current.action ?? '') ? current.action! : null, formula_version: `Current calculation · displayed basket Score${current.sources.some(source => source.status === 'partial') ? ' · partially usable source output' : ''}; not an original saved decision`, completed: true, coverage_status: 'suggested' });
+  if (validCurrent) rows.unshift({ id: `current:${[...currentIds].sort((a,b)=>a-b).join(',')}`, run_id: Math.max(...currentIds), source_run_ids: [...currentIds].sort((a,b)=>a-b), symbol, exchange, covered_at: current.calculatedAt, score: currentScore!, ...(effectiveCurrent ? contract : {}), action: ['Sell All', 'Trim', 'Hold', 'Add more', 'Buy New'].includes(current.action ?? '') ? current.action! : null, formula_version: `Current calculation · ${effectiveCurrent ? ALLOCATION_SCORE_POLICY + ' · effective allocation score' : 'displayed basket Score'}${current.sources.some(source => source.status === 'partial') ? ' · partially usable source output' : ''}; not an original saved decision`, completed: true, coverage_status: 'suggested' });
   const sum = rows.reduce((sum, row) => sum + row.score!, 0);
-  return { rows, sum, score: history.truncated || !rows.length ? null : sum / rows.length };
+  return { rows, sum, score: history.truncated || !rows.length ? null : sum / rows.length, excludedRows };
 }
 export function allocateDisplayScores(stocks: { key: string; score: number | null }[], parameters: DisplayParameters) {
   const selected = parameters.valid && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 ?  stocks.filter(row => typeof row.score === 'number' && Number.isFinite(row.score) && row.score > 0).sort((a, b) => b.score! - a.score! || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, parameters.maximumStocks) : [];

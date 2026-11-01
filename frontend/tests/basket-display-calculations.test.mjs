@@ -11,6 +11,7 @@ sharedColumnBindings = load('../lib/basketColumnPreferences.ts');
 const submissionSafety=load('../lib/basketSubmissionSafety.ts');
 const draftMath=load('../lib/basketEditableDraft.ts');
 const math=load('../lib/basketDisplayCalculations.ts');
+Object.assign(sharedColumnBindings, load('../components/AllocationScoreContext.tsx', math));
 const dateMath=load('../lib/datetime.ts');
 Object.assign(math,load('../lib/basketActionSizing.ts',math));
 const end='2026-10-28T12:00:00Z', start='2026-10-23T12:00:00Z';
