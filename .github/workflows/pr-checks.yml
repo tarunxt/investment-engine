@@ -352,6 +352,33 @@ jobs:
           tests/stock-parameters-contract.test.mjs
           tests/universal-auto-run-provenance.test.mjs
 
+  frontend-audit8-style-contracts:
+    name: Audit8 shared control and theme contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+      - run: npx playwright install --with-deps chromium
+      - name: Verify actual components with synthetic APIs and compiled application CSS
+        run: |
+          export CHROMIUM_PATH="$(node -p 'require("playwright").chromium.executablePath()')"
+          export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$CHROMIUM_PATH"
+          node scripts/disclosure-states-offline-playwright.mjs
+          node scripts/audit8-shared-input-offline-playwright.mjs
+          node scripts/report-refresh-offline-playwright.mjs
+          node scripts/profile-helper-offline-playwright.mjs
+
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification
     runs-on: ubuntu-22.04

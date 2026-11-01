@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { ReportRefreshButton } from '@/components/ui/report-refresh-button';
 import { apiService } from '@/services/api';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
@@ -201,15 +201,12 @@ export default function LlmsPage() {
             </p>
             <p className="mt-1 text-xs text-slate-500">Export outcomes are historical report fields. Google Sheets is retired.</p>
           </div>
-          <button
+          <ReportRefreshButton
             type="button"
             onClick={() => void load()}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={loading}
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+            loading={loading}
+          />
         </div>
 
         {error ? (
