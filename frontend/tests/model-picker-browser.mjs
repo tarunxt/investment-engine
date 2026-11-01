@@ -32,6 +32,7 @@ import {History, Loader2, X, ChevronDown, ChevronRight} from 'lucide-react';
 import {LlmModelSelectionPanel} from '${root}/components/shared/LlmModelSelectionPanel';
 import {LlmModelMixControls} from '${root}/components/shared/LlmModelMixControls';
 import {ModelPickerDialogFrame} from '${root}/components/shared/ModelPickerDialogFrame';
+import {threatInputRationale} from '${root}/app/console/dashboard/_components/threatInputRationale';
 import {Button} from '${root}/components/ui/button';
 import {cn} from '${root}/lib/utils';
 const inventory=${JSON.stringify(inventory)};
