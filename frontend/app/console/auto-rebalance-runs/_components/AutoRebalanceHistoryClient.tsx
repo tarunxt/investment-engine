@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { RunSideEffectPolicyNotice } from "@/components/shared/AnalysisOnlyRunControl";
 import { RUN_HIERARCHY_HELP } from "@/lib/runHierarchy";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -153,7 +154,7 @@ export function AutoRebalanceHistoryListClient({
       const response = await apiService.getAutoRebalanceHistory(apiPortfolio(portfolio), { limit: 100 });
       setItems(response.items);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not load auto-rebalance history.");
+      setError(`Saved workflow history unavailable: ${reason instanceof Error ? reason.message : "Could not load auto-rebalance history."}`);
     } finally {
       setLoading(false);
     }
@@ -189,7 +190,7 @@ export function AutoRebalanceHistoryListClient({
       </div>
 
       {loading ? <div className="flex min-h-56 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm text-slate-600"><Loader2 className="size-4 animate-spin" />Loading runs…</div> : null}
-      {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
+      {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
       {!loading && !error && items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-600">No {portfolioLabel(portfolio)} auto-rebalance runs have been recorded yet.</div>
       ) : null}
@@ -204,6 +205,7 @@ export function AutoRebalanceHistoryListClient({
               <div className="min-w-0 flex-1 basis-48">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{index === 0 ? "Latest auto run" : "Auto run"}</p>
                 <h2 className="mt-1 text-xl font-bold text-slate-950">{item.label}</h2>
+                <RunSideEffectPolicyNotice policy={item.side_effect_policy} />
                 <p className="mt-1 text-sm text-slate-600">Started {formatTime(item.created_at)}</p>
               </div>
               <div className="flex max-w-full items-center gap-2"><span className="text-xs text-slate-600">Saved status <StatusBadge status={item.status} /></span><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
@@ -283,11 +285,11 @@ export function AutoRebalanceHistoryDetailClient({
       <nav aria-label="Run hierarchy" className="flex flex-wrap gap-2 text-sm"><Link className="text-blue-700 underline" href={URLs.routes.console.runs()}>All runs</Link><span aria-hidden="true">/</span><span aria-current="page">Workflow · {run?.label || `Run #${sequence}`}</span></nav>
       <p className="text-xs text-slate-500">{RUN_HIERARCHY_HELP}</p>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><p className="mt-2 text-sm text-slate-600">Stage-by-stage saved status, the exact errors, and every saved LLM prompt/output. Saved statuses do not verify current worker activity.</p></div>
+        <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><RunSideEffectPolicyNotice policy={run?.side_effect_policy} /><p className="mt-2 text-sm text-slate-600">Stage-by-stage saved status, the exact errors, and every saved LLM prompt/output. Saved statuses do not verify current worker activity.</p></div>
         <div className="flex gap-2"><Button asChild variant="outline" className="rounded-full"><Link href={URLs.routes.console.autoRebalanceRuns(portfolio)}><ArrowLeft className="mr-2 size-4" />All runs</Link></Button><Button type="button" onClick={() => void load()} className="rounded-full bg-slate-950 text-white hover:bg-slate-800"><RefreshCw className="mr-2 size-4" />Refresh</Button></div>
       </div>
       {loading ? <div className="flex min-h-56 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm text-slate-600"><Loader2 className="size-4 animate-spin" />Loading run detail…</div> : null}
-      {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
+      {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
       {run ? <>
         <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <Clock3 className="size-5 text-slate-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><span className="text-xs text-slate-600">Saved status <StatusBadge status={run.status} /></span></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Last recorded stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
         {run.stages.filter(stage => stage.stage === "actionables" && stage.summary.frozen_final).map(stage => (

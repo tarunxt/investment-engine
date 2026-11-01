@@ -22,6 +22,7 @@ import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { OperationalErrorNotice, normalizeOperationalErrorMessage } from "@/components/shared/OperationalErrorNotice";
+import { AllocationScoreContext } from "@/components/AllocationScoreContext";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -432,12 +433,12 @@ function ZerodhaBuyTransactionValue({
   fallbackAveragePrice,
 }: {
   transactions: ZerodhaBuyTransaction[];
-  fallbackAveragePrice: number;
+  fallbackAveragePrice: number | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const latest = transactions[0];
   if (!latest) {
-    return fallbackAveragePrice > 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg holding price</span> : <span>—</span>;
+    return fallbackAveragePrice != null && Number.isFinite(fallbackAveragePrice) && fallbackAveragePrice >= 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg holding price</span> : <span>—</span>;
   }
 
   const renderTransaction = (transaction: ZerodhaBuyTransaction) => {
@@ -1595,7 +1596,7 @@ export function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): Scor
     displayScore,
     finalScoreOutOfRange,
     finalScoreMessage: finalScoreOutOfRange
-      ? `Final score ${formatActionScore(rawScore)} is outside the allowed range of ${formatActionScore(SCORE_GUARDRAIL_MIN)} to ${formatActionScore(SCORE_GUARDRAIL_MAX)}. Action mapping continues to use the bounded rule range until the inconsistent input is fixed.`
+      ? `Raw formula score ${formatActionScore(rawScore)} is outside ${formatActionScore(SCORE_GUARDRAIL_MIN)} to ${formatActionScore(SCORE_GUARDRAIL_MAX)}. Action mapping uses the bounded rule range. New allocation calculations show a separate effective score; original saved history keeps its existing eligibility.`
       : null,
     rangeIssues,
     parameterIssues,
@@ -5452,6 +5453,7 @@ function DetailedRationaleScoreSection({
             ) : (`/ ${detail.detailedRationaleDenominator || "—"}`)}
           </div>
         </div>
+        {!readOnly ? <div className="border-t border-slate-200 px-4 py-3"><AllocationScoreContext rawScore={detail.calculatedScore} /></div> : null}
         {validationSummary.finalScoreMessage ? (
           <div className="border-t border-rose-200 px-4 py-3 text-sm font-semibold text-rose-800">
             {validationSummary.finalScoreMessage}

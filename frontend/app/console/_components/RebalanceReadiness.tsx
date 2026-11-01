@@ -12,7 +12,7 @@ type Props = {
 export function RebalanceReadiness({ loading, error, portfolio, threats, selectedSwingCount, blockedReason }: Props) {
   const rows = [
     { name: "Portfolio", state: inputReadiness(loading, error, Boolean(portfolio?.holdings.length)), detail: "Latest holdings snapshot" },
-    { name: "Swing", state: inputReadiness(loading, error, selectedSwingCount > 0), detail: `${selectedSwingCount} selected model outputs after the previous market close` },
+    { name: "Swing", state: inputReadiness(loading, error, selectedSwingCount > 0), detail: `${selectedSwingCount} selected model outputs (may be historical)` },
     { name: "Threats", state: inputReadiness(loading, error, Boolean(threats?.report?.raw_markdown?.trim()), threats?.status), detail: threats && !threats.report?.raw_markdown ? "Latest report has no parsed markdown output yet" : "Latest risk report" },
   ];
   return (

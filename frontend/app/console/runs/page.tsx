@@ -10,12 +10,11 @@ import {
   ChevronRight,
   Clock3,
   Loader2,
-  RefreshCw,
 } from 'lucide-react';
 
 import { PortfolioWorkflowHistoryCard } from './_components/PortfolioWorkflowHistoryCard';
 import { buildPortfolioHistoryEntries } from '@/lib/portfolioStageHistory';
-import { Button } from '@/components/ui/button';
+import { ReportRefreshButton } from '@/components/ui/report-refresh-button';
 import { formatApiTimestamp } from '@/lib/datetime';
 import {
   getAutoRebalanceRunDisplayLabel,
@@ -427,16 +426,13 @@ export default function RunsPage() {
               : 'Loading all runs…'}
           </p>
         </div>
-        <Button
+        <ReportRefreshButton
           type="button"
-          variant="outline"
           onClick={() => void loadRuns()}
           disabled={loading}
           className="w-full sm:w-auto"
-        >
-          <RefreshCw className={cn('mr-2 size-4', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+          loading={loading}
+        />
       </div>
 
       <div

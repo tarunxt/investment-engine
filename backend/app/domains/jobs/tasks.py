@@ -39,6 +39,7 @@ from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_tar
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.runs.schemas import PolymarketEventRunContext
 from app.infrastructure.messaging.task_registry import register_job_task_sync
+from app.domains.jobs.stage_status import aggregate_stage_status
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
@@ -959,21 +960,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                         "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                     })
 
-            statuses = {j.status for j in stage_jobs}
-            active = {JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}
-
-            if statuses & active:
-                # At least one child job is still running
-                new_status = JobStatus.PROCESSING
-            elif any(j.status == JobStatus.PARTIAL for j in stage_jobs):
-                # Usable but incomplete output remains visible at the run level.
-                new_status = JobStatus.PARTIAL
-            elif any(j.status == JobStatus.COMPLETED for j in stage_jobs):
-                # All terminal, at least one succeeded
-                new_status = JobStatus.COMPLETED
-            else:
-                # All terminal, all failed
-                new_status = JobStatus.FAILED
+            new_status = aggregate_stage_status(j.status for j in stage_jobs)
 
             if run.status != new_status:
                 run_repo.update_status(run, new_status)

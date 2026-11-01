@@ -395,6 +395,8 @@ def test_legacy_run_request_denied_before_label_or_job_dispatch(monkeypatch):
     from fastapi import HTTPException
     from app.domains.runs import router
     from app.domains.runs.schemas import AutoRebalanceRunReservationRequest
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(router, "require_workflow_policy_schema", AsyncMock())
     monkeypatch.setattr(router, "_get_redis", lambda: pytest.fail("no reservation without explicit intent"))
     with pytest.raises(HTTPException) as error:
         asyncio.run(router.reserve_auto_rebalance_label(

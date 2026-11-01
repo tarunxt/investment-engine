@@ -90,3 +90,15 @@ Live adapters remain uncertified. Normal full Run remains unavailable under this
 fail-closed patch, with a visible explanation rather than an unexplained422.
 The independent F08 mail/export policy must be integrated by its owner. No paid
 calls, side effects, production changes, push, PR or deployment were performed.
+
+
+## Private main reconciliation verification
+
+The earlier missing-dependency frontend limitation was resolved in the private
+reconciliation against main8d25f34a. Full TypeScript and the Next.js16.2.5 webpack
+production build/postbuild checks passed. Backend combined cap/F08/financial-input/
+calculation/provider/recovery verification:316 passed, five PostgreSQL-only skips,
+12 subtests passed. Frontend workflow checks:72 passed, one skipped; policy checks:
+eight passed. Actual React consent/lifecycle Chromium fixture passed with external
+requests blocked. No adapter activation, production migration, deployment or further
+publication occurred. The prior denied draft PR was not retried.

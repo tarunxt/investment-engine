@@ -61,7 +61,8 @@ class CreateRunUseCase:
 
     async def execute(self, cmd: CreateRunCommand) -> Run:
         require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
-        if recovery_mode():
+        from app.domains.runs.side_effect_policy import execution_allows_side_effects
+        if recovery_mode() or not await execution_allows_side_effects(self._session, cmd):
             # Existing six-stage UI requests sheet exports; contain that optional
             # side effect while preserving queued analysis and database results.
             cmd = replace(cmd, auto_export_enabled=False)

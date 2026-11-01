@@ -796,6 +796,7 @@ export interface AutoRebalanceSpendAuthorization {
   spend_request_id: string;
   spend_observed_revision: number;
   spend_scope_id?: number;
+  side_effect_policy?: RunSideEffectPolicy;
 }
 
 export interface AutoRebalanceSpendReadiness {
@@ -807,7 +808,13 @@ export interface AutoRebalanceSpendReadiness {
   scopes: { id: number; status: string; cap_inr: string; settled_inr: string; reserved_inr: string; created_at: string }[];
 }
 
+export interface RunSideEffectPolicy {
+  version: 1;
+  mode: "existing_preferences" | "analysis_only";
+}
+
 export interface AutoRebalanceRunReservationResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -911,6 +918,7 @@ export interface AutoRebalanceRunDetailResponse {
 }
 
 export interface AutoRebalanceHistoryItemResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -1076,63 +1084,65 @@ export interface ZerodhaStatusResponse {
 }
 
 export interface ZerodhaPortfolioHolding {
+  numeric_input_status?: Record<string, string>;
   tradingsymbol: string;
   exchange: string;
   instrument_token: number | null;
   isin: string | null;
   product: string | null;
-  quantity: number;
-  used_quantity: number;
-  t1_quantity: number;
-  realised_quantity: number;
-  authorised_quantity: number;
+  quantity: number | null;
+  used_quantity: number | null;
+  t1_quantity: number | null;
+  realised_quantity: number | null;
+  authorised_quantity: number | null;
   authorised_date: string | null;
-  opening_quantity: number;
-  short_quantity: number;
-  collateral_quantity: number;
+  opening_quantity: number | null;
+  short_quantity: number | null;
+  collateral_quantity: number | null;
   collateral_type: string | null;
   discrepancy: boolean;
-  average_price: number;
-  last_price: number;
-  close_price: number;
-  pnl: number;
-  day_change: number;
-  day_change_percentage: number;
-  market_value: number;
-  invested_value: number;
-  day_change_value: number;
+  average_price: number | null;
+  last_price: number | null;
+  close_price: number | null;
+  pnl: number | null;
+  day_change: number | null;
+  day_change_percentage: number | null;
+  market_value: number | null;
+  invested_value: number | null;
+  day_change_value: number | null;
 }
 
 export interface ZerodhaPortfolioPosition {
+  numeric_input_status?: Record<string, string>;
   tradingsymbol: string;
   exchange: string;
   instrument_token: number | null;
   product: string | null;
-  quantity: number;
-  overnight_quantity: number;
-  multiplier: number;
-  average_price: number;
-  close_price: number;
-  last_price: number;
-  value: number;
-  pnl: number;
-  m2m: number;
-  unrealised: number;
-  realised: number;
-  buy_quantity: number;
-  buy_price: number;
-  buy_value: number;
-  buy_m2m: number;
-  sell_quantity: number;
-  sell_price: number;
-  sell_value: number;
-  sell_m2m: number;
-  day_buy_quantity: number;
-  day_buy_price: number;
-  day_buy_value: number;
-  day_sell_quantity: number;
-  day_sell_price: number;
-  day_sell_value: number;
+  quantity: number | null;
+  overnight_quantity: number | null;
+  multiplier: number | null;
+  average_price: number | null;
+  close_price: number | null;
+  last_price: number | null;
+  value: number | null;
+  pnl: number | null;
+  m2m: number | null;
+  unrealised: number | null;
+  realised: number | null;
+  buy_quantity: number | null;
+  buy_price: number | null;
+  buy_value: number | null;
+  buy_m2m: number | null;
+  sell_quantity: number | null;
+  sell_price: number | null;
+  sell_value: number | null;
+  sell_m2m: number | null;
+  day_buy_quantity: number | null;
+  day_buy_price: number | null;
+  day_buy_value: number | null;
+  day_sell_quantity: number | null;
+  day_sell_price: number | null;
+  day_sell_value: number | null;
 }
 
 export interface ZerodhaPortfolioSnapshotSummary {
@@ -1146,7 +1156,7 @@ export interface ZerodhaPortfolioSnapshotSummary {
   holdings_invested_value?: number | null;
   holdings_pnl: number;
   holdings_day_change_value: number;
-  available_margin: number;
+  available_margin: number | null;
   positions_pnl: number;
   positions_m2m: number;
 }

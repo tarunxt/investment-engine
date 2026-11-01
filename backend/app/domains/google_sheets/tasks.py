@@ -24,6 +24,7 @@ from app.domains.jobs.output_runtime import (
 )
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.runs.models import Run, RunJob
+from app.domains.runs.side_effect_policy import execution_allows_side_effects_sync
 from app.domains.runs.repository import SyncRunRepository
 from app.domains.runs.run_identity import analysis_run_identity
 from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -199,6 +200,11 @@ def export_job_to_sheets_task(
     with SyncSessionLocal() as db:
         try:
             run_repo = SyncRunRepository(db)
+            job = db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id)).scalar_one_or_none()
+            if job is None:
+                return {"status": "failed", "error": "Job not found"}
+            if not execution_allows_side_effects_sync(db, job):
+                return {"status": "suppressed", "reason": "run_side_effect_policy"}
             job_repo = SyncJobRepository(db)
             from app.domains.jobs.tasks import _publish_job_update, _refresh_run_status
             cred = db.execute(
@@ -219,12 +225,6 @@ def export_job_to_sheets_task(
                     _refresh_run_status(db, job.id)
                 return {"status": "failed", "error": "Google Sheets not connected"}
 
-            job = db.execute(
-                select(Job).where(Job.id == job_id, Job.user_id == user_id)
-            ).scalar_one_or_none()
-
-            if not job:
-                return {"status": "failed", "error": "Job not found"}
             job_repo.update_export_state(job, export_status="processing", export_error=None)
             _publish_job_update(job)
             _refresh_run_status(db, job.id)
@@ -414,6 +414,11 @@ def export_run_to_sheets_task(
     with SyncSessionLocal() as db:
         try:
             run_repo = SyncRunRepository(db)
+            run = db.execute(select(Run).where(Run.id == run_id, Run.user_id == user_id)).scalar_one_or_none()
+            if run is None:
+                return {"status": "failed", "error": "Run not found"}
+            if not execution_allows_side_effects_sync(db, run):
+                return {"status": "suppressed", "reason": "run_side_effect_policy"}
             cred = db.execute(
                 select(GoogleSheetsCredential).where(
                     GoogleSheetsCredential.user_id == user_id
@@ -429,13 +434,6 @@ def export_run_to_sheets_task(
                         export_error="Google Sheets not connected",
                     )
                 return {"status": "failed", "error": "Google Sheets not connected"}
-
-            run = db.execute(
-                select(Run).where(Run.id == run_id, Run.user_id == user_id)
-            ).scalar_one_or_none()
-
-            if not run:
-                return {"status": "failed", "error": "Run not found"}
 
             run_jobs = db.execute(
                 select(RunJob).where(RunJob.run_id == run_id)

@@ -1004,8 +1004,10 @@ class apiServiceClass implements IApiService {
     return this.get<import('@/types/api').AutoRebalanceSpendReadiness>(`${URLs.runs.autoRebalanceSpendReadiness()}?portfolio=${portfolio}`);
   }
 
-  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, authorization: import('@/types/api').AutoRebalanceSpendAuthorization): Promise<AutoRebalanceRunReservationResponse> {
-    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio, ...authorization });
+  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, analysisOnly = false, authorization?: import('@/types/api').AutoRebalanceSpendAuthorization): Promise<AutoRebalanceRunReservationResponse> {
+    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio,
+      ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}), ...authorization });
+
   }
 
   queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
@@ -1456,7 +1458,7 @@ class apiServiceClass implements IApiService {
   }
 
   indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
-    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio());
+    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio(), { cache: "no-store" });
   }
 
   indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail> {
@@ -1563,7 +1565,7 @@ class apiServiceClass implements IApiService {
   }
 
   async indmoneyUsRunThreats(
-    data?: PortfolioEventRunRequest,
+    data?: PortfolioEventRunRequest & { expected_snapshot_id?: number },
   ): Promise<IndMoneyUsThreatRunResponse> {
     try {
       return await this.post<IndMoneyUsThreatRunResponse>(
@@ -1585,6 +1587,9 @@ class apiServiceClass implements IApiService {
             throw new Error(
               "Queued INDmoney threats job is missing snapshot metadata.",
             );
+          }
+          if (data?.expected_snapshot_id != null && analysis.snapshot_id !== data.expected_snapshot_id) {
+            throw new Error("Queued INDmoney threats job uses a different snapshot than the reviewed source.");
           }
           return {
             job_id: analysis.job_id,

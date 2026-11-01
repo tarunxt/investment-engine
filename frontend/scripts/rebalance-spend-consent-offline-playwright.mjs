@@ -47,7 +47,7 @@ const server=createServer(async(req,res)=>{
  if(req.url==='/reserve'){let raw='';for await(const chunk of req)raw+=chunk;const auth=JSON.parse(raw);res.setHeader('Content-Type','application/json');
  const prior=grants.get(auth.spend_request_id);if(prior){res.end(JSON.stringify({...prior,reservation_created:false}));return;}
  if(auth.spend_observed_revision!==(revisions.get(auth.market)||0)){res.statusCode=409;res.end(JSON.stringify({message:'Workflow authorization changed in another tab; refresh readiness.'}));return;}
- sequence++;revisions.set(auth.market,sequence);const value={portfolio:auth.market,sequence,label:'fixture',spend_scope_id:auth.spend_scope_id||sequence};grants.set(auth.spend_request_id,value);res.end(JSON.stringify({...value,reservation_created:true}));return;}
+ sequence++;revisions.set(auth.market,sequence);const value={portfolio:auth.market,sequence,label:'fixture',spend_scope_id:auth.spend_scope_id||sequence,side_effect_policy:auth.side_effect_policy};grants.set(auth.spend_request_id,value);res.end(JSON.stringify({...value,reservation_created:true}));return;}
  res.setHeader('Content-Type',req.url==='/bundle.js'?'text/javascript':'text/html');res.end(req.url==='/bundle.js'?bundle:'<div id="root"></div><script src="/bundle.js"></script>');
 });
 try {

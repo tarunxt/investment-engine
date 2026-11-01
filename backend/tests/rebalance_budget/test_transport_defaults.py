@@ -74,3 +74,26 @@ def test_refund_migration_matches_registered_metadata_without_running_alembic(mo
         assert table == "rebalance_spend_attempts"
         model = RebalanceSpendAttempt.__table__.columns[name]
         assert str(column.type) == str(model.type) and model.nullable is True
+
+
+def test_private_reconciliation_has_one_head_after_f08_without_running_migrations():
+    import ast
+    from pathlib import Path
+    directory = Path(__file__).resolve().parents[2] / 'alembic/versions'
+    revisions, parents = {}, set()
+    for path in directory.glob('*.py'):
+        values = {}
+        for node in ast.parse(path.read_text()).body:
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id in {'revision', 'down_revision'}:
+                values[node.target.id] = ast.literal_eval(node.value)
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in {'revision', 'down_revision'}:
+                        values[target.id] = ast.literal_eval(node.value)
+        if 'revision' in values:
+            revisions[values['revision']] = values.get('down_revision')
+            previous = values.get('down_revision')
+            parents.update(previous if isinstance(previous, (tuple, list)) else [previous] if previous else [])
+    assert revisions['rebalance_spend_cap_001'] == 'audit7_run_policy_001'
+    assert revisions['rebalance_spend_refund_002'] == 'rebalance_spend_cap_001'
+    assert set(revisions) - parents == {'rebalance_spend_refund_002'}

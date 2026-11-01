@@ -64,10 +64,24 @@ jobs:
           backend/tests/test_completion_notifications.py
           backend/tests/test_auto_rebalance_audit_durability.py
           backend/tests/test_auto_rebalance_run_sequence.py
+          backend/tests/test_stage_status.py
+          backend/tests/test_zerodha_unknown_inputs.py
+          backend/tests/test_zerodha_portfolio.py
+          backend/tests/test_portfolio_events.py
+          backend/tests/test_workflow_policy_schema_readiness.py
+          backend/tests/test_rebalance_side_effect_policy.py
+          backend/tests/test_rebalance_side_effect_policy_migration.py
+          backend/tests/test_indmoney_snapshot_source_precondition.py
+          backend/tests/test_final_recompute.py
+          backend/tests/test_final_score_math.py
+          backend/tests/test_frozen_final_v2_routes.py
+          backend/tests/test_frozen_final_validation_gap.py
           backend/tests/test_run_completion_email.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_indmoney_us_parser.py
           backend/tests/test_indmoney_snapshot_validation.py
+          backend/tests/test_indmoney_us_threats.py
+          backend/tests/test_zerodha_threats.py
           backend/tests/test_portfolio_analysis_read_projection.py
           backend/tests/test_cost_dashboard_cache.py
           backend/tests/test_cost_drivers_router.py
@@ -188,6 +202,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up Node.js for executable deployment resolver fixtures
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
       - name: Install isolated test dependencies
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
@@ -207,6 +225,7 @@ jobs:
           backend/tests/test_recommendation_audit_recovery.py
           backend/tests/test_recommendation_audit_fundamentals.py
           backend/tests/test_recommendation_audit_postgres.py
+          backend/tests/test_rebalance_side_effect_policy_postgres.py
           backend/tests/test_output_contracts.py
           backend/tests/test_output_runtime.py
           backend/tests/test_recovery_containment.py
@@ -304,6 +323,10 @@ jobs:
           tests/auto-rebalance-audit-persistence.test.mjs
           tests/recommendation-audit-recovery-policy.test.mjs
           tests/rebalance-stage-inputs.test.mjs
+          tests/rebalance-idle-provenance.test.mjs
+          tests/rebalance-score-scale-contract.test.mjs
+          tests/rebalance-side-effect-policy.test.mjs
+          tests/technical-price-evidence.test.mjs
           tests/portfolio-parameters.test.mjs
           tests/basket-display-calculations.test.mjs
           tests/basket-stable-row-order.test.mjs
@@ -351,6 +374,34 @@ jobs:
           tests/stage-duration-integrity.test.mjs
           tests/stock-parameters-contract.test.mjs
           tests/universal-auto-run-provenance.test.mjs
+
+  frontend-audit8-style-contracts:
+    name: Audit8 shared control and theme contracts
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+      - run: npx playwright install --with-deps chromium
+      - name: Verify actual components with synthetic APIs and compiled application CSS
+        run: |
+          export CHROMIUM_PATH="$(node -p 'require("playwright").chromium.executablePath()')"
+          export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$CHROMIUM_PATH"
+          node scripts/disclosure-states-offline-playwright.mjs
+          node scripts/audit8-shared-input-offline-playwright.mjs
+          node scripts/report-refresh-offline-playwright.mjs
+          node scripts/profile-helper-offline-playwright.mjs
 
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification
@@ -477,6 +528,26 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: node scripts/api-cost-provenance-playwright.mjs
+
+      - name: Verify stage ledger partial and mixed provider outcomes offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: |
+          node scripts/auto-stages-ledger-offline-playwright.mjs
+          AUTO_STAGES_MIXED_FAILURE=1 node scripts/auto-stages-ledger-offline-playwright.mjs
+
+      - name: Verify Audit7 workflow contracts in actual components offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: |
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE="$(node --input-type=module -e 'import {chromium} from "playwright"; process.stdout.write(chromium.executablePath())')" node --test tests/rebalance-input-counts.test.mjs
+          node --test tests/zerodha-unknown-inputs-browser.test.mjs
+          node scripts/rebalance-funds-offline-playwright.mjs
+          node scripts/rebalance-policy-offline-playwright.mjs
+          node scripts/rebalance-score-policy-offline-playwright.mjs
+          node scripts/audit7-snapshot-label-offline-playwright.mjs
+          node scripts/audit7-f11-offline-playwright.mjs
+          node scripts/workflow-schema-readiness-offline-playwright.mjs
 
       - name: Verify saved-output states and keyboard behavior offline
         if: matrix.bundler == 'webpack'

@@ -1,13 +1,13 @@
 """Durable per-market rebalance spending scopes; no grants for old usage.
 
 Revision ID: rebalance_spend_cap_001
-Revises: recommendation_audit_001
+Revises: audit7_run_policy_001
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "rebalance_spend_cap_001"
-down_revision = "recommendation_audit_001"
+down_revision = "audit7_run_policy_001"
 branch_labels = None
 depends_on = None
 

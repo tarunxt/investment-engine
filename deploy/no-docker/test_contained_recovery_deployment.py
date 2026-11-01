@@ -35,7 +35,11 @@ class ContainedDeploymentTests(unittest.TestCase):
 echo frontend-only-promotion >> "$FIXTURE_ROOT/commands"
 [[ "$1" == frontend-only ]] || exit 1
 echo candidate > "$FIXTURE_ROOT/frontend-state"
-if ! bash "$CREDX_CONTAINED_RELEASE_DRIVER" --post-frontend-check; then
+if [[ -n "${FIXTURE_FRONTEND_FAILURE:-}" ]]; then
+  echo previous > "$FIXTURE_ROOT/frontend-state"
+  exit 1
+fi
+if [[ -n "${CREDX_CONTAINED_RELEASE_DRIVER:-}" ]] && ! bash "$CREDX_CONTAINED_RELEASE_DRIVER" --post-frontend-check; then
   echo previous > "$FIXTURE_ROOT/frontend-state"
   exit 1
 fi
@@ -56,7 +60,7 @@ fi
         script=script.replace('/etc/investor/backend.env',str(self.envfile)).replace('/run/investor-production-deploy.lock',str(self.root/"lock"))
         self.script=self.root/"workflow.sh";self.script.write_text(script)
         artifacts=self.app/"artifacts";(artifacts/"frontend.tar.gz").write_text("fixture");(artifacts/"frontend.tar.gz.sha256").write_text("fixture")
-        self.environment={**os.environ,"PATH":str(self.bin)+os.pathsep+os.environ["PATH"],"FIXTURE_ROOT":str(self.root),"FIXTURE_APP":str(self.app),"FIXTURE_PYTHON":sys.executable,"FIXTURE_MODE":"1","DEPLOY_COMMIT_SHA":"b"*40,"DEPLOY_SCOPE":"backend-only","REMOTE_ARTIFACT_DIR":str(artifacts),"REMOTE_ARTIFACT_FILE":"frontend.tar.gz"}
+        self.environment={**os.environ,"PATH":str(self.bin)+os.pathsep+os.environ["PATH"],"FIXTURE_ROOT":str(self.root),"FIXTURE_APP":str(self.app),"FIXTURE_PYTHON":sys.executable,"FIXTURE_MODE":"1","DEPLOY_COMMIT_SHA":"b"*40,"DEPLOY_SCOPE":"backend-only","FRONTEND_BASE_SHA":"a"*40,"REMOTE_ARTIFACT_DIR":str(artifacts),"REMOTE_ARTIFACT_FILE":"frontend.tar.gz"}
 
     def executable(self,path,source):
         path.write_text(source);path.chmod(0o755)
@@ -92,11 +96,19 @@ else: raise SystemExit('Unexpected service mutation')
 while args and args[0] in ('-C','-H'):
     args=args[2:] if args[0]=='-C' else args[1:]
 action=args[0]
+if os.getenv('FIXTURE_RESOLVER'):
+    if action=='rev-parse': print(os.environ['GITHUB_SHA'])
+    elif action=='diff': sys.stdout.write('\\0'.join(json.loads(os.environ.get('FIXTURE_PATHS','[]')))+'\\0')
+    elif action=='merge-base': raise SystemExit(1 if os.getenv('FIXTURE_BAD_ANCESTRY') else 0)
+    elif action=='log': print(os.getenv('FIXTURE_DIRECTIVE',''))
+    else: raise SystemExit('Unexpected resolver git call')
+    raise SystemExit(0)
 if action=='rev-parse': print((root/'head').read_text())
 elif action=='ls-files': sys.stdout.buffer.write(bytes([0]).join(p.encode() for p in json.loads((root/'tracked.json').read_text()))+bytes([0]))
 elif action=='show': sys.stdout.write((root/'candidate'/args[-1].rsplit('/',1)[-1]).read_text())
 elif action=='reset':
     (root/'head').write_text(os.environ['DEPLOY_COMMIT_SHA'])
+    if os.environ.get('DEPLOY_SCOPE')=='frontend-only': raise SystemExit(0)
     (app/'backend/app/main.py').write_text('candidate')
     (app/'backend/app/nested/guard.py').unlink()
     (app/'backend/app/new_feature.py').write_text('new-candidate')
@@ -108,6 +120,16 @@ elif action=='reset':
         backup=next(app.glob('.recovery-release-*/backend-source.tar.gz'))
         with backup.open('ab') as target: target.write(b'corrupt')
 elif action not in ('diff','fetch','cat-file'): raise SystemExit('Unexpected git mutation')
+""")
+        self.executable(self.bin/"gh",common+"""
+if '/jobs?' in args[-1]:
+    jobs=[] if '/43/' in args[-1] else [{'name':'Deploy full-stack','conclusion':'success'}]
+    print(json.dumps({'jobs':jobs}))
+else:
+    sha=args[-1].split('head_sha=',1)[1].split('&',1)[0] if 'head_sha=' in args[-1] else 'a'*40
+    runs=[] if os.getenv('FIXTURE_NO_BASELINE') else [{'id':42,'event':'workflow_dispatch' if os.getenv('FIXTURE_MANUAL_BASELINE') else 'push','head_branch':'main','conclusion':'success','head_sha':sha}]
+    if os.getenv('FIXTURE_HELD_RUN'): runs.insert(0,{'id':43,'event':'push','head_branch':'main','conclusion':'success','head_sha':'b'*40})
+    print(json.dumps({'workflow_runs':runs}))
 """)
         self.executable(self.bin/"curl",common+"""
 url=args[-1]
@@ -182,6 +204,103 @@ else: print('401',end='')
         self.assertEqual((self.app/'backend/app/main.py').read_text(),'previous')
         self.assertFalse((self.app/'backend/app/new_feature.py').exists())
         self.unchanged_runtime()
+
+    def resolve_scope(self, paths, **overrides):
+        workflow=yaml.load((REPO/'.github/workflows/deploy.yml').read_text(),Loader=yaml.BaseLoader)
+        step=next(s for s in workflow['jobs']['detect-changes']['steps'] if s.get('id')=='scope')
+        output=self.root/'scope-output';output.write_text('')
+        env={**self.environment,'FIXTURE_RESOLVER':'1','GITHUB_SHA':'b'*40,'BEFORE_SHA':'a'*40,
+             'GITHUB_EVENT_NAME':'push','GITHUB_REF':'refs/heads/main','REQUESTED_SCOPE':'auto',
+             'GITHUB_REPOSITORY':'synthetic/repository','GITHUB_OUTPUT':str(output),'EXPECTED_RELEASE_SHA':'b'*40,
+             'FIXTURE_PATHS':json.dumps(paths),**overrides}
+        result=subprocess.run(['bash','-c',step['run']],cwd=REPO,env=env,capture_output=True,text=True,timeout=15)
+        values=dict(line.split('=',1) for line in output.read_text().splitlines() if '=' in line)
+        return result,values
+
+    def assert_no_backend_operations(self):
+        commands=(self.root/'commands').read_text()
+        self.assertNotIn('deploy-recovery.sh',commands)
+        self.assertNotIn('backend-recovery-artifact.py',commands)
+        self.assertNotRegex(commands,r'systemctl (stop|start|restart).*investor-(backend|recovery|celery)')
+        self.assertNotIn('snapshot ',commands)
+        self.assertNotIn('alembic',commands)
+        self.assertEqual((self.app/'backend/app/main.py').read_text(),'previous')
+        self.assertEqual((self.app/'backend/app/nested/guard.py').read_text(),'old-guard')
+        self.assertEqual(json.loads(self.state.read_text()),{'investor-backend':'active','investor-recovery-analysis':'active'})
+
+    def test_exact_combined_diff_holds_automatically_and_manual_proof_runs_frontend_only(self):
+        paths=['frontend/app/database/route.ts','frontend/app/database/[...path]/route.ts',
+               'frontend/lib/databaseViewerOwner.ts','frontend/lib/databaseViewerProxy.ts',
+               'frontend/lib/databaseViewerRoute.ts','frontend/next.config.ts',
+               'frontend/tests/database-page-recovery.test.mjs','frontend/tests/database-viewer-owner.test.mjs',
+               'docs/database-viewer-owner-boundary.md','.github/workflows/deploy.yml',
+               '.github/workflows/pr-checks.yml','scripts/resolve-deploy-scope.mjs',
+               'scripts/detect-deploy-scope.test.mjs','deploy/no-docker/deploy-storage-safety.test.mjs',
+               'deploy/no-docker/test_contained_recovery_deployment.py']
+        result,values=self.resolve_scope(paths)
+        self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(values['scope'],'held')
+        self.assertNotIn('systemctl ',(self.root/'commands').read_text())
+        workflow=yaml.load((REPO/'.github/workflows/deploy.yml').read_text(),Loader=yaml.BaseLoader)
+        self.assertIn('frontend-only',workflow['jobs']['deploy-production']['if'])
+        self.assertIn('contains(',workflow['jobs']['deploy-production']['if'])
+        result,values=self.resolve_scope(paths,GITHUB_EVENT_NAME='workflow_dispatch',REQUESTED_SCOPE='frontend',FIXTURE_HELD_RUN='1')
+        self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(values['scope'],'frontend-only')
+        self.assertEqual(values['frontend_base_sha'],'a'*40)
+        result=self.run_workflow(DEPLOY_SCOPE=values['scope'],FRONTEND_BASE_SHA=values['frontend_base_sha'])
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'frontend-state').read_text().strip(),'candidate')
+        self.assert_no_backend_operations()
+
+    def test_successful_manual_frontend_release_is_a_valid_next_baseline(self):
+        result,values=self.resolve_scope(['frontend/app/page.tsx'],GITHUB_EVENT_NAME='workflow_dispatch',REQUESTED_SCOPE='frontend',FIXTURE_MANUAL_BASELINE='1')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(values['scope'],'frontend-only');self.assertEqual(values['frontend_base_sha'],'a'*40)
+
+    def test_frontend_failure_restores_frontend_without_backend_restore(self):
+        result=self.run_workflow(DEPLOY_SCOPE='frontend-only',FIXTURE_FRONTEND_FAILURE='fingerprint')
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual((self.root/'frontend-state').read_text().strip(),'previous')
+        self.assert_no_backend_operations()
+
+    def test_frontend_proof_rejects_source_drift_before_checkout(self):
+        result=self.run_workflow(DEPLOY_SCOPE='frontend-only',FRONTEND_BASE_SHA='c'*40)
+        self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('reset --hard',(self.root/'commands').read_text())
+        self.assert_no_backend_operations()
+
+    def test_manual_frontend_rejects_backend_unknown_shared_and_env_changes(self):
+        for path in ['backend/app/main.py','scripts/release-prod.sh','deploy/no-docker/redeploy.sh',
+                     'frontend/.env.example','packages/shared/runtime.js','.github/workflows/unreviewed.yml']:
+            with self.subTest(path=path):
+                result,values=self.resolve_scope(['frontend/app/page.tsx',path],GITHUB_EVENT_NAME='workflow_dispatch',REQUESTED_SCOPE='frontend')
+                self.assertNotEqual(result.returncode,0);self.assertNotIn('scope',values)
+        self.assertNotIn('systemctl ',(self.root/'commands').read_text())
+
+    def test_manual_frontend_requires_deployed_baseline_main_and_ancestry(self):
+        for extra in [{'FIXTURE_NO_BASELINE':'1'},{'FIXTURE_BAD_ANCESTRY':'1'},{'GITHUB_REF':'refs/heads/unreviewed'},{'EXPECTED_RELEASE_SHA':'c'*40}]:
+            result,values=self.resolve_scope(['frontend/app/page.tsx'],GITHUB_EVENT_NAME='workflow_dispatch',REQUESTED_SCOPE='frontend',**extra)
+            self.assertNotEqual(result.returncode,0);self.assertNotIn('scope',values)
+        self.assertNotIn('systemctl ',(self.root/'commands').read_text())
+
+    def test_auto_frontend_never_broadens_without_verified_prior_deployment(self):
+        for extra in [{'FIXTURE_NO_BASELINE':'1'},{'BEFORE_SHA':'0'*40}]:
+            result,values=self.resolve_scope(['frontend/app/page.tsx'],**extra)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(values['scope'],'held')
+        self.assertNotIn('systemctl ',(self.root/'commands').read_text())
+
+    def test_existing_backend_fullstack_and_manual_full_paths_keep_scope(self):
+        for paths,extra,scope in [
+            (['backend/app/main.py'],{},'backend-only'),
+            (['backend/app/main.py','frontend/app/page.tsx'],{},'full-stack'),
+            (['backend/app/main.py'],{'FIXTURE_NO_BASELINE':'1'},'full-stack'),
+            (['frontend/app/page.tsx'],{},'frontend-only'),
+            (['frontend/app/page.tsx'],{'FIXTURE_DIRECTIVE':'[deploy-scope:frontend]'},'frontend-only'),
+            (['backend/app/main.py'],{'GITHUB_EVENT_NAME':'workflow_dispatch','REQUESTED_SCOPE':'backend'},'backend-only'),
+            (['backend/app/main.py'],{'GITHUB_EVENT_NAME':'workflow_dispatch','REQUESTED_SCOPE':'full'},'full-stack'),
+            (['backend/app/main.py'],{'GITHUB_EVENT_NAME':'workflow_dispatch','REQUESTED_SCOPE':'auto'},'full-stack'),
+        ]:
+            result,values=self.resolve_scope(paths,**extra)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(values['scope'],scope)
 
     def test_actual_runtime_probe_rejects_missing_mode_activation_and_spend(self):
         probe=DRIVER.read_text().split("<<'PY'\n",1)[1].split('\nPY',1)[0]

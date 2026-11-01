@@ -122,3 +122,52 @@ normal capped workflows remain unavailable. No provider/tariff/FX/account settin
 paid run, trade, email/export, merge or deployment was performed.
 Coordinator alone owns combined review, merge and deployment under the existing
 release containment. No new budget decision is requested.
+
+## Private main reconciliation after publication hold
+
+The four content conflicts listed above are now resolved locally against exact
+main `8d25f34a33242adcaab092afdb07af7956f327bd`; this reconciliation is not pushed.
+The server label boundary keeps F08's schema-readiness guard and frozen policy
+on first creation and UUID replay. The service retains its analysis-only argument
+and adds the spend authorization argument. Pending browser records now persist
+the original policy with the UUID; retrying with a different checkbox value cannot
+replace the frozen payload. A missing or different server acknowledgement stops
+before any stages start. All financial repair files checked against main remain
+byte-identical. No peer admission/fencing changes were merged or overwritten.
+
+The unreleased cap migration now follows `audit7_run_policy_001` in source;
+`rebalance_spend_refund_002` follows the cap. A static graph test reads both ordinary
+and annotated Alembic revision assignments and verifies one local source head.
+This is not an Alembic/database execution. The peer dispatch migration also starts
+from F08: the coordinator must reconcile the resulting sibling heads when those
+lanes are combined. The local single-head test does not certify that future merge.
+
+Private reconciliation verification: 316 backend tests passed, five PostgreSQL-only
+skips, 12 subtests passed. This includes cap, F08 suppression/readiness, frozen-final
+recomputation, score arithmetic, unknown holdings/funds, US Threats, provider/metering
+and recovery regressions. Frontend workflow tests:72 passed, one skipped; policy
+checks:8 passed. The actual React consent fixture passed in Chromium against its
+local synthetic API with external requests blocked. Full TypeScript check passed.
+Next.js16.2.5 webpack production build and postbuild runtime-artifact checks passed. No apt retry or alternate
+package feed was used after the previously recorded HTTP403.
+
+### Returned shared-lane contract evidence
+
+Read-only inspected admission/result commit
+`e7e41e2d9bddc02749225a0def3ca96b4f8d80bd`, dispatch/migration commit
+`f43b04345551d122ef075bc4a18d44e97a456593`, and consumer-fence commit
+`72ca85e614e612b9fd50a1e4d066d08e64620b5d`.
+
+| Boundary | Contract to preserve during coordinator integration |
+| --- | --- |
+| Producer admission | Preserve existing job ID, actor, portfolio, sequence, label, complete prompt/model/source fingerprint and UTC ETA. Its actor/operation/idempotency key is distinct from the cap's workflow-grant UUID. A new producer admission does not grant a new allowance. |
+| Outbox | One committed obligation per child and stable outbox UUID delivery ID remain peer-owned. Delivered/uncertain/dead-letter/terminal state is not billing settlement and must never release an ambiguous reservation. Redelivery or resumed publication resolves the same job/scope. No relay activation here. |
+| Consumer fence | Preserve `jobs.runtime_metadata_json.execution_claim` and owner token/attempt/delivery/pending-call/history fields. The cap does not write that metadata. Admit the consumer owner, resolve the persisted cap context before paid work, and retain both independently committed gates. Never hold job/scope DB locks during network I/O. |
+| Threads and retries | The peer's `copy_context` propagation must also preserve the cap ContextVar in provider threads. Cap identity remains job/retry/call within the original workflow scope; ownership-attempt changes cannot renew allowance. Restore context in finally and preserve heartbeat/owner cleanup. |
+| Ambiguity | Ownership loss blocks calls/results; ambiguous provider acceptance blocks replay. Missing INR settlement still retains spend even if a job is cancelled or terminal. A cap denial before I/O and a settlement failure after possible I/O need phase-aware classification; do not convert the latter into a safe pre-provider retry. |
+| SDK boundary | The fence checks adapter entry; hidden SDK retries/tool/repair charges still require the cap's certified finite all-attempt bound. Neither owner fencing nor stable Celery task ID proves external idempotency or invoice amount. All live adapters remain blocked. |
+| A12 accounting | Preserve existing delivery/retry usage identity, phases and hashes. ConfirmedCharge requires matching tariff/FX versions, all transport receipts, actual INR settlement and included taxes/fees. Invoice actuals, estimates, gross charges and confirmed credits remain separate. No final-response-only proof or savings claim. |
+
+These are source-backed integration requirements, not acknowledgements from the
+peer workers or proof that the lanes have been jointly tested. Their source files
+remain lane-owned. Coordinator owns the combined migration and worker integration.

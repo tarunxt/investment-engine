@@ -129,8 +129,8 @@ class GoogleSheetsTaskTests(unittest.TestCase):
             model="gemini-2.5-flash",
         )
         fake_db = FakeDB([
-            FakeScalarResult(scalar=cred),
             FakeScalarResult(scalar=job),
+            FakeScalarResult(scalar=cred),
         ])
 
         sync_session_local_mock.return_value = fake_db
@@ -193,8 +193,8 @@ class GoogleSheetsTaskTests(unittest.TestCase):
             exported_sheet_url=None,
         )
         fake_db = FakeDB([
-            FakeScalarResult(scalar=cred),
             FakeScalarResult(scalar=run),
+            FakeScalarResult(scalar=cred),
             FakeScalarResult(scalars=[
                 SimpleNamespace(stage=1, job=partial_job),
                 SimpleNamespace(stage=1, job=malformed_job),

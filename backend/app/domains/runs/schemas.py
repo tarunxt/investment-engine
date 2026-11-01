@@ -13,6 +13,7 @@ from app.domains.polymarket.stage2_models import (
     Stage2MarketContext,
 )
 from app.shared.types import JobStatus
+from app.domains.runs.side_effect_policy import RunSideEffectPolicy
 
 
 class RunModelTarget(BaseModel):
@@ -112,6 +113,7 @@ class PreparedPolymarketEventContext(BaseModel):
 
 
 class AutoRebalanceRunReservationRequest(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
     spend_intent: Literal["new_workflow", "continue_workflow"] | None = None
     spend_request_id: str | None = None
@@ -128,6 +130,7 @@ class AutoRebalanceRunReservationRequest(BaseModel):
 
 
 class AutoRebalanceRunReservationResponse(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
     sequence: int
     label: str
@@ -253,6 +256,7 @@ class AutoRebalanceRunDetailResponse(BaseModel):
 
 
 class AutoRebalanceHistoryItemResponse(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
     sequence: int
     label: str

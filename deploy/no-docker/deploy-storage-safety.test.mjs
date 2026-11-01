@@ -39,7 +39,7 @@ test('recovery deployment never starts the normal financial service path', () =>
   for (const [mode, scope, status, calls] of [
     ['1', 'full-stack', 0, ['recovery', 'redeploy:frontend-only']],
     ['1', 'backend-only', 0, ['recovery']],
-    ['1', 'frontend-only', 0, ['recovery', 'redeploy:frontend-only']],
+    ['1', 'frontend-only', 0, ['redeploy:frontend-only']],
     ['0', 'backend-only', 1, []],
     ['invalid', 'full-stack', 1, []],
   ]) {
@@ -55,7 +55,7 @@ bash() {
     *) echo unexpected-script; return 1 ;;
   esac
 }
-bash /unused/deploy-recovery.sh --preflight
+if [[ "$DEPLOY_SCOPE" != frontend-only ]]; then bash /unused/deploy-recovery.sh --preflight; fi
 ${selection}`;
     const result = spawnSync('bash', ['-c', script], { encoding: 'utf8' });
     assert.equal(result.status, status, `${mode}/${scope}: ${result.stderr}`);

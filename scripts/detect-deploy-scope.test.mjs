@@ -143,12 +143,9 @@ test("production deployment remains cancellable while optional build jobs may sk
   );
 });
 
-test("manual narrow scopes recover any unapplied current-main deployment", () => {
-  assert.match(deployWorkflow, /Current main push deployment conclusion/);
-  assert.match(
-    deployWorkflow,
-    /Broadening manual scope to full-stack because the current main SHA has no successful push deployment/,
-  );
+test("scope resolution is delegated to the executable fail-closed resolver", () => {
+  assert.match(deployWorkflow, /node scripts\/resolve-deploy-scope.mjs/);
+  assert.match(deployWorkflow, /frontend_base_sha: \$\{\{ steps.scope.outputs.frontend_base_sha \}\}/);
 });
 
 test("deploy and recovery use independent queues plus one production host lock", () => {

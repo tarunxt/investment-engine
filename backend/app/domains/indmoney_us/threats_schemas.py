@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app.domains.portfolio_events.schemas import PortfolioAnalysisHistoryItemResponse
+from app.domains.portfolio_events.schemas import PortfolioAnalysisHistoryItemResponse, PortfolioEventRunRequest
 from app.shared.types import JobStatus
+
+
+class IndMoneyUsThreatRunRequest(PortfolioEventRunRequest):
+    # Optional compare-and-use guard; never selects an older snapshot.
+    expected_snapshot_id: int | None = Field(default=None, gt=0, strict=True)
 
 
 class IndMoneyUsThreatSummaryResponse(BaseModel):

@@ -514,7 +514,7 @@ function RebalanceStockFlowSubwidget({
           zerodhaSnapshot?.holdings.some(
             (holding) =>
               holding.tradingsymbol.trim().toUpperCase() === symbol
-              && holding.quantity > 0,
+              && holding.quantity != null && holding.quantity > 0,
           ),
         );
       })

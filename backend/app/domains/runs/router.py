@@ -13,6 +13,7 @@ from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.domains.jobs.models import Job
+from app.domains.runs.side_effect_policy import permits_side_effects, require_workflow_policy_schema
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
     AutoRebalanceWorkflowStage,
@@ -348,6 +349,7 @@ async def _build_auto_rebalance_history(
     portfolio: str,
     sequences: set[int] | None = None,
 ) -> list[tuple[AutoRebalanceHistoryItemResponse, list[Run], list[Job]]]:
+    await require_workflow_policy_schema(db)
     workflow_query = (
         select(AutoRebalanceWorkflow)
         .where(
@@ -474,6 +476,7 @@ async def _build_auto_rebalance_history(
                 portfolio=portfolio,
                 sequence=sequence,
                 label=label,
+                side_effect_policy=workflow.side_effect_policy_json if workflow else None,
                 # A subset of finished child jobs is not a finished workflow.
                 # Preserve the durable parent's lifecycle; derivation is only
                 # a compatibility fallback for runs predating workflow audits.
@@ -626,6 +629,7 @@ async def reserve_auto_rebalance_label(
     current_user: User = Depends(get_current_user),
 ):
     from app.domains.rebalance_budget.ledger import authorize_workflow, SpendCapBlocked
+    await require_workflow_policy_schema(db)
     # The old request {portfolio} cannot silently authorize fresh spending.
     if body.spend_intent is None or body.spend_request_id is None or body.spend_observed_revision is None:
         raise HTTPException(422, "Choose New workflow (new ₹20 allowance) or Continue workflow (existing allowance), with a stable request UUID and refreshed allowance revision")
@@ -652,7 +656,8 @@ async def reserve_auto_rebalance_label(
         if existing is None:
             raise HTTPException(409, "Spending authorization exists without its workflow; reconcile before retrying")
         return AutoRebalanceRunReservationResponse(portfolio=body.portfolio, sequence=existing.sequence,
-            label=existing.label, spend_scope_id=binding.scope_id)
+            label=existing.label, spend_scope_id=binding.scope_id,
+            side_effect_policy=existing.side_effect_policy_json)
     workflow = AutoRebalanceWorkflow(
         user_id=current_user.id,
         portfolio=body.portfolio,
@@ -660,6 +665,7 @@ async def reserve_auto_rebalance_label(
         label=_format_auto_rebalance_label(body.portfolio, sequence),
         status="queued",
         current_stage="sync",
+        side_effect_policy_json=body.side_effect_policy.model_dump() if body.side_effect_policy else None,
     )
     db.add(workflow)
     await db.commit()
@@ -669,6 +675,7 @@ async def reserve_auto_rebalance_label(
         label=workflow.label,
         spend_scope_id=binding.scope_id,
         reservation_created=True,
+        side_effect_policy=workflow.side_effect_policy_json,
     )
 
 
@@ -680,6 +687,7 @@ async def list_auto_rebalance_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     # Include legacy run/job sequences as well as durable workflow rows. All
     # branches retain the authenticated owner and market boundary.
     sequence_query = select(AutoRebalanceWorkflow.sequence).where(
@@ -777,6 +785,7 @@ async def update_auto_rebalance_stage(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     if portfolio not in AUTO_REBALANCE_LABEL_PREFIXES:
         raise HTTPException(404, detail="Auto-rebalance portfolio not found")
     # Lock the parent row. The dashboard may send a "started" audit update and
@@ -822,7 +831,10 @@ async def update_auto_rebalance_stage(
             raise HTTPException(422, detail="Final capture belongs only to the actionables stage")
         from .frozen_final import validate_frozen_final
         await validate_frozen_final(db, body.summary["frozen_final"], user_id=current_user.id,
-                                   portfolio=portfolio, sequence=sequence)
+                                   portfolio=portfolio, sequence=sequence,
+                                   allow_legacy=bool(was_terminal and stage_record
+                                       and isinstance((stage_record.summary_json or {}).get("frozen_final"), dict)
+                                       and stage_record.summary_json["frozen_final"].get("schema") == "workflow-final-v1"))
     if stage_record is None:
         # Defaults run at flush; linking the relationship also keeps the
         # loaded stages collection current for first-write serialization.
@@ -873,7 +885,8 @@ async def update_auto_rebalance_stage(
         else:
             workflow.status = "processing" if status != "skipped" else workflow.status
             workflow.error_message = None
-    if status in {"completed", "partial"} and existing_status not in AUTO_REBALANCE_TERMINAL_STATUSES:
+    if (permits_side_effects(workflow.side_effect_policy_json)
+            and status in {"completed", "partial"} and existing_status not in AUTO_REBALANCE_TERMINAL_STATUSES):
         from app.domains.mails.completion_events import add_completion_event
         from app.domains.mails.completion_preferences import STOCK_STAGES, stock_segment
         add_completion_event(db, user_id=current_user.id, payload={
@@ -906,6 +919,7 @@ async def queue_auto_rebalance_completion_email(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    await require_workflow_policy_schema(db)
     workflow = (await db.execute(
         select(AutoRebalanceWorkflow)
         .where(
@@ -919,6 +933,8 @@ async def queue_auto_rebalance_completion_email(
     )).scalar_one_or_none()
     if not workflow:
         raise HTTPException(404, detail="Auto-rebalance run not found")
+    if not permits_side_effects(workflow.side_effect_policy_json):
+        return {"status": "suppressed", "reason": "run_side_effect_policy"}
     stages = {event.stage: event for event in workflow.stages}
     if (
         workflow.status not in {"completed", "partial"}
