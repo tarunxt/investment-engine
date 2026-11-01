@@ -750,8 +750,8 @@ export function IndMoneyUsSnapshotsPanel({
               </div>
               <div className="text-sm text-gray-500">
                 <p role="status">Captured <time dateTime={selectedSnapshot.captured_at}>{formatCapturedAt(selectedSnapshot.captured_at)}</time></p>
-              <p>Save time not recorded</p>
-              <p>Price as-of not recorded</p>
+                <p>Save time unavailable in this view</p>
+                <p>Price as-of unavailable in this view</p>
                 <p className="capitalize">Source: {selectedSnapshot.source.replace('_', ' ')}</p>
               </div>
             </div>

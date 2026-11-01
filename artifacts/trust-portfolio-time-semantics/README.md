@@ -29,3 +29,12 @@ Before images/readbacks were captured before changing production files; after im
 ## Limits
 
 This is a presentation-only change. India fixtures exercise panel props; US existing regression tests additionally exercise asynchronous page behavior. Native screen-reader audio and live account/provider behavior were not tested. No verified independent price/save timestamp exists in current API schemas, so both stay explicitly unknown. No merge or deployment attempted; those are reserved for the batch integrator.
+
+## Integration wording correction
+
+The database models inherit created_at/updated_at, but the current snapshot response
+schemas expose neither independent save time nor price-as-of. Final integrated UI
+therefore says “Save time unavailable in this view” and “Price as-of unavailable in
+this view”; it does not claim those facts were never recorded. Earlier screenshots
+above retain the worker's original wording and are superseded for these two labels.
+Final actual-component verification is recorded by the batch integration evidence.

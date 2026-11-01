@@ -58,7 +58,7 @@ test('actual India and US labels in isolated states and widths',async()=>{
  assert.ok(await page.getByRole('status').count()>0,'capture status is announced');
  assert.match(text,/20 Oct 2026/);
  if(market==='us') assert.match(await page.getByText('Wallet',{exact:true}).locator('../..').innerText(),/—/);
- assert.match(text,/Captured/); assert.match(text,/8:19 pm IST/i); assert.match(text,/Price as-of not recorded/); assert.match(text,/Save time not recorded/);
+ assert.match(text,/Captured/); assert.match(text,/8:19 pm IST/i); assert.match(text,/Price as-of unavailable in this view/); assert.match(text,/Save time unavailable in this view/);
  assert.match(text,market==='india'?/Available Margin/i:/Wallet/i);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no page overflow');
  await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement!==document.body),true,'keyboard target');
