@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import re
+from collections import defaultdict
 from fastapi import HTTPException
 from sqlalchemy import select
 from .auto_rebalance_audit import validate_execution
@@ -11,11 +12,18 @@ from .run_identity import analysis_run_identity
 from app.domains.jobs.models import Job
 
 
-async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence):
-    if not isinstance(payload, dict) or payload.get('schema') != 'workflow-final-v1':
+async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False):
+    if not isinstance(payload, dict) or payload.get('schema') not in {'workflow-final-v1', 'workflow-final-v2'}:
         raise HTTPException(422, 'Unsupported frozen final schema')
+    legacy = payload['schema'] == 'workflow-final-v1'
+    if legacy and not allow_legacy:
+        raise HTTPException(422, 'New final captures require workflow-final-v2 source recomputation')
+    if not legacy and (payload.get('formula_version') != 'score-matrix-v1' or payload.get('scorePolicy') != 'score-matrix-raw-effective-v2'):
+        raise HTTPException(422, 'Unsupported final formula or score policy version')
     if len(json.dumps(payload)) > 2_000_000:
         raise HTTPException(422, 'Frozen final exceeds audit size limit')
+    if not legacy and (not isinstance(payload.get('rebalance_run_ids'), list) or not 1 <= len(payload['rebalance_run_ids']) <= 20):
+        raise HTTPException(422, 'New final capture requires exact rebalance run IDs')
     technical_id = payload.get('technical_run_id')
     rebalance_ids = payload.get('rebalance_run_ids', [payload.get('rebalance_run_id')])
     ids = [*rebalance_ids, technical_id] if isinstance(rebalance_ids, list) else []
@@ -50,8 +58,10 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence):
         selected = manifest_data.get('job_ids', [])
         technical_jobs = set((await db.execute(select(RunJob.job_id).where(RunJob.run_id == technical_id))).scalars())
         known = {j.id for j in jobs}
-        if not isinstance(selected, list) or any(not isinstance(i, int) or i not in known or i in technical_jobs for i in selected):
+        if not isinstance(selected, list) or any(isinstance(i, bool) or not isinstance(i, int) or i not in known or i in technical_jobs for i in selected):
             raise HTTPException(422, 'Technical source job manifest is invalid')
+        if not legacy and len(selected) != len(set(selected)):
+            raise HTTPException(422, 'Technical source job manifest contains duplicates')
         allowed = set(selected) | technical_jobs
         jobs = [j for j in jobs if j.id in allowed]
     hashes = {str(j.id): hashlib.sha256((j.response or '').encode()).hexdigest() for j in jobs}
@@ -71,3 +81,24 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence):
         score = row.get('score')
         if score is not None and (isinstance(score, bool) or not isinstance(score, (int,float)) or not math.isfinite(score)):
             raise HTTPException(422, 'Invalid final score')
+
+    if not legacy:
+        # Reconstruct source membership independently; never use client detail
+        # as arithmetic evidence. Existing provenance/hash gates above still run.
+        from .final_recompute import source_calculations, verify_recomputed_rows
+        from .final_source_rows import UnverifiableFinal
+        links = list((await db.execute(select(RunJob).where(RunJob.run_id.in_(ids)).order_by(RunJob.id))).scalars())
+        known_jobs = {job.id: job for job in jobs}
+        if len(known_jobs) > 200:
+            raise HTTPException(422, 'Final source set exceeds verification bound')
+        jobs_by_run = defaultdict(list)
+        memberships = set()
+        for link in links:
+            if link.job_id in known_jobs and (link.run_id, link.job_id) not in memberships:
+                memberships.add((link.run_id, link.job_id))
+                jobs_by_run[link.run_id].append(known_jobs[link.job_id])
+        try:
+            calculations = source_calculations(payload, sources=sources, jobs_by_run=jobs_by_run, market=market)
+            verify_recomputed_rows(payload, calculations, raw_field='rawScore', effective_field='effectiveScore')
+        except (UnverifiableFinal, ArithmeticError) as exc:
+            raise HTTPException(422, f'Final calculation could not be verified: {exc}') from exc

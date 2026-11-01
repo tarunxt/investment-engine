@@ -35,6 +35,7 @@ export type StageErrorDetail = {
 
 export type StageInfo = {
   state: StageState;
+  evidence?: { kind: "saved" | "derived"; references: string[] };
   startedAt?: string | null;
   endedAt?: string | null;
   completedAt?: string | null;

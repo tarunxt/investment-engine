@@ -260,3 +260,24 @@ test('snapshot absence is disclosed separately from a matched zero and captured 
     assert.equal(stock.rows[0].cells[actionHeader], 'Hold');
   }
 });
+
+
+test('partial rows with unavailable model units use frozen holdings for final action and summary', () => {
+  for (const missing of ['—', '-', 'malformed']) {
+    const source = runWithRows([modelRow(2, { 'Current Units': missing, 'Final Units': '—' })]);
+    source.status = 'partial';
+    const before = structuredClone(source);
+    for (const units of [0, 6, 0.125]) {
+      const frozen = snapshot(units);
+      frozen.captured_at = '2020-01-01T00:00:00Z';
+      const [stock] = helpers.buildConsensusRows([source], 'india', frozen);
+      const [row] = helpers.buildDashboardActionRows([stock], 'india', {});
+      assert.equal(row.detail.currentUnits, units);
+      assert.equal(row.formulaAction, units > 0 ? 'Add more' : 'Buy New');
+      assert.equal(row.formulaEstimate.currentUnits, units);
+      assert.equal(helpers.buildSummaryRowCells(stock, row.detail, row.formulaAction, row.detail.calculatedUnitsChange)['Current Units'], String(units));
+      assert.equal(stock.rows[0].cells['Current Units'], '0', 'existing Buy New parser normalization remains unchanged');
+    }
+    assert.deepEqual(source, before, 'captured evidence is unchanged');
+  }
+});

@@ -29,7 +29,9 @@ const auditAst = ts.createSourceFile('audit.ts', read('../services/recommendatio
 const auditHasher = load(auditAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'auditResponseHashes').getText(auditAst), { crypto: webcrypto }).auditResponseHashes;
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
-const portfolioSnapshot = { captured_at: '2026-10-02T20:30:00Z', parse_status: 'parsed', reported_holdings_count: 1,
+modules['@/lib/rebalance'] = rebalance;
+const snapshotSource = load(read('../lib/indmoneySnapshotSource.ts'));
+const portfolioSnapshot = { id: 7001, captured_at: '2026-10-02T20:30:00Z', parse_status: 'parsed', reported_holdings_count: 1,
   holdings: [{ symbol: 'ABC', quantity: 0.125 }] };
 const swing = load(read('../lib/swingTrade.ts'));
 const scope = { market: 'us', stage: 'swing' };
@@ -58,7 +60,7 @@ function run(id = 50, jobIds = [501, 502], stage = 'swing', market = 'us') {
 function threat(jobId = 99, origin = 'selected', market = 'us') {
   return {
     identity: { kind: 'threat-job', stage: 'threats', market, jobId }, origin,
-    analysis: { job_id: jobId, status: 'completed', provider: 'openai', model: 'same-model',
+    analysis: { snapshot_id: 7001, job_id: jobId, status: 'completed', provider: 'openai', model: 'same-model',
       created_at: timestamp, updated_at: timestamp, snapshot_date: '2026-10-02', captured_at: timestamp,
       report: { raw_markdown: 'Keep the current risk and the dissenting view.' },
     },
@@ -256,7 +258,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   const apiService = {
     getProviders: async () => [],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
-    indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99 }; },
+    indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99, snapshot_id: snapshot?.id }; },
     indmoneyUsThreatJob: async (id) => { threatReads.push(id); return threatOverrides[id] ?? threat(id).analysis; },
     indmoneyUsThreatsLatest: async () => ({ analysis: threat(99).analysis }),
     getRuns: async () => ({ items: [generatedSwing] }),
@@ -270,11 +272,13 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
+    readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     recommendationAuditEnabled: false,
     scoreMatrixFormulaConfig: {},
     auditResponseHashes: auditHasher,
-    ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
+    ...inputs, ...rebalance, ...snapshotSource, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
     ...modules['@/lib/autoRebalanceAudit'], ...modules['@/lib/outputSourceJobs'], buildOutputSourceJobs: sourceHasher, apiService,
+    analysisOnlyRuns: { indmoneyUs: false }, setAnalysisOnlyRuns: noop,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,
     isWorkflowExecutingRef: { current: false }, activeExecutionRefsRef: { current: [] },
     activeAutoRebalanceMetadataRef: { current: {} }, cancelRequestedRef, pauseRequestedRef: { current: false },
@@ -307,7 +311,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
 }
 
 test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
-  const result = await executeWorkflow({ snapshot: { parse_status: 'unparsed', holdings: [] } });
+  const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, parse_status: 'unparsed', holdings: [] } });
   assert.deepEqual(result.created, []);
   assert.deepEqual(result.completed, []);
   assert.equal(result.errors[0].stage, 'sync');
@@ -502,4 +506,77 @@ test('starting a stage clears previous run/listing/provider diagnostics without 
  const callback=declarations.get('markRunning').initializer.arguments[0].getText(ast);
  const {mark}=load(`export const mark = ${callback};`,{updateStage:(_portfolio,_stage,info)=>{visible={...visible,...info};},recordAutoRebalanceStage:()=>{}});mark('zerodha','technical',{totalLlms:1});
  assert.equal(visible.state,'running');assert.equal(visible.lastRunId,null);assert.equal(visible.activeRunId,null);assert.equal(visible.recommendedStocks,null);assert.equal(visible.error,null);assert.deepEqual(visible.errorDetails,[]);assert.equal(visible.provider,null);assert.equal(visible.frozenFinal,undefined);assert.equal(visible.totalLlms,1);assert.deepEqual(previous,before);
+});
+
+
+test('Zerodha unknown numeric exposure fails before input generation without inventing zero', () => {
+  const holding = { quantity: 2, t1_quantity: 0, last_price: 10 };
+  const base = { holdings_count: 1, holdings: [holding], available_margin: 0, positions: { net: [], day: [] } };
+  assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure(base));
+  for (const key of ['quantity', 't1_quantity', 'last_price']) for (const value of [null, undefined, NaN, Infinity]) {
+    const snapshot = { ...base, holdings: [{ ...holding, [key]: value }] };
+    assert.throws(() => rebalance.buildRebalanceInputBundle({ market: 'india', portfolio: snapshot, swingRuns: [], threats: null, previousClose: new Date() }), /unknown numeric exposure/);
+  }
+  assert.throws(() => rebalance.assertZerodhaNumericExposure({ ...base, available_margin: null }), /available margin/);
+  assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure({ ...base, holdings: [{ quantity: 0, t1_quantity: 0, last_price: 0 }] }));
+});
+
+test('funds context preserves captured units, zero and unknown without inventing a budget', () => {
+  for (const [market, field, currency] of [['india', 'available_margin', 'INR'], ['us', 'wallet_balance', 'USD']]) {
+    for (const value of [0, -5, 0.125, 100, null, undefined, NaN, Infinity, '123']) {
+      const snapshot = { snapshot_date: '2020-01-01', captured_at: '2020-01-01T00:00:00Z', [field]: value };
+      const before = structuredClone(snapshot);
+      const actual = rebalance.formatRebalanceFunds(market, snapshot);
+      const expected = typeof value === 'number' && Number.isFinite(value) ? String(value) : 'Unknown (missing or invalid)';
+      assert.ok(actual.includes(`snapshot.${field}; currency: ${currency}; stored value: ${expected}`));
+      assert.ok(actual.includes('captured at: 2020-01-01T00:00:00Z'));
+      assert.ok(actual.includes('not a live funds refresh'));
+      assert.ok(actual.includes('no deployable-budget rule'));
+      assert.ok(actual.includes('Funded sizing remains unverified'));
+      assert.deepEqual(snapshot, before);
+      assert.equal(rebalance.formatRebalanceFunds(market, snapshot), actual);
+    }
+    assert.ok(rebalance.formatRebalanceFunds(market, null).includes('stored value: Unknown'));
+    assert.ok(rebalance.formatRebalanceFunds(market, {}).includes('captured at: Unknown'));
+  }
+  assert.ok(rebalance.formatRebalanceFunds('india', { available_margin: 0 }).includes('does not prove broker-confirmed zero'));
+  assert.ok(rebalance.formatRebalanceFunds('us', { wallet_balance: 1 }).includes('Buying power and margin are unknown'));
+});
+
+test('full model input and summary preview retain the same versioned funds evidence', () => {
+  for (const swingDisplayMode of ['full', 'summary']) {
+    const portfolio = { ...portfolioSnapshot, wallet_balance: 0 };
+    const bundle = rebalance.buildRebalanceInputBundle({market: 'us', portfolio, swingRuns: [], threats: null,
+      previousClose: new Date(timestamp), swingDisplayMode});
+    assert.ok(bundle.includes(rebalance.formatRebalanceFunds('us', portfolio)));
+    assert.equal(bundle.split('rebalance-funds/v1').length, 2);
+    assert.ok(bundle.indexOf('rebalance-funds/v1') < bundle.indexOf('## 2. Completed Swing'));
+  }
+});
+
+test('capture ages preserve exact timestamps, zero, old, missing, malformed and future provenance', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-11-01T12:00:00Z', now), 'source timestamp: 2026-11-01T12:00:00Z; age: 0 ms at 2026-11-01T12:00:00.000Z');
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-10-30T12:00:00Z', now), 'source timestamp: 2026-10-30T12:00:00Z; age: 172800000 ms at 2026-11-01T12:00:00.000Z');
+  for (const value of [null, undefined, '', 'broken']) assert.equal(rebalance.describeRebalanceSourceAge(value, now), `source timestamp: ${value || 'unknown'}; age: unknown`);
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-11-02T12:00:00Z', now), 'source timestamp: 2026-11-02T12:00:00Z; age: unknown (future or invalid reference time)');
+});
+
+test('full and summary bundles honestly describe historical selection and unknown source freshness without mutation', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  const selected = run();
+  selected.created_at = '2020-01-01T00:00:00Z';
+  const before = JSON.stringify(selected);
+  for (const swingDisplayMode of ['full', 'summary']) {
+    const args = { market: 'us', portfolio: portfolioSnapshot, threats: null, swingRuns: [selected], previousClose: now, now, swingDisplayMode };
+    const result = rebalance.buildRebalanceInputBundle(args);
+    assert.equal(rebalance.buildRebalanceInputBundle(args), result);
+    assert.match(result, /Swing run #50 creation: source timestamp: 2020-01-01T00:00:00Z; age: 215697600000 ms/);
+    assert.match(result, /Threat report creation: source timestamp: unknown; age: unknown/);
+    assert.match(result, /exchange holidays and early closes are not validated/);
+    assert.match(result, /Price as-of and exchange-session age: unknown/);
+    assert.match(result, /Explicit selections may be historical/);
+    assert.doesNotMatch(result, /runs found after previous market close/);
+  }
+  assert.equal(JSON.stringify(selected), before);
 });

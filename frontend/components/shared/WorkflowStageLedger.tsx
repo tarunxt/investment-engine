@@ -6,6 +6,11 @@ import { StageErrorDetails } from "./StageErrorDetails";
 import { getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
+function evidenceLabel(item: Stage) {
+  if (item.info.evidence?.kind === "derived") return "Derived summary · saved final execution not established";
+  if (item.info.evidence?.kind === "saved") return "Historical saved evidence";
+  return item.info.state === "idle" ? "Source unavailable" : "Workflow stage state · see History for invocation identity";
+}
 export type WorkflowLedgerView = "ledger" | "evidence" | "execution";
 export function WorkflowStageLedgerViews({ market, view, onChange }: {
   market: "zerodha" | "indmoneyUs";
@@ -57,7 +62,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     {view === "ledger" ? <div role="region" aria-label="Saved stage ledger, scroll for all columns" tabIndex={0} className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">
       <table className="w-full min-w-[790px] border-collapse text-left text-sm">
         <caption className="sr-only">Saved workflow stages. Select a stage to inspect its evidence; execution controls are separate.</caption>
-        <thead className="bg-slate-100 text-xs text-slate-700"><tr>{["Stage", "Saved time", "Completion / inputs", "Stocks", "Duration", "Error"].map(label => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
+        <thead className="bg-slate-100 text-xs text-slate-700"><tr>{["Stage", "Evidence time", "Completion / inputs", "Stocks", "Duration", "Error"].map(label => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
         <tbody>{stages.map(item => {
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const error = rows.find(row => row.label === "Error")!;
@@ -69,6 +74,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                 <button type="button" className="rounded text-left font-semibold text-slate-900 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" aria-pressed={selected.stage === item.stage} aria-controls={detailId} onClick={() => setSelectedStage(item.stage)}>
                   {STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}
                   <span className="mt-0.5 block text-xs font-normal capitalize text-slate-500">{item.info.state}{item.info.runStatus ? ` · ${item.info.runStatus}` : ""}</span>
+                  <span className="mt-0.5 block text-xs font-normal text-slate-600">{evidenceLabel(item)}</span>
                 </button>
               </div>
             </th>
@@ -87,6 +93,13 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         {view === "evidence" ? <label className="text-xs">Stage <select aria-label="Stage" value={selected.stage} onChange={event => setSelectedStage(event.target.value)} className="ml-2 rounded border border-indigo-200 bg-white p-2 text-sm text-slate-900">{stages.map(item => <option key={item.stage} value={item.stage}>{STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}</option>)}</select></label> : null}
       </div>
       <p className="mt-1 text-xs">{selected.stage === "sync" ? "Inspect the saved holdings, cash, and exposure snapshot." : STAGE_METADATA[selected.stage].tileDescription}</p>
+      <p className="mt-1 text-xs">{evidenceLabel(selected)}. Stage rows may refer to different workflows; no shared invocation is implied.</p>
+      <ul aria-label="Evidence sources" className="mt-1 text-xs">
+        {(selected.info.evidence?.references ?? [
+          selected.info.activeRunId || selected.info.lastRunId ? `Run #${selected.info.activeRunId || selected.info.lastRunId}` : null,
+          selected.info.jobId ? `Job #${selected.info.jobId}` : null,
+        ].filter((value): value is string => Boolean(value))).map((reference, index) => <li key={index}>{reference}</li>)}
+      </ul>
       <div className="mt-3 flex flex-wrap gap-2">
         {selected.onInputClick ? <button type="button" className={control} onClick={selected.onInputClick}>Inputs</button> : null}
         {selected.onInfoClick ? <button type="button" className={control} onClick={selected.onInfoClick}>Models</button> : null}

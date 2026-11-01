@@ -351,7 +351,7 @@ function buildIndiaTopHoldings(
   overview: ZerodhaPortfolioOverviewResponse | null,
 ): PortfolioCardTopHolding[] {
   const holdings = [...(overview?.latest?.holdings ?? [])]
-    .sort((left, right) => right.market_value - left.market_value)
+    .sort((left, right) => (right.market_value ?? -Infinity) - (left.market_value ?? -Infinity))
     .slice(0, 4);
 
   return holdings.map((holding) => ({
@@ -1562,8 +1562,8 @@ function DashboardPageForUser({
   const indiaComplete =
     indiaSnapshot != null &&
     Number.isFinite(indiaSnapshot.holdings_market_value) &&
-    Number.isFinite(indiaSnapshot.available_margin);
-  const zerodhaCommandValue = indiaComplete
+    indiaSnapshot.available_margin != null && Number.isFinite(indiaSnapshot.available_margin);
+  const zerodhaCommandValue = indiaComplete && indiaSnapshot.available_margin != null
     ? indiaSnapshot.holdings_market_value + indiaSnapshot.available_margin
     : null;
   const usdInrRate = validDashboardFxRate(dashboard.fx);

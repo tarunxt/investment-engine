@@ -32,6 +32,7 @@ const imported = {
   ...load('../lib/technicalSetups.ts'), ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'), ...load('../lib/runPresentation.ts'),
   ...load('../lib/actionableQuantityDisplay.ts'),
+  ...load('../components/AllocationScoreContext.tsx', load('../lib/basketDisplayCalculations.ts')),
   ...load('../lib/summarySourceRows.ts'),
 };
 const ui = Object.fromEntries([
@@ -926,4 +927,18 @@ test('verified partial source runs retain completed and partial jobs without man
  const h=helpers();const [scan]=h.parseTechnicalScanResponse('| EXCHANGE SYMBOL | STOCK SYMBOL | Primary Setup | Secondary Setups | Bias | Premarket trend | Last 5 candles trend | Confidence Score |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| NSE | CGPOWER | Lower-high pullback | 200DMA/rejection | bearish | 0 | -2 | 8.8 |',{runId:455,jobId:2252,provider:'fixture',model:'fixture',createdAt:timestamp,runLabel:'India 211'});
  assert.equal(scan.stockSymbol,'CGPOWER');assert.equal(scan.premarketTrend,'0');assert.equal(scan.last5CandlesTrend,'-2');assert.equal(scan.confidenceScore,'8.8');assert.equal(scan.runId,455);assert.equal(scan.jobId,2252);
  assert.equal(h.getTechnicalScanForStock({'NSE:CGPOWER':scan},{symbol:'CGPOWER',exchange:'NSE',representative:{}}),scan,'canonical observed header/venue is already valid; absence must not be fabricated');
+});
+
+
+test('new matrix detail labels raw and effective allocation score without reinterpreting frozen detail', () => {
+  const h = helpers();
+  const fixture = parameterFixture(h);
+  const detail = {...fixture.detail, calculatedScore: 72.8/24, detailedRationaleFinalScore: 72.8/24};
+  const current = renderToStaticMarkup(React.createElement(h.DetailedRationaleScoreSection, {detail}));
+  assert.match(current, /Raw formula score: 3.033333333333/);
+  assert.match(current, /Effective allocation score: 3/);
+  assert.match(current, /score-matrix-raw-effective-v2/);
+  const frozen = renderToStaticMarkup(React.createElement(h.DetailedRationaleScoreSection, {detail, readOnly:true}));
+  assert.doesNotMatch(frozen, /Effective allocation score:/);
+  assert.equal(detail.calculatedScore, 72.8/24);
 });

@@ -52,7 +52,7 @@ def build_zerodha_events_prompt(snapshot: ZerodhaPortfolioSnapshot) -> str:
         f"- Snapshot date: {snapshot.snapshot_date.isoformat()}",
         f"- Captured at (IST): {captured_at_ist.strftime('%d %b %Y, %I:%M %p IST')}",
         f"- Holdings count: {snapshot.holdings_count}",
-        f"- Holdings market value (INR): {_fmt_num(snapshot.holdings_market_value)}",
+        f"- Settled holdings market value excluding T1 (INR): {_fmt_num(snapshot.holdings_market_value)}",
         f"- Holdings unrealized PnL (INR): {_fmt_num(snapshot.holdings_pnl)}",
         "",
         "Portfolio holdings table:",
@@ -101,7 +101,7 @@ def _build_holdings_markdown_table(snapshot: ZerodhaPortfolioSnapshot) -> str:
         key=lambda holding: float(holding.get("market_value") or 0.0),
         reverse=True,
     )
-    headers = ["Exchange", "Stock Symbol", "Stock Name", "ISIN", "Quantity", "Avg Buy", "Live Price", "Current Value"]
+    headers = ["Exchange", "Stock Symbol", "Stock Name", "ISIN", "Settled Quantity", "Avg Buy", "Live Price", "Settled Value (excludes T1)"]
     lines = [
         f"| {' | '.join(headers)} |",
         f"| {' | '.join('---' for _ in headers)} |",

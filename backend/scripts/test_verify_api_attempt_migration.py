@@ -1,6 +1,8 @@
 """Offline tests: no Alembic commands or PostgreSQL connections are executed."""
 
 from pathlib import Path
+from copy import deepcopy
+import json
 import unittest
 from unittest.mock import patch
 
@@ -10,6 +12,26 @@ import verify_api_attempt_migration as verifier
 
 
 class MigrationSafetyTests(unittest.TestCase):
+    def test_forward_policy_allows_only_nullable_column_and_preserves_prior_facts(self):
+        prior = {"auto_rebalance_workflows": {"columns": [("id", "INTEGER", False, None)], "rows": [json.dumps({"id": 1}, sort_keys=True)], "indexes": []}}
+        valid = deepcopy(prior)
+        valid["auto_rebalance_workflows"]["columns"].append(("side_effect_policy_json", "JSON", True, None))
+        valid["auto_rebalance_workflows"]["rows"] = [json.dumps({"id": 1, "side_effect_policy_json": None}, sort_keys=True)]
+        untouched = deepcopy(valid)
+        verifier.verify_forward_baseline(prior, valid)
+        self.assertEqual(valid, untouched)
+        for field in ("type", "nullable", "default", "old_row", "new_value", "index", "extra_column"):
+            changed = deepcopy(valid)
+            workflow = changed["auto_rebalance_workflows"]
+            if field in {"type", "nullable", "default"}:
+                workflow["columns"][-1] = {"type": ("side_effect_policy_json", "TEXT", True, None), "nullable": ("side_effect_policy_json", "JSON", False, None), "default": ("side_effect_policy_json", "JSON", True, "{}")}[field]
+            elif field == "old_row": workflow["rows"] = [json.dumps({"id": 2, "side_effect_policy_json": None}, sort_keys=True)]
+            elif field == "new_value": workflow["rows"] = [json.dumps({"id": 1, "side_effect_policy_json": {}}, sort_keys=True)]
+            elif field == "index": workflow["indexes"].append({"name": "unexpected"})
+            else: workflow["columns"].append(("unexpected", "JSON", True, None))
+            with self.subTest(field=field), self.assertRaises(AssertionError):
+                verifier.verify_forward_baseline(prior, changed)
+
     def environment(self):
         return {**verifier.TEST_ENVIRONMENT, "PATH": "/usr/local/bin:/usr/bin"}
 

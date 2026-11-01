@@ -382,3 +382,31 @@ portfolio/stage filters. The dialog supports Escape, keyboard focus cycling,
 background inertness and focus restoration. Offline browser acceptance is available
 with `node frontend/scripts/saved-output-offline-playwright.mjs`; it uses fixtures
 and blocks external network requests.
+
+## Per-run notification and export opt-out (REBALANCE-WORKFLOW-F08)
+
+New workflow reservations accept `side_effect_policy` with exactly
+`{"version": 1, "mode": "analysis_only"}` (or `existing_preferences`). The
+nullable policy is frozen on the workflow, returned in reservation/history APIs,
+and never changed by stage summaries or browser retries. Omission and historical
+NULL retain existing normal-mode preferences. No stored user settings are changed.
+
+The run checkbox suppresses notification outbox creation for every stage and
+completion, disables automatic child-run export before provider/profile lookup,
+and blocks both job/run Sheets workers before credential handling, including
+repeated queued requests. Recovery containment remains independently effective.
+The opt-out covers notifications and Sheets exports; existing analysis, portfolio
+sync, broker permissions, order safeguards and costs retain their own contracts.
+The browser refuses to start an opted-out workflow unless reservation confirms
+the exact versioned policy, including during a mixed-version rollout. The checkbox
+resets for a subsequent run; history retains the saved policy after interruption.
+
+Deployment requires migration `audit7_run_policy_001` before the backend rollout;
+no historical rows are backfilled. Local verification does not apply migrations
+or establish live delivery/export acceptance. Offline component acceptance:
+`cd frontend && node scripts/rebalance-policy-offline-playwright.mjs`.
+
+Migration tests record upgrade/rollback operations and compile the PostgreSQL
+column declaration offline; they do not prove a live database upgrade. Rollback
+removes the saved policy, so production rollback requires stopping opted-out
+workflows and their queued exports before downgrading.

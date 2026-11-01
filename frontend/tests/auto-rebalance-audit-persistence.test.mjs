@@ -31,8 +31,11 @@ assert.ok(holdingsGuard, "use the real holdings guard in the extracted workflow"
 const holdingsExports = {};
 new Function("exports", compile(holdingsGuard.getText(rebalanceAst)))(holdingsExports);
 const { assertIndmoneyHoldingsSnapshot } = holdingsExports;
+const snapshotExports = {};
+new Function("exports", "require", compile(readFileSync(new URL("../lib/indmoneySnapshotSource.ts", import.meta.url), "utf8")))(snapshotExports, () => holdingsExports);
+const { readIndmoneySnapshotSource } = snapshotExports;
 const holdingsSnapshot = {
-  parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
+  id: 7001, parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
   holdings: [{ symbol: "ABC", quantity: 0.125 }],
 };
 const workflowSource = readFileSync(new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url), "utf8");
@@ -58,11 +61,12 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
+function harness({ analysisOnly = false, formulaScore = 0, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
   const modelCalls = [];
+  const consensusCalls = [];
   const delays = [];
   const timers = [];
   const updates = [];
@@ -98,6 +102,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     },
     getProviders: async () => [{ provider: "existing", model: "chosen" }],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
+    indmoneyUsThreatsLatest: async () => ({ analysis: { snapshot_id: snapshot?.id, captured_at: snapshot?.captured_at } }),
     zerodhaPortfolioOverview: async () => ({ latest: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaThreatsLatest: async () => ({ analysis: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaDisplayQuotes: quoteRead ?? (async () => ({ quotes: [], missing: [] })),
@@ -105,7 +110,8 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
-    useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
+    readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
+    readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
     apiService, sleep: async (ms) => { delays.push(ms); },
     setAuditStates: set("audits"), setCompletionEmailWarnings: set("warnings"), setStates: set("states"),
@@ -118,7 +124,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     cancelRequestedRef: cancel, pauseRequestedRef: pause,
     setRunningPortfolio: set("running"), setWorkflowPaused: () => {},
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
-    setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
+    analysisOnlyRuns: { zerodha: analysisOnly, indmoneyUs: analysisOnly }, setAnalysisOnlyRuns: () => {}, setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
     onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
     retryWorkflowRead: (read) => read(),
@@ -130,9 +136,9 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     buildRebalanceInputBundle: () => "snapshot", ensureRebalanceFlowMarker: p => p,
     buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
-    buildConsensusRows: () => [{ exchange: "NSE", symbol: "TEST" }],
+    buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST" }]; },
     buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
-    buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore: 0, formulaEstimate: {}, detail: {} })),
+    buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
     buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1,
     getStageTileLabel: (stage) => stage, normalizeError: (error) => error.message,
@@ -141,7 +147,7 @@ function harness({ intercept, read, email, reserve, quoteRead, snapshot = holdin
     window: { setTimeout: (fn) => { timers.push(fn); }, dispatchEvent: () => {}, alert: (message) => { alerts.push(message); } },
     CustomEvent: class {}, console: { error: () => {} },
   };
-  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, delays, timers, durable, updates, alerts };
+  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, consensusCalls, delays, timers, durable, updates, alerts };
 }
 
 for (const rejectedStage of ["sync", "actionables"]) {
@@ -340,6 +346,7 @@ test("actual workflow card renders pending and failed history independently of o
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
+      analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
@@ -453,7 +460,7 @@ test("INDmoney's real holdings guard blocks invalid pasted and saved snapshots b
       assert.equal(h.emails.length, 0);
       assert.equal(h.auditWrites.some(({ stage, payload }) => stage === "sync" && payload.status === "completed"), false);
       assert.equal(h.durable.get("indmoney_us:42:sync").status, "failed");
-      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks/);
+      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks|Saved snapshot identity or capture time is unavailable/);
     }
   }
 });
@@ -514,3 +521,51 @@ test("Personal API denial still creates Technical and completes frozen Actionabl
   assert.equal(h.view.states.zerodha.technical.state,"completed");
   assert.equal(h.view.states.zerodha.actionables.state,"completed");
 });
+
+
+test("final capture uses the retained workflow snapshot on repeated runs", async () => {
+  const retained = { ...holdingsSnapshot, holdings: [{ symbol: "TEST", quantity: 6 }] };
+  const h = harness({ snapshot: retained });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await h.runWorkflow("indmoneyUs");
+    const finalCall = h.consensusCalls.at(-1);
+    assert.ok(finalCall, JSON.stringify(h.updates.filter(x => x.info.error)));
+    assert.equal(finalCall[1], "us");
+    assert.equal(finalCall[2], retained, "final calculation uses the exact retained snapshot");
+    assert.equal(h.view.states.indmoneyUs.actionables.state, "completed");
+  }
+});
+for (const analysisOnly of [false, true]) {
+  test(`actual workflow freezes analysis-only selection=${analysisOnly} in reservation`, async () => {
+    const reservations = [];
+    const h = harness({ analysisOnly, reserve: async (portfolio, flag) => { reservations.push({ portfolio, flag }); return metadata(); } });
+    await h.runWorkflow("zerodha");
+    assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
+  });
+}
+test("stale India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+  const h = harness({quoteRead: async instruments => ({
+    quotes: instruments.map(instrument => ({instrument,price:100,as_of:'2000-01-01T00:00:00Z',source:'synthetic stale fixture'})),
+    missing:[],
+  })});
+  await h.runWorkflow("zerodha");
+  assert.equal(h.modelCalls.filter(call => call.scanLabel === "Technical Scan").length,0);
+  assert.equal(h.view.states.zerodha.technical.state,"failed");
+  assert.notEqual(h.view.states.zerodha.actionables.state,"completed");
+  assert.equal(h.emails.length,0);
+  assert.equal(h.durable.get("india:42:technical").status,"failed");
+});
+for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
+  test(`actual workflow freezes explicit v2 raw/effective evidence for ${rawScore}`, async () => {
+    const h = harness({ formulaScore: rawScore });
+    await h.runWorkflow("zerodha");
+    const frozen = h.durable.get("india:42:actionables").summary.frozen_final;
+    assert.equal(frozen.schema, "workflow-final-v2");
+    assert.equal(frozen.formula_version, "score-matrix-v1");
+    assert.equal(frozen.scorePolicy, "score-matrix-raw-effective-v2");
+    assert.equal(frozen.rows[0].score, rawScore);
+    assert.equal(frozen.rows[0].rawScore, rawScore);
+    assert.equal(frozen.rows[0].effectiveScore, rawScore === null ? null : Math.max(-3, Math.min(3, rawScore)));
+    assert.equal(frozen.rows[0].scorePolicy, frozen.scorePolicy);
+  });
+}
