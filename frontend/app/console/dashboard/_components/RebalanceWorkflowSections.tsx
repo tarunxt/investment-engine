@@ -3,6 +3,7 @@
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { PromptTemplateDialog } from "@/app/console/automated-rebalance/_components/PromptTemplateDialog";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
 import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
@@ -8316,31 +8317,11 @@ ${zerodhaExecutionMode === "direct_market"
       />
 
       {promptDialog ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={() => setPromptDialog(null)}>
-          <div className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl bg-white shadow-2xl xl:max-w-[95vw]" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">
-                  {promptDialog.title}
-                </h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Prompt template used by this Auto-Rebalance stage. Runtime input bundles are added when the workflow runs.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPromptDialog(null)}
-                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Close prompt view"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            <pre className="max-h-[65vh] overflow-auto whitespace-pre-wrap p-5 text-sm leading-6 text-slate-700">
-              {promptDialog.body}
-            </pre>
-          </div>
-        </div>
+        <PromptTemplateDialog
+          title={promptDialog.title}
+          body={promptDialog.body}
+          onClose={() => setPromptDialog(null)}
+        />
       ) : null}
 
       {outputDialog ? (
