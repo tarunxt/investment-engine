@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+// The history timeline is a separate renderer; include its regression in the required timing suite.
+import './stage-timeline-interval.test.mjs';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 // Execute the production pure calculations without a browser or provider calls.

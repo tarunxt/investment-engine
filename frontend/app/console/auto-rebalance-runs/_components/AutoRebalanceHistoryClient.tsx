@@ -16,7 +16,7 @@ import {
 import { getStageTileLabel } from "@/components/shared/WorkflowStageTile";
 import { Button } from "@/components/ui/button";
 import { URLs } from "@/lib/urls";
-import { formatApiTimestamp } from "@/lib/datetime";
+import { formatApiTimestamp, parseApiTimestamp } from "@/lib/datetime";
 import { outputAttribution } from "@/lib/outputProvenance";
 import { apiService } from "@/services/api";
 import type {
@@ -97,6 +97,9 @@ function StatusBadge({ status }: { status?: string | null }) {
 
 function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
   const label = STAGE_LABELS[stage.stage];
+  const started = parseApiTimestamp(stage.started_at);
+  const finished = parseApiTimestamp(stage.completed_at);
+  const invalidInterval = started !== null && finished !== null && finished.getTime() < started.getTime();
   return (
     <div className={`min-w-0 rounded-xl border p-4 [overflow-wrap:anywhere] ${stageCardTone(stage.status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -118,6 +121,11 @@ function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
         <span>Partial LLMs: {stage.partial_provider_count ?? 0}</span>
         <span>Failed LLMs: {stage.failed_provider_count}</span>
       </div>
+      {invalidInterval ? (
+        <p role="note" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-900">
+          Invalid interval: recorded finish is before recorded start. Original timestamps are preserved; elapsed duration cannot be determined reliably.
+        </p>
+      ) : null}
       {typeof stage.summary?.partial_notice === "string" ? <p className="mt-3 text-xs text-amber-800">{stage.summary.partial_notice}</p> : null}
       {stage.error_message ? (
         <div className="mt-3 flex gap-2 rounded-lg border border-rose-200 bg-white/70 p-3 text-xs leading-5 text-rose-800">
