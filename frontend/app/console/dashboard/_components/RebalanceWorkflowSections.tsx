@@ -81,6 +81,7 @@ import {
   INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
   ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
 } from "./dashboardEvents";
+import { ModelPickerDialogFrame } from "@/components/shared/ModelPickerDialogFrame";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
   assertIndmoneyHoldingsSnapshot,
@@ -4250,6 +4251,7 @@ function StageLlmSelectorDialog({
 
   if (!open || !stage) return null;
 
+  const organizedPicker = stage === "threats" && portfolio === "zerodha";
   const singleSelect = stage === "threats" || stage === "technical";
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
@@ -4346,9 +4348,8 @@ function StageLlmSelectorDialog({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} onClose={onClose}>
+        <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5", organizedPicker && "shrink-0 px-4 py-3 sm:px-6")}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               {selectorTitle}
@@ -4392,7 +4393,7 @@ function StageLlmSelectorDialog({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className={cn("flex-1 overflow-y-auto px-6 py-5", organizedPicker && "min-h-0 overscroll-contain px-4 py-4 sm:px-6")}>
           {activeHistoryOpen ? (
             <div className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -4460,12 +4461,14 @@ function StageLlmSelectorDialog({
             </div>
           ) : null}
           <LlmModelSelectionPanel
+            organized={organizedPicker}
+            loading={organizedPicker && loading}
             providers={providers}
             selectedKeys={selectedKeys}
             selectedMultipliers={singleSelect ? undefined : selectedMultipliers}
             onMultiplierChange={singleSelect ? undefined : onMultiplierChange}
             selectionMode={singleSelect ? "single" : "multiple"}
-            emptyMessage="Loading provider models..."
+            emptyMessage={organizedPicker ? "No provider models are available. Retry when provider access is restored." : "Loading provider models..."}
             showBulkActions={!singleSelect}
             modelMixControls={modelMixControls}
             getEstimatedCostInr={getEstimatedCostInr}
@@ -4489,7 +4492,8 @@ function StageLlmSelectorDialog({
           />
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+        <div className={cn("flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4", organizedPicker && "shrink-0 flex-wrap px-4 py-3 sm:px-6")}>
+          {organizedPicker ? <span className="text-sm font-semibold text-slate-700">{selectedKeys.size} selected</span> : null}
           <button
             type="button"
             onClick={onResetDefaults}
@@ -4505,8 +4509,7 @@ function StageLlmSelectorDialog({
             Done
           </Button>
         </div>
-      </div>
-    </div>
+    </ModelPickerDialogFrame>
   );
 }
 
