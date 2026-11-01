@@ -27,58 +27,35 @@ function DashboardSurface({
 
 export function DashboardHeroSkeleton() {
   return (
-    <section role="status" aria-busy="true" className="overflow-hidden rounded-[36px] border border-slate-200 bg-slate-950 shadow-lg">
-      <p className="px-6 pt-5 text-sm font-semibold text-slate-200">Loading portfolio summary…</p>
-      <div className="grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)] lg:items-center lg:px-8 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)_minmax(430px,0.9fr)]">
-        <div className="space-y-4">
-          <SkeletonLoader width={176} height={28} className="bg-white/12" />
-          <SkeletonLoader width="72%" height={44} className="bg-white/14" />
-          <SkeletonLoader width="58%" height={16} className="bg-white/10" />
-          <SkeletonLoader
-            variant="rectangular"
-            width={148}
-            height={42}
-            className="bg-white/14"
-          />
-        </div>
-
-        <div className="rounded-[28px] border border-white/10 bg-white/8 p-5">
-          <SkeletonLoader width={128} height={12} className="bg-white/12" />
-          <SkeletonLoader width={188} height={42} className="mt-4 bg-white/14" />
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div
-                key={index}
-                className="rounded-[18px] border border-white/10 bg-white/8 px-4 py-4"
-              >
-                <SkeletonLoader width={72} height={11} className="bg-white/12" />
-                <SkeletonLoader
-                  width={96}
-                  height={18}
-                  className="mt-3 bg-white/14"
-                />
-                <SkeletonLoader
-                  width="90%"
-                  height={12}
-                  className="mt-4 bg-white/10"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 2xl:block">
-          <SkeletonLoader width={112} height={12} className="bg-white/12" />
-          <SkeletonLoader width={164} height={24} className="mt-4 bg-white/14" />
-          <SkeletonLoader
-            variant="rectangular"
-            width="100%"
-            height={140}
-            className="mt-6 bg-white/10"
-          />
+    <DashboardSurface label="Loading portfolio summary…">
+      <div className="p-6">
+        <SkeletonLoader width={160} height={28} className="bg-slate-200" />
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={index}
+              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+            >
+              <SkeletonLoader
+                width={100}
+                height={14}
+                className="bg-slate-200"
+              />
+              <SkeletonLoader
+                width={130}
+                height={28}
+                className="mt-3 bg-slate-200"
+              />
+              <SkeletonLoader
+                width="90%"
+                height={14}
+                className="mt-3 bg-slate-200"
+              />
+            </div>
+          ))}
         </div>
       </div>
-    </section>
+    </DashboardSurface>
   );
 }
 
