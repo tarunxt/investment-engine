@@ -304,9 +304,9 @@ export function TradeAnalysisDetailClient() {
               { label: "Average Exit Price", value: formatNumber(trade.sell_average_fill_price, 4) },
               { label: "Buy Slippage", value: formatNumber(trade.buy_slippage, 4) },
               { label: "Exit Slippage", value: formatNumber(trade.sell_slippage, 4) },
-              { label: "Best Observed Price", value: formatNumber(trade.best_possible_exit_price_after_buy, 2) },
-              { label: "Worst Observed Price", value: formatNumber(trade.worst_price_after_buy, 2) },
-              { label: "Missed Profit", value: formatNumber(trade.missed_profit_amount, 2) },
+              { label: "In-hold Maximum (raw; unit provenance required)", value: formatNumber(trade.best_possible_exit_price_after_buy, 2) },
+              { label: "In-hold Minimum (raw)", value: formatNumber(trade.worst_price_after_buy, 2) },
+              { label: "Legacy Missed Profit Estimate (unvalidated)", value: formatNumber(trade.missed_profit_amount, 2) },
               { label: "Drawdown While Held", value: formatNumber(trade.drawdown_while_held, 4) },
             ]}
           />
@@ -409,16 +409,18 @@ export function TradeAnalysisDetailClient() {
 
       <Card className="rounded-none border-slate-200 shadow-none">
         <CardHeader>
-          <CardTitle className="text-base text-slate-950">Actionable Learning</CardTitle>
+          <CardTitle className="text-base text-slate-950">Descriptive Review (unvalidated)</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-3 text-sm text-slate-700">
             <p>{data.actionable_learning.analysis_summary || "No summary yet."}</p>
+            <p>Analysis version: {data.actionable_learning.algorithm_version ?? "legacy/unknown"}</p>
+            <p>In-hold observations do not establish an executable post-exit opportunity.</p>
             <p>Mistake category: {data.actionable_learning.mistake_category || "None"}</p>
             <p>Exit timing: {data.actionable_learning.exit_timing}</p>
             <p>Entry too expensive: {data.actionable_learning.entry_too_expensive ? "Yes" : "No"}</p>
             <p>Liquidity or spread issue: {data.actionable_learning.liquidity_or_spread_issue ? "Yes" : "No"}</p>
-            <p>LLM confidence aligned: {data.actionable_learning.llm_confidence_aligned ? "Yes" : "No"}</p>
+            <p>LLM confidence aligned: {data.actionable_learning.llm_confidence_aligned == null ? "Not evaluated" : data.actionable_learning.llm_confidence_aligned ? "Yes" : "No"}</p>
           </div>
           <div className="space-y-3 text-sm text-slate-700">
             <p>What worked: {data.actionable_learning.what_worked.join(" | ") || "—"}</p>

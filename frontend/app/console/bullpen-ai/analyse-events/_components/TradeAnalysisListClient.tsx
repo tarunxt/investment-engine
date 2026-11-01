@@ -418,15 +418,15 @@ export function TradeAnalysisListClient() {
           }
         />
         <StatCard
-          label="Total Net P&L"
+          label={`Recorded Net P&L Subtotal (${summary?.net_pnl_coverage ?? "unknown"} coverage)`}
           value={loading ? "…" : formatCurrency(summary?.total_net_pnl)}
         />
         <StatCard
-          label="Win Rate"
+          label={`Known-outcome Win Rate (n=${summary?.win_rate_denominator ?? summary?.closed_positions ?? 0})`}
           value={
             loading
               ? "…"
-              : summary && summary.closed_positions > 0
+              : summary && summary.win_rate != null && (summary.win_rate_denominator ?? summary.closed_positions) > 0
                 ? formatPercent(summary.win_rate * 100)
                 : "Unavailable"
           }
@@ -444,10 +444,18 @@ export function TradeAnalysisListClient() {
           }
         />
         <StatCard
-          label="Total Fees"
+          label={`Recorded Fees Subtotal (${summary?.fee_coverage ?? "unknown"} coverage)`}
           value={loading ? "…" : formatCurrency(summary?.total_fees)}
         />
       </div>
+
+      {summary ? (<p className="text-sm text-slate-600">
+        Selected cohort: {summary?.closed_positions ?? 0} closed, {summary?.known_outcomes ?? 0} known outcomes,
+        {" "}{summary?.unknown_outcomes ?? 0} unknown. Known zero is a non-win; win requires net P&amp;L &gt; 0.
+        Recorded execution fees only; tax, spread and FX are not verified.
+        Measured fee components: {formatCurrency(summary?.measured_fee_components_total)}
+        {" "}({summary?.known_fee_components ?? 0} known, {summary?.unknown_fee_components ?? 0} missing).
+      </p>) : null}
 
       {error ? (
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
