@@ -1,10 +1,6 @@
 import type { NextConfig } from "next";
 
 const isProduction = process.env.NODE_ENV === "production";
-const databaseViewerUrl = (
-  process.env.DATABASE_VIEWER_INTERNAL_URL || "http://127.0.0.1:8080"
-).replace(/\/+$/, "");
-
 const securityHeaders = [
   {
     key: "X-DNS-Prefetch-Control",
@@ -66,16 +62,6 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   allowedDevOrigins: ["192.168.10.2", "localhost"],
   poweredByHeader: false,
-  async rewrites() {
-    return {
-      beforeFiles: [
-        {
-          source: "/database/:path+",
-          destination: `${databaseViewerUrl}/:path*`,
-        },
-      ],
-    };
-  },
   async headers() {
     return [
       {
