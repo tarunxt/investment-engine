@@ -203,14 +203,16 @@ function StageCard({
   definition,
   stage,
   onOpen,
+  hasRun,
 }: {
   definition: (typeof STAGES)[number];
   stage?: Bullpen008StageOutput;
+  hasRun: boolean;
   onOpen: () => void;
 }) {
-  const status = stage?.status ?? "pending";
+  const status = stage?.status ?? (hasRun ? "not recorded" : "not run");
   const metrics = metricSource(stage);
-  const progressPercent = status === "finished" ? 100 : status === "partial" ? 75 : status === "running" ? 55 : 0;
+  const progressPercent = !stage ? null : status === "finished" ? 100 : status === "partial" ? 75 : status === "running" ? 55 : 0;
   return (
     <button
       type="button"
@@ -234,7 +236,7 @@ function StageCard({
         </span>
       </div>
       <p className="mt-3 text-sm leading-6 text-slate-600">{definition.detail}</p>
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`Stage ${definition.number} progress ${progressPercent}%`}>
+      {progressPercent === null ? <p className="mt-4 text-xs text-slate-500" aria-label={`Stage ${definition.number} progress unavailable`}>Progress unavailable — no stage record</p> : <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`Stage ${definition.number} progress ${progressPercent}%`}>
         <div
           className={cn(
             "h-full rounded-full transition-all",
@@ -242,7 +244,7 @@ function StageCard({
           )}
           style={{ width: `${progressPercent}%` }}
         />
-      </div>
+      </div>}
       <div className="mt-5 grid grid-cols-2 gap-2">
         {definition.metricKeys.map((key) => (
           <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -273,6 +275,9 @@ function SummaryMetric({ label, value, note }: { label: string; value: string; n
 
 export function Bullpen008PageClient() {
   const [bootstrap, setBootstrap] = useState<Bullpen008Bootstrap | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
+  const [portfolioError, setPortfolioError] = useState<string | null>(null);
   const [selectedStage, setSelectedStage] = useState<Bullpen008StageOutput | null>(null);
   const [portfolioStage, setPortfolioStage] = useState<Bullpen008StageOutput | null>(null);
   const [isFormulaDialogOpen, setIsFormulaDialogOpen] = useState(false);
@@ -291,7 +296,11 @@ export function Bullpen008PageClient() {
         signal,
         timeoutMs: 15_000,
       });
+      if (signal?.aborted) return;
       setBootstrap(data);
+      setLastLoadedAt(new Date().toISOString());
+      setSourceError(null);
+      setPortfolioError(null);
       setCustomPhrases(data.settings.custom_exclude_phrases.join(", "));
       setClosingWindowDays(String(data.settings.closing_window_days));
       setAutoRefreshMinutes(String(data.settings.auto_refresh_minutes));
@@ -310,6 +319,7 @@ export function Bullpen008PageClient() {
           );
         } catch {
           setPortfolioStage(null);
+          setPortfolioError("Stage 4 detail is unavailable. Target rows and certified exits cannot be verified.");
         }
       } else {
         setPortfolioStage(null);
@@ -317,7 +327,7 @@ export function Bullpen008PageClient() {
       setError(null);
     } catch (loadError) {
       if (signal?.aborted) return;
-      setError(`Bullpen 008 could not be loaded. ${formatUnknownError(loadError)}`);
+      setSourceError(`Bullpen 008 could not be loaded. ${formatUnknownError(loadError)}`);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -342,6 +352,9 @@ export function Bullpen008PageClient() {
     return () => window.clearInterval(interval);
   }, [latestRun, load]);
 
+  // get_bootstrap deliberately skips monitoring queries for queued/running runs.
+  const monitoringOmitted = latestRun?.status === "queued" || latestRun?.status === "running";
+
   const stagesByNumber = useMemo(
     () => new Map((latestRun?.stages ?? []).map((stage) => [stage.stage_number, stage])),
     [latestRun],
@@ -351,6 +364,8 @@ export function Bullpen008PageClient() {
   const walletSnapshot = asRecord(latestRun?.wallet_snapshot);
   const balance = asRecord(walletSnapshot.balance);
   const positions = asRows(walletSnapshot.positions);
+  const positionsKnown = Array.isArray(walletSnapshot.positions);
+  const balanceKnown = balance.status === "ready" && balance.available_balance_usd != null;
   const portfolioAllocations = asRows(portfolioStage?.outputs.allocations);
   const invested = positions.reduce(
     (total, row) => total + Number(row.current_value_usd ?? row.exposure_usd ?? 0),
@@ -526,6 +541,20 @@ export function Bullpen008PageClient() {
     );
   }
 
+  if (!bootstrap) {
+    return (
+      <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6" data-workflow-profile="bullpen008">
+        <h1 className="text-3xl font-semibold">Bullpen 008</h1>
+        <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          {sourceError ?? "Bullpen 008 data is unavailable."}
+        </div>
+        <p className="text-sm text-slate-600">Runtime and stage progress, wallet positions, schedule, limits, warnings and run history are unavailable until the source loads successfully.</p>
+        <Button variant="outline" onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button>
+        <Button variant="outline" asChild><Link href={URLs.routes.console.bullpen008History()}>History</Link></Button>
+      </section>
+    );
+  }
+
   return (
     <div className="space-y-6" data-workflow-profile="bullpen008">
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -583,6 +612,13 @@ export function Bullpen008PageClient() {
         </div>
       </section>
 
+      {sourceError ? (
+        <div role="alert" className="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+          {sourceError} Showing the last successful response from {formatApiTimestamp(lastLoadedAt)}. Runtime, schedule, limits, warnings and history may have changed. Wallet and stage data below are saved run records.
+        </div>
+      ) : null}
+      {portfolioError ? <div role="alert" className="rounded-3xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">{portfolioError}</div> : null}
+
       {error ? (
         <div role="alert" className="flex items-start gap-3 rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -591,17 +627,17 @@ export function Bullpen008PageClient() {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryMetric label="Portfolio value" value={portfolioValue > 0 ? formatMoney(portfolioValue) : "—"} note="Same live wallet, isolated workflow" />
-        <SummaryMetric label="Investments" value={invested > 0 ? formatMoney(invested) : "—"} note={`${positions.length} active/monitored positions`} />
-        <SummaryMetric label="Cash" value={cash > 0 ? formatMoney(cash) : "—"} note="Cash retention is allowed" />
-        <SummaryMetric label="Certified target" value={formatMoney(stage4Metrics.invested)} note={stage4?.status === "finished" ? "Portfolio certificate passed" : "Awaiting a certified run"} />
+        <SummaryMetric label="Portfolio value" value={positionsKnown && balanceKnown ? formatMoney(portfolioValue) : "—"} note={positionsKnown && balanceKnown ? "Saved run wallet snapshot" : "Wallet valuation unavailable"} />
+        <SummaryMetric label="Investments" value={positionsKnown ? formatMoney(invested) : "—"} note={positionsKnown ? `${positions.length} positions in saved run snapshot` : "Position count unavailable — no wallet snapshot"} />
+        <SummaryMetric label="Cash" value={balanceKnown ? formatMoney(cash) : "—"} note={balanceKnown ? "Saved run balance; cash retention is allowed" : "Balance unavailable"} />
+        <SummaryMetric label="Certified target" value={formatMoney(stage4Metrics.invested)} note={portfolioError ? "Stage 4 detail unavailable" : stage4?.status === "finished" ? "Portfolio certificate passed" : "Awaiting a certified run"} />
       </div>
 
       <Card className="rounded-3xl border-slate-200 shadow-sm">
         <CardHeader className="flex flex-col gap-4 border-b border-slate-100 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <CardTitle>Background worker monitor</CardTitle>
-            <CardDescription className="mt-2">A stage is Finished only after its recorded pass condition succeeds. Current stage: {latestRun?.stages.find((stage) => stage.status === "running")?.stage_name ?? (latestRun?.status === "completed" ? "Reconciled outcome" : "Idle")}.</CardDescription>
+            <CardDescription className="mt-2">A stage is Finished only after its recorded pass condition succeeds. Current stage: {latestRun?.stages.find((stage) => stage.status === "running")?.stage_name ?? (latestRun ? latestRun.status === "completed" ? "Reconciled outcome" : formatLabel(latestRun.status) : "No recorded run")}.</CardDescription>
           </div>
           {latestRun ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -617,7 +653,7 @@ export function Bullpen008PageClient() {
         <CardContent className="pt-6">
           <div className="grid gap-4 lg:grid-cols-3">
             {STAGES.map((definition) => (
-              <StageCard key={definition.number} definition={definition} stage={stagesByNumber.get(definition.number)} onOpen={() => {
+              <StageCard key={definition.number} definition={definition} hasRun={Boolean(latestRun)} stage={stagesByNumber.get(definition.number)} onOpen={() => {
                 const stage = stagesByNumber.get(definition.number);
                 if (stage) void openStage(definition.number);
               }} />
@@ -630,7 +666,7 @@ export function Bullpen008PageClient() {
         <Card className="rounded-3xl border-slate-200 shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2"><WalletCards className="h-5 w-5 text-sky-600" /><CardTitle>Wallet positions</CardTitle></div>
-            <CardDescription>Live shared-account data is read-only here and always included in monitoring and cluster exposure.</CardDescription>
+            <CardDescription>Saved run wallet snapshot, read-only here. These values do not establish current live positions.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -647,7 +683,7 @@ export function Bullpen008PageClient() {
                       <td className="px-4 py-3 capitalize text-slate-600">{String(position.classification ?? "active")}</td>
                     </tr>
                   ))}
-                  {positions.length === 0 ? <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">Run Stage 1 to capture the latest wallet positions.</td></tr> : null}
+                  {positions.length === 0 ? <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">{positionsKnown ? "No positions in the saved run snapshot." : "Wallet positions unavailable — no snapshot was captured."}</td></tr> : null}
                 </tbody>
               </table>
             </div>
@@ -740,7 +776,7 @@ export function Bullpen008PageClient() {
                 <p className="mt-2 text-xs text-slate-500">Markets: {asRows(scenario.affected_market_ids).length || (Array.isArray(scenario.affected_market_ids) ? scenario.affected_market_ids.length : 0)} · adjudication {String(scenario.adjudication_status ?? "unknown")}</p>
               </div>
             ))}
-            {jointLossScenarios.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">Run through Stage 3 to build the versioned joint-loss graph.</p> : null}
+            {jointLossScenarios.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">{monitoringOmitted ? "Joint-loss monitoring unavailable while a run is active." : "Run through Stage 3 to build the versioned joint-loss graph."}</p> : null}
           </CardContent>
         </Card>
 
@@ -750,10 +786,10 @@ export function Bullpen008PageClient() {
             <CardDescription>Daily UTC equity baseline with deposits and withdrawals neutralised; IST timestamps remain available in detailed records.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className={cn("rounded-2xl border p-4", drawdown.exit_only ? "border-rose-200 bg-rose-50" : drawdown.buy_freeze ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50")}>
+            <div className={cn("rounded-2xl border p-4", monitoringOmitted ? "border-slate-200 bg-slate-50" : drawdown.exit_only ? "border-rose-200 bg-rose-50" : drawdown.buy_freeze ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50")}>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Current breaker</p>
-              <p className="mt-1 text-lg font-semibold text-slate-950">{formatLabel(String(drawdown.state ?? "NOT_YET_BASELINED"))}</p>
-              <p className="mt-2 text-sm text-slate-700">Drawdown {formatMoney(drawdown.drawdown_usd)} · soft {formatMoney(drawdown.soft_threshold_usd)} · hard {formatMoney(drawdown.hard_threshold_usd)}</p>
+              <p className="mt-1 text-lg font-semibold text-slate-950">{monitoringOmitted ? "Risk monitoring unavailable" : formatLabel(String(drawdown.state ?? "NOT_YET_BASELINED"))}</p>
+              {monitoringOmitted ? <p className="mt-2 text-sm text-slate-700">Drawdown, risk episodes and cooldowns are not included while a run is active.</p> : <p className="mt-2 text-sm text-slate-700">Drawdown {formatMoney(drawdown.drawdown_usd)} · soft {formatMoney(drawdown.soft_threshold_usd)} · hard {formatMoney(drawdown.hard_threshold_usd)}</p>}
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-950">Regime-change episodes</p>
@@ -765,7 +801,7 @@ export function Bullpen008PageClient() {
                     <p className="mt-1 text-rose-700">Activated {formatApiTimestamp(String(episode.activated_at ?? ""), { emptyValue: "unknown" })} · recovery {episode.recovered_at ? formatApiTimestamp(String(episode.recovered_at)) : "not evidenced"}</p>
                   </div>
                 ))}
-                {regimeEpisodes.length === 0 ? <p className="text-xs text-slate-500">No verified regime-change episode.</p> : null}
+                {regimeEpisodes.length === 0 ? <p className="text-xs text-slate-500">{monitoringOmitted ? "Regime-change episodes unavailable while a run is active." : "No verified regime-change episode."}</p> : null}
               </div>
             </div>
             <div>
@@ -777,10 +813,10 @@ export function Bullpen008PageClient() {
                     <p className="mt-1 text-slate-600">{Array.isArray(activation.trigger_types) ? activation.trigger_types.join(", ") : "No trigger"} · blockers {Array.isArray(activation.blocker_codes) ? activation.blocker_codes.join(", ") || "none" : "none"}</p>
                   </div>
                 ))}
-                {contingentActivations.length === 0 ? <p className="text-xs text-slate-500">No active trigger episode.</p> : null}
+                {contingentActivations.length === 0 ? <p className="text-xs text-slate-500">{monitoringOmitted ? "Trigger episodes unavailable while a run is active." : "No active trigger episode."}</p> : null}
               </div>
             </div>
-            <p className="text-xs text-slate-500">Active/recent scenario cooldowns: {scenarioCooldowns.length}. Opposite-side auto-buys remain prohibited after information shocks.</p>
+            <p className="text-xs text-slate-500">Active/recent scenario cooldowns: {monitoringOmitted ? "unavailable" : scenarioCooldowns.length}. Opposite-side auto-buys remain prohibited after information shocks.</p>
           </CardContent>
         </Card>
 
@@ -814,7 +850,7 @@ export function Bullpen008PageClient() {
                 <p className="mt-1 break-all font-mono text-[10px] text-slate-500">{String(policy.policy_hash ?? "missing hash")}</p>
               </div>
             ))}
-            {contingentPolicies.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">No certified high-shock exit policy in the latest run.</p> : null}
+            {contingentPolicies.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">{portfolioError ? "Certified exits unavailable — Stage 4 detail could not be loaded." : "No certified high-shock exit policy in the latest run."}</p> : null}
           </CardContent>
         </Card>
       </div>
@@ -824,14 +860,14 @@ export function Bullpen008PageClient() {
           <CardHeader><CardTitle>P&amp;L attribution</CardTitle><CardDescription>Run, decision, contract, cluster, scenario, intent, trigger and calendar-day provenance.</CardDescription></CardHeader>
           <CardContent className="space-y-2">
             {pnlAttribution.slice(0, 10).map((row, index) => <div className="rounded-2xl border border-slate-200 p-3 text-xs" key={String(row.stage5_action_id ?? row.market_id ?? index)}><p className="font-semibold text-slate-900">{String(row.market_id ?? "Market")} · {String(row.final_reconciliation_status ?? "unreconciled")}</p><p className="mt-1 text-slate-600">Current {formatMoney(row.current_value)} · realised {formatMoney(row.realized_pnl)} · unrealised {formatMoney(row.unrealized_pnl)} · fees {formatMoney(row.fees)}</p><p className="mt-1 text-slate-500">Scenario(s): {Array.isArray(row.associated_scenario_ids) ? row.associated_scenario_ids.join(", ") : "none"}</p></div>)}
-            {pnlAttribution.length === 0 ? <p className="text-sm text-slate-500">P&amp;L projection appears after the next completed P0 run.</p> : null}
+            {pnlAttribution.length === 0 ? <p className="text-sm text-slate-500">{monitoringOmitted ? "P&L projection unavailable while a run is active." : "P&L projection appears after the next completed P0 run."}</p> : null}
           </CardContent>
         </Card>
         <Card className="rounded-3xl border-slate-200 shadow-sm">
           <CardHeader><CardTitle>Loss-prevention audit</CardTitle><CardDescription>Counterfactual estimates only; they are never reported as realised or avoided P&amp;L.</CardDescription></CardHeader>
           <CardContent className="space-y-2">
             {lossPreventionAudit.slice(0, 10).map((row, index) => <div className="rounded-2xl border border-slate-200 p-3 text-xs" key={String(row.market_id ?? index)}><p className="font-semibold text-slate-900">{String(row.question ?? row.market_id ?? "Market")}</p><p className="mt-1 text-slate-600">Rejected {row.rejected_entry ? "yes" : "no"} · reduced {row.reduced_size ? "yes" : "no"} · top-up blocked {row.blocked_top_up ? "yes" : "no"} · early exit {row.required_early_exit ? "yes" : "no"}</p><p className="mt-1 font-medium text-amber-800">Counterfactual estimate — not an actual realised result.</p></div>)}
-            {lossPreventionAudit.length === 0 ? <p className="text-sm text-slate-500">No loss-prevention audit rows yet.</p> : null}
+            {lossPreventionAudit.length === 0 ? <p className="text-sm text-slate-500">{monitoringOmitted ? "Loss-prevention audit unavailable while a run is active." : "No loss-prevention audit rows yet."}</p> : null}
           </CardContent>
         </Card>
       </div>
@@ -885,7 +921,7 @@ export function Bullpen008PageClient() {
                 {portfolioAllocations.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
-                      Run Stages 1–4 to create the first immutable target portfolio.
+                      {portfolioError ? "Target portfolio unavailable — Stage 4 detail could not be loaded." : "No target portfolio recorded in the loaded Stage 4 detail."}
                     </td>
                   </tr>
                 ) : null}
@@ -906,7 +942,7 @@ export function Bullpen008PageClient() {
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Market</th><th className="px-4 py-3">Side</th><th className="px-4 py-3">Breach</th><th className="px-4 py-3 text-right">LLM odds</th><th className="px-4 py-3 text-right">Actual odds</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">State</th></tr></thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {(bootstrap?.alerts ?? []).map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-medium text-slate-900">{String(alert.payload.question ?? alert.market_id)}</td><td className="px-4 py-3 font-semibold">{alert.side}</td><td className="px-4 py-3 capitalize">{alert.breach_type}</td><td className="px-4 py-3 text-right tabular-nums">{alert.llm_odds == null ? "—" : `${alert.llm_odds.toFixed(2)}%`}</td><td className="px-4 py-3 text-right tabular-nums">{alert.actual_odds == null ? "—" : `${alert.actual_odds.toFixed(2)}%`}</td><td className="px-4 py-3">{alert.source.replaceAll("_", " ")}</td><td className="px-4 py-3">{alert.recovered_at ? "Recovered" : "Active"}</td></tr>)}
-                {(bootstrap?.alerts.length ?? 0) === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No Bullpen 008 warning episodes.</td></tr> : null}
+                {(bootstrap?.alerts.length ?? 0) === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">{monitoringOmitted ? "Warning episodes are not included while a run is active." : "No Bullpen 008 warning episodes."}</td></tr> : null}
               </tbody>
             </table>
           </div>
