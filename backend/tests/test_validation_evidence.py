@@ -159,3 +159,90 @@ def test_sole_family_removal_and_failure_gate_abstain():
 def test_invalid_hash_is_not_original_lineage():
     item = record() | {"prompt_hash": "invalid"}
     assert "prompt_hash_missing_or_invalid" in lineage_gaps(item)
+
+
+@pytest.mark.parametrize("value", [None, "not-a-timestamp", "2024-01-02T10:00:00", "2024-01-02T12:00:00.000001Z"])
+def test_availability_missing_malformed_naive_or_one_microsecond_future(value):
+    item = record() | {"inputs_available_at": value}
+    assert "inputs_available_at_unknown_or_future" in lineage_gaps(item)
+
+
+def test_equal_instant_offsets_do_not_create_false_future_availability():
+    item = record() | {"inputs_available_at": "2024-01-02T17:30:00+05:30"}
+    assert lineage_gaps(item) == []
+
+
+def test_derived_enrichment_cannot_fill_original_availability():
+    item = record() | {"inputs_available_at": None,
+                       "derived": {"inputs_available_at": "2024-01-01T00:00:00Z",
+                                   "method": "synthetic-reconstruction", "source_hash": "f" * 64}}
+    before = deepcopy(item)
+    result = validation_report({"records": [item]})
+    evidence = result["population"]["records"][0]
+    assert evidence["evidence"]["inputs_available_at"] is None
+    assert "inputs_available_at_unknown_or_future" in evidence["lineage_gaps"]
+    assert item == before
+
+
+def test_formula_content_mismatch_is_retained_as_gap():
+    formula = Formula().model_dump(mode="json")
+    item = record() | {"formula": formula, "formula_hash": digest(formula)}
+    assert lineage_gaps(item) == []
+    item["formula"]["detailedRationaleDenominator"] = "19"
+    original_hash = item["formula_hash"]
+    assert "formula_hash_mismatch" in lineage_gaps(item)
+    assert item["formula_hash"] == original_hash
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-0.01", True, None])
+def test_invalid_cost_never_becomes_known_zero(value):
+    costs = {"tax": {"value": value, "coverage": "complete", "source_hash": "a" * 64}}
+    result = cost_coverage(costs)
+    assert result["components"]["tax"] == "unknown" and not result["complete"]
+
+
+def test_zero_without_source_lineage_is_unknown():
+    assert cost_coverage({"fx": {"value": "0", "coverage": "complete"}})["components"]["fx"] == "unknown"
+
+
+def test_failed_partial_missing_and_censored_stay_in_population():
+    states = ("eligible", "excluded", "failed", "partial", "abstained", "missing", "unknown")
+    records = [record() | {"id": f"synthetic-{index}", "population_state": state,
+                           "outcome_state": "censored"} for index, state in enumerate(states)]
+    result = inventory(records, population() | {"attempted": len(states)})
+    assert result["observed"] == sum(result["state_counts"].values()) == len(states)
+    assert result["state_counts"] == dict.fromkeys(states, 1)
+    assert all(row["outcome_state"] == "censored" for row in result["records"])
+    assert all(row["cost_coverage"]["components"]["tax"] == "unknown" for row in result["records"])
+
+
+def test_empty_population_never_reconciles_to_complete_evidence():
+    result = inventory([], population() | {"attempted": 0})
+    assert not result["reconciled"] and "population_empty" in result["population_gaps"]
+
+
+def test_split_inspection_boundary_and_inverted_window():
+    kwargs = {"frozen_at": "2024-01-01T00:00:00Z", "embargo_seconds": 0,
+              "embargo_reason": "synthetic-only boundary check"}
+    row = {"partition": "test", "dependency_group": "synthetic-test",
+           "decision_at": "2024-01-02T00:00:00Z", "outcome_end_at": "2024-01-03T00:00:00Z",
+           "first_result_inspected_at": "2024-01-01T00:00:00Z"}
+    assert "split_not_frozen_before_inspection" in split_gaps([row], **kwargs)
+    assert "inspection_history_unknown" in split_gaps([row | {"first_result_inspected_at": None}], **kwargs)
+    assert "invalid_split_row" in split_gaps([row | {"outcome_end_at": "2024-01-01T00:00:00Z"}], **kwargs)
+    assert "partition_empty" in split_gaps([row], **kwargs)
+
+
+def test_synthetic_fully_populated_contract_cannot_promote_to_validated():
+    # Placeholder choices exercise serialization only; they are no owner policy.
+    contract = ValidationContract(version="synthetic-only", market="synthetic-market",
+                                  strategy="synthetic-strategy", choices=dict.fromkeys(POLICY_FIELDS, "synthetic-placeholder"),
+                                  approved_by="synthetic-identity", approved_at="2023-12-01T00:00:00Z",
+                                  frozen_at="2023-12-02T00:00:00Z", first_result_inspected_at="2024-04-01T00:00:00Z")
+    assert contract_gaps(contract) == []
+    result = validation_report({"validation_contract": contract.model_dump(mode="json"),
+                                "records": [record()], "population": population()})
+    assert result["status"] == "not_established"
+    assert result["dimensions"]["economic_effectiveness"] == "not_established"
+    assert result["dimensions"]["confidence_calibration"] == "not_established"
+    assert "independent_untouched_test_not_performed" in result["reasons"]
