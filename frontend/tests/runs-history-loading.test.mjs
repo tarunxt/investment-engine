@@ -379,3 +379,29 @@ test('unsignalled history reads share only in-flight work and retry reads fresh 
   next = deferred(); const refreshed = api.getAutoRebalanceHistory('india', { limit: 50 }); assert.equal(calls, 3);
   next.resolve({ items: [savedGroup('india')], total: 1 }); assert.equal((await refreshed).items.length, 1);
 });
+
+test('cold loading and failed reads never present verified empty counts or results', async () => {
+  const response = deferred();
+  const h = runsErrorHarness({ getRuns: () => response.promise, getBullpenAutoLiveHistory: async () => historyPage(1, 1) });
+  assert.doesNotMatch(h.text(), /No results|No runs found/);
+  assert.match(h.text(), /Loading results/);
+  const pending = h.refresh();
+  response.reject(new Error('Synthetic unavailable history'));
+  await pending;
+  assert.match(h.text(), /Results unavailable/);
+  assert.doesNotMatch(h.text(), /No results|No runs found/);
+});
+
+test('successful empty reads verify empty copy; refresh keeps populated saved history visible', async () => {
+  let phase = 'empty'; let next;
+  const h = runsErrorHarness({ getRuns: async () => ({ items: [], pages: 1 }),
+    getAutoRebalanceHistory: async portfolio => phase === 'refresh' ? next.promise : ({ items: phase === 'empty' ? [] : [savedGroup(portfolio)], total: phase === 'empty' ? 0 : 1 }),
+    getBullpenAutoLiveHistory: async () => historyPage(1, 1) });
+  await h.refresh(); assert.match(h.text(), /No runs found/); assert.match(h.text(), /No results/);
+  phase = 'populated'; await h.refresh(); assert.match(h.text(), /indmoney_us saved group/);
+  phase = 'refresh'; next = deferred(); const pending = h.refresh();
+  assert.match(h.text(), /indmoney_us saved group/); assert.match(h.text(), /Refreshing run history/);
+  assert.doesNotMatch(h.text(), /No results/);
+  next.reject(new Error('Synthetic refresh failure')); await pending;
+  assert.match(h.text(), /indmoney_us saved group/);
+});
