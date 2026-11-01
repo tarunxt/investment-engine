@@ -50,7 +50,10 @@ try {
     else {assert.equal(normal.top,'rgba(0, 0, 0, 0)');assert.equal(normal.bg,'rgba(0, 0, 0, 0)');assert.notEqual(disabled.bg,normal.bg);assert.notEqual(focused.bottom,normal.bottom);assert.notEqual(invalid,normal.bottom);}
     assert.notEqual(boxed,'rgba(0, 0, 0, 0)');assert.equal(hover.top,normal.top);
     await page.screenshot({path:path.join(output,`${theme}-${name}.png`),fullPage:true});
-    // Deterministic screenshot assertion: unchanged repeated render has identical pixels.
+    // Compare a stable resting render after separately capturing keyboard focus.
+    await page.locator('#full_name').evaluate(el=>el.blur());
+    await page.evaluate(()=>window.getSelection()?.removeAllRanges());
+    await page.mouse.move(0,0);await page.waitForTimeout(300);
     assert.deepEqual(await page.screenshot({fullPage:true,caret:'hide',animations:'disabled'}),await page.screenshot({fullPage:true,caret:'hide',animations:'disabled'}));
     await page.locator('#full_name').fill('Edited synthetic name');
     await page.getByRole('button',{name:'Update profile',exact:true}).click();
