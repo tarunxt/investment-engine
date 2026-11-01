@@ -220,6 +220,7 @@ jobs:
           backend/tests/test_recommendation_audit_recovery.py
           backend/tests/test_recommendation_audit_fundamentals.py
           backend/tests/test_recommendation_audit_postgres.py
+          backend/tests/test_rebalance_side_effect_policy_postgres.py
           backend/tests/test_output_contracts.py
           backend/tests/test_output_runtime.py
           backend/tests/test_recovery_containment.py
