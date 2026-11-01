@@ -3761,17 +3761,17 @@ function InputSelectionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cn("flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] shadow-2xl", stage === "threats" ? "border border-slate-300 bg-[#f5f4fc]" : "bg-white")} onClick={(event) => event.stopPropagation()}>
+        <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
           <div>
-            <h3 id={titleId} className="text-2xl font-extrabold tracking-tight text-slate-950">
+            <h3 id={titleId} className="text-xl font-extrabold sm:text-2xl tracking-tight text-slate-950">
               {titleByStage[stage]}
             </h3>
-            <p className="mt-2 text-base text-slate-500">
+            <p className="mt-2 text-sm text-slate-500 sm:text-base">
               Choose which previous-stage outputs should be included in the next
               prompt.
             </p>
-            <div className="mt-3 max-w-3xl rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
+            <div className="mt-2 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 sm:mt-3 sm:px-4 sm:py-3 sm:leading-6 text-amber-900">
               <span className="font-extrabold">Input selection rationale:</span>{" "}
               {rationaleByStage[stage]}
             </div>
@@ -3785,7 +3785,7 @@ function InputSelectionDialog({
             <X className="size-5" />
           </button>
         </div>
-        <div className="mx-6 mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900">
+        <div className="mx-4 mb-3 flex shrink-0 flex-wrap sm:mx-6 sm:mb-4 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 sm:px-4 sm:py-3">
           {stage === "threats" ? <InputEvidenceSummary candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} /> : <span>{selectedCount} output{selectedCount === 1 ? "" : "s"} selected.</span>}
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-blue-950">
@@ -3807,8 +3807,8 @@ function InputSelectionDialog({
             </button>
           </div>
         </div>
-        <div className="mx-6 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
-          {stage === "threats" ? <InputEvidenceRows candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} onToggle={onToggle} formatTimestamp={formatTimestamp} /> : loading ? (
+        <div className="mx-4 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-2 sm:mx-6 sm:p-3">
+          {stage === "threats" ? <InputEvidenceRows candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} onToggle={onToggle} formatTimestamp={formatTimestamp} formatCost={(value) => formatUsdAsVerifiedInr(value, usdInrRate)} /> : loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
               outputs…
@@ -3943,7 +3943,7 @@ function InputSelectionDialog({
             </div>
           )}
         </div>
-        <div className="flex shrink-0 justify-end px-6 py-5">
+        <div className="flex shrink-0 justify-end px-4 py-3 sm:px-6 sm:py-5">
           <Button
             type="button"
             onClick={onClose}
