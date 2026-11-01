@@ -194,7 +194,7 @@ function SetupTable({
         <p className="mt-1 text-sm text-gray-600">{description}</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-sm" aria-describedby={countsStatus !== 'ready' ? 'setup-counts-status' : undefined}>
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
               {COLUMNS.map((column) => {
@@ -400,8 +400,12 @@ function SetupNameCell({
   countsStatus: SetupCountsStatus;
   onSetupClick: (group: SetupStockGroup) => void;
 }) {
-  if (countsStatus !== 'ready') {
-    return <span>{row.setup} ({countsStatus === 'loading' ? 'Loading…' : 'Unavailable'})</span>;
+  if (countsStatus === 'loading') {
+    return <span>{row.setup}</span>;
+  }
+
+  if (countsStatus === 'error') {
+    return <span>{row.setup} (Unavailable)</span>;
   }
 
   if (!group?.stocks.length) {
@@ -572,10 +576,10 @@ export default function TechnicalSetupsPage() {
       </div>
 
       {countsStatus === 'loading' ? (
-        <p role="status" className="text-sm text-gray-600">Loading setup counts from run history and portfolio snapshots…</p>
+        <p id="setup-counts-status" role="status" className="text-sm text-gray-600">Loading setup counts from run history and portfolio snapshots. No count is inferred as zero.</p>
       ) : null}
       {countsStatus === 'error' ? (
-        <div role="alert" className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+        <div id="setup-counts-status" role="alert" className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
           <p className="font-semibold">Setup counts are unavailable. They have not been reported as zero.</p>
           <p>{countsError}</p>
           <button
