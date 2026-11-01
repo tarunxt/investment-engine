@@ -106,8 +106,9 @@ def test_ambiguous_ledger_commit_blocks_replacement(monkeypatch, commit_number):
 
 
 def test_missing_schema_fails_closed_but_passive_get_needs_no_ledger(monkeypatch, tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'unmigrated.db'}")
-    monkeypatch.setattr(admission, "SyncSessionLocal", sessionmaker(bind=engine))
+    engine = admission.SyncSessionLocal.kw["bind"]
+    # Remove only this test's disposable table, including on PostgreSQL.
+    T.drop(engine)
     monkeypatch.setattr(cache, "_redis_client", lambda: None)
     monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
     cache.reset_local_cost_dashboard_cache_state()
@@ -118,7 +119,6 @@ def test_missing_schema_fails_closed_but_passive_get_needs_no_ledger(monkeypatch
     result = service.get_dashboard(month="2026-07")
     assert result["summary"]["monthToDateAwsCost"] is None
     assert result["debug"]["collectionOccurred"] is False
-    engine.dispose()
 
 
 def process_collector(database_url, values, guard, entered, finish, results, calls):
@@ -282,3 +282,44 @@ def test_ambiguous_collection_preserves_stale_good_source_and_unknown_cutoff(mon
     with pytest.raises(cache.CollectionUnavailableError):
         service.get_dashboard(force_refresh=True, month="2026-07")
     assert accepted == [True]
+
+
+def test_committed_intent_is_visible_before_transport_boundary():
+    observed = []
+    class Transport:
+        def request(self):
+            # Independent transaction observes durable intent before dispatch.
+            row = ledger_row("boundary")
+            observed.append((row.state, row.request_inflight, row.request_sequence))
+            return "unambiguous response"
+    with admission.durable_collection("boundary") as intent:
+        with collection.collection_budget(intent=intent):
+            collection.MeteredClient(Transport(), "fake").request()
+    assert observed == [("active", True, 1)]
+    assert ledger_row("boundary").state == "idle"
+
+
+def test_rolled_back_request_marker_never_dispatches(monkeypatch):
+    normal = admission.SyncSessionLocal
+    commits, accepted = [], []
+    class RollbackSession(Session):
+        def commit(self):
+            commits.append(True)
+            if len(commits) == 2:
+                raise RuntimeError("synthetic commit refused; session rollback follows")
+            super().commit()
+    class Transport:
+        def request(self):
+            accepted.append(True)
+    monkeypatch.setattr(admission, "SyncSessionLocal", sessionmaker(bind=normal.kw["bind"], class_=RollbackSession))
+    with pytest.raises(cache.CollectionUnavailableError):
+        with admission.durable_collection("rolled-back") as intent:
+            with collection.collection_budget(intent=intent):
+                collection.MeteredClient(Transport(), "fake").request()
+    monkeypatch.setattr(admission, "SyncSessionLocal", normal)
+    row = ledger_row("rolled-back")
+    assert not row.request_inflight and row.request_sequence == 0
+    assert row.state == "uncertain" and accepted == []
+    with pytest.raises(cache.CollectionUnavailableError):
+        with admission.durable_collection("rolled-back"):
+            pytest.fail("rollback must not grant operator recovery")

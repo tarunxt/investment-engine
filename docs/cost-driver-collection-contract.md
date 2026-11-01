@@ -38,11 +38,14 @@ makes POST return 503 before provider dispatch; passive GET remains usable.
 Automatic downgrade is refused because erasing unresolved intent would reopen
 admission. No production schema/configuration/privilege changes have been made.
 
-Synthetic SQLite fixtures exercise real committed SQLAlchemy operations, unique-key
-races, separate processes, Redis loss, crashes, cancellation, response loss after
-remote acceptance and lost commit acknowledgements. They do not establish the
-production PostgreSQL durability/failover contract or execute the Alembic migration.
-Those remain release acceptance gates.
+Synthetic SQLite fixtures and isolated official PostgreSQL 18.6 acceptance exercise
+real committed SQLAlchemy operations, unique-key races, separate processes, Redis
+loss, crashes, cancellation, response loss after remote acceptance, rollbacks and
+lost commit acknowledgements. The PostgreSQL fixture is network-disabled and uses
+only a private Unix socket and per-test schemas. An independent transaction proves
+the inflight marker is committed before the synthetic transport boundary. These
+tests do not establish the production durability/failover contract or execute the
+Alembic migration. Those remain release acceptance gates.
 
 ## Exact safety assumptions and unresolved policy
 
@@ -58,3 +61,15 @@ that its old process cannot resume and its potentially accepted external request
 settled before any separately authorized recovery. No age-based criterion, assumed
 provider timeout or operator-reset capability is invented here. Runtime admission
 must not be enabled by migration alone without reviewing this operational limit.
+
+
+## Sibling migration integration
+
+The cost migration and published `jobs_admission_dispatch_001` each name
+`audit7_run_policy_001` as parent. They are sibling revisions, not a single chain.
+Importing both unchanged creates two heads. Integration must explicitly choose a
+reviewed dependency ordering or a merge revision and run the combined additive
+migration acceptance. Do not silently reparent, omit a head or stamp over it.
+The private spend-cap/refund source revisions are absent from this checkout;
+their exact IDs, parents and bytes must be supplied before the full combined DAG
+can be verified. Their lineage is not inferred from task names.

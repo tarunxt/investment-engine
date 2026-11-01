@@ -33,8 +33,29 @@ def isolate_cost_collection_intents(request, monkeypatch, tmp_path):
     from sqlalchemy.orm import sessionmaker
     from app.domains.cost_drivers import admission
     from app.domains.cost_drivers.models import CostCollectionIntent
-    engine = create_engine(f"sqlite:///{tmp_path / 'collection-intents.db'}", connect_args={"timeout": 3})
+    test_url = os.environ.get("COST_TEST_POSTGRES_URL")
+    if test_url:
+        from uuid import uuid4
+        from sqlalchemy.engine import make_url
+        from sqlalchemy.schema import CreateSchema, DropSchema
+        url = make_url(test_url)
+        # Explicit disposable socket-only fixture; refuse runtime/account URLs.
+        if (url.database != "cost_fixture" or url.username != "cost_fixture"
+                or url.host is not None
+                or url.query.get("host") != "/tmp/cost-a12-pg18-socket"):
+            pytest.fail("COST_TEST_POSTGRES_URL must target the isolated cost fixture")
+        schema = "cost_test_" + uuid4().hex
+        admin = create_engine(url)
+        with admin.begin() as connection:
+            connection.execute(CreateSchema(schema))
+        engine = create_engine(url.update_query_dict({"options": "-csearch_path=" + schema}))
+    else:
+        engine = create_engine(f"sqlite:///{tmp_path / 'collection-intents.db'}", connect_args={"timeout": 3})
     CostCollectionIntent.__table__.create(engine)
     monkeypatch.setattr(admission, "SyncSessionLocal", sessionmaker(bind=engine))
     yield
     engine.dispose()
+    if test_url:
+        with admin.begin() as connection:
+            connection.execute(DropSchema(schema, cascade=True))
+        admin.dispose()
