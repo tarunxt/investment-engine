@@ -978,7 +978,7 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
 
         {/* Footer */}
         <div className="flex flex-wrap items-start justify-between gap-2 pt-1">
-          <details ref={previewRef} className="min-w-0 flex-1">
+          <details ref={previewRef} className="min-w-0 flex-1 open:basis-full">
             <summary ref={previewTriggerRef} className="w-fit cursor-pointer rounded bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-800 focus-visible:outline-2 focus-visible:outline-violet-700">
               Visible preview
             </summary>
@@ -986,11 +986,11 @@ function PromptCard({ prompt, metadata, copiedId, onCopy, onFork, onEdit, onDele
               <p className="mb-2 text-xs font-medium text-violet-200">{truncated ? 'Preview · truncated' : 'Preview'}</p>
               <p className="whitespace-pre-wrap break-words text-xs leading-5">{excerpt}{truncated ? '…' : ''}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={() => {
+                <Button variant="secondary" className="h-auto whitespace-normal py-2" onClick={() => {
                   if (previewRef.current) previewRef.current.open = false;
                   previewTriggerRef.current?.focus({ preventScroll: true });
                 }}>Return to Prompt catalogue</Button>
-                {onEdit && <Button variant="secondary" onClick={() => onEdit(prompt)}>Open full prompt</Button>}
+                {onEdit && <Button variant="secondary" className="h-auto whitespace-normal py-2" onClick={() => onEdit(prompt)}>Open full prompt</Button>}
               </div>
             </div>
           </details>
