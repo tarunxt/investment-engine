@@ -1,11 +1,13 @@
 "use client";
 
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
+import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
 import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
+import { threatInputRationale } from "./threatInputRationale";
 import { PromptTemplateDialog } from "@/app/console/automated-rebalance/_components/PromptTemplateDialog";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
@@ -3646,10 +3648,7 @@ function InputSelectionDialog({
   onResetDefaults: () => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
-  const closeRef = useRef(onClose);
-  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
   const allSelected =
@@ -3714,28 +3713,10 @@ function InputSelectionDialog({
     }
   }, [allSelected, someSelected]);
 
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]') ?? []);
-    focusable()[0]?.focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      const first = items[0], last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-    };
-    dialog?.addEventListener("keydown", handleKey);
-    return () => { dialog?.removeEventListener("keydown", handleKey); previous?.focus(); };
-  }, [open]);
-
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
-    threats: "Select Threat Scan inputs",
+    threats: "Select Threats Scan inputs",
     swing: "Select Swing Scan inputs",
     rebalance: "Select Rebalance Scan inputs",
     technical: "Select Technical Scan inputs",
@@ -3743,7 +3724,7 @@ function InputSelectionDialog({
   };
   const rationaleByStage: Record<InputSelectionStage, string> = {
     threats:
-      "Only selected sources are included. Upcoming output reserves the snapshot from this workflow; select Saved snapshot separately if needed.",
+      threatInputRationale(candidates, selectedIds, loading, error),
     swing:
       "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
     rebalance:
@@ -3764,8 +3745,9 @@ function InputSelectionDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cn("flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] shadow-2xl", stage === "threats" ? "border border-slate-300 bg-[#f5f4fc]" : "bg-white")} onClick={(event) => event.stopPropagation()}>
+    <ModelPickerDialogFrame enabled title={titleByStage[stage]} titleId={titleId} onClose={onClose}
+      overlayClassName="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      panelClassName={cn("flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] shadow-2xl", stage === "threats" ? "border border-slate-300 bg-[#f5f4fc]" : "bg-white")}>
         <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
           <div>
             <h3 id={titleId} className="text-xl font-extrabold sm:text-2xl tracking-tight text-slate-950">
@@ -3775,10 +3757,6 @@ function InputSelectionDialog({
               Choose which previous-stage outputs should be included in the next
               prompt.
             </p>
-            <div className="mt-2 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 sm:mt-3 sm:px-4 sm:py-3 sm:leading-6 text-amber-900">
-              <span className="font-extrabold">Input selection rationale:</span>{" "}
-              {rationaleByStage[stage]}
-            </div>
           </div>
           <button
             type="button"
@@ -3812,6 +3790,10 @@ function InputSelectionDialog({
           </div>
         </div>
         <div className="mx-4 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-2 sm:mx-6 sm:p-3">
+          <div className="mb-3 max-w-3xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-5 sm:px-4 sm:py-3 sm:leading-6 text-amber-900">
+            <span className="font-extrabold">Input selection rationale:</span>{" "}
+            {rationaleByStage[stage]}
+          </div>
           {stage === "threats" ? <InputEvidenceRows candidates={candidates} selectedIds={selectedIds} loading={loading} error={error} onToggle={onToggle} formatTimestamp={formatTimestamp} formatCost={(value) => formatUsdAsVerifiedInr(value, usdInrRate)} /> : loading ? (
             <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> Loading eligible
@@ -3956,8 +3938,7 @@ function InputSelectionDialog({
             Done
           </Button>
         </div>
-      </div>
-    </div>
+    </ModelPickerDialogFrame>
   );
 }
 
@@ -4213,6 +4194,7 @@ function StageLlmSelectorDialog({
     readSavedModelMixes(),
   );
   const [selectedMixId, setSelectedMixId] = useState("");
+  const selectorTitleId = useId();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -4374,15 +4356,16 @@ function StageLlmSelectorDialog({
   );
 
   return (
-    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} onClose={onClose}>
+    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} titleId={selectorTitleId} onClose={onClose}>
         <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5", organizedPicker && "shrink-0 px-4 py-3 sm:px-6")}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+            <p id={selectorTitleId} className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               {selectorTitle}
             </p>
             <h3 className="mt-1 text-xl font-bold text-slate-950">
               {getStageLabel(stage, "idle")}
             </h3>
+            {stage === "threats" ? <p className="mt-2 text-sm text-slate-600">{STAGE_METADATA[stage].tileDescription}</p> : null}
             <p className="mt-1 text-sm text-slate-500">
               Choose the provider/model targets this dashboard stage should use.
             </p>
@@ -4412,6 +4395,7 @@ function StageLlmSelectorDialog({
                 onClose();
               }}
               className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              data-dialog-initial-focus
               aria-label="Close LLM selector"
             >
               <X className="size-5" />
@@ -7169,7 +7153,7 @@ ${zerodhaExecutionMode === "direct_market"
           : [];
         if (shouldRunCurrentStage("threats") && threatTargets.length === 0)
           throw new Error(
-            `No compatible target is available for Threats & Guardrails. Open the stage LLM selector and choose one configured model.`,
+            `No compatible target is available for Threats Scan. Open the stage LLM selector and choose one configured model.`,
           );
         if (shouldRunCurrentStage("technical") && technicalTargets.length === 0)
           throw new Error(
@@ -7865,6 +7849,7 @@ ${zerodhaExecutionMode === "direct_market"
               Last run:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
+            {stageLedger ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
             {audit?.status === "pending" ? (
               <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
                 <Loader2 className="size-4 shrink-0 animate-spin" />
@@ -8358,6 +8343,11 @@ ${zerodhaExecutionMode === "direct_market"
         <PromptTemplateDialog
           title={promptDialog.title}
           body={promptDialog.body}
+          onReviewInputs={() => {
+            const { portfolio, stage } = promptDialog;
+            setPromptDialog(null);
+            void openInputSelection(portfolio, stage);
+          }}
           onClose={() => setPromptDialog(null)}
         />
       ) : null}
@@ -8372,6 +8362,7 @@ ${zerodhaExecutionMode === "direct_market"
           onRetry={() => void showStageOutput(outputDialog.portfolio, outputDialog.stage, outputDialog.requestedRunId)}
           loading={outputDialog.loading}
         >
+            {outputDialog.stage === "threats" ? <p className="border-b border-slate-200 bg-white px-6 py-3 text-sm text-slate-600">{STAGE_METADATA[outputDialog.stage].tileDescription}</p> : null}
             <div className="max-h-[72vh] overflow-auto bg-white p-0 text-slate-900">
               {outputDialog.loading ? (
                 <div role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">

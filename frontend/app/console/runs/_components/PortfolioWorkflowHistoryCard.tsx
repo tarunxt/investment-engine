@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { recordedStageRunLabel, RUN_HIERARCHY_HELP } from '@/lib/runHierarchy';
 import { useEffect, useId, useState } from 'react';
 import { getStageTileLabel, STAGE_ORDER } from '@/components/shared/WorkflowStageTile';
 import { HistoricalStageLedgerRow } from './HistoricalStageLedgerRow';
@@ -53,12 +54,13 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
   return (
     <section className="min-w-0 rounded-2xl border border-gray-200 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" aria-label={group.label}>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-semibold text-gray-950 dark:text-slate-100"><Link href={detailPath} className="text-blue-700 dark:text-violet-300 underline underline-offset-2">{group.label}</Link></h2>
+        <h2 className="font-semibold text-gray-950 dark:text-slate-100"><Link href={detailPath} className="text-blue-700 dark:text-violet-300 underline underline-offset-2">Workflow · {group.label}</Link></h2>
         <div className="text-right text-sm">
           <span className={completeness.complete ? 'font-semibold text-emerald-700 dark:text-emerald-300' : 'font-semibold text-amber-800 dark:text-amber-200'}>{completeness.label}</span>
           <p className="text-xs text-gray-500">Execution: {group.status.replaceAll('_', ' ')}</p>
         </div>
       </div>
+      <p className="mt-2 text-xs text-slate-500">{RUN_HIERARCHY_HELP}</p>
       <div role="tablist" aria-label={`${group.label} views`} className="mt-3 flex flex-wrap gap-1">
         {tabs.map((tab, index) => <button key={tab.key} type="button" role="tab" id={`${id}-${tab.key}-tab`} aria-controls={`${id}-${tab.key}`} aria-selected={view === tab.key} tabIndex={view === tab.key ? 0 : -1}
           onClick={() => selectView(tab.key)} onKeyDown={event => {
@@ -74,7 +76,7 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
           <div><dt className="text-slate-500">Started</dt><dd>{formatCompactStageTime(group.created_at)}</dd></div>
           <div><dt className="text-slate-500">Last refreshed</dt><dd>{lastRefreshed || 'Not yet refreshed'}</dd></div>
         </dl>
-        <Link href={detailPath} className="mt-3 inline-block text-violet-700 underline dark:text-violet-300">Open Run #{group.sequence}</Link>
+        <Link href={detailPath} className="mt-3 inline-block text-violet-700 underline dark:text-violet-300">Open workflow details · {group.label}</Link>
       </div>
       {!completeness.complete && ['completed', 'partial', 'partial_success'].includes(group.status) ? <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">{completeness.label}. Completed execution is not equivalent to fully successful results.</p> : null}
       <div id={`${id}-evidence`} role="tabpanel" aria-labelledby={`${id}-evidence-tab`} hidden={view !== 'evidence'}>
@@ -90,13 +92,13 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500">
 
         <span>{runLinksAvailable ? `${children.length} stage run${children.length === 1 ? '' : 's'}` : 'Stage run links are still loading or unavailable'}</span>
-        <Link href={detailPath} className="text-blue-700 dark:text-violet-300 underline">Stage history and diagnostics</Link>
-        {children.map(run => <Link key={run.id} href={getRunDetailPathFromPrompt(run.id, run.prompt_preview)} className="text-blue-700 dark:text-violet-300 underline">Run #{run.id} · {run.status} · {run.run_jobs.length} provider job{run.run_jobs.length === 1 ? '' : 's'}</Link>)}
+        <Link href={detailPath} className="text-blue-700 dark:text-violet-300 underline">Workflow details and diagnostics · {group.label}</Link>
+        {children.map(run => <Link key={run.id} href={getRunDetailPathFromPrompt(run.id, run.prompt_preview)} className="text-blue-700 dark:text-violet-300 underline">{recordedStageRunLabel(run.id, group.stages)} · Run #{run.id} · {run.status} · {run.run_jobs.length} provider job{run.run_jobs.length === 1 ? '' : 's'}</Link>)}
       </div>
       {group.error_message ? <p className="mt-3 whitespace-pre-wrap break-words text-xs text-red-700 dark:text-red-300">{group.error_message}</p> : null}
       {adjacentGroups.map(other => <div key={`${other.portfolio}:${other.sequence}`} className="mt-3 border-t border-slate-200 pt-3 text-xs dark:border-slate-700">
         <p className="mb-1 text-slate-500">{Date.parse(other.created_at) > Date.parse(group.created_at) ? 'Later record' : 'Earlier record'}</p>
-        <Link className="text-violet-700 underline dark:text-violet-300" href={URLs.routes.console.autoRebalanceRunDetail(other.portfolio === 'india' ? 'zerodha' : 'indmoneyUs', other.sequence)}>Open {other.label}</Link>
+        <Link className="text-violet-700 underline dark:text-violet-300" href={URLs.routes.console.autoRebalanceRunDetail(other.portfolio === 'india' ? 'zerodha' : 'indmoneyUs', other.sequence)}>Open workflow · {other.label}</Link>
         <p className="mt-1">Execution: {other.status}</p>
         <p>{STAGE_ORDER.map(key => `${getStageTileLabel(key)}: ${other.stages.find(stage => stage.stage === key)?.status || 'Not recorded'}`).join(' · ')}</p>
       </div>)}

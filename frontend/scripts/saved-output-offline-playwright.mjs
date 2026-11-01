@@ -17,10 +17,12 @@ const start = source.indexOf('  const showStageOutput = useCallback(');
 const end = source.indexOf('  useEffect(() => {\n    const handleOpenStageOutput', start);
 assert.ok(start > 0 && end > start);
 const loader = source.slice(start, end);
+const tileAst = ts.createSourceFile('tile.tsx', await readFile(path.join(frontend, 'components/shared/WorkflowStageTile.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const stageMetadata = tileAst.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(d => d.name.getText(tileAst) === 'STAGE_METADATA')).getText(tileAst).replace(/^export /, '');
 const entry = `import React,{useState,useRef,useCallback} from 'react';
 import {createRoot} from 'react-dom/client';
 import {SavedOutputDialog} from ${JSON.stringify(path.join(frontend,'components/shared/SavedOutputDialog.tsx'))};
-const STAGE_METADATA={threats:{idle:'Threats & Guardrails'},sync:{idle:'Sync'},rebalance:{idle:'Rebalance'}};
+${stageMetadata}
 const getStageOutputRoute=(portfolio,stage)=>'/console/'+portfolio+'/'+stage;
 const normalizeError=e=>e.message;
 const getLatestRunTimestamp=run=>run.updated_at;
@@ -43,8 +45,10 @@ try {
   await writeFile(path.join(temporary,'loader.cjs'),`const ts=require(${JSON.stringify(require.resolve('typescript'))});module.exports=function(s){return ts.transpileModule(s,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020},fileName:this.resourcePath}).outputText;};`);
   const w=require('next/dist/compiled/webpack/webpack');
   await new Promise((resolve,reject)=>w.webpack({mode:'development',devtool:false,entry:path.join(temporary,'entry.tsx'),output:{path:temporary,filename:'bundle.js'},resolve:{extensions:['.tsx','.ts','.js'],modules:[path.join(frontend,'node_modules'),'node_modules']},module:{rules:[{test:/\.tsx?$/,use:path.join(temporary,'loader.cjs')}]},plugins:[new w.webpack.DefinePlugin({'process.env.NODE_ENV':JSON.stringify('development')})]},(e,s)=>e?reject(e):s.hasErrors()?reject(new Error(s.toString({all:false,errors:true}))):resolve()));
+  const postcss=require('postcss'),tailwind=require('@tailwindcss/postcss');
+  const css=(await postcss([tailwind({base:frontend})]).process('@import "tailwindcss";',{from:path.join(frontend,'app/globals.css')})).css;
   const bundle=await readFile(path.join(temporary,'bundle.js'));
-  server=createServer((req,res)=>{if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');return res.end(bundle)}res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<meta charset="utf-8"><style>body{font:16px sans-serif}button,a{padding:10px}.fixed{position:fixed}.inset-0{inset:0}.flex{display:flex}.items-center{align-items:center}.justify-center{justify-content:center}.bg-white{background:white}[role=dialog]{padding:24px;border:1px solid;max-width:85vw}pre{white-space:pre-wrap}</style><div id="root"></div><script src="/bundle.js"></script>`)});
+  server=createServer((req,res)=>{if(req.url==='/bundle.js'){res.setHeader('Content-Type','text/javascript');return res.end(bundle)}res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}body{font:16px sans-serif}</style><div id="root"></div><script src="/bundle.js"></script>`)});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const origin='http://127.0.0.1:'+server.address().port;
   browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{})});
@@ -58,6 +62,7 @@ try {
   await page.getByText('Open India',{exact:true}).click();await page.getByRole('status').waitFor();
   assert.equal(await page.getByText('Retry saved output',{exact:true}).isDisabled(),true);
   await dialog.getByText(/Saved threat report for zerodha/).waitFor();
+  assert.match(await dialog.textContent(),/Threats Scan Output/);
   assert.match(await dialog.textContent(),/Job #71 · fixture\/offline · completed/);
   assert.equal(await dialog.locator('time').getAttribute('datetime'),'2026-10-31T12:00:00Z');
   assert.equal(await page.locator('iframe').count(),0);assert.equal(await page.evaluate(()=>window.executed),undefined);

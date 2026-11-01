@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useModalFocus } from "@/hooks/useModalFocus";
 import { Clock3, Loader2, X } from "lucide-react";
 
 import { apiService } from "@/services/api";
@@ -167,12 +169,14 @@ function buildDurationBreakdown(
 export function StageDurationBreakdownDialog({
   open,
   stageLabel,
+  stagePurpose,
   info,
   now,
   onClose,
 }: {
   open: boolean;
   stageLabel: string;
+  stagePurpose?: string;
   info: StageDurationInfo;
   now: number;
   onClose: () => void;
@@ -182,14 +186,8 @@ export function StageDurationBreakdownDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open]);
+  const panel = useRef<HTMLElement>(null);
+  useModalFocus(open, panel, onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -235,12 +233,14 @@ export function StageDurationBreakdownDialog({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
       onClick={onClose}
     >
       <section
+        ref={panel}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="stage-duration-breakdown-title"
@@ -258,6 +258,7 @@ export function StageDurationBreakdownDialog({
             >
               {stageLabel}
             </h3>
+            {stagePurpose ? <p className="mt-2 text-sm leading-5 text-slate-600">{stagePurpose}</p> : null}
             <p className="mt-3 text-xs font-medium text-slate-500">Total wall-clock duration</p>
             <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-950">
               {breakdown.totalDuration}
@@ -317,6 +318,6 @@ export function StageDurationBreakdownDialog({
           </details>
         </div>
       </section>
-    </div>
+    </div>, document.body,
   );
 }
