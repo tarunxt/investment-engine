@@ -1,0 +1,26 @@
+✔ Bullpen history browser deadline outlives its 14-second BFF budget (120.608798ms)
+✔ Bullpen history preserves caller cancellation and timeout overrides (52.360163ms)
+✔ a six-second history response reaches the browser instead of timing out at five (67.413936ms)
+✔ Runs loads all Bullpen pages in order with at most two concurrent reads (64.982455ms)
+✔ Runs stops after the first page when history has no next page (21.525351ms)
+✔ a failed history page rejects the complete list and stops queued reads (19.072488ms)
+✔ navigation cancellation stops queued history pages (22.064714ms)
+✔ a superseded Runs refresh cannot publish its older result (19.265749ms)
+✔ Bullpen errors arriving after tab changes stay scoped; switching back retains the real failure (39.355414ms)
+✔ active Bullpen failures stay visible and unrelated portfolio errors are preserved (26.256102ms)
+✔ history browser deadlines exceed the bounded BFF and preserve abort signals without browser fanout (45.690886ms)
+✔ saved groups render before summary links or another market/Bullpen finishes (24.193047ms)
+✔ summary failures preserve both markets and successful refresh never erases a failed market last-good groups (19.157416ms)
+✔ portfolio summary pagination limits concurrency, keeps page ordering and stops after cancellation/failure (45.18405ms)
+✔ group pagination reads every 50-group page, rejects gaps and supports retry without truncation (15.339013ms)
+✔ unsignalled history reads share only in-flight work and retry reads fresh after timeout or success (37.2332ms)
+✔ cold loading and failed reads never present verified empty counts or results (12.894483ms)
+✔ successful empty reads verify empty copy; refresh keeps populated saved history visible (13.246604ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 869.134799

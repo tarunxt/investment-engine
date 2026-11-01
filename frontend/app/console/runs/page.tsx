@@ -314,6 +314,15 @@ export default function RunsPage() {
 
   const [workflowGroups, setWorkflowGroups] = useState<AutoRebalanceHistoryItemResponse[]>([]);
 
+  const [loadedSources, setLoadedSources] = useState<Partial<Record<keyof RunErrors, boolean>>>({});
+  const categoryLoaded = (tab: RunTab) => tab === 'bullpen'
+    ? Boolean(loadedSources.bullpen)
+    : Boolean(loadedSources.portfolio && loadedSources[tab === 'zerodha' ? 'india' : 'indmoney_us']);
+
+  const categoryEmptyVerified = (tab: RunTab) => categoryLoaded(tab) && !loading
+    && !sourceErrors[tab === 'bullpen' ? 'bullpen' : tab === 'zerodha' ? 'india' : 'indmoney_us']
+    && (tab === 'bullpen' || !sourceErrors.portfolio);
+
   const loadRuns = useCallback(async () => {
     loadAbortControllerRef.current?.abort();
     const controller = new AbortController();
@@ -325,7 +334,10 @@ export default function RunsPage() {
     const publish = async <T,>(source: keyof RunErrors, label: string, read: () => Promise<T>, save: (value: T) => void) => {
       try {
         const value = await read();
-        if (!controller.signal.aborted) save(value);
+        if (!controller.signal.aborted) {
+          save(value);
+          setLoadedSources(current => ({ ...current, [source]: true }));
+        }
       } catch (error) {
         if (!controller.signal.aborted) setSourceErrors(current => ({ ...current, [source]: label + normalizeError(error) }));
       }
@@ -453,7 +465,7 @@ export default function RunsPage() {
             >
               <span>{tab.label}</span>
               <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
-                {count}
+                {count > 0 || categoryEmptyVerified(tab.id) ? count : '—'}
               </span>
             </button>
           );
@@ -467,7 +479,9 @@ export default function RunsPage() {
         </div>
       ) : null}
 
-      <div className="space-y-3" role="tabpanel">
+      {loading ? <p role="status" className="text-sm text-gray-600">Refreshing run history… Available saved results remain visible.</p> : null}
+
+      <div className="space-y-3" role="tabpanel" aria-busy={loading}>
         {loading && selectedItems.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
             <Loader2 className="mx-auto mb-3 size-5 animate-spin text-gray-400" />
@@ -499,7 +513,7 @@ export default function RunsPage() {
       <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
         <span className="text-xs text-gray-500">
           {selectedItems.length === 0
-            ? 'No results'
+            ? loading ? 'Loading results…' : error || !categoryLoaded(activeTab) ? 'Results unavailable' : 'No results'
             : from + '–' + to + ' of ' + selectedItems.length + (activeTab === 'bullpen' ? ' runs' : ' run groups')}
         </span>
         <div className="flex items-center gap-1">
