@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { AlertCircle, Copy, Loader2 } from 'lucide-react';
+import { AlertCircle, Copy, Loader2, RefreshCw } from 'lucide-react';
 
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { Button } from '@/components/ui/button';
@@ -130,6 +130,24 @@ export default function IndMoneyUsPage() {
     }
   };
 
+  const handleRefreshDisplayedData = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const nextOverview = await apiService.indmoneyUsPortfolioOverview();
+      const retainedSnapshot = selectedSnapshotId && nextOverview.history.some((item) => item.id === selectedSnapshotId)
+        ? nextOverview.latest?.id === selectedSnapshotId
+          ? nextOverview.latest
+          : await apiService.indmoneyUsPortfolioSnapshot(selectedSnapshotId)
+        : null;
+      applyOverview(nextOverview, retainedSnapshot);
+    } catch (error) {
+      setLoadError(normalizeError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (loading && !overview) {
     return (
       <div className="flex items-center gap-3 text-sm text-gray-500">
@@ -144,7 +162,7 @@ export default function IndMoneyUsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="inline-flex items-start gap-1">
-            <h1 className="text-lg font-semibold tracking-tight text-gray-950">IndMoney US</h1>
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">INDmoney US snapshot</h1>
             <Button
               type="button"
               variant="ghost"
@@ -166,10 +184,17 @@ export default function IndMoneyUsPage() {
             </Button>
           </div>
           <p className="text-sm text-gray-500">
-            Manual US portfolio tracking for INDmoney when no direct API is available.
+            Manual snapshot · not a live market feed. No direct broker API.
+          </p>
+          <p className="mt-1 text-sm text-gray-600" aria-live="polite">
+            {selectedSnapshot ? <>Saved snapshot: <time dateTime={selectedSnapshot.captured_at}>{new Date(selectedSnapshot.captured_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</time></> : overview ? 'No saved snapshot yet.' : 'Saved snapshot unavailable.'}
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start">
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          <Button type="button" variant="outline" size="sm" disabled={loading || selecting || saving} onClick={() => void handleRefreshDisplayedData()} title="Reload saved records only; does not import a snapshot or sync broker prices.">
+            <RefreshCw className={cn('mr-2 size-3.5', loading && 'animate-spin')} />
+            Refresh displayed data
+          </Button>
           <PortfolioAnalysisNav portfolio="indmoneyUs" active="portfolio" />
         </div>
       </div>
@@ -177,7 +202,7 @@ export default function IndMoneyUsPage() {
       {showManualNote ? (
         <div
           id="indmoney-us-manual-note"
-          className="border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 shadow-sm"
+          className="border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700"
         >
           The flow here is intentionally manual: paste the INDmoney portfolio screen daily, save a timestamped
           snapshot, and the dashboard will turn that raw text into holdings tables, allocation views, and
@@ -185,7 +210,7 @@ export default function IndMoneyUsPage() {
         </div>
       ) : null}
 
-      {loadError && !overview ? (
+      {loadError && !selectedSnapshot ? (
         <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
           <span>{loadError}</span>
