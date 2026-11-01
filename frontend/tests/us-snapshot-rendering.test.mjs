@@ -113,7 +113,7 @@ test('actual hydrated page preserves data and all three views at desktop and nar
       for (const name of ['Top Allocation', 'Top Gainers', 'Laggards', 'Reconciliation', 'Market Indices', 'Raw Pasted Snapshot']) assert.equal(await page.getByRole('heading', { name, exact: true }).count(), 1);
       await screenshot(page, `${width}-saved-partial`);
       await page.getByText('Source details', { exact: true }).click();
-      assert.match(await page.locator('details').innerText(), /no direct API[\s\S]*manual paste/i);
+      assert.match(await page.locator('details').filter({ has: page.getByText('Source details', { exact: true }) }).innerText(), /no direct API[\s\S]*manual paste/i);
       await screenshot(page, `${width}-source-details`);
       await page.getByText('Source details', { exact: true }).click();
       const reads = await page.evaluate(() => window.fixture.reads);
@@ -234,7 +234,7 @@ test('save failure retains draft, explicit fixture save preserves copied timesta
     await page.getByRole('tab', { name: 'Saved US snapshot' }).click();
     assert.match(await page.locator('header').innerText(), /21 Oct 2026[\s\S]*partial/i);
     assert.equal(await page.getByText('Fixture: totals do not reconcile.', { exact: true }).count(), 1);
-    assert.match(await page.locator('pre').innerText(), /Fixture full holdings text/);
+    assert.match(await page.locator('#us-snapshot-panel-saved pre').innerText(), /Fixture full holdings text/);
     await screenshot(page, '1180-saved-after-fixture-import');
     assert.deepEqual(errors, []);
   } finally { await page.close(); }

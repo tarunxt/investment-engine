@@ -80,11 +80,12 @@ try {
  for(let i=0;i<2;i++){await errors.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(await errors.evaluate(el=>el===document.activeElement),true);}
  const rebalance=page.getByRole('button',{name:/04 Rebalance/});await rebalance.focus();await page.keyboard.press('Enter');
  assert.match(await page.getByRole('region',{name:'Saved evidence and configuration'}).innerText(),/Rebalance/);
+ await page.screenshot({path:path.join(evidence,'inspection-controls-desktop.png'),fullPage:true});
  for(const [name,action] of [['Inputs','inputs:rebalance'],['Models','models:rebalance'],['Prompt','prompt:rebalance'],['Saved output','output:rebalance'],['Stock Flow','flow'],['Open stage','open:rebalance']]){await page.getByRole('button',{name,exact:true}).click();assert.equal(await page.evaluate(()=>window.actions.at(-1)),action);}
  assert.equal(await page.evaluate(()=>window.actions.some(a=>a==='run'||a==='sync'||a.startsWith('order:'))),false);
  await page.getByRole('link',{name:'History',exact:true}).click();assert.match(page.url(),/#history$/);await page.goBack();assert.equal(await page.locator('tbody tr').count(),6);
  const duration=page.getByRole('button',{name:'Duration',exact:true});
- for(let i=0;i<2;i++){await duration.click();const dialog=page.getByRole('dialog');await dialog.waitFor();assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);await page.keyboard.press('Tab');assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await duration.evaluate(el=>el===document.activeElement),true);}
+ for(let i=0;i<2;i++){await duration.click();const dialog=page.getByRole('dialog');await dialog.waitFor();if(i===0)await page.screenshot({path:path.join(evidence,'inspection-duration-desktop.png'),fullPage:true});assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);await page.keyboard.press('Tab');assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await duration.evaluate(el=>el===document.activeElement),true);}
  await page.getByRole('button',{name:'Saved evidence and configuration',exact:true}).click();await page.getByLabel('Stage',{exact:true}).selectOption('actionables');
  await page.getByRole('button',{name:'Calculation',exact:true}).click();assert.equal(await page.evaluate(()=>window.actions.at(-1)),'calculation');
  await page.screenshot({path:path.join(evidence,'evidence-desktop.png'),fullPage:true});
