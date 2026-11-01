@@ -50,6 +50,9 @@ jobs:
           backend/tests/test_upstox_quotes.py
           backend/tests/test_upstox_quote_guard.py
           backend/tests/test_upstox_request_contract.py
+          backend/tests/test_auth_signing_config.py
+          backend/tests/test_email_config.py
+          backend/tests/test_auth_websocket_tickets.py
           backend/tests/test_recovery_containment.py
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_ranking_integrity.py
