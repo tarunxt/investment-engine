@@ -35,11 +35,12 @@ try {
    const button=page.getByRole('button',{name:'Refresh',exact:true});await button.waitFor();
    await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Refresh'&&!b.disabled));
    const style=async()=>{await page.waitForTimeout(250);return button.evaluate(el=>{const s=getComputedStyle(el),i=getComputedStyle(el.querySelector('svg'));return {radius:s.borderRadius,height:s.height,fontSize:s.fontSize,weight:s.fontWeight,tracking:s.letterSpacing,transform:s.textTransform,shadow:s.boxShadow,color:s.color,borderColor:s.borderColor,background:s.backgroundColor,gap:s.gap,iconWidth:i.width,iconHeight:i.height};});};
-   pair.push(await style());
    await page.mouse.move(0,0);await button.evaluate(el=>el.blur());
+   pair.push(await style());
    const defaultImage=await button.screenshot({path:output+'/'+theme+'-'+width+'-'+zoom+'-'+report+'-default.png',animations:'disabled'});
    if(process.env.REPORT_REFRESH_BASELINE) continue;
    await button.hover();await page.screenshot({path:output+'/'+theme+'-'+width+'-'+zoom+'-'+report+'-hover.png'});pair.push(await style());
+   await page.mouse.move(0,0);await button.evaluate(el=>el.blur());
    await page.keyboard.press('Tab');await button.focus();assert.ok(await button.evaluate(el=>document.activeElement===el));
    assert.equal(await button.evaluate(el=>el.matches(':focus-visible')),true);
    await page.screenshot({path:output+'/'+theme+'-'+width+'-'+zoom+'-'+report+'-focus.png'});pair.push(await style());
