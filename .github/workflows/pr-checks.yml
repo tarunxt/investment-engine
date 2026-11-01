@@ -64,6 +64,7 @@ jobs:
           backend/tests/test_completion_notifications.py
           backend/tests/test_auto_rebalance_audit_durability.py
           backend/tests/test_auto_rebalance_run_sequence.py
+          backend/tests/test_stage_status.py
           backend/tests/test_run_completion_email.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_indmoney_us_parser.py
@@ -479,6 +480,13 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: node scripts/api-cost-provenance-playwright.mjs
+
+      - name: Verify stage ledger partial and mixed provider outcomes offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: |
+          node scripts/auto-stages-ledger-offline-playwright.mjs
+          AUTO_STAGES_MIXED_FAILURE=1 node scripts/auto-stages-ledger-offline-playwright.mjs
 
       - name: Verify saved-output states and keyboard behavior offline
         if: matrix.bundler == 'webpack'
