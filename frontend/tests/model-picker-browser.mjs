@@ -17,6 +17,8 @@ mkdirSync(output, { recursive: true });
 const workflow = readFileSync(resolve(root, 'app/console/dashboard/_components/RebalanceWorkflowSections.tsx'), 'utf8');
 const ast = ts.createSourceFile('workflow.tsx', workflow, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const extract = name => ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)?.getText(ast);
+const tileAst = ts.createSourceFile('tile.tsx', readFileSync(resolve(root, 'components/shared/WorkflowStageTile.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const stageMetadata = tileAst.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(d => d.name.getText(tileAst) === 'STAGE_METADATA')).getText(tileAst).replace(/^export /, '');
 const inventory = {
   anthropic: ['claude-opus-4-7','claude-sonnet-4-6','claude-3-7-sonnet-latest','claude-3-5-sonnet-latest','claude-3-5-haiku-latest','claude-3-opus-latest','claude-3-sonnet-20240229','claude-3-haiku-20240307'],
   gemini: ['gemini-2.5-flash','gemini-2.5-pro','gemini-2.0-flash','gemini-2.0-flash-lite','gemini-3-flash-preview'],
@@ -38,7 +40,8 @@ const MODEL_MIX_STORAGE_KEY='offline-fixture-mixes';
 const readSavedModelMixes=()=>[{id:'compatible-models-system',name:'Compatible models',targets:['openai::gpt-4o-mini']}];
 const useUsdInrRate=()=>0;
 const formatInrCost=value=>typeof value==='number'?'₹'+value.toFixed(2):'n/a';
-const getStageLabel=()=> 'Threats & Guardrails';
+${stageMetadata}
+${extract('getStageLabel')}
 const fetchAllFullRuns=async()=>[];
 const buildStageLlmHistoryEntries=()=>[];
 const normalizeError=error=>String(error);
@@ -77,6 +80,8 @@ try {
  const open=async()=>{await page.locator('#open').click();await page.getByRole('dialog').waitFor();};
  const shot=async name=>page.screenshot({path:resolve(output,name+'.png'),fullPage:true});
  await open();
+ assert.equal(await page.getByRole('dialog').getByRole('heading',{name:'Threats Scan',exact:true}).count(),1);
+ assert.match(await page.getByRole('dialog').innerText(),/Check risks in the economy, sectors, and your holdings/);
  assert.equal(await page.getByRole('tab').count(),6);checks++;
  assert.equal(await page.getByRole('button',{name:'Close LLM selector'}).evaluate(el=>el===document.activeElement),true);checks++;
  await shot('desktop-summary');

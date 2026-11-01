@@ -4385,6 +4385,7 @@ function StageLlmSelectorDialog({
             <h3 className="mt-1 text-xl font-bold text-slate-950">
               {getStageLabel(stage, "idle")}
             </h3>
+            {stage === "threats" ? <p className="mt-2 text-sm text-slate-600">{STAGE_METADATA[stage].tileDescription}</p> : null}
             <p className="mt-1 text-sm text-slate-500">
               Choose the provider/model targets this dashboard stage should use.
             </p>
@@ -7171,7 +7172,7 @@ ${zerodhaExecutionMode === "direct_market"
           : [];
         if (shouldRunCurrentStage("threats") && threatTargets.length === 0)
           throw new Error(
-            `No compatible target is available for Threats & Guardrails. Open the stage LLM selector and choose one configured model.`,
+            `No compatible target is available for Threats Scan. Open the stage LLM selector and choose one configured model.`,
           );
         if (shouldRunCurrentStage("technical") && technicalTargets.length === 0)
           throw new Error(
@@ -8375,6 +8376,7 @@ ${zerodhaExecutionMode === "direct_market"
           onRetry={() => void showStageOutput(outputDialog.portfolio, outputDialog.stage, outputDialog.requestedRunId)}
           loading={outputDialog.loading}
         >
+            {outputDialog.stage === "threats" ? <p className="border-b border-slate-200 bg-white px-6 py-3 text-sm text-slate-600">{STAGE_METADATA[outputDialog.stage].tileDescription}</p> : null}
             <div className="max-h-[72vh] overflow-auto bg-white p-0 text-slate-900">
               {outputDialog.loading ? (
                 <div role="status" className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">

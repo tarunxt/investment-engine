@@ -167,12 +167,14 @@ function buildDurationBreakdown(
 export function StageDurationBreakdownDialog({
   open,
   stageLabel,
+  stagePurpose,
   info,
   now,
   onClose,
 }: {
   open: boolean;
   stageLabel: string;
+  stagePurpose?: string;
   info: StageDurationInfo;
   now: number;
   onClose: () => void;
@@ -258,6 +260,7 @@ export function StageDurationBreakdownDialog({
             >
               {stageLabel}
             </h3>
+            {stagePurpose ? <p className="mt-2 text-sm leading-5 text-slate-600">{stagePurpose}</p> : null}
             <p className="mt-3 text-xs font-medium text-slate-500">Total wall-clock duration</p>
             <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-950">
               {breakdown.totalDuration}
