@@ -82,10 +82,10 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
 
 def test_saved_market_value_preserves_settled_basis_with_t1_exposure():
     raw = {"tradingsymbol": "SYNTHETIC", "exchange": "NSE", "quantity": 10,
-           "t1_quantity": 2, "last_price": 100}
-    snapshot = build_portfolio_snapshot([raw], {"net": [], "day": []})
+           "t1_quantity": 2, "last_price": 100, "average_price": 80, "pnl": 200, "day_change": 0}
+    snapshot = build_portfolio_snapshot([raw], {"net": [], "day": []}, {"equity": {"available": {"live_balance": 300}, "net": 300}})
     assert snapshot["holdings_market_value"] == 1000
     assert snapshot["holdings"][0]["market_value"] == 1000
     assert snapshot["holdings"][0]["t1_quantity"] == 2
     assert raw == {"tradingsymbol": "SYNTHETIC", "exchange": "NSE", "quantity": 10,
-                   "t1_quantity": 2, "last_price": 100}
+                   "t1_quantity": 2, "last_price": 100, "average_price": 80, "pnl": 200, "day_change": 0}

@@ -28,7 +28,7 @@ try {
   const bundle=await readFile(path.join(temporary,'bundle.js'));
   server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/bundle.js'?'text/javascript':'text/html');res.end(req.url==='/bundle.js'?bundle:'<!doctype html><title>Offline run policy</title><div id="root"></div><script src="/bundle.js"></script>')});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
-  browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||'/usr/bin/chromium',headless:true});
+  browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||chromium.executablePath(),headless:true});
   const context=await browser.newContext({serviceWorkers:'block'}),external=[],errors=[];
   await context.route('**/*',route=>{if(new URL(route.request().url()).origin!==origin){external.push(route.request().url());return route.abort()}return route.continue()});
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(origin);

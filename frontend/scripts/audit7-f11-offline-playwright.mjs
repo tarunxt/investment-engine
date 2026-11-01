@@ -9,7 +9,7 @@ import {chromium} from 'playwright';
 import postcss from 'postcss';
 import tailwind from '@tailwindcss/postcss';
 const require=createRequire(import.meta.url);
-const {build}=require(process.env.ACTIONABLES_ESBUILD_PATH||'/tmp/audit7-browser-tools/node_modules/esbuild');
+const {build}=require(process.env.ACTIONABLES_ESBUILD_PATH||'esbuild');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const out=process.env.AUDIT6_FINAL_EVIDENCE_DIR||'/tmp/audit7-f11-browser';
 await mkdir(out,{recursive:true});
@@ -32,7 +32,7 @@ const css=await postcss([tailwind()]).process(await readFile(path.join(root,'app
 const server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/bundle.js'?'application/javascript':'text/html');res.end(req.url==='/bundle.js'?result.outputFiles[0].text:`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css.css}</style></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>`)});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin=`http://127.0.0.1:${server.address().port}`;
-const browser=await chromium.launch({headless:true,executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||chromium.executablePath(),args:['--no-sandbox']});
 const errors=[],blocked=[],evidence=[];
 try{const page=await browser.newPage({viewport:{width:1180,height:757}});page.on('pageerror',e=>{errors.push(e.message);console.error(e.stack)});await page.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():(blocked.push(route.request().url()),route.abort()));
 await page.goto(origin);const dialog=page.getByRole('dialog',{name:'Synthetic India Final Excel layout'});await dialog.waitFor();assert.equal(await page.evaluate(()=>window.__stockCount),1);

@@ -29,7 +29,9 @@ const auditAst = ts.createSourceFile('audit.ts', read('../services/recommendatio
 const auditHasher = load(auditAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'auditResponseHashes').getText(auditAst), { crypto: webcrypto }).auditResponseHashes;
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
-const portfolioSnapshot = { captured_at: '2026-10-02T20:30:00Z', parse_status: 'parsed', reported_holdings_count: 1,
+modules['@/lib/rebalance'] = rebalance;
+const snapshotSource = load(read('../lib/indmoneySnapshotSource.ts'));
+const portfolioSnapshot = { id: 7001, captured_at: '2026-10-02T20:30:00Z', parse_status: 'parsed', reported_holdings_count: 1,
   holdings: [{ symbol: 'ABC', quantity: 0.125 }] };
 const swing = load(read('../lib/swingTrade.ts'));
 const scope = { market: 'us', stage: 'swing' };
@@ -58,7 +60,7 @@ function run(id = 50, jobIds = [501, 502], stage = 'swing', market = 'us') {
 function threat(jobId = 99, origin = 'selected', market = 'us') {
   return {
     identity: { kind: 'threat-job', stage: 'threats', market, jobId }, origin,
-    analysis: { job_id: jobId, status: 'completed', provider: 'openai', model: 'same-model',
+    analysis: { snapshot_id: 7001, job_id: jobId, status: 'completed', provider: 'openai', model: 'same-model',
       created_at: timestamp, updated_at: timestamp, snapshot_date: '2026-10-02', captured_at: timestamp,
       report: { raw_markdown: 'Keep the current risk and the dissenting view.' },
     },
@@ -256,7 +258,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   const apiService = {
     getProviders: async () => [],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
-    indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99 }; },
+    indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99, snapshot_id: snapshot?.id }; },
     indmoneyUsThreatJob: async (id) => { threatReads.push(id); return threatOverrides[id] ?? threat(id).analysis; },
     indmoneyUsThreatsLatest: async () => ({ analysis: threat(99).analysis }),
     getRuns: async () => ({ items: [generatedSwing] }),
@@ -270,10 +272,11 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
+    readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     recommendationAuditEnabled: false,
     scoreMatrixFormulaConfig: {},
     auditResponseHashes: auditHasher,
-    ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
+    ...inputs, ...rebalance, ...snapshotSource, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
     ...modules['@/lib/autoRebalanceAudit'], ...modules['@/lib/outputSourceJobs'], buildOutputSourceJobs: sourceHasher, apiService,
     analysisOnlyRuns: { indmoneyUs: false }, setAnalysisOnlyRuns: noop,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,
@@ -308,7 +311,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
 }
 
 test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
-  const result = await executeWorkflow({ snapshot: { parse_status: 'unparsed', holdings: [] } });
+  const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, parse_status: 'unparsed', holdings: [] } });
   assert.deepEqual(result.created, []);
   assert.deepEqual(result.completed, []);
   assert.equal(result.errors[0].stage, 'sync');

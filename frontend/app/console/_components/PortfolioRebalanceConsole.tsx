@@ -231,10 +231,11 @@ function getSelectedSwingRuns(
 }
 
 function buildRebalanceInputPreviews(inputs: Parameters<typeof buildRebalanceInputBundle>[0]) {
+  const now = inputs.now ?? new Date();
   try {
     return {
-      prompt: buildRebalanceInputBundle({ ...inputs, swingDisplayMode: "full" }),
-      display: buildRebalanceInputBundle({ ...inputs, swingDisplayMode: "summary" }),
+      prompt: buildRebalanceInputBundle({ ...inputs, now, swingDisplayMode: "full" }),
+      display: buildRebalanceInputBundle({ ...inputs, now, swingDisplayMode: "summary" }),
       error: null,
     };
   } catch (error) {

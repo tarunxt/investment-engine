@@ -24,7 +24,7 @@ import {isRunInSwingTradeMarket} from '@/lib/runPresentation';
 const CreateJobCard=()=>null; // Submission boundary excluded: no jobs or paid calls.
 const Context=createContext(null);const useDashboard=()=>useContext(Context);
 const params=new URL(location.href).searchParams,market=params.get('market')||'india';
-const snapshot={snapshot_date:'2020-01-01',captured_at:'2020-01-01T00:00:00Z',parse_status:'parsed',reported_holdings_count:1,holdings:market==='india'?[{exchange:'NSE',tradingsymbol:'ABC',quantity:1,t1_quantity:0,average_price:10,last_price:10,pnl:0}]:[{symbol:'ABC',quantity:1,average_price:10,market_price:10,current_value:10}]};
+const snapshot={holdings_count:1,positions:{net:[],day:[]},snapshot_date:'2020-01-01',captured_at:'2020-01-01T00:00:00Z',parse_status:'parsed',reported_holdings_count:1,holdings:market==='india'?[{exchange:'NSE',tradingsymbol:'ABC',quantity:1,t1_quantity:0,average_price:10,last_price:10,pnl:0}]:[{symbol:'ABC',quantity:1,average_price:10,market_price:10,current_value:10}]};
 const raw=params.get('value');if(raw!=='missing')snapshot[market==='india'?'available_margin':'wallet_balance']=raw==='null'?null:raw==='malformed'?'bad':Number(raw);
 async function readSnapshot(){if(params.has('error'))throw Error('Synthetic snapshot read failed');return {latest:snapshot};}
 const apiService={zerodhaPortfolioOverview:readSnapshot,indmoneyUsPortfolioOverview:readSnapshot,zerodhaThreatsLatest:async()=>({analysis:null}),indmoneyUsThreatsLatest:async()=>({analysis:null}),getRuns:async()=>({items:[]})};
@@ -39,10 +39,19 @@ try{
  const bundle=await readFile(path.join(temp,'bundle.js'));
  server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/bundle.js'?'application/javascript':'text/html');res.end(req.url==='/bundle.js'?bundle:'<div id="root"></div><script src="/bundle.js"></script>');});await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const origin='http://127.0.0.1:'+server.address().port;
- browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||'/usr/bin/chromium'});
- const page=await browser.newPage();page.setDefaultTimeout(10000);page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)});await page.route('**/*',route=>{if(route.request().url().startsWith(origin+'/'))return route.continue();denied.push(route.request().url());return route.abort();});
+ browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||chromium.executablePath()});
+ const page=await browser.newPage();await page.clock.setFixedTime(new Date('2026-11-01T12:00:00Z'));page.setDefaultTimeout(10000);page.on('pageerror',e=>{errors.push(e.message);console.error(e.message)});await page.route('**/*',route=>{if(route.request().url().startsWith(origin+'/'))return route.continue();denied.push(route.request().url());return route.abort();});
  for(const market of ['india','us'])for(const value of ['missing','null','malformed','0','-5','0.125','100']){
   await page.goto(origin+'/?'+new URLSearchParams({market,value}));
+  if(market==='india'&&['missing','null','malformed'].includes(value)){
+   await page.getByText(/Zerodha snapshot has unknown numeric exposure or available margin/).first().waitFor();
+   assert.equal(await page.getByTestId('prompt').textContent(),'');assert.equal(await page.getByTestId('selection').textContent(),'');
+   await page.getByRole('button',{name:/Input Box/}).click();
+   await page.getByRole('button',{name:'Refresh Inputs',exact:true}).click();
+   await page.getByText(/Zerodha snapshot has unknown numeric exposure or available margin/).first().waitFor();
+   assert.equal(await page.getByTestId('prompt').textContent(),'');assert.equal(await page.getByTestId('selection').textContent(),'');
+   results.push(market+':'+value+':fail-closed unknown source');continue;
+  }
   await page.getByTestId('prompt').filter({hasText:'rebalance-funds/v1'}).waitFor();
   await page.getByRole('button',{name:/Input Box/}).click();
   const portfolio=page.locator('section').filter({has:page.getByRole('heading',{name:'Portfolio',exact:true})}).locator('pre');

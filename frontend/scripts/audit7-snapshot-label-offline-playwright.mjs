@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {chromium} from 'playwright';
 const require=createRequire(import.meta.url);
-const {build}=require(process.env.AUDIT7_ESBUILD_PATH||'/tmp/a7-build/node_modules/esbuild');
+const {build}=require(process.env.AUDIT7_ESBUILD_PATH||'esbuild');
 const workflow=await readFile('app/console/dashboard/_components/RebalanceWorkflowSections.tsx','utf8');
 for(const contract of ['loadSnapshot={readLatestIndmoneySnapshot}','readIndmoneySnapshotSource(readLatestIndmoneySnapshot, savedSnapshot)','expected_snapshot_id: workflowSnapshot.id'])assert.ok(workflow.includes(contract));
 const bridge=workflow.slice(workflow.indexOf('  const handleIndMoneyContinue = useCallback('),workflow.indexOf('  const lastRunByPortfolio = useMemo('));
@@ -18,7 +18,7 @@ ${bridge}
 return <><button onClick={()=>setDialogOpen(true)}>Reopen</button><IndMoneySnapshotDialog open={open} saving={false} error={null} loadSnapshot={load} onClose={()=>setDialogOpen(false)} onContinue={handleIndMoneyContinue}/></>};createRoot(document.getElementById('app')).render(<App/>);`;
 const bundle=await build({stdin:{contents:fixture,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,platform:'browser',jsx:'automatic'});
 const snapshot=(id=87,overrides={})=>({id,captured_at:'2026-11-01T08:28:10.767Z',parse_status:'parsed',reported_holdings_count:1,holdings:[{symbol:'SYNTH',quantity:0}],wallet_balance:0,...overrides});
-const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+const browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||chromium.executablePath(),args:['--no-sandbox']});
 const errors=[],results=[];
 async function start(timezoneId='UTC'){
  const context=await browser.newContext({timezoneId,viewport:{width:390,height:844}}),page=await context.newPage();

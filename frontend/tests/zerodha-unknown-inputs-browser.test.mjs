@@ -31,7 +31,7 @@ before(async () => {
   });
   await new Promise((resolve, reject) => compiler.run((error, stats) => compiler.close(() => error || stats.hasErrors() ? reject(error || new Error(stats.toString({ all: false, errors: true }))) : resolve())));
   css = (await postcss([tailwind()]).process('@import "tailwindcss";', { from: join(frontend, 'app/globals.css') })).css;
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || chromium.executablePath(), headless: true, args: ['--no-sandbox'] });
 });
 after(async () => { await browser?.close(); });
 

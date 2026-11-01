@@ -42,7 +42,7 @@ try {
   const send=()=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));};if(url.searchParams.get('mode')==='delayed')setTimeout(send,250);else send();
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+server.address().port;
- browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE??'/usr/bin/chromium'});
+ browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE??chromium.executablePath()});
  const context=await browser.newContext({viewport:{width:1500,height:1000},serviceWorkers:'block'});
  await context.route('**/*',route=>{if(new URL(route.request().url()).origin!==origin){denied.push(route.request().url());return route.abort('blockedbyclient');}return route.continue();});
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(origin);

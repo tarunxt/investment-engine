@@ -31,8 +31,11 @@ assert.ok(holdingsGuard, "use the real holdings guard in the extracted workflow"
 const holdingsExports = {};
 new Function("exports", compile(holdingsGuard.getText(rebalanceAst)))(holdingsExports);
 const { assertIndmoneyHoldingsSnapshot } = holdingsExports;
+const snapshotExports = {};
+new Function("exports", "require", compile(readFileSync(new URL("../lib/indmoneySnapshotSource.ts", import.meta.url), "utf8")))(snapshotExports, () => holdingsExports);
+const { readIndmoneySnapshotSource } = snapshotExports;
 const holdingsSnapshot = {
-  parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
+  id: 7001, parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
   holdings: [{ symbol: "ABC", quantity: 0.125 }],
 };
 const workflowSource = readFileSync(new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url), "utf8");
@@ -99,7 +102,7 @@ function harness({ analysisOnly = false, intercept, read, email, reserve, quoteR
     },
     getProviders: async () => [{ provider: "existing", model: "chosen" }],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
-    indmoneyUsThreatsLatest: async () => ({ analysis: { captured_at: snapshot?.captured_at } }),
+    indmoneyUsThreatsLatest: async () => ({ analysis: { snapshot_id: snapshot?.id, captured_at: snapshot?.captured_at } }),
     zerodhaPortfolioOverview: async () => ({ latest: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaThreatsLatest: async () => ({ analysis: { captured_at: "2026-10-29T09:17:00Z" } }),
     zerodhaDisplayQuotes: quoteRead ?? (async () => ({ quotes: [], missing: [] })),
@@ -107,7 +110,8 @@ function harness({ analysisOnly = false, intercept, read, email, reserve, quoteR
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
-    useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
+    readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
+    readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
     apiService, sleep: async (ms) => { delays.push(ms); },
     setAuditStates: set("audits"), setCompletionEmailWarnings: set("warnings"), setStates: set("states"),
@@ -456,7 +460,7 @@ test("INDmoney's real holdings guard blocks invalid pasted and saved snapshots b
       assert.equal(h.emails.length, 0);
       assert.equal(h.auditWrites.some(({ stage, payload }) => stage === "sync" && payload.status === "completed"), false);
       assert.equal(h.durable.get("indmoney_us:42:sync").status, "failed");
-      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks/);
+      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks|Saved snapshot identity or capture time is unavailable/);
     }
   }
 });
