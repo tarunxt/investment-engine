@@ -105,11 +105,11 @@ export const STAGE_METADATA: Record<
   },
   threats: {
     step: "02",
-    idle: "Threats & Guardrails",
-    running: "Running Threats & Guardrails",
-    completed: "Threats & Guardrails Ready",
+    idle: "Threats Scan",
+    running: "Running Threats Scan",
+    completed: "Threats Scan Ready",
     tileDescription:
-      "Score macro, sector, and position-level risks that can block adds, force trims, or raise cash.",
+      "Check risks in the economy, sectors, and your holdings before adding, reducing, or holding investments.",
     chartTitle: "Threats",
     chartLines: ["Macro, sector, and", "position-level guardrails"],
   },
@@ -597,6 +597,7 @@ export function WorkflowStageTile({
       </div>
 
       <div className="pointer-events-none relative z-10 mt-6 w-full space-y-2 text-sm leading-5 text-slate-600">
+        {stage === "threats" ? <p>{stageMeta.tileDescription}</p> : null}
         {historical ? <p><span className="font-semibold">Status:</span> {info.runStatus || "Not recorded"}</p> : null}
         {stageRows.map(renderStageRow)}
       </div>
@@ -668,6 +669,7 @@ export function WorkflowStageTile({
     <StageDurationBreakdownDialog
       open={durationDialogOpen}
       stageLabel={stageMeta.idle}
+      stagePurpose={stage === "threats" ? stageMeta.tileDescription : undefined}
       info={info}
       now={now}
       onClose={closeDurationDialog}
