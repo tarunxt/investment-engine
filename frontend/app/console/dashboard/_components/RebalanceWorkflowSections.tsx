@@ -1,5 +1,7 @@
 "use client";
 
+import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
+
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
@@ -4516,8 +4518,10 @@ export function RebalanceWorkflowSections({
   // Standalone workflows refresh stage data and dispatch final-actionables-refresh
   // themselves; only embedded consumers need an additional dashboard refresh.
   onDashboardRefresh = NO_DASHBOARD_REFRESH,
+  stageLedger = false,
 }: {
   onDashboardRefresh?: () => Promise<void>;
+  stageLedger?: boolean;
 }) {
   const usdInrRate = useUsdInrRate();
   const { user: basketOwner } = useAuth();
@@ -4536,6 +4540,8 @@ export function RebalanceWorkflowSections({
       ? initialPersisted.states
       : buildInitialStates(),
   );
+  const [ledgerMarket, setLedgerMarket] = useState<WorkflowPortfolio>(() => initialRunningPortfolio ?? "zerodha");
+  const [ledgerView, setLedgerView] = useState<WorkflowLedgerView>("ledger");
   const [runningPortfolio, setRunningPortfolio] =
     useState<WorkflowPortfolio | null>(() => initialRunningPortfolio);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -7808,7 +7814,7 @@ ${zerodhaExecutionMode === "direct_market"
     return (
       <div
         key={section.portfolio}
-        className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-md shadow-slate-200/70"
+        className={stageLedger ? "min-w-0 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4" : "rounded-[28px] border border-slate-200 bg-white p-6 shadow-md shadow-slate-200/70"}
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
@@ -7844,7 +7850,8 @@ ${zerodhaExecutionMode === "direct_market"
             ) : null}
             {emailWarning ? <p role="alert" className="mt-2 text-sm text-amber-800">{emailWarning}</p> : null}
           </div>
-          <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
+          <div aria-label={stageLedger ? "Run controls" : undefined} className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
+            {stageLedger ? <h3 className="text-sm font-semibold text-slate-900">Run controls</h3> : null}
             <div
               className={
                 showPauseKillControls
@@ -8005,7 +8012,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         ) : null}
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <WorkflowStageLedger enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -8086,7 +8093,7 @@ ${zerodhaExecutionMode === "direct_market"
               }
             />
           ))}
-        </div>
+        </WorkflowStageLedger>
         <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <RebalanceStockFlowTrigger
@@ -8123,9 +8130,10 @@ ${zerodhaExecutionMode === "direct_market"
 
   return (
     <>
-      <section className="grid gap-6 xl:grid-cols-2">
-        {renderSectionCard(zerodhaSection)}
-        {renderSectionCard(indmoneySection)}
+      {stageLedger ? <WorkflowStageLedgerViews market={ledgerMarket} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
+      <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
+        {(!stageLedger || ledgerMarket === "zerodha") && renderSectionCard(zerodhaSection)}
+        {(!stageLedger || ledgerMarket === "indmoneyUs") && renderSectionCard(indmoneySection)}
       </section>
 
       <section className="mt-6">

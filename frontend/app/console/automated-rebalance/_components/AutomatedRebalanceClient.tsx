@@ -9,7 +9,7 @@ installAutomatedRebalanceStartRecovery();
 export function AutomatedRebalanceClient() {
   return (
     <AutomatedRebalanceReliabilityBridge>
-      <RebalanceWorkflowSections />
+      <RebalanceWorkflowSections stageLedger />
     </AutomatedRebalanceReliabilityBridge>
   );
 }
