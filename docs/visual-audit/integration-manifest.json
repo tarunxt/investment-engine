@@ -9,8 +9,8 @@
       "pr": 1345,
       "observed_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
       "final_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/api-cost-provenance.md",
         "frontend/app/console/apis/CombinedLlmCostChart.tsx",
@@ -30,8 +30,8 @@
       "pr": 1361,
       "observed_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
       "final_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
-      "source_visual_acceptance": "pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "coordinator_supplied_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
       "files": [
         "docs/visual/auto-models-selection/README.md",
@@ -79,8 +79,8 @@
       "pr": 1347,
       "observed_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
       "final_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-auto-inputs-evidence.md",
         "frontend/app/console/dashboard/_components/InputEvidenceRows.tsx",
@@ -99,8 +99,8 @@
       "pr": 1363,
       "observed_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
       "final_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
-      "source_visual_acceptance": "pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "coordinator_supplied_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
       "files": [
         "docs/visual-audit/auto-stages-hierarchy/README.md",
@@ -125,8 +125,8 @@
       "pr": 1356,
       "observed_head": "50f8ab80588e31732097c54583a7d97b849ab042",
       "final_head": "50f8ab80588e31732097c54583a7d97b849ab042",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "frontend/app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
         "frontend/scripts/duration-explanation-playwright.mjs"
@@ -142,8 +142,8 @@
       "pr": 1350,
       "observed_head": "79f33b2fde2135297ead7a99ce042087377ef063",
       "final_head": "79f33b2fde2135297ead7a99ce042087377ef063",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "frontend/app/console/automated-rebalance/_components/PromptTemplateDialog.tsx",
         "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx"
@@ -157,10 +157,10 @@
       "scope": "DASH-LAYOUT-SUMMARY",
       "branch": "visual/dash-layout-summary",
       "pr": 1357,
-      "observed_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
-      "final_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
-      "source_visual_acceptance": "pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "observed_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "final_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/DASH-LAYOUT-SUMMARY.md",
         "docs/visual-audit/evidence/dash-layout-summary/overview-1180.png",
@@ -175,8 +175,8 @@
         "frontend/scripts/dashboard-freshness-playwright.mjs",
         "frontend/tests/dashboard-portfolio-totals.test.mjs"
       ],
-      "coordinator_supplied_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
-      "integrated_source_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
+      "coordinator_supplied_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "integrated_source_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
       "source_commit_is_ancestor": true,
       "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
     },
@@ -186,8 +186,8 @@
       "pr": 1346,
       "observed_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
       "final_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "artifacts/nav-sidebar-hierarchy/README.md",
         "artifacts/nav-sidebar-hierarchy/browser-results.json",
@@ -215,8 +215,8 @@
       "pr": 1352,
       "observed_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
       "final_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
-      "source_visual_acceptance": "pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/US-SNAPSHOT-PROVENANCE.md",
         "docs/visual-audit/us-snapshot-provenance/1180-empty.json",
@@ -280,8 +280,8 @@
       "pr": 1351,
       "observed_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
       "final_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-llm-report-comparison.md",
         "frontend/app/console/llms/page.tsx",
@@ -298,8 +298,8 @@
       "pr": 1362,
       "observed_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
       "final_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "coordinator_supplied_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
       "files": [
         "artifacts/visual-mails-history/desktop-github.png",
@@ -323,8 +323,8 @@
       "pr": 1353,
       "observed_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
       "final_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/usage-error-consolidation.md",
         "frontend/app/console/profile/layout.tsx",
@@ -341,8 +341,8 @@
       "pr": 1349,
       "observed_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
       "final_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/prefs-form-scope/README.md",
         "docs/visual-audit/prefs-form-scope/after-1180x757.png",
@@ -366,8 +366,8 @@
       "pr": null,
       "observed_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
       "final_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
-      "source_visual_acceptance": "pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "coordinator_supplied_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
       "files": [
         "frontend/app/console/prompts/page.tsx",
@@ -383,8 +383,8 @@
       "pr": 1354,
       "observed_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
       "final_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/runs-stages/README.md",
         "docs/visual-audit/runs-stages/diagnostics-1180.png",
@@ -408,8 +408,8 @@
       "pr": 1360,
       "observed_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
       "final_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/rankings-browser-grouping/README.md",
         "docs/visual-audit/rankings-browser-grouping/empty-desktop.png",
@@ -437,8 +437,8 @@
       "pr": 1348,
       "observed_head": "6528616845a29f037d2af1c53b746ec558db63ab",
       "final_head": "6528616845a29f037d2af1c53b746ec558db63ab",
-      "source_visual_acceptance": "pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/scanner-table-comparison.md",
         "frontend/app/console/technical-setups/page.tsx",
@@ -456,8 +456,8 @@
       "pr": 1358,
       "observed_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
       "final_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/bots-overview-runtime.md",
         "docs/evidence/bots-overview-runtime/before-loading-desktop.png",
@@ -520,8 +520,8 @@
       "pr": 1355,
       "observed_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
       "final_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
-      "source_visual_acceptance": "independent acceptance pending",
-      "status": "integrated locally; independent visual acceptance pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
       "files": [
         "docs/visual-audit/india-portfolio-hierarchy.md",
         "frontend/app/console/zerodha/_components/IndiaPortfolioNav.module.css",
@@ -541,7 +541,7 @@
       "pr": null,
       "observed_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
       "final_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
-      "source_visual_acceptance": "pending",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
       "status": "preserve-only; coordinator reports six tests passed",
       "files": [],
       "integrated_source_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
@@ -989,5 +989,14 @@
         }
       }
     }
-  ]
+  ],
+  "integration_verification": {
+    "runtime_verified_head": "3232fbdf865450dceecfd603ffd9a940fc6c7238",
+    "runtime_gate": "passed unchanged Webpack standalone budgets, fingerprint, auth boundary, mock backend proxy, routes and assets",
+    "dashboard_transferred_bytes": 235535,
+    "dashboard_decoded_bytes": 758488,
+    "documentation_only_dashboard_update": "a92263ded624704c30e03e9475acbe178cb2e01a",
+    "application_configuration_diff_after_runtime_verification": [],
+    "final_remote_ci": "pending draft publication"
+  }
 }
