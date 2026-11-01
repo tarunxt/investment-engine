@@ -327,7 +327,7 @@ type UniversalScanTriggerStatus = {
 };
 
 function triggerOutcome(run: BullpenAutoLiveHistoryItem | undefined) {
-  if (!run) return "Awaiting first trigger";
+  if (!run) return "Unknown · no recorded trigger";
   if (run.status === "running" || run.status === "confirming") {
     return "In progress";
   }
@@ -13990,7 +13990,9 @@ export function BullpenAutoRunScheduleCard({
       ? "All 3 stages finished"
       : workflowView.currentStageLabel
     : workflowView.currentStageLabel;
-  const workflowStatusCopy = workflowView.statusCopy;
+  const workflowStatusCopy = workflowRunForMonitor
+    ? `${workflowView.statusCopy} Saved run ${workflowRunForMonitor.id} · Run ${workflowRunForMonitor.completed_at ? "completed" : "started"} ${formatIstDateTime(workflowRunForMonitor.completed_at ?? workflowRunForMonitor.started_at)} · Current worker execution is unverified.`
+    : workflowView.statusCopy;
   const monitorRunStatusLabel = workflowRunForMonitor
     ? formatRunStatusLabel(workflowRunForMonitor.status)
     : null;
@@ -15190,7 +15192,9 @@ export function BullpenAutoRunScheduleCard({
                   stageOneResultSource === "independent" &&
                   independentStageOneView !== null);
               const upstreamBlocked = stage.state === "queued" && workflowRunForMonitor?.status === "failed";
-              const stageStatusLabel = upstreamBlocked
+              const stageStatusLabel = !showStageNumbers
+                ? "Unknown"
+                : upstreamBlocked
                 ? "Blocked"
                 : stage.outputs.phase_status === "failed"
                 ? "Failed"
@@ -15216,7 +15220,7 @@ export function BullpenAutoRunScheduleCard({
                   ? 100
                   : stage.progressPercent;
               const stageProgressLabel =
-                upstreamBlocked ? "Blocked by upstream failure" : isIncompleteUniverse
+                !showStageNumbers ? "Workflow description · no run evidence" : upstreamBlocked ? "Blocked by upstream failure" : isIncompleteUniverse
                   ? "Partial results · full catalogue not verified"
                   : isStageOneActive
                   ? `${scanProgressScanned.toLocaleString("en-IN")}${scanProgressTotal ? ` / ${scanProgressTotal.toLocaleString("en-IN")}` : ""} markets scanned · ${scanProgressPercent.toFixed(1)}% · Page ${displayedScanProgress?.currentPage ?? 1}`
@@ -15326,7 +15330,7 @@ export function BullpenAutoRunScheduleCard({
                       </div>
                     ) : null}
                     <div className="flex-1">
-                      <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
+                      <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions} hideNumbers={!showStageNumbers}
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                         onOpenScanFilters={onOpenScanFilters}
@@ -15344,13 +15348,13 @@ export function BullpenAutoRunScheduleCard({
                           {notEvaluated ? "Filtering blocked" : isStageOneActive ? "Filter progress" : "Scan coverage"}
                         </span>
                         <span className="tabular-nums">
-                          {notEvaluated ? "Not evaluated" : isStageOneActive
+                          {!showStageNumbers ? "Unknown · no run evidence" : notEvaluated ? "Not evaluated" : isStageOneActive
                             ? `${scanProgressScanned.toLocaleString("en-IN")} / ${scanProgressTotal?.toLocaleString("en-IN") ?? "—"}`
                             : `${stats.totalScanned.toLocaleString("en-IN")} / ${stats.totalScanned.toLocaleString("en-IN")}`}
                         </span>
                       </div>
                       <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
-                        <div className={`h-full rounded-full transition-[width] duration-500 ${toneClasses.progress}`} style={{ width: `${notEvaluated ? 0 : isStageOneActive ? stageProgressPercent : 100}%` }} />
+                        <div className={`h-full rounded-full transition-[width] duration-500 ${toneClasses.progress}`} style={{ width: `${!showStageNumbers || notEvaluated ? 0 : isStageOneActive ? stageProgressPercent : 100}%` }} />
                       </div>
                     </div>
                   </div>

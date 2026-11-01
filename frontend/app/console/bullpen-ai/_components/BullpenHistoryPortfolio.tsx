@@ -342,6 +342,7 @@ export function BullpenHistoryPortfolio() {
     const balanceStatus = liveBalance?.status ?? balance?.status ?? "not loaded";
 
     return {
+      hasPositionEvidence: hasActivePositionsSnapshot || Boolean(botState && (!botState.read_source || botState.read_source === "runtime")),
       activeInvested,
       activePositionCount,
       balanceRefresh,
@@ -365,6 +366,7 @@ export function BullpenHistoryPortfolio() {
     };
   }, [botState, lastUsableBalance, positions, summary]);
 
+  const hasRuntimeEvidence = Boolean(botState && (!botState.read_source || botState.read_source === "runtime"));
   const metricCards = [
     {
       label: "Investment Value",
@@ -384,13 +386,13 @@ export function BullpenHistoryPortfolio() {
     },
     {
       label: "Events available for claim",
-      value: view.claimableEventCount.toLocaleString("en-IN"),
-      detail: formatMoney(view.claimableAmount),
+      value: view.hasPositionEvidence ? view.claimableEventCount.toLocaleString("en-IN") : "—",
+      detail: view.hasPositionEvidence ? formatMoney(view.claimableAmount) : "Unknown · source unavailable",
     },
     {
       label: "Active positions",
-      value: view.activePositionCount.toLocaleString("en-IN"),
-      detail: `${formatMoney(view.activeInvested)} invested`,
+      value: view.hasPositionEvidence ? view.activePositionCount.toLocaleString("en-IN") : "—",
+      detail: view.hasPositionEvidence ? `${formatMoney(view.activeInvested)} invested` : "Unknown · source unavailable",
     },
     {
       label: "PnL",
@@ -408,12 +410,12 @@ export function BullpenHistoryPortfolio() {
     },
     {
       label: "Live trades today",
-      value: (botState?.live.live_trades_today ?? 0).toLocaleString("en-IN"),
+      value: hasRuntimeEvidence && botState?.live.live_trades_today != null ? botState.live.live_trades_today.toLocaleString("en-IN") : "—",
       detail: `Mode: ${botState?.mode ?? "—"}`,
     },
     {
       label: "Pending confirmations",
-      value: view.pendingConfirmationsCount.toLocaleString("en-IN"),
+      value: hasRuntimeEvidence ? view.pendingConfirmationsCount.toLocaleString("en-IN") : "—",
       detail: view.balanceStatus,
     },
   ];
@@ -496,6 +498,13 @@ export function BullpenHistoryPortfolio() {
             </div>
             <div className="mt-2 text-xl font-semibold">{metric.value}</div>
             <div className="mt-1 text-xs text-slate-400">{metric.detail}</div>
+            {metric.label === "Active positions" || metric.label === "Events available for claim" ? (
+              <p className="mt-1 text-xs text-slate-400">
+                Source: {view.displayedLineageSource ?? (view.hasPositionEvidence ? "reported snapshot" : "unavailable")} · Recorded {formatIstDateTime(view.positionsRefresh)} · Current freshness unverified
+              </p>
+            ) : metric.label === "Live trades today" || metric.label === "Pending confirmations" ? (
+              <p className="mt-1 text-xs text-slate-400">Source: {hasRuntimeEvidence ? "reported runtime snapshot" : "unavailable"} · Observation age unknown</p>
+            ) : null}
           </div>
         ))}
       </div>
