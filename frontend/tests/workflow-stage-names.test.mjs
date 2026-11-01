@@ -23,10 +23,10 @@ function declaration(text, name) {
   return found.replace(/^export /, '');
 }
 function evaluate(text, names, bindings = {}) {
-  const module = { exports: {} };
+  const evaluated = { exports: {} };
   const code = ts.transpileModule(names.map(name => declaration(text, name)).join('\n') + '\nexport {' + names.join(',') + '};', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  new Function('exports', ...Object.keys(bindings), code)(module.exports, ...Object.values(bindings));
-  return module.exports;
+  new Function('exports', ...Object.keys(bindings), code)(evaluated.exports, ...Object.values(bindings));
+  return evaluated.exports;
 }
 const { STAGE_METADATA, getStageTileLabel } = evaluate(tile, ['STAGE_METADATA', 'getStageTileLabel']);
 

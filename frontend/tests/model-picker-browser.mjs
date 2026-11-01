@@ -87,13 +87,49 @@ writeFileSync(resolve(output,'fixture.css'),compiler.build(scanner.scan()));
 writeFileSync(resolve(output,'index.html'),'<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
 const server=createServer((req,res)=>{const file=req.url==='/fixture.js'?'fixture.js':req.url==='/fixture.css'?'fixture.css':'index.html';res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(readFileSync(resolve(output,file)));});
 await new Promise(yes=>server.listen(0,'127.0.0.1',yes));
-const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
+const browserZoom=process.env.MODEL_PICKER_BROWSER_ZOOM==='2';
+const launchOptions={headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE_PATH||'/usr/bin/chromium',args:['--no-sandbox']};
+const browser=browserZoom?await chromium.launchPersistentContext(resolve(output,'zoom-profile'),launchOptions):await chromium.launch(launchOptions);
 let checks=0;
 try {
- const page=await browser.newPage({viewport:{width:1180,height:757},deviceScaleFactor:1});
+ const page=browserZoom?await browser.newPage():await browser.newPage({viewport:{width:1180,height:757},deviceScaleFactor:1});
+ if(browserZoom){await page.setViewportSize({width:1180,height:844});await page.goto('chrome://settings/appearance');await page.evaluate(()=>chrome.settingsPrivate.setDefaultZoom(2));}
  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:')?route.continue():route.abort());
  await page.goto('http://127.0.0.1:'+server.address().port);
+ if(browserZoom){
+  const metrics=await page.evaluate(()=>({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,cssZoom:getComputedStyle(document.body).zoom,transform:getComputedStyle(document.body).transform}));
+  assert.equal(metrics.dpr,2);assert.equal(metrics.cssZoom,'1');assert.equal(metrics.transform,'none');
+  const matrix=[],canonical={threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan'};
+  for(const market of ['zerodha','indmoneyUs']) for(const stage of Object.keys(canonical)){
+   await page.getByLabel('Portfolio fixture',{exact:true}).selectOption(market);
+   await page.getByLabel('Model stage fixture',{exact:true}).selectOption(stage);
+   const selectionBefore=await page.locator('#selection').innerText();
+   await page.locator('#open').focus();await page.keyboard.press('Enter');
+   const dialog=page.getByRole('dialog');await dialog.waitFor();
+   assert.equal(await dialog.count(),1);assert.equal(await dialog.getAttribute('aria-modal'),'true');
+   assert.equal(await dialog.getByRole('heading',{name:canonical[stage],exact:true}).count(),1);
+   await dialog.getByText('Select LLMs- '+canonical[stage]+' '+(market==='zerodha'?'India':'US'),{exact:true}).waitFor();
+   assert.equal(await page.getByRole('button',{name:'Close LLM selector'}).evaluate(el=>el===document.activeElement),true);
+   await page.locator('#open').evaluate(el=>el.focus());assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);
+   await page.screenshot({path:resolve(output,'browser200-'+market+'-'+stage+'-top.png')});
+   const providerTab=page.getByRole('tab',{name:'Anthropic choices',exact:true});if(await providerTab.count())await providerTab.click();
+   const last=dialog.locator('input[type=radio],input[type=checkbox]').last(),row=last.locator('xpath=ancestor::label[1]');
+   await row.scrollIntoViewIfNeeded();
+   const visibility=await row.evaluate(el=>{const r=el.getBoundingClientRect();let p=el.parentElement;while(p&&!/(auto|scroll)/.test(getComputedStyle(p).overflowY))p=p.parentElement;const b=p?.getBoundingClientRect()??{top:0,bottom:innerHeight};return {rowHeight:r.height,visibleHeight:Math.max(0,Math.min(r.bottom,b.bottom)-Math.max(r.top,b.top)),text:el.innerText};});
+   assert.ok(visibility.visibleHeight>=Math.min(40,visibility.rowHeight));assert.ok(visibility.text.trim());
+   for(const name of ['Close LLM selector','Done']){const box=await page.getByRole('button',{name,exact:true}).boundingBox();assert.ok(box.x>=0&&box.x+box.width<=metrics.width&&box.y>=0&&box.y+box.height<=metrics.height);}
+   await page.screenshot({path:resolve(output,'browser200-'+market+'-'+stage+'-final-row.png')});
+   const semantics=await dialog.ariaSnapshot();
+   await page.getByRole('button',{name:/Show LLM run history/}).focus();await page.keyboard.press('Shift+Tab');
+   assert.equal(await page.getByRole('button',{name:'Done',exact:true}).evaluate(el=>el===document.activeElement),true);
+   await page.keyboard.press('Tab');assert.equal(await page.getByRole('button',{name:/Show LLM run history/}).evaluate(el=>el===document.activeElement),true);
+   await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);
+   assert.equal(await page.locator('#open').evaluate(el=>el===document.activeElement),true);assert.equal(await page.locator('#selection').innerText(),selectionBefore);
+   matrix.push({market,stage,canonical:canonical[stage],metrics,oneDialog:true,initialCloseFocus:true,backgroundFocusContained:true,visibility,controlsVisible:true,semantics,selectionPreserved:true,escapeRestoresOpener:true});
+  }
+  assert.deepEqual(errors,[]);writeFileSync(resolve(output,'all-eight-browser200.json'),JSON.stringify({metrics,matrix,errors},null,2));console.log(JSON.stringify({browserZoom:200,variants:matrix.length,output,errors}));
+ }else{
  const open=async()=>{await page.locator('#open').click();await page.getByRole('dialog').waitFor();};
  const shot=async name=>page.screenshot({path:resolve(output,name+'.png'),fullPage:true});
  await open();
@@ -286,4 +322,5 @@ try {
  assert.deepEqual(errors,[]);checks++;
  writeFileSync(resolve(output,'results.json'),JSON.stringify({checks,errors,inventory,viewport:{desktop:[1180,757],narrow:[390,844]},source:'real StageLlmSelectorDialog extracted with offline history/FX fixtures; real panel, frame and template controls'},null,2));
  console.log(JSON.stringify({checks,output,errors}));
+ }
 }finally{await browser.close();server.close();}
