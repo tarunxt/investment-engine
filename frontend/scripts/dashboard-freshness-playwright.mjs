@@ -323,13 +323,64 @@ try {
     }
     // Residual repair: exact card guidance and chart sufficiency need verified reads too.
     if (state === "failed-retained-history") {
-      await page.getByRole("img", {name:"All Time genuine India portfolio value history"}).waitFor();
+      const savedSeries = page.getByRole("img", {name:"All Time genuine India portfolio value history"});
+      await savedSeries.waitFor();
+      const savedPath = await savedSeries.locator("path").first().getAttribute("d");
       await page.getByRole("button", {name:"Refresh Board", exact:true}).click();
       await page.getByText("Cannot verify saved snapshot availability · Last-known snapshot shown", {exact:false}).first().waitFor();
-      await page.getByRole("img", {name:"All Time genuine India portfolio value history"}).waitFor();
+      await savedSeries.waitFor();
+      assert.equal(await savedSeries.locator("path").first().getAttribute("d"), savedPath, "failed refresh preserves saved series values");
       await page.getByText("Holdings availability is unverified. View saved portfolio history.", {exact:true}).first().waitFor();
-      await page.getByRole("button", {name:"1D", exact:true}).click();
-      await page.locator('[data-portfolio-history-state="unknown"]').getByText("Cannot verify saved snapshot history for Past Day. History sufficiency is unknown; view saved portfolio history.", {exact:false}).waitFor();
+      for (const key of ["india", "indmoney", "bullpen", "combined"]) {
+        await page.getByRole("combobox", {name:"Choose portfolio chart"}).selectOption(key);
+        await page.getByRole("img", {name:/All Time genuine .* portfolio value history/}).waitFor();
+      }
+      await page.getByRole("button", {name:"1D", exact:true}).focus();
+      await page.keyboard.press("Enter");
+      for (const key of ["india", "indmoney", "bullpen", "combined"]) {
+        await page.getByRole("combobox", {name:"Choose portfolio chart"}).selectOption(key);
+        const unknown = page.locator('[data-portfolio-history-state="unknown"]');
+        await unknown.getByText("Cannot verify saved snapshot history for Past Day. History sufficiency is unknown; view saved portfolio history.", {exact:false}).waitFor();
+        assert.equal(await unknown.getAttribute("role"), "status");
+        assert.equal(await unknown.getAttribute("aria-live"), "polite");
+        assert.equal(await page.getByText(/Insufficient genuine snapshot history/).count(), 0);
+      }
+      await page.getByRole("combobox", {name:"Choose portfolio chart"}).selectOption("india");
+    }
+    // A6-01 is closed: retain the correction in child disclosures during failed reads.
+    if (["failed", "stale-cache", "partial-source", "failed-retained-history"].includes(state)) {
+      const readsBefore = await page.evaluate(() => window.__reads);
+      for (const width of [1180, 390]) {
+        await page.setViewportSize({width, height:757});
+        for (const view of ["Overview", "Sources and freshness"]) {
+          await page.getByRole("tab", {name:view, exact:true}).click();
+          for (const [source, title] of [["India", "Zerodha"], ["INDmoney", "INDmoney"], ["Bullpen", "Bullpen"]]) {
+            const trigger = page.getByRole("button", {name:`${source} total (portfolio + cash) info`, exact:true});
+            await trigger.focus();
+            await page.keyboard.press("Enter");
+            const dialog = page.getByRole("dialog", {name:`${title} tile details`, exact:true});
+            await dialog.waitFor();
+            assert.ok(await dialog.getAttribute("aria-labelledby"), "disclosure has a labelled title");
+            assert.ok(await dialog.getAttribute("aria-describedby"), "disclosure has a linked explanation");
+            assert.doesNotMatch(await dialog.innerText(), /No saved snapshot|No holdings|Insufficient genuine snapshot history|Connect Zerodha and sync|Paste an INDmoney US snapshot/);
+            for (const key of ["Tab", "Shift+Tab"]) {
+              await page.keyboard.press(key);
+              assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)), true, `${state}/${source}: focus remains in disclosure`);
+            }
+            const bounds = await dialog.boundingBox();
+            assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `${state}/${source}: disclosure fits ${width}px viewport`);
+            if (state === "failed" && source === "India" && view === "Sources and freshness") {
+              await page.screenshot({path:path.join(out,`a6-01-failed-disclosure-${width}.png`), fullPage:false});
+            }
+            await page.keyboard.press("Escape");
+            await dialog.waitFor({state:"hidden"});
+            assert.equal(await trigger.evaluate(el=>el === document.activeElement), true);
+          }
+        }
+      }
+      assert.equal(await page.evaluate(() => window.__reads), readsBefore, "inspection never refreshes source data");
+      await page.setViewportSize({width:1180, height:757});
+      await page.getByRole("tab", {name:"Overview", exact:true}).click();
     }
     if (["failed", "stale-cache", "partial-source", "failed-retained-history"].includes(state)) {
       assert.equal(await page.getByText("Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard.", {exact:true}).count(), 0);
