@@ -404,6 +404,22 @@ function preserveSwingRecommendationResponse(response?: string | null) {
   return response?.trim() ? response : "_No response captured yet._";
 }
 
+export function formatRebalanceFunds(market: SwingTradeMarket, snapshot: PortfolioSnapshot) {
+  const field = market === "india" ? "available_margin" : "wallet_balance";
+  const value = snapshot && field in snapshot
+    ? (snapshot as unknown as Record<string, unknown>)[field] : undefined;
+  const amount = typeof value === "number" && Number.isFinite(value) ? String(value) : "Unknown (missing or invalid)";
+  return [
+    "Funds context contract: rebalance-funds/v1",
+    `Source: ${market === "india" ? "Zerodha" : "INDmoney US"} portfolio snapshot.${field}; currency: ${market === "india" ? "INR" : "USD"}; stored value: ${amount}`,
+    `Snapshot date: ${snapshot?.snapshot_date ?? "Unknown"}; captured at: ${snapshot?.captured_at ?? "Unknown"}. Snapshot values are not a live funds refresh.`,
+    market === "india"
+      ? "Available margin is not verified cash or a deployable budget. Snapshot ingestion can default unavailable margin to zero; a stored zero does not prove broker-confirmed zero. Wallet cash and buying power are unknown."
+      : "Wallet balance is the captured wallet value, not verified buying power or a deployable budget. Buying power and margin are unknown.",
+    "Budget policy: no deployable-budget rule is established by this contract. Do not equate cash, margin or buying power, infer a budget from holdings value, or treat Swing ideation capital as actual funds. Funded sizing remains unverified; existing order eligibility and affordability checks remain required.",
+  ].join("\n");
+}
+
 function formatPortfolioSnapshot(
   market: SwingTradeMarket,
   snapshot: PortfolioSnapshot,
@@ -575,6 +591,8 @@ Generated at: ${new Date().toISOString()}
 
 ${REBALANCE_INPUT_SECTION_MARKERS.portfolio}
 ${formatPortfolioSnapshot(market, portfolio)}
+
+${formatRebalanceFunds(market, portfolio)}
 
 ${REBALANCE_INPUT_SECTION_MARKERS.swing}
 ${formatSwingRuns(uniqueSwingRuns, previousClose, market, swingDisplayMode)}

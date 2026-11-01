@@ -516,3 +516,36 @@ test('Zerodha unknown numeric exposure fails before input generation without inv
   assert.throws(() => rebalance.assertZerodhaNumericExposure({ ...base, available_margin: null }), /available margin/);
   assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure({ ...base, holdings: [{ quantity: 0, t1_quantity: 0, last_price: 0 }] }));
 });
+
+test('funds context preserves captured units, zero and unknown without inventing a budget', () => {
+  for (const [market, field, currency] of [['india', 'available_margin', 'INR'], ['us', 'wallet_balance', 'USD']]) {
+    for (const value of [0, -5, 0.125, 100, null, undefined, NaN, Infinity, '123']) {
+      const snapshot = { snapshot_date: '2020-01-01', captured_at: '2020-01-01T00:00:00Z', [field]: value };
+      const before = structuredClone(snapshot);
+      const actual = rebalance.formatRebalanceFunds(market, snapshot);
+      const expected = typeof value === 'number' && Number.isFinite(value) ? String(value) : 'Unknown (missing or invalid)';
+      assert.ok(actual.includes(`snapshot.${field}; currency: ${currency}; stored value: ${expected}`));
+      assert.ok(actual.includes('captured at: 2020-01-01T00:00:00Z'));
+      assert.ok(actual.includes('not a live funds refresh'));
+      assert.ok(actual.includes('no deployable-budget rule'));
+      assert.ok(actual.includes('Funded sizing remains unverified'));
+      assert.deepEqual(snapshot, before);
+      assert.equal(rebalance.formatRebalanceFunds(market, snapshot), actual);
+    }
+    assert.ok(rebalance.formatRebalanceFunds(market, null).includes('stored value: Unknown'));
+    assert.ok(rebalance.formatRebalanceFunds(market, {}).includes('captured at: Unknown'));
+  }
+  assert.ok(rebalance.formatRebalanceFunds('india', { available_margin: 0 }).includes('does not prove broker-confirmed zero'));
+  assert.ok(rebalance.formatRebalanceFunds('us', { wallet_balance: 1 }).includes('Buying power and margin are unknown'));
+});
+
+test('full model input and summary preview retain the same versioned funds evidence', () => {
+  for (const swingDisplayMode of ['full', 'summary']) {
+    const portfolio = { ...portfolioSnapshot, wallet_balance: 0 };
+    const bundle = rebalance.buildRebalanceInputBundle({market: 'us', portfolio, swingRuns: [], threats: null,
+      previousClose: new Date(timestamp), swingDisplayMode});
+    assert.ok(bundle.includes(rebalance.formatRebalanceFunds('us', portfolio)));
+    assert.equal(bundle.split('rebalance-funds/v1').length, 2);
+    assert.ok(bundle.indexOf('rebalance-funds/v1') < bundle.indexOf('## 2. Completed Swing'));
+  }
+});
