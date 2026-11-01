@@ -539,3 +539,15 @@ for (const analysisOnly of [false, true]) {
     assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
   });
 }
+test("stale India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+  const h = harness({quoteRead: async instruments => ({
+    quotes: instruments.map(instrument => ({instrument,price:100,as_of:'2000-01-01T00:00:00Z',source:'synthetic stale fixture'})),
+    missing:[],
+  })});
+  await h.runWorkflow("zerodha");
+  assert.equal(h.modelCalls.filter(call => call.scanLabel === "Technical Scan").length,0);
+  assert.equal(h.view.states.zerodha.technical.state,"failed");
+  assert.notEqual(h.view.states.zerodha.actionables.state,"completed");
+  assert.equal(h.emails.length,0);
+  assert.equal(h.durable.get("india:42:technical").status,"failed");
+});
