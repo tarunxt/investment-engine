@@ -426,8 +426,8 @@ export function LlmModelSelectionPanel({
                       {organized ? providerLabel(provider.name) : provider.name}
                     </span>
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                  <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 text-sm">
+                    <span className="min-w-0 max-w-full break-words rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
                       Selected estimate: {showEstimateReadiness ? estimateLabel(providerCostSummary.estimatedCostInr, providerCostSummary.unknownEstimateCount) : formatInrCost(providerCostSummary.estimatedCostInr)}
                     </span>
                     {providerCostSummary.historicalCostInr > 0 ? (
