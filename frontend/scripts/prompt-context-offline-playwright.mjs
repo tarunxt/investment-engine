@@ -2,12 +2,11 @@
 /** Offline acceptance of the production saved-output loader and dialog. No production calls. */
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 import postcss from 'postcss';
 import tailwind from '@tailwindcss/postcss';
 import { chromium } from 'playwright';
