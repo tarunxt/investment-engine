@@ -1,0 +1,20 @@
+// Actual modal extracted unchanged from source; synthetic data, no backend access.
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import {chromium} from 'playwright';
+const require=createRequire(import.meta.url);
+const {build}=require(process.env.AUDIT7_ESBUILD_PATH||'/tmp/a7-build/node_modules/esbuild');
+const source=await readFile('app/console/dashboard/_components/RebalanceWorkflowSections.tsx','utf8');
+const dialog=source.slice(source.indexOf('function IndMoneySnapshotDialog('),source.indexOf('\nfunction InputSelectionDialog'));
+const formatter=source.slice(source.indexOf('function formatTimestamp('),source.indexOf('\nfunction getStageLabel'));
+assert.ok(source.includes('historicalSyncAt={states.indmoneyUs.sync.completedAt}'));
+assert.ok(!dialog.includes('Latest Sync:'));
+const fixture=`import React,{useState,useCallback,useEffect,useRef} from 'react';import{createRoot}from'react-dom/client';import{X,Loader2,AlertCircle}from'lucide-react';import{Button}from'./components/ui/button';import{cn}from'./lib/utils';import{formatApiTimestamp}from'./lib/datetime';const INDIA_TIMEZONE='Asia/Kolkata';${formatter}\n${dialog}\nwindow.render=(time,saving=false,error=null)=>createRoot(document.getElementById('app')).render(<IndMoneySnapshotDialog open saving={saving} error={error} historicalSyncAt={time} onClose={()=>window.closedCount++} onContinue={(...args)=>window.calls.push(args)}/>);window.calls=[];window.closedCount=0;`;
+const built=await build({stdin:{contents:fixture,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,platform:'browser',jsx:'automatic'});
+const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+let count=0;
+try{for(const timezoneId of ['UTC','America/New_York'])for(const time of [null,undefined,'2026-10-28T14:49:12Z','invalid']){
+const context=await browser.newContext({timezoneId});const page=await context.newPage();await page.route('**/*',r=>r.abort());await page.setContent('<div id="app"></div>');await page.addScriptTag({content:built.outputFiles[0].text});await page.evaluate(t=>window.render(t),time);await page.getByText(/Historical workflow Sync:/).waitFor();const text=await page.locator('body').innerText();assert.match(text,/past workflow evidence/);assert.match(text,/timestamp does not identify that snapshot/);if(time?.includes('2026'))assert.match(text,/8:19:12 pm IST/);else assert.match(text,time==='invalid'?/Historical workflow Sync: invalid/:/Not available/);
+await page.getByRole('button',{name:'Continue Rebalance'}).isDisabled().then(disabled=>assert.equal(disabled,true));await page.getByRole('radio').nth(1).check();await page.getByRole('button',{name:'Continue Rebalance'}).click();assert.deepEqual(await page.evaluate(()=>window.calls),[['reuse',undefined]]);await page.getByRole('button',{name:'Cancel'}).click();assert.equal(await page.evaluate(()=>window.closedCount),1);await page.getByRole('radio').nth(0).check();await page.locator('textarea').fill('synthetic portfolio');await page.getByRole('button',{name:'Continue Rebalance'}).click();assert.equal(await page.evaluate(()=>window.calls[1][1].raw_text),'synthetic portfolio');await context.close();count++;
+}for(const saving of [true,false]){const context=await browser.newContext();const page=await context.newPage();await page.route('**/*',r=>r.abort());await page.setContent('<div id="app"></div>');await page.addScriptTag({content:built.outputFiles[0].text});await page.evaluate(s=>window.render(null,s,'Synthetic interrupted attempt'),saving);await page.getByText('Synthetic interrupted attempt').waitFor();await page.getByRole('radio').nth(1).check();assert.equal(await page.getByRole('button',{name:'Continue Rebalance'}).isDisabled(),saving);assert.equal(await page.getByRole('button',{name:'Cancel'}).isDisabled(),saving);assert.deepEqual(await page.evaluate(()=>window.calls),[]);await context.close();count++;}console.log(`PASS ${count} actual modal scenarios: history/missing/invalid, two browser timezones, reuse and paste`);}finally{await browser.close();}

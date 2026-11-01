@@ -3468,14 +3468,14 @@ function IndMoneySnapshotDialog({
   open,
   saving,
   error,
-  latestSyncAt,
+  historicalSyncAt,
   onClose,
   onContinue,
 }: {
   open: boolean;
   saving: boolean;
   error: string | null;
-  latestSyncAt: string | null | undefined;
+  historicalSyncAt: string | null | undefined;
   onClose: () => void;
   onContinue: (
     mode: IndMoneySyncMode,
@@ -3567,7 +3567,10 @@ function IndMoneySnapshotDialog({
               <span>
                 Continue with latest snapshot
                 <span className="mt-1 block text-xs font-medium text-slate-500">
-                  Latest Sync: {formatTimestamp(latestSyncAt)}
+                  Historical workflow Sync: {formatTimestamp(historicalSyncAt)}
+                  <span className="mt-1 block">
+                    This is past workflow evidence. The latest saved portfolio is resolved when you continue; this timestamp does not identify that snapshot.
+                  </span>
                 </span>
               </span>
             </span>
@@ -8406,7 +8409,7 @@ ${zerodhaExecutionMode === "direct_market"
           open={dialogOpen}
           saving={runningPortfolio === "indmoneyUs"}
           error={dialogError}
-          latestSyncAt={states.indmoneyUs.sync.completedAt}
+          historicalSyncAt={states.indmoneyUs.sync.completedAt}
           onClose={() => {
             if (runningPortfolio === "indmoneyUs") return;
             setDialogOpen(false);
