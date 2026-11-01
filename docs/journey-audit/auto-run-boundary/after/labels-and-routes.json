@@ -1,0 +1,15 @@
+{
+  "labels": "Run prepares rebalance recommendations: it runs all stages, or only your selected stages. Included stages can sync holdings, request paid LLM scans and save calculated actionables. After a confirmed run including Actionables, it can queue a completion email.\n\nReview saved run history (read-only) or choose Saved evidence and configuration → Saved output. These views do not start a run or sync. Sync Now separately requests a portfolio sync.\n\nManual order review begins at Place Order (India) or Final Order (US), which opens the basket review. India orders require separate basket confirmation; the US basket is for manual execution review. Run does not submit orders.",
+  "historyHref": "/console/auto-rebalance-runs/indmoneyUs",
+  "actions": [
+    "inputs:rebalance",
+    "models:rebalance",
+    "prompt:rebalance",
+    "output:rebalance",
+    "flow",
+    "open:rebalance",
+    "calculation",
+    "calculation"
+  ],
+  "deviceScaleFactor": 1
+}
