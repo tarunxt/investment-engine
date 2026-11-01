@@ -48,7 +48,7 @@ export function ZerodhaConnectionGuide({
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="border border-gray-200 bg-white px-5 py-5 shadow-sm">
             <div className="flex items-center gap-2">
               <ShieldCheck className="size-4 text-gray-600" />
@@ -119,7 +119,7 @@ export function ZerodhaConnectionGuide({
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="border border-emerald-200 bg-emerald-50 px-5 py-5 shadow-sm">
           <div className="flex items-center gap-2">
             <ShieldCheck className="size-4 text-emerald-700" />

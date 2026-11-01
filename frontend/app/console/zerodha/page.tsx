@@ -763,10 +763,10 @@ export default function ZerodhaPage() {
   return (
     <div className="mx-auto flex flex-col gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <header className="flex flex-col gap-3">
         <div>
           <div className="inline-flex items-start gap-1">
-            <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha</h1>
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha portfolio</h1>
             {status?.connected && (
               <Button
                 variant="ghost"
@@ -786,25 +786,26 @@ export default function ZerodhaPage() {
               </Button>
             )}
           </div>
-          <p className="text-sm text-gray-500">
-            Kite Connect integration — save daywise portfolio history and manage orders
+          <p className="flex flex-wrap gap-x-2 text-sm text-gray-500">
+            <span>India</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {selectedSnapshot
+                ? `Saved snapshot ${new Date(`${selectedSnapshot.snapshot_date}T00:00:00+05:30`).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}`
+                : loadingPortfolio
+                  ? 'Loading saved snapshots…'
+                  : portfolioError
+                    ? 'Saved snapshot status unavailable'
+                    : 'No saved snapshot'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{status ? (status.connected ? 'Connected' : 'Not connected') : 'Connection status unavailable'}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <nav aria-label="Portfolio stages and markets">
           <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" />
-        </div>
-      </div>
-
-      {/* Not configured warning */}
-      {!configured && (
-        <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            Zerodha is not configured. Add <code className="font-mono text-xs">ZERODHA_API_KEY</code> and{' '}
-            <code className="font-mono text-xs">ZERODHA_API_SECRET</code> to your backend <code className="font-mono text-xs">.env</code> file.
-          </span>
-        </div>
-      )}
+        </nav>
+      </header>
 
       {/* Error */}
       {error && (
@@ -862,7 +863,7 @@ export default function ZerodhaPage() {
           ) : (
             <>
               <LogOut className="size-4 shrink-0 text-gray-400" />
-              <span>Not connected — log in below to get started.</span>
+              <span>Not connected. Saved snapshots remain available; open connection guidance to sign in.</span>
             </>
           )}
         </div>
@@ -876,39 +877,57 @@ export default function ZerodhaPage() {
       ) : null}
 
       {!status?.connected && (
-        <ZerodhaConnectionGuide
-          configured={configured}
-          loginUrl={loginUrl}
-          redirectUrl={`${URLs.frontend}/zerodha/callback`}
-          connecting={connectingPopup}
-          onQuickConnect={handlePopupConnect}
-        >
-          {configured ? (
-            <ManualTokenForm
-              onConnected={() => {
-                const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
-                fetchStatus().then(() => {
-                  fetchOrders();
-                  pollPortfolioOverview(baselineCapturedAt);
-                });
-              }}
-            />
-          ) : null}
-        </ZerodhaConnectionGuide>
+        <details className="border border-gray-200 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
+            Connection guidance
+            <span className="ml-2 text-xs font-normal text-gray-500">Review login options separately from saved data</span>
+          </summary>
+          <div className="border-t border-gray-200 p-4">
+            <ZerodhaConnectionGuide
+              configured={configured}
+              loginUrl={loginUrl}
+              redirectUrl={`${URLs.frontend}/zerodha/callback`}
+              connecting={connectingPopup}
+              onQuickConnect={handlePopupConnect}
+            >
+              {configured ? (
+                <ManualTokenForm
+                  onConnected={() => {
+                    const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+                    fetchStatus().then(() => {
+                      fetchOrders();
+                      pollPortfolioOverview(baselineCapturedAt);
+                    });
+                  }}
+                />
+              ) : null}
+            </ZerodhaConnectionGuide>
+          </div>
+        </details>
       )}
 
-      <PortfolioSnapshotsPanel
-        connected={Boolean(status?.connected)}
-        overview={portfolioOverview}
-        selectedSnapshot={selectedSnapshot}
-        selectedSnapshotDate={selectedSnapshotDate}
-        loading={loadingPortfolio}
-        selecting={selectingSnapshot}
-        syncing={syncingPortfolio}
-        error={portfolioError}
-        onSelectSnapshot={handleSelectSnapshot}
-        onSync={handleSyncPortfolio}
-      />
+      <section aria-label="Saved portfolio snapshots">
+        {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
+          <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+            <h2 className="font-semibold">Saved snapshots unavailable</h2>
+            <p className="mt-1">{portfolioError}</p>
+            <p className="mt-1">Saved data could not be loaded. This does not mean it was erased.</p>
+          </div>
+        ) : (
+          <PortfolioSnapshotsPanel
+            connected={Boolean(status?.connected)}
+            overview={portfolioOverview}
+            selectedSnapshot={selectedSnapshot}
+            selectedSnapshotDate={selectedSnapshotDate}
+            loading={loadingPortfolio}
+            selecting={selectingSnapshot}
+            syncing={syncingPortfolio}
+            error={portfolioError}
+            onSelectSnapshot={handleSelectSnapshot}
+            onSync={handleSyncPortfolio}
+          />
+        )}
+      </section>
 
       {/* Connected — orders + place order */}
       {status?.connected && (
