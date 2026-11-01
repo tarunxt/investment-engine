@@ -509,16 +509,7 @@ function getLlmSelectorScanLabel(
 ) {
   const marketLabel =
     portfolio === "zerodha" ? "India" : portfolio === "indmoneyUs" ? "US" : "";
-  const scanLabels: Record<WorkflowStageKey, string> = {
-    sync: "Sync",
-    threats: "Threats",
-    swing: "Swing",
-    rebalance: "Rebalance",
-    technical: "Technical",
-    actionables: "Actionables",
-  };
-
-  return [scanLabels[stage], marketLabel].filter(Boolean).join(" ");
+  return [STAGE_METADATA[stage].idle, marketLabel].filter(Boolean).join(" ");
 }
 
 function getLlmSelectorTitle(
@@ -3716,11 +3707,11 @@ function InputSelectionDialog({
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
-    threats: "Select Threats Scan inputs",
-    swing: "Select Swing Scan inputs",
-    rebalance: "Select Rebalance Scan inputs",
-    technical: "Select Technical Scan inputs",
-    actionables: "Select Actionables inputs",
+    threats: `Select ${getStageTileLabel("threats")} inputs`,
+    swing: `Select ${getStageTileLabel("swing")} inputs`,
+    rebalance: `Select ${getStageTileLabel("rebalance")} inputs`,
+    technical: `Select ${getStageTileLabel("technical")} inputs`,
+    actionables: `Select ${getStageTileLabel("actionables")} inputs`,
   };
   const rationaleByStage: Record<InputSelectionStage, string> = {
     threats:
@@ -4356,7 +4347,7 @@ function StageLlmSelectorDialog({
   );
 
   return (
-    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} titleId={selectorTitleId} onClose={onClose}>
+    <ModelPickerDialogFrame enabled title={selectorTitle} titleId={selectorTitleId} onClose={onClose}>
         <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5", organizedPicker && "shrink-0 px-4 py-3 sm:px-6")}>
           <div>
             <p id={selectorTitleId} className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
@@ -7157,7 +7148,7 @@ ${zerodhaExecutionMode === "direct_market"
           );
         if (shouldRunCurrentStage("technical") && technicalTargets.length === 0)
           throw new Error(
-            `No compatible target is available for Technical Validation. Open the stage LLM selector and choose one configured model.`,
+            `No compatible target is available for Technical Scan. Open the stage LLM selector and choose one configured model.`,
           );
 
         currentStage = "threats";

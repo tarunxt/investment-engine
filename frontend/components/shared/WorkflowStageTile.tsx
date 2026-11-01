@@ -85,7 +85,7 @@ export const STAGE_METADATA: Record<
 > = {
   sync: {
     step: "01",
-    idle: "Sync Portfolio",
+    idle: getStageTileLabel("sync"),
     running: "Syncing Portfolio",
     completed: "Portfolio Synced",
     tileDescription:
@@ -95,9 +95,9 @@ export const STAGE_METADATA: Record<
   },
   swing: {
     step: "03",
-    idle: "Swing Opportunities",
-    running: "Running Swing Opportunity Scan",
-    completed: "Swing Opportunities Ready",
+    idle: getStageTileLabel("swing"),
+    running: "Running Swing Scan",
+    completed: "Swing Scan Ready",
     tileDescription:
       "Surface fresh setups, momentum, and catalyst-driven names worth new capital or adds.",
     chartTitle: "Swing",
@@ -105,7 +105,7 @@ export const STAGE_METADATA: Record<
   },
   threats: {
     step: "02",
-    idle: "Threats Scan",
+    idle: getStageTileLabel("threats"),
     running: "Running Threats Scan",
     completed: "Threats Scan Ready",
     tileDescription:
@@ -115,9 +115,9 @@ export const STAGE_METADATA: Record<
   },
   rebalance: {
     step: "04",
-    idle: "Rebalance Draft",
-    running: "Building Rebalance Draft",
-    completed: "Rebalance Draft Ready",
+    idle: getStageTileLabel("rebalance"),
+    running: "Building Rebalance",
+    completed: "Rebalance Ready",
     tileDescription:
       "Merge sync, threats, and swing conviction into target weights, adds, trims, and holds.",
     chartTitle: "Rebalance",
@@ -125,9 +125,9 @@ export const STAGE_METADATA: Record<
   },
   technical: {
     step: "05",
-    idle: "Technical Validation",
-    running: "Running Technical Validation",
-    completed: "Technical Validation Ready",
+    idle: getStageTileLabel("technical"),
+    running: "Running Technical Scan",
+    completed: "Technical Scan Ready",
     tileDescription:
       "Validate entry quality, trim timing, and whether each proposed action still fits the chart.",
     chartTitle: "Technical",
@@ -135,9 +135,9 @@ export const STAGE_METADATA: Record<
   },
   actionables: {
     step: "06",
-    idle: "Final Actionables",
-    running: "Preparing Final Actionables",
-    completed: "Final Actionables Ready",
+    idle: getStageTileLabel("actionables"),
+    running: "Preparing Actionables",
+    completed: "Actionables Ready",
     tileDescription:
       "Publish the validated buy/add, sell/trim, and hold/watch outputs for execution.",
     chartTitle: "Actionables",

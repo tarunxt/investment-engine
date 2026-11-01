@@ -18,6 +18,7 @@ const workflow = readFileSync(resolve(root, 'app/console/dashboard/_components/R
 const ast = ts.createSourceFile('workflow.tsx', workflow, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const extract = name => ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)?.getText(ast);
 const tileAst = ts.createSourceFile('tile.tsx', readFileSync(resolve(root, 'components/shared/WorkflowStageTile.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const stageLabelSource = tileAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'getStageTileLabel').getText(tileAst).replace(/^export /, '');
 const stageMetadata = tileAst.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(d => d.name.getText(tileAst) === 'STAGE_METADATA')).getText(tileAst).replace(/^export /, '');
 const inventory = {
   anthropic: ['claude-opus-4-7','claude-sonnet-4-6','claude-3-7-sonnet-latest','claude-3-5-sonnet-latest','claude-3-5-haiku-latest','claude-3-opus-latest','claude-3-sonnet-20240229','claude-3-haiku-20240307'],
@@ -33,6 +34,7 @@ import {LlmModelSelectionPanel} from '${root}/components/shared/LlmModelSelectio
 import {LlmModelMixControls} from '${root}/components/shared/LlmModelMixControls';
 import {ModelPickerDialogFrame} from '${root}/components/shared/ModelPickerDialogFrame';
 import {PromptTemplateDialog} from '${root}/app/console/automated-rebalance/_components/PromptTemplateDialog';
+import {InputEvidenceRows,InputEvidenceSummary} from '${root}/app/console/dashboard/_components/InputEvidenceRows';
 import {threatInputRationale} from '${root}/app/console/dashboard/_components/threatInputRationale';
 import {Button} from '${root}/components/ui/button';
 import {cn} from '${root}/lib/utils';
@@ -42,6 +44,7 @@ const MODEL_MIX_STORAGE_KEY='offline-fixture-mixes';
 const readSavedModelMixes=()=>[{id:'compatible-models-system',name:'Compatible models',targets:['openai::gpt-4o-mini']}];
 const useUsdInrRate=()=>0;
 const formatInrCost=value=>typeof value==='number'?'₹'+value.toFixed(2):'n/a';
+${stageLabelSource}
 ${stageMetadata}
 ${extract('getStageLabel')}
 const fetchAllFullRuns=async()=>[];
@@ -64,14 +67,15 @@ const formatUsdAsVerifiedInr=()=> 'Unavailable';
 ${extract('InputSelectionDialog')}
 
 function App(){
+ const [stage,setStage]=useState('threats'),[inputStage,setInputStage]=useState('rebalance'),[portfolio,setPortfolio]=useState('zerodha');
  const [promptOpen,setPromptOpen]=useState(false);
  const [inputOpen,setInputOpen]=useState(false),[ids,setIds]=useState(new Set(['fixture-0']));
  const [open,setOpen]=useState(false),[state,setState]=useState('loaded'),[selected,setSelected]=useState(new Set(['openai::gpt-4o-mini']));
  const providers=state==='empty'||state==='failed'||state==='loading'?[]:catalog;
- return <><main><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
- {promptOpen&&<PromptTemplateDialog title="Rebalance template" body="FIXTURE_ONLY" onClose={()=>setPromptOpen(false)} onReviewInputs={()=>{setPromptOpen(false);setInputOpen(true)}}/>}
- <InputSelectionDialog open={inputOpen} stage="rebalance" candidates={state==='empty'||state==='failed'||state==='loading'?[]:Array.from({length:40},(_,i)=>({id:'fixture-'+i,jobNo:'Fixture '+i,label:'Saved input '+i,status:i%2?'partial':'completed',source:'saved',timestamp:null}))} selectedIds={ids} usdInrRate={0} loading={state==='loading'} error={state==='failed'?'Fixture input read failed':state==='partial'?'Fixture partial input read':null} onToggle={id=>setIds(old=>{const next=new Set(old);next.has(id)?next.delete(id):next.add(id);return next;})} onToggleAll={()=>{}} onResetDefaults={()=>{}} onClose={()=>setInputOpen(false)}/>
- <StageLlmSelectorDialog open={open} stage="threats" portfolio="zerodha" providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
+ return <><main><select aria-label="Portfolio fixture" value={portfolio} onChange={e=>setPortfolio(e.target.value)}>{['zerodha','indmoneyUs'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Model stage fixture" value={stage} onChange={e=>setStage(e.target.value)}>{['threats','swing','rebalance','technical'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Input stage fixture" value={inputStage} onChange={e=>setInputStage(e.target.value)}>{['threats','swing','rebalance','technical','actionables'].map(x=><option key={x}>{x}</option>)}</select><output id="selection">{Array.from(selected).join(',')}</output><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ {promptOpen&&<PromptTemplateDialog title={(portfolio==='zerodha'?'Zerodha':'INDmoney US')+' '+STAGE_METADATA[stage].idle+' prompt'} body="FIXTURE_ONLY" onClose={()=>setPromptOpen(false)} onReviewInputs={()=>{setPromptOpen(false);setInputOpen(true)}}/>}
+ <InputSelectionDialog open={inputOpen} stage={inputStage} candidates={state==='empty'||state==='failed'||state==='loading'?[]:Array.from({length:40},(_,i)=>({id:'fixture-'+i,jobNo:'Fixture '+i,label:'Saved input '+i,status:i%2?'partial':'completed',source:'saved',timestamp:null}))} selectedIds={ids} usdInrRate={0} loading={state==='loading'} error={state==='failed'?'Fixture input read failed':state==='partial'?'Fixture partial input read':null} onToggle={id=>setIds(old=>{const next=new Set(old);next.has(id)?next.delete(id):next.add(id);return next;})} onToggleAll={()=>{}} onResetDefaults={()=>{}} onClose={()=>setInputOpen(false)}/>
+ <StageLlmSelectorDialog open={open} stage={stage} portfolio={portfolio} providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
 `);
@@ -83,13 +87,49 @@ writeFileSync(resolve(output,'fixture.css'),compiler.build(scanner.scan()));
 writeFileSync(resolve(output,'index.html'),'<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>');
 const server=createServer((req,res)=>{const file=req.url==='/fixture.js'?'fixture.js':req.url==='/fixture.css'?'fixture.css':'index.html';res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html');res.end(readFileSync(resolve(output,file)));});
 await new Promise(yes=>server.listen(0,'127.0.0.1',yes));
-const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE_PATH||'/usr/bin/chromium',args:['--no-sandbox']});
+const browserZoom=process.env.MODEL_PICKER_BROWSER_ZOOM==='2';
+const launchOptions={headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE_PATH||'/usr/bin/chromium',args:['--no-sandbox']};
+const browser=browserZoom?await chromium.launchPersistentContext(resolve(output,'zoom-profile'),launchOptions):await chromium.launch(launchOptions);
 let checks=0;
 try {
- const page=await browser.newPage({viewport:{width:1180,height:757},deviceScaleFactor:1});
+ const page=browserZoom?await browser.newPage():await browser.newPage({viewport:{width:1180,height:757},deviceScaleFactor:1});
+ if(browserZoom){await page.setViewportSize({width:1180,height:844});await page.goto('chrome://settings/appearance');await page.evaluate(()=>chrome.settingsPrivate.setDefaultZoom(2));}
  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:')?route.continue():route.abort());
  await page.goto('http://127.0.0.1:'+server.address().port);
+ if(browserZoom){
+  const metrics=await page.evaluate(()=>({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,cssZoom:getComputedStyle(document.body).zoom,transform:getComputedStyle(document.body).transform}));
+  assert.equal(metrics.dpr,2);assert.equal(metrics.cssZoom,'1');assert.equal(metrics.transform,'none');
+  const matrix=[],canonical={threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan'};
+  for(const market of ['zerodha','indmoneyUs']) for(const stage of Object.keys(canonical)){
+   await page.getByLabel('Portfolio fixture',{exact:true}).selectOption(market);
+   await page.getByLabel('Model stage fixture',{exact:true}).selectOption(stage);
+   const selectionBefore=await page.locator('#selection').innerText();
+   await page.locator('#open').focus();await page.keyboard.press('Enter');
+   const dialog=page.getByRole('dialog');await dialog.waitFor();
+   assert.equal(await dialog.count(),1);assert.equal(await dialog.getAttribute('aria-modal'),'true');
+   assert.equal(await dialog.getByRole('heading',{name:canonical[stage],exact:true}).count(),1);
+   await dialog.getByText('Select LLMs- '+canonical[stage]+' '+(market==='zerodha'?'India':'US'),{exact:true}).waitFor();
+   assert.equal(await page.getByRole('button',{name:'Close LLM selector'}).evaluate(el=>el===document.activeElement),true);
+   await page.locator('#open').evaluate(el=>el.focus());assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);
+   await page.screenshot({path:resolve(output,'browser200-'+market+'-'+stage+'-top.png')});
+   const providerTab=page.getByRole('tab',{name:'Anthropic choices',exact:true});if(await providerTab.count())await providerTab.click();
+   const last=dialog.locator('input[type=radio],input[type=checkbox]').last(),row=last.locator('xpath=ancestor::label[1]');
+   await row.scrollIntoViewIfNeeded();
+   const visibility=await row.evaluate(el=>{const r=el.getBoundingClientRect();let p=el.parentElement;while(p&&!/(auto|scroll)/.test(getComputedStyle(p).overflowY))p=p.parentElement;const b=p?.getBoundingClientRect()??{top:0,bottom:innerHeight};return {rowHeight:r.height,visibleHeight:Math.max(0,Math.min(r.bottom,b.bottom)-Math.max(r.top,b.top)),text:el.innerText};});
+   assert.ok(visibility.visibleHeight>=Math.min(40,visibility.rowHeight));assert.ok(visibility.text.trim());
+   for(const name of ['Close LLM selector','Done']){const box=await page.getByRole('button',{name,exact:true}).boundingBox();assert.ok(box.x>=0&&box.x+box.width<=metrics.width&&box.y>=0&&box.y+box.height<=metrics.height);}
+   await page.screenshot({path:resolve(output,'browser200-'+market+'-'+stage+'-final-row.png')});
+   const semantics=await dialog.ariaSnapshot();
+   await page.getByRole('button',{name:/Show LLM run history/}).focus();await page.keyboard.press('Shift+Tab');
+   assert.equal(await page.getByRole('button',{name:'Done',exact:true}).evaluate(el=>el===document.activeElement),true);
+   await page.keyboard.press('Tab');assert.equal(await page.getByRole('button',{name:/Show LLM run history/}).evaluate(el=>el===document.activeElement),true);
+   await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);
+   assert.equal(await page.locator('#open').evaluate(el=>el===document.activeElement),true);assert.equal(await page.locator('#selection').innerText(),selectionBefore);
+   matrix.push({market,stage,canonical:canonical[stage],metrics,oneDialog:true,initialCloseFocus:true,backgroundFocusContained:true,visibility,controlsVisible:true,semantics,selectionPreserved:true,escapeRestoresOpener:true});
+  }
+  assert.deepEqual(errors,[]);writeFileSync(resolve(output,'all-eight-browser200.json'),JSON.stringify({metrics,matrix,errors},null,2));console.log(JSON.stringify({browserZoom:200,variants:matrix.length,output,errors}));
+ }else{
  const open=async()=>{await page.locator('#open').click();await page.getByRole('dialog').waitFor();};
  const shot=async name=>page.screenshot({path:resolve(output,name+'.png'),fullPage:true});
  await open();
@@ -170,7 +210,7 @@ try {
  for(const state of ['loaded','loading','empty','failed','partial']){
   await page.getByRole('combobox',{name:'Fixture state'}).selectOption(state);
   await page.locator('#input-open').click();
-  const dialog=page.getByRole('dialog',{name:'Select Rebalance Scan inputs',exact:true});
+  const dialog=page.getByRole('dialog',{name:'Select Rebalance inputs',exact:true});
   await dialog.waitFor();
   assert.equal(await dialog.getAttribute('aria-modal'),'true');
   assert.equal(await page.getByRole('button',{name:'Close input selection'}).evaluate(el=>el===document.activeElement),true);
@@ -209,7 +249,7 @@ try {
  await page.keyboard.press('Escape');
  await page.locator('#prompt-open').click();
  await page.getByRole('button',{name:'Review selected inputs'}).click();
- await page.getByRole('dialog',{name:'Select Rebalance Scan inputs',exact:true}).waitFor();
+ await page.getByRole('dialog',{name:'Select Rebalance inputs',exact:true}).waitFor();
  assert.equal(await page.getByRole('dialog').count(),1);checks++;
  assert.equal(await page.getByRole('button',{name:'Close input selection'}).evaluate(el=>el===document.activeElement),true);checks++;
  assert.equal(await page.getByRole('checkbox',{name:'Select all LLM jobs in Fixture 0',exact:true}).isChecked(),selectedBeforePrompt);checks++;
@@ -218,8 +258,69 @@ try {
  assert.equal(await page.locator('main').evaluate(el=>!el.closest('[inert]')),true);checks++;
  await page.locator('#input-open').click();await page.keyboard.press('Escape');
  assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true);checks++;
+ const canonical={threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',actionables:'Actionables'};
+ for(const width of [1180,390]){
+  await page.setViewportSize({width,height:844});
+  for(const portfolio of ['zerodha','indmoneyUs']){
+   await page.getByLabel('Portfolio fixture',{exact:true}).selectOption(portfolio);
+   for(const stage of ['threats','swing','rebalance','technical']){
+    await page.getByLabel('Model stage fixture',{exact:true}).selectOption(stage);await page.locator('#open').click();
+    await page.getByRole('heading',{name:canonical[stage],exact:true}).waitFor();
+    await page.getByText('Select LLMs- '+canonical[stage]+' '+(portfolio==='zerodha'?'India':'US'),{exact:true}).waitFor();
+    await shot('canonical-model-'+width+'-'+portfolio+'-'+stage);
+    assert.equal(await page.getByRole('dialog',{name:new RegExp(canonical[stage])}).count(),1);
+    await page.keyboard.press('Escape');assert.equal(await page.locator('#open').evaluate(el=>el===document.activeElement),true);
+    checks++;
+    await page.locator('#prompt-open').click();await page.getByRole('dialog',{name:(portfolio==='zerodha'?'Zerodha':'INDmoney US')+' '+canonical[stage]+' prompt',exact:true}).waitFor();
+    await shot('canonical-prompt-'+width+'-'+portfolio+'-'+stage);await page.keyboard.press('Escape');checks++;
+   }
+  }
+  for(const stage of Object.keys(canonical)){
+   await page.getByLabel('Input stage fixture',{exact:true}).selectOption(stage);await page.locator('#input-open').click();
+   await page.getByRole('dialog',{name:'Select '+canonical[stage]+' inputs',exact:true}).waitFor();
+   await shot('canonical-input-'+width+'-'+stage);await page.keyboard.press('Escape');
+   assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true);checks++;
+  }
+ }
  writeFileSync(resolve(output,'input-focus-evidence.json'),JSON.stringify(focusEvidence,null,2));
+ const matrix=[];
+ await page.setViewportSize({width:1180,height:757});
+ const retained=await page.locator('#selection').innerText();
+ for(const market of ['indmoneyUs','zerodha']) for(const stage of ['threats','swing','rebalance','technical']){
+  await page.getByRole('combobox',{name:'Portfolio fixture'}).selectOption(market);
+  await page.getByRole('combobox',{name:'Model stage fixture'}).selectOption(stage);
+  for(const state of ['loaded','loading','empty','failed','partial']){
+   await page.getByRole('combobox',{name:'Fixture state'}).selectOption(state);
+   for(let repeat=0;repeat<2;repeat++){
+    await page.locator('#open').focus();await page.keyboard.press('Enter');
+    if(market==='indmoneyUs'&&stage==='threats'&&state==='loaded'&&repeat===0) await shot('us-threats-current');
+    const dialog=page.getByRole('dialog');
+    if(await dialog.count()!==1) writeFileSync(resolve(output,'missing-dialog.json'),JSON.stringify({market,stage,state,focus:await page.evaluate(()=>document.activeElement.outerHTML),dialogs:await dialog.count()}));
+    assert.equal(await dialog.count(),1,market+' '+stage+' '+state);
+    assert.equal(await dialog.getAttribute('aria-modal'),'true');
+    assert.equal(await page.getByRole('button',{name:'Close LLM selector'}).evaluate(el=>el===document.activeElement),true);
+    await page.getByRole('button',{name:/Show LLM run history/}).focus();await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.getByRole('button',{name:'Done',exact:true}).evaluate(el=>el===document.activeElement),true);
+    await page.keyboard.press('Tab');assert.equal(await page.getByRole('button',{name:/Show LLM run history/}).evaluate(el=>el===document.activeElement),true);
+    if(state==='loaded'&&repeat===1){
+     await page.setViewportSize({width:390,height:844});
+     const inputs=dialog.locator('input:not(:disabled)');
+     if(await inputs.count()) await inputs.last().scrollIntoViewIfNeeded();
+     assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+     await shot(market+'-'+stage+'-narrow-end');checks++;
+    }
+    matrix.push({market,stage,state,repeat,snapshot:await dialog.ariaSnapshot()});
+    await page.keyboard.press('Escape');assert.equal(await page.locator('#open').evaluate(el=>el===document.activeElement),true);
+    assert.equal(await page.locator('#selection').innerText(),retained);await page.setViewportSize({width:1180,height:757});checks+=7;
+   }
+  }
+ }
+ await page.locator('#open').click();await page.locator('#open').evaluate(el=>el.remove());
+ await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);
+ assert.equal(await page.locator('main').evaluate(el=>!el.closest('[inert]')),true);checks+=2;
+ writeFileSync(resolve(output,'both-market-model-matrix.json'),JSON.stringify(matrix,null,2));
  assert.deepEqual(errors,[]);checks++;
  writeFileSync(resolve(output,'results.json'),JSON.stringify({checks,errors,inventory,viewport:{desktop:[1180,757],narrow:[390,844]},source:'real StageLlmSelectorDialog extracted with offline history/FX fixtures; real panel, frame and template controls'},null,2));
  console.log(JSON.stringify({checks,output,errors}));
+ }
 }finally{await browser.close();server.close();}

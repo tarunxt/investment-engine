@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mount the production Threats Scan card and duration dialog with local read-only fixtures.
+// Mount all production stage cards and applicable duration dialogs with local read-only fixtures.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, writeFile, rm, access } from 'node:fs/promises';
@@ -17,7 +17,7 @@ let browser, server;
 try {
   await writeFile(path.join(temporary, 'entry.tsx'), `import React,{useState} from 'react';import {createRoot} from 'react-dom/client';
 import {WorkflowStageTile} from '@/components/shared/WorkflowStageTile';
-function Fixture(){const [mode,setMode]=useState('fallback');window.timingMode=mode;return <><select aria-label="Fixture" onChange={e=>setMode(e.target.value)}>{['fallback','loaded','failed','loading','empty','active','partial'].map(x=><option key={x}>{x}</option>)}</select><main style={{maxWidth:360,margin:'24px auto'}}><WorkflowStageTile stage="threats" now={Date.parse('2026-11-01T00:01:49Z')} info={{state:mode==='active'?'running':mode==='failed'?'failed':'completed',startedAt:mode==='empty'?null:'2026-11-01T00:00:00Z',endedAt:mode==='empty'||mode==='active'?null:'2026-11-01T00:01:49Z',provider:'Fixture provider',model:'Exact fixture model',lastRunId:['fallback','empty','active'].includes(mode)?null:42}}/></main></>}
+function Fixture(){const [mode,setMode]=useState('fallback');const [stage,setStage]=useState('threats');window.timingMode=mode;return <><select aria-label="Stage fixture" onChange={e=>setStage(e.target.value)}>{['sync','threats','swing','rebalance','technical','actionables'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Fixture" onChange={e=>setMode(e.target.value)}>{['fallback','loaded','failed','loading','empty','active','partial'].map(x=><option key={x}>{x}</option>)}</select><main style={{maxWidth:360,margin:'24px auto'}}><WorkflowStageTile key={stage} stage={stage} now={Date.parse('2026-11-01T00:01:49Z')} info={{state:mode==='active'?'running':mode==='failed'?'failed':'completed',startedAt:mode==='empty'?null:'2026-11-01T00:00:00Z',endedAt:mode==='empty'||mode==='active'?null:'2026-11-01T00:01:49Z',provider:'Fixture provider',model:'Exact fixture model',lastRunId:['fallback','empty','active'].includes(mode)?null:42}}/></main></>}
 createRoot(document.getElementById('root')).render(<Fixture/>);`);
   await writeFile(path.join(temporary,'api.ts'), `export const apiService={getRun:async(id,{signal})=>{await new Promise(r=>setTimeout(r,50));if(window.timingMode==='loading')return new Promise(()=>{});if(window.timingMode==='failed')throw new Error('Fixture read failure');return {run_jobs:[{job:{id:1,status:window.timingMode==='partial'?'failed':'completed',provider:'Fixture provider',model:'Exact fixture model',created_at:'2026-11-01T00:00:09Z',updated_at:'2026-11-01T00:01:39Z'}},{job:{id:2,status:'completed',provider:'Second provider',model:'Second exact model',created_at:'2026-11-01T00:00:09Z',updated_at:'2026-11-01T00:01:29Z'}}]}}};`);
   await writeFile(path.join(temporary, 'loader.cjs'), `const ts=require(${JSON.stringify(require.resolve('typescript'))});module.exports=function(s){return ts.transpileModule(s,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020},fileName:this.resourcePath}).outputText}`);
@@ -36,10 +36,19 @@ createRoot(document.getElementById('root')).render(<Fixture/>);`);
   page.on('pageerror',error=>errors.push(error.message));
   for(const width of [1180,390]){
     await page.setViewportSize({width,height:757});await page.goto(base);
+    const canonical={sync:'Sync Portfolio',threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',actionables:'Actionables'};
+    const baseline={...canonical,swing:'Swing Opportunities',rebalance:'Rebalance Draft',technical:'Technical Validation',actionables:'Final Actionables'};
+    for(const stage of Object.keys(canonical)){
+    await page.getByLabel('Stage fixture',{exact:true}).selectOption(stage);
+    await page.getByLabel('Fixture',{exact:true}).selectOption('fallback');
+    const screenshot=(suffix)=>'/tmp/stage-names-complete-'+(process.env.STAGE_NAMES_BASELINE?'before':'after')+'-'+width+'-'+stage+'-'+suffix+'.png';
+    assert.equal(await page.locator('article .text-center').innerText(),canonical[stage]);
+    await page.screenshot({path:screenshot('card')});
+    if(['sync','actionables'].includes(stage)){assert.equal(await page.getByRole('button',{name:/Show duration breakdown for/}).count(),0);continue;}
     for(const mode of ['fallback','loaded','failed','loading','empty','active','partial']){
-      await page.getByLabel('Fixture').selectOption(mode);
-      const trigger=page.getByRole('button',{name:/Show duration breakdown for/});if(mode==='fallback')await page.screenshot({path:'/tmp/stage-names-'+(process.env.STAGE_NAMES_BASELINE?'before':'after')+'-'+width+'-card.png'});await trigger.focus();await page.keyboard.press('Enter');
-      const dialog=page.getByRole('dialog');await dialog.waitFor();assert.equal(await dialog.locator('h3').innerText(),process.env.STAGE_NAMES_BASELINE?'Threats & Guardrails':'Threats Scan');if(!process.env.STAGE_NAMES_BASELINE)assert.match(await dialog.innerText(),/Check risks in the economy, sectors, and your holdings/);
+      await page.getByLabel('Fixture',{exact:true}).selectOption(mode);
+      const trigger=page.getByRole('button',{name:/Show duration breakdown for/});assert.equal(await trigger.getAttribute('aria-label'),'Show duration breakdown for '+(process.env.STAGE_NAMES_BASELINE?baseline:canonical)[stage]);await trigger.focus();await page.keyboard.press('Enter');
+      const dialog=page.getByRole('dialog');await dialog.waitFor();assert.equal(await dialog.locator('h3').innerText(),(process.env.STAGE_NAMES_BASELINE?baseline:canonical)[stage]);if(stage==='threats')assert.match(await dialog.innerText(),/Check risks in the economy, sectors, and your holdings/);
       if(['loaded','partial'].includes(mode))await dialog.locator('dt').getByText('Second exact model',{exact:false}).waitFor();
       if(mode==='failed')await dialog.getByText(/Fixture read failure/).waitFor();
       if(mode==='loading')await dialog.getByText('Loading detailed LLM timings…').waitFor();
@@ -61,14 +70,15 @@ createRoot(document.getElementById('root')).render(<Fixture/>);`);
       assert.ok(await dialog.evaluate(n=>n.scrollWidth<=n.clientWidth),'dialog overflow');
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'page overflow');
       const rect=await dialog.boundingBox();assert.ok(rect.x>=0&&rect.x+rect.width<=width);
-      await page.screenshot({path:'/tmp/stage-names-'+(process.env.STAGE_NAMES_BASELINE?'before':'after')+'-'+width+'-'+mode+'.png'});
-      await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});if(mode==='fallback')console.log('Focus restored after Escape at '+width+'px: '+await trigger.evaluate(el=>el===document.activeElement));
+      await page.screenshot({path:screenshot(mode)});
+      await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await trigger.evaluate(el=>el===document.activeElement),true,'Escape restores '+stage+' trigger');
       await trigger.click();await dialog.waitFor();assert.equal(await dialog.locator('details').getAttribute('open'),null);
       await dialog.getByRole('button',{name:'Close duration breakdown'}).click();await dialog.waitFor({state:'detached'});
     }
+    }
   }
   assert.deepEqual(requests,[]);assert.deepEqual(errors,[]);
-  console.log('Duration fixtures passed: 1180×757 and 390×757; seven states; disclosure keyboard, Escape, close and repeated opening; no external requests.');
+  console.log('All six card labels checked; four duration stages × seven states × 1180×757 and 390×757 passed; Sync/Actionables duration inapplicable; disclosure keyboard, Escape focus restoration, close and repeated opening; no external requests.');
 
 } finally {
   if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true});

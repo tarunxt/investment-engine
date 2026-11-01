@@ -14,9 +14,12 @@ mkdirSync(temp, { recursive: true });
 const workflow = readFileSync(resolve(root, 'app/console/dashboard/_components/RebalanceWorkflowSections.tsx'), 'utf8');
 const rows = readFileSync(resolve(root, 'app/console/dashboard/_components/InputEvidenceRows.tsx'), 'utf8');
 const dialog = workflow.slice(workflow.indexOf('function InputSelectionDialog('), workflow.indexOf('function AutoRebalanceCostHistoryDialog('));
+const tile = readFileSync(resolve(root, 'components/shared/WorkflowStageTile.tsx'), 'utf8');
+const stageLabelSource = tile.slice(tile.indexOf('export function getStageTileLabel('), tile.indexOf('export function isActionablesFresh(')).replace(/^export /, '');
 const entry = `import React,{useState,useRef,useEffect,useMemo,useId} from 'react';
 import {createRoot} from 'react-dom/client';
 import {ModelPickerDialogFrame} from '${resolve(root, 'components/shared/ModelPickerDialogFrame.tsx')}';
+${stageLabelSource}
 import {threatInputRationale} from '${resolve(root, 'app/console/dashboard/_components/threatInputRationale.ts')}';
 import {InputEvidenceRows,InputEvidenceSummary} from '${resolve(root, 'app/console/dashboard/_components/InputEvidenceRows.tsx')}';
 const Button=(p)=><button {...p}/>; const X=()=> <span>×</span>;
