@@ -418,8 +418,8 @@ def _build_list_item(
         sell_submitted_at=_serialize_datetime(record.sell_submitted_at),
         sell_executed_at=_serialize_datetime(record.sell_executed_at),
         buy_amount=record.buy_notional or record.buy_requested_amount,
-        buy_price=record.buy_average_fill_price or record.buy_requested_price,
-        buy_odds=record.buy_average_fill_odds or record.buy_requested_odds,
+        buy_price=record.buy_average_fill_price,
+        buy_odds=record.buy_average_fill_odds,
         buy_shares=record.buy_filled_shares or record.buy_requested_shares,
         buy_requested_amount=record.buy_requested_amount,
         buy_requested_shares=record.buy_requested_shares,
@@ -430,8 +430,8 @@ def _build_list_item(
         buy_average_fill_price=record.buy_average_fill_price,
         buy_average_fill_odds=record.buy_average_fill_odds,
         current_price=current_price,
-        exit_price=record.sell_average_fill_price or record.sell_requested_price,
-        exit_odds=record.sell_average_fill_odds or record.sell_requested_odds,
+        exit_price=record.sell_average_fill_price,
+        exit_odds=record.sell_average_fill_odds,
         exit_amount=record.exit_notional or record.sell_requested_amount,
         exit_shares=record.sell_filled_shares or record.sell_requested_shares,
         sell_requested_amount=record.sell_requested_amount,
@@ -463,7 +463,8 @@ def _build_summary(
     records: Sequence[BullpenTradeAnalysisRecord],
 ) -> BullpenTradeAnalysisSummaryStats:
     closed = [record for record in records if record.closed_at is not None]
-    wins = [record for record in closed if (record.net_pnl or 0) > 0]
+    known = [record for record in closed if record.net_pnl is not None]
+    wins = [record for record in known if record.net_pnl > 0]
     holding_values = [
         record.holding_period_seconds
         for record in closed
@@ -472,7 +473,8 @@ def _build_summary(
     pnl_values = [
         record.pnl_percent for record in closed if record.pnl_percent is not None
     ]
-    fees_total = sum(record.fees_total or 0 for record in records)
+    fee_values = [record.fees_total for record in records if record.fees_total is not None]
+    pnl_known = [record.net_pnl for record in records if record.net_pnl is not None]
     return BullpenTradeAnalysisSummaryStats(
         total_executed_trades=len(
             [record for record in records if record.buy_executed_at is not None]
@@ -482,8 +484,20 @@ def _build_summary(
             if record.buy_executed_at is not None and record.closed_at is None
         ]),
         closed_positions=len(closed),
-        total_net_pnl=round(sum(record.net_pnl or 0 for record in records), 4),
-        win_rate=round(len(wins) / len(closed), 4) if closed else 0,
+        total_net_pnl=round(sum(pnl_known), 4) if pnl_known else None,
+        known_outcomes=len(known),
+        unknown_outcomes=len(closed) - len(known),
+        win_rate_denominator=len(known),
+        win_rate=round(len(wins) / len(known), 4) if known else None,
+        measured_fee_components_total=(round(sum(
+            fee for record in records for fee in (record.buy_fees, record.sell_fees) if fee is not None
+        ), 4) if any(fee is not None for record in records for fee in (record.buy_fees, record.sell_fees)) else None),
+        known_fee_components=sum(fee is not None for record in records for fee in (record.buy_fees, record.sell_fees)),
+        unknown_fee_components=sum(fee is None for record in records for fee in (record.buy_fees, record.sell_fees)),
+        known_fee_records=len(fee_values),
+        unknown_fee_records=len(records) - len(fee_values),
+        net_pnl_coverage="complete" if len(pnl_known) == len(records) and records else "partial" if pnl_known else "unknown",
+        fee_coverage="complete" if len(fee_values) == len(records) and records else "partial" if fee_values else "unknown",
         average_pnl_percent=(
             round(sum(pnl_values) / len(pnl_values), 4) if pnl_values else None
         ),
@@ -492,7 +506,7 @@ def _build_summary(
             if holding_values
             else None
         ),
-        total_fees=round(fees_total, 4),
+        total_fees=round(sum(fee_values), 4) if fee_values else None,
     )
 
 
@@ -500,10 +514,10 @@ def _build_comparison(
     record: BullpenTradeAnalysisRecord,
 ) -> BullpenTradeAnalysisComparison:
     return BullpenTradeAnalysisComparison(
-        buy_price=record.buy_average_fill_price or record.buy_requested_price,
-        exit_price=record.sell_average_fill_price or record.sell_requested_price,
-        buy_odds=record.buy_average_fill_odds or record.buy_requested_odds,
-        exit_odds=record.sell_average_fill_odds or record.sell_requested_odds,
+        buy_price=record.buy_average_fill_price,
+        exit_price=record.sell_average_fill_price,
+        buy_odds=record.buy_average_fill_odds,
+        exit_odds=record.sell_average_fill_odds,
         buy_liquidity_score=record.buy_liquidity_score,
         exit_liquidity_score=record.sell_liquidity_score,
         buy_volume_score=record.buy_volume_score,
@@ -524,18 +538,29 @@ def _build_comparison(
 def _apply_learning_fields(
     record: BullpenTradeAnalysisRecord,
 ) -> BullpenTradeAnalysisActionableLearning:
-    learning = generate_bullpen_post_trade_analysis(record)
-    record.analysis_summary = _safe_text(learning.get("analysis_summary"))
-    record.mistake_category = _safe_text(learning.get("mistake_category"))
-    record.improvement_suggestion = _safe_text(learning.get("improvement_suggestion"))
-    record.reinforcement_signal = _safe_text(learning.get("reinforcement_signal"))
-    record.reinforcement_score = parse_float(learning.get("reinforcement_score"))
-    record.should_avoid_similar_trade = bool(learning.get("should_avoid_similar_trade"))
-    record.should_increase_confidence_for_similar_trade = bool(
-        learning.get("should_increase_confidence_for_similar_trade")
+    # Revised analysis is derived evidence, never an overwrite of original columns.
+    return BullpenTradeAnalysisActionableLearning.model_validate(
+        generate_bullpen_post_trade_analysis(record)
     )
-    record.human_review_required = bool(learning.get("human_review_required"))
-    return BullpenTradeAnalysisActionableLearning.model_validate(learning)
+
+
+def _analysis_version_snapshot(record: BullpenTradeAnalysisRecord) -> BullpenTradeAnalysisSnapshotRecord:
+    learning = _apply_learning_fields(record).model_dump(mode="json")
+    inputs = {
+        key: sanitize_json_value(getattr(record, key))
+        for key in ("id", "net_pnl", "buy_confidence", "buy_liquidity_score",
+                    "buy_spread_score", "fees_total", "sell_reason",
+                    "best_possible_exit_price_after_buy", "sell_average_fill_price",
+                    "sell_requested_price")
+    }
+    inputs["analysis_price_contract"] = (record.metadata_json or {}).get("analysis_price_contract")
+    return BullpenTradeAnalysisSnapshotRecord(
+        trade_analysis_id=record.id,
+        snapshot_type="ANALYSIS_VERSION",
+        captured_at=utc_now(),
+        raw_api_response_json={"analysis": learning, "source_inputs": inputs,
+                               "interpretation": "Derived revision; not decision-time evidence or changed execution."},
+    )
 
 
 def _record_event_log(
@@ -866,16 +891,16 @@ def _apply_buy_execution(
     trade.buy_client_order_id = _safe_text(summary.get("client_order_id"))
     trade.buy_status = _safe_text(summary.get("status")) or "executed"
     trade.buy_filled_amount = (
-        parse_float(summary.get("filled_amount")) or trade.buy_requested_amount
+        parse_float(summary.get("filled_amount"))
     )
     trade.buy_filled_shares = (
-        parse_float(summary.get("filled_shares")) or trade.buy_requested_shares
+        parse_float(summary.get("filled_shares"))
     )
     trade.buy_average_fill_price = (
-        parse_float(summary.get("average_fill_price")) or trade.buy_requested_price
+        parse_float(summary.get("average_fill_price"))
     )
     trade.buy_average_fill_odds = (
-        parse_float(summary.get("average_fill_odds")) or trade.buy_requested_odds
+        parse_float(summary.get("average_fill_odds"))
     )
     trade.buy_fees = parse_float(summary.get("fees"))
     trade.buy_slippage = _slippage(
@@ -889,7 +914,10 @@ def _apply_buy_execution(
         trade.buy_filled_shares,
         trade.buy_average_fill_price,
     )
-    trade.fees_total = round((trade.buy_fees or 0) + (trade.sell_fees or 0), 6)
+    trade.fees_total = (
+        round(trade.buy_fees + trade.sell_fees, 6)
+        if trade.buy_fees is not None and trade.sell_fees is not None else None
+    )
     trade.status = "BOUGHT"
     trade.lifecycle_state = "BUY_EXECUTED_ONLY"
     trade.final_tag = "OPEN"
@@ -984,17 +1012,22 @@ def _apply_exit_execution(
     trade.sell_client_order_id = _safe_text(summary.get("client_order_id"))
     trade.sell_status = _safe_text(summary.get("status")) or exit_type.lower()
     trade.sell_filled_amount = (
-        parse_float(summary.get("filled_amount")) or trade.sell_requested_amount
+        parse_float(summary.get("filled_amount"))
     )
     trade.sell_filled_shares = (
-        parse_float(summary.get("filled_shares")) or trade.sell_requested_shares
+        parse_float(summary.get("filled_shares"))
     )
     trade.sell_average_fill_price = (
-        parse_float(summary.get("average_fill_price")) or trade.sell_requested_price
+        parse_float(summary.get("average_fill_price"))
     )
     trade.sell_average_fill_odds = (
-        parse_float(summary.get("average_fill_odds")) or trade.sell_requested_odds
+        parse_float(summary.get("average_fill_odds"))
     )
+    trade.metadata_json = {**(trade.metadata_json or {}), "analysis_price_contract": {
+        **(trade.metadata_json or {}).get("analysis_price_contract", {}),
+        "fill_unit": "unit_price" if trade.sell_average_fill_price is not None else None,
+        "fill_source": "verified_execution" if trade.sell_average_fill_price is not None else "unknown",
+    }}
     trade.sell_fees = parse_float(summary.get("fees"))
     trade.sell_slippage = _slippage(
         trade.sell_requested_price, trade.sell_average_fill_price
@@ -1023,20 +1056,23 @@ def _apply_exit_execution(
         if trade.exit_notional is not None and trade.buy_notional is not None
         else None
     )
-    trade.fees_total = round((trade.buy_fees or 0) + (trade.sell_fees or 0), 6)
+    trade.fees_total = (
+        round(trade.buy_fees + trade.sell_fees, 6)
+        if trade.buy_fees is not None and trade.sell_fees is not None else None
+    )
     trade.net_pnl = (
         round((trade.gross_pnl or 0) - (trade.fees_total or 0), 6)
-        if trade.gross_pnl is not None
+        if trade.gross_pnl is not None and trade.fees_total is not None
         else None
     )
     trade.pnl_percent = (
         round((trade.net_pnl or 0) / trade.buy_notional * 100, 4)
-        if trade.buy_notional
+        if trade.buy_notional and trade.net_pnl is not None
         else None
     )
     trade.realized_return = (
         round((trade.net_pnl or 0) / trade.buy_notional, 6)
-        if trade.buy_notional
+        if trade.buy_notional and trade.net_pnl is not None
         else None
     )
     trade.holding_period_seconds = _holding_period_seconds(
@@ -1499,7 +1535,6 @@ class BullpenTradeAnalysisService:
         if record is None:
             return None
         actionable_learning = _apply_learning_fields(record)
-        await self.session.commit()
         return BullpenTradeAnalysisDetailResponse(
             trade=_build_record_response(record),
             comparison=_build_comparison(record),
@@ -1539,8 +1574,9 @@ class BullpenTradeAnalysisService:
         )
         if record is None:
             return None
-        _apply_learning_fields(record)
+        self.session.add(_analysis_version_snapshot(record))
         await self.session.commit()
+        await self.session.refresh(record, ["snapshots"])
         return await self.get_trade_detail(user_id=user_id, trade_id=trade_id)
 
 
@@ -2176,6 +2212,11 @@ def sync_auto_live_position_snapshots_sync(
                 if parse_float(getattr(item, "heldProbability", None)) is not None
             ]
             if history_prices:
+                trade.metadata_json = {**(trade.metadata_json or {}), "analysis_price_contract": {
+                    **(trade.metadata_json or {}).get("analysis_price_contract", {}),
+                    "in_hold_maximum_unit": "cents",
+                    "source": "heldProbability * 100, in-position monitor",
+                }}
                 trade.max_favorable_price = round(max(history_prices) * 100, 4)
                 trade.max_adverse_price = round(min(history_prices) * 100, 4)
                 trade.best_possible_exit_price_after_buy = trade.max_favorable_price
