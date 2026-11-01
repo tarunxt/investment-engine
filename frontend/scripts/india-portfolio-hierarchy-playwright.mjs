@@ -24,7 +24,7 @@ export class APIError extends Error {}
 const mode=new URLSearchParams(location.search).get('mode')||'saved';
 window.apiCalls=[];
 const snapshot={snapshot_date:'2026-10-30',captured_at:'2026-10-30T09:00:00Z',source:'offline_fixture',holdings_count:0,net_positions_count:0,day_positions_count:0,holdings_market_value:125000,holdings_pnl:2500,holdings_day_change_value:50,available_margin:1000,positions_pnl:0,positions_m2m:0,holdings:[],positions:{net:[],day:[]}};
-const read=async(name,data)=>{window.apiCalls.push(name);if(mode==='loading'&&name==='portfolio')await new Promise(r=>setTimeout(r,1800));if(mode==='failed'&&name==='portfolio')throw new APIError('Fixture saved-data request failed');return data};
+const read=async(name,data)=>{window.apiCalls.push(name);if(mode==='loading'&&name==='portfolio')await new Promise(r=>setTimeout(r,1800));if((mode==='failed'||(mode==='partial'&&window.apiCalls.filter(x=>x==='portfolio').length>1))&&name==='portfolio')throw new APIError('Fixture saved-data request failed');return data};
 export const apiService=new Proxy({
 zerodhaStatus:()=>read('status',{connected:mode==='connected',expires_at:'2026-11-01T12:00:00Z'}),
 zerodhaLoginUrl:()=>read('login-url',{configured:mode!=='unconfigured',login_url:'/fixture-kite-login'}),
@@ -57,7 +57,7 @@ zerodhaOrders:()=>read('orders',{data:[]})
   await page.screenshot({path:path.join(evidence,'desktop-saved.png')});
   assert.match(await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).getAttribute('title'),/Stale/);
   await page.locator('svg g.cursor-pointer circle').first().click();await page.waitForFunction(()=>document.querySelector('header').textContent.includes('29 Oct 2026'));
-  await visit('partial');await page.locator('svg g.cursor-pointer circle').first().click();await saved().getByText('Fixture historical snapshot unavailable').waitFor();assert.match(await page.locator('header').textContent(),/30 Oct 2026/);
+  await visit('partial');await saved().getByText('Fixture saved-data request failed').waitFor();assert.match(await page.locator('header').textContent(),/30 Oct 2026/);
   await visit('saved');
   for(let n=0;n<3;n++){await guidance().focus();await page.keyboard.press('Enter');assert.equal(await page.getByRole('button',{name:'Connect With Zerodha',exact:true}).isVisible(),true);assert.equal(await page.getByText('Option 2: Manual Token').isVisible(),true);await page.keyboard.press('Enter');assert.equal(await page.locator('details').getAttribute('open'),null)}
   await page.getByRole('button',{name:'Show Zerodha login status',exact:true}).click();await page.getByText(/Saved snapshots remain available/).waitFor();
@@ -70,6 +70,6 @@ zerodhaOrders:()=>read('orders',{data:[]})
   await visit('connected');await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).waitFor();assert.equal(await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).isEnabled(),true);assert.equal(await page.locator('details').count(),0);assert.equal(await page.getByRole('button',{name:'Disconnect Zerodha',exact:true}).isVisible(),true);
   await page.goBack();await page.getByRole('heading',{name:'Zerodha portfolio',exact:true}).waitFor();
   assert.deepEqual(await page.evaluate(()=>window.apiCalls.filter(x=>x.startsWith('FORBIDDEN'))),[]);assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
-  const result={result:'PASS',checks:['saved snapshot while disconnected','dated stale sync disclosure','historical selection updates metadata','partial historical failure retains loaded snapshot','snapshot date and connection metadata','18 existing stage and market links','collapsed setup','keyboard repeated open-close','connection details','desktop 1180x757','390px no page overflow','empty','failed does not claim absent data','loading to loaded','unconfigured setup collapsed','connected controls and explicit sync enablement','back navigation','zero external requests'],limits:['Synthetic empty holdings exercise existing empty tables; no real account data used.','No production authentication, connection, sync, order, or provider actions.']};
+  const result={result:'PASS',checks:['saved snapshot while disconnected','dated stale sync disclosure','historical selection updates metadata','partial overview failure retains loaded snapshot','snapshot date and connection metadata','18 existing stage and market links','collapsed setup','keyboard repeated open-close','connection details','desktop 1180x757','390px no page overflow','empty','failed does not claim absent data','loading to loaded','unconfigured setup collapsed','connected controls and explicit sync enablement','back navigation','zero external requests'],limits:['Synthetic empty holdings exercise existing empty tables; no real account data used.','No production authentication, connection, sync, order, or provider actions.']};
   await writeFile(path.join(evidence,'results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 } finally {await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));await rm(tmp,{recursive:true,force:true});}
