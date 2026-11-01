@@ -1,5 +1,6 @@
 import os
 import time
+from threading import Lock
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
@@ -11,6 +12,7 @@ from app.domains.cost_drivers.cache import RefreshCooldownError
 class FakeRedis:
     def __init__(self):
         self._values: dict[str, tuple[str, float | None]] = {}
+        self._guard = Lock()
 
     def get(self, key: str):
         record = self._values.get(key)
@@ -37,6 +39,17 @@ class FakeRedis:
         if expires_at is None:
             return -1
         return max(int(expires_at - time.time()), 0)
+
+    def lock(self, key, timeout=None, blocking=False):
+        parent = self
+        class Lease:
+            def acquire(self, blocking=False):
+                with parent._guard:
+                    return bool(parent.set(key, "held", nx=True))
+            def release(self):
+                with parent._guard:
+                    parent._values.pop(key, None)
+        return Lease()
 
     def close(self):
         return None
@@ -83,7 +96,7 @@ def test_get_dashboard_reads_and_writes_shared_cache(monkeypatch):
 
     monkeypatch.setattr(service, "_live_dashboard", fake_live_dashboard)
 
-    first = service.get_dashboard(month="2026-07")
+    first = service.get_dashboard(force_refresh=True, month="2026-07")
     second = service.get_dashboard(month="2026-07")
 
     assert calls["count"] == 1
@@ -166,73 +179,25 @@ def test_cache_socket_timeout_preserves_local_fallback(monkeypatch):
     cache.reset_local_cost_dashboard_cache_state()
 
 
-def test_concurrent_cache_misses_collect_once(monkeypatch):
+def test_concurrent_cache_misses_never_collect(monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
-    from threading import Event
-
     cache.reset_local_cost_dashboard_cache_state()
     monkeypatch.setattr(cache, "_redis_client", lambda: None)
     monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
-    started = Event()
-    release = Event()
-    second_attempted = Event()
-    calls = []
-
-    def live_dashboard(month):
-        calls.append(month)
-        started.set()
-        release.wait(timeout=2)
-        return service._empty_live_dashboard(month)
-
-    def second_read():
-        second_attempted.set()
-        return service.get_dashboard(month="2026-07")
-
-    monkeypatch.setattr(service, "_live_dashboard", live_dashboard)
-    with ThreadPoolExecutor(max_workers=2) as workers:
-        first = workers.submit(service.get_dashboard, month="2026-07")
-        try:
-            assert started.wait(timeout=1)
-            second = workers.submit(second_read)
-            assert second_attempted.wait(timeout=1)
-            # Let the second request reach the same missing cache while the
-            # first request still owns collection.
-            time.sleep(0.05)
-            assert calls == ["2026-07"]
-        finally:
-            release.set()
-        assert first.result(timeout=1) == second.result(timeout=1)
-    assert calls == ["2026-07"]
-    assert "2026-07:live" not in service._DASHBOARD_LOCKS
-    cache.reset_local_cost_dashboard_cache_state()
+    def forbidden(*args):
+        raise AssertionError("passive reads must not collect")
+    monkeypatch.setattr(service, "_aws_client", forbidden)
+    monkeypatch.setattr(service, "_live_dashboard", forbidden)
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        results = list(workers.map(lambda _: service.get_dashboard(month="2026-07"), range(8)))
+    assert all(r["summary"]["monthToDateAwsCost"] is None for r in results)
+    assert all(r["debug"]["collectionOccurred"] is False for r in results)
 
 
-def test_concurrent_manual_refresh_preserves_local_cooldown(monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Barrier
-
-    cache.reset_local_cost_dashboard_cache_state()
+def test_refresh_fails_closed_without_shared_coordination(monkeypatch):
+    import pytest
     monkeypatch.setattr(cache, "_redis_client", lambda: None)
     monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
-    callers = Barrier(2)
-    calls = []
-
-    def live_dashboard(month):
-        calls.append(month)
-        return service._empty_live_dashboard(month)
-
-    def refresh():
-        callers.wait(timeout=1)
-        try:
-            service.get_dashboard(force_refresh=True, month="2026-07")
-            return "ok"
-        except RefreshCooldownError as exc:
-            assert 0 <= exc.retry_after_seconds <= 900
-            return "cooldown"
-
-    monkeypatch.setattr(service, "_live_dashboard", live_dashboard)
-    with ThreadPoolExecutor(max_workers=2) as workers:
-        results = list(workers.map(lambda _index: refresh(), range(2)))
-    assert sorted(results) == ["cooldown", "ok"]
-    assert calls == ["2026-07"]
-    cache.reset_local_cost_dashboard_cache_state()
+    monkeypatch.setattr(service, "_live_dashboard", lambda *args: pytest.fail("must not collect"))
+    with pytest.raises(cache.CollectionUnavailableError):
+        service.get_dashboard(force_refresh=True, month="2026-07")

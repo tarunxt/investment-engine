@@ -171,11 +171,11 @@ def generateUnattachedEbsRecommendation(input: dict[str, Any]) -> dict[str, Any]
     )
     return recommendation(
         "unattached-ebs",
-        "Unattached EBS volumes are incurring storage cost",
+        "Unattached EBS storage requires owner review",
         "medium",
         "confirmed",
         "ec2_api",
-        "EBS volumes continue billing while unattached.",
+        "Unattached inventory may include required retained backups. Gross list-price exposure is not an actual bill or approved savings.",
         [
             {"label": "Unattached volumes", "value": len(available)},
             {
@@ -192,10 +192,10 @@ def generateUnattachedEbsRecommendation(input: dict[str, Any]) -> dict[str, Any]
         ],
         [
             "Review the listed volume IDs.",
-            "Snapshot first if the data might still be needed.",
+            "Preserve encrypted backups, retention and owner dependencies.",
             "Delete only after manual owner approval.",
         ],
-        input.get("estimatedMonthlySavingsUsd"),
+        None,
         checked_at,
         "https://console.aws.amazon.com/ec2/home#Volumes:",
     )
