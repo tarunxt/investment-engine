@@ -1756,6 +1756,7 @@ function DashboardPageForUser({
       trendPoints: indmoneyCommandTrend,
       capturedAt: usSnapshot?.captured_at,
       dataStatus: totalStatuses.indmoney,
+      historyUnavailable: usdInrRate == null,
     },
     bullpen: {
       label: "Bullpen portfolio value",
@@ -1763,14 +1764,19 @@ function DashboardPageForUser({
       trendPoints: bullpenCommandTrend,
       capturedAt: bullpenUpdatedAt,
       dataStatus: totalStatuses.bullpen,
+      historyUnavailable: usdInrRate == null,
     },
     combined: {
       label: "Combined portfolio value",
       currentValue: totalCommandValue,
       trendPoints: combinedCommandTrend,
+      historyUnavailable: usdInrRate == null,
       capturedAt: combinedChartCapturedAt,
       dataStatus: {
         source: "Zerodha + INDmoney + Bullpen · Verified FX required",
+        failed: Object.values(totalStatuses).some((status) => status.failed),
+        pending: Object.values(totalStatuses).some((status) => status.pending),
+        cachedAt: Object.values(totalStatuses).find((status) => status.cachedAt !== undefined)?.cachedAt,
         capturedAt: combinedChartCapturedAt,
         complete: totalCommandValue != null,
       },
@@ -1934,7 +1940,9 @@ function DashboardPageForUser({
             statusPills={[
               {
                 label: "Connection",
-                value: dashboard.zerodhaStatus?.connected
+                value: !dashboard.zerodhaStatus && (totalStatuses.zerodha.failed || totalStatuses.zerodha.pending)
+                  ? "Unverified"
+                  : dashboard.zerodhaStatus?.connected
                   ? "Connected"
                   : "Disconnected",
                 tone: dashboard.zerodhaStatus?.connected ? "success" : "danger",
@@ -2010,7 +2018,9 @@ function DashboardPageForUser({
             emptyMessage={
               indiaSnapshot
                 ? null
-                : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
+                : totalStatuses.zerodha.failed || totalStatuses.zerodha.pending || totalStatuses.zerodha.cachedAt !== undefined
+                  ? snapshotAvailability(totalStatuses.zerodha)
+                  : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
             }
           />
         )}
@@ -2118,7 +2128,9 @@ function DashboardPageForUser({
             emptyMessage={
               usSnapshot
                 ? null
-                : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
+                : totalStatuses.indmoney.failed || totalStatuses.indmoney.pending || totalStatuses.indmoney.cachedAt !== undefined
+                  ? snapshotAvailability(totalStatuses.indmoney)
+                  : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
             }
           />
         )}

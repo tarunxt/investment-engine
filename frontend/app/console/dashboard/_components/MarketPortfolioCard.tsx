@@ -236,7 +236,9 @@ export function MarketPortfolioCard({
                 </div>
               ) : (
                 <div className="mt-4 rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm text-slate-500">
-                  No holdings are available yet for this market snapshot.
+                  {dataStatus?.failed || dataStatus?.pending || dataStatus?.cachedAt !== undefined
+                    ? "Holdings availability is unverified. View saved portfolio history."
+                    : "No holdings are available yet for this market snapshot."}
                 </div>
               )}
             </div>

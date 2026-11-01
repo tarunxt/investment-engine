@@ -23,6 +23,7 @@ export type PortfolioCommandChartOption = {
   trendPoints: GenuinePortfolioPoint[];
   capturedAt?: string | null;
   dataStatus?: TotalDataStatusInfo;
+  historyUnavailable?: boolean;
 };
 
 const PORTFOLIO_COMMAND_CHART_KEYS: PortfolioCommandChartKey[] = [
@@ -259,6 +260,9 @@ export function PortfolioCommandChart({
   }, [options, userId]);
 
   const selectedOption = options[selectedChart];
+  const historyUnverified = Boolean(selectedOption.historyUnavailable ||
+    selectedOption.dataStatus?.failed || selectedOption.dataStatus?.pending ||
+    selectedOption.dataStatus?.cachedAt !== undefined);
   const trendPoints =
     selectedOption.trendPoints.length >= MIN_GENUINE_PORTFOLIO_POINTS
       ? selectedOption.trendPoints
@@ -297,11 +301,20 @@ export function PortfolioCommandChart({
         </div>
         <div
           className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm leading-6 text-slate-300"
-          data-portfolio-history-state="insufficient"
+          role="status"
+          aria-live="polite"
+          data-portfolio-history-state={historyUnverified ? "unknown" : "insufficient"}
         >
-          Insufficient genuine snapshot history for {displayedRangeLabel}. The
-          chart appears after at least {MIN_GENUINE_PORTFOLIO_POINTS} verified
-          snapshots are available.
+          {historyUnverified ? (
+            <>Cannot verify saved snapshot history for {displayedRangeLabel}. History sufficiency is unknown; view saved portfolio history.</>
+          ) : (
+            <>Insufficient genuine snapshot history for {displayedRangeLabel}. The
+            chart appears after at least {MIN_GENUINE_PORTFOLIO_POINTS} verified
+            snapshots are available.</>
+          )}
+          {selectedOption.dataStatus?.historyHref ? <a className="mt-2 block underline focus-visible:outline-2" href={selectedOption.dataStatus.historyHref}>
+            {selectedOption.dataStatus.historyLabel ?? "View saved portfolio history"}
+          </a> : null}
         </div>
       </div>
     );
