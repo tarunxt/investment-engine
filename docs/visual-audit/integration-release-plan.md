@@ -109,3 +109,37 @@ keyboard verification results will be recorded after execution.
 
 No denied PR creation or metadata action was retried. Branch inspection and local
 integration do not establish approval of the worker's screenshots or clear release.
+
+## All twenty scopes prepared
+
+All nineteen coordinator-supplied implementation heads have now been merged locally;
+DB recovery is the twentieth preserve-only scope. Final Dashboard source is
+`7e3831ec3f64a4b3d49f230c2ad105c5c12d3607`. Every mapped source commit was verified as
+an ancestor of the integration branch. The manifest is authoritative for that mapping.
+The latest CI observation snapshot is `integration-ci-round-3.json`; Dashboard's final
+head arrived after that snapshot and needs a fresh CI read.
+
+Models and Stages merged cleanly with the updated Inputs and Prompt dialogs.
+Scanner's final worker test correction overlapped `f9a19e8d`; merge `5f97a8a8` retains
+the worker's equivalent checks, including shared status and not-zero assertions.
+Stage Ledger moved the presentation grid into an adapter, invalidating two extraction
+fixtures. Commit `fe11713d` supplies the adapter bindings to the audit fixture and
+checks the original grid in the adapter. All 37 affected tests passed. Shared workflow
+regressions passed 48 tests. Models passed 45 browser checks; Stages passed its
+India/US six-row state/keyboard/navigation fixture with zero execution callbacks.
+
+Sidebar on-demand loading ultimately uses React lazy/Suspense (`c1519e52`), retaining
+all keyboard, focus, destination, account and preference checks in its offline harness.
+The intermediate Next dynamic boundary did not clear the artifact budget.
+Exact stamped build `c1519e5216a992a7b4e42026a076c4a4b25d527f` compiled and packaged
+successfully. Its fingerprint/auth runtime check reached the dashboard budget gate:
+236,323 transferred bytes against 235,942 allowed growth; 762,939 decoded bytes
+against 760,197 allowed growth. It failed the transfer gate; no budgets were changed.
+This build predates the final Dashboard merge. The integration cannot be released
+until the complete final build passes the unchanged runtime budgets and all other
+release gates. Sidebar's worker is independently diagnosing its source CI failure.
+
+Exact local logs are in `/tmp/visual-audit-*`; runtime artifact/fingerprint verification
+was against a local mock backend, never production. No denied PR creation/metadata
+operation, real provider call, live financial action, account mutation, merge to main
+or deployment was attempted by this integrator.

@@ -10,7 +10,7 @@
       "observed_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/api-cost-provenance.md",
         "frontend/app/console/apis/CombinedLlmCostChart.tsx",
@@ -19,16 +19,57 @@
         "frontend/scripts/api-cost-provenance-playwright.mjs",
         "frontend/tests/api-usage-failed-versus-empty.test.mjs"
       ],
-      "coordinator_supplied_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb"
+      "coordinator_supplied_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "integrated_source_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "AUTO-MODELS-SELECTION",
       "branch": "visual/auto-models-selection",
       "pr": null,
-      "observed_head": null,
+      "observed_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
       "final_head": null,
       "source_visual_acceptance": "pending",
-      "status": "provisional"
+      "status": "integrated locally; independent visual acceptance pending",
+      "coordinator_supplied_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
+      "files": [
+        "docs/visual/auto-models-selection/README.md",
+        "docs/visual/auto-models-selection/desktop-anthropic-end.png",
+        "docs/visual/auto-models-selection/desktop-anthropic.png",
+        "docs/visual/auto-models-selection/desktop-deepseek-end.png",
+        "docs/visual/auto-models-selection/desktop-deepseek.png",
+        "docs/visual/auto-models-selection/desktop-empty.png",
+        "docs/visual/auto-models-selection/desktop-failed.png",
+        "docs/visual/auto-models-selection/desktop-gemini-end.png",
+        "docs/visual/auto-models-selection/desktop-gemini.png",
+        "docs/visual/auto-models-selection/desktop-history-empty.png",
+        "docs/visual/auto-models-selection/desktop-loading.png",
+        "docs/visual/auto-models-selection/desktop-openai-end.png",
+        "docs/visual/auto-models-selection/desktop-openai.png",
+        "docs/visual/auto-models-selection/desktop-partial.png",
+        "docs/visual/auto-models-selection/desktop-summary.png",
+        "docs/visual/auto-models-selection/desktop-templates.png",
+        "docs/visual/auto-models-selection/narrow-320-anthropic.png",
+        "docs/visual/auto-models-selection/narrow-anthropic-end.png",
+        "docs/visual/auto-models-selection/narrow-anthropic.png",
+        "docs/visual/auto-models-selection/narrow-deepseek-end.png",
+        "docs/visual/auto-models-selection/narrow-deepseek.png",
+        "docs/visual/auto-models-selection/narrow-gemini-end.png",
+        "docs/visual/auto-models-selection/narrow-gemini.png",
+        "docs/visual/auto-models-selection/narrow-openai-end.png",
+        "docs/visual/auto-models-selection/narrow-openai.png",
+        "docs/visual/auto-models-selection/narrow-summary.png",
+        "docs/visual/auto-models-selection/narrow-templates.png",
+        "docs/visual/auto-models-selection/results.json",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+        "frontend/components/shared/LlmModelMixControls.tsx",
+        "frontend/components/shared/LlmModelSelectionPanel.tsx",
+        "frontend/components/shared/ModelPickerDialogFrame.tsx",
+        "frontend/tests/model-picker-browser.mjs",
+        "frontend/tests/rebalance-readiness.test.mjs"
+      ],
+      "integrated_source_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "AUTO-INPUTS-EVIDENCE",
@@ -37,7 +78,7 @@
       "observed_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-auto-inputs-evidence.md",
         "frontend/app/console/dashboard/_components/InputEvidenceRows.tsx",
@@ -45,16 +86,34 @@
         "frontend/tests/input-evidence-offline.mjs",
         "frontend/tests/rebalance-stage-inputs.test.mjs"
       ],
-      "coordinator_supplied_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f"
+      "coordinator_supplied_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
+      "integrated_source_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "AUTO-STAGES-HIERARCHY",
       "branch": "codex/auto-stages-hierarchy",
       "pr": null,
-      "observed_head": null,
+      "observed_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
       "final_head": null,
       "source_visual_acceptance": "pending",
-      "status": "provisional"
+      "status": "integrated locally; independent visual acceptance pending",
+      "coordinator_supplied_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
+      "files": [
+        "docs/visual-audit/auto-stages-hierarchy/README.md",
+        "docs/visual-audit/auto-stages-hierarchy/evidence-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/execution-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/india-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/us-partial-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/us-partial-narrow-left.png",
+        "docs/visual-audit/auto-stages-hierarchy/us-partial-narrow.png",
+        "frontend/app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+        "frontend/components/shared/WorkflowStageLedger.tsx",
+        "frontend/scripts/auto-stages-ledger-offline-playwright.mjs"
+      ],
+      "integrated_source_head": "48954d6eeb1ffee376a45ae03cc2a8c65d064caa",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "AUTO-DURATION-EXPLANATION",
@@ -63,12 +122,14 @@
       "observed_head": "50f8ab80588e31732097c54583a7d97b849ab042",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "frontend/app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
         "frontend/scripts/duration-explanation-playwright.mjs"
       ],
-      "coordinator_supplied_head": "50f8ab80588e31732097c54583a7d97b849ab042"
+      "coordinator_supplied_head": "50f8ab80588e31732097c54583a7d97b849ab042",
+      "integrated_source_head": "50f8ab80588e31732097c54583a7d97b849ab042",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "AUTO-PROMPT-PREVIEW",
@@ -77,21 +138,23 @@
       "observed_head": "79f33b2fde2135297ead7a99ce042087377ef063",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "frontend/app/console/automated-rebalance/_components/PromptTemplateDialog.tsx",
         "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx"
       ],
-      "coordinator_supplied_head": "79f33b2fde2135297ead7a99ce042087377ef063"
+      "coordinator_supplied_head": "79f33b2fde2135297ead7a99ce042087377ef063",
+      "integrated_source_head": "79f33b2fde2135297ead7a99ce042087377ef063",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "DASH-LAYOUT-SUMMARY",
       "branch": "visual/dash-layout-summary",
       "pr": 1357,
-      "observed_head": "84c09d83f63f697758b2a8f473dab80eaf7d0f8e",
+      "observed_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
       "final_head": null,
       "source_visual_acceptance": "pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/DASH-LAYOUT-SUMMARY.md",
         "docs/visual-audit/evidence/dash-layout-summary/overview-1180.png",
@@ -105,7 +168,10 @@
         "frontend/app/console/dashboard/_components/DashboardSkeletons.tsx",
         "frontend/scripts/dashboard-freshness-playwright.mjs",
         "frontend/tests/dashboard-portfolio-totals.test.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
+      "integrated_source_head": "7e3831ec3f64a4b3d49f230c2ad105c5c12d3607",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "NAV-SIDEBAR-HIERARCHY",
@@ -114,7 +180,7 @@
       "observed_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "artifacts/nav-sidebar-hierarchy/README.md",
         "artifacts/nav-sidebar-hierarchy/browser-results.json",
@@ -131,24 +197,73 @@
         "frontend/app/console/_components/SidebarNavigation.tsx",
         "frontend/scripts/sidebar-space-playwright.mjs"
       ],
-      "coordinator_supplied_head": "2eefd68654a45d393c682358c2fe68579a9d808d"
+      "coordinator_supplied_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+      "integrated_source_head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "US-SNAPSHOT-PROVENANCE",
       "branch": "fix/us-snapshot-provenance",
       "pr": 1352,
-      "observed_head": "c620715dacfbbb79a5b51310e3c750435af99e9e",
+      "observed_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
       "final_head": null,
       "source_visual_acceptance": "pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/US-SNAPSHOT-PROVENANCE.md",
+        "docs/visual-audit/us-snapshot-provenance/1180-empty.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-empty.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-failed.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-failed.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-loading.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-loading.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-navigation-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-navigation.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-navigation.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-draft.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-draft.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-empty-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-empty.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-empty.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-recovered.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-recovered.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-save-failure.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-save-failure.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-after-fixture-import.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-after-fixture-import.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-partial-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-partial.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-partial.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-source-details.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-source-details.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-stale-read-failure.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-stale-read-failure.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-unavailable.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-unavailable.png",
+        "docs/visual-audit/us-snapshot-provenance/390-navigation-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/390-navigation.json",
+        "docs/visual-audit/us-snapshot-provenance/390-navigation.png",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-draft.json",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-draft.png",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-empty-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-empty.json",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-empty.png",
+        "docs/visual-audit/us-snapshot-provenance/390-saved-partial-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/390-saved-partial.json",
+        "docs/visual-audit/us-snapshot-provenance/390-saved-partial.png",
+        "docs/visual-audit/us-snapshot-provenance/390-source-details.json",
+        "docs/visual-audit/us-snapshot-provenance/390-source-details.png",
+        "docs/visual-audit/us-snapshot-provenance/validation.json",
         "frontend/app/console/indmoney-us/_components/IndMoneyUsPasteCard.tsx",
+        "frontend/app/console/indmoney-us/_components/IndMoneyUsSnapshotWorkspace.tsx",
         "frontend/app/console/indmoney-us/_components/IndMoneyUsSnapshotsPanel.tsx",
         "frontend/app/console/indmoney-us/page.tsx",
         "frontend/tests/us-snapshot-provenance.test.mjs",
         "frontend/tests/us-snapshot-rendering.test.mjs"
-      ]
+      ],
+      "coordinator_supplied_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
+      "integrated_source_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "LLM-REPORT-COMPARISON",
@@ -157,13 +272,15 @@
       "observed_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-llm-report-comparison.md",
         "frontend/app/console/llms/page.tsx",
         "frontend/scripts/llm-report-offline-playwright.mjs"
       ],
-      "coordinator_supplied_head": "442d385f99559457dd462cd6ab6148ca976d1c88"
+      "coordinator_supplied_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "integrated_source_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "VISUAL-MAILS-HISTORY-HIERARCHY",
@@ -172,7 +289,7 @@
       "observed_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "coordinator_supplied_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
       "files": [
         "artifacts/visual-mails-history/desktop-github.png",
@@ -185,7 +302,9 @@
         "docs/visual-mails-history-hierarchy.md",
         "frontend/app/console/mails/page.tsx",
         "frontend/scripts/mail-history-offline-playwright.mjs"
-      ]
+      ],
+      "integrated_source_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "USAGE-ERROR-CONSOLIDATION",
@@ -194,13 +313,15 @@
       "observed_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/usage-error-consolidation.md",
         "frontend/app/console/profile/layout.tsx",
         "frontend/scripts/cost-usage-recovery-playwright.mjs"
       ],
-      "coordinator_supplied_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc"
+      "coordinator_supplied_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
+      "integrated_source_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "PREFS-FORM-SCOPE",
@@ -209,7 +330,7 @@
       "observed_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/prefs-form-scope/README.md",
         "docs/visual-audit/prefs-form-scope/after-1180x757.png",
@@ -222,16 +343,25 @@
         "frontend/app/console/profile/preferences/page.tsx",
         "frontend/scripts/preferences-scope-offline-playwright.mjs"
       ],
-      "coordinator_supplied_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f"
+      "coordinator_supplied_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
+      "integrated_source_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "PROMPTS-LIST-DISCOVERY",
       "branch": "visual/prompts-list-discovery",
       "pr": null,
-      "observed_head": null,
+      "observed_head": "b2561f086bc16db2c2d688172da87e8126356d97",
       "final_head": null,
       "source_visual_acceptance": "pending",
-      "status": "provisional"
+      "status": "integrated locally; independent visual acceptance pending",
+      "coordinator_supplied_head": "b2561f086bc16db2c2d688172da87e8126356d97",
+      "files": [
+        "frontend/app/console/prompts/page.tsx",
+        "frontend/scripts/prompts-discovery-offline-playwright.mjs"
+      ],
+      "integrated_source_head": "b2561f086bc16db2c2d688172da87e8126356d97",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "VISUAL-RUNS-STAGES-HIERARCHY",
@@ -240,7 +370,7 @@
       "observed_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/runs-stages/README.md",
         "docs/visual-audit/runs-stages/diagnostics-1180.png",
@@ -253,7 +383,9 @@
         "frontend/tests/portfolio-stage-history.test.mjs",
         "frontend/tests/runs-stages-browser.mjs"
       ],
-      "coordinator_supplied_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d"
+      "coordinator_supplied_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "integrated_source_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "RANKINGS-BROWSER-GROUPING",
@@ -262,7 +394,7 @@
       "observed_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/rankings-browser-grouping/README.md",
         "docs/visual-audit/rankings-browser-grouping/empty-desktop.png",
@@ -279,21 +411,27 @@
         "frontend/scripts/rankings-browser-offline-playwright.mjs",
         "frontend/tests/sports-rankings-summary.test.mjs"
       ],
-      "coordinator_supplied_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915"
+      "coordinator_supplied_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "integrated_source_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "SCANNER-TABLE-COMPARISON",
       "branch": "visual/scanner-table-comparison",
       "pr": 1348,
-      "observed_head": "ff7103e616cd868ce5a27dd33c5be4545a423c56",
+      "observed_head": "6528616845a29f037d2af1c53b746ec558db63ab",
       "final_head": null,
       "source_visual_acceptance": "pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/scanner-table-comparison.md",
         "frontend/app/console/technical-setups/page.tsx",
-        "frontend/scripts/scanner-table-offline-playwright.mjs"
-      ]
+        "frontend/scripts/scanner-table-offline-playwright.mjs",
+        "frontend/tests/full-run-history.test.mjs"
+      ],
+      "coordinator_supplied_head": "6528616845a29f037d2af1c53b746ec558db63ab",
+      "integrated_source_head": "6528616845a29f037d2af1c53b746ec558db63ab",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "BOTS-OVERVIEW-RUNTIME",
@@ -302,7 +440,7 @@
       "observed_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/bots-overview-runtime.md",
         "docs/evidence/bots-overview-runtime/before-loading-desktop.png",
@@ -354,7 +492,9 @@
         "frontend/app/console/trading-bots/_components/TradingBotsOverviewPage.tsx",
         "frontend/scripts/bots-overview-offline-playwright.mjs"
       ],
-      "coordinator_supplied_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980"
+      "coordinator_supplied_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
+      "integrated_source_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "INDIA-PORTFOLIO-HIERARCHY",
@@ -363,7 +503,7 @@
       "observed_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
       "final_head": null,
       "source_visual_acceptance": "independent acceptance pending",
-      "status": "provisional",
+      "status": "integrated locally; independent visual acceptance pending",
       "files": [
         "docs/visual-audit/india-portfolio-hierarchy.md",
         "frontend/app/console/zerodha/_components/IndiaPortfolioNav.module.css",
@@ -372,7 +512,9 @@
         "frontend/app/console/zerodha/page.tsx",
         "frontend/scripts/india-portfolio-hierarchy-playwright.mjs"
       ],
-      "coordinator_supplied_head": "62795de2e96b9094fc1e633d620df70ac26d8aff"
+      "coordinator_supplied_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
+      "integrated_source_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
+      "source_commit_is_ancestor": true
     },
     {
       "scope": "DB-RECOVERY-PRESERVATION",
@@ -382,7 +524,9 @@
       "final_head": null,
       "source_visual_acceptance": "pending",
       "status": "preserve-only; coordinator reports six tests passed",
-      "files": []
+      "files": [],
+      "integrated_source_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+      "source_commit_is_ancestor": true
     }
   ],
   "ci_observed": [
