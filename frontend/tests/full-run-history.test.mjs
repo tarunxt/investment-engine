@@ -145,10 +145,10 @@ function loadSetupNameCell() {
   return loadedModule.exports.SetupNameCell;
 }
 
-test('Scanner differentiates loading and unavailable counts from a verified zero', () => {
+test('Scanner uses shared loading while differentiating unavailable counts from a verified zero', () => {
   const SetupNameCell = loadSetupNameCell();
   const render = (countsStatus, group) => renderToStaticMarkup(createElement(SetupNameCell, { row: { setup: 'Breakout' }, countsStatus, group, onSetupClick: () => {} }));
-  assert.match(render('loading'), /Breakout \(Loading…\)/);
+  assert.equal(render('loading'), '<span>Breakout</span>');
   assert.match(render('error'), /Breakout \(Unavailable\)/);
   assert.doesNotMatch(render('loading'), /\(0\)/);
   assert.doesNotMatch(render('error'), /\(0\)/);
@@ -161,6 +161,8 @@ test('all full-history consumers delegate to the summary-first service and Scann
   const actionables = read('../app/console/_components/FinalActionablesConsole.tsx');
   assert.match(actionables, /export async function fetchAllFullRuns\(\) \{\s*return apiService\.getAllFullRuns\(\);\s*\}/);
   const scanner = read('../app/console/technical-setups/page.tsx');
+  assert.match(scanner, /id="setup-counts-status" role="status"/);
+  assert.match(scanner, /Loading setup counts from run history and portfolio snapshots\. No count is inferred as zero\./);
   assert.match(scanner, /role="alert"/);
   assert.match(scanner, /Retry counts/);
   assert.match(scanner, /setLoadAttempt\(\(attempt\) => attempt \+ 1\)/);

@@ -32,14 +32,18 @@ Native source reviewer `/root/verify_remaining_visual_requirements` reviewed act
 
 ## Verification
 
-- `npx eslint app/console/technical-setups/page.tsx scripts/scanner-table-offline-playwright.mjs`: passed.
+- `npx eslint app/console/technical-setups/page.tsx scripts/scanner-table-offline-playwright.mjs tests/full-run-history.test.mjs`: passed.
 - `npx tsc --noEmit`: passed.
-- `node --test tests/technical-price-evidence.test.mjs tests/final-actionables-run-identity.test.mjs tests/actionables-runs-matching.test.mjs tests/final-actionables-consensus-denominator.test.mjs`: 30 passed.
-- `SCANNER_EVIDENCE_DIR=/workspace/scanner-evidence node scripts/scanner-table-offline-playwright.mjs`: passed. Actual scanner page rendered with isolated fixture dependencies; external requests denied. Covers all catalogue fields/rules/scores, both mapped views, return and retained sorting/focus, keyboard sorting for all headers, keyboard tab controls, loading, populated, empty, failed/retry, partial source failure, historical saved display values, repeated stock-dialog open/close, narrow horizontal scroll and browser back.
+- `node --test tests/technical-price-evidence.test.mjs tests/final-actionables-run-identity.test.mjs tests/actionables-runs-matching.test.mjs tests/final-actionables-consensus-denominator.test.mjs tests/full-run-history.test.mjs`: 43 passed.
+- `SCANNER_EVIDENCE_DIR=/workspace/scanner-evidence node scripts/scanner-table-offline-playwright.mjs tests/full-run-history.test.mjs`: passed. Actual scanner page rendered with isolated fixture dependencies; external requests denied. Covers all catalogue fields/rules/scores, both mapped views, return and retained sorting/focus, keyboard sorting for all headers, keyboard tab controls, loading, populated, empty, failed/retry, partial source failure, historical saved display values, repeated stock-dialog open/close, narrow horizontal scroll and browser back.
 - Screenshots: `/workspace/scanner-evidence/loading-1180.png`, `loaded-1180.png`, `guidance-1180.png`, `loaded-narrow.png`, `guidance-narrow.png`, `failed-narrow.png`. Each also has a `-viewport.png` capture at the exact configured viewport. These are safe local fixture renders without the production shell, not production or PDF images.
+
+- Exact aggregate dashboard regression command from `.github/workflows/pr-checks.yml`: 505 passed across 51 test files.
 
 ## Remaining limits and coordination
 
 No separate stale-state or per-row availability contract exists in this page; introducing either would require data-contract work beyond this visual reorganization. The historical fixture verifies unchanged display-value pass-through, not a real provider freshness detector. Existing stock modal Escape/focus-trapping/return-to-trigger limitations are unchanged; button-close and repeated reopening are verified. No live provider, refresh, scan, trade, account mutation, merge or deployment was performed.
 
-Only `frontend/app/console/technical-setups/page.tsx` is production code changed. Parallel work touching that file must reconcile the shared status IDs, tab/panel wrapper and Setup header label. No automated-rebalance or global layout files changed. One existing draft PR is updated for coordinator integration; do not merge/deploy independently.
+Only `frontend/app/console/technical-setups/page.tsx` is production code changed. Parallel work touching that file must reconcile the shared status IDs, tab/panel wrapper and Setup header label. The existing scanner assertion in `frontend/tests/full-run-history.test.mjs` was also updated for the shared loading requirement; parallel edits to that test should retain its safety assertions. No automated-rebalance or global layout files changed. The existing draft PR receives branch commits for coordinator integration; do not merge/deploy independently. Automatic approval review denied updating its title/body (stating metadata publication was not explicitly authorized), so its original description remains stale pending explicit authorization.
+
+The exact earlier CI jobs 124732792241 (run 41267340844, ff7103e6) and 124735064465 (run 41268110475, e93c3547) were inspected. Both failed only the pre-existing scanner assertion requiring a per-row Loading suffix, which contradicts the mapped shared-status requirement. The updated test requires the plain loading setup name and shared loading status while retaining every unavailable/verified-zero/loaded-count assertion. No unavailable/zero safety assertion was removed.
