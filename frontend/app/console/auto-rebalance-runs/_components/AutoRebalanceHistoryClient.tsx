@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
-  CheckCircle2,
   ChevronRight,
   Clock3,
   Loader2,
@@ -167,7 +166,7 @@ export function AutoRebalanceHistoryListClient({
             {portfolioLabel(portfolio)} Auto-Rebalance Runs
           </h1>
           <p className="mt-2 text-sm text-slate-600">
-            Each tile is one complete auto-rebalance attempt. Open a tile for stage outputs, errors, prompts, and LLM-level diagnostics.
+            Each tile is one recorded auto-rebalance attempt. Saved statuses and stages do not verify current worker activity. Component completion does not establish that the full run finished. Open a tile for stage outputs, errors, prompts, and LLM-level diagnostics.
           </p>
         </div>
         <div className="flex gap-2">
@@ -198,13 +197,13 @@ export function AutoRebalanceHistoryListClient({
                 <h2 className="mt-1 text-xl font-bold text-slate-950">{item.label}</h2>
                 <p className="mt-1 text-sm text-slate-600">Started {formatTime(item.created_at)}</p>
               </div>
-              <div className="flex max-w-full items-center gap-2"><StatusBadge status={item.status} /><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
+              <div className="flex max-w-full items-center gap-2"><span className="text-xs text-slate-600">Saved status <StatusBadge status={item.status} /></span><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-              <div><p className="text-xs text-slate-500">Current stage</p><p className="mt-1 font-semibold text-slate-900">{item.current_stage ? STAGE_LABELS[item.current_stage] : "Queued"}</p></div>
+              <div><p className="text-xs text-slate-500">Last recorded stage</p><p className="mt-1 font-semibold text-slate-900">{item.current_stage ? STAGE_LABELS[item.current_stage] : "Not recorded"}</p></div>
               <div><p className="text-xs text-slate-500">Stages</p><p className="mt-1 font-semibold text-slate-900">{item.stages.filter((stage) => stage.status === "completed").length}/{item.stages.length || 6}</p></div>
               <div><p className="text-xs text-slate-500">LLM cost</p><p className="mt-1 font-semibold text-slate-900">{formatCost(item.total_estimated_cost)}</p></div>
-              <div><p className="text-xs text-slate-500">Finished</p><p className="mt-1 font-semibold text-slate-900">{item.completed_at ? formatTime(item.completed_at) : "In progress"}</p></div>
+              <div><p className="text-xs text-slate-500">Finished</p><p className="mt-1 font-semibold text-slate-900">{item.completed_at ? formatTime(item.completed_at) : "Not recorded"}</p></div>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-3">
               {item.stages.map((stage) => <StageSummary key={stage.stage} stage={stage} />)}
@@ -265,13 +264,13 @@ export function AutoRebalanceHistoryDetailClient({
       <nav aria-label="Run hierarchy" className="flex flex-wrap gap-2 text-sm"><Link className="text-blue-700 underline" href={URLs.routes.console.runs()}>All runs</Link><span aria-hidden="true">/</span><span aria-current="page">Workflow · {run?.label || `Run #${sequence}`}</span></nav>
       <p className="text-xs text-slate-500">{RUN_HIERARCHY_HELP}</p>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><p className="mt-2 text-sm text-slate-600">Stage-by-stage status, the exact errors, and every saved LLM prompt/output.</p></div>
+        <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><p className="mt-2 text-sm text-slate-600">Stage-by-stage saved status, the exact errors, and every saved LLM prompt/output. Saved statuses do not verify current worker activity.</p></div>
         <div className="flex gap-2"><Button asChild variant="outline" className="rounded-full"><Link href={URLs.routes.console.autoRebalanceRuns(portfolio)}><ArrowLeft className="mr-2 size-4" />All runs</Link></Button><Button type="button" onClick={() => void load()} className="rounded-full bg-slate-950 text-white hover:bg-slate-800"><RefreshCw className="mr-2 size-4" />Refresh</Button></div>
       </div>
       {loading ? <div className="flex min-h-56 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm text-slate-600"><Loader2 className="size-4 animate-spin" />Loading run detail…</div> : null}
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
       {run ? <>
-        <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <CheckCircle2 className="size-5 text-emerald-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><StatusBadge status={run.status} /></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Current stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
+        <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <Clock3 className="size-5 text-slate-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><span className="text-xs text-slate-600">Saved status <StatusBadge status={run.status} /></span></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Last recorded stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
         {run.stages.filter(stage => stage.stage === "actionables" && stage.summary.frozen_final).map(stage => (
           <details key="frozen-final" className="rounded-xl border bg-white p-4">
             <summary className="cursor-pointer font-semibold">Saved final calculation — original formula and source evidence</summary>
