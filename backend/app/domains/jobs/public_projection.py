@@ -17,12 +17,12 @@ _EXACT = frozenset({
 })
 _SUFFIXES = ("password", "passwd", "secret", "secretkey", "accesskey", "secretaccesskey", "credential", "credentials", "apikey",
              "privatekey", "signingkey", "accesstoken", "refreshtoken", "sessiontoken")
-_CREDENTIAL_LABEL = (r"(?:[a-z0-9_-]*(?:api[_-]?key|password(?:[_-]?hash)?|passwd|passphrase|secret|credentials?|"
-                     r"private[_-]?key|signing[_-]?key|access[_-]?token|refresh[_-]?token|"
-                     r"session[_-]?token)|token|authorization|cookie)")
-_ASSIGNMENT = re.compile(
-    r"(?i)(\b" + _CREDENTIAL_LABEL + r"\b)([\"']?\s*[:=]\s*)"
-    r'''("[^"]*"|'[^']*'|\[REDACTED\]|[^\s,;|&<>{}]+)'''
+# Parse assignment structure, then use the SAME credential_label policy as
+# nested mappings and exported headers. A second regex label allowlist drifts
+# (for example SECRET_KEY/AWS_SECRET_ACCESS_KEY) and must not decide sensitivity.
+_ASSIGNMENT = re.compile(r"(?i)(\b[a-z][a-z0-9_-]*\b)([\"']?\s*[:=]\s*)")
+_ASSIGNMENT_VALUE = re.compile(
+    r'''(?i)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\[REDACTED\]|(?:Basic|Bearer)\s+(?:\[REDACTED\]|[a-z0-9._~+/=-]+)|[^\s,;|&<>{}"']+)'''
 )
 _BEARER = re.compile(r"(?i)\bBearer\s+[a-z0-9._~+/=-]+")
 _BASIC_URL = re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@")
@@ -34,15 +34,26 @@ def credential_label(label: str) -> bool:
 
 
 def public_text(value: str) -> str:
-    def replacement(match):
-        token = match[3]
+    parts = []
+    cursor = 0
+    # Scan label positions rather than consuming safe outer assignments: a
+    # detail="SECRET_KEY=..." wrapper must not hide an inner labeled value.
+    # This stays iterative even for deeply nested diagnostic strings.
+    for match in _ASSIGNMENT.finditer(value):
+        if match.start() < cursor or not credential_label(match[1]):
+            continue
+        supplied = _ASSIGNMENT_VALUE.match(value, match.end())
+        if supplied is None:
+            continue
+        token = supplied[0]
         quoted = token[0] in {"'", '"'}
         safe = token[0] + REDACTED + token[0] if quoted else REDACTED
-        return match[1] + match[2] + safe
-    # Bearer may be the value of Authorization; redact its payload before a
-    # generic assignment matcher can consume only the word "Bearer".
-    text = _BEARER.sub("Bearer " + REDACTED, value)
-    text = _ASSIGNMENT.sub(replacement, text)
+        parts.extend((value[cursor:match.end()], safe))
+        cursor = supplied.end()
+    parts.append(value[cursor:])
+    # Complete Basic/Bearer values are consumed above, not just their schemes.
+    # Retain the accepted standalone Bearer and URL-userinfo contracts too.
+    text = _BEARER.sub("Bearer " + REDACTED, "".join(parts))
     return _BASIC_URL.sub(lambda match: match[1] + REDACTED + "@", text)
 
 

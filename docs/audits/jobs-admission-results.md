@@ -193,3 +193,42 @@ both passed. The original fixture's assertions and retained xfail were not
 weakened or relabeled. No policy question remains: existing denial is required.
 The supplied acceptance source differs only by removal of the first strict xfail
 marker after its four parametrized serializer cases genuinely passed.
+
+## A9-R05 independent redaction re-review correction
+
+Review of fa455bb6 reproduced three blocking diagnostic-copy gaps using only
+synthetic values: SECRET_KEY=..., AWS_SECRET_ACCESS_KEY=... and Authorization:
+Basic <synthetic-base64>. Three DTO cases failed before remediation. The text
+matcher maintained a separate credential-label allowlist that omitted labels
+already handled by the reviewed structured credential_label policy. Its generic
+value matcher could also consume only the Basic scheme, leaving its payload.
+
+Text assignment projection now reuses credential_label directly, the same policy
+already used for structured mappings and export headers. There is no independent
+text-label allowlist. An iterative label/value scan handles safe quoted wrappers
+without hiding inner labeled secrets or introducing recursive string-depth growth.
+Basic/Bearer scheme plus credential is consumed as one value; quoted strings,
+[REDACTED] idempotence and safe diagnostic suffixes are preserved. The accepted
+standalone Bearer, URL-userinfo and [REDACTED] contracts are retained. Existing
+Polymarket logger and Bullpen audit sanitizer contracts were inspected; their
+broad token-key scrubbers are not applied to financial token IDs/counts, and those
+modules are not changed. This correction consolidates the jobs lane on its
+reviewed structured policy instead of adding a conflicting ad hoc label list.
+
+New test_jobs_public_projection_regressions.py: 19 passing synthetic cases cover
+all three labels/schemes through JobResponse, actual initial WebSocket handler,
+actual update publication with fake Redis, and actual export tasks with mocked
+credentials/append/notifications. Also covers quoted labels, safe nested
+wrappers, idempotence, 1500 flat wrapper assignments without recursion, stored
+original immutability, quantities/currency/unknown values, source IDs, financial
+token IDs, token counts and ordinary Basic analysis text.
+
+Validation: the previous 227-test source/behavior set plus 19 new regressions:
+246 passed, 1 unchanged historical xfail. All provider, credential, Redis, append
+and notification boundaries remain mocked. No parser or old acceptance assertion
+changes; the unsupported one-column success assertion remains historical xfail,
+with explicit zero-append denial and valid ancillary redaction acceptance retained.
+No changes to cancellation, execution ownership contract, admission/outbox,
+migrations, financial provenance, stored originals or workflow settings. This is
+an unpublished private delta against fa455bb6 for independent re-review; no claim
+of deployment, real-data exposure proof, arbitrary secret detection or closure.
