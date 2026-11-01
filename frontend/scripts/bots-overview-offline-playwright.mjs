@@ -31,30 +31,54 @@ try {
  if(evidence)await mkdir(evidence,{recursive:true});
  if(process.env.BOTS_BASELINE_ONLY){
   await page.goto(origin);await page.waitForFunction(()=>window.pending.length===3);
-  await page.screenshot({path:path.join(evidence,'before-loading-desktop.png')});
+  await page.screenshot({animations:'disabled',path:path.join(evidence,'before-loading-desktop.png')});
  }else{
- for(const state of ['loading','loaded','empty','failed','partial','stale']){
+ for(const state of ['loading','loaded','unavailable','empty','failed','partial','stale']){
   await page.goto(origin);await page.waitForFunction(()=>window.pending.length===3);
   if(state!=='loading')await page.evaluate(s=>window.settle(s),state);
   if(state!=='loading')await page.getByText('Loading the latest shared bot state in the background.',{exact:false}).waitFor({state:'hidden'});
   for(const [name,metric] of [['Runtime context','Bots running'],['Capital and performance','Total money invested'],['Positions and exposure','Live exposure']]){
-   const tab=page.getByRole('tab',{name,exact:true});await tab.click();await page.getByRole('tabpanel').getByRole('rowheader',{name:metric,exact:true}).waitFor();
+   const tab=page.getByRole('tab',{name,exact:true});await tab.click();
+   await page.waitForFunction(()=>{const el=document.querySelector('[role=tab][aria-selected=true]');const color=getComputedStyle(el).color;return color==='rgb(255, 255, 255)'||color==='oklch(1 0 0)';});await page.getByRole('tabpanel').getByRole('rowheader',{name:metric,exact:true}).waitFor();
    if(state==='loading'||state==='empty'||state==='failed'){
     if(name!=='Runtime context')assert.match(await page.getByRole('tabpanel').textContent(),/—/);
    }
    if(state==='loaded'&&name==='Capital and performance')assert.match(await page.getByRole('tabpanel').textContent(),/\$400/);
    if(state==='stale')assert.match(await page.getByText('Last refreshed',{exact:false}).first().textContent(),/Jan/);
-   if(evidence)await page.screenshot({path:path.join(evidence,`${state}-${name.split(' ')[0]}.png`)});
+   await page.evaluate(()=>scrollTo(0,0));
+   if(evidence)await page.screenshot({animations:'disabled',path:path.join(evidence,`${state}-${name.split(' ')[0]}.png`)});
+   if(state==='loaded'){
+    const active=await tab.evaluate(el=>({background:getComputedStyle(el).backgroundColor,color:getComputedStyle(el).color}));
+    assert.ok(active.color==='rgb(255, 255, 255)'||active.color==='oklch(1 0 0)','Active tab uses white text');
+    await page.evaluate(()=>document.documentElement.classList.add('dark'));
+    if(evidence)await page.screenshot({animations:'disabled',path:path.join(evidence,`dark-${name.split(' ')[0]}.png`)});
+    await page.evaluate(()=>document.documentElement.classList.remove('dark'));
+   }
+   await page.setViewportSize({width:390,height:844});
+   const last=await page.getByRole('tab',{name:'Positions and exposure',exact:true}).boundingBox();const content=await page.getByRole('tabpanel').boundingBox();assert.ok(last.y+last.height<=content.y);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+   if(evidence)await page.locator('#root > div > div').first().screenshot({animations:'disabled',path:path.join(evidence,`${state}-${name.split(' ')[0]}-narrow.png`)});
+   await page.setViewportSize({width:1180,height:757});
   }
   await page.getByRole('button',{name:'Return to Runtime context'}).click();assert.equal(await page.getByRole('tab',{name:'Runtime context',exact:true}).getAttribute('aria-selected'),'true');
   await page.keyboard.press('ArrowRight');await page.getByRole('tab',{name:'Capital and performance',exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'Capital and performance',exact:true}).getAttribute('aria-selected'),'true');
   const details=page.getByRole('button',{name:'Details',exact:true}).first();for(let i=0;i<2;i++){await details.click();assert.equal(await details.getAttribute('aria-expanded'),'true');await details.click();assert.equal(await details.getAttribute('aria-expanded'),'false');}
   assert.equal(await page.getByRole('link',{name:'Open',exact:true}).count(),4);
+  const destinations=await page.getByRole('link',{name:'Open',exact:true}).evaluateAll(links=>links.map(link=>link.getAttribute('href')));
+  assert.deepEqual(destinations,['/console/polymarket-bot','/console/polymarket-direct-bot','/console/bullpen-ai','/console/trading-bots/bullpen-ai-auto-live']);
+  if(state==='loaded'){
+   await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>window.pending.length===3);
+   assert.equal(await page.getByRole('button',{name:'Refresh',exact:true}).isDisabled(),true);
+   assert.equal(await page.getByRole('tab',{name:'Capital and performance',exact:true}).getAttribute('aria-selected'),'true');
+   await page.evaluate(()=>window.settle('failed'));await page.getByRole('button',{name:'Refresh',exact:true}).waitFor({state:'visible'});
+   await page.waitForFunction(()=>!document.body.textContent.includes('Loading the latest shared bot state in the background.'));
+   assert.match(await page.getByRole('tabpanel').textContent(),/\$400/);
+  }
   await page.setViewportSize({width:390,height:844});
   const lastTab=await page.getByRole('tab',{name:'Positions and exposure',exact:true}).boundingBox();const panel=await page.getByRole('tabpanel').boundingBox();assert.ok(lastTab.y+lastTab.height<=panel.y,'Narrow tabs must not overlap content');
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);if(evidence)await page.screenshot({path:path.join(evidence,`${state}-narrow.png`)});await page.setViewportSize({width:1180,height:757});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.setViewportSize({width:1180,height:757});
  }
  await page.evaluate(()=>{history.pushState({},'', '/fixture-away');});await page.goBack();await page.getByRole('heading',{name:'Overview',exact:true}).waitFor();
  }
- assert.deepEqual(external,[]);assert.deepEqual(errors,[]);console.log(process.env.BOTS_BASELINE_ONLY?'PASS: baseline desktop captured.':'PASS: six source states (including stale source), back navigation; all three views; desktop and narrow without tab overlap; keyboard; repeated details; four console links; zero external requests.');
+ assert.deepEqual(external,[]);assert.deepEqual(errors,[]);console.log(process.env.BOTS_BASELINE_ONLY?'PASS: baseline desktop captured.':'PASS: seven source states (including unavailable and stale source), back navigation; all three views; desktop and narrow without tab overlap; keyboard; repeated details; four console links; zero external requests.');
 }finally{await browser?.close();if(server)await new Promise(r=>server.close(r));await rm(temp,{recursive:true,force:true});}
