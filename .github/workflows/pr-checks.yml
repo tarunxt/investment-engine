@@ -68,6 +68,7 @@ jobs:
           backend/tests/test_zerodha_unknown_inputs.py
           backend/tests/test_zerodha_portfolio.py
           backend/tests/test_portfolio_events.py
+          backend/tests/test_workflow_policy_schema_readiness.py
           backend/tests/test_rebalance_side_effect_policy.py
           backend/tests/test_rebalance_side_effect_policy_migration.py
           backend/tests/test_indmoney_snapshot_source_precondition.py
@@ -542,6 +543,7 @@ jobs:
           node scripts/rebalance-score-policy-offline-playwright.mjs
           node scripts/audit7-snapshot-label-offline-playwright.mjs
           node scripts/audit7-f11-offline-playwright.mjs
+          node scripts/workflow-schema-readiness-offline-playwright.mjs
 
       - name: Verify saved-output states and keyboard behavior offline
         if: matrix.bundler == 'webpack'

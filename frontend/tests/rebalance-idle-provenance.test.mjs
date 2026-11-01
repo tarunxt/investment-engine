@@ -16,11 +16,12 @@ const mergeStageEvidence = new Function(ts.transpileModule('function mergeStageE
 const stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'];
 const oldTime = '2026-10-30T12:00:00Z', newTime = '2026-11-01T12:00:00Z';
 const record = (status, count) => ({ portfolio: 'india', sequence: 7, created_at: newTime, updated_at: newTime, completed_at: newTime, stages: [{ stage: 'actionables', status, started_at: newTime, completed_at: newTime, run_id: 10, job_id: 20, provider_count: 2, completed_provider_count: 1, failed_provider_count: 1, partial_provider_count: 0, estimated_cost: 0, summary: { recommended_stocks: count } }] });
-async function hydrate({ runs = [], histories = [], initial } = {}) {
+async function hydrate({ runs = [], histories = [], initial, historyFailure, onError = () => {} } = {}) {
   let states = initial ?? Object.fromEntries(['zerodha', 'indmoneyUs'].map(market => [market, Object.fromEntries(stages.map(stage => [stage, { state: 'idle' }]))]));
   const apiService = Object.fromEntries(['zerodhaPortfolioOverview', 'indmoneyUsPortfolioOverview', 'zerodhaThreatsLatest', 'indmoneyUsThreatsLatest'].map(key => [key, async () => ({})]));
-  apiService.getAutoRebalanceHistory = async market => ({ items: market === 'india' ? histories : [] });
+  apiService.getAutoRebalanceHistory = async market => { if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
   const context = {
+    setWorkflowHistoryError: onError, normalizeError: error => error.message,
     apiService, fetchDashboardRecentFullRuns: async () => runs, useCallback: fn => fn, usdInrRate: 1,
     getLatestStageRun: (rows, stage, market) => market === 'india' ? rows.find(row => row.stage === stage) : undefined,
     getLatestMatchingRebalanceRuns: (rows, market) => market === 'india' ? rows.filter(row => row.stage === 'rebalance') : [],
@@ -74,4 +75,14 @@ test('default reconciliation remains unchanged and newer derivation can supersed
   assert.equal(mergeStageEvidence(observed, saved).evidence.kind, 'derived');
   assert.equal(mergeStageEvidence(observed, saved, true).evidence.kind, 'saved');
   assert.equal(mergeStageEvidence(observed, {...saved, completedAt: oldTime}, true).evidence.kind, 'derived');
+});
+
+test('history read failure is unavailable and cannot replace saved evidence with empty history', async () => {
+  const initial = await hydrate({histories: [record('completed', 3)]});
+  let error;
+  const result = await hydrate({initial, historyFailure: Error('Workflow schema is not ready'), onError: value => {error=value;}});
+  assert.match(error, /Saved workflow history unavailable.*Workflow schema is not ready/);
+  assert.deepEqual(result, initial);
+  await hydrate({initial, onError: value => {error=value;}});
+  assert.equal(error, null);
 });

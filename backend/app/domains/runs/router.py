@@ -13,7 +13,7 @@ from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.domains.jobs.models import Job
-from app.domains.runs.side_effect_policy import permits_side_effects
+from app.domains.runs.side_effect_policy import permits_side_effects, require_workflow_policy_schema
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
     AutoRebalanceWorkflowStage,
@@ -349,6 +349,7 @@ async def _build_auto_rebalance_history(
     portfolio: str,
     sequences: set[int] | None = None,
 ) -> list[tuple[AutoRebalanceHistoryItemResponse, list[Run], list[Job]]]:
+    await require_workflow_policy_schema(db)
     workflow_query = (
         select(AutoRebalanceWorkflow)
         .where(
@@ -599,6 +600,7 @@ async def reserve_auto_rebalance_label(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     redis = _get_redis()
     try:
         sequence = await _reserve_auto_rebalance_sequence(db, redis, body.portfolio)
@@ -631,6 +633,7 @@ async def list_auto_rebalance_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     # Include legacy run/job sequences as well as durable workflow rows. All
     # branches retain the authenticated owner and market boundary.
     sequence_query = select(AutoRebalanceWorkflow.sequence).where(
@@ -728,6 +731,7 @@ async def update_auto_rebalance_stage(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     if portfolio not in AUTO_REBALANCE_LABEL_PREFIXES:
         raise HTTPException(404, detail="Auto-rebalance portfolio not found")
     # Lock the parent row. The dashboard may send a "started" audit update and
@@ -861,6 +865,7 @@ async def queue_auto_rebalance_completion_email(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    await require_workflow_policy_schema(db)
     workflow = (await db.execute(
         select(AutoRebalanceWorkflow)
         .where(
