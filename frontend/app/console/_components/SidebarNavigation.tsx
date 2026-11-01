@@ -43,7 +43,7 @@ import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
 const NavigationDirectory = lazy(() => import('./NavigationDirectory').then((module) => ({ default: module.NavigationDirectory })));
-import { SidebarThemeToggle } from './SidebarThemeToggle';
+const SidebarThemeToggle = lazy(() => import('./SidebarThemeToggle').then((module) => ({ default: module.SidebarThemeToggle })));
 import {
     ACCOUNT_ACTIONS,
     ACCOUNT_NAVIGATION,
@@ -719,6 +719,7 @@ function AccountFooter({
     const displayName = user?.full_name || user?.username || 'User';
     const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
     const detailsRef = useRef<HTMLDetailsElement>(null);
+    const [appearanceOpen, setAppearanceOpen] = useState(false);
     const accountActive = ACCOUNT_NAVIGATION.some((item) => isLeafActive(pathname, item));
 
     useEffect(() => {
@@ -783,9 +784,9 @@ function AccountFooter({
                     </div>
                 </div>
 
-                <details className="mx-3 mt-3 rounded-xl border border-sidebar-border">
+                <details onToggle={(event) => setAppearanceOpen(event.currentTarget.open)} className="mx-3 mt-3 rounded-xl border border-sidebar-border">
                     <summary className="cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">Appearance</summary>
-                    <SidebarThemeToggle />
+                    {appearanceOpen ? <Suspense fallback={null}><SidebarThemeToggle /></Suspense> : null}
                 </details>
 
                 {onLogout ? (
