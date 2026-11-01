@@ -30,27 +30,12 @@ export function DashboardHeroSkeleton() {
     <DashboardSurface label="Loading portfolio summary…">
       <div className="p-6">
         <SkeletonLoader width={160} height={28} className="bg-slate-200" />
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="mt-5 divide-y divide-slate-200 rounded-xl border border-indigo-100 bg-white">
           {Array.from({ length: 3 }).map((_, index) => (
-            <div
-              key={index}
-              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-            >
-              <SkeletonLoader
-                width={100}
-                height={14}
-                className="bg-slate-200"
-              />
-              <SkeletonLoader
-                width={130}
-                height={28}
-                className="mt-3 bg-slate-200"
-              />
-              <SkeletonLoader
-                width="90%"
-                height={14}
-                className="mt-3 bg-slate-200"
-              />
+            <div key={index} className="grid grid-cols-[1fr_2fr_1fr] gap-3 p-4">
+              <SkeletonLoader width="80%" height={14} className="bg-slate-200" />
+              <div><SkeletonLoader width="70%" height={24} className="bg-slate-200" /><SkeletonLoader width="90%" height={14} className="mt-3 bg-slate-200" /></div>
+              <SkeletonLoader width="80%" height={14} className="bg-slate-200" />
             </div>
           ))}
         </div>

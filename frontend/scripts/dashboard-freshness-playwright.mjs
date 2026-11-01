@@ -119,6 +119,8 @@ try {
     await page
       .getByRole("heading", { name: "Dashboard", exact: true })
       .waitFor();
+    assert.equal(await page.evaluate(()=>devicePixelRatio),1);
+    assert.equal(await page.evaluate(()=>visualViewport.scale),1);
     if (state === "loading") {
       await page.getByText("Loading…", { exact: true }).first().waitFor();
       await page
@@ -198,7 +200,7 @@ try {
       assert.equal(await page.getByRole("heading", { level: 1 }).count(), 1);
       assert.equal(
         await page
-          .getByText("India total (portfolio + cash)", { exact: true })
+          .getByRole("rowheader", { name: "India", exact: false })
           .count(),
         1,
       );
@@ -209,9 +211,9 @@ try {
         .getByRole("tab", { name: "Sources and freshness", exact: true })
         .click();
       await page.getByText("Portfolio:", { exact: false }).first().waitFor();
-      for (let i = 0; i < 2; i++) {
+      for (const source of ["India", "INDmoney", "Bullpen", "India"]) {
         const trigger = page.getByRole("button", {
-          name: "India total (portfolio + cash) info",
+          name: `${source} total (portfolio + cash) info`,
           exact: true,
         });
         await trigger.click();
@@ -230,9 +232,30 @@ try {
           true,
         );
       }
+      await page.evaluate(() => {
+        window.__sourceEvents=[];
+        for (const name of ["investment-engine:dashboard:zerodha-sync-now", "investment-engine:dashboard:indmoney-sync-now"]) window.addEventListener(name,()=>window.__sourceEvents.push(name));
+        window.__sourceWalletReads=0;
+        const originalFetch=window.fetch;
+        window.fetch=(...args)=>{window.__sourceWalletReads++;return originalFetch(...args);};
+      });
+      for (const source of ["Zerodha", "INDmoney", "Bullpen"]) {
+        await page.getByRole("button",{name:`Refresh ${source}`,exact:true}).focus();
+        await page.keyboard.press("Enter");
+      }
+      assert.deepEqual(await page.evaluate(()=>window.__sourceEvents),["investment-engine:dashboard:zerodha-sync-now", "investment-engine:dashboard:indmoney-sync-now"]);
+      await page.waitForFunction(()=>window.__sourceWalletReads > 0);
+      const methodology=page.getByText("How portfolio totals are calculated",{exact:true});
+      for (let cycle=0;cycle<2;cycle++) {
+        await methodology.focus();
+        await page.keyboard.press("Enter");
+        assert.equal(await methodology.locator("..").getAttribute("open"), "");
+        await page.keyboard.press("Enter");
+        assert.equal(await methodology.locator("..").getAttribute("open"), null);
+      }
       await page.screenshot({
         path: path.join(out, "sources-desktop.png"),
-        fullPage: true,
+        fullPage: false,
       });
       await page
         .getByRole("tab", { name: "Sources and freshness", exact: true })
@@ -243,7 +266,7 @@ try {
         .waitFor();
       await page.screenshot({
         path: path.join(out, "refresh-desktop.png"),
-        fullPage: true,
+        fullPage: false,
       });
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
       assert.equal(
@@ -275,12 +298,43 @@ try {
               out,
               `${view.split(" ")[0].toLowerCase()}-${width}.png`,
             ),
-            fullPage: true,
+            fullPage: false,
           });
         }
       }
       await page.setViewportSize({ width: 1180, height: 757 });
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    }
+    // Every primary availability state remains navigable in all mapped views.
+    if (!state.endsWith("-panels")) {
+      for (const width of [1180, 390]) {
+        await page.setViewportSize({width, height:757});
+        for (const view of ["Overview", "Sources and freshness", "Refresh behaviour"]) {
+          await page.getByRole("tab", {name:view, exact:true}).click();
+          await page.getByRole("tabpanel", {name:view, exact:true}).waitFor();
+          assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true,`${state}/${view}: document overflow at ${width}`);
+          const tabBounds = await page.getByRole("tablist",{name:"Portfolio overview details"}).boundingBox();
+          const noticeBounds = await page.locator("[data-fx-status]").first().boundingBox();
+          assert.ok(noticeBounds.y >= tabBounds.y + tabBounds.height, "tabs must not overlap currency notice");
+          if (view !== "Refresh behaviour") {
+            const table = page.getByRole("region", {name:view === "Overview" ? "Portfolio overview table" : "Sources and freshness table", exact:true});
+            assert.equal(await table.getByRole("row").count(),4);
+            if (width === 390) {
+              await table.focus();
+              await page.keyboard.press("ArrowRight");
+              await page.waitForFunction(()=>Array.from(document.querySelectorAll('[role="region"]')).some(el=>el.scrollLeft > 0));
+              await table.evaluate(el=>el.scrollLeft=el.scrollWidth);
+              assert.equal(await table.evaluate(el=>el.scrollLeft + el.clientWidth >= el.scrollWidth - 1),true,"rightmost columns reachable");
+              await table.evaluate(el=>el.scrollLeft=0);
+            }
+          }
+          if (["failed","stale-cache","partial-source","missing-cash","unavailable-fx"].includes(state)) {
+            await page.screenshot({path:path.join(out,`${state}-${view.split(" ")[0].toLowerCase()}-${width}.png`),fullPage:false});
+          }
+        }
+      }
+      await page.setViewportSize({width:1180,height:757});
+      await page.getByRole("tab", {name:"Overview", exact:true}).click();
     }
     if (state.endsWith("-panels")) {
       const deferred = page.getByText(
@@ -352,7 +406,7 @@ try {
     );
     await page.screenshot({
       path: path.join(out, `${state}-desktop.png`),
-      fullPage: true,
+      fullPage: false,
     });
     results.push({
       state,

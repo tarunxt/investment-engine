@@ -78,7 +78,6 @@ import {
 } from "./_components/PortfolioCommandChart";
 
 import {
-  TotalDataStatus,
   dataAge,
   type TotalDataStatusInfo,
 } from "./_components/TotalDataStatus";
@@ -554,7 +553,11 @@ function PortfolioCommandSummary({
   refreshingBullpen,
   fx,
   totalStatuses,
+  onRefreshBoard,
+  refreshingBoard,
 }: {
+  onRefreshBoard: () => void;
+  refreshingBoard: boolean;
   totalStatuses: Record<CommandTileInfoKey, TotalDataStatusInfo>;
   totalValue: number | null;
   zerodhaValue: number | null;
@@ -578,271 +581,437 @@ function PortfolioCommandSummary({
   fx: DashboardSummaryResponse["fx"] | null;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
+  const [view, setView] = useState("overview");
+  const [infoDialog, setInfoDialog] = useState<CommandTileInfoKey | null>(null);
+  const infoTrigger = useRef<HTMLButtonElement | null>(null);
+  const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
+  const info = infoDialog ? COMMAND_TILE_INFO[infoDialog] : null;
   const formatPrivateInvestmentValue = (
     value: number | null | undefined,
     currency: "INR" | "USD" = "INR",
   ) => {
-    const formattedValue =
-      currency === "USD" ? formatUsd(value) : formatInr(value);
-    return showInvestmentNumbers
-      ? formattedValue
-      : maskInvestmentValue(formattedValue);
+    const formatted = currency === "USD" ? formatUsd(value) : formatInr(value);
+    return showInvestmentNumbers ? formatted : maskInvestmentValue(formatted);
   };
-  const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
-  const [view, setView] = useState("overview");
-  const infoTrigger = useRef<HTMLButtonElement | null>(null);
-  const [infoDialog, setInfoDialog] = useState<CommandTileInfoKey | null>(null);
-
-  const renderTile = ({
-    keyName,
-    title,
-    value,
-    portfolioValue,
-    cashValue,
-    cashLabel = "Cash",
-    updatedAt,
-    onRefresh,
-    refreshingTile,
-    currency = "INR",
-  }: {
-    keyName: CommandTileInfoKey;
-    title: string;
+  const rows: Array<{
+    key: CommandTileInfoKey;
+    label: string;
+    identity: string;
     value: number | null | undefined;
-    portfolioValue: number | null | undefined;
-    cashValue: number | null | undefined;
-    cashLabel?: string;
+    portfolio: number | null | undefined;
+    cash: number | null | undefined;
     updatedAt?: string | null;
     onRefresh: () => void;
-    refreshingTile: boolean;
-    currency?: "INR" | "USD";
-  }) => {
-    const formatter = (amount: number | null | undefined) =>
-      formatPrivateInvestmentValue(amount, currency);
-
-    return (
-      <div className="relative min-w-0 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-slate-700">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-950">
-            {title}
-            <button
-              type="button"
-              onClick={(event) => {
-                infoTrigger.current = event.currentTarget;
-                setInfoDialog(keyName);
-              }}
-              className="rounded-full p-1 text-slate-600 transition hover:text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-2"
-              aria-label={`${title} info`}
-            >
-              <Info className="size-3.5" />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshingTile}
-            className="rounded-full p-1 text-slate-600 transition hover:text-slate-950 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-            aria-label={`Refresh ${title}`}
-          >
-            <RefreshCw
-              className={`size-3.5 ${refreshingTile ? "animate-spin" : ""}`}
-            />
-          </button>
-        </div>
-        <div className="mt-2 text-xl font-semibold text-slate-950">
-          {totalStatuses[keyName].pending && !totalStatuses[keyName].capturedAt
-            ? "Loading…"
-            : totalStatuses[keyName].complete
-              ? formatter(value)
-              : "Incomplete total"}
-        </div>
-        <p className="mt-2 text-xs leading-5 text-slate-600">
-          Source: {totalStatuses[keyName].source}
-          <br />
-          Saved: <time dateTime={updatedAt ?? undefined} title={updatedAt ?? undefined}>{updatedAt ? formatTs(updatedAt) : "Time unavailable"}</time>
-        </p>
-        <TotalDataStatus info={totalStatuses[keyName]} />
-        {view === "sources" ? (
-          <div className="mt-3 space-y-1 text-xs leading-5 text-slate-700">
-            <div>Portfolio: {formatter(portfolioValue)}</div>
-            <div>
-              {cashLabel}: {formatter(cashValue)}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
+    refreshing: boolean;
+    currency: "INR" | "USD";
+  }> = [
+    {
+      key: "zerodha",
+      label: "India",
+      identity: "Zerodha",
+      value: zerodhaValue,
+      portfolio: zerodhaPortfolioValue,
+      cash: zerodhaMargin,
+      updatedAt: zerodhaUpdatedAt,
+      onRefresh: onRefreshZerodha,
+      refreshing: refreshingZerodha,
+      currency: "INR",
+    },
+    {
+      key: "indmoney",
+      label: "INDmoney",
+      identity: "INDmoney",
+      value: indmoneyValue,
+      portfolio: indmoneyPortfolioValue,
+      cash: indmoneyFundsValue,
+      updatedAt: indmoneyUpdatedAt,
+      onRefresh: onRefreshIndmoney,
+      refreshing: refreshingIndmoney,
+      currency: fx?.status === "valid" ? "INR" : "USD",
+    },
+    {
+      key: "bullpen",
+      label: "Bullpen",
+      identity: "Bullpen",
+      value: bullpenTotalValueInr,
+      portfolio: bullpenAccountValueInr,
+      cash: bullpenCashValueInr,
+      updatedAt: bullpenUpdatedAt,
+      onRefresh: onRefreshBullpen,
+      refreshing: refreshingBullpen,
+      currency: fx?.status === "valid" ? "INR" : "USD",
+    },
+  ];
+  const controls = (row: (typeof rows)[number]) => (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        aria-label={`${row.label} total (portfolio + cash) info`}
+        onClick={(event) => {
+          infoTrigger.current = event.currentTarget;
+          setInfoDialog(row.key);
+        }}
+        className="rounded p-1.5 text-slate-500 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
+        <Info className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        aria-label={`Refresh ${row.identity}`}
+        onClick={row.onRefresh}
+        disabled={row.refreshing}
+        className="rounded p-1.5 text-slate-500 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+      >
+        <RefreshCw
+          className={`size-3.5 ${row.refreshing ? "animate-spin" : ""}`}
+        />
+      </button>
+    </span>
+  );
+  const balance = (row: (typeof rows)[number]) => {
+    const status = totalStatuses[row.key];
+    return status.pending && !status.capturedAt
+      ? "Loading…"
+      : status.complete
+        ? formatPrivateInvestmentValue(row.value, row.currency)
+        : row.key === "zerodha" || status.capturedAt
+          ? "Incomplete total"
+          : "Unavailable";
   };
-
-  const info = infoDialog ? COMMAND_TILE_INFO[infoDialog] : null;
-
+  const availability = (status: TotalDataStatusInfo) => (
+    <div className="text-xs leading-5 text-slate-600" data-total-complete={status.complete}>
+      <p>
+        {status.pending ? "Refreshing… · " : ""}
+        {status.complete
+          ? "All components available"
+          : "Incomplete · Missing portfolio or cash"}
+      </p>
+      {status.failed ? (
+        <p className="font-medium text-amber-900">
+          Refresh failed ·{" "}
+          {status.capturedAt ? "Last available data" : "No snapshot available"}
+        </p>
+      ) : null}
+    </div>
+  );
+  const saved = (row: (typeof rows)[number]) => (
+    <time
+      dateTime={row.updatedAt ?? undefined}
+      title={row.updatedAt ?? undefined}
+    >
+      {row.updatedAt ? formatTs(row.updatedAt) : "Time unavailable"}
+    </time>
+  );
+  const age = (status: TotalDataStatusInfo) => (
+    <div className="text-xs leading-5 text-slate-600">
+      <p>Snapshot: {dataAge(status.capturedAt)}</p>
+      {status.cachedAt !== undefined ? (
+        <p>Browser cache: {dataAge(status.cachedAt)} · Saved copy</p>
+      ) : null}
+    </div>
+  );
+  const tableClass =
+    "w-full text-left text-sm [&_th]:px-4 [&_th]:py-2 [&_th]:text-xs [&_th]:font-semibold [&_th]:text-slate-600 [&_td]:px-4 [&_td]:py-3 [&_td]:align-top";
   return (
-    <div>
-      <div className="flex flex-col gap-4">
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-600">
-              <Target className="size-3.5" />
-              Total Investments
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-pressed={showInvestmentNumbers}
-              aria-label={
-                showInvestmentNumbers
-                  ? "Hide investment numbers"
-                  : "Show investment numbers"
-              }
-              title={
-                showInvestmentNumbers
-                  ? "Hide investment numbers"
-                  : "Show investment numbers"
-              }
-              onClick={() =>
-                setShowInvestmentNumbers((currentValue) => !currentValue)
-              }
-              className="size-9 shrink-0 rounded-full border border-slate-200 bg-slate-50 text-slate-700 hover:bg-white/15 hover:text-slate-950"
+    <>
+      <Tabs value={view} onValueChange={setView} className="gap-3">
+        <TabsList
+          aria-label="Portfolio overview details"
+          style={{ height: "auto" }}
+          className="grid w-full max-w-full grid-cols-1 justify-start gap-1 bg-transparent p-0 sm:w-fit sm:grid-cols-3"
+        >
+          {[
+            ["overview", "Overview"],
+            ["sources", "Sources and freshness"],
+            ["refresh", "Refresh behaviour"],
+          ].map(([value, label]) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="h-auto rounded-lg bg-indigo-100 px-3 py-2 text-xs normal-case tracking-normal text-slate-700 transition-none data-active:bg-violet-700 data-active:text-white data-[state=active]:bg-violet-700 data-[state=active]:text-white"
             >
-              <VisibilityIcon className="size-4" />
-            </Button>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-950"
+          data-fx-status={fx?.status ?? "unavailable"}
+        >
+          {fx?.status === "valid" && fx.source && fx.as_of
+            ? `USD/INR ${fx.value?.toFixed(4)} from ${fx.source}, as of ${formatTs(fx.as_of)}.`
+            : fx?.status === "stale"
+              ? `USD/INR is stale as of ${fx.as_of ? formatTs(fx.as_of) : "an unknown time"}; combined INR totals are omitted and native USD stays USD.`
+              : "USD/INR is unavailable; combined INR totals are omitted and USD values remain in USD."}{" "}
+          Missing portfolio or cash keeps totals incomplete.
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button
+            type="button"
+            onClick={onRefreshBoard}
+            disabled={refreshingBoard}
+            className="bg-amber-400 text-slate-950 hover:bg-amber-300"
+          >
+            {refreshingBoard ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 size-4" />
+            )}
+            Refresh Board
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-pressed={showInvestmentNumbers}
+            aria-label={
+              showInvestmentNumbers
+                ? "Hide investment numbers"
+                : "Show investment numbers"
+            }
+            onClick={() => setShowInvestmentNumbers((value) => !value)}
+          >
+            <VisibilityIcon className="size-4" />
+          </Button>
+          <p className="max-w-lg text-xs leading-5 text-slate-600">
+            Reloads saved snapshots and FX; requests a fresh Bullpen wallet
+            read. Stored prices stay at their snapshot time.
+          </p>
+        </div>
+        <TabsContent value="overview" className="mt-0">
+          <p className="mb-2 text-xs text-slate-600 sm:hidden">Scroll horizontally to see all columns.</p>
+          <div
+            className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-2"
+            tabIndex={0}
+            role="region"
+            aria-label="Portfolio overview table"
+          >
+            <table className={`${tableClass} min-w-[580px]`}>
+              <thead className="bg-slate-50">
+                <tr>
+                  <th scope="col">Portfolio</th>
+                  <th scope="col">Portfolio + cash</th>
+                  <th scope="col">Snapshot age</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {rows.map((row) => (
+                  <tr key={row.key}>
+                    <th scope="row" className="w-[22%]">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-sm font-semibold text-slate-950">
+                          {row.label}
+                        </span>
+                        {controls(row)}
+                      </div>
+                    </th>
+                    <td>
+                      <p className="font-semibold text-slate-950">
+                        {balance(row)}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">
+                        Source: {totalStatuses[row.key].source} · Saved:{" "}
+                        {saved(row)}
+                      </p>
+                      {availability(totalStatuses[row.key])}
+                      {row.currency === "USD" ? (
+                        <p className="text-xs leading-5 text-amber-900">
+                          INR unavailable · Verified USD/INR required
+                        </p>
+                      ) : null}
+                    </td>
+                    <td className="w-[23%]">{age(totalStatuses[row.key])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
+        </TabsContent>
+        <TabsContent value="sources" className="mt-0">
+          <p className="mb-2 text-xs text-slate-600 sm:hidden">Scroll horizontally to see all columns.</p>
+          <div
+            className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-2"
+            tabIndex={0}
+            role="region"
+            aria-label="Sources and freshness table"
+          >
+            <table className={`${tableClass} min-w-[780px]`}>
+              <thead className="bg-slate-50">
+                <tr>
+                  {[
+                    "Source",
+                    "Refresh",
+                    "Captured snapshot text",
+                    "Age",
+                    "INR",
+                  ].map((label) => (
+                    <th key={label} scope="col">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {rows.map((row) => {
+                  const status = totalStatuses[row.key];
+                  return (
+                    <tr key={row.key}>
+                      <th scope="row">
+                        <div className="flex flex-wrap items-center">
+                          <span className="text-sm text-slate-950">
+                            {row.identity}
+                          </span>
+                          {controls(row)}
+                        </div>
+                      </th>
+                      <td className="text-xs leading-5">
+                        {status.failed
+                          ? "Refresh failed"
+                          : status.pending
+                            ? "Refreshing…"
+                            : "Saved read"}
+                        {status.failed ? (
+                          <p>
+                            {status.capturedAt
+                              ? "Last available data"
+                              : "No snapshot available"}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td>
+                        <p className="text-xs leading-5">
+                          Source: {status.source}
+                        </p>
+                        <p className="text-xs leading-5">Saved: {saved(row)}</p>
+                        <div className="mt-1 text-xs leading-5">
+                          <p>
+                            Portfolio:{" "}
+                            {formatPrivateInvestmentValue(
+                              row.portfolio,
+                              row.currency,
+                            )}
+                          </p>
+                          <p>
+                            Cash:{" "}
+                            {formatPrivateInvestmentValue(
+                              row.cash,
+                              row.currency,
+                            )}
+                          </p>
+                        </div>
+                      </td>
+                      <td>{age(status)}</td>
+                      <td>
+                        <p className="text-xs font-medium">
+                          {row.currency === "USD"
+                            ? "Unavailable · Verified USD/INR required"
+                            : status.complete
+                              ? "Available"
+                              : "Incomplete total"}
+                        </p>
+                        {availability(status)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="refresh"
+          className="mt-0 rounded-xl border border-indigo-100 bg-white p-4 text-sm leading-6 text-slate-700"
+        >
+          <h2 className="font-semibold text-slate-950">Refresh behaviour</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>
+              Refresh Board reloads stored portfolio snapshots and FX status.
+            </li>
+            <li>Requests a fresh Bullpen wallet read.</li>
+            <li>Zerodha sync is requested when its workflow is open.</li>
+            <li>
+              INDmoney stays at the last imported snapshot until you import a
+              new one.
+            </li>
+            <li>
+              Reloading the board does not make stored snapshot prices current.
+            </li>
+            <li>
+              If a read fails, the last available data is labelled beside each
+              source.
+            </li>
+          </ul>
+        </TabsContent>
+      </Tabs>
+      <div className="mt-3 border-t border-indigo-200 pt-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <Target className="size-3.5" />
+            Total Investments
+          </span>
+          <p className="font-semibold text-slate-950">
             {totalValue == null
               ? "Combined INR unavailable"
               : formatPrivateInvestmentValue(totalValue)}
-          </div>
-          <p className="mt-2 text-xs text-slate-600">
-            Sources: Zerodha, INDmoney and Bullpen snapshots · Oldest snapshot:{" "}
-            {dataAge(
-              Math.min(
-                ...Object.values(totalStatuses)
-                  .map((info) => Date.parse(info.capturedAt ?? ""))
-                  .filter(Number.isFinite),
-              ),
-            )}
-            . Source details below.
-            {Object.values(totalStatuses).some(
-              (info) => !info.complete || info.failed,
-            )
-              ? " Incomplete sources: combined total omitted."
-              : ""}
           </p>
-          <div
-            className={`mt-2 text-xs leading-5 ${
-              fx?.status === "valid" ? "text-slate-600" : "text-amber-800"
-            }`}
-            data-fx-status={fx?.status ?? "unavailable"}
-          >
-            {fx?.status === "valid" && fx.source && fx.as_of
-              ? `USD/INR ${fx.value?.toFixed(4)} from ${fx.source}, as of ${formatTs(fx.as_of)}`
-              : fx?.status === "stale"
-                ? `USD/INR is stale as of ${fx.as_of ? formatTs(fx.as_of) : "an unknown time"}; combined INR totals are omitted.`
-                : "USD/INR is unavailable; combined INR totals are omitted and USD values remain in USD."}
-          </div>
         </div>
-
-        <Tabs value={view} onValueChange={setView}>
-          <TabsList
-            aria-label="Portfolio overview details"
-            className="max-w-full overflow-x-auto justify-start"
-          >
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="sources">Sources and freshness</TabsTrigger>
-            <TabsTrigger value="refresh">Refresh behaviour</TabsTrigger>
-          </TabsList>
-          <TabsContent value={view === "refresh" ? "unused" : view}>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {renderTile({
-                keyName: "zerodha",
-                title: "India total (portfolio + cash)",
-                value: zerodhaValue,
-                portfolioValue: zerodhaPortfolioValue,
-                cashValue: zerodhaMargin,
-                updatedAt: zerodhaUpdatedAt,
-                onRefresh: onRefreshZerodha,
-                refreshingTile: refreshingZerodha,
-              })}
-              {renderTile({
-                keyName: "indmoney",
-                title: "INDmoney total (portfolio + cash)",
-                value: indmoneyValue,
-                portfolioValue: indmoneyPortfolioValue,
-                cashValue: indmoneyFundsValue,
-                updatedAt: indmoneyUpdatedAt,
-                onRefresh: onRefreshIndmoney,
-                refreshingTile: refreshingIndmoney,
-                currency: fx?.status === "valid" ? "INR" : "USD",
-              })}
-              {renderTile({
-                keyName: "bullpen",
-                title: "Bullpen total (portfolio + cash)",
-                value: bullpenTotalValueInr,
-                portfolioValue: bullpenAccountValueInr,
-                cashValue: bullpenCashValueInr,
-                updatedAt: bullpenUpdatedAt,
-                onRefresh: onRefreshBullpen,
-                refreshingTile: refreshingBullpen,
-                currency: fx?.status === "valid" ? "INR" : "USD",
-              })}
-            </div>
-          </TabsContent>
-          <TabsContent
-            value="refresh"
-            className="rounded-2xl border border-slate-200 p-4 text-sm leading-6 text-slate-700"
-          >
-            <h2 className="font-semibold text-slate-950">Refresh behaviour</h2>
-            <p className="mt-2">
-              Refresh Board reloads stored portfolio snapshots and FX status,
-              and requests a fresh Bullpen wallet read. Zerodha sync is
-              requested when its workflow is open. INDmoney stays at the last
-              imported snapshot until you import a new one. Reloading the board
-              does not make stored snapshot prices current. If a read fails, the
-              last available data is labelled beside each source.
-            </p>
-          </TabsContent>
-        </Tabs>
-        <details className="text-xs text-slate-600">
-          <summary className="w-fit cursor-pointer rounded-sm font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2">
-            How portfolio totals are calculated
-          </summary>
-          <div className="mt-3 space-y-2 leading-5">
-            {Object.entries(COMMAND_TILE_INFO).map(([key, details]) => (
-              <p key={key}>{details.body}</p>
-            ))}
-          </div>
-        </details>
-        <Dialog.Root
-          open={info !== null}
-          onOpenChange={(open) => {
-            if (!open) setInfoDialog(null);
-          }}
-        >
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/50" />
-            <Dialog.Content
-              onCloseAutoFocus={(event) => {
-                event.preventDefault();
-                infoTrigger.current?.focus();
-              }}
-              className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 text-slate-950 shadow-xl"
-            >
-              <Dialog.Title className="text-lg font-semibold">
-                {info?.title}
-              </Dialog.Title>
-              <Dialog.Description className="mt-3 text-sm leading-6 text-slate-600">
-                {info?.body}
-              </Dialog.Description>
-              <Dialog.Close asChild>
-                <Button type="button" variant="outline" className="mt-5">
-                  Close
-                </Button>
-              </Dialog.Close>
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          Sources: Zerodha, INDmoney and Bullpen snapshots · Oldest snapshot:{" "}
+          {dataAge(
+            Math.min(
+              ...Object.values(totalStatuses)
+                .map((status) => Date.parse(status.capturedAt ?? ""))
+                .filter(Number.isFinite),
+            ),
+          )}
+          .
+          {Object.values(totalStatuses).some(
+            (status) => !status.complete || status.failed,
+          )
+            ? " Incomplete sources: combined total omitted."
+            : ""}
+        </p>
       </div>
-    </div>
+      <details className="mt-3 text-xs text-slate-600">
+        <summary className="w-fit cursor-pointer rounded-sm font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2">
+          How portfolio totals are calculated
+        </summary>
+        <div className="mt-3 space-y-2 leading-5">
+          {Object.entries(COMMAND_TILE_INFO).map(([key, details]) => (
+            <p key={key}>{details.body}</p>
+          ))}
+        </div>
+      </details>
+      <Dialog.Root
+        open={info !== null}
+        onOpenChange={(open) => {
+          if (!open) setInfoDialog(null);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/50" />
+          <Dialog.Content
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              infoTrigger.current?.focus();
+            }}
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 text-slate-950 shadow-xl"
+          >
+            <Dialog.Title className="text-lg font-semibold">
+              {info?.title}
+            </Dialog.Title>
+            <Dialog.Description className="mt-3 text-sm leading-6 text-slate-600">
+              {info?.body}
+            </Dialog.Description>
+            <Dialog.Close asChild>
+              <Button type="button" variant="outline" className="mt-5">
+                Close
+              </Button>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
   );
 }
 
@@ -1683,8 +1852,11 @@ function DashboardPageForUser({
             : ""}
         </div>
       ) : null}
-      <section className="rounded-3xl border border-slate-200 bg-white text-slate-950 shadow-sm" data-performance-usable="dashboard-portfolio-summary">
-        <div className="relative px-6 py-7 lg:px-8">
+      <section
+        className="rounded-3xl border border-indigo-100 bg-indigo-50/70 text-slate-950 shadow-sm"
+        data-performance-usable="dashboard-portfolio-summary"
+      >
+        <div className="relative p-4 sm:p-5">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
@@ -1694,32 +1866,20 @@ function DashboardPageForUser({
                 Portfolio overview · Saved snapshots
               </p>
             </div>
-            <div className="flex shrink-0 flex-wrap gap-3">
-              <Button
-                onClick={() => {
-                  window.dispatchEvent(
-                    new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
-                  );
-                  void Promise.allSettled([
-                    loadDashboard(false),
-                    refreshBullpenTile(true),
-                  ]);
-                }}
-                disabled={refreshing}
-                className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
-              >
-                {refreshing ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-2 size-4" />
-                )}
-                Refresh Board
-              </Button>
-            </div>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-4">
             <PortfolioCommandSummary
+              onRefreshBoard={() => {
+                window.dispatchEvent(
+                  new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
+                );
+                void Promise.allSettled([
+                  loadDashboard(false),
+                  refreshBullpenTile(true),
+                ]);
+              }}
+              refreshingBoard={refreshing}
               totalStatuses={totalStatuses}
               totalValue={totalCommandValue}
               zerodhaValue={zerodhaCommandValue}

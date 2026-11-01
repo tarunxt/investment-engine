@@ -66,9 +66,9 @@ test("dashboard overview preserves three totals with native currency fallback", 
     ),
     "utf8",
   );
-  assert.match(source, /India total \(portfolio \+ cash\)/);
-  assert.match(source, /INDmoney total \(portfolio \+ cash\)/);
-  assert.match(source, /Bullpen total \(portfolio \+ cash\)/);
+  for (const heading of ["Portfolio + cash", "Snapshot age", "Captured snapshot text", "Refresh"]) {
+    assert.ok(source.includes(heading));
+  }
   assert.match(source, /currency: fx\?\.status === "valid" \? "INR" : "USD"/);
 });
 
