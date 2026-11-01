@@ -4409,6 +4409,7 @@ export function RebalanceWorkflowSections({
   const [runningPortfolio, setRunningPortfolio] =
     useState<WorkflowPortfolio | null>(() => initialRunningPortfolio);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [workflowHistoryError, setWorkflowHistoryError] = useState<string | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [indMoneySyncOnly, setIndMoneySyncOnly] = useState(false);
   const [now, setNow] = useState(0);
@@ -5434,6 +5435,11 @@ ${zerodhaExecutionMode === "direct_market"
         ? indmoneyThreatResult.value
         : null;
     const runs = runsResult.status === "fulfilled" ? runsResult.value : [];
+    const failedHistory = [zerodhaHistoryResult, indmoneyHistoryResult].find(result => result.status === "rejected");
+    setWorkflowHistoryError(failedHistory?.status === "rejected"
+      ? `Saved workflow history unavailable: ${normalizeError(failedHistory.reason)}. Refresh to retry.` : null);
+    // Failed reads are unavailable, never evidence of an empty saved history.
+    if (failedHistory) return;
     const historyByPortfolio: Record<
       WorkflowPortfolio,
       AutoRebalanceHistoryItemResponse[]
@@ -8032,6 +8038,7 @@ ${zerodhaExecutionMode === "direct_market"
 
   return (
     <>
+      {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
       {stageLedger ? <WorkflowStageLedgerViews market={ledgerMarket} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
         {(!stageLedger || ledgerMarket === "zerodha") && renderSectionCard(zerodhaSection)}
