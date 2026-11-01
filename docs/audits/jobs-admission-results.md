@@ -64,3 +64,14 @@ session resolver and upstream fetch doubles; not a real auth/session release tes
 No Alembic execution, provider/search/sync, send/export, financial worker action,
 production setting, host access, queue replay or deployment. No private reports,
 account data, receipts or credentials in published files. No actual tool denial.
+
+Additional touched-boundary verification: 75 passed, 12 subtests passed across
+INDmoney/Zerodha threats, portfolio events/read projection, output source context
+and saved snapshot source preconditions. Updated the source-precondition fixture
+to accept only the expected (job_id, actor) via get_for_user.
+
+GitHub exact-head PR checks and disposable-container migration workflow were
+observed running at 08c4720b; subsequent fixture-only publication creates a new
+head and requires fresh CI. No green exact-head CI or independent approval is
+claimed. The prohibition above on Alembic execution refers to manual/local and
+production operations; ordinary PR CI runs its existing isolated migration job.
