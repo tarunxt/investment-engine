@@ -97,7 +97,9 @@ test('both portfolios render shared tiles, missing stages, historical counts and
   const workflow = readFileSync(new URL('app/console/dashboard/_components/RebalanceWorkflowSections.tsx', root), 'utf8');
   assert.match(workflow, /import .*WorkflowStageTile.*from "@\/components\/shared\/WorkflowStageTile"/);
   assert.doesNotMatch(workflow, /function WorkflowStageTile/);
-  assert.match(workflow, /mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3/);
+  assert.match(workflow, /<WorkflowStageLedger enabled=\{stageLedger\}/);
+  const ledger = readFileSync(new URL('components/shared/WorkflowStageLedger.tsx', root), 'utf8');
+  assert.match(ledger, /if \(!enabled\) return <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">\{children\}<\/div>/);
 });
 
 test('historical stage actions open exact saved runs and group diagnostics, with no action for missing stages', () => {
