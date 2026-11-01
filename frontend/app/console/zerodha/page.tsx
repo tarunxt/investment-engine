@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { PortfolioSnapshotsPanel } from './_components/PortfolioSnapshotsPanel';
 import { ZerodhaConnectionGuide } from './_components/ZerodhaConnectionGuide';
+import styles from './_components/IndiaPortfolioNav.module.css';
 import {
   type ZerodhaOrder,
   type ZerodhaPortfolioOverviewResponse,
@@ -803,7 +804,7 @@ export default function ZerodhaPage() {
           </p>
         </div>
         <nav aria-label="Portfolio stages and markets">
-          <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" />
+          <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" className={styles.navigation} />
         </nav>
       </header>
 

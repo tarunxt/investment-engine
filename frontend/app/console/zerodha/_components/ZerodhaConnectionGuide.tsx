@@ -107,6 +107,9 @@ export function ZerodhaConnectionGuide({
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
             <h2 className="text-base font-semibold text-gray-950">Connect Zerodha</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Kite Connect integration — save daywise portfolio history and manage orders
+            </p>
             <p className="mt-1 text-sm leading-6 text-gray-600">
               Sign in with Kite, let the app exchange the request token, and we&apos;ll start syncing your latest
               holdings snapshot automatically.
