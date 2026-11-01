@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-11-01T06:19:59.663Z",
+  "cases": 4,
+  "passed": 4,
+  "failed": 0,
+  "desktop": {
+    "width": 1440,
+    "height": 900,
+    "deviceScaleFactor": 1
+  },
+  "narrow": {
+    "width": 390,
+    "height": 844
+  },
+  "checks": [
+    "actual recovery component",
+    "copy and direct",
+    "initial error and retained data",
+    "keyboard focus and details",
+    "back to console and browser back",
+    "no external requests"
+  ],
+  "limitations": [
+    "Populated-success, verified-empty and loading pages are not exercised by this recovery-component browser harness."
+  ]
+}
