@@ -79,6 +79,8 @@ jobs:
           backend/tests/test_output_consistency.py
           backend/tests/test_output_source_context.py
           backend/tests/test_output_runtime.py
+          backend/tests/test_historical_partial_provenance.py
+          backend/tests/test_output_provenance.py
           backend/tests/test_output_runtime_cancellation.py
           backend/tests/test_job_table_validation.py
           backend/tests/test_deepseek_provider.py
@@ -336,6 +338,19 @@ jobs:
           tests/bullpen-sports-workspace.test.mjs
           tests/bullpen-event-clusters.test.mjs
           tests/bullpen-claim-returns.test.mjs
+          tests/api-cost-history-state.test.mjs
+          tests/audit6-mail-batch-source-state.test.mjs
+          tests/auto-rebalance-history.test.mjs
+          tests/bullpen-run-audit-read-states.test.mjs
+          tests/bullpen-trade-analysis-source-state.test.mjs
+          tests/bullpen008-source-state.test.mjs
+          tests/final-actionables-loading-counts.test.mjs
+          tests/output-provenance.test.mjs
+          tests/rebalance-input-counts.test.mjs
+          tests/rebalance-readiness.test.mjs
+          tests/stage-duration-integrity.test.mjs
+          tests/stock-parameters-contract.test.mjs
+          tests/universal-auto-run-provenance.test.mjs
 
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification

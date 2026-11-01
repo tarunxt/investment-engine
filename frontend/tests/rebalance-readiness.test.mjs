@@ -52,14 +52,34 @@ function modelPanel(estimates, props = {}) {
 }
 test('unknown, partial, stale selection, loading and explicit zero estimates stay distinct', () => {
   for (const value of [undefined, null, NaN, Infinity, -1]) assert.equal(readiness.isKnownEstimate(value), false);
-  assert.equal(readiness.isKnownEstimate(0), true);
+  assert.equal(readiness.isKnownEstimate(0), false);
   assert.match(modelPanel({}), /Unknown \(2 model estimates unavailable\)/);
   assert.match(modelPanel({ a: 2 }), /Unknown \(1 model estimate unavailable\)/);
-  assert.match(modelPanel({ a: 0, b: 0 }), /Estimated selected total: ₹0.00 reported \(zero not verified\)/);
+  assert.match(modelPanel({ a: 0, b: 0 }), /Estimated selected total: Unknown \(2 model estimates unavailable\)/);
   assert.match(modelPanel({ a: 1.25, b: 2.5 }), /Estimated selected total: ₹3.75/);
   assert.match(modelPanel({ a: 0, b: 0 }, { loading: true }), /Loading pricing/);
   assert.match(modelPanel({ a: 0, b: 0 }, { selectedKeys: new Set(['retired::model']) }), /Unknown/);
   assert.match(modelPanel({}, { showEstimateReadiness: false }), /Estimated selected total: ₹0.00/);
+});
+
+test('Swing enables readiness for India and US through the shared console', () => {
+  assert.match(read('../app/console/_components/PortfolioSwingTradeConsole.tsx'), /<CreateJobCard\s+showEstimateReadiness/);
+});
+
+test('missing FX, token-derived estimates and partial model pricing never imply a free run', () => {
+  const unknownFx = modelPanel({}, { providers: [{ name: 'openai', configured: true, models: ['a', 'b'], model_estimated_cost_usd: { a: 1, b: 2 }, fx: { status: 'unavailable', value: null } }] });
+  assert.match(unknownFx, /Estimated selected total: Unknown/);
+  for (const html of [unknownFx, modelPanel({}), modelPanel({ a: 2, b: 0 }), modelPanel({ a: -1, b: 2 })]) {
+    assert.match(html, /Cost estimate incomplete/);
+    assert.match(html, /Missing pricing, token estimates or USD\/INR conversion/);
+    assert.doesNotMatch(html, /Estimated selected total: ₹/);
+  }
+  const successful = modelPanel({ a: 2, b: 3 });
+  assert.match(successful, /Estimated selected total: ₹5.00/);
+  assert.doesNotMatch(successful, /Cost estimate incomplete/);
+  assert.match(modelPanel({}, { loading: true }), /Loading pricing/);
+  assert.doesNotMatch(modelPanel({}, { selectedKeys: new Set() }), /Cost estimate incomplete/);
+  assert.match(modelPanel({ a: 2, b: 3 }, { selectedMultipliers: { 'openai::a': 2 } }), /Estimated selected total: ₹7.00/);
 });
 
 const consoleSource = read('../app/console/_components/PortfolioRebalanceConsole.tsx');

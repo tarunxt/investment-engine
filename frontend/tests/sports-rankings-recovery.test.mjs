@@ -88,3 +88,39 @@ test('terminal 504 preserves safe diagnostics for the error popup', async () => 
   assert.match(error.details.cause, /service\/database availability problem/);
   assert.equal(error.details.steps.length, 4);
 });
+
+test('recovery containment retains backend provenance without inferring database health', async () => {
+  let calls = 0;
+  const error = await readRankingJson('', undefined, async () => {
+    calls++;
+    return new Response(JSON.stringify({ code: 'RECOVERY_CONTAINMENT', detail: 'Endpoint unavailable during analysis-only recovery.' }), {
+      status: 503, headers: { 'X-Correlation-ID': 'synthetic-recovery-reference' },
+    });
+  }, async () => {}).catch(value => value);
+  assert.ok(error instanceof RankingReadError);
+  assert.equal(error.details.code, 'RECOVERY_CONTAINMENT');
+  assert.equal(error.details.status, 503);
+  assert.equal(error.details.correlationId, 'synthetic-recovery-reference');
+  assert.equal(error.details.serviceMessage, 'Endpoint unavailable during analysis-only recovery.');
+  assert.equal(error.details.attempts, 3);
+  assert.equal(calls, 3);
+  assert.match(error.details.summary, /analysis-only recovery/);
+  assert.match(error.details.cause, /does not establish database health or whether ranking records exist/);
+  assert.match(error.details.steps.join(' '), /after authorized recovery/);
+  assert.doesNotMatch(error.details.steps.join(' '), /restart|stale scan/);
+});
+
+test('structured backend codes preserve database diagnostics and legacy error precedence', async () => {
+  for (const payload of [
+    { code: 'DATABASE_UNAVAILABLE' },
+    { error: 'DATABASE_UNAVAILABLE', code: 'OTHER_CODE' },
+  ]) {
+    const error = await readRankingJson('', undefined, async () => new Response(JSON.stringify(payload), { status: 503 }), async () => {}).catch(value => value);
+    assert.equal(error.details.code, 'DATABASE_UNAVAILABLE');
+    assert.match(error.details.cause, /healthy database connection/);
+  }
+  for (const code of [undefined, null, 17, {}]) {
+    const error = await readRankingJson('', undefined, async () => new Response(JSON.stringify({ code }), { status: 503 }), async () => {}).catch(value => value);
+    assert.equal(error.details.code, 'SERVICE_UNAVAILABLE');
+  }
+});

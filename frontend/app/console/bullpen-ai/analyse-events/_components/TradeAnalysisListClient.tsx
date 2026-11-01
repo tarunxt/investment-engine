@@ -13,11 +13,13 @@ import {
   writeTradeAnalysisCache,
 } from "@/lib/bullpenTradeAnalysisFallback";
 import { URLs } from "@/lib/urls";
-import { tradeExecutionFill, tradeOutcomeLabel } from "@/lib/tradeAnalysisExecution";
+import {
+  tradeExecutionFill,
+  tradeOutcomeLabel,
+} from "@/lib/tradeAnalysisExecution";
 import { apiService } from "@/services/api";
 import { useAuth } from "@/hooks/useAuth";
 import type {
-  BullpenTradeAnalysisLearningInsights,
   BullpenTradeAnalysisListItem,
   BullpenTradeAnalysisListResponse,
 } from "@/types/api";
@@ -58,7 +60,8 @@ const defaultFilters: AnalysisFilters = {
 function cardToneClassName(item: BullpenTradeAnalysisListItem) {
   if (item.status === "FAILED") return "border-amber-200 bg-amber-50/40";
   if (item.final_tag === "OPEN") return "border-sky-200 bg-sky-50/40";
-  if (item.pnl_outcome_tag === "PROFIT") return "border-emerald-200 bg-emerald-50/40";
+  if (item.pnl_outcome_tag === "PROFIT")
+    return "border-emerald-200 bg-emerald-50/40";
   if (item.pnl_outcome_tag === "LOSS") return "border-rose-200 bg-rose-50/40";
   return "border-slate-200 bg-white";
 }
@@ -113,20 +116,16 @@ function pnlOutcomeLabel(item: BullpenTradeAnalysisListItem) {
   return humanizeTag(tradeOutcomeLabel(item));
 }
 
-function LearningCard({
-  title,
-  items,
-}: {
-  title: string;
-  items: string[];
-}) {
+function LearningCard({ title, items }: { title: string; items?: string[] }) {
   return (
     <Card className="rounded-none border-slate-200 shadow-none">
       <CardHeader>
         <CardTitle className="text-base text-slate-950">{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm text-slate-700">
-        {items.length > 0 ? (
+        {items === undefined ? (
+          <p className="text-slate-500">Learning insights unavailable.</p>
+        ) : items.length > 0 ? (
           items.map((item) => (
             <p key={item} className="leading-6">
               {item}
@@ -143,8 +142,11 @@ function LearningCard({
 export function TradeAnalysisListClient() {
   const { user } = useAuth();
   const [filters, setFilters] = useState<AnalysisFilters>(defaultFilters);
-  const [draftFilters, setDraftFilters] = useState<AnalysisFilters>(defaultFilters);
-  const [data, setData] = useState<BullpenTradeAnalysisListResponse | null>(null);
+  const [draftFilters, setDraftFilters] =
+    useState<AnalysisFilters>(defaultFilters);
+  const [data, setData] = useState<BullpenTradeAnalysisListResponse | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
@@ -154,6 +156,8 @@ export function TradeAnalysisListClient() {
 
     async function load() {
       setLoading(true);
+      // A previous request may belong to another filter set or user.
+      setData(null);
       setError(null);
       setFallbackNotice(null);
       const filtersKey = buildTradeAnalysisFiltersKey(filters);
@@ -385,15 +389,33 @@ export function TradeAnalysisListClient() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Executed Trades"
-          value={loading ? "…" : String(summary?.total_executed_trades ?? 0)}
+          value={
+            loading
+              ? "…"
+              : summary
+                ? String(summary.total_executed_trades)
+                : "Unavailable"
+          }
         />
         <StatCard
           label="Confirmed Open Positions"
-          value={loading ? "…" : String(summary?.open_positions ?? 0)}
+          value={
+            loading
+              ? "…"
+              : summary
+                ? String(summary.open_positions)
+                : "Unavailable"
+          }
         />
         <StatCard
           label="Closed Positions"
-          value={loading ? "…" : String(summary?.closed_positions ?? 0)}
+          value={
+            loading
+              ? "…"
+              : summary
+                ? String(summary.closed_positions)
+                : "Unavailable"
+          }
         />
         <StatCard
           label="Total Net P&L"
@@ -401,7 +423,13 @@ export function TradeAnalysisListClient() {
         />
         <StatCard
           label="Win Rate"
-          value={loading ? "…" : formatPercent((summary?.win_rate ?? 0) * 100)}
+          value={
+            loading
+              ? "…"
+              : summary && summary.closed_positions > 0
+                ? formatPercent(summary.win_rate * 100)
+                : "Unavailable"
+          }
         />
         <StatCard
           label="Average P&L %"
@@ -409,7 +437,11 @@ export function TradeAnalysisListClient() {
         />
         <StatCard
           label="Average Holding"
-          value={loading ? "…" : formatDuration(summary?.average_holding_period_seconds)}
+          value={
+            loading
+              ? "…"
+              : formatDuration(summary?.average_holding_period_seconds)
+          }
         />
         <StatCard
           label="Total Fees"
@@ -551,47 +583,96 @@ export function TradeAnalysisListClient() {
         </TabsContent>
 
         <TabsContent value="learning" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <LearningCard
-              title="Recommendations"
-              items={learning?.recommendations ?? []}
-            />
-            <LearningCard
-              title="Profitable Tags"
-              items={listEntries(learning?.profitable_tags ?? [], "tag")}
-            />
-            <LearningCard
-              title="Unprofitable Tags"
-              items={listEntries(learning?.unprofitable_tags ?? [], "tag")}
-            />
-            <LearningCard
-              title="Exit Reasons Ranked By P&L"
-              items={listEntries(learning?.exit_reasons_ranked_by_pnl ?? [], "reason")}
-            />
-            <LearningCard
-              title="Buy Reasons Ranked By P&L"
-              items={listEntries(learning?.buy_reasons_ranked_by_pnl ?? [], "reason")}
-            />
-            <LearningCard
-              title="Confidence And Liquidity Buckets"
-              items={[
-                ...listEntries(learning?.average_pnl_by_confidence_bucket ?? [], "bucket"),
-                ...listEntries(learning?.average_pnl_by_liquidity_bucket ?? [], "bucket"),
-              ]}
-            />
-          </div>
+          {loading ? (
+            <p role="status" className="text-sm text-slate-500">
+              Loading learning insights…
+            </p>
+          ) : (
+            <>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <LearningCard
+                  title="Recommendations"
+                  items={learning?.recommendations}
+                />
+                <LearningCard
+                  title="Profitable Tags"
+                  items={
+                    learning?.profitable_tags
+                      ? listEntries(learning.profitable_tags, "tag")
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Unprofitable Tags"
+                  items={
+                    learning?.unprofitable_tags
+                      ? listEntries(learning.unprofitable_tags, "tag")
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Exit Reasons Ranked By P&L"
+                  items={
+                    learning?.exit_reasons_ranked_by_pnl
+                      ? listEntries(
+                          learning.exit_reasons_ranked_by_pnl,
+                          "reason",
+                        )
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Buy Reasons Ranked By P&L"
+                  items={
+                    learning?.buy_reasons_ranked_by_pnl
+                      ? listEntries(
+                          learning.buy_reasons_ranked_by_pnl,
+                          "reason",
+                        )
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Confidence And Liquidity Buckets"
+                  items={
+                    learning?.average_pnl_by_confidence_bucket &&
+                    learning?.average_pnl_by_liquidity_bucket
+                      ? [
+                          ...listEntries(
+                            learning?.average_pnl_by_confidence_bucket ?? [],
+                            "bucket",
+                          ),
+                          ...listEntries(
+                            learning?.average_pnl_by_liquidity_bucket ?? [],
+                            "bucket",
+                          ),
+                        ]
+                      : undefined
+                  }
+                />
+              </div>
 
-          <Card className="rounded-none border-slate-200 shadow-none">
-            <CardHeader>
-              <CardTitle className="text-base text-slate-950">Learning Raw Data</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <JsonPanel
-                title="Learning Insights JSON"
-                value={learning as BullpenTradeAnalysisLearningInsights | null}
-              />
-            </CardContent>
-          </Card>
+              <Card className="rounded-none border-slate-200 shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base text-slate-950">
+                    Learning Raw Data
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {learning && Object.keys(learning).length > 0 ? (
+                    <JsonPanel
+                      title="Learning Insights JSON"
+                      value={learning}
+                    />
+                  ) : (
+                    <p className="text-sm text-slate-500">
+                      Learning insights unavailable.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>

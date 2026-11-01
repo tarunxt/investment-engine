@@ -200,7 +200,8 @@ export function formatDuration(
   if (!started) return null;
   const ended = end ? parseTimestampMs(end) : now;
   if (!ended) return null;
-  const totalSeconds = Math.max(0, Math.floor((ended - started) / 1000));
+  if (ended < started) return "Invalid interval (end before start)";
+  const totalSeconds = Math.floor((ended - started) / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;

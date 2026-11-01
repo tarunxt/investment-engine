@@ -203,6 +203,18 @@ class AutoRebalanceStageResponse(BaseModel):
     estimated_cost: float = 0
 
 
+class OutputProvenanceIdentity(BaseModel):
+    provider: str
+    model: str | None = None
+
+
+class OutputProvenanceResponse(BaseModel):
+    source: Literal["api_usage_attempt_events"]
+    identities: list[OutputProvenanceIdentity] = Field(default_factory=list)
+    observed_from: datetime | None = None
+    observed_to: datetime | None = None
+
+
 class AutoRebalanceJobDetailResponse(BaseModel):
     id: int
     provider: str
@@ -218,6 +230,7 @@ class AutoRebalanceJobDetailResponse(BaseModel):
     web_search_queries: list[str] | None = None
     web_sources: list[str] | None = None
     runtime_metadata_json: dict[str, Any] | None = None
+    output_provenance: OutputProvenanceResponse | None = None
     created_at: datetime
     updated_at: datetime
 

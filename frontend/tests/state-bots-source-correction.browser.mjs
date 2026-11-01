@@ -8,9 +8,16 @@ import postcss from 'postcss';
 import tailwind from '@tailwindcss/postcss';
 const require = createRequire(import.meta.url);
 const { build } = require(process.env.STATE_BOTS_ESBUILD_PATH || 'esbuild');
-const out = resolve('../docs/evidence/state-bots-source-correction');
+const workspaceProfile = process.env.STATE_BOTS_WORKSPACE_PROFILE || 'bullpen007';
+assert.ok(['bullpen007', 'bullpen-sports'].includes(workspaceProfile));
+const out = resolve(process.env.STATE_BOTS_EVIDENCE_DIR || '../docs/evidence/state-bots-source-correction');
+const workspaceQuery = `workspace=${workspaceProfile}`;
 mkdirSync(out, { recursive: true });
 const result = await build({ entryPoints: ['tests/fixtures/state-bots/correction.jsx'], bundle: true, write: false, define: {'process.env': '{}'}, jsx: 'automatic', tsconfig: 'tsconfig.json', plugins: [{ name: 'isolated-components', setup(b) {
+  // Isolated evidence must not inherit account identifiers from product defaults.
+  b.onLoad({ filter: /BullpenAiPageClient\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8')
+    .replace(/const BULLPEN_ACCOUNT_USERNAME = [\s\S]*?;/, 'const BULLPEN_ACCOUNT_USERNAME = "synthetic-account";')
+    .replace(/const BULLPEN_ACCOUNT_WALLET_FALLBACK =\s*[\s\S]*?;/, 'const BULLPEN_ACCOUNT_WALLET_FALLBACK = "synthetic-wallet";'), loader: 'tsx' }));
   b.onLoad({ filter: /TradingBotsOverviewPage\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8') + '\nexport { TradingBotCard };', loader: 'tsx' }));
   b.onLoad({ filter: /services\/api\.ts$/ }, () => ({ contents: `export const apiService = new Proxy({}, { get: (_, name) => (...args) => { (window.__fixtureApiCalls ??= []).push(String(name)); if (window.__fixtureName === "overview") return new Promise((resolve,reject) => window.__rejectReads.push(() => reject(new Error("Synthetic source unavailable")))); return Promise.reject(new Error("Synthetic source unavailable: " + String(name))); } }); export class APIError extends Error {} export class RequestTimeoutError extends Error {}`, loader: 'js' }));
   b.onLoad({ filter: /UniversalPolymarketScan\.tsx$/ }, () => ({ contents: 'export const UniversalPolymarketScan = () => null;', loader: 'js' }));
@@ -34,6 +41,15 @@ await page.route('**/*', route => {
   return route.request().url().startsWith(`http://127.0.0.1:${server.address().port}/`) ? route.continue() : (blocked.push(route.request().url()), route.abort());
 });
 
+async function clearSavedFixtures() {
+  await page.evaluate(async () => {
+    localStorage.clear();
+    await Promise.all(['investment-engine-bullpen-ai', 'investment-engine-bullpen-ai:bullpen-sports'].map(name => new Promise(resolve => {
+      const request = indexedDB.deleteDatabase(name);
+      request.onsuccess = request.onerror = request.onblocked = resolve;
+    })));
+  });
+}
 const evidence = [];
 try {
   await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=overview#overview`);
@@ -46,14 +62,26 @@ try {
   await page.screenshot({path: `${out}/overview-failed-after-loading.png`, fullPage: true});
   evidence.push({fixture: 'failed-after-loading', text: await page.locator('body').innerText(), calls: await page.evaluate(() => window.__fixtureApiCalls ?? [])});
   for (const fixture of ['failed', 'zero', 'cached']) {
-    await page.evaluate(async () => { localStorage.clear(); await new Promise(resolve => { const request = indexedDB.deleteDatabase('investment-engine-bullpen-ai'); request.onsuccess = request.onerror = request.onblocked = resolve; }); });
-    await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=${fixture}#${fixture}`);
+    await clearSavedFixtures();
+    await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=${fixture}&${workspaceQuery}#${fixture}`);
     await page.getByText('Total Events Scanned:', {exact: false}).last().waitFor();
     if (fixture === 'failed') await page.getByText('Event results unknown.', {exact: false}).waitFor();
     else await page.getByText('Saved snapshot ·', {exact: false}).last().waitFor();
     const text = await page.locator('body').innerText();
+    assert.match(text, /synthetic-account/);
+    assert.match(text, /synthetic-wallet/);
+    assert.doesNotMatch(text, /0x[a-fA-F0-9]{40}/);
     assert.doesNotMatch(text, /No auto scan results yet|Run Scans and Invest Now above|No auto-run result yet|Not run yet|Not started/);
+    if (workspaceProfile === 'bullpen-sports') {
+      assert.match(text, /Sports Breakup/);
+      if (fixture === 'failed') assert.match(text, /Not evaluated — no completed filter snapshot is available/);
+    }
     if (fixture === 'failed') {
+      const names = await page.locator('button[aria-label]').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
+      assert.ok(names.some(name => name === 'Open events that passed filters · count unknown'));
+      const downloads = names.filter(name => name.startsWith('Download Excel'));
+      assert.ok(downloads.length > 0);
+      assert.ok(downloads.every(name => /count unknown/.test(name)));
       assert.match(text, /Total Events Scanned: —/);
       assert.match(text, /Events that passed Filters: —/);
       assert.match(text, /Run history unknown/);
@@ -66,6 +94,8 @@ try {
       assert.equal(await page.getByRole('button', {name:'Close LLM run details'}).evaluate(el => el === document.activeElement), true);
       await page.keyboard.press('Tab');
       assert.equal(await page.getByRole('button', {name:'Close LLM run details'}).evaluate(el => el === document.activeElement), true);
+      await page.keyboard.press('Shift+Tab');
+      assert.equal(await page.getByRole('button', {name:'Close LLM run details'}).evaluate(el => el === document.activeElement), true);
       await page.keyboard.press('Escape');
       await page.getByRole('dialog').waitFor({state: 'hidden'});
       assert.match(await page.evaluate(() => document.activeElement.getAttribute('aria-label') || ''), /Open LLM completion diagnostics/);
@@ -77,9 +107,9 @@ try {
     await page.screenshot({path: `${out}/bullpen-${fixture}.png`, fullPage: true});
     evidence.push({fixture, text, calls: await page.evaluate(() => window.__fixtureApiCalls ?? [])});
   }
-  await page.evaluate(async () => { localStorage.clear(); await new Promise(resolve => { const request = indexedDB.deleteDatabase('investment-engine-bullpen-ai'); request.onsuccess = request.onerror = request.onblocked = resolve; }); });
+  await clearSavedFixtures();
   await page.setViewportSize({width: 390, height: 844});
-  await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=failed#failed`);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?fixture=failed&${workspaceQuery}#failed`);
   await page.getByText('Event results unknown.', {exact: false}).waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({path: `${out}/bullpen-failed-narrow.png`, fullPage: true});
@@ -101,6 +131,6 @@ try {
   assert.ok(calls.every(name => name.startsWith('get') || name === 'polymarketState'), JSON.stringify(calls));
   assert.deepEqual(errors, []);
   assert.deepEqual(blocked, []);
-  writeFileSync(`${out}/result.json`, JSON.stringify({timestamp: new Date().toISOString(), viewport:'1180x757 at 100%', narrow:'390x844', calls, errors, blocked, evidence}, null, 2));
-  console.log('PASS: actual overview failed-after-loading; full Bullpen failed, verified zero, cached; diagnostics Escape, narrow; no operational calls');
+  writeFileSync(`${out}/result.json`, JSON.stringify({timestamp: new Date().toISOString(), workspaceProfile, viewport:'1180x757 at 100%', narrow:'390x844', calls, errors, blocked, evidence}, null, 2));
+  console.log(`PASS: ${workspaceProfile}; actual overview failed-after-loading; full workspace failed, verified zero, cached; unknown control names; diagnostics Tab/Shift+Tab/Escape, narrow; no operational calls`);
 } finally { await browser.close(); server.close(); }

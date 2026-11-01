@@ -43,3 +43,14 @@ test("read-only API calls use bounded transport failover without retry loops", (
   assert.doesNotMatch(api, /READ_RETRY_DELAYS_MS/);
   assert.doesNotMatch(api, /while \(true\)/);
 });
+
+test("saved lifecycle timestamps do not imply current worker activity", () => {
+  assert.doesNotMatch(history, /"In progress"/);
+  assert.match(history, /Saved statuses and stages do not verify current worker activity/);
+  assert.match(history, /Component completion does not establish that the full run finished/);
+  assert.match(history, /Saved status <StatusBadge status=\{item.status\}/);
+  assert.match(history, /item.completed_at \? formatTime\(item.completed_at\) : "Not recorded"/);
+  assert.match(history, /Last recorded stage/);
+  assert.match(history, /Saved status <StatusBadge status=\{run.status\}/);
+  assert.doesNotMatch(history, /CheckCircle2/);
+});

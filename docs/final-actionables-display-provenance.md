@@ -68,3 +68,24 @@ labels now show inclusive/exclusive endpoints explicitly; matching conditions an
 holdings-dependent Buy New/Add More behavior are unchanged. Historical frozen
 matrices continue to display saved actions and rules, with the unrounded saved
 score available in the score tooltip.
+
+## Audit6 A6-05: exact holding provenance
+
+India captured-detail holding averages and completed-buy observations now require
+both exchange and symbol, matching the existing consolidated position identity.
+A BSE holding or order must not supply NSE detail evidence, or vice versa; missing
+venue evidence is not guessed. Original model cells, dates, scores and actions
+remain untouched. Historical reconstruction continues to use captured holdings
+and current formula settings, separately from original saved decisions.
+
+Position source labels distinguish a matched snapshot holding (including an
+explicit zero) from absence of that instrument in the snapshot. The existing
+zero-on-absence arithmetic is preserved and is now explicitly labeled as inferred,
+not a verified holding quantity. This does not establish universal portfolio
+reconciliation or verify the audit's historical BEL example.
+
+Synthetic regressions cover both venues in either holding order, missing venues,
+matched zero, absent instrument, unavailable snapshot and unchanged quantity
+arithmetic. The supplied report resolved to Library version 3 rather than the
+specified version 2; supported materialization and its bounded retry failed, so
+no report screenshot or live browser review is claimed.

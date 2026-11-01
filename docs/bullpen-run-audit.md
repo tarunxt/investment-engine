@@ -2758,3 +2758,31 @@ is not evaluated. Filtered/scanned export names, their tooltips and adjacent
 included-active labels follow the same existing display guard. Verified zero and
 saved known counts remain visible. Action handlers, disabled predicates, audit
 capture, frozen snapshots, calculations and execution remain unchanged.
+
+### Audit6 A6-07: Bullpen 008 source presentation
+
+The Bullpen 008 workspace renders runtime, settings, schedule, alerts and history
+only after bootstrap succeeds. A later retrieval failure preserves the last
+successful response with an explicit retrieval timestamp and stale-data warning;
+it does not rewrite saved run or audit records. Wallet values are labelled as
+saved run snapshots, and absent snapshots do not establish zero positions.
+Missing stage records do not establish pending status or zero progress. Separate
+Stage 4 detail failures leave bootstrap configuration and history available while
+marking target rows and certified exits unavailable. Monitoring queries omitted
+by bootstrap during queued/running runs are labelled unavailable, not empty.
+This is presentation only: audit capture, frozen snapshots, formulas, API shapes,
+execution permissions and mutation endpoints are unchanged.
+
+Controlled synthetic coverage: `frontend/tests/bullpen008-source-state.test.mjs`.
+
+### Runs Audit list read provenance (A6-12)
+
+The list treats a successful paginated summary response as evidence only for its
+requested filters and page. Loading and failed reads do not imply an empty history
+or a filter mismatch. Last successful snapshot records remain visible during a
+refresh or failure with the read time and original page, explicitly marked as
+possibly using previous filters. Pagination counts and controls are available only
+for the successfully verified current request. Filtered zero results describe a
+filter match, never the existence of all saved history. The supplemental Bullpen
+run source remains independent and is labeled as unfiltered. A history retry only
+repeats the existing list read; it does not invoke explicit materialization.

@@ -1,4 +1,5 @@
 "use client";
+import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
 import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
 import { mergeSummarySourceRows, originalRebalanceSources, originalSourceCell } from "@/lib/summarySourceRows";
 import type { StockSourceObservation } from "@/types/api";
@@ -152,6 +153,7 @@ type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
 
 type PositionContext = {
   source: "portfolio-snapshot" | "captured-model-rows";
+  holdingMatch?: "matched" | "absent";
   currentUnits: number | null;
   currentInvestmentAmount: number | null;
 };
@@ -403,7 +405,8 @@ function getZerodhaHoldingForStock(
 ) {
   if (!isZerodhaPortfolioSnapshot(snapshot)) return null;
   const symbol = stock.symbol.trim().toUpperCase();
-  return snapshot.holdings.find((holding) => holding.tradingsymbol.trim().toUpperCase() === symbol) ?? null;
+  return snapshot.holdings.find((holding) => holding.tradingsymbol.trim().toUpperCase() === symbol
+    && holding.exchange.trim().toUpperCase() === stock.exchange.trim().toUpperCase()) ?? null;
 }
 
 function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockConsensus): ZerodhaBuyTransaction[] {
@@ -411,7 +414,9 @@ function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockC
   return orders
     .filter((order) => {
       const isCompletedBuy = order.status?.toUpperCase() === "COMPLETE" && order.transaction_type?.toUpperCase() === "BUY";
-      return isCompletedBuy && order.tradingsymbol?.trim().toUpperCase() === symbol && (order.filled_quantity || order.quantity) > 0;
+      return isCompletedBuy && order.tradingsymbol?.trim().toUpperCase() === symbol
+        && order.exchange?.trim().toUpperCase() === stock.exchange.trim().toUpperCase()
+        && (order.filled_quantity || order.quantity) > 0;
     })
     .map((order) => ({
       orderId: order.order_id,
@@ -1363,6 +1368,7 @@ function buildPositionContext(
     // A complete holdings snapshot also captures stocks that are no longer held.
     return {
       source: "portfolio-snapshot",
+      holdingMatch: snapshot ? "matched" : "absent",
       currentUnits: snapshot ? snapshot.units : 0,
       currentInvestmentAmount: snapshot ? snapshot.currentValue : 0,
     };
@@ -1381,8 +1387,13 @@ function getStockPositionContext(stock: StockConsensus): PositionContext {
 }
 
 function getPositionContextLabel(stock: StockConsensus) {
-  return getStockPositionContext(stock).source === "portfolio-snapshot"
-    ? "Latest portfolio snapshot"
+  const position = getStockPositionContext(stock);
+  return position.source === "portfolio-snapshot"
+    ? position.holdingMatch === "absent"
+      ? "Latest portfolio snapshot · no matching instrument; zero inferred from snapshot absence, not a verified holding quantity"
+      : position.holdingMatch === "matched"
+        ? "Latest portfolio snapshot · matched holding"
+        : "Latest portfolio snapshot · instrument match not recorded in cached context"
     : "Captured model holdings (snapshot unavailable)";
 }
 
@@ -7161,6 +7172,14 @@ function ActionablesInputSelectionDialog({
   );
 }
 
+export function calculationsCountSummary(stocks: { rows: unknown[] }[], loading: boolean, error?: string | null): string {
+  if (!stocks.length && (loading || error)) {
+    return loading ? "LLMs consolidated in this view: Loading… Stocks: Loading…" : "LLMs consolidated in this view: Unknown. Stocks: Unknown.";
+  }
+  const counts = `LLMs consolidated in this view: ${Math.max(...stocks.map(stock => stock.rows.length), 0)}. Stocks: ${stocks.length}.`;
+  return loading || error ? `${counts} Previously available results; ${loading ? "refresh in progress" : "refresh failed"}.` : counts;
+}
+
 function ActionablesCalculationsModal(props: Parameters<typeof OpenActionablesCalculationsModal>[0]) {
   if (!props.open) return null;
   return <OpenActionablesCalculationsModal {...props} />;
@@ -7396,7 +7415,7 @@ function OpenActionablesCalculationsModal({
             </div>
           </div>
           <div className="border-b border-blue-100 bg-blue-50/50 px-5 py-3 text-sm text-blue-900">
-            LLMs consolidated in this view: {Math.max(...displayedStocks.map((stock) => stock.rows.length), 0)}. Stocks: {displayedStocks.length}.
+            {calculationsCountSummary(displayedStocks, loading, loadError)}
           </div>
           <div className="max-h-[76vh] overflow-auto p-5" aria-busy={loading}>
             {loading ? (
@@ -8682,7 +8701,7 @@ function ScopedFinalActionablesConsole({
     setLoading(true);
     setError(null);
     try {
-      const response = await fetchAllFullRuns();
+      const response = await withFinalActionablesReadDeadline(fetchAllFullRuns());
       if (request !== runsRequestRef.current) return;
       setRuns(response);
       cacheFinalActionablesRuns(runCacheKey, response, market);

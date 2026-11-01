@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { History, Loader2, RefreshCw, X } from 'lucide-react';
@@ -101,19 +101,24 @@ export function ScanHistoryButton({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState<ScanHistoryItem[]>([]);
+  const [history, setHistory] = useState<ScanHistoryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const requestId = useRef(0);
+
+  useEffect(() => () => { requestId.current += 1; }, []);
+
   const refreshHistory = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     setLoading(true);
     setError(null);
     try {
       const nextHistory = await loadHistory();
-      setHistory(nextHistory);
+      if (requestId.current === currentRequest) setHistory(nextHistory);
     } catch (err) {
-      setError(normalizeError(err));
+      if (requestId.current === currentRequest) setError(normalizeError(err));
     } finally {
-      setLoading(false);
+      if (requestId.current === currentRequest) setLoading(false);
     }
   }, [loadHistory]);
 
@@ -125,7 +130,7 @@ export function ScanHistoryButton({
   useEffect(() => {
     if (!open) return;
 
-    const hasActiveRun = history.some((item) => isActiveStatus(item.status));
+    const hasActiveRun = (history ?? []).some((item) => isActiveStatus(item.status));
     if (!hasActiveRun) return;
 
     const interval = window.setInterval(() => {
@@ -155,7 +160,7 @@ export function ScanHistoryButton({
   }, [open]);
 
   const totalKnownCostUsd = useMemo(
-    () => history.reduce((total, item) => total + (item.estimated_cost ?? 0), 0),
+    () => (history ?? []).reduce((total, item) => total + (item.estimated_cost ?? 0), 0),
     [history],
   );
 
@@ -202,10 +207,10 @@ export function ScanHistoryButton({
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
-                      {history.length} runs
+                      {loading ? 'Runs: loading' : error || history === null ? 'Runs: unknown' : `${history.length} runs`}
                     </div>
                     <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                      Total known cost: {formatKnownCost(totalKnownCostUsd, usdInrRate)}
+                      Total known cost: {loading ? 'Loading' : error || history === null ? 'Unknown' : formatKnownCost(totalKnownCostUsd, usdInrRate)}
                     </div>
                   </div>
                 </div>
@@ -216,6 +221,7 @@ export function ScanHistoryButton({
                     variant="ghost"
                     size="icon"
                     className="h-9 w-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    aria-label="Refresh scan history"
                     onClick={() => void refreshHistory()}
                     disabled={loading}
                   >
@@ -226,6 +232,7 @@ export function ScanHistoryButton({
                     variant="ghost"
                     size="icon"
                     className="h-9 w-9 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    aria-label="Close scan history"
                     onClick={() => setOpen(false)}
                   >
                     <X className="size-4" />
@@ -240,22 +247,28 @@ export function ScanHistoryButton({
                   </div>
                 ) : null}
 
-                {loading && history.length === 0 ? (
+                {history !== null && (loading || error) ? (
+                  <p role="status" className="mb-3 text-sm text-slate-600">
+                    Previously loaded history retained. Current run count and total known cost are unknown.
+                  </p>
+                ) : null}
+
+                {loading && (history?.length ?? 0) === 0 ? (
                   <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
                     <Loader2 className="size-4 animate-spin" />
                     Loading scan history...
                   </div>
                 ) : null}
 
-                {!loading && history.length === 0 && !error ? (
+                {!loading && history?.length === 0 && !error ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
                     {emptyMessage}
                   </div>
                 ) : null}
 
-                {history.length > 0 ? (
+                {(history?.length ?? 0) > 0 ? (
                   <div className="space-y-3">
-                    {history.map((item) => (
+                    {history?.map((item) => (
                       <button
                         key={item.job_id}
                         type="button"

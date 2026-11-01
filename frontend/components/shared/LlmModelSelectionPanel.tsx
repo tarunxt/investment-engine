@@ -112,7 +112,7 @@ function getModelEstimatedCostInr(
     getEstimatedCostInr?.(provider.name, model) ??
     provider.model_estimated_cost_inr?.[model];
 
-  return typeof estimated === "number" && Number.isFinite(estimated)
+  return isKnownEstimate(estimated)
     ? estimated
     : 0;
 }
@@ -246,7 +246,7 @@ export function LlmModelSelectionPanel({
               </button>
             ))}
           </div>
-          <p className="text-xs leading-relaxed text-slate-600">A displayed zero estimate is not evidence that a future provider run is free.</p>
+          {!showEstimateReadiness ? <p className="text-xs leading-relaxed text-slate-600">A displayed zero estimate is not evidence that a future provider run is free.</p> : null}
         </>
       ) : null}
       <div id={`${panelId}-content`} className={organized ? "space-y-3" : "space-y-4"} role={organized ? "tabpanel" : undefined} aria-labelledby={organized ? `${panelId}-tab-${views.findIndex(item => item.key === activeView)}` : undefined}>
@@ -258,6 +258,7 @@ export function LlmModelSelectionPanel({
       ) : null}
 
       {!organized || activeView === "summary" ? (
+      <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-base font-semibold uppercase tracking-[0.12em] text-slate-950">
           {title}
@@ -313,6 +314,12 @@ export function LlmModelSelectionPanel({
         </div>
       </div>
 
+      {showEstimateReadiness && !loading && selectedKeys.size > 0 && (unknownEstimateCount > 0 || selectedEstimatedCostInr === 0) ? (
+        <p role="status" className="text-xs leading-relaxed text-amber-800">
+          Cost estimate incomplete. Missing pricing, token estimates or USD/INR conversion may prevent an estimate. A reported zero does not verify a free run; provider charges may apply.
+        </p>
+      ) : null}
+      </>
       ) : null}
       {organized && activeView !== "summary" && activeView !== "templates" ? (
         <label className="block text-xs font-semibold text-slate-700">
@@ -419,8 +426,8 @@ export function LlmModelSelectionPanel({
                       {organized ? providerLabel(provider.name) : provider.name}
                     </span>
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                  <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 text-sm">
+                    <span className="min-w-0 max-w-full break-words rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700 ring-1 ring-emerald-100">
                       Selected estimate: {showEstimateReadiness ? estimateLabel(providerCostSummary.estimatedCostInr, providerCostSummary.unknownEstimateCount) : formatInrCost(providerCostSummary.estimatedCostInr)}
                     </span>
                     {providerCostSummary.historicalCostInr > 0 ? (
@@ -513,7 +520,7 @@ export function LlmModelSelectionPanel({
                               </span>
                               <span className="text-xs text-slate-700">
                                 <span className="sm:sr-only">Estimate: </span>
-                                {showEstimateReadiness && !isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? "Unknown" : showEstimateReadiness ? estimateReadinessLabel(estimated, 0, false, 1) : formatInrCost(estimated)}
+                                {showEstimateReadiness ? estimateReadinessLabel(estimated, isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? 0 : 1, loading, 1) : formatInrCost(estimated)}
                                 {historicalCost !== null ? <span className="mt-1 block text-amber-800">Prev. {formatInrCost(historicalCost)}</span> : null}
                               </span>
                               <span className="text-xs text-slate-600">{compatible ? selected ? "Selected" : "Available" : getCompatibilityReason(provider, model, getSelectionConstraint)}</span>
@@ -569,7 +576,7 @@ export function LlmModelSelectionPanel({
                                   selected && compatible ? "text-slate-600" : "",
                                 )}
                               >
-                                Est. {showEstimateReadiness && !isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? "Unknown" : showEstimateReadiness ? estimateReadinessLabel(estimated, 0, false, 1) : formatInrCost(estimated)}
+                                Est. {showEstimateReadiness ? estimateReadinessLabel(estimated, isKnownEstimate(getEstimatedCostInr?.(provider.name, model) ?? provider.model_estimated_cost_inr?.[model]) ? 0 : 1, loading, 1) : formatInrCost(estimated)}
                               </span>
                               {historicalCost !== null ? (
                                 <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100">

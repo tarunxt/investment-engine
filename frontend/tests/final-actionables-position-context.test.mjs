@@ -29,7 +29,7 @@ const bindings = {
   ...load('../lib/runPresentation.ts'),
 };
 const helpers = load('../app/console/_components/FinalActionablesConsole.tsx', bindings,
-  'export { historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
+  'export { getPositionContextLabel, getZerodhaHoldingForStock, getZerodhaBuyTransactionsForStock, historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
 const actionHeader = 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)';
 const timestamp = '2026-09-01T10:00:00Z';
 
@@ -226,4 +226,37 @@ test('same-symbol Indian venues remain separate decisions and cannot inherit ano
  const base={ 'Stock Symbol':'CGPOWER',[actionHeader]:'Hold','Units Change':'0','Units to Buy':'0','Total Buy Amount':'0' };
  const source=runWithRows([{...base,'Exchange Symbol':'BSE','Current Units':'13','Final Units':'13'},{...base,'Exchange Symbol':'NSE','Current Units':'0','Final Units':'0'}]);
  const stocks=helpers.buildConsensusRows([source],'india',{holdings:[{exchange:'BSE',tradingsymbol:'CGPOWER',quantity:13,market_value:7403.85}]});assert.equal(stocks.length,2);assert.equal(stocks.find(stock=>stock.exchange==='BSE').positionContext.currentUnits,13);assert.equal(stocks.find(stock=>stock.exchange==='NSE').positionContext.currentUnits,0);assert.equal(helpers.buildDashboardActionRows(stocks,'india',{}).length,2);
+});
+
+
+test('holding detail and buy provenance require the exact venue, including reversed holding order', () => {
+  const holdings = ['BSE', 'NSE'].map((exchange, index) => ({ exchange, tradingsymbol: 'TESTINDIA', quantity: index + 3, average_price: index + 100 }));
+  const orders = holdings.map((holding, index) => ({ ...holding, status: 'COMPLETE', transaction_type: 'BUY', filled_quantity: 1, order_id: `synthetic-${index}` }));
+  for (const ordered of [holdings, [...holdings].reverse()]) {
+    for (const exchange of ['BSE', 'NSE']) {
+      const stock = { symbol: 'TESTINDIA', exchange };
+      assert.equal(helpers.getZerodhaHoldingForStock({ holdings: ordered, positions: {} }, stock).exchange, exchange);
+      assert.deepEqual(helpers.getZerodhaBuyTransactionsForStock(orders, stock).map(row => row.orderId), [exchange === 'BSE' ? 'synthetic-0' : 'synthetic-1']);
+    }
+  }
+  assert.equal(helpers.getZerodhaHoldingForStock({ holdings: [holdings[0]], positions: {} }, { symbol: 'TESTINDIA', exchange: 'NSE' }), null);
+  assert.deepEqual(helpers.getZerodhaBuyTransactionsForStock([{ ...orders[0], exchange: undefined }], { symbol: 'TESTINDIA', exchange: 'NSE' }), []);
+});
+
+test('snapshot absence is disclosed separately from a matched zero and captured fallback', () => {
+  const run = runWithRows([modelRow(0, { [actionHeader]: 'Hold' })]);
+  const [absent] = helpers.buildConsensusRows([run], 'india', { holdings: [] });
+  const [matched] = helpers.buildConsensusRows([run], 'india', snapshot(0));
+  const [captured] = helpers.buildConsensusRows([run], 'india', null);
+  assert.equal(absent.positionContext.holdingMatch, 'absent');
+  assert.equal(matched.positionContext.holdingMatch, 'matched');
+  assert.match(helpers.getPositionContextLabel(absent), /zero inferred from snapshot absence/);
+  assert.match(helpers.getPositionContextLabel(matched), /matched holding/);
+  assert.match(helpers.getPositionContextLabel(captured), /Captured model holdings/);
+  for (const stock of [absent, matched, captured]) {
+    const detail = helpers.buildScoreMatrixDetail(stock);
+    const cells = helpers.buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
+    assert.equal(Number(cells['Current Units']) + Number(cells['Units Change']), Number(cells['Final Units']));
+    assert.equal(stock.rows[0].cells[actionHeader], 'Hold');
+  }
 });

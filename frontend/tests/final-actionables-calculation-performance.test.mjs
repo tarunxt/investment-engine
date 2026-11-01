@@ -23,6 +23,7 @@ function load(path, bindings = {}, extraExports = [], transform = (value) => val
   return loaded.exports;
 }
 const colors = load('../lib/actionColorScheme.ts');
+const { withFinalActionablesReadDeadline } = load('../lib/finalActionablesReadDeadline.ts');
 const parser = load('../components/InvestmentRecommendationTable.tsx', colors);
 const imported = {
   ...React, ...parser, ...colors,
@@ -311,6 +312,7 @@ test('actual run loader ignores stale success, stale errors and completion after
   const state = { runs: [], loading: false, error: null, cache: [] };
   const requests = { current: 0 };
   const loader = load(sourcePath, {
+    withFinalActionablesReadDeadline,
     useCallback: (fn) => fn, runsRequestRef: requests, market: 'india', runCacheKey: 'india',
     setLoading: (value) => { state.loading = value; }, setError: (value) => { state.error = value; },
     setRuns: (value) => { state.runs = value; },

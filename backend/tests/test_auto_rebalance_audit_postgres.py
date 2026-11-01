@@ -21,6 +21,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 
 import app.models  # noqa: F401
 from app.domains.auth.models import ActivityLog, User
+from app.domains.api_usage.models import ApiUsageAttemptEvent
 from app.domains.jobs.models import Job
 from app.domains.prompts.models import Prompt
 from app.domains.runs import router as routes
@@ -34,7 +35,7 @@ FINISH = datetime(2026, 1, 2, 8, 2, tzinfo=timezone.utc)
 LATE = datetime(2026, 1, 2, 8, 5, tzinfo=timezone.utc)
 TABLES = [model.__table__ for model in (
     User, Prompt, Job, Run, RunJob, AutoRebalanceWorkflow,
-    AutoRebalanceWorkflowStage, ActivityLog,
+    AutoRebalanceWorkflowStage, ActivityLog, ApiUsageAttemptEvent,
 )]
 
 

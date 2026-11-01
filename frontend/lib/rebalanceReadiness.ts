@@ -9,13 +9,15 @@ export function inputReadiness(loading: boolean, error: string | null, present: 
 }
 
 export function isKnownEstimate(value: number | null | undefined): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+  // The provider API has no verified-free provenance. Zero may be a fallback
+  // or a rounded estimate and cannot establish that a future run is free.
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 export function estimateReadinessLabel(cost: number, unknown: number, loading: boolean, selected: number) {
   if (loading) return "Loading pricing…";
   if (unknown > 0) return `Unknown (${unknown} model estimate${unknown === 1 ? "" : "s"} unavailable)`;
   if (selected === 0) return "Select models";
-  if (cost === 0) return "₹0.00 reported (zero not verified)";
+  if (cost === 0) return "Unknown (reported zero; free cost not verified)";
   return `₹${cost.toFixed(2)}`;
 }

@@ -873,6 +873,12 @@ export interface AutoRebalanceJobDetailResponse {
   web_search_queries?: string[] | null;
   web_sources?: string[] | null;
   runtime_metadata_json?: Record<string, unknown> | null;
+  output_provenance?: {
+    source: "api_usage_attempt_events";
+    identities: { provider: string; model: string | null }[];
+    observed_from: string | null;
+    observed_to: string | null;
+  } | null;
   created_at: string;
   updated_at: string;
 }

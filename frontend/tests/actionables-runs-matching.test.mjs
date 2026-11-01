@@ -15,6 +15,7 @@ function load(source, bindings = {}) {
   return loaded.exports;
 }
 const { ActionablesRunGroup, ActionablesEmptyState } = load(read('../components/shared/ActionablesRunGroup.tsx'));
+const { withFinalActionablesReadDeadline } = load(read('../lib/finalActionablesReadDeadline.ts'));
 const render = (Component, props) => renderToStaticMarkup(createElement(Component, props));
 const sourceRun = { id: 450, created_at: '2026-10-31T10:15:00Z', status: 'completed', prompt: 'Instructions\n## Rebalance Input Bundle\nSnapshot date: 2026-10-30; captured at: 2026-10-31T08:00:00Z\n## Swing Trade Run #440\nCreated: 2026-10-31T09:00:00Z\nJob #701\nThreats job #702\n<script>unsafe()</script>' };
 const base = { market: 'india', latestRun: null, runCount: 0, stockCount: 0, loading: false, error: null };
@@ -64,6 +65,7 @@ test('late run responses cannot replace newer data, failure, or loading state', 
   const pending = [];
   const state = { runs: null, loading: false, error: null, writes: [] };
   const { loadRuns } = load(`${scoped.slice(start, end)}\nexport {loadRuns};`, {
+    withFinalActionablesReadDeadline,
     useCallback: fn => fn, runsRequestRef: { current: 0 }, market: 'india', runCacheKey: 'fixture',
     setLoading: value => { state.loading = value; }, setError: value => { state.error = value; },
     setRuns: value => { state.runs = value; }, cacheFinalActionablesRuns: (...args) => state.writes.push(args),
