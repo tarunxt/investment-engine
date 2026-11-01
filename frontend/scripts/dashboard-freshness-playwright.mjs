@@ -95,6 +95,7 @@ try {
     "empty",
     "failed",
     "stale-cache",
+    "stale-response",
     "partial-source",
     "missing-cash",
     "unavailable-fx",
@@ -319,6 +320,35 @@ try {
       await page.setViewportSize({ width: 1180, height: 757 });
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
     }
+    // Trust repair: a failed or pending summary cannot establish absence in history.
+    if (["loading", "success", "empty", "failed", "stale-cache", "stale-response", "partial-source"].includes(state)) {
+      const overview = page.getByRole("region", {name:"Portfolio overview table", exact:true});
+      const indiaRow = overview.getByRole("row").nth(1);
+      const usRow = overview.getByRole("row").nth(2);
+      const expected = state === "loading" ? "Checking saved snapshot availability"
+        : state === "empty" ? "No saved snapshot returned by the latest successful read"
+        : ["failed", "stale-cache"].includes(state) ? "Cannot verify saved snapshot availability"
+        : "Saved snapshot available";
+      await indiaRow.getByRole("status").getByText(expected, {exact:false}).waitFor();
+      await usRow.getByRole("status").getByText(state === "partial-source" ? "Cannot verify saved snapshot availability" : expected, {exact:false}).waitFor();
+      if (state === "stale-response") {
+        await indiaRow.getByText("Snapshot: 720h 0m old", {exact:true}).waitFor();
+        await usRow.getByText("Snapshot: 720h 0m old", {exact:true}).waitFor();
+      }
+      for (const [row, name, href] of [[indiaRow,"View India saved portfolio history","/console/zerodha#saved-portfolio-snapshots"], [usRow,"View US saved portfolio history","/console/indmoney-us#us-snapshot-panel-saved"]]) {
+        const link = row.getByRole("link", {name, exact:true});
+        assert.equal(await link.getAttribute("href"), href);
+        await link.focus();
+        assert.equal(await link.evaluate(el=>el === document.activeElement), true);
+        await page.keyboard.press("Tab");
+        await page.keyboard.press("Shift+Tab");
+        assert.equal(await link.evaluate(el=>el === document.activeElement), true);
+        assert.equal(await row.getByRole("status").getAttribute("aria-live"), "polite");
+      }
+      if (["loading","failed","partial-source"].includes(state)) {
+        assert.doesNotMatch(await overview.innerText(), /No snapshot available|No stored snapshot|No imported snapshot/);
+      }
+    }
     // Every primary availability state remains navigable in all mapped views.
     if (!state.endsWith("-panels")) {
       for (const width of [1180, 390]) {
@@ -342,7 +372,7 @@ try {
               await table.evaluate(el=>el.scrollLeft=0);
             }
           }
-          if (["failed","stale-cache","partial-source","missing-cash","unavailable-fx"].includes(state)) {
+          if (["loading","success","empty","failed","stale-cache","stale-response","partial-source","missing-cash","unavailable-fx"].includes(state)) {
             await page.screenshot({path:path.join(out,`${state}-${view.split(" ")[0].toLowerCase()}-${width}.png`),fullPage:false});
           }
         }
@@ -418,6 +448,7 @@ try {
       0,
       `${state}: unexpected external effects`,
     );
+    await page.evaluate(() => window.scrollTo({top: 0, behavior: "instant"}));
     await page.screenshot({
       path: path.join(out, `${state}-desktop.png`),
       fullPage: false,
