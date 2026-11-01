@@ -16,9 +16,12 @@ class CatalogTests(unittest.TestCase):
             module = ast.parse((REPO / item['source_path']).read_text())
             model = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == item['source_model'])
             columns = {node.target.id for node in model.body if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
+            self.assertTrue(any(isinstance(base, ast.Name) and base.id=='TimestampMixin' for base in model.bases))
             columns |= {'created_at', 'updated_at'}  # inspected TimestampMixin
             self.assertTrue(set(item['columns'] + item['policy_columns']) <= columns, item['relation'])
             self.assertIn('id', columns)
+            primary = next(node for node in model.body if isinstance(node, ast.AnnAssign) and getattr(node.target,'id',None)=='id')
+            self.assertTrue(any(keyword.arg=='primary_key' and isinstance(keyword.value, ast.Constant) and keyword.value.value is True for keyword in primary.value.keywords))
 
     def test_sensitive_relations_and_payload_columns_are_excluded(self):
         excluded = {'users', 'user_sessions', 'api_keys', 'zerodha_credentials', 'google_sheets_credentials'}
@@ -42,6 +45,10 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(sql, (HERE / '001-owner-views.review.sql').read_text())
         self.assertIn('__PRIVATE_VERIFIED_OWNER_ID__', sql)
         self.assertIn('security_barrier=true', sql)
+        self.assertIn('END;\n$audit$;', sql)
+        self.assertIn('aclexplode', sql)
+        self.assertIn('views_owner', sql)
+        self.assertEqual(plan.audit_sql(), (HERE/'privilege-audit.review.sql').read_text())
         self.assertNotIn('security_invoker', sql)
         self.assertNotIn('GRANT SELECT ON ALL', sql)
         self.assertNotIn('SELECT *', sql)

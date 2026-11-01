@@ -18,6 +18,14 @@ def catalog():
     return result
 
 
+def audit_sql():
+    expected = [(item['relation'], column) for item in catalog()['relations']
+                for column in sorted(set(item['columns'] + item['policy_columns']))]
+    values = ', '.join("('%s','%s')" % pair for pair in expected)
+    relations = ', '.join("'%s'" % item['relation'] for item in catalog()['relations'])
+    return (ROOT / 'audit_template.sql').read_text().replace('__EXPECTED_COLUMN_VALUES__', values).replace('__EXPECTED_RELATIONS__', relations)
+
+
 def review_sql():
     spec = catalog()
     lines = [
@@ -25,6 +33,8 @@ def review_sql():
         '-- Apply only after live relation/column/ownership and effective privilege review.',
         '-- Versioned native-viewer provisioning migration; no application data is modified.',
         'BEGIN;',
+        "SET LOCAL lock_timeout = '500ms';",
+        "SET LOCAL statement_timeout = '5s';",
         'CREATE ROLE credx_viewer_views NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;',
         'CREATE ROLE credx_viewer_read LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 2;',
         'CREATE SCHEMA credx_viewer AUTHORIZATION credx_viewer_views;',
@@ -50,7 +60,7 @@ def review_sql():
             f'REVOKE ALL ON credx_viewer."{name}" FROM PUBLIC;',
             f'GRANT SELECT ON credx_viewer."{name}" TO credx_viewer_read;',
         ]
-    lines.append((ROOT / 'privilege-audit.review.sql').read_text())
+    lines.append(audit_sql())
     lines += [
         '-- Mandatory in-transaction effective privilege audit before COMMIT:',
         '-- reject any membership/SET ROLE path, base-table/column access, persistent writes,',

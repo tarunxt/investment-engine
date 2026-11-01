@@ -1,0 +1,41 @@
+# Review/render the immutable artifact path before installation. No app environment.
+[Unit]
+Description=Owner-only read-only database browser
+Requires=investor-database-viewer.socket
+After=investor-database-viewer.socket
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=__IMMUTABLE_VIEWER_ARTIFACT__
+User=investor-db-viewer
+ExecStart=/srv/investor/backend/.venv/bin/python -I -B __IMMUTABLE_VIEWER_ARTIFACT__/serve.py
+LoadCredential=database-url:/etc/investor/database-viewer.dsn
+Sockets=investor-database-viewer.socket
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+IPAddressAllow=localhost
+SocketBindDeny=any
+LimitCORE=0
+MemoryMax=256M
+MemorySwapMax=0
+CPUQuota=25%
+TasksMax=32
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=15
+TimeoutStopSec=10
