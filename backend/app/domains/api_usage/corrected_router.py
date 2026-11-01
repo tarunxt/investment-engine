@@ -555,6 +555,57 @@ async def _load_provider_snapshot_rows(
     return rows
 
 
+async def _load_chart_rows(
+    db: AsyncSession, *, user_id: int, provider: str,
+    start_utc: datetime, end_utc: datetime,
+) -> list[dict[str, Any]]:
+    """Complete day-window read; no run_limit, prompt/output, or detail joins.
+
+    Four fixed statements regardless of result size. Ownership and provider
+    restrictions execute in SQL, before hydration. Detail stays on its own path.
+    """
+    from types import SimpleNamespace
+
+    groups: list[list[dict[str, Any]]] = []
+    for model, owner, timestamp, kind, cost_field, extra in (
+        (Job, Job.user_id, Job.created_at, "job", Job.estimated_cost,
+         [Job.runtime_metadata_json, Job.web_search_queries]),
+        (BullpenRunAuditFeedbackSubcallRecord, BullpenRunAuditFeedbackRecord.user_id,
+         BullpenRunAuditFeedbackSubcallRecord.created_at, "bullpen_run_audit_subcall",
+         BullpenRunAuditFeedbackSubcallRecord.estimated_cost, []),
+        (LlmProviderUsageCallRecord, LlmProviderUsageCallRecord.user_id,
+         LlmProviderUsageCallRecord.occurred_at, "provider_usage_call",
+         LlmProviderUsageCallRecord.actual_cost, []),
+    ):
+        statement = select(model.id, model.provider, model.model, model.tokens_in,
+                           model.tokens_out, cost_field, timestamp, *extra)
+        if model is BullpenRunAuditFeedbackSubcallRecord:
+            statement = statement.join(BullpenRunAuditFeedbackRecord,
+                BullpenRunAuditFeedbackRecord.id == model.feedback_id)
+        statement = statement.where(owner == user_id, model.provider == provider,
+                                    timestamp >= start_utc, timestamp < end_utc)
+        records = (await db.execute(statement)).all()
+        rows = []
+        for record_id, actual_provider, actual_model, tokens_in, tokens_out, cost, occurred_at, *metadata in records:
+            requests = _job_request_count(SimpleNamespace(
+                runtime_metadata_json=metadata[0], web_search_queries=metadata[1]
+            )) if metadata else 1
+            rows.append(_new_usage_row(
+                provider=actual_provider, model=actual_model, source_key=kind,
+                source_label=kind, workflow=kind, requests=requests,
+                tokens_in=tokens_in or 0, tokens_out=tokens_out or 0,
+                estimated_cost=cost or 0, occurred_at=occurred_at,
+                record_kind=kind, record_id=record_id,
+            ))
+        groups.append(rows)
+    start_day = start_utc.replace(tzinfo=UTC).astimezone(API_USAGE_TZ).date()
+    end_day = (end_utc - timedelta(microseconds=1)).replace(tzinfo=UTC).astimezone(API_USAGE_TZ).date()
+    snapshots = await _load_provider_snapshot_rows(
+        db, user_id=user_id, start_day=start_day, end_day=end_day, provider=provider,
+    )
+    return _effective_usage_rows(groups[0] + groups[1], groups[2], snapshots)
+
+
 def _effective_usage_rows(
     local_rows: list[dict[str, Any]],
     call_rows: list[dict[str, Any]],
@@ -1211,9 +1262,8 @@ async def corrected_llm_cost_history(
     today = datetime.now(API_USAGE_TZ).date()
     oldest_day = today - timedelta(days=day_limit - 1)
     start_utc, end_utc, _ = _window_utc("custom", oldest_day, today)
-    rows = await _load_effective_usage_rows(
-        db, user_id=current_user.id, start_utc=start_utc, end_utc=end_utc,
-    )
+    rows = await _load_chart_rows(db, user_id=current_user.id, provider=normalized_provider,
+                                  start_utc=start_utc, end_utc=end_utc)
     fx = await load_persisted_usd_inr_rate()
     display_fx_rate = (
         round(fx.valid_value, 4) if fx.valid_value is not None else None
