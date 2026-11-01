@@ -15,3 +15,11 @@ Safe checks:
 Before/after PNGs are baseline/current component renders using the same partial fixture and CSS. `readback.json` records actual visible labels and hrefs. Workflow and stage detail narrow screenshots are also included. Images were visually inspected for wrapping and readable hierarchy.
 
 No paid jobs, provider refresh, trading, account changes or external messages were triggered. Loading/empty checks apply to link availability; no fabricated workflow history is presented as production data. Production QA and deployment remain with the parent integration task. No dialog behavior was changed. Potential shared-file overlap: RunDetailPageContent.tsx and AutoRebalanceHistoryClient.tsx; apply narrowly during serial integration.
+
+## Native review correction
+
+The initial visual-pass assessment was too broad: the stage detail H1 still used the parent's `auto_rebalance_label`. Verified `/console/indmoney-us-swing-run/[id]/page.tsx` delegates to the shared `RunDetailPageContent`; run ID 442 and parent sequence 120 are distinct fields. The corrected H1 is `Stage run #442`, with `Workflow #120 · IndMoney US Run #120 (Swing Scan)` secondary. The recorded stage breadcrumb remains `Swing Scan stage run · Run #442`. Non-workflow run headings preserve existing behavior.
+
+Initial workflow fixture screenshots contained mojibake because the offline HTTP server omitted UTF-8 HTML/JavaScript encoding. Both response content types and the HTML meta charset are now explicit UTF-8. Baseline `c7d4942e` source has valid `—` literals, and Next.js default metadata includes UTF-8; this is a confirmed fixture defect, not evidence of production mojibake. Regenerated screenshots and automated text checks show valid em dashes and no `â` or replacement characters.
+
+The workflow detail's green completed summary with partial child stages is pre-existing rendering of workflow execution status versus child result status; it is retained. The workflow card continues to state `Finished with partial results` and `Execution: completed`. No production visual QA is claimed. Detail screenshots now cover both 1440px and 390px. Browser verification exercises the canonical `/console/indmoney-us-swing-run/442` route using the actual shared component, with local fixtures only.
