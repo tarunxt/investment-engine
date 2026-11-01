@@ -68,6 +68,8 @@ jobs:
           backend/tests/test_dashboard_summary.py
           backend/tests/test_indmoney_us_parser.py
           backend/tests/test_indmoney_snapshot_validation.py
+          backend/tests/test_indmoney_us_threats.py
+          backend/tests/test_zerodha_threats.py
           backend/tests/test_portfolio_analysis_read_projection.py
           backend/tests/test_cost_dashboard_cache.py
           backend/tests/test_cost_drivers_router.py
