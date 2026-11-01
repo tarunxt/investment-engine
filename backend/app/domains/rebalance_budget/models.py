@@ -66,5 +66,24 @@ class RebalanceSpendAttempt(Base):
     fx_version: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="reserved")
     receipt: Mapped[str | None] = mapped_column(String(255))
+    settlement_evidence_hash: Mapped[str | None] = mapped_column(String(64))
+    settlement_reference: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RebalanceSpendRefund(Base):
+    """Append-only confirmed credits; never rewrite gross incurred usage."""
+    __tablename__ = "rebalance_spend_refunds"
+    __table_args__ = (
+        UniqueConstraint("scope_id", "refund_key", name="uq_rebalance_spend_refund"),
+        CheckConstraint("amount_inr > 0", name="ck_rebalance_refund_positive"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scope_id: Mapped[int] = mapped_column(ForeignKey("rebalance_spend_scopes.id", ondelete="RESTRICT"), nullable=False)
+    attempt_id: Mapped[int] = mapped_column(ForeignKey("rebalance_spend_attempts.id", ondelete="RESTRICT"), nullable=False)
+    refund_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount_inr: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
+    settlement_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)

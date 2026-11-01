@@ -3,7 +3,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from . import policy
-from .ledger import SpendCapBlocked, bind_scope, money, reserve, settle
+from .ledger import SpendCapBlocked, bind_scope, reserve, settle
 
 
 def sessions():
@@ -88,10 +88,9 @@ def after_call(admission, evidence):
             raise SpendCapBlocked("Provider settlement is unavailable; reservation retained") from None
     if charge is not None:
         try:
-            if (not isinstance(charge, policy.ConfirmedCharge)
-                    or not isinstance(charge.receipt, str) or not charge.receipt.strip()):
+            if not isinstance(charge, policy.ConfirmedCharge):
                 raise SpendCapBlocked("Unconfirmed receipt")
-            money(charge.inr)
+            charge.validate(admission.bound)
         except SpendCapBlocked:
             with sessions() as db:
                 settle(db, scope_id=admission.scope_id, attempt_id=admission.attempt_id)
@@ -99,4 +98,6 @@ def after_call(admission, evidence):
     with sessions() as db:
         settle(db, scope_id=admission.scope_id, attempt_id=admission.attempt_id,
             confirmed_actual_inr=charge.inr if charge else None,
-            receipt=charge.receipt if charge else None)
+            receipt=charge.receipt if charge else None,
+            evidence_hash=charge.digest() if charge else None,
+            settlement_reference=charge.settlement_reference if charge else None)

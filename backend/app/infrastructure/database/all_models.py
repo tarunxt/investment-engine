@@ -84,5 +84,5 @@ from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
 from app.domains.rebalance_budget.models import (  # noqa: F401
-    RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt,
+    RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund,
 )

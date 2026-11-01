@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from decimal import Decimal as D
 from threading import Barrier
 from types import SimpleNamespace
@@ -49,10 +50,20 @@ def job(sequence=1, portfolio="india", job_id=1):
         auto_rebalance_sequence=sequence, auto_rebalance_label="Synthetic workflow")
 
 
+def finite_limits():
+    return policy.FiniteRequestLimits(1000, 1000, 2, 3, 30,
+        "synthetic adapter/transport enforcement proof", True, True)
+
+
+def confirmed_charge(actual="3"):
+    return policy.ConfirmedCharge(D(actual), "fixture-receipt", ("fixture-transport-1",), True,
+        "fixture-settled-inr-invoice", "fixture", "fixture-all-in-inr", "INR", True)
+
+
 def bound(amount="4", actual="3"):
     return policy.RequestBound(D(amount), "fixture", "fixture-all-in-inr",
         datetime.now(timezone.utc) + timedelta(minutes=5),
-        lambda evidence: policy.ConfirmedCharge(D(actual), "fixture-receipt"))
+        lambda evidence: confirmed_charge(actual), finite_limits())
 
 
 def test_sequences_share_allowance_but_markets_and_owners_do_not(cap_db):
@@ -198,7 +209,7 @@ def test_expired_or_unknown_fx_policy_blocks_before_io(cap_db, monkeypatch):
 def test_usage_estimate_does_not_release_unconfirmed_spend(cap_db, monkeypatch):
     f, _ = cap_db
     unconfirmed = policy.RequestBound(D("4"), "fixture", "fixture", datetime.now(timezone.utc)
-        + timedelta(minutes=5), lambda _: None)
+        + timedelta(minutes=5), lambda _: None, finite_limits())
     monkeypatch.setattr(policy, "resolve_bound", lambda **kwargs: unconfirmed)
     token = runtime.configure_job(job(), 0)
     try:
@@ -212,7 +223,7 @@ def test_usage_estimate_does_not_release_unconfirmed_spend(cap_db, monkeypatch):
 def test_malformed_settlement_suspends_scope(cap_db, monkeypatch):
     f, _ = cap_db
     invalid = policy.RequestBound(D("4"), "fixture", "fixture", datetime.now(timezone.utc)
-        + timedelta(minutes=5), lambda _: policy.ConfirmedCharge(D("NaN"), "bad"))
+        + timedelta(minutes=5), lambda _: policy.ConfirmedCharge(D("NaN"), "bad"), finite_limits())
     monkeypatch.setattr(policy, "resolve_bound", lambda **kwargs: invalid)
     token = runtime.configure_job(job(), 0)
     try:

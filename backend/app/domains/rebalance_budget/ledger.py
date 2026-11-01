@@ -2,9 +2,9 @@
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from .models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendScope, utcnow
+from .models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendRefund, RebalanceSpendScope, utcnow
 
 CAP_INR = Decimal("20.00000000")
 QUANTUM = Decimal("0.00000001")
@@ -154,7 +154,8 @@ def reserve(db, *, scope_id, user_id, job_id, attempt_key, provider, model,
     return attempt.id
 
 
-def settle(db, *, scope_id, attempt_id, confirmed_actual_inr=None, receipt=None):
+def settle(db, *, scope_id, attempt_id, confirmed_actual_inr=None, receipt=None,
+           evidence_hash=None, settlement_reference=None):
     scope = db.scalar(select(RebalanceSpendScope).where(RebalanceSpendScope.id == scope_id).with_for_update())
     attempt = db.scalar(select(RebalanceSpendAttempt).where(
         RebalanceSpendAttempt.id == attempt_id, RebalanceSpendAttempt.scope_id == scope_id,
@@ -162,15 +163,26 @@ def settle(db, *, scope_id, attempt_id, confirmed_actual_inr=None, receipt=None)
     if scope is None or attempt is None:
         raise SpendCapBlocked("Spending reservation is unavailable; further dispatch is blocked")
     if attempt.status in {"settled", "bound_breach"}:
-        return  # provider receipt/duplicate settlement never counts twice
-    if confirmed_actual_inr is None or not isinstance(receipt, str) or not receipt.strip():
+        if confirmed_actual_inr is not None and (
+                money(confirmed_actual_inr) != attempt.actual_inr or receipt != attempt.receipt
+                or (evidence_hash is not None and evidence_hash != attempt.settlement_evidence_hash)):
+            # Preserve the first confirmed history. A conflicting later receipt
+            # must not silently pass as successful idempotency or enable dispatch.
+            scope.status = "settlement_conflict"
+            db.commit()
+            raise SpendCapBlocked("Conflicting settlement evidence; original charge preserved and scope suspended")
+        return
+    if confirmed_actual_inr is None or not isinstance(receipt, str) or not receipt.strip() or len(receipt) > 255:
         attempt.status = "uncertain"
-        scope.status = "uncertain"
+        if scope.status not in {"bound_breach", "settlement_conflict"}:
+            scope.status = "uncertain"
         # No timeout/lease expiry/cancellation releases a possibly billed call.
     else:
         actual = money(confirmed_actual_inr)
         attempt.actual_inr = actual
-        attempt.receipt = receipt[:255]
+        attempt.receipt = receipt
+        attempt.settlement_evidence_hash = evidence_hash
+        attempt.settlement_reference = settlement_reference
         attempt.finished_at = utcnow()
         scope.reserved_inr -= attempt.upper_inr
         scope.settled_inr += actual
@@ -187,3 +199,47 @@ def settle(db, *, scope_id, attempt_id, confirmed_actual_inr=None, receipt=None)
             if unresolved is None:
                 scope.status = "open"
     db.commit()
+
+
+def record_confirmed_refund(db, *, scope_id, attempt_id, user_id, evidence):
+    """Record a verified INR credit without replenishing the original allowance.
+
+    No route, setting or provider callback invokes this yet. A future reviewed
+    billing reconciler must supply actual settled evidence, never telemetry or
+    an estimated refund. Gross incurred cost, reservations and breach/suspension
+    states remain immutable; Audit12 may report credits separately.
+    """
+    from .policy import ConfirmedRefund
+    if not isinstance(evidence, ConfirmedRefund):
+        raise SpendCapBlocked("Confirmed refund settlement evidence required")
+    evidence.validate()
+    scope = db.scalar(select(RebalanceSpendScope).where(
+        RebalanceSpendScope.id == scope_id, RebalanceSpendScope.user_id == user_id,
+    ).with_for_update())
+    attempt = db.scalar(select(RebalanceSpendAttempt).where(
+        RebalanceSpendAttempt.id == attempt_id, RebalanceSpendAttempt.scope_id == scope_id,
+    ).with_for_update())
+    if (scope is None or attempt is None or attempt.actual_inr is None
+            or attempt.status not in {"settled", "bound_breach"}
+            or evidence.original_receipt != attempt.receipt):
+        raise SpendCapBlocked("Refund does not match an owned confirmed original charge")
+    previous = db.scalar(select(RebalanceSpendRefund).where(
+        RebalanceSpendRefund.scope_id == scope_id, RebalanceSpendRefund.refund_key == evidence.refund_key,
+    ))
+    if previous is not None:
+        if previous.attempt_id != attempt_id or previous.evidence_hash != evidence.digest():
+            raise SpendCapBlocked("Refund receipt conflicts with immutable recorded credit")
+        return previous.id
+    refunded = db.scalar(select(func.coalesce(func.sum(RebalanceSpendRefund.amount_inr), 0)).where(
+        RebalanceSpendRefund.attempt_id == attempt_id,
+    ))
+    amount = money(evidence.inr, positive=True)
+    if refunded + amount > attempt.actual_inr:
+        raise SpendCapBlocked("Confirmed credits cannot exceed the recorded original charge")
+    row = RebalanceSpendRefund(scope_id=scope_id, attempt_id=attempt_id,
+        refund_key=evidence.refund_key, amount_inr=amount,
+        settlement_reference=evidence.settlement_reference, evidence_hash=evidence.digest())
+    db.add(row)
+    db.flush()
+    db.commit()
+    return row.id

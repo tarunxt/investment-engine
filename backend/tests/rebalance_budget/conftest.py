@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.domains.rebalance_budget import ledger, runtime
-from app.domains.rebalance_budget.models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendScope
+from app.domains.rebalance_budget.models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendRefund, RebalanceSpendScope
 from app.domains.runs.models import AutoRebalanceWorkflow
 
 
@@ -39,7 +39,7 @@ def cap_db(monkeypatch):
     jobs = Table("jobs", metadata, Column("id", Integer, primary_key=True),
         Column("user_id", Integer, ForeignKey("users.id")),
         Column("auto_rebalance_portfolio", String(32)), Column("auto_rebalance_sequence", Integer))
-    for model in (RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, AutoRebalanceWorkflow):
+    for model in (RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund, AutoRebalanceWorkflow):
         model.__table__.to_metadata(metadata)
     metadata.create_all(engine)
     with engine.begin() as connection:
