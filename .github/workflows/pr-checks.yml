@@ -215,6 +215,8 @@ jobs:
           pytest -q --junitxml=/tmp/recommendation-audit.xml
           backend/tests/test_recommendation_audit.py
           backend/tests/test_validation_evidence.py
+          backend/tests/test_execution_evidence.py
+          backend/tests/test_validation_protocol.py
           backend/tests/test_recommendation_audit_integration.py
           backend/tests/test_historical_score_reader.py
           backend/tests/test_stock_source_observations.py
