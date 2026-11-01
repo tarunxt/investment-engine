@@ -127,8 +127,8 @@ if '/jobs?' in args[-1]:
     print(json.dumps({'jobs':jobs}))
 else:
     sha=args[-1].split('head_sha=',1)[1].split('&',1)[0] if 'head_sha=' in args[-1] else 'a'*40
-    runs=[] if os.getenv('FIXTURE_NO_BASELINE') else [{'id':42,'event':'push','conclusion':'success','head_sha':sha}]
-    if os.getenv('FIXTURE_HELD_RUN'): runs.insert(0,{'id':43,'event':'push','conclusion':'success','head_sha':'b'*40})
+    runs=[] if os.getenv('FIXTURE_NO_BASELINE') else [{'id':42,'event':'workflow_dispatch' if os.getenv('FIXTURE_MANUAL_BASELINE') else 'push','head_branch':'main','conclusion':'success','head_sha':sha}]
+    if os.getenv('FIXTURE_HELD_RUN'): runs.insert(0,{'id':43,'event':'push','head_branch':'main','conclusion':'success','head_sha':'b'*40})
     print(json.dumps({'workflow_runs':runs}))
 """)
         self.executable(self.bin/"curl",common+"""
@@ -250,6 +250,11 @@ else: print('401',end='')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual((self.root/'frontend-state').read_text().strip(),'candidate')
         self.assert_no_backend_operations()
+
+    def test_successful_manual_frontend_release_is_a_valid_next_baseline(self):
+        result,values=self.resolve_scope(['frontend/app/page.tsx'],GITHUB_EVENT_NAME='workflow_dispatch',REQUESTED_SCOPE='frontend',FIXTURE_MANUAL_BASELINE='1')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(values['scope'],'frontend-only');self.assertEqual(values['frontend_base_sha'],'a'*40)
 
     def test_frontend_failure_restores_frontend_without_backend_restore(self):
         result=self.run_workflow(DEPLOY_SCOPE='frontend-only',FIXTURE_FRONTEND_FAILURE='fingerprint')

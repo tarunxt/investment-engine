@@ -41,7 +41,7 @@ Changes to the specifically reviewed deployment orchestration/test files hold
 push-triggered production delivery before host mutation. The general classifier
 continues to treat shared paths as full-stack; no frontend override masks them.
 A manual `frontend` deployment must provide `expected_sha` matching the exact
-reviewed main SHA. The resolver finds the latest successful push deployment
+reviewed main SHA. The resolver finds the latest successful main deployment (push or manual)
 with a successful actual deployment job, excluding scope-only holds, verifies
 ancestry, and permits only frontend/docs plus the explicit reviewed orchestration
 and test paths. Missing evidence or backend/shared/unknown runtime differences

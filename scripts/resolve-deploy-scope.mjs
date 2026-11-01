@@ -25,7 +25,7 @@ export function resolveReleaseScope(input, io) {
   if (!shaPattern.test(sha || '') || io.git(['rev-parse', 'HEAD']).trim() !== sha) throw new Error('Checkout SHA mismatch');
   const changed = base => io.git(['diff', '--no-renames', '--name-only', '-z', base, sha]).split('\0').filter(Boolean);
   const runs = query => io.api(`/repos/${repository}/actions/workflows/deploy.yml/runs?${query}&per_page=20`).workflow_runs || [];
-  const deployed = run => run.event === 'push' && run.conclusion === 'success' && shaPattern.test(run.head_sha || '') &&
+  const deployed = run => ['push', 'workflow_dispatch'].includes(run.event) && run.head_branch === 'main' && run.conclusion === 'success' && shaPattern.test(run.head_sha || '') &&
     (io.api(`/repos/${repository}/actions/runs/${run.id}/jobs?per_page=100`).jobs || []).some(job =>
       /^Deploy (frontend-only|backend-only|full-stack)$/.test(job.name) && job.conclusion === 'success');
   const result = (scope, base = '', reason = '') => ({ scope, frontend_base_sha: base, reason });
@@ -35,7 +35,7 @@ export function resolveReleaseScope(input, io) {
     if (requestedScope === 'frontend') {
       if (input.expectedSha !== sha) throw new Error('Frontend release requires the exact reviewed SHA');
       // Successful scope-detection-only holds are not deployment evidence.
-      const baseline = runs('event=push&status=success').find(deployed)?.head_sha;
+      const baseline = runs('status=success').find(deployed)?.head_sha;
       if (!baseline) throw new Error('No successful deployed baseline; frontend release held');
       io.git(['merge-base', '--is-ancestor', baseline, sha]);
       if (!frontendProofPaths(changed(baseline))) throw new Error('Frontend proof includes backend/shared/unknown changes');
