@@ -626,3 +626,22 @@ test('nullable Kite exposure cannot become known units or popup asset totals', (
     if (field !== 'last_price') assert.equal(math.kiteHoldingQuantity(snapshot, 'SYNTH', 'NSE'), null);
   }
 });
+
+test('Audit7 F03 settled saved value and exposure denominator remain distinct',()=>{
+ const snapshot={captured_at:end,holdings_count:1,available_margin:300,holdings_market_value:1000,holdings:[{exchange:'NSE',tradingsymbol:'SYNTHETIC',quantity:10,t1_quantity:2,last_price:100,market_value:1000}]};
+ const before=JSON.stringify(snapshot), context=math.kiteWeightContext(snapshot);
+ assert.equal(context.values.get('NSE:SYNTHETIC'),1200);
+ assert.equal(context.portfolioValue,1200);assert.equal(context.totalAssets,1500);
+ assert.equal(math.weightComparison(1200,context.totalAssets,0.8).current,0.8);
+ assert.equal(math.weightComparison(1200,context.totalAssets,0.8).difference,0);
+ assert.equal(JSON.stringify(snapshot),before);
+ for(const patch of [{quantity:0,t1_quantity:2},{quantity:0,t1_quantity:0},{quantity:10,t1_quantity:0}]){
+  const holding={...snapshot.holdings[0],...patch};const value=(patch.quantity+patch.t1_quantity)*100;
+  const result=math.kiteWeightContext({...snapshot,holdings:[holding]});assert.equal(result.portfolioValue,value);assert.equal(result.totalAssets,value+300);
+ }
+ for(const patch of [{t1_quantity:undefined},{quantity:null},{last_price:NaN},{t1_quantity:-1}]){
+  assert.equal(math.kiteWeightContext({...snapshot,holdings:[{...snapshot.holdings[0],...patch}]}).valid,false);
+ }
+ assert.equal(math.kiteWeightContext({...snapshot,holdings_count:2}).valid,false);
+ assert.equal(math.kiteWeightContext(null).valid,false);
+});

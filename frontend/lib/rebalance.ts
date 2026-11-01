@@ -424,14 +424,14 @@ function formatPortfolioSnapshot(
       holding.t1_quantity,
       holding.quantity,
     ]);
-    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\nCurrent Units includes settled + T1 exposure. T1 is not automatically sellable; order eligibility is separately checked. Market Value is total exposure times the captured last price.\n\n${asMarkdownTable(
+    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\nCurrent Units includes settled + T1 exposure. T1 is not automatically sellable; order eligibility is separately checked. Exposure Market Value is total exposure times the captured last price.\n\n${asMarkdownTable(
       [
         "Exchange",
         "Stock Symbol",
         "Current Units",
         "Average Price",
         "Last Price",
-        "Market Value",
+        "Exposure Market Value (settled + T1)",
         "PnL",
         "Day Change %",
         "T1 Units",

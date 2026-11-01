@@ -78,3 +78,14 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
     assert snapshot["positions_m2m"] == 900.0
     assert snapshot["holdings"][0]["tradingsymbol"] == "INFY"
     assert snapshot["holdings"][0]["market_value"] >= snapshot["holdings"][1]["market_value"]
+
+
+def test_saved_market_value_preserves_settled_basis_with_t1_exposure():
+    raw = {"tradingsymbol": "SYNTHETIC", "exchange": "NSE", "quantity": 10,
+           "t1_quantity": 2, "last_price": 100}
+    snapshot = build_portfolio_snapshot([raw], {"net": [], "day": []})
+    assert snapshot["holdings_market_value"] == 1000
+    assert snapshot["holdings"][0]["market_value"] == 1000
+    assert snapshot["holdings"][0]["t1_quantity"] == 2
+    assert raw == {"tradingsymbol": "SYNTHETIC", "exchange": "NSE", "quantity": 10,
+                   "t1_quantity": 2, "last_price": 100}

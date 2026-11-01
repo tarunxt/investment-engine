@@ -427,7 +427,7 @@ function SnapshotHistoryChart({
             Daily History
           </span>
           <p className="mt-1 text-sm text-gray-500">
-            Holdings value trend across saved portfolio snapshots.
+            Settled holdings value trend (excludes T1) across saved portfolio snapshots.
           </p>
         </div>
         {selectedPoint && (
@@ -712,7 +712,7 @@ export function PortfolioSnapshotsPanel({
         <div className="grid grid-cols-1 gap-5 px-5 py-5 xl:grid-cols-2">
           <div className="grid gap-4 sm:grid-cols-2">
             <MetricCard
-              label="Holdings Value"
+              label="Settled Holdings Value (excludes T1)"
               value={formatCurrency(selectedSnapshot.holdings_market_value)}
               icon={Wallet}
             />
@@ -807,7 +807,7 @@ export function PortfolioSnapshotsPanel({
                       className="pb-2 pr-4"
                     />
                     <SortableTableHeader
-                      label="Qty"
+                      label="Settled Qty"
                       activeDirection={
                         holdingsSort?.column === "quantity"
                           ? holdingsSort.direction
@@ -849,7 +849,7 @@ export function PortfolioSnapshotsPanel({
                       className="pb-2 pr-4"
                     />
                     <SortableTableHeader
-                      label="Value"
+                      label="Settled Value (excludes T1)"
                       activeDirection={
                         holdingsSort?.column === "market_value"
                           ? holdingsSort.direction
