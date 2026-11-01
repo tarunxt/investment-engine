@@ -70,6 +70,6 @@ for(const width of [1180,390]){
  assert.equal(await page.evaluate(()=>writes),0);assert.deepEqual(await page.evaluate(()=>requests.filter(r=>!['usage','history'].includes(r.kind))),[]);
 }
 assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-await writeFile(path.join(output,'result.json'),JSON.stringify({timestamp:new Date().toISOString(),actualComponents:['ApisPage','LlmCostHistoryModal'],evidence,writes:0,external,errors,limitations:['Existing cost modal has no dialog semantics, focus trap, Escape dismissal or automatic focus restoration. This harness records those gaps without changing production code.','Synthetic isolated browser acceptance; not authenticated production UI or real cost history.']},null,2));
+await writeFile(path.join(output,'result.json'),JSON.stringify({timestamp:new Date().toISOString(),actualComponents:['ApisPage','LlmCostHistoryModal'],evidence,writes:0,external,errors,limitations:['Existing cost modal exposes no dialog role, permits background focus and does not close on Escape. This harness records those gaps without changing production code.','Synthetic isolated browser acceptance; not authenticated production UI or real cost history.']},null,2));
 console.log('PASS source-state and stale-response acceptance: both tabs at1180/390;0writes/external/errors. Existing modal keyboard/semantics limitations recorded. '+output);
 }finally{await browser.close();server.close()}
