@@ -207,3 +207,31 @@ test("interrupted requests cannot replace a later result", async () => {
   assert.match(h.render(), /50%/);
   assert.doesNotMatch(h.render(), /100%/);
 });
+
+test("selected known-outcome denominator and partial fee coverage stay explicit", async () => {
+  const h = harness();
+  h.render();
+  const data = response(2, 1);
+  Object.assign(data.summary, {
+    known_outcomes: 1, unknown_outcomes: 1, win_rate_denominator: 1,
+    fee_coverage: "partial", net_pnl_coverage: "partial",
+    measured_fee_components_total: 0, known_fee_components: 1, unknown_fee_components: 3,
+  });
+  h.start(Promise.resolve(data));
+  await tick();
+  const html = h.render();
+  assert.match(html, /Known-outcome Win Rate \(n=1\)/);
+  assert.match(html, /Selected cohort: 2 closed, 1 known outcomes, 1 unknown/);
+  assert.match(html, /Recorded Fees Subtotal \(partial coverage\)/);
+  assert.match(html, /1 known, 3 missing/);
+});
+
+test("explicit zero known-outcome denominator never borrows closed population", async () => {
+  const h = harness();
+  h.render();
+  const data = response(2, 0);
+  data.summary.win_rate_denominator = 0;
+  h.start(Promise.resolve(data));
+  await tick();
+  assert.doesNotMatch(h.render(), /0%/);
+});

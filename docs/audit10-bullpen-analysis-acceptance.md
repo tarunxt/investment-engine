@@ -35,3 +35,10 @@ Reviewable commit organization: backend analysis/contracts/lifecycle fixtures an
 run-audit documentation; frontend coverage/review labels and nullable types;
 per-recommendation acceptance ledger. All must be integrated together after the
 coordinator's auth-first independent review and exact-head CI gates.
+
+PR CI follow-up: older summary projections may omit fee component fields; these
+now remain unknown instead of raising. Legacy responses with zero closed trades
+cannot show a 0% win rate, and explicit zero known-outcome denominators do not
+borrow the closed population. Expanded local checks: 60 backend tests and eight
+actual rendered-component source/coverage tests pass. Per-ID partial gates remain
+unchanged.

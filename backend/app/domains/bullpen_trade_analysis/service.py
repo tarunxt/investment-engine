@@ -475,6 +475,11 @@ def _build_summary(
     ]
     fee_values = [record.fees_total for record in records if record.fees_total is not None]
     pnl_known = [record.net_pnl for record in records if record.net_pnl is not None]
+    fee_components = [
+        getattr(record, key, None)
+        for record in records for key in ("buy_fees", "sell_fees")
+    ]
+    measured_fees = [fee for fee in fee_components if fee is not None]
     return BullpenTradeAnalysisSummaryStats(
         total_executed_trades=len(
             [record for record in records if record.buy_executed_at is not None]
@@ -489,11 +494,9 @@ def _build_summary(
         unknown_outcomes=len(closed) - len(known),
         win_rate_denominator=len(known),
         win_rate=round(len(wins) / len(known), 4) if known else None,
-        measured_fee_components_total=(round(sum(
-            fee for record in records for fee in (record.buy_fees, record.sell_fees) if fee is not None
-        ), 4) if any(fee is not None for record in records for fee in (record.buy_fees, record.sell_fees)) else None),
-        known_fee_components=sum(fee is not None for record in records for fee in (record.buy_fees, record.sell_fees)),
-        unknown_fee_components=sum(fee is None for record in records for fee in (record.buy_fees, record.sell_fees)),
+        measured_fee_components_total=round(sum(measured_fees), 4) if measured_fees else None,
+        known_fee_components=len(measured_fees),
+        unknown_fee_components=len(fee_components) - len(measured_fees),
         known_fee_records=len(fee_values),
         unknown_fee_records=len(records) - len(fee_values),
         net_pnl_coverage="complete" if len(pnl_known) == len(records) and records else "partial" if pnl_known else "unknown",

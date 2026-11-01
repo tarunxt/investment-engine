@@ -422,11 +422,11 @@ export function TradeAnalysisListClient() {
           value={loading ? "…" : formatCurrency(summary?.total_net_pnl)}
         />
         <StatCard
-          label={`Known-outcome Win Rate (n=${summary?.win_rate_denominator ?? 0})`}
+          label={`Known-outcome Win Rate (n=${summary?.win_rate_denominator ?? summary?.closed_positions ?? 0})`}
           value={
             loading
               ? "…"
-              : summary && summary.win_rate != null
+              : summary && summary.win_rate != null && (summary.win_rate_denominator ?? summary.closed_positions) > 0
                 ? formatPercent(summary.win_rate * 100)
                 : "Unavailable"
           }
