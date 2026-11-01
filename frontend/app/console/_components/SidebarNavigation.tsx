@@ -40,6 +40,7 @@ import {
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
+import { NavigationDirectory } from './NavigationDirectory';
 import { SidebarThemeToggle } from './SidebarThemeToggle';
 import {
     ACCOUNT_ACTIONS,
@@ -386,10 +387,10 @@ function NavigationLeafLink({
             aria-current={active ? 'page' : undefined}
             title={leaf.title ?? leaf.name}
             className={cn(
-                'group flex w-full items-center rounded-xl text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                'group flex min-h-10 w-full items-center rounded-xl text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
                 isChild
                     ? 'gap-2 px-3 py-2.5'
-                    : 'gap-3 px-3.5 py-3',
+                    : 'gap-3 px-3.5 py-2.5',
                 active
                     ? 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border'
                     : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -443,10 +444,12 @@ function NavigationGroupRow({
                     defaultName: DEFAULT_NAVIGATION_NAMES[`folder:${group.id}`] ?? group.name,
                 }, event)}
                 className={cn(
-                    'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
-                    active
-                        ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
-                        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                    'flex min-h-10 w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                    active && !expanded
+                        ? 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border'
+                        : active
+                            ? 'text-sidebar-primary hover:bg-sidebar-accent'
+                            : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
                 )}
             >
                 <group.icon
@@ -566,7 +569,7 @@ function SortableNavigationEntry({
     };
 
     const rowClassName = cn(
-        'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition',
+        'flex min-h-10 w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition',
         active
             ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
             : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -676,7 +679,7 @@ function SidebarSection({
             >
                 <h2
                     id={headingId}
-                    className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground"
+                    className="text-[11px] font-semibold tracking-wide text-muted-foreground"
                 >
                     {section.label}
                 </h2>
@@ -812,6 +815,7 @@ export function SidebarNavigation({
 }: SidebarNavigationProps) {
     const navigationRef = useRef<HTMLElement>(null);
     const [isReordering, setIsReordering] = useState(false);
+    const [directoryOpen, setDirectoryOpen] = useState(false);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
     const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
@@ -1072,10 +1076,11 @@ export function SidebarNavigation({
         <div className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 px-3">
                 <div className="flex items-center justify-between gap-3">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
                         Navigation
                     </span>
                     <div className="flex items-center gap-2">
+                        {!isReordering ? <button type="button" onClick={() => setDirectoryOpen(true)} aria-haspopup="dialog" className="rounded text-[11px] font-medium text-sidebar-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">All destinations</button> : null}
                         {isReordering ? (
                             <button
                                 type="button"
@@ -1152,6 +1157,8 @@ export function SidebarNavigation({
                     user={user}
                 />
             </div>
+
+            <NavigationDirectory open={directoryOpen} pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} />
 
             {contextMenu ? (
                 <>
