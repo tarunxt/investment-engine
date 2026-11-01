@@ -22,6 +22,20 @@ type PreferencesFormData = {
   theme_preference: ThemePreference;
 };
 
+function timezoneExample(timezone: string): string {
+  try {
+    const localTime = new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(new Date("2026-01-01T12:00:00Z"));
+    return `Example: 12:00 UTC on 1 Jan 2026 is ${localTime} in ${timezone}.`;
+  } catch {
+    return "Time example unavailable for this timezone.";
+  }
+}
+
 export default function PreferencesPage() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -161,7 +175,7 @@ export default function PreferencesPage() {
             <option value="Asia/Calcutta">India Standard Time</option>
           </select>
           <p id="timezone-help" className="text-xs text-muted-foreground">
-            Example: 12:00 UTC is 17:30 India Standard Time (UTC+05:30).
+            {timezoneExample(formData.timezone)}
           </p>
         </div>
 

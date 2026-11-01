@@ -74,6 +74,14 @@ try {
   const save = page.getByRole('button', { name: 'Update preferences', exact: true });
   await open();
   assert.equal(await page.locator('select').count(), 3);
+  const optionInventory = {
+    theme_preference: [['light', 'Light'], ['dark', 'Dark'], ['system', 'System']],
+    timezone: [['UTC', 'UTC'], ['America/New_York', 'Eastern Time (US & Canada)'], ['America/Chicago', 'Central Time (US & Canada)'], ['America/Denver', 'Mountain Time (US & Canada)'], ['America/Los_Angeles', 'Pacific Time (US & Canada)'], ['Europe/London', 'London'], ['Europe/Paris', 'Paris'], ['Asia/Tokyo', 'Tokyo'], ['Asia/Calcutta', 'India Standard Time']],
+    notification_preferences: [['all', 'All notifications'], ['important', 'Important only'], ['none', 'None']],
+  };
+  for (const [id, options] of Object.entries(optionInventory)) {
+    assert.deepEqual(await page.locator(`#${id} option`).evaluateAll(items => items.map(o => [o.value, o.textContent])), options);
+  }
   assert.equal(await page.evaluate(() => window.saves.length), 0); // Opening/loading never saves.
   await loaded();
   assert.equal(await page.getByLabel('Theme', { exact: true }).inputValue(), 'light');
@@ -83,7 +91,24 @@ try {
   assert.deepEqual(await page.locator('nav a').evaluateAll(links => links.map(a => a.getAttribute('href'))), destinations);
   assert.equal(await save.count(), 1);
   if (!baseline) {
-    assert.match(await page.locator('#timezone-help').textContent(), /12:00 UTC is 17:30/);
+    assert.equal(await page.locator('#timezone-help').textContent(), 'Example: 12:00 UTC on 1 Jan 2026 is 12:00 in UTC.');
+    // Explicit winter examples make DST-dependent zones unambiguous; every native option is retained.
+    const times = ['12:00', '07:00', '06:00', '05:00', '04:00', '12:00', '13:00', '21:00', '17:30'];
+    for (const [index, [timezone]] of optionInventory.timezone.entries()) {
+      await page.getByLabel('Timezone', { exact: true }).selectOption(timezone);
+      assert.equal(await page.locator('#timezone-help').textContent(), `Example: 12:00 UTC on 1 Jan 2026 is ${times[index]} in ${timezone}.`);
+      assert.equal(await page.getByLabel('Timezone', { exact: true }).inputValue(), timezone);
+    }
+    if (evidence) await page.screenshot({ path: path.join(evidence, 'after-india-1180x757.png') });
+    await page.getByLabel('Timezone', { exact: true }).selectOption('UTC');
+    await page.getByLabel('Timezone', { exact: true }).focus();
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await page.getByLabel('Timezone', { exact: true }).inputValue(), 'America/New_York');
+    assert.match(await page.locator('#timezone-help').textContent(), /07:00 in America\/New_York/);
+    if (evidence) await page.screenshot({ path: path.join(evidence, 'after-new-york-1180x757.png') });
+    await page.keyboard.press('Home');
+    assert.equal(await page.getByLabel('Timezone', { exact: true }).inputValue(), 'UTC');
+    assert.equal(await page.evaluate(() => window.saves.length), 0);
     for (const [id, help] of [['theme_preference', 'theme-help'], ['timezone', 'timezone-help'], ['notification_preferences', 'notifications-help']]) {
       assert.equal(await page.locator(`#${id}`).getAttribute('aria-describedby'), help);
     }
@@ -124,6 +149,10 @@ try {
     await page.getByRole('alert').getByText('Fixture save failed').waitFor();
     assert.equal(await page.getByLabel('Timezone', { exact: true }).inputValue(), 'Asia/Calcutta');
     await save.click();
+    await page.evaluate(() => window.profileSave.reject(new Error('Fixture validation: invalid preference')));
+    await page.getByRole('alert').getByText('Fixture validation: invalid preference').waitFor();
+    assert.equal(await page.getByLabel('Notifications', { exact: true }).inputValue(), 'important');
+    await save.click();
     await page.evaluate(() => window.profileSave.resolve({}));
     await page.getByText('Preferences Updated', { exact: true }).waitFor();
     await page.getByRole('button', { name: '✕', exact: true }).click();
@@ -141,6 +170,15 @@ try {
     assert.equal(await page.getByLabel('Timezone', { exact: true }).inputValue(), 'America/New_York');
     assert.equal(await page.getByLabel('Notifications', { exact: true }).inputValue(), 'none');
     assert.equal(await page.getByLabel('Theme', { exact: true }).inputValue(), 'system');
+    assert.match(await page.locator('#timezone-help').textContent(), /07:00 in America\/New_York/);
+    assert.equal(await page.evaluate(() => window.saves.length), 0);
+    await page.setViewportSize({ width: 375, height: 812 });
+    assert.ok(await page.locator('#timezone-help').evaluate(el => el.getBoundingClientRect().right <= innerWidth));
+    if (evidence) await page.screenshot({ path: path.join(evidence, 'after-new-york-375x812.png'), fullPage: true });
+    // Malformed stored zones cannot crash presentation or silently normalize the saved value.
+    await open();
+    await page.evaluate(() => window.profileRead.resolve({ timezone: 'Invalid/Timezone', notification_preferences: 'all', theme_preference: 'light' }));
+    await page.getByText('Time example unavailable for this timezone.', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.saves.length), 0);
     // Empty/partial and failed reads retain the existing fallback behavior, no implicit write.
     for (const state of ['empty', 'partial', 'failed']) {
