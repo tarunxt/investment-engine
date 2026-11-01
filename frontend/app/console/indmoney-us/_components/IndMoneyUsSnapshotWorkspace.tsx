@@ -74,7 +74,7 @@ export function IndMoneyUsSnapshotWorkspace({
               <span aria-live="polite">
                 {selectedSnapshot ? <>Saved: <time dateTime={selectedSnapshot.captured_at}>{new Date(selectedSnapshot.captured_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</time></> : loading ? 'Loading saved snapshot…' : overview ? 'No saved snapshot yet.' : 'Saved snapshot unavailable.'}
               </span>
-              {selectedSnapshot ? <span className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-700">Parse status: <span className="capitalize">{selectedSnapshot.parse_status}</span></span> : null}
+              {selectedSnapshot ? <span className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-700">Holdings parse status: <span className="capitalize">{selectedSnapshot.parse_status}</span></span> : null}
               <details className="text-sm">
                 <summary className="cursor-pointer rounded text-purple-800 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-purple-700">Source details</summary>
                 <div className="mt-2 max-w-xl rounded border border-gray-200 bg-white p-3 text-gray-600">

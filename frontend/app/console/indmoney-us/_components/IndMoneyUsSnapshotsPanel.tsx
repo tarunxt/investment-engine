@@ -25,6 +25,14 @@ import type {
   IndMoneyUsReconciliationItem,
 } from '@/types/api';
 
+// Presentation only: retained source fields are never rewritten.
+function holdingDisplayName(holding: IndMoneyUsHolding) {
+  const name = holding.company_name?.trim();
+  return !name || /^(reports?|dashboard|portfolio|holdings|home|watchlist)$/i.test(name)
+    ? `${holding.symbol} · Display name needs review`
+    : holding.company_name;
+}
+
 function formatCurrency(value: number | null | undefined) {
   if (value == null) return '—';
   return new Intl.NumberFormat('en-US', {
@@ -105,7 +113,7 @@ const HOLDINGS_SORT_ACCESSORS: Record<
 > = {
   stock: {
     type: 'text',
-    getValue: (holding) => holding.company_name || holding.symbol,
+    getValue: (holding) => holdingDisplayName(holding),
   },
   quantity: {
     type: 'number',
@@ -157,7 +165,7 @@ type MarketIndexSortColumn = 'name' | 'value' | 'change_value' | 'change_percent
 const COMPACT_HOLDINGS_SORT_ACCESSORS = {
   stock: {
     type: 'text',
-    getValue: (holding: IndMoneyUsHolding) => holding.company_name || holding.symbol,
+    getValue: (holding: IndMoneyUsHolding) => holdingDisplayName(holding),
   },
   portfolio_weight_percent: {
     type: 'number',
@@ -458,7 +466,7 @@ function CompactHoldingsTable({
                       {holding.symbol}
                     </span>
                     <span className="text-xs text-gray-500 transition-colors group-hover:text-blue-600">
-                      {holding.company_name}
+                      {holdingDisplayName(holding)}
                     </span>
                   </TradingViewSymbolLink>
                 </td>
@@ -490,6 +498,7 @@ function ReconciliationTable({ items }: { items: IndMoneyUsReconciliationItem[] 
     <div className="border border-gray-200 bg-white shadow-sm">
       <div className="border-b border-gray-200 px-5 py-4">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Reconciliation</h3>
+        <p className="mt-2 text-sm text-gray-600">Snapshot and parsed totals are retained separately. Differences, including one cent, remain disclosed below.</p>
       </div>
       <div className="overflow-x-auto p-5">
         <table className="w-full text-sm">
@@ -551,6 +560,7 @@ function MarketIndicesTable({ indices }: { indices: IndMoneyUsMarketIndex[] }) {
     <div className="border border-gray-200 bg-white shadow-sm">
       <div className="border-b border-gray-200 px-5 py-4">
         <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Market Indices</h3>
+        <p role="status" className="mt-2 text-sm text-gray-600">Market-context extraction: {indices.length ? `${indices.length} index rows extracted; coverage is not verified.` : 'Incomplete or unavailable.'}</p>
       </div>
       <div className="overflow-x-auto p-5">
         <table className="w-full text-sm">
@@ -599,7 +609,7 @@ function MarketIndicesTable({ indices }: { indices: IndMoneyUsMarketIndex[] }) {
         </table>
         {indices.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-400">
-            No market indices were detected in this pasted snapshot.
+            Market-context extraction is incomplete or unavailable. No index rows were extracted; this does not confirm that the source has no indices. Review the raw pasted snapshot below.
           </p>
         ) : null}
       </div>
@@ -628,7 +638,7 @@ export function IndMoneyUsSnapshotsPanel({
 
   if (loading && !overview) {
     return (
-      <div className="flex items-center gap-2 border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
+      <div role="status" className="flex items-center gap-2 border border-gray-200 bg-white px-5 py-4 text-sm text-gray-500 shadow-sm">
         <Loader2 className="size-4 animate-spin" />
         Loading INDmoney portfolio history…
       </div>
@@ -667,7 +677,7 @@ export function IndMoneyUsSnapshotsPanel({
         ) : null}
 
         {selecting ? (
-          <div className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-5 py-3 text-sm text-gray-500">
+          <div role="status" className="flex items-center gap-2 border-b border-gray-200 bg-gray-50 px-5 py-3 text-sm text-gray-500">
             <Loader2 className="size-4 animate-spin" />
             Loading snapshot details…
           </div>
@@ -706,7 +716,7 @@ export function IndMoneyUsSnapshotsPanel({
               icon={Wallet}
             />
             <MetricCard
-              label="Holdings"
+              label="Holdings parsed"
               value={`${formatCount(selectedSnapshot.holdings_count)} / ${formatCount(reportedHoldings)}`}
               sublabel={`${selectedSnapshot.derived.profitable_holdings_count} profitable, ${selectedSnapshot.derived.loss_making_holdings_count} losing`}
               icon={Target}
@@ -820,7 +830,7 @@ export function IndMoneyUsSnapshotsPanel({
 	                      <td className="py-2.5 pr-4">
 	                        <TradingViewSymbolLink symbol={holding.symbol} market="us" className="group inline-flex flex-col">
 	                          <span className="font-medium text-gray-900 transition-colors group-hover:text-blue-700">
-	                            {holding.company_name}
+	                            {holdingDisplayName(holding)}
 	                          </span>
 	                          <span className="text-xs text-gray-500 transition-colors group-hover:text-blue-600">
 	                            {holding.symbol}
