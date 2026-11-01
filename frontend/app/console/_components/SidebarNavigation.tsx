@@ -10,6 +10,7 @@ import {
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
     DndContext,
     KeyboardSensor,
@@ -40,7 +41,7 @@ import {
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
-import { NavigationDirectory } from './NavigationDirectory';
+const NavigationDirectory = dynamic(() => import('./NavigationDirectory').then((module) => module.NavigationDirectory));
 import { SidebarThemeToggle } from './SidebarThemeToggle';
 import {
     ACCOUNT_ACTIONS,
@@ -1158,7 +1159,7 @@ export function SidebarNavigation({
                 />
             </div>
 
-            <NavigationDirectory open={directoryOpen} pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} />
+            {directoryOpen ? <NavigationDirectory open pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} /> : null}
 
             {contextMenu ? (
                 <>
