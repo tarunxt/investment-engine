@@ -153,6 +153,7 @@ type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
 
 type PositionContext = {
   source: "portfolio-snapshot" | "captured-model-rows";
+  holdingMatch?: "matched" | "absent";
   currentUnits: number | null;
   currentInvestmentAmount: number | null;
 };
@@ -404,7 +405,8 @@ function getZerodhaHoldingForStock(
 ) {
   if (!isZerodhaPortfolioSnapshot(snapshot)) return null;
   const symbol = stock.symbol.trim().toUpperCase();
-  return snapshot.holdings.find((holding) => holding.tradingsymbol.trim().toUpperCase() === symbol) ?? null;
+  return snapshot.holdings.find((holding) => holding.tradingsymbol.trim().toUpperCase() === symbol
+    && holding.exchange.trim().toUpperCase() === stock.exchange.trim().toUpperCase()) ?? null;
 }
 
 function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockConsensus): ZerodhaBuyTransaction[] {
@@ -412,7 +414,9 @@ function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockC
   return orders
     .filter((order) => {
       const isCompletedBuy = order.status?.toUpperCase() === "COMPLETE" && order.transaction_type?.toUpperCase() === "BUY";
-      return isCompletedBuy && order.tradingsymbol?.trim().toUpperCase() === symbol && (order.filled_quantity || order.quantity) > 0;
+      return isCompletedBuy && order.tradingsymbol?.trim().toUpperCase() === symbol
+        && order.exchange?.trim().toUpperCase() === stock.exchange.trim().toUpperCase()
+        && (order.filled_quantity || order.quantity) > 0;
     })
     .map((order) => ({
       orderId: order.order_id,
@@ -1364,6 +1368,7 @@ function buildPositionContext(
     // A complete holdings snapshot also captures stocks that are no longer held.
     return {
       source: "portfolio-snapshot",
+      holdingMatch: snapshot ? "matched" : "absent",
       currentUnits: snapshot ? snapshot.units : 0,
       currentInvestmentAmount: snapshot ? snapshot.currentValue : 0,
     };
@@ -1382,8 +1387,13 @@ function getStockPositionContext(stock: StockConsensus): PositionContext {
 }
 
 function getPositionContextLabel(stock: StockConsensus) {
-  return getStockPositionContext(stock).source === "portfolio-snapshot"
-    ? "Latest portfolio snapshot"
+  const position = getStockPositionContext(stock);
+  return position.source === "portfolio-snapshot"
+    ? position.holdingMatch === "absent"
+      ? "Latest portfolio snapshot · no matching instrument; zero inferred from snapshot absence, not a verified holding quantity"
+      : position.holdingMatch === "matched"
+        ? "Latest portfolio snapshot · matched holding"
+        : "Latest portfolio snapshot · instrument match not recorded in cached context"
     : "Captured model holdings (snapshot unavailable)";
 }
 
