@@ -9,9 +9,9 @@ MAX_COLLECTION_SECONDS = 240
 
 
 @contextmanager
-def collection_budget():
+def collection_budget(require_ownership=None):
     meter = {"requests": 0, "requestCap": MAX_PROVIDER_REQUESTS, "sdkRetries": 0, "byService": {}, "budgetExceeded": False}
-    token = _ACTIVE.set((meter, monotonic() + MAX_COLLECTION_SECONDS))
+    token = _ACTIVE.set((meter, monotonic() + MAX_COLLECTION_SECONDS, require_ownership))
     try:
         yield meter
     finally:
@@ -31,7 +31,9 @@ class MeteredClient:
             active = _ACTIVE.get()
             if active is None:
                 raise RuntimeError("AWS cost collection requires an explicit collection budget")
-            meter, deadline = active
+            meter, deadline, require_ownership = active
+            if require_ownership is not None:
+                require_ownership()
             if meter["requests"] >= MAX_PROVIDER_REQUESTS or monotonic() >= deadline:
                 meter["budgetExceeded"] = True
                 raise RuntimeError("Cost collection request/time budget exhausted")

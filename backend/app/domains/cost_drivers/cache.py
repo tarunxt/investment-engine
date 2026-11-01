@@ -222,12 +222,28 @@ def collection_lease(cache_key: str):
 
     No lease expiry: an expired lease could admit a duplicate while an old owner
     is still running. Normal completion, failure and cancellation release it.
+    Redis state loss can still admit a new owner during an old in-flight provider
+    request. Ownership checks stop detectable subsequent work; they cannot fence
+    a remote provider request. Strict failover exclusion remains an acceptance gap.
     """
     client = _redis_client()
     if client is None:
         raise CollectionUnavailableError("Shared collection coordination unavailable; no collection started")
     lock = client.lock(_cache_key("collector", cache_key), timeout=None, blocking=False)
     acquired = False
+
+    def require_ownership():
+        try:
+            owned = lock.owned()
+        except Exception as exc:
+            raise CollectionUnavailableError(
+                "Collection ownership cannot be verified; further requests stopped. In-flight outcome unknown."
+            ) from exc
+        if not owned:
+            raise CollectionUnavailableError(
+                "Collection ownership lost; further requests stopped. In-flight outcome unknown."
+            )
+
     try:
         try:
             acquired = lock.acquire(blocking=False)
@@ -235,8 +251,14 @@ def collection_lease(cache_key: str):
             raise CollectionUnavailableError("Shared collection coordination unavailable; no collection started") from exc
         if not acquired:
             raise CollectionUnavailableError("Collection already in progress; no duplicate collection started")
-        yield
+        yield require_ownership
     finally:
-        if acquired:
-            lock.release()
-        client.close()
+        try:
+            if acquired and lock.owned():
+                # Real Redis release also compares the token atomically.
+                lock.release()
+        except Exception:
+            # Do not mask cancellation/failure or assume ownership was released.
+            logger.exception("Unable to confirm/release cost collector ownership; operator recovery may be required")
+        finally:
+            client.close()

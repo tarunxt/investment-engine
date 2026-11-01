@@ -1,6 +1,7 @@
 import os
 import time
 from threading import Lock
+from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
@@ -43,11 +44,16 @@ class FakeRedis:
     def lock(self, key, timeout=None, blocking=False):
         parent = self
         class Lease:
+            token = uuid4().hex
             def acquire(self, blocking=False):
                 with parent._guard:
-                    return bool(parent.set(key, "held", nx=True))
+                    return bool(parent.set(key, self.token, nx=True))
+            def owned(self):
+                return parent.get(key) == self.token
             def release(self):
                 with parent._guard:
+                    if parent.get(key) != self.token:
+                        raise RuntimeError("synthetic ownership lost")
                     parent._values.pop(key, None)
         return Lease()
 
