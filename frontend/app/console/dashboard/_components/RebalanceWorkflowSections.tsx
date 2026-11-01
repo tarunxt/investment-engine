@@ -1,6 +1,7 @@
 "use client";
 
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
+import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
@@ -7866,6 +7867,7 @@ ${zerodhaExecutionMode === "direct_market"
               Last run:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
+            {stageLedger ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
             {audit?.status === "pending" ? (
               <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
                 <Loader2 className="size-4 shrink-0 animate-spin" />
