@@ -47,6 +47,7 @@ try {
   await open();
   await resolve(response);
   await page.getByText('Confidence: Not evaluated', { exact: true }).waitFor();
+  assert.equal(await page.getByText('$0.00', { exact: true }).count(), 0);
   await page.getByRole('tab', { name: 'Trades', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
   await page.getByText('Descriptive observations only.', { exact: false }).waitFor();

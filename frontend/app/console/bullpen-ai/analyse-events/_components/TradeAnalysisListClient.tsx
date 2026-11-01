@@ -231,6 +231,8 @@ export function TradeAnalysisListClient() {
 
   const summary = data?.summary;
   const learning = data?.learning_insights;
+  const hasUnknownPnl = data?.items.some((item) => !Number.isFinite(item.net_pnl));
+  const hasUnknownFees = data?.items.some((item) => !Number.isFinite(item.fees_total));
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
@@ -420,21 +422,21 @@ export function TradeAnalysisListClient() {
         />
         <StatCard
           label="Total Net P&L"
-          value={loading ? "…" : formatCurrency(summary?.total_net_pnl)}
+          value={loading ? "…" : hasUnknownPnl ? "Not evaluated" : formatCurrency(summary?.total_net_pnl)}
         />
         <StatCard
           label="Win Rate"
           value={
             loading
               ? "…"
-              : summary && summary.closed_positions > 0
+              : !hasUnknownPnl && summary && summary.closed_positions > 0
                 ? formatPercent(summary.win_rate * 100)
                 : "Unavailable"
           }
         />
         <StatCard
           label="Average P&L %"
-          value={loading ? "…" : formatPercent(summary?.average_pnl_percent)}
+          value={loading ? "…" : hasUnknownPnl ? "Not evaluated" : formatPercent(summary?.average_pnl_percent)}
         />
         <StatCard
           label="Average Holding"
@@ -446,7 +448,7 @@ export function TradeAnalysisListClient() {
         />
         <StatCard
           label="Total Fees"
-          value={loading ? "…" : formatCurrency(summary?.total_fees)}
+          value={loading ? "…" : hasUnknownFees ? "Not evaluated" : formatCurrency(summary?.total_fees)}
         />
       </div>
 
@@ -477,6 +479,7 @@ export function TradeAnalysisListClient() {
         <p>Applied filters: {Object.entries(filters).map(([key, value]) => `${key}: ${value || "All"}`).join(" · ")}</p>
         <p>Displayed records: {data ? data.items.length : "Unavailable"}. Outcome-label and fee coverage denominators: unavailable in this response. Aggregate totals do not establish complete coverage.</p>
         {data ? <p>Displayed-record coverage only: known net P&amp;L {data.items.filter((item) => Number.isFinite(item.net_pnl)).length}/{data.items.length}; known fees {data.items.filter((item) => Number.isFinite(item.fees_total)).length}/{data.items.length}. These counts do not establish full-cohort coverage.</p> : null}
+        {data ? <JsonPanel title="Reported Summary Raw Evidence" value={summary} /> : null}
         <p>Source and analysis versions: unavailable unless supplied in the raw evidence. Exit observations do not establish post-exit performance.</p>
       </section>
 

@@ -218,6 +218,8 @@ test("legacy list observations show coverage limits and do not invent confidence
   await tick();
   const html = h.render();
   assert.match(html, /Confidence: Not evaluated/);
+  assert.match(html, /Total Net P&amp;L<\/div><\/div><div><div[^>]*>Not evaluated/);
+  assert.match(html, /Total Fees<\/div><\/div><div><div[^>]*>Not evaluated/);
   assert.match(html, /Net P&amp;L: —/);
   assert.match(html, /Fees: —/);
   assert.match(html, /Outcome-label and fee coverage denominators: unavailable/);
