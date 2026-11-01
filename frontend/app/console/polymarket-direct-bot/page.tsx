@@ -1698,7 +1698,7 @@ export default function PolymarketBotPage() {
     return (
       <div className="flex items-center gap-3 text-sm text-slate-500">
         <Loader2 className="size-4 animate-spin" />
-        Loading Polymarket Copy Bot…
+        Loading Polymarket Direct Bot…
       </div>
     );
   }
