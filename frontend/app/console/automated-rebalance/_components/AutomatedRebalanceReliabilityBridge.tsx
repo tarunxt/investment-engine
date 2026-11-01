@@ -633,6 +633,9 @@ async function loadSavedStageJobs(
       if (jobs.length) return { label: detail.label, jobs };
     }
   } catch (error) {
+    // Missing workflow schema is unavailability, not absence of saved jobs.
+    if (error && typeof error === "object" && "details" in error
+      && (error.details as { error?: string } | undefined)?.error === "WORKFLOW_SCHEMA_NOT_READY") throw error;
     primaryError = error;
   }
 

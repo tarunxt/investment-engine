@@ -132,6 +132,7 @@ export default function RunDetailPage() {
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const runId = Number(idParam);
   const hasValidRunId = Number.isInteger(runId) && runId > 0;
+  const [parentHistoryError, setParentHistoryError] = useState<string | null>(null);
   const [parentStages, setParentStages] = useState<{ portfolio: string; sequence: number; stages: AutoRebalanceStageResponse[] } | null>(null);
   const [run, setRun] = useState<RunResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,10 +143,12 @@ export default function RunDetailPage() {
 
   useEffect(() => {
     let active = true;
+    setParentHistoryError(null);
+    setParentStages(null);
     if (run?.auto_rebalance_portfolio && run.auto_rebalance_sequence) {
       void apiService.getAutoRebalanceHistoryDetail(run.auto_rebalance_portfolio, run.auto_rebalance_sequence)
         .then(parent => { if (active) setParentStages({ portfolio: parent.portfolio, sequence: parent.sequence, stages: parent.stages }); })
-        .catch(() => { /* Keep the stage explicitly unknown when parent history is unavailable. */ });
+        .catch(reason => { if (active) setParentHistoryError(`Saved workflow history unavailable: ${reason instanceof Error ? reason.message : "Refresh to retry."}`); });
     }
     return () => { active = false; };
   }, [run?.auto_rebalance_portfolio, run?.auto_rebalance_sequence]);
@@ -331,6 +334,7 @@ export default function RunDetailPage() {
         <span aria-hidden="true">/</span><span aria-current="page">{run.auto_rebalance_portfolio ? recordedStageRunLabel(run.id, parentStages?.portfolio === run.auto_rebalance_portfolio && parentStages?.sequence === run.auto_rebalance_sequence ? parentStages.stages : []) : 'Run details'} · Run #{run.id}</span>
       </nav>
       <p className="text-xs text-gray-500">{RUN_HIERARCHY_HELP}</p>
+      {parentHistoryError ? <div role="alert" className="text-sm text-amber-800">{parentHistoryError}</div> : null}
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
