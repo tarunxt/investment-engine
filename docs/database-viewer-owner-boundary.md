@@ -34,3 +34,26 @@ all need separately scoped approval. Verify unauthenticated/non-owner/root/child
 and write denials in production before considering runtime approval. Roll back by
 keeping the viewer stopped and the route fail-closed; never restore public
 forwarding to a running administrative interface.
+
+## Frontend-only release gate
+
+Changes to the specifically reviewed deployment orchestration/test files hold
+push-triggered production delivery before host mutation. The general classifier
+continues to treat shared paths as full-stack; no frontend override masks them.
+A manual `frontend` deployment must provide `expected_sha` matching the exact
+reviewed main SHA. The resolver finds the latest successful push deployment
+with a successful actual deployment job, excluding scope-only holds, verifies
+ancestry, and permits only frontend/docs plus the explicit reviewed orchestration
+and test paths. Missing evidence or backend/shared/unknown runtime differences
+reject the request rather than broadening it to full-stack. The production host
+also rejects source drift from that baseline/target before checkout.
+
+For this combined release: merge only after all required checks and coordination;
+confirm the push is held with no host delivery; prepare the private owner setting
+through the designated operator; then dispatch the checked merged main SHA with
+`scope=frontend` and matching `expected_sha`. The one frontend promotion restart
+loads that setting. Backend/recovery driver setup, preparation, stop/start,
+migrations and restoration are absent from this path. Frontend candidate and
+rollback verification remain in the existing native deployment mechanism.
+Backend/full-stack delivery retains its contained driver and complete rollback.
+No viewer start or database grant is included.
