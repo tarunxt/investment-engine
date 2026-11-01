@@ -1,0 +1,13 @@
+[Unit]
+Description=Private owner database browser socket
+
+[Socket]
+ListenStream=/run/investor-database-viewer.sock
+SocketUser=investor
+SocketGroup=investor
+SocketMode=0600
+RemoveOnStop=yes
+Service=investor-database-viewer.service
+
+[Install]
+WantedBy=sockets.target
