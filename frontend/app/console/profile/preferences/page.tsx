@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { apiService } from "@/services/api";
 import { FormAlert } from "@/components/auth/FormAlert";
+import { URLs } from "@/lib/urls";
 import {
   applyThemePreference,
   getStoredThemePreference,
@@ -118,12 +120,13 @@ export default function PreferencesPage() {
         />
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      <form onSubmit={handleSubmit} className="w-full max-w-2xl space-y-6">
         <div className="space-y-2">
           <Label htmlFor="theme_preference">Theme</Label>
           <select
             id="theme_preference"
             name="theme_preference"
+            aria-describedby="theme-help"
             value={formData.theme_preference}
             onChange={handleChange}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -132,7 +135,7 @@ export default function PreferencesPage() {
             <option value="dark">Dark</option>
             <option value="system">System</option>
           </select>
-          <p className="text-[0.8rem] text-muted-foreground">
+          <p id="theme-help" className="text-xs text-muted-foreground">
             Select the theme for the dashboard.
           </p>
         </div>
@@ -142,6 +145,7 @@ export default function PreferencesPage() {
           <select
             id="timezone"
             name="timezone"
+            aria-describedby="timezone-help"
             value={formData.timezone}
             onChange={handleChange}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -156,6 +160,9 @@ export default function PreferencesPage() {
             <option value="Asia/Tokyo">Tokyo</option>
             <option value="Asia/Calcutta">India Standard Time</option>
           </select>
+          <p id="timezone-help" className="text-xs text-muted-foreground">
+            Example: 12:00 UTC is 17:30 India Standard Time (UTC+05:30).
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -163,6 +170,7 @@ export default function PreferencesPage() {
           <select
             id="notification_preferences"
             name="notification_preferences"
+            aria-describedby="notifications-help"
             value={formData.notification_preferences}
             onChange={handleChange}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -171,11 +179,23 @@ export default function PreferencesPage() {
             <option value="important">Important only</option>
             <option value="none">None</option>
           </select>
+          <p id="notifications-help" className="text-xs text-muted-foreground">
+            Email categories are managed separately. Open{" "}
+            <Link
+              href={`${URLs.routes.console.mails()}#mail-preferences-heading`}
+              className="rounded-sm text-primary underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              Email categories
+            </Link>{" "}
+            to choose individual email types.
+          </p>
         </div>
 
-        <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-          {loading ? "Saving..." : "Update preferences"}
-        </Button>
+        <div className="flex items-center border-t border-border pt-4">
+          <Button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+            {loading ? "Saving..." : "Update preferences"}
+          </Button>
+        </div>
       </form>
     </div>
   );
