@@ -234,51 +234,62 @@
 
 /*
  * Bullpen and older console tables also use tinted 100/200 surfaces and
- * opacity-suffixed utilities. Match those class families so a newly added
- * table row cannot silently reintroduce a white or pastel panel in dark mode.
+ * opacity-suffixed utilities. Match complete unprefixed tokens, including the opacity variants in use.
+ * Substring matching also selects hover/focus classes before interaction.
  */
-.dark [class*="bg-emerald-50"],
-.dark [class*="bg-emerald-100"],
-.dark [class*="bg-emerald-200"],
-.dark [class*="bg-green-50"],
-.dark [class*="bg-teal-50"],
-.dark [class*="bg-lime-50"] {
+.dark :is([class~="bg-emerald-50"], [class~="bg-emerald-50/35"], [class~="bg-emerald-50/40"], [class~="bg-emerald-50/50"], [class~="bg-emerald-50/60"], [class~="bg-emerald-50/70"], [class~="bg-emerald-50/75"], [class~="bg-emerald-50/80"], [class~="bg-emerald-50/85"], [class~="bg-emerald-50/90"]),
+.dark :is([class~="bg-emerald-100"], [class~="bg-emerald-100/60"], [class~="bg-emerald-100/65"], [class~="bg-emerald-100/70"], [class~="bg-emerald-100/80"]),
+.dark :is([class~="bg-emerald-200"], [class~="bg-emerald-200/80"]),
+.dark :is([class~="bg-green-50"]),
+.dark :is([class~="bg-teal-50"]),
+.dark :is([class~="bg-lime-50"]) {
   background-color: color-mix(in oklch, oklch(0.55 0.16 155) 16%, var(--card)) !important;
 }
 
-.dark [class*="bg-red-50"],
-.dark [class*="bg-red-100"],
-.dark [class*="bg-rose-50"],
-.dark [class*="bg-rose-100"],
-.dark [class*="bg-rose-200"],
-.dark [class*="bg-pink-50"] {
+.dark :is([class~="bg-red-50"], [class~="bg-red-50/40"], [class~="bg-red-50/50"], [class~="bg-red-50/60"], [class~="bg-red-50/70"], [class~="bg-red-50/80"], [class~="bg-red-50/90"]),
+.dark :is([class~="bg-red-100"], [class~="bg-red-100/80"]),
+.dark :is([class~="bg-rose-50"], [class~="bg-rose-50/40"], [class~="bg-rose-50/50"], [class~="bg-rose-50/60"], [class~="bg-rose-50/70"], [class~="bg-rose-50/80"], [class~="bg-rose-50/90"]),
+.dark :is([class~="bg-rose-100"], [class~="bg-rose-100/70"], [class~="bg-rose-100/75"], [class~="bg-rose-100/80"]),
+.dark :is([class~="bg-rose-200"], [class~="bg-rose-200/80"]),
+.dark :is([class~="bg-pink-50"]) {
   background-color: color-mix(in oklch, oklch(0.58 0.22 25) 16%, var(--card)) !important;
 }
 
-.dark [class*="bg-blue-50"],
-.dark [class*="bg-blue-100"],
-.dark [class*="bg-sky-50"],
-.dark [class*="bg-sky-100"],
-.dark [class*="bg-sky-200"],
-.dark [class*="bg-indigo-50"] {
+.dark :is([class~="bg-blue-50"], [class~="bg-blue-50/30"], [class~="bg-blue-50/35"], [class~="bg-blue-50/40"], [class~="bg-blue-50/50"], [class~="bg-blue-50/60"], [class~="bg-blue-50/70"], [class~="bg-blue-50/80"], [class~="bg-blue-50/90"]),
+.dark :is([class~="bg-blue-100"]),
+.dark :is([class~="bg-sky-50"], [class~="bg-sky-50/40"], [class~="bg-sky-50/50"], [class~="bg-sky-50/55"], [class~="bg-sky-50/60"], [class~="bg-sky-50/70"], [class~="bg-sky-50/80"], [class~="bg-sky-50/90"]),
+.dark :is([class~="bg-sky-100"]),
+.dark :is([class~="bg-sky-200"], [class~="bg-sky-200/80"]),
+.dark :is([class~="bg-indigo-50"], [class~="bg-indigo-50/50"], [class~="bg-indigo-50/60"], [class~="bg-indigo-50/70"], [class~="bg-indigo-50/75"]) {
   background-color: color-mix(in oklch, oklch(0.52 0.2 265) 16%, var(--card)) !important;
 }
 
-.dark [class*="bg-violet-50"],
-.dark [class*="bg-violet-100"],
-.dark [class*="bg-purple-50"],
-.dark [class*="bg-purple-100"],
-.dark [class*="bg-fuchsia-50"],
-.dark [class*="bg-fuchsia-100"] {
+.dark :is([class~="bg-violet-50"], [class~="bg-violet-50/40"], [class~="bg-violet-50/60"], [class~="bg-violet-50/70"]),
+.dark :is([class~="bg-violet-100"], [class~="bg-violet-100/70"]),
+.dark :is([class~="bg-purple-50"], [class~="bg-purple-50/40"], [class~="bg-purple-50/60"]),
+.dark :is([class~="bg-purple-100"]),
+.dark :is([class~="bg-fuchsia-50"], [class~="bg-fuchsia-50/60"]),
+.dark :is([class~="bg-fuchsia-100"], [class~="bg-fuchsia-100/70"]) {
   background-color: color-mix(in oklch, oklch(0.58 0.22 305) 16%, var(--card)) !important;
 }
 
-.dark [class*="bg-yellow-50"],
-.dark [class*="bg-amber-50"],
-.dark [class*="bg-amber-100"],
-.dark [class*="bg-amber-200"],
-.dark [class*="bg-orange-50"] {
+.dark :is([class~="bg-yellow-50"], [class~="bg-yellow-50/80"]),
+.dark :is([class~="bg-amber-50"], [class~="bg-amber-50/40"], [class~="bg-amber-50/50"], [class~="bg-amber-50/60"], [class~="bg-amber-50/70"], [class~="bg-amber-50/80"], [class~="bg-amber-50/85"], [class~="bg-amber-50/90"]),
+.dark :is([class~="bg-amber-100"], [class~="bg-amber-100/70"]),
+.dark :is([class~="bg-amber-200"], [class~="bg-amber-200/60"], [class~="bg-amber-200/80"]),
+.dark :is([class~="bg-orange-50"], [class~="bg-orange-50/80"]) {
   background-color: color-mix(in oklch, oklch(0.72 0.16 75) 16%, var(--card)) !important;
+}
+
+/* Semantic disclosure surfaces apply only during interaction. */
+.dark [class~="hover:bg-emerald-50"]:hover,
+.dark [class~="focus-visible:bg-emerald-50"]:focus-visible {
+  background-color: color-mix(in oklch, oklch(0.55 0.16 155) 16%, var(--card)) !important;
+}
+
+.dark [class~="hover:bg-blue-50"]:hover,
+.dark [class~="focus-visible:bg-blue-50"]:focus-visible {
+  background-color: color-mix(in oklch, oklch(0.52 0.2 265) 16%, var(--card)) !important;
 }
 
 /* Preserve semantic meaning while meeting high contrast on the dark tints. */
@@ -464,7 +475,8 @@
   border-color: var(--border) !important;
 }
 
-.dark input,
+/* Shared Input owns its underline, focus/invalid borders and disabled fill. */
+.dark input:not([data-slot="input"]),
 .dark textarea,
 .dark select {
   color: var(--foreground);

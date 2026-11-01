@@ -834,7 +834,7 @@ export default function ZerodhaPage() {
           onClick={() => setShowConnectionDetails((current) => !current)}
           className={cn(
             status?.connected
-              ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+              ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:bg-emerald-50'
               : 'border-gray-200 text-gray-600 hover:bg-gray-100',
           )}
         >
@@ -845,7 +845,7 @@ export default function ZerodhaPage() {
             active={showRedirectDetails}
             label="Show Zerodha redirect URL details"
             onClick={() => setShowRedirectDetails((current) => !current)}
-            className="border-blue-200 text-blue-700 hover:bg-blue-50"
+            className="border-blue-200 text-blue-700 hover:bg-blue-50 focus-visible:bg-blue-50"
           >
             <Link2 className="size-4" />
           </StatusRevealButton>
