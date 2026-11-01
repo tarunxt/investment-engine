@@ -756,7 +756,7 @@ export default function ZerodhaPage() {
     return (
       <div className="flex items-center gap-3 text-sm text-gray-500">
         <Loader2 className="size-4 animate-spin" />
-        Loading Zerodha status…
+        Loading India Portfolio · Zerodha status…
       </div>
     );
   }
@@ -767,7 +767,7 @@ export default function ZerodhaPage() {
       <header className="flex flex-col gap-3">
         <div>
           <div className="inline-flex items-start gap-1">
-            <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha portfolio</h1>
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">India Portfolio · Zerodha</h1>
             {status?.connected && (
               <Button
                 variant="ghost"
