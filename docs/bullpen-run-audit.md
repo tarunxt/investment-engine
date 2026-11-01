@@ -2745,3 +2745,10 @@ without position/runtime evidence render as unavailable, while reported zero
 counts retain their source and observation/freshness qualification. This is a
 presentation change only: audit capture, frozen snapshots, schema, validators,
 calculations, execution and recovery behavior are unchanged.
+
+The scoped source-state correction also covers lower Events Summary counts,
+empty-state text, missing-run timings/history and LLM diagnostics. Missing saved
+snapshots do not imply zero activity or invite execution; verified empty saved
+snapshots retain zero counts. An overview read settling without data clears only
+its transient loading note, preserving cached values, source notes and timestamps.
+Audit capture, frozen snapshots and execution remain unchanged.
