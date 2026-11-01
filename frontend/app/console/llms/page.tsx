@@ -190,39 +190,41 @@ export default function LlmsPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6 lg:max-w-none lg:px-0">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-500">LLMs</p>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">LLM Performance</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Summarised and listwise LLM performance by scan type, with timestamps, runtime, processing pass/fail,
-            Google Sheets export pass/fail, cost, and captured errors.
-          </p>
-          <p className="mt-1 text-xs text-slate-500">Export outcomes are historical report fields. Google Sheets is retired.</p>
+      <section aria-label="Report overview" className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-500">LLMs</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">LLM Performance</h1>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              Summarised and listwise LLM performance by scan type, with timestamps, runtime, processing pass/fail,
+              Google Sheets export pass/fail, cost, and captured errors.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">Export outcomes are historical report fields. Google Sheets is retired.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={loading}
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
-      </div>
 
-      {error ? (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          {error}
-          <p className="mt-1">{data ? 'Showing the last loaded report; it may be stale. Use Refresh to retry.' : 'Report unavailable. Use Refresh to retry.'}</p>
+        {error ? (
+          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            {error}
+            <p className="mt-1">{data ? 'Showing the last loaded report; it may be stale. Use Refresh to retry.' : 'Report unavailable. Use Refresh to retry.'}</p>
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Metric label="LLMs used" value={data ? data.total_llms.toLocaleString('en-IN') : '—'} />
+          <Metric label="Total scans" value={data ? data.total_scans.toLocaleString('en-IN') : '—'} />
+          <Metric label="Generated" value={formatDateTime(data?.generated_at)} />
         </div>
-      ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Metric label="LLMs used" value={data ? data.total_llms.toLocaleString('en-IN') : '—'} />
-        <Metric label="Total scans" value={data ? data.total_scans.toLocaleString('en-IN') : '—'} />
-        <Metric label="Generated" value={formatDateTime(data?.generated_at)} />
-      </div>
+      </section>
 
       {loading && !data ? (
         <div role="status" className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Loading LLM performance…</div>

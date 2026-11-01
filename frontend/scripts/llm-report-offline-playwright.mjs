@@ -39,6 +39,15 @@ try {
     await page.setViewportSize({width,height:757});
     await page.goto(base);
     await page.getByRole('status').waitFor();
+    const overview=page.getByRole('region',{name:'Report overview',exact:true});
+    assert.equal(await overview.getByRole('heading',{name:'LLM Performance',exact:true}).count(),1);
+    assert.equal(await overview.getByText('LLMs',{exact:true}).count(),1);
+    for(const text of ['LLMs used','Total scans','Generated']) assert.equal(await overview.getByText(text,{exact:true}).count(),1);
+    assert.match(await overview.innerText(),/Summarised and listwise LLM performance by scan type/);
+    assert.match(await overview.innerText(),/timestamps, runtime, processing pass\/fail/);
+    assert.match(await overview.innerText(),/Google Sheets export pass\/fail, cost, and captured errors/);
+    assert.match(await overview.innerText(),/Export outcomes are historical report fields/);
+    if(width===1180){const metrics=await Promise.all(['LLMs used','Total scans','Generated'].map(t=>overview.getByText(t,{exact:true}).boundingBox()));assert.equal(metrics[0].y,metrics[1].y);assert.equal(metrics[1].y,metrics[2].y);}
     assert.equal(await page.getByText('0',{exact:true}).count(),0);
     assert.equal(await page.getByRole('button',{name:'Refresh'}).isDisabled(),true);
     await page.screenshot({path:path.join(output,`${width}-loading.png`)});
@@ -54,7 +63,7 @@ try {
     assert.equal(await page.getByRole('alert').count(),0);
     assert.equal(await page.getByText('Fixture pending evidence').count(),1);
     assert.equal(await page.getByText('Fail',{exact:true}).count(),0);
-    for(const region of await page.getByRole('region').all()) {
+    for(const region of await page.locator('[role=region][tabindex]').all()) {
       await region.focus();
       assert.equal(await region.evaluate(el=>el===document.activeElement),true);
       await page.keyboard.press('ArrowRight');
@@ -74,6 +83,11 @@ try {
     await page.getByText(/No LLM scans/).waitFor();
     assert.equal(await page.getByText('0',{exact:true}).count(),2);
     await page.screenshot({path:path.join(output,`${width}-empty.png`)});
+    await page.getByRole('button',{name:'Refresh'}).click();
+    const complete=structuredClone(fixture);complete.groups[0].scans[0].processing_passed=true;complete.groups[0].scans[0].sheet_export_passed=false;complete.groups[0].scans[0].estimated_cost=0.125;
+    await settle(4,complete);
+    await page.getByText('Pass',{exact:true}).waitFor();assert.equal(await page.getByText('Fail',{exact:true}).count(),1);assert.equal(await page.getByText('$0.13 (FX unavailable)',{exact:true}).count(),1);
+    await page.screenshot({path:path.join(output,`${width}-loaded-outcomes.png`),fullPage:true});
     await page.goto(`${base}/other`);await page.goto(`${base}/console/llms`);
     await page.getByRole('status').waitFor();
     await settle(0,fixture);
