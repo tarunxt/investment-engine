@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { chromium } from 'playwright';
 import { compile } from '@tailwindcss/node';
+import { Scanner } from '@tailwindcss/oxide';
 
 const root = resolve(import.meta.dirname, '..');
 const temp = resolve(root, 'node_modules/.cache/input-evidence-test');
@@ -17,18 +18,18 @@ const entry = `import React,{useState,useRef,useEffect,useMemo,useId} from 'reac
 import {createRoot} from 'react-dom/client';
 import {InputEvidenceRows,InputEvidenceSummary} from '${resolve(root, 'app/console/dashboard/_components/InputEvidenceRows.tsx')}';
 const Button=(p)=><button {...p}/>; const X=()=> <span>×</span>;
-const parseTimestampMs=(s)=>Date.parse(s)||0; const formatTimestamp=(s)=>s;
+const cn=(...s)=>s.filter(Boolean).join(' '); const formatUsdAsVerifiedInr=(value)=>'₹'+value; const parseTimestampMs=(s)=>Date.parse(s)||0; const formatTimestamp=(s)=>s;
 ${dialog}
-const next={id:'threats:next',source:'next',label:'Upcoming portfolio snapshot',timestamp:null,status:'reserved',error:null,jobNo:'Upcoming run'};
-const saved={id:'portfolio:zerodha:latest',source:'run-job',label:'Latest Zerodha portfolio snapshot',timestamp:'2026-10-31T12:00:00Z',status:'partial',error:'Some holdings unavailable',jobNo:'Latest snapshot'};
+const next={id:'threats:next',source:'next',label:'Upcoming portfolio snapshot',timestamp:null,status:'reserved',error:null,costUsd:null,market:'india',jobNo:'Upcoming run'};
+const saved={id:'portfolio:zerodha:latest',source:'run-job',label:'Latest Zerodha portfolio snapshot',timestamp:'2026-10-31T12:00:00Z',status:'partial',error:'Some holdings unavailable',costUsd:null,market:'india',jobNo:'Latest snapshot'};
 function Fixture(){const[open,setOpen]=useState(false);const[selected,setSelected]=useState(new Set([next.id]));const[state,setState]=useState('loaded');
-const candidates=state==='empty'?[]:state==='missing'?[next]:[next,saved];
-return <main><button onClick={()=>setOpen(true)}>Choose evidence</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','missing','failed'].map(s=><option key={s}>{s}</option>)}</select><InputSelectionDialog open={open} stage="threats" candidates={candidates} selectedIds={selected} usdInrRate={83} loading={state==='loading'} error={state==='failed'?'Fixture read failed':null} onClose={()=>setOpen(false)} onToggle={id=>setSelected(old=>{const n=new Set(old);n.has(id)?n.delete(id):n.add(id);return n})} onToggleAll={()=>setSelected(candidates.every(c=>selected.has(c.id))?new Set():new Set(candidates.map(c=>c.id)))} onResetDefaults={()=>setSelected(new Set([next.id]))}/></main>}
+const candidates=state==='empty'?[]:state==='missing'?[next]:state==='zero'?[next,{...saved,status:'synced',error:null,costUsd:0}]:[next,saved];
+return <main><button onClick={()=>setOpen(true)}>Choose evidence</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','missing','failed','zero'].map(s=><option key={s}>{s}</option>)}</select><InputSelectionDialog open={open} stage="threats" candidates={candidates} selectedIds={selected} usdInrRate={83} loading={state==='loading'} error={state==='failed'?'Fixture read failed':null} onClose={()=>setOpen(false)} onToggle={id=>setSelected(old=>{const n=new Set(old);n.has(id)?n.delete(id):n.add(id);return n})} onToggleAll={()=>setSelected(candidates.every(c=>selected.has(c.id))?new Set():new Set(candidates.map(c=>c.id)))} onResetDefaults={()=>setSelected(new Set([next.id]))}/></main>}
 createRoot(document.getElementById('root')).render(<Fixture/>);`;
 writeFileSync(resolve(temp, 'fixture.tsx'), entry);
 execFileSync('npm', ['exec', '--yes', '--cache', '/tmp/auto-inputs-npm', '--package', 'esbuild', '--', 'esbuild', resolve(temp, 'fixture.tsx'), '--bundle', '--jsx=automatic', '--outfile='+resolve(temp,'fixture.js')], { cwd: root, stdio: 'pipe' });
 const compiler = await compile('@import "tailwindcss";', {base:root,onDependency:()=>{}});
-const candidates = [...(dialog+rows).matchAll(/className="([^"]+)"/g)].flatMap(match=>match[1].split(/\s+/));
+const candidates = new Scanner({}).scanFiles([{content:dialog+rows,extension:'tsx'}]);
 const css=compiler.build(candidates);
 const server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end(`<style>${css}</style><div id="root"></div><script>${readFileSync(resolve(temp,'fixture.js'),'utf8')}</script>`)});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -45,9 +46,21 @@ try {
   assert.equal(await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).isChecked(),false);
   await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).check();
   assert.match(await summary.innerText(),/Upcoming output · Saved snapshot/);
-  assert.match(await page.getByRole('dialog').innerText(),/Existing snapshot · partial/);
+  assert.match(await page.getByRole('dialog').innerText(),/Partial/);
+  assert.match(await page.getByRole('dialog').innerText(),/Existing snapshot/);
   assert.match(await page.getByRole('dialog').innerText(),/2026-10-31T12:00:00Z/);
   assert.match(await page.getByRole('dialog').innerText(),/Some holdings unavailable/);
+  await page.getByRole('button',{name:'Expand Upcoming run',exact:true}).click();
+  await page.getByRole('button',{name:'Expand Latest snapshot',exact:true}).click();
+  assert.equal(await page.getByRole('checkbox',{name:'Select Upcoming portfolio snapshot',exact:true}).isChecked(),true);
+  assert.equal(await page.getByRole('checkbox',{name:'Select Latest Zerodha portfolio snapshot',exact:true}).isChecked(),true);
+  await page.getByRole('tab',{name:'Included evidence',exact:true}).click();
+  assert.match(await page.getByRole('region',{name:'Included',exact:true}).innerText(),/Upcoming output/);
+  assert.equal(await page.getByRole('button',{name:'Collapse Upcoming run',exact:true}).count(),1);
+  await page.getByRole('button',{name:'Return to Select sources',exact:true}).click();
+  assert.equal(await page.getByRole('button',{name:'Collapse Latest snapshot',exact:true}).count(),1);
+  await page.getByRole('button',{name:'Collapse Upcoming run',exact:true}).click();
+  await page.getByRole('button',{name:'Collapse Latest snapshot',exact:true}).click();
   await page.getByRole('checkbox',{name:'Include Upcoming output',exact:true}).uncheck();
   assert.doesNotMatch(await summary.innerText(),/Upcoming output/);
   await page.keyboard.press('Escape');
@@ -65,21 +78,42 @@ try {
   await page.keyboard.press('Tab');assert.equal(await page.getByRole('button',{name:'Close input selection',exact:true}).evaluate(e=>document.activeElement===e),true);
   const evidence=process.env.EVIDENCE_DIR || '/tmp/auto-inputs-evidence';mkdirSync(evidence,{recursive:true});
   await page.screenshot({path:resolve(evidence,'desktop-1180x757.png')});
+  await page.getByRole('tab',{name:'Included evidence',exact:true}).click();
+  assert.match(await page.getByRole('region',{name:'Included',exact:true}).innerText(),/Upcoming output/);
+  assert.match(await page.getByRole('region',{name:'Not included',exact:true}).innerText(),/Saved snapshot/);
+  await page.getByRole('button',{name:'Expand Latest snapshot',exact:true}).click();
+  await page.getByRole('tab',{name:'Included evidence',exact:true}).scrollIntoViewIfNeeded();
+  await page.screenshot({path:resolve(evidence,'included-desktop-1180x757.png')});
+  await page.getByRole('tab',{name:'Included evidence',exact:true}).focus();
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.getByRole('tab',{name:'Select sources',exact:true}).getAttribute('aria-selected'),'true');
+  await page.keyboard.press('End');
+  assert.equal(await page.getByRole('tab',{name:'Included evidence',exact:true}).getAttribute('aria-selected'),'true');
+  await page.getByRole('button',{name:'Return to Select sources',exact:true}).click();
+  await page.getByRole('button',{name:'Collapse Latest snapshot',exact:true}).click();
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:resolve(evidence,'narrow-390x844.png')});
   await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).scrollIntoViewIfNeeded();
   await page.getByRole('checkbox',{name:'Include Saved snapshot',exact:true}).check();
   assert.match(await summary.innerText(),/Upcoming output · Saved snapshot/);
+  await page.getByRole('tab',{name:'Included evidence',exact:true}).click();
+  await page.screenshot({path:resolve(evidence,'included-narrow-390x844.png')});
   await page.keyboard.press('Escape');
   for(const state of ['loading','empty','missing','failed']){
     await page.getByRole('combobox',{name:'Fixture state'}).selectOption(state);await open();
     const text=await page.getByRole('dialog').innerText();
     assert.match(text,({loading:/Loading evidence sources/,empty:/No eligible sources/,missing:/Saved snapshot unavailable/,failed:/Fixture read failed/})[state]);
+    await page.getByRole('tab',{name:'Included evidence',exact:true}).click();
+    assert.match(await page.getByRole('dialog').innerText(),({loading:/Loading evidence sources/,empty:/No eligible sources/,missing:/Saved snapshot unavailable/,failed:/Fixture read failed/})[state]);
     if(state==='empty') assert.match(await summary.innerText(),/2 selected sources are unavailable/);
     if(state==='missing') assert.match(await summary.innerText(),/1 selected source is unavailable/);
     await page.keyboard.press('Escape');
   }
+  await page.getByRole('combobox',{name:'Fixture state'}).selectOption('zero');await open();
+  assert.match(await page.getByRole('dialog').innerText(),/Synced/);
+  assert.match(await page.getByRole('dialog').innerText(),/₹0/);
+  await page.keyboard.press('Escape');
   assert.deepEqual(errors,[]);
-  console.log('PASS: selection, select-all/reset, partial/stale timestamp, loading/empty/missing/failed, repeated open/close, Escape/focus return, Tab containment, desktop/narrow overflow.');
+  console.log('PASS: both views, original expansion columns/controls, keyboard tabs, selection, select-all/reset, partial/stale timestamp, loading/empty/missing/failed, repeated open/close, Escape/focus return, Tab containment, desktop/narrow overflow.');
 } finally {await browser.close();await new Promise(r=>server.close(r));rmSync(temp,{recursive:true,force:true});}
