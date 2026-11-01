@@ -188,7 +188,8 @@ for (const direct of [false, true]) {
   });
   test(`${label}: actual page loading remains separate from failure`, () => {
     const result = renderColdPage("runtime", "main", {direct,noState:true,loading:true});
-    assert.match(result.text, /Loading/);
+    assert.match(result.text, direct ? /Loading Polymarket Direct Bot…/ : /Loading/);
+    if (direct) assert.doesNotMatch(result.text, /Copy Bot/);
     assert.doesNotMatch(result.text, /state unavailable|Back to console/);
   });
   test(`${label}: verified empty success does not show recovery`, () => {

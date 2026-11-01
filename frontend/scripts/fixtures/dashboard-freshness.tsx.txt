@@ -8,6 +8,9 @@ const india={snapshot_date:stamp.slice(0,10),captured_at:stamp,source:'stored-ki
 const us={snapshot_date:stamp.slice(0,10),captured_at:stamp,source:'manual-import',parse_status:'parsed',holdings_count:0,wallet_balance:50,current_value:1000,invested_value:900,day_return_value:1,day_return_percent:0.1,total_return_value:100,total_return_percent:10,top_holdings:[],history:[]};
 const bullpen={active_count:0,claimable_count:0,claimable_value:0,cash_balance:20,total_value:120,unrealized_pnl:0,wallet_value:120,fetched_at:stamp,source:'redis-cache'};
 const summary={schema_version:1,generated_at:new Date().toISOString(),fx,zerodha:{connected:true,snapshot:india},indmoney_us:{snapshot:us},bullpen,sections:{zerodha:{status:'available'},indmoney_us:{status:'available'},bullpen:{status:'available'}},portfolio_history:{india:[],indmoney:[],bullpen:[],combined:[]}};
+if(state==='failed-retained-history'){
+ for(const key of ['india','indmoney','bullpen','combined']) summary.portfolio_history[key]=Array.from({length:4},(_,i)=>({captured_at:new Date(Date.now()-(8-i)*86400000).toISOString(),value:128000+i*100}));
+}
 if(state==='empty'){summary.zerodha=null;summary.indmoney_us=null;summary.bullpen=null;}
 if(state==='partial-source'){summary.indmoney_us=null;summary.sections.indmoney_us.status='unavailable';}
 if(state==='missing-cash')summary.indmoney_us.snapshot.wallet_balance=null;
@@ -20,6 +23,6 @@ if(state==='cached-panels'){
 }
 window.__reads=0;window.__unexpected=[];window.__threatReads=0;
 window.__threatRead=()=>{window.__threatReads++;return new Promise((resolve,reject)=>{if(state==='loading-panels'||state==='cached-panels')return;setTimeout(()=>state==='failed-panels'?reject(new Error('Fixture saved report unavailable')):resolve({analysis:state==='empty-panels'?null:{job_id:1,status:'completed',provider:'fixture',model:'fixture',updated_at:stamp,report:{summary:{},tables:[]}}}),150);});};
-window.__summaryRead=()=>{window.__reads++;return new Promise((resolve,reject)=>{if(state==='loading')return;setTimeout(()=>state==='failed'||state==='stale-cache'?reject(new Error('Fixture summary read failed')):resolve(summary),100);});};
+window.__summaryRead=()=>{window.__reads++;return new Promise((resolve,reject)=>{if(state==='loading')return;setTimeout(()=>state==='failed'||state==='stale-cache'||(state==='failed-retained-history'&&window.__reads>1)?reject(new Error('Fixture summary read failed')):resolve(summary),100);});};
 window.fetch=async(input)=>{if(state==='loading')return new Promise(()=>{});const url=String(input);if(!url.startsWith('/api/bullpen-ai/positions?')){window.__unexpected.push(url);throw new Error('Blocked unexpected request');}if(['failed','stale-cache','partial-source'].includes(state))return new Response('Fixture wallet unavailable',{status:503});return new Response(JSON.stringify(state==='empty'?{}:{summary:{walletValue:120,totalValue:120,cashBalance:20},positionsSource:'redis-cache',fetchedAt:stamp}),{status:200});};
 createRoot(document.getElementById('root')!).render(<DashboardPageClient/>);

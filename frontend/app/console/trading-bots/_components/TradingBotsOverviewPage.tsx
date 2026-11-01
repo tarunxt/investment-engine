@@ -24,6 +24,8 @@ import {
   buildBullpenAiAutoLiveTradingBotSummary,
   buildPolymarketTradingBotSummary,
   buildTradingBotsOverviewShell,
+  settleTradingBotsOverviewRead,
+  TRADING_BOTS_LOADING_NOTE,
   mergeTradingBotsOverview,
   normalizeTradingBotsSummaryResponse,
   type TradingBotGuardrail,
@@ -52,7 +54,7 @@ const PREFERRED_OVERVIEW_TIMEOUT_MS = 2_000;
 const FAST_BOT_TIMEOUT_MS = 2_500;
 const AUTO_LIVE_TIMEOUT_MS = 2_500;
 const INITIAL_OVERVIEW = buildTradingBotsOverviewShell(
-  "Loading latest trading bot status in the background.",
+  TRADING_BOTS_LOADING_NOTE,
 );
 const INITIAL_DETAILS: TradingBotsOverviewDetails = {
   "bullpen-x-polymarket": null,
@@ -833,6 +835,7 @@ export function TradingBotsOverviewPage() {
         setLoadError(errors.join(" • "));
       }
     } finally {
+      setOverview(settleTradingBotsOverviewRead);
       setIsLoadingLatest(false);
       setIsRefreshing(false);
     }

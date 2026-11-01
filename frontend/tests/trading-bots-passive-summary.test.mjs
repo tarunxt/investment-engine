@@ -51,7 +51,7 @@ for (const fail of [false, true]) {
       isTimeoutError: () => false, normalizeError: (error) => error.message,
       normalizeTradingBotsSummaryResponse: () => ({}), mergeTradingBotsOverview: () => ({}),
       buildPolymarketTradingBotSummary: () => ({}), buildBullpenAiAutoLiveTradingBotSummary: () => ({}),
-      upsertBotSummary: () => ({}),
+      upsertBotSummary: () => ({}), settleTradingBotsOverviewRead: (value) => value,
     };
     for (const name of ['setIsRefreshing', 'setIsLoadingLatest', 'setLoadError', 'setOverview', 'setDetails']) {
       bindings[name] = (value) => { if (typeof value === 'function') value({}); };
@@ -106,3 +106,16 @@ for (const fixture of ['loading', 'failed', 'partial', 'success-zero', 'populate
     assert.equal(summary.botsPausedStopped, unknown ? null : fixture === 'populated' ? 0 : 1);
   });
 }
+
+
+test('failed-after-loading settles transient notes while preserving cached/verified values', () => {
+  const loading = helpers.buildTradingBotsOverviewShell(helpers.TRADING_BOTS_LOADING_NOTE);
+  assert.equal(loading.bots[0].note, helpers.TRADING_BOTS_LOADING_NOTE);
+  const cached = { ...loading.bots[1], note: 'Saved snapshot from 2026-11-01T00:00:00Z', source: 'fallback', activePositionsCount: 0 };
+  const settled = helpers.settleTradingBotsOverviewRead({ ...loading, bots: [loading.bots[0], cached] });
+  assert.match(settled.bots[0].note, /status is unavailable/);
+  assert.doesNotMatch(settled.bots[0].note, /Loading/);
+  assert.equal(settled.bots[1], cached);
+  assert.equal(settled.bots[1].activePositionsCount, 0);
+  assert.equal(loading.bots[0].note, helpers.TRADING_BOTS_LOADING_NOTE);
+});

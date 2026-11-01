@@ -96,6 +96,7 @@ try {
     "failed",
     "stale-cache",
     "stale-response",
+    "failed-retained-history",
     "partial-source",
     "missing-cash",
     "unavailable-fx",
@@ -320,6 +321,33 @@ try {
       await page.setViewportSize({ width: 1180, height: 757 });
       await page.getByRole("tab", { name: "Overview", exact: true }).click();
     }
+    // Residual repair: exact card guidance and chart sufficiency need verified reads too.
+    if (state === "failed-retained-history") {
+      await page.getByRole("img", {name:"All Time genuine India portfolio value history"}).waitFor();
+      await page.getByRole("button", {name:"Refresh Board", exact:true}).click();
+      await page.getByText("Cannot verify saved snapshot availability · Last-known snapshot shown", {exact:false}).first().waitFor();
+      await page.getByRole("img", {name:"All Time genuine India portfolio value history"}).waitFor();
+      await page.getByText("Holdings availability is unverified. View saved portfolio history.", {exact:true}).first().waitFor();
+      await page.getByRole("button", {name:"1D", exact:true}).click();
+      await page.locator('[data-portfolio-history-state="unknown"]').getByText("Cannot verify saved snapshot history for Past Day. History sufficiency is unknown; view saved portfolio history.", {exact:false}).waitFor();
+    }
+    if (["failed", "stale-cache", "partial-source", "failed-retained-history"].includes(state)) {
+      assert.equal(await page.getByText("Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard.", {exact:true}).count(), 0);
+      assert.equal(await page.getByText("Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here.", {exact:true}).count(), 0);
+      if (state !== "failed-retained-history") {
+        for (const key of (state === "partial-source" ? ["indmoney","combined"] : ["india","indmoney","bullpen","combined"])) {
+          await page.getByRole("combobox", {name:"Choose portfolio chart"}).selectOption(key);
+          await page.locator('[data-portfolio-history-state="unknown"]').getByText("Cannot verify saved snapshot history for All Time. History sufficiency is unknown; view saved portfolio history.", {exact:false}).waitFor();
+          assert.equal(await page.getByText(/Insufficient genuine snapshot history/).count(), 0);
+        }
+        await page.getByRole("combobox", {name:"Choose portfolio chart"}).selectOption("india");
+      }
+    }
+    if (state === "empty") {
+      await page.getByText("Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here.", {exact:true}).waitFor();
+      await page.getByText("Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard.", {exact:true}).waitFor();
+      await page.locator('[data-portfolio-history-state="insufficient"]').getByText("Insufficient genuine snapshot history for All Time. The chart appears after at least 4 verified snapshots are available.", {exact:false}).waitFor();
+    }
     // Trust repair: a failed or pending summary cannot establish absence in history.
     if (["loading", "success", "empty", "failed", "stale-cache", "stale-response", "partial-source"].includes(state)) {
       const overview = page.getByRole("region", {name:"Portfolio overview table", exact:true});
@@ -372,7 +400,7 @@ try {
               await table.evaluate(el=>el.scrollLeft=0);
             }
           }
-          if (["loading","success","empty","failed","stale-cache","stale-response","partial-source","missing-cash","unavailable-fx"].includes(state)) {
+          if (["loading","success","empty","failed","stale-cache","stale-response","failed-retained-history","partial-source","missing-cash","unavailable-fx"].includes(state)) {
             await page.screenshot({path:path.join(out,`${state}-${view.split(" ")[0].toLowerCase()}-${width}.png`),fullPage:false});
           }
         }
@@ -441,6 +469,22 @@ try {
           );
         }
       }
+    }
+    if (["failed", "empty", "failed-retained-history"].includes(state)) {
+      for (const width of [1180, 390]) {
+        await page.setViewportSize({width, height:757});
+        for (const [market, title] of [["india", "Zerodha India"], ["us", "INDmoney US"]]) {
+          const card = page.getByRole("heading", {name:title, exact:true}).locator("xpath=ancestor::section[1]");
+          if (state !== "empty") assert.doesNotMatch(await card.innerText(), /Connect Zerodha and sync|Paste an INDmoney US snapshot|No holdings are available yet/);
+          if (state === "failed" && market === "india") assert.doesNotMatch(await card.innerText(), /DISCONNECTED/i);
+          await card.screenshot({path:path.join(out,`${state}-${market}-card-${width}.png`)});
+        }
+        const history = page.getByRole("region", {name:"Portfolio history", exact:true});
+        await history.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(150);
+        await history.screenshot({path:path.join(out,`${state}-history-${width}.png`)});
+      }
+      await page.setViewportSize({width:1180, height:757});
     }
     assert.deepEqual(errors, [], `${state}: browser runtime errors`);
     assert.equal(
