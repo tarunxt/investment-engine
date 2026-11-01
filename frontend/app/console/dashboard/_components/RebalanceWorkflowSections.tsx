@@ -3648,10 +3648,7 @@ function InputSelectionDialog({
   onResetDefaults: () => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
-  const closeRef = useRef(onClose);
-  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
   const allSelected =
@@ -3716,24 +3713,6 @@ function InputSelectionDialog({
     }
   }, [allSelected, someSelected]);
 
-  useEffect(() => {
-    if (!open) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const dialog = dialogRef.current;
-    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]') ?? []);
-    focusable()[0]?.focus();
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      const first = items[0], last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-    };
-    dialog?.addEventListener("keydown", handleKey);
-    return () => { dialog?.removeEventListener("keydown", handleKey); previous?.focus(); };
-  }, [open]);
-
   if (!open || !stage) return null;
 
   const titleByStage: Record<InputSelectionStage, string> = {
@@ -3766,8 +3745,9 @@ function InputSelectionDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cn("flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] shadow-2xl", stage === "threats" ? "border border-slate-300 bg-[#f5f4fc]" : "bg-white")} onClick={(event) => event.stopPropagation()}>
+    <ModelPickerDialogFrame enabled title={titleByStage[stage]} titleId={titleId} onClose={onClose}
+      overlayClassName="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      panelClassName={cn("flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] shadow-2xl", stage === "threats" ? "border border-slate-300 bg-[#f5f4fc]" : "bg-white")}>
         <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
           <div>
             <h3 id={titleId} className="text-xl font-extrabold sm:text-2xl tracking-tight text-slate-950">
@@ -3958,8 +3938,7 @@ function InputSelectionDialog({
             Done
           </Button>
         </div>
-      </div>
-    </div>
+    </ModelPickerDialogFrame>
   );
 }
 
@@ -4215,6 +4194,7 @@ function StageLlmSelectorDialog({
     readSavedModelMixes(),
   );
   const [selectedMixId, setSelectedMixId] = useState("");
+  const selectorTitleId = useId();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -4376,10 +4356,10 @@ function StageLlmSelectorDialog({
   );
 
   return (
-    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} onClose={onClose}>
+    <ModelPickerDialogFrame enabled={organizedPicker} title={selectorTitle} titleId={selectorTitleId} onClose={onClose}>
         <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5", organizedPicker && "shrink-0 px-4 py-3 sm:px-6")}>
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
+            <p id={selectorTitleId} className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               {selectorTitle}
             </p>
             <h3 className="mt-1 text-xl font-bold text-slate-950">
@@ -4415,6 +4395,7 @@ function StageLlmSelectorDialog({
                 onClose();
               }}
               className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              data-dialog-initial-focus
               aria-label="Close LLM selector"
             >
               <X className="size-5" />

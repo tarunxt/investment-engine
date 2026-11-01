@@ -26,9 +26,9 @@ const inventory = {
   deepseek: ['deepseek-v4-flash','deepseek-v4-pro'],
 };
 writeFileSync(resolve(output, 'fixture.tsx'), `
-import React, {useState, useCallback} from '${root}/node_modules/react/index.js';
+import React, {useState, useCallback, useEffect, useRef, useMemo, useId} from '${root}/node_modules/react/index.js';
 import {createRoot} from '${root}/node_modules/react-dom/client.js';
-import {History, Loader2, X} from 'lucide-react';
+import {History, Loader2, X, ChevronDown, ChevronRight} from 'lucide-react';
 import {LlmModelSelectionPanel} from '${root}/components/shared/LlmModelSelectionPanel';
 import {LlmModelMixControls} from '${root}/components/shared/LlmModelMixControls';
 import {ModelPickerDialogFrame} from '${root}/components/shared/ModelPickerDialogFrame';
@@ -54,10 +54,19 @@ const formatInrCostFromUsd=()=> 'Unavailable';
 ${extract('getLlmSelectorScanLabel')}
 ${extract('getLlmSelectorTitle')}
 ${extract('StageLlmSelectorDialog')}
+const parseTimestampMs=value=>Date.parse(value)||0;
+const getInputMarketBadgeClass=()=>'';
+const getInputMarketLabel=()=> 'India';
+const getInputStatusBadgeClass=()=>'';
+const formatUsdAsVerifiedInr=()=> 'Unavailable';
+${extract('InputSelectionDialog')}
+
 function App(){
+ const [inputOpen,setInputOpen]=useState(false),[ids,setIds]=useState(new Set(['fixture-0']));
  const [open,setOpen]=useState(false),[state,setState]=useState('loaded'),[selected,setSelected]=useState(new Set(['openai::gpt-4o-mini']));
  const providers=state==='empty'||state==='failed'||state==='loading'?[]:catalog;
- return <><main><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ return <><main><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ <InputSelectionDialog open={inputOpen} stage="rebalance" candidates={state==='empty'||state==='failed'||state==='loading'?[]:Array.from({length:40},(_,i)=>({id:'fixture-'+i,jobNo:'Fixture '+i,label:'Saved input '+i,status:i%2?'partial':'completed',source:'saved',timestamp:null}))} selectedIds={ids} usdInrRate={0} loading={state==='loading'} error={state==='failed'?'Fixture input read failed':state==='partial'?'Fixture partial input read':null} onToggle={id=>setIds(old=>{const next=new Set(old);next.has(id)?next.delete(id):next.add(id);return next;})} onToggleAll={()=>{}} onResetDefaults={()=>{}} onClose={()=>setInputOpen(false)}/>
  <StageLlmSelectorDialog open={open} stage="threats" portfolio="zerodha" providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
 }
 createRoot(document.getElementById('root')).render(<App/>);
@@ -84,6 +93,11 @@ try {
  assert.match(await page.getByRole('dialog').innerText(),/Check risks in the economy, sectors, and your holdings/);
  assert.equal(await page.getByRole('tab').count(),6);checks++;
  assert.equal(await page.getByRole('button',{name:'Close LLM selector'}).evaluate(el=>el===document.activeElement),true);checks++;
+ assert.equal(await page.getByRole('dialog').getAttribute('aria-modal'),'true');
+ assert.equal(await page.locator('main').evaluate(el=>Boolean(el.closest('[inert]'))),true);
+ await page.locator('#input-open').evaluate(el=>el.focus());
+ assert.equal(await page.getByRole('dialog').evaluate(el=>el.contains(document.activeElement)),true);checks+=3;
+ writeFileSync(resolve(output,'model-semantics.json'),JSON.stringify({baseline:await page.evaluate(()=>({innerWidth,innerHeight,devicePixelRatio,visualViewportScale:visualViewport.scale})),snapshot:await page.getByRole('dialog').ariaSnapshot(),labelledby:await page.getByRole('dialog').getAttribute('aria-labelledby'),initialFocus:'Close LLM selector',forwardWrap:'Done → Show LLM run history',reverseWrap:'Show LLM run history → Done'},null,2));
  await shot('desktop-summary');
  const labels={anthropic:'Anthropic',gemini:'Gemini',openai:'OpenAI',deepseek:'DeepSeek'};
  for(const [provider,models] of Object.entries(inventory)){
@@ -147,6 +161,46 @@ try {
  await shot('narrow-320-anthropic');
  await page.keyboard.press('Escape');
  assert.equal(await page.locator('main').evaluate(el=>el.closest('[inert]')===null),true);checks++;
+ await page.setViewportSize({width:1180,height:757});
+ const focusEvidence=[];
+ for(const state of ['loaded','loading','empty','failed','partial']){
+  await page.getByRole('combobox',{name:'Fixture state'}).selectOption(state);
+  await page.locator('#input-open').click();
+  const dialog=page.getByRole('dialog',{name:'Select Rebalance Scan inputs',exact:true});
+  await dialog.waitFor();
+  assert.equal(await dialog.getAttribute('aria-modal'),'true');
+  assert.equal(await page.getByRole('button',{name:'Close input selection'}).evaluate(el=>el===document.activeElement),true);
+  assert.equal(await page.locator('main').evaluate(el=>Boolean(el.closest('[inert]'))),true);
+  await page.locator('#open').evaluate(el=>el.focus());
+  assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);
+  await page.getByRole('button',{name:'Done',exact:true}).focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await page.getByRole('button',{name:'Close input selection'}).evaluate(el=>el===document.activeElement),true);
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.getByRole('button',{name:'Done',exact:true}).evaluate(el=>el===document.activeElement),true);
+  if(state==='loaded'){
+   const selected=page.getByRole('checkbox',{name:'Select all LLM jobs in Fixture 0',exact:true});
+   assert.equal(await selected.isChecked(),true);
+   await selected.focus(); await page.keyboard.press('Space'); assert.equal(await selected.isChecked(),false);
+   await page.getByRole('checkbox',{name:'Select all LLM jobs in Fixture 39',exact:true}).scrollIntoViewIfNeeded();
+  }
+  await shot('input-desktop-'+state);
+  focusEvidence.push({state,role:await dialog.getAttribute('role'),labelledby:await dialog.getAttribute('aria-labelledby'),snapshot:await dialog.ariaSnapshot(),sequence:['Open inputs','Close input selection','Done','Tab → Close input selection','Shift+Tab → Done','Escape → Open inputs']});
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true);
+  checks+=8;
+ }
+ for(const width of [390,320]){
+  await page.setViewportSize({width,height:844});
+  await page.getByRole('combobox',{name:'Fixture state'}).selectOption('loaded');
+  await page.locator('#input-open').click();
+  const dialog=page.getByRole('dialog');
+  assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  await shot('input-narrow-'+width);
+  await page.getByRole('button',{name:'Close input selection'}).click();
+  assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true); checks+=2;
+ }
+ writeFileSync(resolve(output,'input-focus-evidence.json'),JSON.stringify(focusEvidence,null,2));
  assert.deepEqual(errors,[]);checks++;
  writeFileSync(resolve(output,'results.json'),JSON.stringify({checks,errors,inventory,viewport:{desktop:[1180,757],narrow:[390,844]},source:'real StageLlmSelectorDialog extracted with offline history/FX fixtures; real panel, frame and template controls'},null,2));
  console.log(JSON.stringify({checks,output,errors}));
