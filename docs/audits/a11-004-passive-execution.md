@@ -76,3 +76,35 @@ recovery configuration unchanged; .06 no publication/provider/service operations
 .07 seven offline tests pass, existing full application suite unavailable without
 pytest; .08 owner/threshold remain unset pending approval. Live artifact identity,
 read-only telemetry and independent acceptance remain external for all claims.
+
+## Source reader follow-up (R01/R02)
+
+R01: `execution_reader.py` now implements the scoped SQLAlchemy source seam. It
+accepts explicit integrated Table objects and a dedicated session factory rather
+than importing models or initializing runtime engines. Required contract columns:
+Jobs id/user_id/status/auto_rebalance_portfolio/request_context_json/
+runtime_metadata_json; Outbox id/job_id/topic/state/created_at. The SELECT returns
+only five safe scalar columns, filtering actor, analysis.dispatch.v1 and the
+existing recovery equity/context allowlist before a deterministic primary-key
+order and LIMIT 101. Tokens, IDs, payloads and entire JSON objects are not returned.
+This does not inspect the broker or prove its prefix; prefix/queue identity remains
+unverified without trustworthy independent existing telemetry. No core model edits.
+
+R02: dedicated transaction is explicitly READ ONLY; SET LOCAL statement_timeout
+150ms and lock_timeout 50ms are fixed resource limits, not service objectives.
+The 450ms async deadline covers pool acquisition, query and cleanup. Driver
+cancellation must remain enabled in an integrated factory. The session explicitly
+rolls back; no commit, row locks or publication paths exist. Query work is bounded
+by native deadlines as LIMIT only bounds results. Static plan: outbox topic filter,
+job-id join, actor/policy predicates, primary-key order, LIMIT. No aggregate count,
+JSON payload fetch, FOR UPDATE, OFFSET or full queue scan. Actual PostgreSQL EXPLAIN
+and index selection are not asserted: coordinator must validate the exact migrated
+schema and plan offline before wiring the reader. No schema/index migration added.
+
+The source seam is tested with in-memory SQLite scoped synthetic rows, PostgreSQL
+dialect compilation, fake asynchronous transaction/deadline recording, pool timeout,
+invalid actor, and safe failure cases. Eleven tests pass with SQLAlchemy installed
+in a disposable /tmp virtual environment. No runtime database/broker/provider used.
+This supersedes the earlier absence of a source reader, but not runtime integration
+or acceptance. HTTP still uses the safe unknown default. Sampling completeness,
+consumer/receipt/service status and retry exhaustion remain explicitly unverified.
