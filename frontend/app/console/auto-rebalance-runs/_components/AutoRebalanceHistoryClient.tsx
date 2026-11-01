@@ -14,6 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { getStageTileLabel } from "@/components/shared/WorkflowStageTile";
 import { Button } from "@/components/ui/button";
 import { URLs } from "@/lib/urls";
 import { formatApiTimestamp } from "@/lib/datetime";
@@ -28,12 +29,12 @@ import type {
 export type AutoRebalanceHistoryPortfolio = "zerodha" | "indmoneyUs";
 
 const STAGE_LABELS = {
-  sync: "Portfolio sync",
-  threats: "Threats Scan",
-  swing: "Swing scan",
-  rebalance: "Rebalance scan",
-  technical: "Technical validation",
-  actionables: "Final actionables",
+  sync: getStageTileLabel("sync"),
+  threats: getStageTileLabel("threats"),
+  swing: getStageTileLabel("swing"),
+  rebalance: getStageTileLabel("rebalance"),
+  technical: getStageTileLabel("technical"),
+  actionables: getStageTileLabel("actionables"),
 } as const;
 
 function apiPortfolio(portfolio: AutoRebalanceHistoryPortfolio) {
