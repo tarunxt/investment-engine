@@ -8,8 +8,8 @@ export type StockParameter = {
 export const STOCK_PARAMETERS_STORAGE_KEY = 'credx-stock-parameters-v1';
 
 export const DEFAULT_STOCK_PARAMETERS: StockParameter[] = [
-  { id: 'exchange-symbol', parameter: 'Exchange Symbol', description: 'Listing exchange for the security.', validationRule: 'NASDAQ/NYSE for US & NSE/BSE for Ind' },
-  { id: 'stock-symbol', parameter: 'Stock Symbol', description: 'Ticker symbol used by the exchange.', validationRule: 'Less than 5 chars' },
+  { id: 'exchange-symbol', parameter: 'Exchange Symbol', description: 'Listing exchange for the security.', validationRule: 'NASDAQ/NYSE/AMEX for US & NSE/BSE for India' },
+  { id: 'stock-symbol', parameter: 'Stock Symbol', description: 'Ticker symbol used by the exchange.', validationRule: '1–64 letters, digits, &, _, . or -; preserve exchange ticker' },
   { id: 'current-units', parameter: 'Current Units', description: 'Current number of units held.', validationRule: 'number' },
   { id: 'action', parameter: 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)', description: 'Portfolio action recommended by the prompt output.', validationRule: 'Buy/Add/Sell All/Trim/Hold/Buy New only' },
   { id: 'units-change', parameter: 'Units Change', description: 'Change in units versus current holding.', validationRule: 'number' },
@@ -26,17 +26,17 @@ export const DEFAULT_STOCK_PARAMETERS: StockParameter[] = [
   { id: 'weeks', parameter: 'Weeks', description: 'Expected time horizon in weeks.', validationRule: 'number' },
   { id: 'confidence-score', parameter: 'Confidence Score (0-100)', description: 'Confidence score bounded from 0 to 100.', validationRule: 'number between 0 and 100' },
   { id: 'rationale-cruxx', parameter: 'Rationale Cruxx', description: 'Concise rationale summary.', validationRule: 'text' },
-  { id: 'score-rationale-cruxx', parameter: 'Score Rationale Cruxx', description: 'Numeric score for the rationale crux.', validationRule: 'number' },
+  { id: 'score-rationale-cruxx', parameter: 'Score Rationale Cruxx', description: 'Numeric score for the rationale crux.', validationRule: 'integer from -3 to 3' },
   { id: 'rationale-technical-short', parameter: 'Rationale - Technical Setup (Short Term 1–3 Months)', description: 'Short-term technical rationale.', validationRule: 'text' },
-  { id: 'score-rationale-technical-short', parameter: 'Score Rationale - Technical Setup (Short Term 1–3 Months)', description: 'Numeric score for short-term technical setup.', validationRule: 'number' },
+  { id: 'score-rationale-technical-short', parameter: 'Score Rationale - Technical Setup (Short Term 1–3 Months)', description: 'Numeric score for short-term technical setup.', validationRule: 'integer from -3 to 3' },
   { id: 'rationale-technical-medium', parameter: 'Rationale - Technical Setup (Medium Term)', description: 'Medium-term technical rationale.', validationRule: 'text' },
-  { id: 'score-rationale-technical-medium', parameter: 'Score Rationale - Technical Setup (Medium Term)', description: 'Numeric score for medium-term technical setup.', validationRule: 'number' },
+  { id: 'score-rationale-technical-medium', parameter: 'Score Rationale - Technical Setup (Medium Term)', description: 'Numeric score for medium-term technical setup.', validationRule: 'integer from -3 to 3' },
   { id: 'rationale-technical-long', parameter: 'Rationale - Technical Setup (Long Term)', description: 'Long-term technical rationale.', validationRule: 'text' },
-  { id: 'score-rationale-technical-long', parameter: 'Score Rationale - Technical Setup (Long Term)', description: 'Numeric score for long-term technical setup.', validationRule: 'number' },
+  { id: 'score-rationale-technical-long', parameter: 'Score Rationale - Technical Setup (Long Term)', description: 'Numeric score for long-term technical setup.', validationRule: 'integer from -3 to 3' },
   { id: 'rationale-fundamentals-short', parameter: 'Rationale - Fundamentals Short Term', description: 'Short-term fundamental rationale.', validationRule: 'text' },
-  { id: 'score-rationale-fundamentals-short', parameter: 'Score Rationale - Fundamentals Short Term', description: 'Numeric score for short-term fundamentals.', validationRule: 'number' },
+  { id: 'score-rationale-fundamentals-short', parameter: 'Score Rationale - Fundamentals Short Term', description: 'Numeric score for short-term fundamentals.', validationRule: 'integer from -3 to 3' },
   { id: 'rationale-fundamentals-medium-long', parameter: 'Rationale - Fundamentals Medium/Long Term', description: 'Medium/long-term fundamental rationale.', validationRule: 'text' },
-  { id: 'score-rationale-fundamentals-medium-long', parameter: 'Score Rationale - Fundamentals Medium/Long Term', description: 'Numeric score for medium/long-term fundamentals.', validationRule: 'number' },
+  { id: 'score-rationale-fundamentals-medium-long', parameter: 'Score Rationale - Fundamentals Medium/Long Term', description: 'Numeric score for medium/long-term fundamentals.', validationRule: 'integer from -3 to 3' },
 ];
 
 export function normalizeParameterName(value: string) {
@@ -64,7 +64,17 @@ export function loadStockParametersFromStorage(): StockParameter[] {
     parsed.forEach((item) => {
       if (!item?.parameter) return;
       const existingIndex = merged.findIndex((param) => normalizeParameterName(param.parameter) === normalizeParameterName(item.parameter));
-      if (existingIndex >= 0) merged[existingIndex] = { ...merged[existingIndex], ...item };
+      if (existingIndex >= 0) {
+        const current = merged[existingIndex];
+        // Refresh only shipped legacy defaults in memory; retain custom rules and saved records.
+        const legacyRule = current.id === 'stock-symbol' ? 'Less than 5 chars'
+          : current.id === 'exchange-symbol' ? 'NASDAQ/NYSE for US & NSE/BSE for Ind'
+          : current.id.startsWith('score-rationale-') ? 'number' : null;
+        merged[existingIndex] = {
+          ...current, ...item,
+          validationRule: item.validationRule === legacyRule ? current.validationRule : item.validationRule,
+        };
+      }
       else merged.push(item);
     });
     return merged;
@@ -91,9 +101,10 @@ export function buildMasterValidationChecklist(parameters: StockParameter[]) {
 export function validateStockParameterValue(parameter: StockParameter, value: string) {
   const trimmed = value.trim();
   const rule = parameter.validationRule.toLowerCase();
+  if (rule === 'integer from -3 to 3') return /^(?:-?[1-3]|0)$/.test(trimmed);
   if (!trimmed || ['-', '—', 'n/a', 'na'].includes(trimmed.toLowerCase())) return true;
-  if (parameter.parameter === 'Exchange Symbol') return /^(NASDAQ|NYSE|NSE|BSE)$/i.test(trimmed);
-  if (parameter.parameter === 'Stock Symbol') return /^[A-Z.\-]{1,4}$/i.test(trimmed);
+  if (parameter.parameter === 'Exchange Symbol') return /^(NASDAQ|NYSE|AMEX|NSE|BSE)$/i.test(trimmed);
+  if (parameter.parameter === 'Stock Symbol') return /^[A-Z0-9&_.-]{1,64}$/i.test(trimmed);
   if (parameter.parameter.startsWith('Action')) return /^(Buy|Add|Sell All|Trim|Hold|Buy New)$/i.test(trimmed);
   if (rule.includes('0') && rule.includes('100')) {
     const valueNumber = Number(trimmed.replace(/%$/, ''));
