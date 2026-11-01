@@ -151,7 +151,7 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
                     'postgresql+asyncpg://credx_viewer_read:synthetic@127.0.0.1/test?options=unsafe',
                     'postgresql+asyncpg://credx_viewer_read@127.0.0.1/test']:
             with self.assertRaises(browser.Unavailable):
-                browser.Store(dsn)
+                browser.Store(dsn,approved_other_database="postgres")
 
     def test_cursor_context_and_blank_filter_contract(self):
         item = browser.RELATIONS['jobs']
@@ -160,6 +160,12 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(browser.filters(QueryParams('column=&value=&limit=25'), item), (25, None))
         with self.assertRaises(browser.Invalid):
             browser.cursor_key(token, browser.RELATIONS['runs'], None)
+
+    def test_store_requires_exact_private_temporary_database_policy(self):
+        for other in [None,'',123,'x'*64,'bad\0name','synthetic']:
+            with self.subTest(other=other):
+                with self.assertRaises(browser.Unavailable):
+                    browser.Store('postgresql+asyncpg://credx_viewer_read:synthetic@127.0.0.1/synthetic',approved_other_database=other)
 
 
 if __name__ == '__main__':

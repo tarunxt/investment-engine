@@ -76,6 +76,9 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
         for database in dbs:
             quoted = self.connection.dialect.identifier_preparer.quote(database)
             await self.connection.exec_driver_sql(f'REVOKE CREATE,TEMP ON DATABASE {quoted} FROM PUBLIC')
+        for database in [self.url.database, 'postgres']:
+            quoted = self.connection.dialect.identifier_preparer.quote(database)
+            await self.connection.exec_driver_sql(f'GRANT TEMP ON DATABASE {quoted} TO PUBLIC')
         await self.connection.exec_driver_sql('REVOKE CREATE ON SCHEMA public FROM PUBLIC')
         await self.connection.exec_driver_sql('CREATE ROLE viewer_fixture_other NOLOGIN')
         names=[item['relation'] for item in plan.catalog()['relations']]
@@ -112,8 +115,8 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
             elif name == 'llm_provider_usage_calls':
                 rows += [{**rows[0], 'id':401,'job_id':201},{**rows[0], 'id':501,'job_id':None}]
             await self.connection.execute(insert(table), rows)
-        self.ddl = statements(plan.review_sql().replace(plan.OWNER_PLACEHOLDER, '71').replace('__VERIFIED_DATABASE_IDENTIFIER__', self.url.database))
-        self.audit = plan.audit_sql()
+        self.ddl = statements(plan.review_sql().replace(plan.OWNER_PLACEHOLDER, '71').replace('__VERIFIED_DATABASE_IDENTIFIER__', self.url.database).replace('__APPROVED_OTHER_TEMP_DATABASE_LITERAL__', "'postgres'"))
+        self.audit = plan.audit_sql().replace('__APPROVED_OTHER_TEMP_DATABASE_LITERAL__', "'postgres'")
         await self.connection.exec_driver_sql('SAVEPOINT before_provision')
 
     async def asyncTearDown(self):
@@ -160,7 +163,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
             'SELECT id FROM public.jobs', 'SELECT forbidden_payload FROM public.jobs',
             "UPDATE credx_viewer.jobs SET status='changed' WHERE id=101",
             "UPDATE public.jobs SET status='changed' WHERE id=101",
-            'CREATE TABLE public.viewer_forbidden(id int)', 'CREATE TEMP TABLE viewer_forbidden(id int)',
+            'CREATE TABLE public.viewer_forbidden(id int)',
             'CREATE SCHEMA viewer_forbidden', "SELECT nextval('public.fixture_sequence')",
             # SET ROLE authority follows session_user, so switching denial is
             # tested below using an actual authenticated viewer connection.
@@ -181,7 +184,8 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
         await self.provision()
         database = self.connection.dialect.identifier_preparer.quote(self.url.database)
         hazards = [
-            f'GRANT TEMP ON DATABASE {database} TO PUBLIC',
+            'GRANT TEMP ON DATABASE template1 TO PUBLIC',
+            f'GRANT CREATE ON DATABASE {database} TO PUBLIC',
             'GRANT CREATE ON SCHEMA public TO PUBLIC',
             'GRANT SELECT (forbidden_payload) ON public.jobs TO PUBLIC',
             'GRANT viewer_fixture_other TO credx_viewer_read',
@@ -224,7 +228,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_audit_failure_rolls_back_roles_and_schema(self):
         database = self.connection.dialect.identifier_preparer.quote(self.url.database)
-        await self.connection.exec_driver_sql(f'GRANT TEMP ON DATABASE {database} TO PUBLIC')
+        await self.connection.exec_driver_sql(f'GRANT CREATE ON DATABASE {database} TO PUBLIC')
         with self.assertRaises(DBAPIError) as rejected:
             await self.provision()
         self.assertEqual(rejected.exception.orig.sqlstate,'P0001')
@@ -243,7 +247,7 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
         try:
             module_spec=importlib.util.spec_from_file_location('pg_viewer_browser',HERE/'browser.py')
             browser=importlib.util.module_from_spec(module_spec);module_spec.loader.exec_module(browser)
-            service=browser.Store(self.url.set(username='credx_viewer_read',password='synthetic-viewer-password'))
+            service=browser.Store(self.url.set(username='credx_viewer_read',password='synthetic-viewer-password'),approved_other_database='postgres')
             await service.verify()
             for item in plan.catalog()['relations']:
                 records=await service.rows(item,51)
@@ -255,9 +259,52 @@ class PgIsolationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await connection.scalar(text('SHOW default_transaction_read_only')),'on')
                 ids=set((await connection.execute(text('SELECT id FROM credx_viewer.jobs'))).scalars())
                 self.assertEqual(ids,{101})
+            # Retained TEMP is explicit, independently of default read-only mode.
+            # Shadow names must never redirect the schema-qualified production queries.
+            for database in [self.url.database, 'postgres']:
+                temporary = create_async_engine(self.url.set(database=database,username='credx_viewer_read',password='synthetic-viewer-password'),poolclass=NullPool,hide_parameters=True)
+                try:
+                    async with temporary.connect() as connection:
+                        await connection.exec_driver_sql('SET TRANSACTION READ WRITE')
+                        await connection.exec_driver_sql('CREATE TEMP TABLE jobs(id bigint)')
+                        await connection.exec_driver_sql('INSERT INTO pg_temp.jobs VALUES (999)')
+                        self.assertEqual(await connection.scalar(text('SELECT id FROM pg_temp.jobs')),999)
+                        if database == self.url.database:
+                            await connection.exec_driver_sql('CREATE TEMP TABLE pg_roles(oid oid,rolname text)')
+                            await connection.exec_driver_sql('SET LOCAL search_path=pg_catalog,pg_temp')
+                            await connection.exec_driver_sql(self.audit)
+                            self.assertEqual(set((await connection.execute(text('SELECT id FROM credx_viewer.jobs'))).scalars()),{101})
+                        else:
+                            await connection.exec_driver_sql((HERE/'other_database_audit.sql').read_text())
+                finally:
+                    await temporary.dispose()
+            # Other-database audits are not skipped by the TEMP exception.
+            other_admin=create_async_engine(self.url.set(database='postgres'),poolclass=NullPool,hide_parameters=True)
+            try:
+                async with other_admin.connect() as connection:
+                    for hazard in [
+                        'CREATE TABLE public.fixture_other_secret(id int); GRANT SELECT ON public.fixture_other_secret TO PUBLIC',
+                        'CREATE TABLE public.fixture_other_secret(id int); GRANT SELECT(id) ON public.fixture_other_secret TO PUBLIC',
+                        'CREATE TABLE public.fixture_other_secret(id int); GRANT UPDATE ON public.fixture_other_secret TO PUBLIC',
+                        'CREATE SEQUENCE public.fixture_other_sequence; GRANT USAGE ON public.fixture_other_sequence TO PUBLIC',
+                        "CREATE FUNCTION public.fixture_other_function() RETURNS int LANGUAGE SQL SECURITY DEFINER AS 'SELECT 1'",
+                        'GRANT CREATE ON SCHEMA public TO PUBLIC',
+                    ]:
+                        transaction=await connection.begin()
+                        try:
+                            for command in hazard.split('; '):
+                                await connection.exec_driver_sql(command)
+                            with self.subTest(other_database_hazard=hazard):
+                                with self.assertRaises(DBAPIError) as denied:
+                                    await connection.exec_driver_sql((HERE/'other_database_audit.sql').read_text())
+                                self.assertEqual(denied.exception.orig.sqlstate,'P0001')
+                        finally:
+                            await transaction.rollback()
+            finally:
+                await other_admin.dispose()
             for statement in ['SELECT id FROM public.jobs', 'SELECT forbidden_payload FROM public.jobs',
                     "UPDATE credx_viewer.jobs SET status='changed'", "UPDATE public.jobs SET status='changed'",
-                'CREATE TABLE public.forbidden(id int)', 'CREATE TEMP TABLE forbidden(id int)',
+                'CREATE TABLE public.forbidden(id int)',
                 'CREATE SCHEMA viewer_forbidden', "SELECT nextval('public.fixture_sequence')",
                 'SET ROLE credx_viewer_views', 'SET ROLE viewer_fixture_admin']:
                 async with reader.connect() as connection:

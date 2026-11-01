@@ -13,6 +13,7 @@ WorkingDirectory=__IMMUTABLE_VIEWER_ARTIFACT__
 User=investor-db-viewer
 ExecStart=/srv/investor/backend/.venv/bin/python -I -B __IMMUTABLE_VIEWER_ARTIFACT__/serve.py
 LoadCredential=database-url:/etc/investor/database-viewer.dsn
+LoadCredential=temporary-database-policy:/etc/investor/database-viewer.policy.json
 Sockets=investor-database-viewer.socket
 UMask=0077
 NoNewPrivileges=yes

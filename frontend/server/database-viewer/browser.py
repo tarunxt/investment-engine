@@ -13,6 +13,8 @@ from starlette.responses import HTMLResponse
 from sqlalchemy import BigInteger, Column, MetaData, String, Table, Text, case, cast, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool
+from sqlalchemy.dialects import postgresql
 
 HERE = Path(__file__).parent
 CATALOG = json.loads((HERE / 'catalog.json').read_text())
@@ -77,14 +79,20 @@ def cursor_key(value, item, condition):
 
 
 class Store:
-    def __init__(self, dsn):
+    def __init__(self, dsn, approved_other_database=None):
         try:
             url = make_url(dsn)
             if url.drivername != 'postgresql+asyncpg' or url.host != '127.0.0.1' or url.username != 'credx_viewer_read' or not url.password or not url.database or url.query:
                 raise Unavailable()
+            if not isinstance(approved_other_database,str) or not approved_other_database or len(approved_other_database.encode())>63 or '\0' in approved_other_database or approved_other_database==url.database:
+                raise Unavailable()
         except Exception:
             raise Unavailable() from None
-        self.audit_sql = (HERE / 'privilege-audit.review.sql').read_text()
+        self.url = url
+        self.approved_other_database = approved_other_database
+        other_literal = String().literal_processor(postgresql.dialect())(approved_other_database)
+        self.audit_sql = (HERE / 'privilege-audit.review.sql').read_text().replace('__APPROVED_OTHER_TEMP_DATABASE_LITERAL__',other_literal)
+        self.other_audit_sql = (HERE / 'other_database_audit.sql').read_text()
         self.engine = create_async_engine(dsn, pool_size=2, max_overflow=0, pool_timeout=.5,
             hide_parameters=True, echo=False, connect_args={'timeout': 3, 'server_settings': {
                 'default_transaction_read_only': 'on', 'statement_timeout': '3000',
@@ -99,14 +107,34 @@ class Store:
         async with self.engine.connect() as connection:
             async with connection.begin():
                 await connection.exec_driver_sql('SET TRANSACTION READ ONLY')
+                await connection.exec_driver_sql('SET LOCAL search_path = pg_catalog, pg_temp')
                 if await connection.scalar(text('SELECT current_user')) != 'credx_viewer_read':
                     raise Unavailable()
                 await connection.exec_driver_sql(self.audit_sql)
                 yield connection
 
     async def verify(self):
-        async with self.connection():
-            pass
+        async with asyncio.timeout(10):
+            async with self.connection() as connection:
+                databases=(await connection.execute(text("SELECT datname FROM pg_catalog.pg_database WHERE datallowconn AND has_database_privilege(current_user,oid,'CONNECT')"))).scalars().all()
+            if self.approved_other_database not in databases or len(databases)>16:
+                raise Unavailable()
+            # Only metadata is inspected elsewhere. No other database supplies UI rows.
+            for database in databases:
+                if database==self.url.database:
+                    continue
+                engine=create_async_engine(self.url.set(database=database),poolclass=NullPool,hide_parameters=True,
+                    connect_args={'timeout':3,'server_settings':{'default_transaction_read_only':'on','statement_timeout':'3000','lock_timeout':'500'}})
+                try:
+                    async with engine.connect() as connection:
+                        async with connection.begin():
+                            await connection.exec_driver_sql('SET TRANSACTION READ ONLY')
+                            await connection.exec_driver_sql('SET LOCAL search_path = pg_catalog, pg_temp')
+                            if await connection.scalar(text('SELECT current_user'))!='credx_viewer_read':
+                                raise Unavailable()
+                            await connection.exec_driver_sql(self.other_audit_sql)
+                finally:
+                    await engine.dispose()
 
     async def structure(self):
         async with self.connection() as connection:

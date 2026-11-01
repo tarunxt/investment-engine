@@ -1,5 +1,6 @@
 """Only systemd Unix-socket activation; no TCP listener or application environment."""
 import os
+import json
 from importlib.metadata import version
 from pathlib import Path
 import socket
@@ -27,6 +28,12 @@ def main():
         verify_dependencies()
         directory = Path(os.environ['CREDENTIALS_DIRECTORY'])
         dsn = (directory / 'database-url').read_text().strip()
+        def unique(pairs):
+            if len({key for key,_ in pairs})!=len(pairs): raise ValueError()
+            return dict(pairs)
+        policy=json.loads((directory / 'temporary-database-policy').read_text(),object_pairs_hook=unique)
+        if not isinstance(policy,dict) or set(policy)!={'approved_other_database'}: raise ValueError()
+        other_database=policy['approved_other_database']
         if not dsn.startswith('postgresql+asyncpg://'):
             raise ValueError()
     except (ValueError, KeyError, OSError):
@@ -36,7 +43,7 @@ def main():
     try:
         from browser import Store, make_app
         import uvicorn
-        store = Store(dsn)
+        store = Store(dsn,approved_other_database=other_database)
     except Exception:
         raise SystemExit('Viewer database configuration unavailable') from None
     uvicorn.run(make_app(store), fd=3, workers=1, access_log=False, server_header=False, proxy_headers=False)

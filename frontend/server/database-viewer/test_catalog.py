@@ -55,6 +55,16 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn('COMMIT;', sql)
         self.assertTrue(sql.endswith('ROLLBACK; -- review template never commits\n'))
 
+    def test_temporary_exception_is_explicit_and_other_data_audit_is_retained(self):
+        audit=(HERE/'audit_template.sql').read_text()
+        self.assertIn('__APPROVED_OTHER_TEMP_DATABASE_LITERAL__',audit)
+        self.assertIn('d.datname NOT IN (current_database(),approved_other_temp)',audit)
+        self.assertIn("has_database_privilege(reader,d.oid,'CREATE')",audit)
+        other=(HERE/'other_database_audit.sql').read_text()
+        for check in ['has_any_column_privilege','has_sequence_privilege','has_function_privilege','pg_authid','subconninfo']:
+            self.assertIn(check,other)
+        self.assertNotIn('GRANT ',other)
+
 
 if __name__ == '__main__':
     unittest.main()

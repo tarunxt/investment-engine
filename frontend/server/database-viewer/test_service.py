@@ -24,7 +24,7 @@ class ServiceTests(TestCase):
                 serve.verify_dependencies()
 
     def test_dedicated_service_has_no_application_environment_or_financial_dependencies(self):
-        unit=configparser.ConfigParser(interpolation=None)
+        unit=configparser.ConfigParser(interpolation=None,strict=False)
         unit.read(HERE/'systemd/investor-database-viewer.service')
         self.assertEqual(unit['Service']['DynamicUser'],'yes')
         self.assertEqual(unit['Service']['User'],'investor-db-viewer')
@@ -36,7 +36,7 @@ class ServiceTests(TestCase):
         self.assertEqual(unit['Unit']['Requires'],'investor-database-viewer.socket')
         self.assertNotIn('backend.env',str(dict(unit['Service'])))
         self.assertNotIn('celery',str(dict(unit['Unit'])))
-        socket=configparser.ConfigParser(interpolation=None)
+        socket=configparser.ConfigParser(interpolation=None,strict=False)
         socket.read(HERE/'systemd/investor-database-viewer.socket')
         self.assertEqual(socket['Socket']['ListenStream'],'/run/investor-database-viewer.sock')
         self.assertEqual(socket['Socket']['SocketUser'],'investor')

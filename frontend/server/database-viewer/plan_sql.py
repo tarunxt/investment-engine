@@ -35,6 +35,7 @@ def review_sql():
         'BEGIN;',
         "SET LOCAL lock_timeout = '500ms';",
         "SET LOCAL statement_timeout = '5s';",
+        'SET LOCAL search_path = pg_catalog, pg_temp;',
         'CREATE ROLE credx_viewer_views NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;',
         'CREATE ROLE credx_viewer_read LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 2;',
         'CREATE SCHEMA credx_viewer AUTHORIZATION credx_viewer_views;',
@@ -63,8 +64,8 @@ def review_sql():
     lines.append(audit_sql())
     lines += [
         '-- Mandatory in-transaction effective privilege audit before COMMIT:',
-        '-- reject any membership/SET ROLE path, base-table/column access, persistent writes,',
-        '-- schema/database CREATE, database TEMP, unsafe executable security-definer functions.',
+        '-- reject membership/SET ROLE, base access, persistent writes/CREATE, unsafe functions,',
+        '-- and TEMP outside the target/one privately approved database. TEMP storage remains possible.',
         '-- A PUBLIC-derived privilege cannot be denied by revoking it from this role alone.',
         '-- If the audit fails, ROLLBACK; do not globally revoke PUBLIC or alter other services.',
         '-- No password, credential generation, existing-object replacement, CASCADE or DROP here.',
