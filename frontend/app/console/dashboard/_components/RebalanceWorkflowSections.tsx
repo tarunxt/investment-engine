@@ -1782,7 +1782,7 @@ This dashboard queues the server-side ${portfolioName} threat prompt through the
 ---
 
 ## Rebalance Input Bundle
-Runtime inputs are appended here from the Select Inputs popup: latest portfolio snapshot, latest Threat Scan output, and all selected Swing Scan outputs run after the previous market close.`;
+Runtime inputs are appended here from the Select Inputs popup: latest portfolio snapshot, latest Threat Scan output, and all explicitly selected Swing Scan outputs. Selections may be historical. Capture times do not prove price freshness; the weekday close estimate does not validate exchange holidays or early closes.`;
   }
   return buildTechnicalScanPrompt([], market);
 }

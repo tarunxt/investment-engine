@@ -549,3 +549,30 @@ test('full model input and summary preview retain the same versioned funds evide
     assert.ok(bundle.indexOf('rebalance-funds/v1') < bundle.indexOf('## 2. Completed Swing'));
   }
 });
+
+test('capture ages preserve exact timestamps, zero, old, missing, malformed and future provenance', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-11-01T12:00:00Z', now), 'source timestamp: 2026-11-01T12:00:00Z; age: 0 ms at 2026-11-01T12:00:00.000Z');
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-10-30T12:00:00Z', now), 'source timestamp: 2026-10-30T12:00:00Z; age: 172800000 ms at 2026-11-01T12:00:00.000Z');
+  for (const value of [null, undefined, '', 'broken']) assert.equal(rebalance.describeRebalanceSourceAge(value, now), `source timestamp: ${value || 'unknown'}; age: unknown`);
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-11-02T12:00:00Z', now), 'source timestamp: 2026-11-02T12:00:00Z; age: unknown (future or invalid reference time)');
+});
+
+test('full and summary bundles honestly describe historical selection and unknown source freshness without mutation', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  const selected = run();
+  selected.created_at = '2020-01-01T00:00:00Z';
+  const before = JSON.stringify(selected);
+  for (const swingDisplayMode of ['full', 'summary']) {
+    const args = { market: 'us', portfolio: portfolioSnapshot, threats: null, swingRuns: [selected], previousClose: now, now, swingDisplayMode };
+    const result = rebalance.buildRebalanceInputBundle(args);
+    assert.equal(rebalance.buildRebalanceInputBundle(args), result);
+    assert.match(result, /Swing run #50 creation: source timestamp: 2020-01-01T00:00:00Z; age: 215697600000 ms/);
+    assert.match(result, /Threat report creation: source timestamp: unknown; age: unknown/);
+    assert.match(result, /exchange holidays and early closes are not validated/);
+    assert.match(result, /Price as-of and exchange-session age: unknown/);
+    assert.match(result, /Explicit selections may be historical/);
+    assert.doesNotMatch(result, /runs found after previous market close/);
+  }
+  assert.equal(JSON.stringify(selected), before);
+});

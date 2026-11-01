@@ -94,3 +94,21 @@ test('loading and failed input reads never fabricate empty counts in the tile or
   assert.match(failed, /Input context unavailable/);
   assert.doesNotMatch(failed, /No data|0 runs considered/);
 });
+
+test('browser fixture renders historical selection wording and source age in the real expanded input component', { skip: !process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE }, async () => {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE });
+  try {
+    const page = await browser.newPage();
+    for (const options of [{}, { selected: new Set(['41:51']) }, { selected: new Set() }, { loading: true }, { error: 'fixture failure' }, {}]) {
+      await page.setContent(render(options));
+      if (options.loading) await page.getByText('Loading saved inputs…').first().waitFor();
+      else if (options.error) await page.getByText('Saved inputs could not be loaded. Refresh Input Box to retry.').first().waitFor();
+      else {
+        await page.getByText(/selected model outputs \(may be historical\)/).waitFor();
+        assert.match(await page.locator('body').innerText(), /Portfolio capture: source timestamp: 2026-10-30T12:00:00Z; age:/);
+        assert.doesNotMatch(await page.locator('body').innerText(), /model outputs created after the prior market-close cutoff/);
+      }
+    }
+  } finally { await browser.close(); }
+});
