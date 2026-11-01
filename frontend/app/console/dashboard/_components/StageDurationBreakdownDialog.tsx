@@ -258,8 +258,13 @@ export function StageDurationBreakdownDialog({
             >
               {stageLabel}
             </h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Total wall-clock duration: {breakdown.totalDuration}
+            <p className="mt-3 text-xs font-medium text-slate-500">Total wall-clock duration</p>
+            <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-950">
+              {breakdown.totalDuration}
+            </p>
+            <p className="mt-2 text-sm leading-5 text-slate-600">
+              Measured stage interval includes processing and possible queue time.
+              Separate phases are shown only where timestamps were recorded.
             </p>
           </div>
           <button
@@ -284,33 +289,41 @@ export function StageDurationBreakdownDialog({
             </div>
           ) : null}
 
-          <ol className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            {breakdown.steps.map((step, index) => (
-              <li
-                key={step.id}
-                className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0"
-              >
-                <span className="inline-flex size-7 items-center justify-center rounded-full bg-slate-100 text-xs font-extrabold text-slate-600">
-                  {index + 1}
-                </span>
-                <span className="min-w-0">
-                  <span className="block font-bold text-slate-950">{step.label}</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-500">
-                    {step.detail}
-                  </span>
-                </span>
-                <span className="whitespace-nowrap font-mono text-sm font-extrabold text-slate-800">
-                  {step.duration}
-                </span>
-              </li>
+          <dl className="divide-y divide-slate-200 rounded-xl border border-slate-200">
+            {[
+              { label: "Setup and dispatch", steps: breakdown.steps.slice(0, 1) },
+              { label: "Model processing", steps: breakdown.steps.slice(1, -1) },
+              { label: "Validation and persistence", steps: breakdown.steps.slice(-1) },
+            ].map((phase) => (
+              <div key={phase.label} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] sm:gap-4">
+                <dt className="text-sm font-medium text-slate-700">{phase.label}</dt>
+                <dd className="min-w-0 space-y-2 text-sm text-slate-950 sm:text-right">
+                  {phase.steps.map((step) => (
+                    <div key={step.id}>
+                      {phase.label === "Model processing" ? (
+                        <p className="mb-1 break-words text-xs text-slate-600">{step.label}</p>
+                      ) : null}
+                      <p className="font-mono font-semibold tabular-nums">{step.duration}</p>
+                    </div>
+                  ))}
+                </dd>
+              </div>
             ))}
-          </ol>
+          </dl>
 
-          {breakdown.hasParallelJobs ? (
-            <p className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
-              LLM rows can overlap because providers run in parallel. Their individual durations therefore do not add up to the wall-clock total.
-            </p>
-          ) : null}
+          <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 text-xs leading-5 text-slate-600">
+            <summary className="cursor-pointer rounded-xl px-4 py-3 font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500">
+              How timing is measured
+            </summary>
+            <div className="space-y-3 px-4 pb-4">
+              {breakdown.steps.map((step) => (
+                <p key={step.id}><span className="font-semibold">{step.label}: </span>{step.detail}</p>
+              ))}
+              {breakdown.hasParallelJobs ? (
+                <p>LLM rows can overlap because providers run in parallel. Their individual durations therefore do not add up to the wall-clock total.</p>
+              ) : null}
+            </div>
+          </details>
         </div>
       </section>
     </div>
