@@ -627,6 +627,7 @@ export default function MailsPage() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyVerified, setHistoryVerified] = useState(false);
   const historyRequest = useRef(0);
+  const historyRefreshPending = useRef(false);
   const [githubRuns, setGithubRuns] = useState<GitHubWorkflowRun[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
   const [githubError, setGithubError] = useState<string | null>(null);
@@ -821,7 +822,13 @@ export default function MailsPage() {
   }, [loadGitHubRuns]);
 
   async function refreshHistory() {
-    await Promise.all([loadHistory(), loadGitHubRuns()]);
+    if (historyLoading || githubLoading || historyRefreshPending.current) return;
+    historyRefreshPending.current = true;
+    try {
+      await Promise.all([loadHistory(), loadGitHubRuns()]);
+    } finally {
+      historyRefreshPending.current = false;
+    }
   }
 
   async function sendMail() {
@@ -1148,8 +1155,8 @@ export default function MailsPage() {
           <button
             type="button"
             onClick={() => void refreshHistory()}
-            disabled={historyLoading || githubLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+            aria-disabled={historyLoading || githubLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-muted aria-disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${historyLoading || githubLoading ? 'animate-spin' : ''}`} />
             Refresh
