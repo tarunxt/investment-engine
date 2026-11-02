@@ -40,7 +40,7 @@ try {
  server=createServer(async(req,res)=>{if(req.url.endsWith('.js')){res.setHeader('Content-Type','text/javascript');try{res.end(await readFile(path.join(tmp,path.basename(req.url))))}catch{res.statusCode=404;res.end('Missing fixture chunk')}}else{res.setHeader('Content-Type','text/html');res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:Arial}table{border-collapse:collapse}td,th{padding:8px}button,a{margin:4px}section{margin-top:20px}</style><div id="root"></div><script src="/bundle.js"></script>')}});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+server.address().port;
  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
- const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[],external=[];page.on('pageerror',error=>errors.push(error.message));
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});await page.addInitScript(()=>{const intervals=new Map();const start=window.setInterval.bind(window),stop=window.clearInterval.bind(window);window.setInterval=(callback,ms,...args)=>{const id=start(callback,ms,...args);intervals.set(id,ms);return id};window.clearInterval=id=>{intervals.delete(id);return stop(id)};window.workflowIntervalCount=ms=>[...intervals.values()].filter(value=>value===ms).length;});const errors=[],external=[];page.on('pageerror',error=>errors.push(error.message));
  await page.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():(external.push(route.request().url()),route.abort()));
  // Cold Dashboard Stock Flow loads without the workflow's both-market hydration or timer.
  await page.goto(origin+'/console/dashboard');await page.getByText('Rebalance Stock Flow',{exact:true}).waitFor();
@@ -52,11 +52,13 @@ try {
  assert.equal(await page.getByText('Rebalance Stock Flow',{exact:true}).count(),0);
  assert.ok(await page.evaluate(()=>document.querySelector('#saved-portfolio-snapshots').compareDocumentPosition(document.querySelector('#india-workflow'))&Node.DOCUMENT_POSITION_FOLLOWING));
  const hydration=await page.evaluate(()=>window.apiCalls.filter(x=>x.method==='getAutoRebalanceHistory').length);
- assert.ok(hydration>=2);
+ assert.equal(hydration,2);
+ assert.equal(await page.evaluate(()=>window.workflowIntervalCount(1000)),1);
  // Sibling navigation retains the one runtime; it cannot hydrate both markets again.
  await page.getByRole('button',{name:'US stage ledger',exact:true}).click();
  await page.locator('#us-workflow nav').waitFor();
  assert.equal(await page.evaluate(()=>window.apiCalls.filter(x=>x.method==='getAutoRebalanceHistory').length),hydration);
+ assert.equal(await page.evaluate(()=>window.workflowIntervalCount(1000)),1);
  assert.ok(await page.evaluate(()=>document.querySelector('[role="tablist"]').compareDocumentPosition(document.querySelector('#us-workflow'))&Node.DOCUMENT_POSITION_FOLLOWING));
  // Pending saved-snapshot continuation is discarded when leaving its page.
  await page.getByRole('button',{name:'Sync Now',exact:true}).click();
@@ -68,6 +70,7 @@ try {
  assert.equal(await page.getByRole('dialog').count(),0);
  await page.getByRole('button',{name:'Fixture account',exact:true}).click();await page.locator('#us-workflow nav').waitFor();
  assert.ok(await page.evaluate(()=>window.apiCalls.filter(x=>x.method==='getProfile').length)>=2);
+ assert.equal(await page.evaluate(()=>window.workflowIntervalCount(1000)),1);
  assert.deepEqual(await page.evaluate(()=>window.forbidden),[]);
  assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
  await page.screenshot({path:path.join(evidence,'us-workflow-synthetic.png'),fullPage:true});
