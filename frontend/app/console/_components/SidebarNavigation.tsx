@@ -1,6 +1,8 @@
 'use client';
 
 import {
+    createContext,
+    useContext,
     lazy,
     Suspense,
     useEffect,
@@ -9,28 +11,14 @@ import {
     useState,
     useSyncExternalStore,
     type FormEvent,
+    type ReactNode,
+    type ComponentType,
+    type CSSProperties,
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
-import {
-    DndContext,
-    KeyboardSensor,
-    MouseSensor,
-    TouchSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-    type DraggableAttributes,
-    type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-    SortableContext,
-    arrayMove,
-    sortableKeyboardCoordinates,
-    useSortable,
-    verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import type { DraggableAttributes, DragEndEvent } from '@dnd-kit/core';
+import type { useSortable } from '@dnd-kit/sortable';
 import {
     ChevronDown,
     ChevronRight,
@@ -87,6 +75,23 @@ const ACTIVE_ROW = 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-b
 const IDLE_ROW = 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground';
 const ITEM_OPTIONS = 'rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground';
 const CONTEXT_ACTION = 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent';
+
+const SidebarDragRuntime = lazy(() => import('./SidebarDragRuntime'));
+type SortableState = ReturnType<typeof useSortable> & { style: CSSProperties };
+export type SidebarDragBindings = {
+    Item: ComponentType<{ id: string; children: (state: SortableState) => ReactNode }>;
+    List: ComponentType<{ items: string[]; children: ReactNode }>;
+};
+const SidebarDragContext = createContext<SidebarDragBindings | null>(null);
+function SortableContext({ items, children }: { items: string[]; children: ReactNode }) {
+    const drag = useContext(SidebarDragContext);
+    return drag ? <drag.List items={items}>{children}</drag.List> : <>{children}</>;
+}
+function arrayMove<T>(array: T[], from: number, to: number) {
+    const copy = array.slice();
+    copy.splice(to < 0 ? copy.length + to : to, 0, copy.splice(from, 1)[0]);
+    return copy;
+}
 
 const NavigationDirectory = lazy(() => import('./NavigationDirectory'));
 
@@ -507,20 +512,12 @@ function SortableNavigationChild({
     groupName,
     onContextMenu,
 }: SortableNavigationChildProps) {
-    const {
-        attributes,
-        isDragging,
-        listeners,
-        setActivatorNodeRef,
-        setNodeRef,
-        transform,
-        transition,
-    } = useSortable({ id: child.id });
-
-    return (
+    const drag = useContext(SidebarDragContext);
+    if (!drag) throw new Error('Reorder child requires drag runtime');
+    return <drag.Item id={child.id}>{({ attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef, style }) => (
         <div
             ref={setNodeRef}
-            style={{ transform: CSS.Transform.toString(transform), transition }}
+            style={style}
             className={cn(
                 'flex items-center gap-2 rounded-xl border border-transparent bg-sidebar-accent/45 px-2 py-1.5 text-sm text-sidebar-foreground/75',
                 isDragging ? 'relative z-20 border-sidebar-border bg-sidebar shadow-lg' : '',
@@ -548,7 +545,7 @@ function SortableNavigationChild({
                 &hellip;
             </button>
         </div>
-    );
+    )}</drag.Item>;
 }
 
 function SortableNavigationEntry({
@@ -561,24 +558,11 @@ function SortableNavigationEntry({
     pathname,
     sectionLabel,
 }: SortableNavigationEntryProps) {
-    const {
-        attributes,
-        isDragging,
-        listeners,
-        setActivatorNodeRef,
-        setNodeRef,
-        transform,
-        transition,
-    } = useSortable({
-        id: entry.id,
-        disabled: !isReordering,
-    });
+    const drag = useContext(SidebarDragContext);
     const active = isEntryActive(pathname, entry);
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-    };
-
+    if (!isReordering) return <div>{isNavigationGroup(entry) ? <NavigationGroupRow active={active} expanded={expandedGroupIds.has(entry.id)} group={entry} onContextMenu={onContextMenu} onNavigate={onNavigate} onToggle={() => onToggleGroup(entry.id)} pathname={pathname} /> : <NavigationLeafLink leaf={entry} active={active} onContextMenu={onContextMenu} onNavigate={onNavigate} />}</div>;
+    if (!drag) throw new Error('Reorder entry requires drag runtime');
+    return <drag.Item id={entry.id}>{({ attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef, style }) => {
     const rowClassName = cn(
         NAVIGATION_ROW,
         active
@@ -629,7 +613,6 @@ function SortableNavigationEntry({
                     {isNavigationGroup(entry) ? (
                         <SortableContext
                             items={entry.children.map((child) => child.id)}
-                            strategy={verticalListSortingStrategy}
                         >
                             <div className="ml-7 space-y-1 border-l border-sidebar-border pl-2">
                                 {entry.children.map((child) => (
@@ -664,6 +647,7 @@ function SortableNavigationEntry({
             )}
         </div>
     );
+    }}</drag.Item>;
 }
 
 function SidebarSection({
@@ -697,7 +681,6 @@ function SidebarSection({
             </div>
             <SortableContext
                 items={section.entries.map((entry) => entry.id)}
-                strategy={verticalListSortingStrategy}
             >
                 <div className="space-y-1.5">
                     {section.entries.map((entry) => (
@@ -930,22 +913,7 @@ export function SidebarNavigation({
         [expandedGroupId],
     );
 
-    const sensors = useSensors(
-        useSensor(MouseSensor, {
-            activationConstraint: {
-                distance: 6,
-            },
-        }),
-        useSensor(TouchSensor, {
-            activationConstraint: {
-                delay: 120,
-                tolerance: 6,
-            },
-        }),
-        useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
-        }),
-    );
+
 
     useEffect(() => {
         const navigation = navigationRef.current;
@@ -1131,11 +1099,8 @@ export function SidebarNavigation({
 
             <div className="mt-4 min-h-0 flex-1">
                 <nav ref={navigationRef} aria-label="Console navigation" className="h-full overflow-y-auto overscroll-contain px-2 pb-4 pt-1">
-                    <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleDragEnd}
-                    >
+                    {isReordering ? <Suspense fallback={<p role="status">Loading reorder controls…</p>}>
+                        <SidebarDragRuntime onDragEnd={handleDragEnd}>{bindings => <SidebarDragContext.Provider value={bindings}>
                         <div className="space-y-5 pr-1">
                             {sections.map((section) => (
                                 <SidebarSection
@@ -1157,7 +1122,31 @@ export function SidebarNavigation({
                                 />
                             ))}
                         </div>
-                    </DndContext>
+                        </SidebarDragContext.Provider>}</SidebarDragRuntime>
+                    </Suspense> : (
+                        <div className="space-y-5 pr-1">
+                            {sections.map((section) => (
+                                <SidebarSection
+                                    key={section.id}
+                                    expandedGroupIds={expandedGroupIds}
+                                    isReordering={isReordering}
+                                    onContextMenu={openContextMenu}
+                                    onNavigate={onNavigate}
+                                    onToggleGroup={(groupId) => {
+                                        setNavigationExpansion({
+                                            pathname,
+                                            expandedGroupId: expandedGroupId === groupId
+                                                ? null
+                                                : groupId,
+                                        });
+                                    }}
+                                    pathname={pathname}
+                                    section={section}
+                                />
+                            ))}
+                        </div>
+                    )}
+
                 </nav>
             </div>
 

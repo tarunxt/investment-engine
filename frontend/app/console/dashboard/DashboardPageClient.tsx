@@ -1,4 +1,5 @@
 "use client";
+import { DashboardStockFlowSlot } from "@/app/console/_components/WorkflowSurfaceSlots";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -2144,9 +2145,7 @@ function DashboardPageForUser({
           Automated Rebalance
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Start and monitor the complete multi-stage workflow in its dedicated
-          console. Its histories, editors, polling, and model output stay out
-          of the dashboard runtime.
+          Start and monitor each market’s multi-stage workflow below its portfolio page. Review shared Rebalance Stock Flow on Dashboard; use the existing workflow and history links for their full controls and records.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild className="rounded-full">
@@ -2184,8 +2183,7 @@ function DashboardPageForUser({
           Final Actionables
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Full histories, model evidence, and action tables load only when you
-          open the market-specific report.
+          Open the market-specific report for full histories, model evidence, and action tables. Dashboard also provides shared Rebalance Stock Flow review.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild variant="outline" className="rounded-full">
@@ -2278,6 +2276,7 @@ function DashboardPageForUser({
         )}
         </section>
       </LazyMount>
+      <DashboardStockFlowSlot deferred />
     </div>
   );
 }
