@@ -6,6 +6,8 @@ const workflowSource = readFileSync(
   new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url),
   "utf8",
 );
+const configurationSource = readFileSync(new URL("../app/console/_components/WorkflowConfiguration.tsx", import.meta.url), "utf8");
+const surfacesSource = readFileSync(new URL("../app/console/_components/WorkflowSessionSurfaces.tsx", import.meta.url), "utf8");
 const stockFlowSource = readFileSync(
   new URL("../app/console/dashboard/_components/StockFlowTabs.tsx", import.meta.url),
   "utf8",
@@ -13,7 +15,8 @@ const stockFlowSource = readFileSync(
 
 test("legacy stock-flow tabs are composed as one reusable rebalance widget", () => {
   assert.doesNotMatch(workflowSource, /ZerodhaRebalanceFlowCard|Zerodha Rebalance Flow/);
-  assert.match(workflowSource, /<RebalanceStockFlowWidget/);
+  assert.match(surfacesSource, /<RebalanceStockFlowWidget/);
+  assert.doesNotMatch(workflowSource, /<RebalanceStockFlowWidget/);
   assert.match(workflowSource, /buyThresholds=\{\{/);
   assert.match(stockFlowSource, /Rebalance Stock Flow/);
   assert.match(stockFlowSource, /Zerodha Rebalance Stock Flow/);
@@ -32,10 +35,10 @@ test("stock flow and basket preview share score inputs and persisted thresholds"
   assert.match(workflowSource, /fetchRebalanceStockFlowSource\("zerodha"\)/);
   assert.match(workflowSource, /fetchRebalanceStockFlowSource\("indmoneyUs"\)/);
   assert.match(stockFlowSource, /buildConsensusRows\(matchingRebalanceRuns, portfolio\.market, portfolioSnapshot, runs\)/);
-  assert.match(workflowSource, /apiService\.getProfile\(\)/);
-  assert.match(workflowSource, /zerodha_buy_threshold/);
-  assert.match(workflowSource, /indmoney_buy_threshold/);
-  assert.match(workflowSource, /apiService\.updateProfile/);
+  assert.match(configurationSource, /apiService\.getProfile\(\)/);
+  assert.match(configurationSource, /zerodha_buy_threshold/);
+  assert.match(configurationSource, /indmoney_buy_threshold/);
+  assert.match(configurationSource, /apiService\.updateProfile/);
 });
 
 test("final actionables prioritize and highlight buys above the shared threshold", () => {
