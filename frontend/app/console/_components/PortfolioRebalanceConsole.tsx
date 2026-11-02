@@ -367,7 +367,8 @@ function RebalanceInputBox({
   }, [inputError, market, promptInputBundle, selectedSwingRuns, setOutputSourceSelection]);
 
   useEffect(() => {
-    if (inputError || hasUnsavedPromptDraft) return;
+    if (inputError) return;
+    if (hasUnsavedPromptDraft) return;
     const nextPrompt = composePrompt(basePrompt, promptInputBundle);
     setPrompt((current) => {
       if (
