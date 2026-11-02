@@ -83,3 +83,6 @@ from app.domains.trading_bots.models import (  # noqa: F401
 from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
+from app.domains.rebalance_budget.models import (  # noqa: F401
+    RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund,
+)

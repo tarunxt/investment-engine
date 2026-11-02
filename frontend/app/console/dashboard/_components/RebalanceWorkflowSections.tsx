@@ -5,6 +5,8 @@ import { readIndmoneySnapshotSource } from "@/lib/indmoneySnapshotSource";
 import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunControl";
 
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
+import { RebalanceSpendConsent } from "@/components/shared/RebalanceSpendConsent";
+import { authorizeAndClaimWorkflow, type SpendChoice } from "@/lib/rebalanceSpendAuthorization";
 import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
@@ -1598,15 +1600,20 @@ function getAutoRebalancePortfolioKey(portfolio: WorkflowPortfolio): AutoRebalan
 
 async function reserveAutoRebalanceRunMetadata(
   portfolio: WorkflowPortfolio,
+  owner: number,
+  choice: SpendChoice,
   analysisOnly = false,
 ): Promise<AutoRebalanceRunMetadata> {
-  const reserved = await apiService.reserveAutoRebalanceRunLabel(
-    getAutoRebalancePortfolioKey(portfolio),
-    analysisOnly,
-  );
+  const market = getAutoRebalancePortfolioKey(portfolio);
+  const readiness = await apiService.getAutoRebalanceSpendReadiness(market);
+  if (!readiness.paid_execution_available && choice.intent !== "retry_authorization") throw new Error(readiness.reason);
+  const reserved = await authorizeAndClaimWorkflow({ owner, market, choice, analysisOnly,
+    reserve: authorization => apiService.reserveAutoRebalanceRunLabel(market, analysisOnly, authorization),
+  });
   if (analysisOnly && (reserved.side_effect_policy?.version !== 1 || reserved.side_effect_policy.mode !== "analysis_only")) {
     throw new Error("The server did not confirm notification and export suppression. This run has not started.");
   }
+
   return {
     auto_rebalance_portfolio: reserved.portfolio,
     auto_rebalance_sequence: reserved.sequence,
@@ -4390,6 +4397,12 @@ export function RebalanceWorkflowSections({
   const usdInrRate = useUsdInrRate();
   const { user: basketOwner } = useAuth();
   const basketSafety = useBasketSubmissionSafety(basketOwner?.id ?? null);
+  const spendChoicesRef = useRef<Partial<Record<WorkflowPortfolio, SpendChoice>>>({});
+  const spendOwnerRef = useRef<number | null>(null);
+  if (spendOwnerRef.current !== (basketOwner?.id ?? null)) spendChoicesRef.current = {};
+  spendOwnerRef.current = basketOwner?.id ?? null;
+  const [spendConsentRevision, setSpendConsentRevision] = useState(0);
+  const loadSpendReadiness = useCallback((market: import("@/types/api").AutoRebalancePortfolioKey) => apiService.getAutoRebalanceSpendReadiness(market), []);
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
     readPersistedWorkflow(),
   );
@@ -6734,6 +6747,12 @@ ${zerodhaExecutionMode === "direct_market"
       // Kill may clear the visible running portfolio before its asynchronous
       // work has unwound. Do not let a new run steal that work's identity.
       if (isWorkflowExecutingRef.current) return;
+      const spendChoice = spendChoicesRef.current[portfolio];
+      const spendOwner = spendOwnerRef.current;
+      if (!spendChoice || !spendOwner) {
+        window.alert("Review workflow allowance readiness and explicitly choose New, Continue, or Resolve pending start before Run. Capped execution is unavailable until provider billing bounds are verified.");
+        return;
+      }
       const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
       const runSpecificMode = specificMode[portfolio];
       const stagesToRun = new Set(selectedStages[portfolio]);
@@ -6756,6 +6775,8 @@ ${zerodhaExecutionMode === "direct_market"
           : null;
 
       isWorkflowExecutingRef.current = true;
+      delete spendChoicesRef.current[portfolio];
+      setSpendConsentRevision(value => value + 1);
       setRunningPortfolio(portfolio);
       resetPortfolio(portfolio);
       activeExecutionRefsRef.current = [];
@@ -6779,7 +6800,7 @@ ${zerodhaExecutionMode === "direct_market"
       let runMetadata: AutoRebalanceRunMetadata;
       let auditSession: AutoRebalanceAuditSession;
       try {
-        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, analysisOnlyRuns[portfolio]);
+        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, spendOwner, spendChoice, analysisOnlyRuns[portfolio]);
         assertAutoRebalanceRunMetadata(runMetadata, portfolio === "zerodha" ? "india" : "indmoney_us");
         auditSession = getAuditSession(portfolio, runMetadata);
       } catch (error) {
@@ -7741,6 +7762,9 @@ ${zerodhaExecutionMode === "direct_market"
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
             {stageLedger ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
+            <RebalanceSpendConsent key={`${section.portfolio}:${basketOwner?.id}:${spendConsentRevision}`} owner={basketOwner?.id ?? null}
+              market={getAutoRebalancePortfolioKey(section.portfolio)} disabled={isBusy} load={loadSpendReadiness}
+              onChoose={choice => { if (choice) spendChoicesRef.current[section.portfolio] = choice; else delete spendChoicesRef.current[section.portfolio]; }} />
             {audit?.status === "pending" ? (
               <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
                 <Loader2 className="size-4 shrink-0 animate-spin" />

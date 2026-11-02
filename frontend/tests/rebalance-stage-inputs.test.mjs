@@ -281,6 +281,8 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     analysisOnlyRuns: { indmoneyUs: false }, setAnalysisOnlyRuns: noop,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,
     isWorkflowExecutingRef: { current: false }, activeExecutionRefsRef: { current: [] },
+    spendChoicesRef: {current: {indmoneyUs: {intent:'new_workflow', revision:0}}},
+    spendOwnerRef: {current:7}, setSpendConsentRevision: () => {},
     activeAutoRebalanceMetadataRef: { current: {} }, cancelRequestedRef, pauseRequestedRef: { current: false },
     auditSessionsRef: { current: {} }, setAuditStates: noop, setCompletionEmailWarnings: noop,
     // Persistence behavior is exercised by auto-rebalance-audit-persistence;

@@ -1000,8 +1000,14 @@ class apiServiceClass implements IApiService {
     return this.post<RunResponse>(URLs.runs.create(), data);
   }
 
-  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, analysisOnly = false): Promise<AutoRebalanceRunReservationResponse> {
-    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio, ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}) });
+  getAutoRebalanceSpendReadiness(portfolio: AutoRebalancePortfolioKey): Promise<import('@/types/api').AutoRebalanceSpendReadiness> {
+    return this.get<import('@/types/api').AutoRebalanceSpendReadiness>(`${URLs.runs.autoRebalanceSpendReadiness()}?portfolio=${portfolio}`);
+  }
+
+  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, analysisOnly = false, authorization?: import('@/types/api').AutoRebalanceSpendAuthorization): Promise<AutoRebalanceRunReservationResponse> {
+    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio,
+      ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}), ...authorization });
+
   }
 
   queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {

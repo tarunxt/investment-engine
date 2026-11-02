@@ -180,7 +180,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   const runWorkflowSource = source.slice(start, end);
   const popupIndex = runWorkflowSource.indexOf('window.open("about:blank"');
   const reservationIndex = runWorkflowSource.indexOf(
-    "await reserveAutoRebalanceRunMetadata(portfolio, analysisOnlyRuns[portfolio])",
+    "await reserveAutoRebalanceRunMetadata(portfolio, spendOwner, spendChoice, analysisOnlyRuns[portfolio])",
   );
   assert.ok(popupIndex >= 0, "Zerodha popup should be pre-opened");
   assert.ok(reservationIndex >= 0, "run metadata should still be reserved");

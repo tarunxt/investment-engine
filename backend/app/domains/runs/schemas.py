@@ -115,6 +115,10 @@ class PreparedPolymarketEventContext(BaseModel):
 class AutoRebalanceRunReservationRequest(BaseModel):
     side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
+    spend_intent: Literal["new_workflow", "continue_workflow"] | None = None
+    spend_request_id: str | None = None
+    spend_observed_revision: int | None = Field(default=None, strict=True, ge=0)
+    spend_scope_id: int | None = Field(default=None, strict=True, ge=1)
 
     @field_validator("portfolio")
     @classmethod
@@ -130,6 +134,8 @@ class AutoRebalanceRunReservationResponse(BaseModel):
     portfolio: str
     sequence: int
     label: str
+    spend_scope_id: int | None = None
+    reservation_created: bool = False
 
 
 class AutoRebalanceCompletionEmailRequest(BaseModel):

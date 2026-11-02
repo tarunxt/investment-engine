@@ -22,6 +22,8 @@ from app.domains.api_usage.recorder import (
 )
 from app.domains.api_usage.metering import content_hash
 from app.domains.jobs.usage_identity import resolve_job_usage_identity
+from app.domains.rebalance_budget.ledger import SpendCapBlocked
+from app.domains.rebalance_budget.runtime import configure_job as configure_spend_job, reset_job as reset_spend_job
 from app.domains.jobs.output_runtime import (
     OutputPreflightError, active_contract_hash, configure_output_context, contract_issue,
     current_output_context, merge_swing_fragments, normalize_runtime_output,
@@ -736,7 +738,7 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Everything else retries after 30 s.
     """
 
-    if isinstance(exc, OutputPreflightError) or is_provider_capacity_error(exc):
+    if isinstance(exc, (OutputPreflightError, SpendCapBlocked)) or is_provider_capacity_error(exc):
         return False, 0
 
     text = str(exc).lower()
@@ -1201,6 +1203,7 @@ def execute_ai_job(self, job_id: int) -> None:
     job: Job | None = None
     provider_usage_token = None
     output_context_token = None
+    spend_context_token = None
 
     def with_output_validation(metadata: dict | None) -> dict | None:
         validation = output_validation_metadata(content)
@@ -1231,6 +1234,7 @@ def execute_ai_job(self, job_id: int) -> None:
         if job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
             logger.info("Skipping terminal job redelivery %s", job_id)
             return
+        spend_context_token = configure_spend_job(job, getattr(self.request, "retries", 0))
         usage_dimensions = resolve_job_usage_identity(db, job)
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
@@ -1682,6 +1686,7 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        reset_spend_job(spend_context_token)
         reset_output_context(output_context_token)
         reset_provider_usage_context(provider_usage_token)
         db.close()

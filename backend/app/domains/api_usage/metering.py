@@ -232,8 +232,15 @@ class ApiAttempt:
         self._usage_sources: set[str] = set()
         self._malformed_usage_fields: set[str] = set()
         self._conflicting_usage_fields: set[str] = set()
+        self._spend_request = request
+        self._spend_admission = None
 
     def __enter__(self):
+        # Telemetry remains fail-open; rebalance spending admission is a
+        # separate fail-closed policy and must not be swallowed by telemetry.
+        from app.domains.rebalance_budget.runtime import before_call
+        self._spend_admission = before_call(provider=self.values["actual_provider"],
+            model=self.values["requested_model"], request=self._spend_request)
         if self.context:
             self.context.last_attempt["attempt_id"] = self.values["attempt_id"]
         self._update_coverage()
@@ -355,6 +362,11 @@ class ApiAttempt:
                 self.observe_search_results(len(results))
 
     def __exit__(self, exc_type, exc, traceback):
+        from app.domains.rebalance_budget.runtime import after_call
+        # Retain the reservation even if optional telemetry processing fails.
+        # Successful evidence is collected below before settlement.
+        if exc is not None:
+            after_call(self._spend_admission, {"status": "uncertain"})
         if exc is not None:
             values = self.values
             # Read only available SDK metadata; never fetch, decode a raw body,
@@ -390,6 +402,8 @@ class ApiAttempt:
         self.values["latency_ms"] = max(0.0, (perf_counter() - self._start) * 1000)
         self._update_coverage()
         _persist_attempt(self.values)
+        if exc is None:
+            after_call(self._spend_admission, self.values)
         return False
 
 
