@@ -16,6 +16,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog } from "radix-ui";
 import { LazyMount } from "@/components/shared/LazyMount";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -83,11 +84,6 @@ import {
   snapshotAvailability,
   type TotalDataStatusInfo,
 } from "./_components/TotalDataStatus";
-
-const DashboardTileInfoDialog = dynamic(
-  () => import("./_components/DashboardTileInfoDialog").then(module => module.DashboardTileInfoDialog),
-  { ssr: false },
-);
 
 const ThreatMarketCard = dynamic(
   () =>
@@ -975,11 +971,35 @@ function PortfolioCommandSummary({
           ))}
         </div>
       </details>
-      {info ? <DashboardTileInfoDialog
-        info={info}
-        onClose={() => setInfoDialog(null)}
-        onReturnFocus={() => infoTrigger.current?.focus()}
-      /> : null}
+      <Dialog.Root
+        open={info !== null}
+        onOpenChange={(open) => {
+          if (!open) setInfoDialog(null);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/50" />
+          <Dialog.Content
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              infoTrigger.current?.focus();
+            }}
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 text-slate-950 shadow-xl"
+          >
+            <Dialog.Title className="text-lg font-semibold">
+              {info?.title}
+            </Dialog.Title>
+            <Dialog.Description className="mt-3 text-sm leading-6 text-slate-600">
+              {info?.body}
+            </Dialog.Description>
+            <Dialog.Close asChild>
+              <Button type="button" variant="outline" className="mt-5">
+                Close
+              </Button>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   );
 }
