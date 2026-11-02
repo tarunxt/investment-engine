@@ -1,6 +1,6 @@
 # Import every ORM model so SQLAlchemy's mapper registry is fully populated
 # before any query runs. Required in Celery workers (which don't load main.py).
-from app.domains.cost_drivers.models import CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
+from app.domains.cost_drivers.models import CostCollectionIntent, CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
 from app.domains.api_usage.models import (  # noqa: F401
     ApiUsageAttemptEvent,
