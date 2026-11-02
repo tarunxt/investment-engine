@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { createPortal } from "react-dom";
 import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { setWorkflowOwner } from "@/lib/workflowOwnerLifetime";
@@ -39,7 +40,15 @@ export function WorkflowSurfaceHost({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== null && event.key !== "investment-engine:private-cache-owner:v1") return;
-      if (event.newValue === String(owner)) return;
+      // Storage is only a reconciliation hint. It cannot authenticate a new owner.
+      let storedOwner: string | null = null;
+      try { storedOwner = window.localStorage.getItem("investment-engine:private-cache-owner:v1"); } catch { /* Stay closed when storage cannot be verified. */ }
+      if (owner !== null && event.newValue === String(owner) && storedOwner === String(owner)) {
+        reconcileBrowserPrivateCacheOwner(owner);
+        setWorkflowOwner(owner);
+        setReconciledOwner(owner);
+        return;
+      }
       setWorkflowOwner(null);
       setReconciledOwner(null);
     };
@@ -56,6 +65,9 @@ export function WorkflowSurfaceHost({ children }: { children: ReactNode }) {
   }, [owner]);
   return <SurfaceContext.Provider value={{ registerWorkflow, registerStockFlow }}>
     {children}
+    {activated === owner && owner !== null && reconciledOwner !== owner ? [workflow?.target, stockFlow].filter((target): target is HTMLElement => Boolean(target)).map((target, index) => createPortal(
+      <p role="alert">Account confirmation changed in another tab. This workflow will return when the same signed-in account is confirmed. <button type="button" className="underline" onClick={() => window.location.reload()}>Reload to retry</button></p>, target, `owner-reconciliation-${index}`,
+    )) : null}
     {activated === owner && owner !== null && reconciledOwner === owner ? <WorkflowSurfaceBoundary key={owner}>
       <SessionSurfaces workflow={workflow} stockFlow={stockFlow} workflowActivated={workflowActivated === owner} />
     </WorkflowSurfaceBoundary> : null}

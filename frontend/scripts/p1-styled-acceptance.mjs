@@ -72,6 +72,19 @@ try{
  });
  await record('owner change and reload reject previous private surface state',async()=>{await authenticate(9002);await page.reload();await page.locator('#india-workflow nav').waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('investment-engine:private-cache-owner:v1')),'9002');});
  await record('cold compatibility route resolves to a fixed portfolio anchor',async()=>{await page.goto(base+'/console/automated-rebalance');await page.waitForURL('**/console/zerodha#india-workflow');await page.locator('#india-workflow nav').waitFor();});
+ await record('real cross-tab owner removal and clear recover only the same authenticated account',async()=>{
+ const peer=await context.newPage();try{
+ await peer.goto(base+'/login');
+ for(const clear of [false,true]){
+ await peer.evaluate(clear=>{if(clear)localStorage.clear();else localStorage.removeItem('investment-engine:private-cache-owner:v1')},clear);
+ await page.getByRole('alert').getByText(/Account confirmation changed in another tab/).waitFor();
+ assert.equal(await page.locator('#india-workflow nav').count(),0);
+ await peer.evaluate(()=>localStorage.setItem('investment-engine:private-cache-owner:v1','9002'));
+ await page.locator('#india-workflow nav').waitFor();
+ assert.equal(await page.getByText(/Account confirmation changed in another tab/).count(),0);
+ }
+ }finally{await peer.close();}
+ });
  for(const width of [1440,390]){await page.setViewportSize({width,height:1000});await screenshot('india-final-'+width);await record('responsive viewport '+width,async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true));}
  await record('Dashboard preserves existing content and defers inline Stock Flow until scroll',async()=>{await page.goto(base+'/console/dashboard');await page.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();await page.locator('#rebalance-stock-flow').scrollIntoViewIfNeeded();await page.getByText('Rebalance Stock Flow',{exact:true}).waitFor();assert.equal(await page.locator('#india-workflow,#us-workflow').count(),0);await screenshot('dashboard-stock-flow');});
  for(const state of ['empty','partial','failed','failed-stage','restored-running','queued']){

@@ -1,6 +1,6 @@
 "use client";
 import { acquireZerodhaLogin } from "@/lib/zerodhaLoginArbitration";
-import { captureWorkflowOwner, isCurrentWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
+import { captureWorkflowOwner, isCurrentWorkflowOwner, onWorkflowOwnerInvalidated, requireWorkflowOwner, type WorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
 import type { WorkflowSurface } from "@/app/console/_components/WorkflowSurfaceHost";
 import { IndMoneySnapshotDialog } from "./IndMoneySnapshotDialog";
@@ -435,36 +435,41 @@ function isZerodhaAuthPropagationError(error: unknown) {
 
 async function confirmZerodhaConnectionReady(
   timeoutMs = ZERODHA_AUTH_CLOSE_GRACE_MS,
+  owner: WorkflowOwner | null = captureWorkflowOwner(),
 ) {
+  requireWorkflowOwner(owner);
+  const ownerApi = workflowOwnedApi(apiService, owner);
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown = null;
-
   while (Date.now() < deadline) {
+    requireWorkflowOwner(owner);
     try {
-      const status = await apiService.zerodhaStatus();
+      const status = await ownerApi.zerodhaStatus();
       if (status.connected) return status;
-      lastError = new Error(
-        "Kite login returned successfully, but the Zerodha session is not active yet.",
-      );
+      lastError = new Error("Kite login returned successfully, but the Zerodha session is not active yet.");
     } catch (error) {
+      requireWorkflowOwner(owner);
       lastError = error;
     }
     await sleep(ZERODHA_AUTH_STATUS_POLL_MS);
+    requireWorkflowOwner(owner);
   }
-
-  throw new Error(
-    `Kite login could not be confirmed by Cred-X within ${Math.round(timeoutMs / 1000)} seconds: ${normalizeError(lastError)}`,
-  );
+  throw new Error(`Kite login could not be confirmed by Cred-X within ${Math.round(timeoutMs / 1000)} seconds: ${normalizeError(lastError)}`);
 }
 
-async function queueZerodhaPortfolioSyncWithAuthRetry() {
+async function queueZerodhaPortfolioSyncWithAuthRetry(owner: WorkflowOwner | null = captureWorkflowOwner()) {
+  requireWorkflowOwner(owner);
+  const ownerApi = workflowOwnedApi(apiService, owner);
   try {
-    return await apiService.zerodhaSyncPortfolio();
+    return await ownerApi.zerodhaSyncPortfolio();
   } catch (error) {
+    requireWorkflowOwner(owner);
     if (!isZerodhaAuthPropagationError(error)) throw error;
-    await confirmZerodhaConnectionReady();
+    await confirmZerodhaConnectionReady(undefined, owner);
+    requireWorkflowOwner(owner);
     await sleep(ZERODHA_SYNC_AUTH_RETRY_DELAY_MS);
-    return apiService.zerodhaSyncPortfolio();
+    requireWorkflowOwner(owner);
+    return ownerApi.zerodhaSyncPortfolio();
   }
 }
 
@@ -765,30 +770,38 @@ async function retryWorkflowRead<T>(
 async function waitForZerodhaPortfolioSync(
   previousCapturedAt?: string | null,
   shouldStop?: () => boolean,
+  owner: WorkflowOwner | null = captureWorkflowOwner(),
 ): Promise<ZerodhaPortfolioOverviewResponse> {
+  requireWorkflowOwner(owner);
+  const ownerApi = workflowOwnedApi(apiService, owner);
+  const stopped = () => !isCurrentWorkflowOwner(owner) || Boolean(shouldStop?.());
   let latestOverview = await retryWorkflowRead(
-    () => apiService.zerodhaPortfolioOverview(),
+    () => ownerApi.zerodhaPortfolioOverview(),
     "Zerodha portfolio sync status",
-    shouldStop,
+    stopped,
   );
 
   for (let attempt = 0; attempt < MAX_ZERODHA_SYNC_POLLS; attempt += 1) {
-    if (shouldStop?.()) {
+    if (stopped()) {
       throw new Error("Zerodha portfolio sync was cancelled by user.");
     }
+    requireWorkflowOwner(owner);
     const latestCapturedAt = latestOverview.latest?.captured_at ?? null;
     if (latestCapturedAt && latestCapturedAt !== (previousCapturedAt ?? null)) {
+      requireWorkflowOwner(owner);
       return latestOverview;
     }
 
     await sleep(POLL_INTERVAL_MS);
+    requireWorkflowOwner(owner);
     latestOverview = await retryWorkflowRead(
-      () => apiService.zerodhaPortfolioOverview(),
+      () => ownerApi.zerodhaPortfolioOverview(),
       "Zerodha portfolio sync status",
-      shouldStop,
+      stopped,
     );
   }
 
+  requireWorkflowOwner(owner);
   return latestOverview;
 }
 
@@ -5200,7 +5213,7 @@ ${zerodhaExecutionMode === "direct_market"
               () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
             );
             await apiService.zerodhaSyncPortfolio();
-            const overview = await waitForZerodhaPortfolioSync(previousOverview.latest?.captured_at);
+            const overview = await waitForZerodhaPortfolioSync(previousOverview.latest?.captured_at, () => !isCurrentWorkflowOwner(runtimeOwner), runtimeOwner);
             portfolioRefreshedAt = overview.latest?.captured_at ?? null;
             setZerodhaBasketDetailsData((current) => ({
               ...current,
@@ -6668,6 +6681,7 @@ ${zerodhaExecutionMode === "direct_market"
       indmoneyPayload?: IndMoneyUsPortfolioSnapshotCreateRequest,
       savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
     ) => {
+      if (!isCurrentWorkflowOwner(runtimeOwner)) return;
       // Kill may clear the visible running portfolio before its asynchronous
       // work has unwound. Do not let a new run steal that work's identity.
       if (isWorkflowExecutingRef.current) return;
@@ -6849,10 +6863,11 @@ ${zerodhaExecutionMode === "direct_market"
           if (portfolio === "zerodha") {
             await ensureZerodhaConnectedForSync(zerodhaPopup);
             const previousOverview = await apiService.zerodhaPortfolioOverview();
-            const synced = await queueZerodhaPortfolioSyncWithAuthRetry();
+            const synced = await queueZerodhaPortfolioSyncWithAuthRetry(runtimeOwner);
             const overview = await waitForZerodhaPortfolioSync(
               previousOverview.latest?.captured_at,
               () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
+              runtimeOwner,
             );
             workflowSnapshot = overview.latest;
             await markCompleted(portfolio, "sync", {
@@ -7491,6 +7506,7 @@ ${zerodhaExecutionMode === "direct_market"
       payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
       savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
     ) => {
+      if (!isCurrentWorkflowOwner(runtimeOwner)) return;
       const zerodhaPopup =
         portfolio === "zerodha"
           ? window.open("about:blank", "zerodha-workflow-connect", buildZerodhaPopupFeatures())
@@ -7500,9 +7516,11 @@ ${zerodhaExecutionMode === "direct_market"
         if (portfolio === "zerodha") {
           await ensureZerodhaConnectedForSync(zerodhaPopup);
           const previousOverview = await apiService.zerodhaPortfolioOverview();
-          const synced = await queueZerodhaPortfolioSyncWithAuthRetry();
+          const synced = await queueZerodhaPortfolioSyncWithAuthRetry(runtimeOwner);
           const overview = await waitForZerodhaPortfolioSync(
             previousOverview.latest?.captured_at,
+            () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
+            runtimeOwner,
           );
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
