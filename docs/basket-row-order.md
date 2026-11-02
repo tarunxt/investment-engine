@@ -43,10 +43,12 @@ the four Action/Target sizing labels use the broker name. Raw/effective score
 explanations appear only in Historical Weighted Score details. Original saved
 scores and stage colours are unchanged.
 
-US vendor integration is intentionally unresolved: the existing Google Finance
-HTML scraper is not expanded to this basket. The US quote adapter fails closed
-with an explicit error until an approved display feed with exact listing and
-source trade time is configured. Receipt time is not a trade timestamp.
+The US quote adapter is dormant and owner scoped, using explicit Alpaca IEX
+coverage only. Credentials and verified listing mappings are not configured;
+missing configuration returns Unavailable. The existing Google Finance HTML
+scraper is not expanded to this basket. IEX is not consolidated US-market LTP.
+Receipt time is not a trade timestamp. See indmoney-alpaca-display.md for the
+normalized quote contract, separate secure setup approval and readiness limits.
 Generic US and competing explicit venues are excluded from allocation until a
 verified listing mapping is available; no symbol-only alias merge is performed.
 Original rows/history remain visible for review. Partial sources and oversized

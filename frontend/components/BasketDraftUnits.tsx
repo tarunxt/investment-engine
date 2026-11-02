@@ -3,7 +3,7 @@ import { draftDirection, stepDraftUnits } from '@/lib/basketEditableDraft';
 import type { ReactNode } from 'react';
 export function BasketDraftUnits({symbol, action, units, onChange, children, fractional = false}: {fractional?:boolean;symbol:string;action:string|null;units:number|null;onChange:(value:number)=>void;children:ReactNode}) {
   const side=draftDirection(action);
-  const step = (direction: -1 | 1) => fractional ? Math.max(0, (units ?? 0) + direction) : stepDraftUnits(units, direction);
+  const step = (direction: -1 | 1) => fractional ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, (units ?? 0) + direction)) : stepDraftUnits(units, direction);
   return <div data-testid={`units-${symbol}`} className={`inline-flex items-center overflow-hidden rounded-full border text-sm font-bold ${side==='SELL'?'border-red-200 bg-red-100 text-red-700':side==='BUY'?'border-emerald-200 bg-emerald-100 text-emerald-700':'border-slate-200 bg-slate-100 text-slate-700'}`}>
     <button type="button" aria-label={`Decrease ${symbol} draft Units`} disabled={units===null||units<=0} className="px-3 py-2 hover:brightness-90 focus-visible:ring-2" onClick={()=>onChange(step(-1))}>−</button>
     {children}

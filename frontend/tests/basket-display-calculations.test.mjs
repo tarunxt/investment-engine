@@ -722,8 +722,8 @@ test('US holdings require unique explicit listing and complete snapshot; generic
  assert.equal(math.indmoneyHolding({...snap,holdings_count:2},'ABC','NASDAQ',[listing]),null);assert.equal(math.indmoneyHolding({...snap,holdings_count:2,reported_holdings_count:2,holdings:[holding,holding]},'ABC','NASDAQ',[listing]),null);
  assert.deepEqual(math.indmoneyHolding({...snap,holdings:[],holdings_count:0,reported_holdings_count:0},'ABC','NASDAQ',[listing]),{currentValue:0,investedValue:0,quantity:0});
 });
-test('US quote adapter fails closed without using Google Finance or India APIs',async()=>{
- const h=hooks();let calls=0;const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{zerodhaDisplayQuotes:()=>{calls++;},indmoneyUsCurrentPrices:()=>{calls++;}}});const render=()=>{h.start();return component.useBasketDisplayQuotes(true,'us',['NASDAQ:ABC']);};render();h.flush();await tick();const result=render();assert.equal(calls,0);assert.deepEqual(result.quotes,[]);assert.match(result.error,/approved display feed/);assert.equal(result.loading,false);
+test('unconfigured Alpaca quote adapter fails closed without Google Finance or India APIs',async()=>{
+ const h=hooks();let forbidden=0,reads=0;const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{indmoneyDisplayQuotes:async()=>{reads++;return {provider:'Alpaca',feed:'iex',quotes:[],missing:[{instrument:'NASDAQ:ABC',reason:'Alpaca IEX display data is not configured for this owner'}]};},zerodhaDisplayQuotes:()=>{forbidden++;},indmoneyUsCurrentPrices:()=>{forbidden++;}}});const render=()=>{h.start();return component.useBasketDisplayQuotes(true,'us',['NASDAQ:ABC']);};render();h.flush();await tick();const result=render();assert.equal(reads,1);assert.equal(forbidden,0);assert.deepEqual(result.quotes,[]);assert.match(result.error,/not configured/);assert.equal(result.loading,false);
 });
 
 test('US shared columns and calculation dialogs use exact USD formulas and relocate score context',async()=>{

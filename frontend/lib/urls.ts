@@ -484,6 +484,7 @@ export const URLs = {
     portfolio: () => `${resolveApiBaseUrl()}/indmoney-us/portfolio`,
     portfolioSnapshot: (snapshotId: number) => `${resolveApiBaseUrl()}/indmoney-us/portfolio/${snapshotId}`,
     currentPrices: () => `${resolveApiBaseUrl()}/indmoney-us/prices/current`,
+    displayQuotes: () => `${resolveApiBaseUrl()}/indmoney-us/prices/display`,
     eventsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/events/history`,
     eventJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/events/${jobId}`,

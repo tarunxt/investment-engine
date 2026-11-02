@@ -5,16 +5,17 @@ import { AllocationScoreContext } from "./AllocationScoreContext";
 import { BasketMetricPopup } from "./BasketMetricPopup";
 import { BasketActionSizingPopup } from "./BasketActionSizingPopup";
 import { basketActionSizing } from "@/lib/basketActionSizing";
+import type { UsVendorDisplayQuote } from "@/types/api";
 import { apiService } from "@/services/api";
 import { ALLOCATION_SCORE_POLICY, allocationScoreContract, allocationDisclosure, indmoneyActionSizing, allocateDisplayScores, sellHoldingDisplay, weightComparison, displaySizingPrice, formatBasketIntegerCurrency, formatBasketDisplayCurrency, brokerDisplayAllocation, defaultDisplayParameters, historicalMean, stockIdentity, type BasketScoreHistory, type CurrentScoreCalculation } from "@/lib/basketDisplayCalculations";
 
-type Stock = { investedValue?: number | null; vendorLtp?: number | null; vendorAsOf?: string; vendorSource?: string; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string; currentValue?: number | null; symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; limitPrice?: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };
+type Stock = { investedValue?: number | null; vendorReady?: boolean; vendorLtp?: number | null; vendorAsOf?: string; vendorSource?: string; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string; currentValue?: number | null; symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; limitPrice?: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };
 export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", instruments: string[], scope: string | null = null) {
   const keys = [...new Set(instruments)].sort().join(",");
   const [attempt, setAttempt] = useState(0);
   const request = useMemo(() => ({ open, market, keys, scope, attempt }), [open, market, keys, scope, attempt]);
   const [capabilities, setCapabilities] = useState<{ request: object | null; enabled: boolean }>({ request: null, enabled: false });
-  const [state, setState] = useState<{ request: object | null; quotes: { instrument: string; price: number; as_of: string; source: string }[]; upstoxQuotes?: { instrument: string; price: number; as_of: string; source: string }[]; error?: string }>({ request: null, quotes: [] });
+  const [state, setState] = useState<{ request: object | null; quotes: { instrument: string; price: number; as_of: string; source: string }[]; vendorQuotes?: UsVendorDisplayQuote[]; upstoxQuotes?: { instrument: string; price: number; as_of: string; source: string }[]; error?: string }>({ request: null, quotes: [] });
   useEffect(() => {
     if (!open || !keys) return;
     let active = true;
@@ -22,18 +23,33 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
     void (async () => {
       const quotes: { instrument: string; price: number; as_of: string; source: string }[] = [];
       const upstoxQuotes: typeof quotes = [];
+      const vendorQuotes: UsVendorDisplayQuote[] = [];
+      const warnings: string[] = [];
       if (requested.length > 500) throw new Error("Display quote batch exceeds 500 instruments.");
       for (let offset = 0; offset < requested.length; offset += 50) {
         if (!active) return null;
         const batch = requested.slice(offset, offset + 50);
-        if (market === "us") throw new Error("US vendor LTP is unavailable: an approved display feed with listing identity and quote time must be configured. Snapshot and limit prices are not vendor substitutes.");
+        if (market === "us") {
+          const supported = batch.filter(key => /^(NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN):[A-Z0-9.-]{1,24}$/.test(key));
+          if (supported.length !== batch.length) warnings.push("Some US listing identities are unsupported or ambiguous; verified listing mapping is required.");
+          if (!supported.length) continue;
+          const data = await apiService.indmoneyDisplayQuotes(supported);
+          if (data.provider !== "Alpaca" || data.feed !== "iex" || !Array.isArray(data.quotes) || !Array.isArray(data.missing)) throw new Error("US vendor quote response scope is invalid.");
+          for (const quote of data.quotes) {
+            if (!supported.includes(quote.instrument) || quote.provider !== "Alpaca" || quote.feed !== "iex" || quote.currency !== "USD" || !quote.security_id || ({NASDAQ:"XNAS",NYSE:"XNYS",NYSEARCA:"ARCX",NYSEAMERICAN:"XASE"} as Record<string,string>)[quote.instrument.split(":")[0]] !== quote.listing_mic || !quote.share_class || !Number.isFinite(Date.parse(quote.as_of)) || !Number.isFinite(Date.parse(quote.received_at)) || Date.parse(quote.as_of) > Date.parse(quote.received_at) || !Number.isFinite(quote.price) || quote.price <= 0 || !quote.source?.startsWith("US vendor Alpaca")) throw new Error("US vendor quote identity, time or price is invalid.");
+            vendorQuotes.push(quote);
+            quotes.push({ instrument: quote.instrument, price: quote.price, as_of: quote.as_of, source: `${quote.source} · received ${quote.received_at} · ${quote.delay_reason ?? "IEX last trade"} · ${quote.session}` });
+          }
+          warnings.push(...data.missing.map(row => row.reason));
+          continue;
+        }
         const data = await apiService.zerodhaDisplayQuotes(batch);
         if (!Array.isArray(data.quotes) || !Array.isArray(data.missing) || data.quotes.some(quote => !batch.includes(quote.instrument))) throw new Error("Quote response does not match this basket.");
         quotes.push(...data.quotes);
         if (data.upstox_quotes !== undefined && (!Array.isArray(data.upstox_quotes) || data.upstox_quotes.some(quote => !batch.includes(quote.instrument) || !quote.source?.startsWith("Upstox ")))) throw new Error("Upstox response does not match this basket.");
         upstoxQuotes.push(...(data.upstox_quotes ?? []));
       }
-      return { quotes, upstoxQuotes };
+      return { quotes, upstoxQuotes, vendorQuotes, ...(warnings.length ? { error: [...new Set(warnings)].join("; ") } : {}) };
     })().then(result => {
       if (active && result) setState({ request, ...result });
     }).catch((error: unknown) => { if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." }); });
@@ -48,7 +64,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
     return () => { active = false; };
   }, [open, market, request]);
   const current = open && state.request === request;
-  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], upstoxEnabled: open && capabilities.request === request && capabilities.enabled, error: current ? state.error : undefined, loading: Boolean(open && keys && !current) };
+  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], vendorQuotes: current ? state.vendorQuotes ?? [] : [], upstoxEnabled: open && capabilities.request === request && capabilities.enabled, error: current ? state.error : undefined, loading: Boolean(open && keys && !current) };
 }
 
 export function CalculationPopup({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {

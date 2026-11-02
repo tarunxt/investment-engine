@@ -1,4 +1,4 @@
-import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
+import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
 import type { StockSourceObservationPage } from "@/types/api";
 
 import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
@@ -1463,6 +1463,12 @@ class apiServiceClass implements IApiService {
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
     return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+  }
+
+  indmoneyDisplayQuotes(instruments: string[]): Promise<UsVendorDisplayQuotes> {
+    const query = new URLSearchParams();
+    instruments.forEach(instrument => query.append("instruments", instrument));
+    return this.get<UsVendorDisplayQuotes>(`${URLs.indmoneyUs.displayQuotes()}?${query}`, { skipUnauthorizedRefresh: true });
   }
 
   indmoneyUsCurrentPrices(

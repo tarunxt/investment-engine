@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -110,3 +110,17 @@ async def get_current_prices(
         market_open=any(quote.get("market_open") for quote in quotes),
         fetched_at=datetime.now(timezone.utc),
     )
+
+
+@router.get("/prices/display")
+async def get_display_quotes(
+    instruments: list[str] = Query(min_length=1, max_length=50),
+    current_user: User = Depends(get_current_user),
+):
+    """Read-only IEX display estimates; credentials never enter the response."""
+    from .alpaca_quotes import read_alpaca_quotes, validate_instruments
+    try:
+        keys = validate_instruments(instruments)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await read_alpaca_quotes(current_user.id, keys)

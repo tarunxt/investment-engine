@@ -59,7 +59,8 @@ export function brokerDisplayAllocation(weight: number | undefined, assets: numb
   const validPrice = ltp !== null && Number.isFinite(ltp) && ltp > 0;
   if (market === 'us') {
     const amount = unroundedAmount;
-    return { unroundedAmount, unroundedStocks: validPrice ? amount / ltp! : null, amount, stocks: validPrice ? amount / ltp! : null };
+    const stocks = validPrice && Number.isFinite(amount / ltp!) ? amount / ltp! : null;
+    return { unroundedAmount, unroundedStocks: stocks, amount, stocks };
   }
   if (!validPrice) return { unroundedAmount, unroundedStocks: null, amount: null, stocks: null };
   const unroundedStocks = unroundedAmount / ltp!, stocks = excelRound(unroundedStocks);
