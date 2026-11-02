@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import load_only
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -444,7 +445,7 @@ async def llm_cost_history(
 
     day_rows = (
         await db.execute(
-            select(Job)
+            select(Job).options(load_only(Job.id, Job.model, Job.status, Job.created_at, Job.estimated_cost, Job.tokens_in, Job.tokens_out))
             .where(
                 Job.user_id == current_user.id,
                 Job.provider == normalized_provider,
@@ -476,7 +477,7 @@ async def llm_cost_history(
 
     run_jobs = (
         await db.execute(
-            select(Job)
+            select(Job).options(load_only(Job.id, Job.model, Job.status, Job.created_at, Job.estimated_cost, Job.tokens_in, Job.tokens_out))
             .where(
                 Job.user_id == current_user.id,
                 Job.provider == normalized_provider,

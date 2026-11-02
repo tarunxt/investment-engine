@@ -2786,3 +2786,70 @@ for the successfully verified current request. Filtered zero results describe a
 filter match, never the existence of all saved history. The supplemental Bullpen
 run source remains independent and is labeled as unfiltered. A history retry only
 repeats the existing list read; it does not invoke explicit materialization.
+
+## Post-trade descriptive analysis v2 (Audit10, 2026-11-01)
+
+`bullpen-descriptive-v2` is a derived post-trade review algorithm, separate from
+Stage 1/2/3 decision formulas and frozen run snapshots. Single outcomes do not
+establish calibration, causality or validated learning. Reinforcement and policy
+change flags are withheld; no training, routing, prompt or trading consumer was
+found in the repository. Legacy stored analysis remains original evidence.
+
+Detail GET computes a labelled transient review without writes. The existing
+explicit recompute action appends an `ANALYSIS_VERSION` to the existing trade
+snapshot table with algorithm version, calculation time, source trade identity
+and calculation inputs. It does not overwrite the original analysis columns,
+source snapshots, units or executions. Repeated revisions are separate snapshots;
+there is no bulk recomputation/backfill or new schema/migration. Analysis revision
+is not a changed execution or original decision-time evidence.
+
+Only declared `cents`/`unit_price` operands normalize. New in-position monitor
+maxima declare their existing heldProbability × 100 source; legacy units remain
+unknown. Execution-summary extraction no longer substitutes order intent for
+missing fill fields, and genuine zero fills survive. In-hold maxima never prove
+an executable post-exit opportunity; post-exit advice remains Not evaluated until
+a bounded horizon and executable liquidity/size/spread/fee convention are approved.
+
+Null outcome and execution fees remain unknown. Closed population, known/unknown
+outcomes, known-outcome denominator, recorded subtotals and fee component coverage
+are separate. Known zero is a non-win (`net_pnl > 0` is a win). Metrics describe
+the selected cohort; raw-dollar ranks do not establish comparable risk-adjusted
+performance. Tax/spread/FX coverage is not asserted. Existing financial execution,
+exit/partial-close lifecycle policy and run-audit capture remain unchanged.
+
+Acceptance and task-specific unresolved gates are tracked in
+`docs/audit10-bullpen-analysis-acceptance.md`; frozen run audit schemas need no
+change because this revision neither changes nor backfills decision-time runs.
+
+
+### Trade-analysis presentation evidence
+
+Trade-analysis list and detail views preserve missing or invalid confidence as
+not evaluated, separate failed retrieval from empty learning categories, and mark
+legacy learning fields as unvalidated hypotheses. A stored exit-timing or
+confidence-alignment field alone does not establish evaluated advice. Its original
+value remains available in the raw-evidence disclosure. Filter scope and displayed
+record counts are visible; aggregate totals do not establish complete outcome or
+fee coverage. Coverage denominators, declared exit windows/units and version
+provenance require the analytics response contract before evaluated display.
+This presentation change does not alter capture, frozen snapshots, formulas,
+execution permissions or API responses. Offline component/browser fixtures are in
+`frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
+`frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
+navigation or provider calls.
+
+
+### Audit10 combined coverage contract
+
+The selected-cohort summary and displayed records are separate evidence scopes.
+The list preserves recorded P&L/fee subtotals with supplied coverage labels and
+uses the known closed-outcome denominator for win rate. Displayed unknown rows
+do not erase full-cohort coverage. A zero known-outcome denominator never shows
+a win rate. Legacy responses without coverage metadata retain conservative
+displayed-row guards and never acquire fabricated zero denominators. Raw summary
+and learning records remain available as recorded evidence.
+
+Stored exit and calibration fields remain unvalidated hypotheses in the detail
+view; raw in-hold observations do not establish executable post-exit opportunity.
+The combined rendering fixtures cover mixed full-cohort outcomes with a single
+displayed unknown row, legacy missing metadata and zero known-outcome populations.

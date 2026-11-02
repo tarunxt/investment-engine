@@ -53,3 +53,16 @@ class CostRecommendation(Base, TimestampMixin):
     confidence: Mapped[str] = mapped_column(String(32), nullable=False)
     evidence_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CostCollectionIntent(Base):
+    """Durable admission, never TTL-reclaimed. No resource/account identifiers."""
+    __tablename__ = "cost_collection_intents"
+    scope_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    owner_token: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    request_inflight: Mapped[bool] = mapped_column(nullable=False, default=False)
+    request_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_allowed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

@@ -15,6 +15,7 @@ import type {
 } from "@/types/api";
 
 import {
+  formatConfidence,
   formatCurrency,
   formatDateTime,
   formatDuration,
@@ -108,7 +109,7 @@ function LlmSection({
             <div className="flex flex-wrap items-center gap-2">
               <TradeAnalysisBadge value={entry.phase} className="border-slate-200 bg-white text-slate-700" />
               <TradeAnalysisBadge
-                value={entry.confidence !== null && entry.confidence !== undefined ? `${Math.round(entry.confidence * 100)}% confidence` : "No confidence"}
+                value={`${formatConfidence(entry.confidence)} confidence`}
                 className="border-slate-200 bg-white text-slate-700"
               />
             </div>
@@ -147,6 +148,7 @@ export function TradeAnalysisDetailClient() {
 
     async function load() {
       setLoading(true);
+      setData(null);
       setError(null);
       try {
         const nextData = await apiService.bullpenAiTradeAnalysisDetail(tradeId);
@@ -207,7 +209,7 @@ export function TradeAnalysisDetailClient() {
     return (
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
         <Card className="rounded-none border-slate-200 shadow-none">
-          <CardContent className="py-10 text-sm text-slate-500">
+          <CardContent role="status" className="py-10 text-sm text-slate-500">
             Loading trade lifecycle details…
           </CardContent>
         </Card>
@@ -220,7 +222,7 @@ export function TradeAnalysisDetailClient() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
           <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">
-            <p className="text-sm text-rose-700">{error || "Trade record not found."}</p>
+            <p role="alert" className="text-sm text-rose-700">{error || "Trade record not found."}</p>
             <Button asChild variant="outline">
               <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
                 Back to Trade Analysis
@@ -304,9 +306,9 @@ export function TradeAnalysisDetailClient() {
               { label: "Average Exit Price", value: formatNumber(trade.sell_average_fill_price, 4) },
               { label: "Buy Slippage", value: formatNumber(trade.buy_slippage, 4) },
               { label: "Exit Slippage", value: formatNumber(trade.sell_slippage, 4) },
-              { label: "Best Observed Price", value: formatNumber(trade.best_possible_exit_price_after_buy, 2) },
-              { label: "Worst Observed Price", value: formatNumber(trade.worst_price_after_buy, 2) },
-              { label: "Missed Profit", value: formatNumber(trade.missed_profit_amount, 2) },
+              { label: "In-hold Maximum (raw; unit provenance required)", value: formatNumber(trade.best_possible_exit_price_after_buy, 2) },
+              { label: "In-hold Minimum (raw)", value: formatNumber(trade.worst_price_after_buy, 2) },
+              { label: "Legacy Missed Profit Estimate (unvalidated)", value: formatNumber(trade.missed_profit_amount, 2) },
               { label: "Drawdown While Held", value: formatNumber(trade.drawdown_while_held, 4) },
             ]}
           />
@@ -328,7 +330,7 @@ export function TradeAnalysisDetailClient() {
               { label: "Average Fill Price", value: formatNumber(trade.buy_average_fill_price, 4) },
               { label: "Requested Odds", value: formatPercent(trade.buy_requested_odds) },
               { label: "Average Fill Odds", value: formatPercent(trade.buy_average_fill_odds) },
-              { label: "Confidence", value: formatPercent((trade.buy_confidence ?? 0) * 100) },
+              { label: "Confidence", value: formatConfidence(trade.buy_confidence) },
               { label: "Risk Score", value: formatNumber(trade.buy_risk_score, 2) },
               { label: "Expected Edge", value: formatNumber(trade.buy_expected_edge, 2) },
               { label: "Expected Value", value: formatCurrency(trade.buy_expected_value) },
@@ -370,7 +372,7 @@ export function TradeAnalysisDetailClient() {
                   { label: "Average Exit Price", value: formatNumber(trade.sell_average_fill_price, 4) },
                   { label: "Requested Odds", value: formatPercent(trade.sell_requested_odds) },
                   { label: "Average Exit Odds", value: formatPercent(trade.sell_average_fill_odds) },
-                  { label: "Confidence", value: formatPercent((trade.sell_confidence ?? 0) * 100) },
+                  { label: "Confidence", value: formatConfidence(trade.sell_confidence) },
                   { label: "Risk Score", value: formatNumber(trade.sell_risk_score, 2) },
                   { label: "Expected Edge", value: formatNumber(trade.sell_expected_edge, 2) },
                 ]}
@@ -398,7 +400,7 @@ export function TradeAnalysisDetailClient() {
               { label: "Liquidity Score", value: `${formatNumber(data.comparison.buy_liquidity_score, 2)} vs ${formatNumber(data.comparison.exit_liquidity_score, 2)}` },
               { label: "Volume Score", value: `${formatNumber(data.comparison.buy_volume_score, 2)} vs ${formatNumber(data.comparison.exit_volume_score, 2)}` },
               { label: "Spread Score", value: `${formatNumber(data.comparison.buy_spread_score, 2)} vs ${formatNumber(data.comparison.exit_spread_score, 2)}` },
-              { label: "Confidence", value: `${formatPercent((data.comparison.buy_confidence ?? 0) * 100)} vs ${formatPercent((data.comparison.exit_confidence ?? 0) * 100)}` },
+              { label: "Confidence", value: `${formatConfidence(data.comparison.buy_confidence)} vs ${formatConfidence(data.comparison.exit_confidence)}` },
               { label: "Probability Estimate", value: `${formatNumber(data.comparison.buy_probability_estimate, 2)} vs ${formatNumber(data.comparison.exit_probability_estimate, 2)}` },
               { label: "Implied Probability", value: `${formatNumber(data.comparison.buy_market_implied_probability, 2)} vs ${formatNumber(data.comparison.exit_market_implied_probability, 2)}` },
               { label: "Probability Delta", value: `${formatNumber(data.comparison.buy_probability_delta, 2)} vs ${formatNumber(data.comparison.exit_probability_delta, 2)}` },
@@ -409,16 +411,18 @@ export function TradeAnalysisDetailClient() {
 
       <Card className="rounded-none border-slate-200 shadow-none">
         <CardHeader>
-          <CardTitle className="text-base text-slate-950">Actionable Learning</CardTitle>
+          <CardTitle className="text-base text-slate-950">Descriptive Review (unvalidated)</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-3 text-sm text-slate-700">
-            <p>{data.actionable_learning.analysis_summary || "No summary yet."}</p>
-            <p>Mistake category: {data.actionable_learning.mistake_category || "None"}</p>
-            <p>Exit timing: {data.actionable_learning.exit_timing}</p>
-            <p>Entry too expensive: {data.actionable_learning.entry_too_expensive ? "Yes" : "No"}</p>
-            <p>Liquidity or spread issue: {data.actionable_learning.liquidity_or_spread_issue ? "Yes" : "No"}</p>
-            <p>LLM confidence aligned: {data.actionable_learning.llm_confidence_aligned ? "Yes" : "No"}</p>
+            <p>Analysis version: {data.actionable_learning.algorithm_version ?? "legacy/unknown"}</p>
+            <p>Stored learning fields are unvalidated hypotheses; causal conclusions and automatic rule, prompt or weight changes are not evaluated.</p>
+            <p>Stored descriptive summary (unvalidated): {data.actionable_learning.analysis_summary || "Not evaluated"}</p>
+            <p>Mistake category: {data.actionable_learning.mistake_category || "Not evaluated"}</p>
+            <p>Exit timing: Not evaluated. Executable post-exit coverage and an approved counterfactual horizon are not established. In-hold excursions are descriptive only.</p>
+            <p>Entry too expensive (stored hypothesis): {data.actionable_learning.entry_too_expensive === true ? "Yes" : data.actionable_learning.entry_too_expensive === false ? "No" : "Not evaluated"}</p>
+            <p>Liquidity or spread issue (stored hypothesis): {data.actionable_learning.liquidity_or_spread_issue === true ? "Yes" : data.actionable_learning.liquidity_or_spread_issue === false ? "No" : "Not evaluated"}</p>
+            <p>LLM confidence aligned: Not evaluated. A single outcome does not establish calibration.</p>
           </div>
           <div className="space-y-3 text-sm text-slate-700">
             <p>What worked: {data.actionable_learning.what_worked.join(" | ") || "—"}</p>
@@ -435,6 +439,7 @@ export function TradeAnalysisDetailClient() {
           <CardTitle className="text-base text-slate-950">Raw Data</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <JsonPanel title="Stored Learning Raw Evidence" value={data.actionable_learning} />
           <JsonPanel title="Buy Bullpen Snapshot" value={buyPreSubmitSnapshot?.bullpen_snapshot_json || {}} />
           <JsonPanel title="Sell Bullpen Snapshot" value={sellPreSubmitSnapshot?.bullpen_snapshot_json || {}} />
           <JsonPanel title="Computed Buy Tags" value={trade.buy_computed_tags_json || []} />

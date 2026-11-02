@@ -121,8 +121,8 @@ cors_allowed_origins = _build_cors_allowed_origins()
 async def lifespan(app: FastAPI):
     recovery_mode()  # Refuse malformed recovery configuration before startup work.
     logger.info("Starting AI Investment Platform Backend")
-    logger.info("Database: %s", settings.database_url.split("@")[-1])
-    logger.info("Redis: %s", settings.redis_url)
+    logger.info("Database configured: %s", bool(settings.database_url))
+    logger.info("Redis configured: %s", bool(settings.redis_url))
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
     # Do not terminalize persisted Auto-Live runs during FastAPI startup.

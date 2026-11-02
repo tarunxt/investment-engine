@@ -63,7 +63,7 @@ async def get_current_user(
             )
 
         token = credentials.credentials
-        payload = JWTUtils.verify_token(token)
+        payload = JWTUtils.verify_access_token(token)
         if not payload:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

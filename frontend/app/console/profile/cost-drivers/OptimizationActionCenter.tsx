@@ -288,7 +288,7 @@ export function OptimizationActionCenter() {
                 {money(review.comparisonCostUsd)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Cost Explorer actual: {money(review.actualCostUsd)}
+                Cost Explorer snapshot: {money(review.actualCostUsd)}
               </p>
             </div>
 
