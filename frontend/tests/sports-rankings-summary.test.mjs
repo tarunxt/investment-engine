@@ -34,6 +34,8 @@ function mount(readRankingJson, search = '') {
   const modules = {
     react,
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' },
+    // DOM focus behavior is covered by the actual-page diagnostics browser fixture.
+    '@/hooks/useReviewDialog': { useReviewDialog: () => ({}) },
     '@/lib/sportsRankingsApi': { readRankingJson, RankingReadError: class extends Error {} },
   };
   const exports = {};
