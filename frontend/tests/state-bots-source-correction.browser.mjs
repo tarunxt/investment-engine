@@ -18,6 +18,7 @@ const result = await build({ entryPoints: ['tests/fixtures/state-bots/correction
   b.onLoad({ filter: /BullpenAiPageClient\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8')
     .replace(/const BULLPEN_ACCOUNT_USERNAME = [\s\S]*?;/, 'const BULLPEN_ACCOUNT_USERNAME = "synthetic-account";')
     .replace(/const BULLPEN_ACCOUNT_WALLET_FALLBACK =\s*[\s\S]*?;/, 'const BULLPEN_ACCOUNT_WALLET_FALLBACK = "synthetic-wallet";'), loader: 'tsx' }));
+  b.onLoad({ filter: /BullpenAutoRunScheduleCard\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8') + '\nexport { StageOneOutputDialog, buildRunDetailScanCandidateDialogState };', loader: 'tsx' }));
   b.onLoad({ filter: /TradingBotsOverviewPage\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8') + '\nexport { TradingBotCard };', loader: 'tsx' }));
   b.onLoad({ filter: /services\/api\.ts$/ }, () => ({ contents: `export const apiService = new Proxy({}, { get: (_, name) => (...args) => { (window.__fixtureApiCalls ??= []).push(String(name)); if (window.__fixtureName === "overview") return new Promise((resolve,reject) => window.__rejectReads.push(() => reject(new Error("Synthetic source unavailable")))); return Promise.reject(new Error("Synthetic source unavailable: " + String(name))); } }); export class APIError extends Error {} export class RequestTimeoutError extends Error {}`, loader: 'js' }));
   b.onLoad({ filter: /UniversalPolymarketScan\.tsx$/ }, () => ({ contents: 'export const UniversalPolymarketScan = () => null;', loader: 'js' }));
@@ -77,6 +78,21 @@ try {
       if (fixture === 'failed') assert.match(text, /Not evaluated — no completed filter snapshot is available/);
     }
     if (fixture === 'failed') {
+      await page.getByRole('button', {name:'Open events that passed filters · count unknown', exact:true}).click();
+      const stageOnePopup = page.getByRole('dialog', {name:'Stage 1 output', exact:true});
+      await stageOnePopup.waitFor();
+      assert.match(await stageOnePopup.innerText(), /Fresh Bullpen Opportunities \(Unknown\)/);
+      assert.doesNotMatch(await stageOnePopup.innerText(), /No (?:claimable|active|new event)|\(0\)/);
+      await page.screenshot({path:`${out}/stage1-parent-and-popup.png`,fullPage:false});
+      await page.setViewportSize({width:390,height:844});
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      const closeBounds = await stageOnePopup.getByRole('button',{name:'Close Stage 1 output',exact:true}).boundingBox();
+      assert.ok(closeBounds.x >= 0 && closeBounds.x + closeBounds.width <= 390);
+      await page.screenshot({path:`${out}/stage1-narrow-popup.png`,fullPage:false});
+      await page.setViewportSize({width:1180,height:757});
+      await page.keyboard.press('Escape');
+      await stageOnePopup.waitFor({state:'hidden'});
+      assert.equal(await page.getByRole('button', {name:'Open events that passed filters · count unknown',exact:true}).evaluate(el => el === document.activeElement), true);
       const names = await page.locator('button[aria-label]').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
       assert.ok(names.some(name => name === 'Open events that passed filters · count unknown'));
       const downloads = names.filter(name => name.startsWith('Download Excel'));
@@ -126,11 +142,37 @@ try {
   assert.doesNotMatch(savedDiagnostics, /Stage 2 evidence unknown/);
   await page.screenshot({path: `${out}/cached-zero-diagnostics.png`, fullPage: false});
   evidence.push({fixture: 'cached-zero-diagnostics', text: savedDiagnostics});
+  for (const name of ['loading', 'failed', 'partial', 'missing', 'zero', 'populated', 'cached']) {
+    for (const mode of ['fresh-opportunities', 'active-positions', 'all-scanned']) {
+      await page.goto(`http://127.0.0.1:${server.address().port}/?${workspaceQuery}&mode=${mode}#stage1-${name}`);
+      const opener = page.getByRole('button', {name:'Open Stage 1 fixture',exact:true});
+      await opener.click();
+      const popup = page.getByRole('dialog');
+      const text = await popup.innerText();
+      const unknown = ['loading','failed','partial','missing'].includes(name);
+      if (unknown) {
+        assert.match(text, /[Uu]nknown/);
+        assert.doesNotMatch(text, /\(0\)|No (?:claimable|active|new event)|0 events were scanned|0 events passed/);
+      } else {
+        assert.match(text, name === 'zero' ? /\(0\)/ : mode === 'all-scanned' ? /\(12\)/ : mode === 'active-positions' ? /\(1\)/ : /\(2\)/);
+        assert.match(text, /Saved Stage 1 evidence.*2026-11-01T00:00:00Z/);
+      }
+      if (['populated','cached','partial'].includes(name) && mode !== 'active-positions') assert.match(text, /Synthetic retained opportunity/);
+      await page.keyboard.press('Shift+Tab');
+      assert.equal(await popup.evaluate(el => el.contains(document.activeElement)), true);
+      await page.keyboard.press('Tab');
+      assert.equal(await popup.evaluate(el => el.contains(document.activeElement)), true);
+      await page.keyboard.press('Escape');
+      await popup.waitFor({state:'hidden'});
+      assert.equal(await opener.evaluate(el => el === document.activeElement), true);
+      evidence.push({fixture:`stage1-${name}-${mode}`,text});
+    }
+  }
   const calls = evidence.flatMap(item => item.calls ?? []);
   assert.ok(calls.length > 3, 'full fixtures must exercise the synthetic passive read failures');
   assert.ok(calls.every(name => name.startsWith('get') || name === 'polymarketState'), JSON.stringify(calls));
   assert.deepEqual(errors, []);
   assert.deepEqual(blocked, []);
   writeFileSync(`${out}/result.json`, JSON.stringify({timestamp: new Date().toISOString(), workspaceProfile, viewport:'1180x757 at 100%', narrow:'390x844', calls, errors, blocked, evidence}, null, 2));
-  console.log(`PASS: ${workspaceProfile}; actual overview failed-after-loading; full workspace failed, verified zero, cached; unknown control names; diagnostics Tab/Shift+Tab/Escape, narrow; no operational calls`);
+  console.log(`PASS: ${workspaceProfile}; actual overview failed-after-loading; full workspace failed, verified zero, cached; unknown control names; 21 Stage 1 state/mode fixtures; diagnostics Tab/Shift+Tab/Escape, narrow; no operational calls`);
 } finally { await browser.close(); server.close(); }

@@ -2786,3 +2786,13 @@ for the successfully verified current request. Filtered zero results describe a
 filter match, never the existence of all saved history. The supplemental Bullpen
 run source remains independent and is labeled as unfiltered. A history retry only
 repeats the existing list read; it does not invoke explicit materialization.
+
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.
