@@ -20,7 +20,8 @@ def scripts():
 
 def test_one_head_preserves_original_ancestry():
     graph = scripts()
-    assert graph.get_heads() == [MERGE]
+    assert graph.get_heads() == ["audits_session_merge_001"]
+    assert set(graph.get_revision("audits_session_merge_001").down_revision) == {MERGE, "session_families_001"}
     assert set(graph.get_revision(MERGE).down_revision) == BRANCHES
     for name in ("jobs_admission_dispatch_001", "a12_collection_intent_001", "rebalance_spend_cap_001"):
         assert graph.get_revision(name).down_revision == "audit7_run_policy_001"

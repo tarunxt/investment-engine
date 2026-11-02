@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.domains.jobs.public_projection import public_text, public_value
+from session_family_fixture import SessionFamilyFixture
 from app.domains.jobs.schemas import JobResponse
 from app.domains.jobs.output_contracts import SWING_COLUMNS
 from test_google_sheets_output_contracts import export_job, job, markdown, stock
@@ -76,11 +77,15 @@ async def test_review_labels_at_actual_ws_initial_boundary(message, hidden, monk
     async def session(): yield object()
     monkeypatch.setattr(ws_router, "AsyncSessionLocal", session)
     monkeypatch.setattr(ws_router, "PostgresJobRepository", lambda db: SimpleNamespace(get_for_user=AsyncMock(return_value=original)))
-    monkeypatch.setattr(ws_router, "user_id_from_ws_token", AsyncMock(return_value=7))
+    from app.shared import ws_relay
+    family = SessionFamilyFixture(uid=7)
+    monkeypatch.setattr(ws_relay, "AsyncSessionLocal", family.session)
+    monkeypatch.setattr(ws_router, "user_id_from_ws_token", AsyncMock(return_value=family.identity))
     monkeypatch.setattr(ws_router, "relay_channel", AsyncMock())
     socket = SimpleNamespace(accept=AsyncMock(), send_json=AsyncMock(), close=AsyncMock())
     await ws_router.ws_job_detail(socket, 41, "synthetic-ws-ticket")
     socket.send_json.assert_awaited_once()
+    assert family.family_reads == 1
     projected = socket.send_json.await_args.args[0]
     assert hidden not in json.dumps(projected)
     assert projected["response"] == original.response

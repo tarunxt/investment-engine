@@ -21,10 +21,11 @@ from app.domains.auth.router import refresh_token
 from app.domains.auth.schemas import RefreshTokenRequest
 from app.domains.polymarket_auto_live.router import _resolve_persisted_status_user_id
 from app.shared.ws_relay import user_id_from_token
+from session_family_fixture import SessionFamilyFixture
 
 
-def token_for(shape):
-    pair = AuthUtils.create_tokens(42, 'fixture@example.invalid', 'user')
+def token_for(shape, fixture=None):
+    pair = (fixture or SessionFamilyFixture()).tokens
     if shape in ('access', 'refresh'):
         return pair[f'{shape}_token']
     claims = {'sub': '42', 'exp': datetime.now(UTC) + timedelta(minutes=1)}
@@ -39,27 +40,14 @@ def token_for(shape):
     return jwt.encode(claims, settings.jwt_signing_key.get_secret_value(), algorithm='HS256')
 
 
-class DB:
-    def __init__(self):
-        self.reads = 0
-        now = datetime.now(UTC)
-        self.user = SimpleNamespace(id=42, email='fixture@example.invalid', username='fixture',
-            full_name=None, role=UserRole.USER, is_active=True, is_verified=True,
-            created_at=now, updated_at=now, last_login=None, profile=None)
-    async def execute(self, statement):
-        self.reads += 1
-        assert 42 in statement.compile().params.values()
-        return SimpleNamespace(scalar_one_or_none=lambda: self.user,
-                               one_or_none=lambda: self.user)
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('consumer', ['dependency', 'status', 'refresh', 'websocket'])
 @pytest.mark.parametrize('shape', ['access', 'refresh', 'explicit_access', 'missing_exp', 'expired', 'malformed'])
 async def test_actual_imported_consumers_enforce_purpose_before_database(consumer, shape, monkeypatch):
     monkeypatch.setattr('socket.socket.connect', Mock(side_effect=AssertionError('offline fixture')))
-    token = token_for(shape)
-    db = DB()
+    db = SessionFamilyFixture()
+    token = token_for(shape, db)
     credentials = HTTPAuthorizationCredentials(scheme='Bearer', credentials=token)
     accepted = shape == ('refresh' if consumer == 'refresh' else 'access')
     if consumer == 'websocket':
@@ -79,7 +67,8 @@ async def test_actual_imported_consumers_enforce_purpose_before_database(consume
         assert db.reads == 0
         return
     result = await invoke()
-    assert db.reads == 1
+    assert db.reads == (3 if consumer == 'refresh' else 2)
+    assert db.family_reads == 1
     if consumer == 'dependency':
         assert result is db.user
     elif consumer == 'status':
