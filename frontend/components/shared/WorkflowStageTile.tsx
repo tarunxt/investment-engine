@@ -153,16 +153,28 @@ export const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
   "technical",
 ]);
 
+export function getStageBackgroundClass(state: StageState) {
+  if (state === "running") return "bg-amber-50";
+  if (state === "queued") return "bg-sky-50";
+  if (state === "completed") return "bg-emerald-50";
+  if (state === "failed") return "bg-red-50";
+  return "bg-slate-100";
+}
+
 export function getStageClasses(state: StageState) {
+  return `${getStageBackgroundClass(state)} ${getStageToneClasses(state)}`;
+}
+
+function getStageToneClasses(state: StageState) {
   if (state === "running")
-    return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
+    return "border-amber-300 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
   if (state === "queued")
-    return "border-sky-200 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
+    return "border-sky-200 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
   if (state === "completed")
-    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
+    return "border-emerald-300 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
   if (state === "failed")
-    return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
-  return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
+    return "border-red-300 text-red-950 shadow-red-100 ring-1 ring-red-100";
+  return "border-slate-200 text-slate-950 shadow-slate-100";
 }
 
 export function getStageTileLabel(stage: WorkflowStageKey) {
@@ -469,7 +481,7 @@ export function WorkflowStageTile({
     ? selected
       ? "ring-2 ring-blue-500"
       : info.state === "idle"
-        ? "bg-white opacity-100"
+        ? "opacity-100"
         : ""
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);

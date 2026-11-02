@@ -3,7 +3,7 @@
 import { useId, useState, type ComponentProps, type ReactElement } from "react";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { StageErrorDetails } from "./StageErrorDetails";
-import { getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
+import { getStageBackgroundClass, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
@@ -68,7 +68,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const error = rows.find(row => row.label === "Error")!;
           const time = rows[0].value;
-          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${selected.stage === item.stage ? "bg-indigo-50" : ""}`}>
+          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${getStageBackgroundClass(item.info.state)}`}>
             <th scope="row" className="px-3 py-2 font-normal">
               <div className="flex items-start gap-2">
                 {item.selectable ? <input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} aria-label={`Select ${getStageTileLabel(item.stage)} for the next run`} className="mt-2 size-4 accent-indigo-700" /> : null}
