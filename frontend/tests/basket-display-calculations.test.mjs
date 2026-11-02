@@ -746,3 +746,12 @@ test('fractional USD draft step preserves the fractional remainder and India kee
  find(render(true),n=>n.props?.['aria-label']==='Decrease ABC draft Units').props.onClick();assert.equal(value,0);
  find(render(false),n=>n.props?.['aria-label']==='Increase ABC draft Units').props.onClick();assert.equal(value,1);
 });
+
+test('verified US aliases contribute original historical observations once without rewriting saved identities',()=>{
+ const original={...history([observation(1,2,{symbol:'ABC',exchange:'US'}),observation(1,2,{symbol:'ABC',exchange:'NASDAQ'}),observation(2,1,{symbol:'ABC',exchange:'NASDAQ'})]),market:'us',symbols:['ABC']},before=structuredClone(original);
+ const proof={securityId:'synthetic:ABC:common:XNAS',exchangeAliases:['US']};const result=math.historicalMean(original,'ABC','NASDAQ',undefined,proof);
+ assert.equal(result.rows.length,2);assert.equal(result.score,1.5);assert.equal(result.rows[0].exchange,'US');assert.deepEqual(original,before);
+ assert.equal(math.historicalMean(original,'ABC','NASDAQ').rows.length,2,'without verified proof only explicit NASDAQ observations count');
+ const conflicting={...original,observations:[observation(1,2,{symbol:'ABC',exchange:'US',action:'Buy New'}),observation(1,-2,{symbol:'ABC',exchange:'NASDAQ',action:'Sell All'}),observation(2,1,{symbol:'ABC',exchange:'NASDAQ'})]};
+ const rejected=math.historicalMean(conflicting,'ABC','NASDAQ',undefined,proof);assert.equal(rejected.score,1);assert.equal(rejected.rows.length,1);assert.equal(rejected.excludedRows.length,2);assert.match(rejected.excludedRows[0].reason,/Conflicting saved alias/);
+});

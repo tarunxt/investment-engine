@@ -2993,7 +2993,7 @@ function ScopedZerodhaBasketPreviewDialog({
     const currentDetail = currentOrder?.detail ?? row.detail;
     const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange) : null;
     const upstox = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(quote => quote.source.startsWith("Upstox ")), row.stock.symbol, row.stock.exchange);
-    const usHolding = tradingViewMarket === "us" ? indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange, allocationUniverse.map(item => item.stock)) : null;
+    const usHolding = tradingViewMarket === "us" && !row.stock.identityIssue && row.stock.usIdentity?.holdingSafe !== false ? indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange, allocationUniverse.map(item => item.stock)) : null;
     const vendor = tradingViewMarket === "us" ? verifiedFetchedDisplayQuote(quoteRead.quotes, row.stock.symbol, row.stock.exchange) : null;
     const ids = [...new Set([...row.stock.rows.map(source => source.meta.runId), ...(currentDetail.technicalScanSourceRunId ? [currentDetail.technicalScanSourceRunId] : [])])];
     const scoreSources = ids.map(runId => {
@@ -3001,7 +3001,7 @@ function ScopedZerodhaBasketPreviewDialog({
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
       return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
-    return { vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    return { verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin });
@@ -3015,7 +3015,7 @@ function ScopedZerodhaBasketPreviewDialog({
     const id = existing?.id ?? `basket:${stockIdentity(stock.symbol, stock.exchange)}`;
     const units = Object.hasOwn(manualDraftUnits, id) ? manualDraftUnits[id] : suggested;
     const price = metrics?.actionSizing.price ?? null;
-    const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, stock.symbol, stock.exchange) : (() => { const found = indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, stock.symbol, stock.exchange, allocationUniverse.map(item => item.stock)); return found?.quantity == null ? null : { quantity: found.quantity }; })();
+    const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, stock.symbol, stock.exchange) : (() => { if (metrics?.sourceStock.identityIssue) return null; const found = indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, stock.symbol, stock.exchange, allocationUniverse.map(item => item.stock)); return found?.quantity == null ? null : { quantity: found.quantity }; })();
     const upstox = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(quote => quote.source.startsWith("Upstox ")), stock.symbol, stock.exchange);
     return { ...existing, id, symbol: stock.symbol, exchange: stock.exchange,
       action: (basketActionGroup(action) === 'Unavailable' ? 'Hold' : basketActionGroup(action)) as ActionCategory,
@@ -3066,6 +3066,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const groupForOrder = (order: ZerodhaBasketPreviewOrder) => typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
   const groupForDisplay = (row: DashboardActionRow) => typeof displayCalculations.metrics === "function" ? basketActionGroup(displayCalculations.metrics(displayStock(row)).comparison.action) : row.formulaAction;
   const rowDraftIssues = (order: ZerodhaBasketPreviewOrder) => !isZerodhaPreview ? [
+    ...(order.stock.identityIssue ? [order.stock.identityIssue] : []),
     ...(!draftDirection(order.draftContext?.action) ? ["Action New has no buy or sell direction."] : []),
     ...(order.units == null || !Number.isFinite(order.units) || order.units <= 0 ? ["A positive fractional or whole quantity is required."] : []),
     ...(order.price == null || order.amount == null ? ["Verified US vendor price and calculated amount are required."] : []),
@@ -4904,6 +4905,8 @@ export function RebalanceWorkflowSections({
         getLatestMatchingRebalanceRuns(runs, "us"),
         "us",
         portfolioSnapshot,
+        runs,
+        stockFlowSource.verifiedUsListings ?? [],
       );
       const technicalScans = buildTechnicalScanMap(runs);
       const actionRows = buildDashboardActionRows(stocks, "us", technicalScans, scoreMatrixFormulaConfig);
@@ -4911,7 +4914,7 @@ export function RebalanceWorkflowSections({
         .map((order) => ({
           ...order,
           id: order.id.replace(/^zerodha:/, "indmoney:"),
-          exchange: order.exchange || "NASDAQ",
+          exchange: order.exchange || "US",
         }));
       const capturedDetailsErrors = [eventsResult, threatsResult]
         .filter((result) => result.status === "rejected")

@@ -56,6 +56,18 @@ def verified_listings(raw):
     return {key: rows[0] for key, rows in candidates.items() if len(rows) == 1 and len(vendor_symbols[rows[0]["vendor_symbol"]]) == 1}
 
 
+def read_verified_listings(user_id):
+    """Nonsecret owner-bound metadata only. No key access or provider request."""
+    if str(user_id) != os.getenv("ALPACA_LTP_OWNER_USER_ID", ""):
+        return {"listings": [], "reason": "Verified US listing metadata is not configured for this owner"}
+    try:
+        rows = list(verified_listings(json.loads(os.getenv("ALPACA_LTP_LISTINGS_JSON", "[]"))).values())
+    except (ValueError, TypeError):
+        rows = []
+    allowed = {"instrument", "symbol", "listing_mic", "share_class", "security_id", "vendor_symbol", "currency", "verified"}
+    return {"listings": [{key: row[key] for key in allowed} for row in rows], "reason": None if rows else "Verified US listing MIC, symbol and share-class metadata unavailable"}
+
+
 def configured_for(user_id):
     # This is an application restraint. Paper keys may still permit paper trades.
     return (os.getenv("ALPACA_LTP_ENABLED") == "true"

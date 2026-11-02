@@ -1,3 +1,4 @@
+import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
 import type { StockSourceObservationPage } from "@/types/api";
 
@@ -1463,6 +1464,10 @@ class apiServiceClass implements IApiService {
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
     return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+  }
+
+  indmoneyVerifiedListings(): Promise<{ listings: VerifiedUsListing[]; reason: string | null }> {
+    return this.get(`${URLs.indmoneyUs.displayListings()}`, { skipUnauthorizedRefresh: true });
   }
 
   indmoneyDisplayQuotes(instruments: string[]): Promise<UsVendorDisplayQuotes> {

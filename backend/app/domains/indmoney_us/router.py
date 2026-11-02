@@ -124,3 +124,10 @@ async def get_display_quotes(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return await read_alpaca_quotes(current_user.id, keys)
+
+
+@router.get("/prices/listings")
+async def get_verified_display_listings(current_user: User = Depends(get_current_user)):
+    """Read existing owner-bound nonsecret mappings; never contact a vendor."""
+    from .alpaca_quotes import read_verified_listings
+    return read_verified_listings(current_user.id)

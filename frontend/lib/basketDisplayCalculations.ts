@@ -12,8 +12,9 @@ export type BasketScoreHistory = { market: 'india' | 'us'; symbols: string[]; as
 export type DisplayParameters = { maximumStocks: number; days: number; cash: number; normalised: number; valid: boolean };
 export const defaultDisplayParameters = (): DisplayParameters => ({ maximumStocks: 20, days: 5, cash: 5, normalised: 9.5, valid: true });
 export const stockIdentity = (symbol: string, exchange: string) => `${exchange.toUpperCase()}:${symbol.toUpperCase()}`;
-export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation) {
+export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation, verifiedIdentity?: {securityId:string;exchangeAliases:readonly string[]}) {
   const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
+  const acceptedVenues = new Set([exchange.toUpperCase(), ...(history.market === 'us' && verifiedIdentity?.securityId ? verifiedIdentity.exchangeAliases.filter(value => value === 'US') : [])]);
   const seen = new Set<number>();
   const excludedRows: ExcludedScoreObservation[] = [];
   // New current observations explicitly opt into the versioned effective-score contract.
@@ -26,14 +27,24 @@ export function historicalMean(history: BasketScoreHistory, symbol: string, exch
   const currentTime = Date.parse(current?.calculatedAt ?? '');
   const validCurrent = current && current.symbol.toUpperCase() === symbol.toUpperCase() && current.exchange.toUpperCase() === exchange.toUpperCase() && current.market === history.market && typeof currentScore === 'number' && Number.isFinite(currentScore) && currentScore >= -3 && currentScore <= 3 && (!current.scorePolicy || effectiveCurrent) && currentTime > start && currentTime <= end && current.sources.length > 0 && current.sources.every(source => Number.isSafeInteger(source.runId) && source.runId > 0 && (source.completed === true || source.status === 'partial') && source.market === history.market && Date.parse(source.createdAt) > start && Date.parse(source.createdAt) <= end);
   const currentIds = new Set(validCurrent ? current.sources.map(source => source.runId) : []);
+  const fingerprints = new Map<number, Set<string>>();
+  for (const row of history.observations) {
+    const time = Date.parse(row?.covered_at ?? '');
+    if (history.market === 'us' && verifiedIdentity?.securityId && row?.symbol?.toUpperCase() === symbol.toUpperCase() && acceptedVenues.has(row.exchange?.toUpperCase() ?? '') && time > start && time <= end && (row.completed || row.eligible) && row.coverage_status === 'suggested' && typeof row.score === 'number' && Number.isFinite(row.score)) {
+      const values = fingerprints.get(row.run_id) ?? new Set<string>(); values.add(JSON.stringify([row.score,row.action])); fingerprints.set(row.run_id,values);
+    }
+  }
   const rows = history.observations.filter(row => {
     if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string') return false;
     const time = Date.parse(row.covered_at);
-    if (row.symbol?.toUpperCase() === symbol.toUpperCase() && row.exchange?.toUpperCase() === exchange.toUpperCase()
+    if ((fingerprints.get(row.run_id)?.size ?? 0) > 1 && row.symbol.toUpperCase() === symbol.toUpperCase() && acceptedVenues.has(row.exchange.toUpperCase())) {
+      excludedRows.push({row,reason:'Conflicting saved alias observations from the same run; original scores and identities are preserved and no observation is chosen.'}); return false;
+    }
+    if (row.symbol?.toUpperCase() === symbol.toUpperCase() && acceptedVenues.has(row.exchange?.toUpperCase())
       && Number.isFinite(time) && time > start && time <= end && typeof row.score === 'number' && Number.isFinite(row.score) && (row.score < -3 || row.score > 3)) {
       excludedRows.push({ row, reason: 'Original saved score is outside −3 through +3. Legacy eligibility is unchanged; no effective score has been substituted.' });
     }
-    if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string' || !Number.isSafeInteger(row.run_id) || seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || row.exchange?.toUpperCase() !== exchange.toUpperCase() || (row.completed !== true && row.eligible !== true) || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
+    if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string' || !Number.isSafeInteger(row.run_id) || seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || !acceptedVenues.has(row.exchange?.toUpperCase()) || (row.completed !== true && row.eligible !== true) || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
     if (currentIds.has(row.run_id)) return false;
     seen.add(row.run_id); return true;
   });

@@ -107,3 +107,46 @@ owner/mapping configuration; then separately approve activation and a small fixe
 read-only data test. Paper Trading confirmation alone does not authorize those
 actions. No regeneration, key replacement, term acceptance, subscription or
 paper/live trading is part of any step.
+
+## Local canonical identity path
+
+The shared stock-flow source reads only the existing nonsecret owner-bound mapping
+via authenticated `/indmoney-us/prices/listings`. It never sends holdings to a
+vendor, reads credentials or creates mappings. Both the widget and basket pass
+that same metadata into consensus construction **before** votes or holdings are
+attached. India keeps its existing path.
+
+A generic US alias resolves only when exactly one verified symbol/share-class/
+listing record matches. Canonical keys include security ID, listing MIC and share
+class. Independent real listings stay separate. Generic holdings attach only when
+the full verified symbol mapping is unambiguous and the snapshot is complete;
+otherwise holdings remain unavailable, not zero. Missing mapping does not become
+a guessed NASDAQ default. The previous default has been removed.
+
+Every original parsed row remains in `stock.rows`, unchanged, with run/job/parsed
+source-row index and original symbol/venue in `sourceRowLinks`. A separate
+`consensusRows` list gives each job at most one vote per verified security. A
+same-job contradictory action or differing alias observation blocks the decision;
+all original rows remain reviewable. Conflicting actions from independent jobs
+remain legitimate separate votes. Raw-row UI keys include source-row indices for
+canonicalized US stocks so aliases cannot overwrite each other's rendered rows.
+
+Historical score matching may accept a generic US alias only for an unambiguous
+verified security. Original observation objects, identities, IDs, timestamps and
+scores are retained; no saved history is rewritten. Equal same-run alias entries
+count once. Contradictory same-run alias scores/actions are excluded with their
+original observations and an explanation, rather than selecting the first one.
+
+A synthetic fixture models 20 economic securities represented by 33 raw rows. With
+verified synthetic mappings it produces 20 consensus stocks, 20 holdings and 33
+original linked rows. It also covers same-job contradictions, independent-job
+votes, missing mappings and genuine dual listings. No real portfolio data is
+included in fixtures.
+
+No actual US security master was verified or configured in this task. Existing
+Indian Upstox instrument metadata does not identify US listings. Model exchange
+labels and INDmoney's symbol-only holdings are insufficient proof. Actual Run123
+resolution therefore still needs authoritative records for its symbols, share
+classes and listing MICs, supplied through the separately approved nonsecret
+mapping setup. Code can resolve those records when available; it does not fabricate
+them or claim that the live 33 rows have already been resolved.

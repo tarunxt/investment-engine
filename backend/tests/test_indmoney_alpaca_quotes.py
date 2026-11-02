@@ -107,3 +107,16 @@ def test_mock_transport_is_data_only_and_rate_errors_fail_closed(monkeypatch, st
     assert bool(result["quotes"]) is (status == 200)
     assert cooldown == (["61"] if status == 429 else [])
     assert "dummy-secret" not in json.dumps(result)
+
+
+def test_existing_nonsecret_listing_metadata_is_owner_bound_and_does_not_read_credentials(monkeypatch):
+    import json
+    monkeypatch.setenv("ALPACA_LTP_OWNER_USER_ID", "123")
+    monkeypatch.setenv("ALPACA_LTP_LISTINGS_JSON", json.dumps([{**LISTING, "unexpected_private_field": "not returned"}]))
+    monkeypatch.delenv("ALPACA_DATA_KEY_ID", raising=False)
+    monkeypatch.delenv("ALPACA_DATA_SECRET_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_LTP_ENABLED", raising=False)
+    assert quotes.read_verified_listings(123) == {"listings": [LISTING], "reason": None}
+    assert quotes.read_verified_listings(456)["listings"] == []
+    monkeypatch.setenv("ALPACA_LTP_LISTINGS_JSON", "invalid")
+    assert quotes.read_verified_listings(123)["listings"] == []
