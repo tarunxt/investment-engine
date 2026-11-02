@@ -6,7 +6,7 @@ import { StageDurationBreakdownDialog } from '@/app/console/dashboard/_component
 import { formatDuration, formatInrCost, formatLlmCompletion, formatRecommendedStockProgress, getStageTileError, getStageTileLabel, type StageInfo, type WorkflowStageKey } from '@/components/shared/WorkflowStageTile';
 import { formatCompactStageTime } from '@/lib/datetime';
 
-export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputClick, onPromptClick, additional = false }: {
+export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputClick, onPromptClick, additional = false, stageRunAvailable = true }: {
   stage: WorkflowStageKey;
   info: StageInfo;
   now: number;
@@ -14,6 +14,7 @@ export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputCl
   onOutputClick?: () => void;
   onPromptClick?: () => void;
   additional?: boolean;
+  stageRunAvailable?: boolean;
 }) {
   const [durationOpen, setDurationOpen] = useState(false);
   const label = getStageTileLabel(stage);
@@ -24,8 +25,8 @@ export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputCl
   if (additional) return <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 py-2 text-xs dark:border-slate-700">
     <span className="font-semibold">{label}</span>
     {llm ? <span>Measured scan cost: {formatInrCost(info.costInr)}{info.costUsd != null ? ` · USD ${info.costUsd}` : ''}</span> : null}
-    {onClick ? <button type="button" className={actionClass} onClick={onClick}>Open stage</button> : null}
-    {onOutputClick ? <button type="button" className={actionClass} onClick={onOutputClick}>Saved output for {label}</button> : null}
+    {onClick ? <button type="button" className={actionClass} onClick={onClick}>{stageRunAvailable ? 'Open stage' : 'View workflow context — no stage run'}</button> : null}
+    {onOutputClick ? <button type="button" className={actionClass} onClick={onOutputClick}>{stageRunAvailable ? `Saved output for ${label}` : `Workflow output context for ${label} — no stage run`}</button> : null}
     {onPromptClick ? <button type="button" className={actionClass} onClick={onPromptClick}>Prompt for {label}</button> : null}
     {llm && info.endedAt ? <button type="button" className={actionClass} aria-haspopup="dialog" aria-label={`Show duration breakdown for ${label}`} onClick={() => setDurationOpen(true)}>Duration: {duration}</button> : null}
     {error.detail ? <span>Error detail <StageErrorDetails stageLabel={label} info={info} row={error} /></span> : null}

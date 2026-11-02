@@ -54,8 +54,8 @@ try {
   assert.match(await region.textContent(), /Loading/);
   await page.evaluate(() => window.reads[0].resolve(new Response(JSON.stringify({detail:'Synthetic read failure'}), {status:503})));
   await region.getByRole('alert').waitFor();
-  const refresh = region.getByRole('button', {name:'Refresh', exact:true});
-  await refresh.focus(); await page.keyboard.press('Enter');
+  const retry = region.getByRole('button', {name:'Retry daily breakdown', exact:true});
+  await retry.focus(); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.reads.length === 2);
   await page.evaluate(() => {
     const day = document.querySelector('input[type=date]').value;
@@ -71,6 +71,7 @@ try {
   await region.getByText(/Selected persisted read: complete/).waitFor();
   await region.getByText(/Tariff freshness: repository_snapshot_unverified/).waitFor();
   await page.setViewportSize({width:375,height:900});
+  const refresh = region.getByRole('button', {name:'Refresh daily breakdown', exact:true});
   await refresh.focus(); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.reads.length === 3);
   await page.evaluate(() => window.reads[2].reject(new TypeError('Synthetic network failure')));

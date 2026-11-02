@@ -353,7 +353,7 @@ export default function LlmUsageBreakdown() {
 
       {error ? (
         <div role="alert" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {error} Usage has not been verified. Use Refresh to retry.
+          {error} Usage has not been verified. Use Retry daily breakdown to retry.
         </div>
       ) : null}
       {data && (error || loading || data.from_date !== selectedDate) ? (
@@ -400,7 +400,7 @@ export default function LlmUsageBreakdown() {
           className="inline-flex h-9 items-center border rounded-md border-indigo-600 bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          {loading ? 'Refreshing daily breakdown…' : error ? 'Retry daily breakdown' : 'Refresh daily breakdown'}
         </button>
         <div className="pb-2 text-sm font-medium text-gray-700">
           {formatDate(selectedDate)} · {data?.timezone ?? API_TIMEZONE}
