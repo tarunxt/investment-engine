@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.domains.recommendation_audit.evaluation import replay, sensitivity, walk_forward
+from app.domains.recommendation_audit.evaluation import replay, sensitivity, walk_forward, validate_horizons
 from app.domains.recommendation_audit.validation import validation_report
 
 
@@ -54,6 +54,11 @@ def main():
                 raise ValueError("Invalid captured findings")
         if len(records) > 10000 or len(data.get("prices", [])) > 100000:
             raise ValueError("Offline dataset exceeds bounds")
+        simulation = data.get("simulation", {})
+        if not isinstance(simulation, dict):
+            raise ValueError("Expected simulation object")
+        if "horizons" in simulation:
+            validate_horizons(simulation["horizons"])
         report = {"validation": validation_report(data), "robustness_established": False}
         if not args.evidence_only:
             report.update(dataset_provenance=data.get("provenance", "unspecified"), replay=replay(records),

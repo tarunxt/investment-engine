@@ -72,3 +72,44 @@ def test_a10_006_naive_timestamp_is_not_assumed_to_be_original_utc():
     with pytest.raises(ValueError,match='timezone'):
         walk_forward([record()],points,train_fraction=0)
 
+
+INVALID=[True,False,"1",1.5,1.0,Decimal('1'),0,-1]
+@pytest.mark.parametrize('horizon',INVALID)
+def test_a10_007_helper_rejects_invalid_horizon_before_any_result(horizon):
+    with pytest.raises(ValueError,match='horizon'):
+        walk_forward([],[],horizons=(horizon,))
+
+
+def test_a10_007_positive_horizon_beyond_history_remains_unknown_and_defaults_unchanged():
+    result=walk_forward([record()],prices(),train_fraction=0,horizons=(1,100))
+    assert result['horizons'][0]['return']==str(Decimal(103)/Decimal(101)-1)
+    assert result['horizons'][1]=={'id':'synthetic-only','price_points':100,'return':None}
+    default=walk_forward([record()],prices(),train_fraction=0)
+    assert [row['price_points'] for row in default['horizons']]==[5,20,60]
+    assert all(row['return'] is None for row in default['horizons'])
+
+
+@pytest.mark.parametrize('horizon',[True,False,'1',1.5,1.0,0,-1])
+@pytest.mark.parametrize('evidence_only',[False,True])
+def test_a10_007_cli_invalid_horizon_does_not_replace_existing_report(tmp_path,horizon,evidence_only):
+    source,output=tmp_path/'input.json',tmp_path/'report.json'
+    source.write_text(json.dumps({'records':[record()],'prices':prices(),'simulation':{'train_fraction':0,'horizons':[horizon]}}))
+    output.write_bytes(b'{"previous":true}\n');before=source.read_bytes();old=output.read_bytes()
+    script=Path(__file__).resolve().parents[1]/'scripts'/'replay_recommendations.py'
+    command=[sys.executable,str(script),str(source),str(output)]+(['--evidence-only'] if evidence_only else [])
+    result=subprocess.run(command,capture_output=True,text=True)
+    assert result.returncode==2
+    assert output.read_bytes()==old and source.read_bytes()==before
+    assert not list(tmp_path.glob('*.tmp'))
+
+
+def test_a10_007_cli_valid_long_horizon_is_unknown_not_fabricated(tmp_path):
+    source,output=tmp_path/'input.json',tmp_path/'report.json'
+    source.write_text(json.dumps({'records':[record()],'prices':prices(),'simulation':{'train_fraction':0,'horizons':[1,100]}}))
+    before=source.read_bytes()
+    script=Path(__file__).resolve().parents[1]/'scripts'/'replay_recommendations.py'
+    result=subprocess.run([sys.executable,str(script),str(source),str(output)],capture_output=True,text=True)
+    assert result.returncode==0 and source.read_bytes()==before
+    rows=json.loads(output.read_text())['walk_forward']['horizons']
+    assert rows[0]['return']==str(Decimal(103)/Decimal(101)-1)
+    assert rows[1]['return'] is None and rows[1]['price_points']==100

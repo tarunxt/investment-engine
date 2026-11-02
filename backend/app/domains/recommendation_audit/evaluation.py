@@ -66,6 +66,12 @@ def utc_instant(value):
     return when.astimezone(timezone.utc)
 
 
+def validate_horizons(horizons):
+    if not isinstance(horizons, (tuple, list)) or any(type(horizon) is not int or horizon <= 0 for horizon in horizons):
+        raise ValueError("Replay horizons must be positive integers")
+    return tuple(horizons)
+
+
 def walk_forward(records, prices, *, initial_cash="10000", initial_units="0", fee_bps="10", slippage_bps="10", lot_size="1", train_fraction=Decimal("0.2"), horizons=(5, 20, 60)):
     """Single-security simulation with declared costs and price availability.
 
@@ -74,6 +80,7 @@ def walk_forward(records, prices, *, initial_cash="10000", initial_units="0", fe
     explicitly supplied, corporate-action-adjusted and tradable. Cash/hold baselines
     share starting cash/units. No portfolio-level performance claim is made.
     """
+    horizons = validate_horizons(horizons)
     cash, units = number(initial_cash), number(initial_units)
     fee, slip, lot = number(fee_bps), number(slippage_bps), number(lot_size)
     if any(v is None or v < 0 for v in (cash, units, fee, slip)) or lot is None or lot <= 0 or fee > 1000 or slip > 1000: raise ValueError("Invalid simulation assumptions")
