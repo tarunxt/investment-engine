@@ -13,16 +13,19 @@ function useWorkflowAnchor(target: HTMLElement | null) {
   useEffect(() => {
     if (!target) return;
     let frame = 0;
+    let pending = true;
     const focus = () => {
-      if (window.location.hash !== `#${target.id}` || !target.childElementCount) return;
+      if (!pending || window.location.hash !== `#${target.id}` || !target.childElementCount) return;
+      pending = false;
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => { target.focus({ preventScroll: true }); target.scrollIntoView({ block: "start" }); });
     };
     const observer = new MutationObserver(focus);
     observer.observe(target, { childList: true });
-    window.addEventListener("hashchange", focus);
+    const onHashChange = () => { pending = true; focus(); };
+    window.addEventListener("hashchange", onHashChange);
     focus();
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("hashchange", focus); };
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("hashchange", onHashChange); };
   }, [target]);
 }
 
