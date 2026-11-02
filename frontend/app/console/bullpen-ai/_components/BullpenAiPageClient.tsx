@@ -140,7 +140,10 @@ import {
   isActiveBullpenPosition,
   shouldPreserveBullpenPositionsOnRefresh,
 } from "@/lib/bullpenPositions";
-import { SportsBreakupSection } from "./SportsBreakupSection";
+const SportsBreakupSection = dynamic(
+  () => import("./SportsBreakupSection").then((module) => module.SportsBreakupSection),
+  { loading: () => <div role="status">Loading sports breakdown…</div> },
+);
 
 const BullpenQuestionsTable = dynamic(
   () =>
