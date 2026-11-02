@@ -16,7 +16,12 @@ from app.domains.jobs.output_contracts import REBALANCE_COLUMNS, SWING_COLUMNS, 
 from app.domains.ai_providers.base import AIProviderResponse
 from app.shared.types import JobStatus
 from test_output_contracts import swing_row, rebalance_row, holding, table
-from test_job_table_validation import FakeDB, FakeRepo
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+from app.domains.jobs.models import Job
+from app.domains.jobs.repository import SyncJobRepository
+from app.domains.jobs.execution_claim import KEY
 
 
 def make_job(kind='swing', market='india', **extra):
@@ -25,7 +30,7 @@ def make_job(kind='swing', market='india', **extra):
     prompt = prefix + '\n\nReturn only one markdown table.\nChoose exactly 5 stocks.\n' + table(columns, [])
     if kind == 'rebalance':
         prompt += '\n\n# Inputs considered at current time\n## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n| --- | --- | --- |\n| NSE | ABC | 10 |\n\n## 2. Completed Swing Trade Runs\n'
-    return SimpleNamespace(**(dict(id=99,user_id=7,prompt=prompt,provider='deepseek',model='deepseek-v4-flash',
+    return Job(**(dict(id=99,user_id=7,prompt=prompt,provider='deepseek',model='deepseek-v4-flash',
         status=JobStatus.PENDING,response=None,error_message=None,tokens_in=None,tokens_out=None,estimated_cost=None,
         created_at=datetime(2026,10,3,tzinfo=timezone.utc),auto_rebalance_portfolio='india' if market=='india' else 'indmoney_us',
         auto_rebalance_label=f'{"India" if market=="india" else "IndMoney US"} Run #9 ({"Swing" if kind=="swing" else "Rebalance"} Scan)') | extra))
@@ -141,11 +146,43 @@ def test_deepseek_complete_json_skips_format_call(scoped):
 
 
 def execute_mocked(job, results):
-    db,repo,provider=FakeDB(),FakeRepo(job),MagicMock()
-    provider.generate.side_effect=results
-    with patch.object(tasks,'SyncSessionLocal',return_value=db),patch.object(tasks,'SyncJobRepository',return_value=repo),patch('app.domains.ai_providers.factory.ProviderFactory.create',return_value=provider) as factory,patch.object(tasks,'_publish_job_update'),patch.object(tasks,'_refresh_run_status'),patch.object(tasks,'_mark_failed') as failed:
-        tasks.execute_ai_job.run(job.id)
-    return db,provider,factory,failed
+    # Real persisted ownership and fenced repository writes; only provider/I/O
+    # adapters are synthetic. SQLite does not certify PostgreSQL row locking.
+    class TrackingSession(Session):
+        closed = False
+        def close(self):
+            # Preserve a loaded assertion snapshot after rollback expired it.
+            for instance in list(self.identity_map.values()):
+                for column in instance.__table__.columns:
+                    getattr(instance, column.key)
+            self.closed = True
+            super().close()
+
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    Job.__table__.create(engine)
+    sessions = sessionmaker(engine, class_=TrackingSession, expire_on_commit=False)
+    db = sessions()
+    db.add(job); db.commit()
+    repo, provider = SyncJobRepository(db), MagicMock()
+    sequence = None if callable(results) else iter(results)
+    def generate(**kwargs):
+        try:
+            return results(**kwargs) if callable(results) else next(sequence)
+        finally:
+            # Model a cancellation committed by the API while the call is in flight.
+            if db.is_modified(job, include_collections=False):
+                db.commit()
+    provider.generate.side_effect = generate
+    initial_session = [db]
+    try:
+        with patch.object(tasks, 'SyncSessionLocal', side_effect=lambda: initial_session.pop() if initial_session else sessions()), patch.object(tasks, 'SyncJobRepository', return_value=repo), patch('app.domains.ai_providers.factory.ProviderFactory.create', return_value=provider) as factory, patch.object(tasks, '_publish_job_update'), patch.object(tasks, '_refresh_run_status'), patch.object(tasks, '_mark_failed') as failed:
+            tasks.execute_ai_job.run(job.id)
+        return db, provider, factory, failed
+    finally:
+        if not db.closed:
+            db.close()
+        engine.dispose()
 
 
 def test_worker_formats_complete_output_once_and_resets_context():
@@ -249,10 +286,13 @@ def test_failed_cancellation_read_preserves_original_failure(monkeypatch):
         nonlocal generation_failed
         generation_failed=True
         raise RuntimeError('p/m returned invalid output contract (synthetic)')
-    monkeypatch.setattr(FakeRepo,'get_fresh',get_fresh,raising=False)
+    monkeypatch.setattr(SyncJobRepository,'get_fresh',get_fresh)
     _,_,_,failed=execute_mocked(job,generate)
-    failed.assert_called_once()
-    assert failed.call_args.args[3]=='p/m returned invalid output contract (synthetic)'
+    failed.assert_not_called()
+    assert job.runtime_metadata_json[KEY]['state'] == 'reconciliation_needed'
+    assert job.runtime_metadata_json[KEY]['provider_started'] is True
+    assert 'p/m returned invalid output contract (synthetic)' in json.dumps(job.runtime_metadata_json)
+    assert 'Secondary state read failure' not in json.dumps(job.runtime_metadata_json)
     assert current_output_context() is None
 
 
@@ -402,3 +442,36 @@ def test_nonrecoverable_failures_stay_failed(error, response):
     job = make_job('rebalance', status=JobStatus.FAILED, error_message=error, response=response,
                    updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
     assert JobResponse.model_validate(job).status == JobStatus.FAILED
+
+
+def test_provider_result_after_owner_replacement_never_overwrites_new_owner():
+    job = make_job()
+    def generate(**kwargs):
+        claim = dict(job.runtime_metadata_json[KEY])
+        job.runtime_metadata_json = {**job.runtime_metadata_json, KEY: {**claim, "owner_token": "replacement-owner"}}
+        return AIProviderResponse(content="stale output", tokens_in=2, tokens_out=3, cost=.004, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, generate)
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.status == JobStatus.PROCESSING
+    assert job.response is None
+    assert job.runtime_metadata_json[KEY]["owner_token"] == "replacement-owner"
+    assert job.runtime_metadata_json[KEY]["state"] == "owned"
+    assert current_output_context() is None
+
+
+def test_expired_owner_retains_returned_usage_for_reconciliation_without_terminal_success():
+    job = make_job()
+    def generate(**kwargs):
+        claim = dict(job.runtime_metadata_json[KEY])
+        job.runtime_metadata_json = {**job.runtime_metadata_json, KEY: {**claim, "expires_at": 0, "provider_started": True}}
+        return AIProviderResponse(content="retained uncommitted output", tokens_in=2, tokens_out=3, cost=.004, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, generate)
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.status == JobStatus.PROCESSING
+    assert job.response == "retained uncommitted output"
+    assert (job.tokens_in, job.tokens_out, job.estimated_cost) == (2, 3, .004)
+    assert job.runtime_metadata_json[KEY]["state"] == "reconciliation_needed"
+    assert job.runtime_metadata_json[KEY]["provider_started"] is True
+    assert current_output_context() is None

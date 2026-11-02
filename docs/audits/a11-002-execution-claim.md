@@ -114,3 +114,34 @@ access failure, not an automatic-approval policy rejection. No credentials were
 retrieved or changed; the denied endpoint was not repeated or bypassed. Parent
 owns access handoff, shared-lane acknowledgement, merge/deploy and rebasing around
 independent signing-key/viewer changes.
+
+## Fixture compatibility follow-up (2026-11-02)
+
+Draft PR1398 at 72ca85e6 failed CI run 41373676127 (jobs 125049257058
+and 125049257177): legacy output fixtures supplied FakeDB without execute(),
+which cannot implement durable row-locked claims. Migration run 41373676133 passed.
+These failed runs remain part of the evidence history.
+
+Adapted only test_job_table_validation.py and test_output_runtime.py using the
+fixture pattern reviewed at integration reference 6eb000a. They now persist actual
+Job rows in isolated SQLite and use the actual SyncJobRepository for admission,
+provider-boundary checkpoints and terminal fencing. External adapters remain
+mocked. Cancellation mutations are committed in the synthetic fixture to represent
+the API transaction. Added explicit stale-token and expired-owner output/usage
+assertions. No claim/fence bypass, fake successful admission, quarantine/skip or
+runtime behavior change is included.
+
+Socket connect, DNS lookup and datagram network operations were blocked by a
+local pytest plugin during verification. Three affected suites: 85 passed, 1 failed.
+Eight adjacent output suites: 236 passed, 1 failed. Compilation and diff checks
+passed. These results do not replace the earlier 30-test isolated acceptance run.
+
+Remaining failure: test_failed_cancellation_read_preserves_original_failure.
+When a provider exception is followed by get_fresh() failing, current runtime code
+logs the error but does not take the locked reconciliation fallback; the durable
+claim remains owned instead of reconciliation_needed. The integration reference
+contains an 11-line fallback for this path at tasks.py, independently of its other
+unrelated changes. This correction is intentionally not imported under the
+fixture-only instruction. The assertion remains active and failing; no green CI
+or complete correction is claimed. Coordinator must resolve the runtime scope
+before this can be considered ready for integration.
