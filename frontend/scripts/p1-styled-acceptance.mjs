@@ -64,9 +64,13 @@ try{
  await enter('india');const profileBefore=calls.filter(call=>call.path.endsWith('/auth/profile')).length;
  const peer=await context.newPage();try{await peer.route(base+'/p1-batch-peer',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Synthetic owner event peer</title>'}));await peer.goto(base+'/p1-batch-peer');await peer.evaluate(()=>{localStorage.clear();localStorage.setItem('investment-engine:private-cache-owner:v1','9001');});
  await page.waitForFunction(()=>document.querySelector('#india-workflow nav'));
- await page.evaluate(()=>{const key='investment-engine:private-cache-owner:v1';localStorage.removeItem(key);window.dispatchEvent(new StorageEvent('storage',{key,newValue:null}));localStorage.setItem(key,'9001');window.dispatchEvent(new StorageEvent('storage',{key,newValue:'9001'}));});
+
  for(let attempt=0;attempt<40&&calls.filter(call=>call.path.endsWith('/auth/profile')).length<=profileBefore;attempt++)await page.waitForTimeout(50);
- assert.ok(calls.filter(call=>call.path.endsWith('/auth/profile')).length>profileBefore,'new owner generation remount reads configuration');
+ assert.ok(calls.filter(call=>call.path.endsWith('/auth/profile')).length>profileBefore,'real peer event recovery reads configuration');
+ const beforeBatched=calls.filter(call=>call.path.endsWith('/auth/profile')).length;
+ await page.evaluate(()=>{const key='investment-engine:private-cache-owner:v1';localStorage.removeItem(key);window.dispatchEvent(new StorageEvent('storage',{key,newValue:null}));localStorage.setItem(key,'9001');window.dispatchEvent(new StorageEvent('storage',{key,newValue:'9001'}));});
+ for(let attempt=0;attempt<40&&calls.filter(call=>call.path.endsWith('/auth/profile')).length<=beforeBatched;attempt++)await page.waitForTimeout(50);
+ assert.ok(calls.filter(call=>call.path.endsWith('/auth/profile')).length>beforeBatched,'same-task batched owner generation remount reads configuration');
  await scope().getByRole('button',{name:/03.*Swing Scan/}).click();await scope().getByRole('button',{name:'Saved output',exact:true}).click();await page.getByRole('button',{name:'Close output view'}).waitFor();await page.getByText(/Synthetic/).first().waitFor();await screenshot('batch-owner-restored-saved-output');await page.getByRole('button',{name:'Close output view'}).click();assert.deepEqual(writes,[]);
  }finally{await peer.close();}});}
  for(const status of (process.env.P1_BATCH_ONLY?[]:['paused','cancelled','interrupted'])){await record('historical '+status+' evidence remains reviewable without execution',async()=>{mode='history-'+status;await enter('india');await page.reload();await page.getByRole('navigation',{name:'Automated rebalance views'}).waitFor();await scope().getByRole('button',{name:/03.*Swing Scan/}).first().click();await page.getByText(new RegExp(status,'i')).first().waitFor();await screenshot('history-'+status);assert.deepEqual(writes,[]);mode='populated';});}
