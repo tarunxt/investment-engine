@@ -27,7 +27,7 @@ def make_job(kind='swing', market='india', **extra):
         prompt += '\n\n# Inputs considered at current time\n## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n| --- | --- | --- |\n| NSE | ABC | 10 |\n\n## 2. Completed Swing Trade Runs\n'
     return SimpleNamespace(**(dict(id=99,user_id=7,prompt=prompt,provider='deepseek',model='deepseek-v4-flash',
         status=JobStatus.PENDING,response=None,error_message=None,tokens_in=None,tokens_out=None,estimated_cost=None,
-        created_at=datetime(2026,10,3,tzinfo=timezone.utc),auto_rebalance_portfolio='india' if market=='india' else 'indmoney_us',
+        created_at=datetime(2026,10,3,tzinfo=timezone.utc),auto_rebalance_sequence=9,auto_rebalance_portfolio='india' if market=='india' else 'indmoney_us',
         auto_rebalance_label=f'{"India" if market=="india" else "IndMoney US"} Run #9 ({"Swing" if kind=="swing" else "Rebalance"} Scan)') | extra))
 
 
@@ -143,7 +143,9 @@ def test_deepseek_complete_json_skips_format_call(scoped):
 def execute_mocked(job, results):
     db,repo,provider=FakeDB(),FakeRepo(job),MagicMock()
     provider.generate.side_effect=results
-    with patch.object(tasks,'SyncSessionLocal',return_value=db),patch.object(tasks,'SyncJobRepository',return_value=repo),patch('app.domains.ai_providers.factory.ProviderFactory.create',return_value=provider) as factory,patch.object(tasks,'_publish_job_update'),patch.object(tasks,'_refresh_run_status'),patch.object(tasks,'_mark_failed') as failed:
+    # This output-contract double has no SQL spending ledger. Cap admission is
+    # exercised separately by tests/rebalance_budget; never open an app DB here.
+    with patch.object(tasks,'configure_spend_job',return_value=None),patch.object(tasks,'SyncSessionLocal',return_value=db),patch.object(tasks,'SyncJobRepository',return_value=repo),patch('app.domains.ai_providers.factory.ProviderFactory.create',return_value=provider) as factory,patch.object(tasks,'_publish_job_update'),patch.object(tasks,'_refresh_run_status'),patch.object(tasks,'_mark_failed') as failed:
         tasks.execute_ai_job.run(job.id)
     return db,provider,factory,failed
 
