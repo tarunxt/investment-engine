@@ -121,6 +121,8 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     selectedStages: { zerodha: new Set(selection), indmoneyUs: new Set(selection) },
     selectedInputs: Object.fromEntries(["zerodha", "indmoneyUs"].map((p) => [p, Object.fromEntries(stages.map((stage) => [stage, new Set([`${stage}:next`])]))])),
     isWorkflowExecutingRef: execution, activeExecutionRefsRef: { current: [] },
+    spendChoicesRef: { current: { zerodha: { intent: "new_workflow", revision: 0 }, indmoneyUs: { intent: "new_workflow", revision: 0 } } },
+    spendOwnerRef: { current: 7 }, setSpendConsentRevision: () => {},
     cancelRequestedRef: cancel, pauseRequestedRef: pause,
     setRunningPortfolio: set("running"), setWorkflowPaused: () => {},
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
@@ -347,6 +349,8 @@ test("actual workflow card renders pending and failed history independently of o
       completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
       analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
+      RebalanceSpendConsent: () => null, basketOwner: { id: 7 }, spendConsentRevision: 0,
+      loadSpendReadiness: async () => ({}), getAutoRebalancePortfolioKey: () => "india",
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
@@ -538,7 +542,7 @@ test("final capture uses the retained workflow snapshot on repeated runs", async
 for (const analysisOnly of [false, true]) {
   test(`actual workflow freezes analysis-only selection=${analysisOnly} in reservation`, async () => {
     const reservations = [];
-    const h = harness({ analysisOnly, reserve: async (portfolio, flag) => { reservations.push({ portfolio, flag }); return metadata(); } });
+    const h = harness({ analysisOnly, reserve: async (portfolio, owner, choice, flag) => { assert.equal(owner, 7); assert.equal(choice.intent, "new_workflow"); reservations.push({ portfolio, flag }); return metadata(); } });
     await h.runWorkflow("zerodha");
     assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
   });
