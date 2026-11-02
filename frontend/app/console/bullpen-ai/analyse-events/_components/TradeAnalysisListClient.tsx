@@ -25,6 +25,7 @@ import type {
 } from "@/types/api";
 
 import {
+  formatConfidence,
   formatCurrency,
   formatDateTime,
   formatDuration,
@@ -132,7 +133,7 @@ function LearningCard({ title, items }: { title: string; items?: string[] }) {
             </p>
           ))
         ) : (
-          <p className="text-slate-500">No signals yet.</p>
+          <p className="text-slate-500">No observations in this category.</p>
         )}
       </CardContent>
     </Card>
@@ -230,6 +231,8 @@ export function TradeAnalysisListClient() {
 
   const summary = data?.summary;
   const learning = data?.learning_insights;
+  const hasUnknownPnl = data?.items.some((item) => !Number.isFinite(item.net_pnl));
+  const hasUnknownFees = data?.items.some((item) => !Number.isFinite(item.fees_total));
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
@@ -419,21 +422,21 @@ export function TradeAnalysisListClient() {
         />
         <StatCard
           label="Total Net P&L"
-          value={loading ? "…" : formatCurrency(summary?.total_net_pnl)}
+          value={loading ? "…" : hasUnknownPnl ? "Not evaluated" : formatCurrency(summary?.total_net_pnl)}
         />
         <StatCard
           label="Win Rate"
           value={
             loading
               ? "…"
-              : summary && summary.closed_positions > 0
+              : !hasUnknownPnl && summary && summary.closed_positions > 0
                 ? formatPercent(summary.win_rate * 100)
                 : "Unavailable"
           }
         />
         <StatCard
           label="Average P&L %"
-          value={loading ? "…" : formatPercent(summary?.average_pnl_percent)}
+          value={loading ? "…" : hasUnknownPnl ? "Not evaluated" : formatPercent(summary?.average_pnl_percent)}
         />
         <StatCard
           label="Average Holding"
@@ -445,7 +448,7 @@ export function TradeAnalysisListClient() {
         />
         <StatCard
           label="Total Fees"
-          value={loading ? "…" : formatCurrency(summary?.total_fees)}
+          value={loading ? "…" : hasUnknownFees ? "Not evaluated" : formatCurrency(summary?.total_fees)}
         />
       </div>
 
@@ -471,6 +474,14 @@ export function TradeAnalysisListClient() {
           </CardContent>
         </Card>
       ) : null}
+
+      <section aria-label="Analysis scope and coverage" className="space-y-2 text-sm text-slate-700">
+        <p>Applied filters: {Object.entries(filters).map(([key, value]) => `${key}: ${value || "All"}`).join(" · ")}</p>
+        <p>Displayed records: {data ? data.items.length : "Unavailable"}. Outcome-label and fee coverage denominators: unavailable in this response. Aggregate totals do not establish complete coverage.</p>
+        {data ? <p>Displayed-record coverage only: known net P&amp;L {data.items.filter((item) => Number.isFinite(item.net_pnl)).length}/{data.items.length}; known fees {data.items.filter((item) => Number.isFinite(item.fees_total)).length}/{data.items.length}. These counts do not establish full-cohort coverage.</p> : null}
+        {data ? <JsonPanel title="Reported Summary Raw Evidence" value={summary} /> : null}
+        <p>Source and analysis versions: unavailable unless supplied in the raw evidence. Exit observations do not establish post-exit performance.</p>
+      </section>
 
       <Tabs defaultValue="trades" className="gap-6">
         <TabsList variant="line">
@@ -569,7 +580,7 @@ export function TradeAnalysisListClient() {
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Reasoning</p>
-                      <p>Confidence: {formatPercent((item.confidence ?? 0) * 100)}</p>
+                      <p>Confidence: {formatConfidence(item.confidence)}</p>
                       <p>Risk score: {formatNumber(item.risk_score, 2)}</p>
                       <p>{item.short_reason || "No buy summary stored."}</p>
                       <p>{item.exit_reason ? `Exit reason: ${item.exit_reason}` : "Position still open or exit reason unavailable."}</p>
@@ -589,6 +600,10 @@ export function TradeAnalysisListClient() {
             </p>
           ) : (
             <>
+              <p className="text-sm leading-6 text-slate-700">
+                Descriptive observations only. Calibration, causal attribution and weight
+                changes are not evaluated. Stored recommendations are unvalidated hypotheses.
+              </p>
               <div className="grid gap-4 lg:grid-cols-2">
                 <LearningCard
                   title="Recommendations"
