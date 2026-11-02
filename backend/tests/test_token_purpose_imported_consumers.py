@@ -67,8 +67,9 @@ async def test_actual_imported_consumers_enforce_purpose_before_database(consume
         assert db.reads == 0
         return
     result = await invoke()
-    assert db.reads == (3 if consumer == 'refresh' else 2)
+    assert db.reads == 2
     assert db.family_reads == 1
+    assert db.commits == (1 if consumer == 'refresh' else 0)
     if consumer == 'dependency':
         assert result is db.user
     elif consumer == 'status':

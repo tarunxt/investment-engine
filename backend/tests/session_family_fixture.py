@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import app.models  # complete canonical mappings; no database connection
 from app.core.security import AuthUtils, JWTUtils
 from app.domains.auth.models import AuthSessionFamily, User, UserRole
 from app.domains.auth.session_lifecycle import digest
