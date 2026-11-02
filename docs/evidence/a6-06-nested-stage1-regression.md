@@ -74,3 +74,21 @@ The original audit document and prior Library handoff artifact are preserved.
 No push, PR, deployment, live runtime manipulation, settings change or provider
 run was performed. Integration/release and authenticated acceptance belong to
 the existing composition owner. Service recovery remains separate.
+
+## Nested filter-detail keyboard follow-up
+
+Fresh canonical task: `6hvWHqxPPqhxjQh8`; original November 1 task remains completed.
+On source `4cfb2146dd429a074c1fc626b9ccc79a23d80100`, the synthetic filtered-event
+detail left focus on its parent opener and Escape closed the parent as well.
+This was reproduced in the actual component browser fixture before the change.
+
+The parent now suspends its keyboard handler while filter detail is open; the
+child focuses its Close control, contains Tab/Shift+Tab, closes alone on Escape,
+and returns focus to its exact reason-count opener. Closing the parent afterward
+returns focus to the original fixture opener. The same regression exercises
+keyboard and click dismissal/reopening at 1180px and 390px in both workspaces.
+All 155 existing onClick/disabled attributes are identical to the follow-up base.
+Source-evidence flags, calculations, P1 modal shells and protected routes remain
+unchanged. Focused Node tests (44), TypeScript and changed-test lint pass; schedule
+lint retains the same two errors/five warnings. No broad JSX extraction or cleanup
+is included. Performance extraction may resume after integration review.

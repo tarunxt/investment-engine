@@ -168,11 +168,42 @@ try {
       evidence.push({fixture:`stage1-${name}-${mode}`,text});
     }
   }
+  for (const width of [1180, 390]) {
+    await page.setViewportSize({width,height:844});
+  await page.goto(`http://127.0.0.1:${server.address().port}/?${workspaceQuery}&mode=all-scanned#stage1-populated`);
+  await page.getByRole('button', {name:'Open Stage 1 fixture',exact:true}).click();
+  await page.getByRole('button', {name:'Analyse Filtered Events',exact:true}).click();
+  const filterOpener = page.getByRole('button', {name:'Show 1 events caught by Synthetic fixture reason',exact:true});
+  await filterOpener.click();
+  const childClose = page.getByRole('button', {name:'Close filtered event list',exact:true});
+  await childClose.waitFor();
+  const child = page.getByRole('dialog', {name:'Stage 1 filter detail',exact:true});
+  assert.equal(await childClose.evaluate(el => el === document.activeElement), true);
+  const childLink = child.getByRole('link', {name:'Synthetic retained opportunity',exact:true});
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await childLink.evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Tab');
+  assert.equal(await childClose.evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Tab');
+  assert.equal(await childLink.evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Escape');
+  assert.equal(await page.getByRole('dialog', {name:'All scanned events',exact:true}).isVisible(), true, 'Escape must preserve parent dialog');
+  await child.waitFor({state:'hidden'});
+  assert.equal(await filterOpener.evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Enter');
+  await child.waitFor();
+  await childClose.click();
+  await child.waitFor({state:'hidden'});
+  assert.equal(await filterOpener.evaluate(el => el === document.activeElement), true);
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', {name:'All scanned events',exact:true}).waitFor({state:'hidden'});
+  assert.equal(await page.getByRole('button', {name:'Open Stage 1 fixture',exact:true}).evaluate(el => el === document.activeElement), true);
+  }
   const calls = evidence.flatMap(item => item.calls ?? []);
   assert.ok(calls.length > 3, 'full fixtures must exercise the synthetic passive read failures');
   assert.ok(calls.every(name => name.startsWith('get') || name === 'polymarketState'), JSON.stringify(calls));
   assert.deepEqual(errors, []);
   assert.deepEqual(blocked, []);
   writeFileSync(`${out}/result.json`, JSON.stringify({timestamp: new Date().toISOString(), workspaceProfile, viewport:'1180x757 at 100%', narrow:'390x844', calls, errors, blocked, evidence}, null, 2));
-  console.log(`PASS: ${workspaceProfile}; actual overview failed-after-loading; full workspace failed, verified zero, cached; unknown control names; 21 Stage 1 state/mode fixtures; diagnostics Tab/Shift+Tab/Escape, narrow; no operational calls`);
+  console.log(`PASS: ${workspaceProfile}; actual overview failed-after-loading; full workspace failed, verified zero, cached; unknown control names; 21 Stage 1 state/mode fixtures; nested filter topmost keyboard at 1180/390px; diagnostics Tab/Shift+Tab/Escape, narrow; no operational calls`);
 } finally { await browser.close(); server.close(); }
