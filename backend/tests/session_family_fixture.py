@@ -49,3 +49,16 @@ class SessionFamilyFixture:
 
     async def commit(self):
         self.commits += 1
+
+
+def persist_active_session_tokens(session, user):
+    """Persist a real synthetic active family; caller commits its fixture transaction."""
+    from uuid import uuid4
+    sid = uuid4().hex
+    tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value,
+        session_id=sid, refresh_id="synthetic-refresh-" + uuid4().hex)
+    session.add(AuthSessionFamily(id=sid, user_id=user.id, is_active=True,
+        expires_at=datetime.utcnow() + timedelta(days=1),
+        refresh_digest=digest(tokens["refresh_token"])))
+    session.flush()
+    return tokens
