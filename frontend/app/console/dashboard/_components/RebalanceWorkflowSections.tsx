@@ -1,4 +1,5 @@
 "use client";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { acquireZerodhaLogin } from "@/lib/zerodhaLoginArbitration";
 import { captureWorkflowOwner, isCurrentWorkflowOwner, onWorkflowOwnerInvalidated, requireWorkflowOwner, type WorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
@@ -2953,6 +2954,7 @@ function ScopedZerodhaBasketPreviewDialog({
   basketCurrency?: "INR" | "USD";
   columnPreferences?: { hiddenColumns: string[]; order?: string[]; names?: Record<string, string>; toggle: (label: string) => void; reorder?: (order: string[]) => void; rename?: (id: string, name: string) => void };
 }) {
+  const reviewDialog = useReviewDialog<HTMLDivElement>(open, onClose);
   const orderBlockersId = useId();
   const [marketNoticeOpen, setMarketNoticeOpen] = useState(false);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
@@ -3105,7 +3107,7 @@ function ScopedZerodhaBasketPreviewDialog({
   return (
     <>
     <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn || marketNoticeOpen ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="flex max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
@@ -3829,6 +3831,7 @@ function AutoRebalanceCostHistoryDialog({
   onClose: () => void;
   onCloseBreakdown: () => void;
 }) {
+  const reviewDialog = useReviewDialog<HTMLDivElement>(open, onClose);
   const [collapsedRunIds, setCollapsedRunIds] = useState<Set<string>>(() => new Set());
   const [collapsedStageKeys, setCollapsedStageKeys] = useState<Set<string>>(() => new Set());
 
@@ -3836,7 +3839,7 @@ function AutoRebalanceCostHistoryDialog({
   const title = portfolio === "zerodha" ? "Zerodha scan cost history" : "INDmoney US scan cost history";
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={title} className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-600">
@@ -7874,7 +7877,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         ) : null}
 
-        <WorkflowStageLedger enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
+        <WorkflowStageLedger market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}

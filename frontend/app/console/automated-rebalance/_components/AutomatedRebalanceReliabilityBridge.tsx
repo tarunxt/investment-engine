@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Loader2, X } from "lucide-react";
 
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { normalizeError } from "@/app/console/dashboard/_components/dashboardOverviewUtils";
 import { apiService } from "@/services/api";
 import type { ApiRequestControl } from "@/services/api.types";
@@ -380,6 +381,7 @@ function compactText(value: string | null | undefined) {
 function findMetricElement(target: HTMLElement, root: HTMLElement) {
   let element: HTMLElement | null = target;
   while (element && element !== root) {
+    if (element.dataset.autoRebalanceLlmMetric === "true") return element;
     const text = compactText(element.textContent);
     if (text.length <= 180 && /^LLMs completed\s*:/i.test(text)) return element;
     element = element.parentElement;
@@ -406,6 +408,12 @@ function inferMetricContext(
   metricElement: HTMLElement,
   root: HTMLElement,
 ): LlmMetricContext | null {
+  const explicitStage = metricElement.dataset.workflowStage;
+  const explicitPortfolio = metricElement.dataset.workflowPortfolio;
+  if (["threats", "swing", "rebalance", "technical"].includes(explicitStage ?? "") && ["india", "indmoney_us"].includes(explicitPortfolio ?? "")) {
+    const total = Number(metricElement.dataset.workflowTotal);
+    return { stage: explicitStage as LlmStage, portfolio: explicitPortfolio as AutoRebalancePortfolioKey, expectedTotal: Number.isSafeInteger(total) && total > 0 ? total : null };
+  }
   const metricText = compactText(metricElement.textContent);
   const countMatch = metricText.match(/LLMs completed\s*:\s*\d+\s*\/\s*(\d+)/i);
   let stage: LlmStage | null = null;
@@ -800,13 +808,7 @@ function LlmDetailsDialog({
     };
   }, [context]);
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
+  const reviewDialog = useReviewDialog<HTMLElement>(true, onClose);
 
   const passed = rows.filter(({ job }) =>
     ["completed", "success", "passed", "partial"].includes(
@@ -824,6 +826,7 @@ function LlmDetailsDialog({
       }}
     >
       <section
+        {...reviewDialog}
         role="dialog"
         aria-modal="true"
         aria-label={`${stageLabel(context.stage)} LLM details`}
