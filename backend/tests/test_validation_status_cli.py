@@ -17,7 +17,7 @@ def test_current_context_contract_matches_pinned_source_without_policy_invention
     data = json.loads(path.read_text())
     contract = ValidationContract.model_validate(data)
     context = contract.current_strategy_context
-    source = subprocess.check_output(["git", "show", f"{context.repository_commit}:{context.prompt_path}"], cwd=ROOT)
+    source = subprocess.check_output(["git", "-c", f"safe.directory={ROOT}", "show", f"{context.repository_commit}:{context.prompt_path}"], cwd=ROOT)
     assert hashlib.sha256(source).hexdigest() == context.prompt_sha256
     assert hashlib.sha256((ROOT / context.prompt_path).read_bytes()).hexdigest() == context.prompt_sha256
     assert "aggressive 1–3 month" in context.original_objective
