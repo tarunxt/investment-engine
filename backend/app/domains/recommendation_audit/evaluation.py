@@ -1,9 +1,9 @@
 """Offline replay/sensitivity and causal price-point simulations; never fetch data."""
 from copy import deepcopy
 from decimal import Decimal
+from datetime import datetime, timezone
 from .deterministic import calculate, digest, number, sizing_layer
 from .schemas import Formula, WEIGHT_KEYS
-from .verdict import aware
 
 
 def record_calculation(record, formula, technical, samples=None, *, require_coverage=False):
@@ -58,6 +58,20 @@ def sensitivity(record):
         "interpretation": "One-at-a-time sensitivity, not market validation or calibrated probability"}
 
 
+def utc_instant(value):
+    """Compare instants in UTC without rewriting supplied timestamp spellings."""
+    when = datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
+    if not isinstance(when, datetime) or when.utcoffset() is None:
+        raise ValueError("Explicit timezone required for replay timestamps")
+    return when.astimezone(timezone.utc)
+
+
+def validate_horizons(horizons):
+    if not isinstance(horizons, (tuple, list)) or any(type(horizon) is not int or horizon <= 0 for horizon in horizons):
+        raise ValueError("Replay horizons must be positive integers")
+    return tuple(horizons)
+
+
 def walk_forward(records, prices, *, initial_cash="10000", initial_units="0", fee_bps="10", slippage_bps="10", lot_size="1", train_fraction=Decimal("0.2"), horizons=(5, 20, 60)):
     """Single-security simulation with declared costs and price availability.
 
@@ -66,45 +80,46 @@ def walk_forward(records, prices, *, initial_cash="10000", initial_units="0", fe
     explicitly supplied, corporate-action-adjusted and tradable. Cash/hold baselines
     share starting cash/units. No portfolio-level performance claim is made.
     """
+    horizons = validate_horizons(horizons)
     cash, units = number(initial_cash), number(initial_units)
     fee, slip, lot = number(fee_bps), number(slippage_bps), number(lot_size)
     if any(v is None or v < 0 for v in (cash, units, fee, slip)) or lot is None or lot <= 0 or fee > 1000 or slip > 1000: raise ValueError("Invalid simulation assumptions")
     train_fraction = number(train_fraction)
     if train_fraction is None or not Decimal(0) <= train_fraction < Decimal(1): raise ValueError("Invalid chronological split")
-    candidates = sorted(records, key=lambda r: aware(r["decision_at"]))
+    candidates = sorted(records, key=lambda r: utc_instant(r["decision_at"]))
     security_keys = {(r.get("market"), r.get("security_id")) for r in candidates}
     if len(security_keys) != 1 or any(not key[1] for key in security_keys): return {"status": "insufficient_evidence", "eligible_decisions": 0, "reason": "Exactly one verified canonical security is required", "excluded": len(records)}
     market, security_id = next(iter(security_keys))
     eligible, excluded_prices = [], 0
     seen = set()
     for point in prices:
-        key = point.get("at")
-        if key in seen: raise ValueError("Duplicate price time")
+        key = utc_instant(point["at"]) if point.get("at") else None
+        if key is not None and key in seen: raise ValueError("Duplicate price time")
         seen.add(key)
         value = number(point.get("price"))
-        if point.get("security_id") != security_id or point.get("market") != market or not key or not point.get("available_at") or not point.get("adjusted") or not point.get("tradable") or value is None or value <= 0 or aware(point["available_at"]) > aware(key):
+        if point.get("security_id") != security_id or point.get("market") != market or not key or not point.get("available_at") or not point.get("adjusted") or not point.get("tradable") or value is None or value <= 0 or utc_instant(point["available_at"]) > key:
             excluded_prices += 1; continue
-        eligible.append(point)
-    eligible.sort(key=lambda p: aware(p["at"]))
+        eligible.append((key, point))
+    eligible.sort(key=lambda item: item[0])
     if not eligible: return {"status": "insufficient_evidence", "eligible_decisions": 0, "reason": "No eligible price points", "excluded_prices": excluded_prices}
     split = int(len(candidates) * train_fraction)
     holdout = candidates[split:]
     if not holdout: return {"status":"insufficient_evidence", "reason":"No holdout decisions", "eligible_decisions":0}
-    eligible = [p for p in eligible if aware(p["at"]) >= aware(holdout[0]["decision_at"])]
+    eligible = [(at, p) for at, p in eligible if at >= utc_instant(holdout[0]["decision_at"])]
     if not eligible: return {"status":"insufficient_evidence", "reason":"No holdout price points", "eligible_decisions":0}
     baseline_cash, baseline_units = cash, units
     trades, skipped, horizon_rows = [], [], []
     consumed = set()
-    equity_curve = [cash + units * number(eligible[0]["price"])]
+    equity_curve = [cash + units * number(eligible[0][1]["price"])]
     peak, drawdown, turnover = equity_curve[0], Decimal(0), Decimal(0)
     for record in holdout:
-        when = aware(record["decision_at"])
-        if not record.get("original_completion_at") or aware(record["original_completion_at"]) > when or not record.get("inputs_available_at") or aware(record["inputs_available_at"]) > when:
+        when = utc_instant(record["decision_at"])
+        if not record.get("original_completion_at") or utc_instant(record["original_completion_at"]) > when or not record.get("inputs_available_at") or utc_instant(record["inputs_available_at"]) > when:
             skipped.append({"id": record.get("id"), "reason": "Unknown or future original input/completion availability"}); continue
-        future = [(i, p) for i, p in enumerate(eligible) if aware(p["at"]) > when]
+        future = [(i, at, p) for i, (at, p) in enumerate(eligible) if at > when]
         if not future: skipped.append({"id": record.get("id"), "reason": "No next price point"}); continue
-        index, point = future[0]
-        if index in consumed: skipped.append({"id": record.get("id"), "reason": "Overlapping decision at same fill point"}); continue
+        index, fill_at, point = future[0]
+        if fill_at in consumed: skipped.append({"id": record.get("id"), "reason": "Overlapping decision at same fill point"}); continue
         calc = record_calculation(record, Formula.model_validate(record["formula"]) if record.get("formula") else None, record.get("technical"), require_coverage=True)
         if calc["formula_action"] is None: skipped.append({"id": record.get("id"), "reason": "Deterministic gates failed"}); continue
         if number(calc["current_units"]) != units: skipped.append({"id": record.get("id"), "reason": "Captured holdings differ from simulated holdings"}); continue
@@ -120,26 +135,26 @@ def walk_forward(records, prices, *, initial_cash="10000", initial_units="0", fe
         cost = notional * fee / 10000
         if change > 0 and notional + cost > cash or change < 0 and abs(change) > units:
             skipped.append({"id": record.get("id"), "reason": "Cash/position constraints"}); continue
-        cash -= change * fill + cost; units += change; turnover += notional; consumed.add(index)
+        cash -= change * fill + cost; units += change; turnover += notional; consumed.add(fill_at)
         equity = cash + units * price; equity_curve.append(equity)
         peak = max(peak, equity); drawdown = min(drawdown, equity / peak - 1) if peak > 0 else drawdown
         trades.append({"id": record.get("id"), "fill_at": point["at"], "units": str(change), "fill_price": str(fill), "fee": str(cost), "equity": str(equity), "cash_after": str(cash), "units_after": str(units)})
         for horizon in horizons:
             target = index + horizon
-            horizon_rows.append({"id": record.get("id"), "price_points": horizon, "return": str(number(eligible[target]["price"]) / price - 1) if target < len(eligible) else None})
-    final_price = number(eligible[-1]["price"])
+            horizon_rows.append({"id": record.get("id"), "price_points": horizon, "return": str(number(eligible[target][1]["price"]) / price - 1) if target < len(eligible) else None})
+    final_price = number(eligible[-1][1]["price"])
     curve_cash, curve_units = baseline_cash, baseline_units
-    fills = {t["fill_at"]: t for t in trades}
-    peak = baseline_cash + baseline_units * number(eligible[0]["price"])
+    fills = {utc_instant(t["fill_at"]): t for t in trades}
+    peak = baseline_cash + baseline_units * number(eligible[0][1]["price"])
     drawdown = Decimal(0)
-    for point in eligible:
-        if point["at"] in fills:
-            curve_cash, curve_units = number(fills[point["at"]]["cash_after"]), number(fills[point["at"]]["units_after"])
+    for point_at, point in eligible:
+        if point_at in fills:
+            curve_cash, curve_units = number(fills[point_at]["cash_after"]), number(fills[point_at]["units_after"])
         equity = curve_cash + curve_units * number(point["price"])
         peak = max(peak, equity)
         if peak: drawdown = min(drawdown, equity / peak - 1)
     final_equity = cash + units * final_price
-    initial_equity = baseline_cash + baseline_units * number(eligible[0]["price"])
+    initial_equity = baseline_cash + baseline_units * number(eligible[0][1]["price"])
     return {"status": "computed" if trades else "insufficient_evidence", "training_decisions": split, "holdout_decisions": len(holdout), "eligible_decisions": len(trades), "executed_trades": sum(t["units"] != "0" for t in trades), "excluded_prices": excluded_prices,
         "initial_equity": str(initial_equity), "final_equity": str(final_equity), "net_return": str(final_equity / initial_equity - 1) if initial_equity else None,
         "hold_baseline_equity": str(baseline_cash + baseline_units * final_price), "cash_baseline_equity": str(initial_equity),
