@@ -28,6 +28,7 @@ def isolate_api_usage_telemetry(monkeypatch):
 def isolate_cost_collection_intents(request, monkeypatch, tmp_path):
     """Cost tests use an isolated synthetic ledger, never a runtime database."""
     if not request.node.path.name.startswith("test_cost"):
+        yield
         return
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
