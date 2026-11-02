@@ -47,6 +47,7 @@ from app.domains.bullpen_trade_analysis.models import (
 )
 from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.cost_drivers.models import (
+    CostCollectionIntent,
     CostRecommendation,
     CostSnapshot,
     TrafficCostRollup,
@@ -124,6 +125,7 @@ __all__ = [
     "BullpenTradeAnalysisLlmRecord",
     "BullpenTradeAnalysisRecord",
     "BullpenTradeAnalysisSnapshotRecord",
+    "CostCollectionIntent",
     "CostRecommendation",
     "DashboardPortfolioDailySnapshot",
     "CostSnapshot",
@@ -158,4 +160,10 @@ __all__ = [
 
 from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
+)
+
+from app.domains.jobs.admission import JobAdmission  # noqa: F401
+
+from app.domains.rebalance_budget.models import (  # noqa: F401
+    RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund,
 )

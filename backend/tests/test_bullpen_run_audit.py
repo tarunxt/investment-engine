@@ -2724,10 +2724,11 @@ def test_build_bundle_projects_stage3_handoff_checkpoint_without_rewriting_legac
 
 
 def test_algorithm_registry_contains_required_audit_keys():
+    assert any(entry["algorithm_key"] == "wallet_payout_authority" and entry["algorithm_version"] == "classifier-v5-evidence-v1" for entry in AUDITED_ALGORITHM_REGISTRY)
     assert BULLPEN_RUN_AUDIT_SCHEMA_VERSION == 2
     assert (
         BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION
-        == "2026-09-20-ups-filter-integrity-v32"
+        == "2026-11-01-private-payout-provenance-v33"
     )
     assert (
         BULLPEN_RUN_AUDIT_RULE_VERSION
@@ -2804,7 +2805,7 @@ def test_algorithm_registry_contains_required_audit_keys():
         if entry["algorithm_key"] == "stage3_terminal_doctor_blocker"
     )
     assert terminal_doctor_blocker["algorithm_version"] == "v1"
-    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 4
+    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 5
 
 
 def test_stage3_rank_formula_provenance_matches_current_registry():

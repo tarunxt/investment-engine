@@ -32,6 +32,51 @@ class MigrationSafetyTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(AssertionError):
                 verifier.verify_forward_baseline(prior, changed)
 
+    def test_forward_dispatch_allows_exact_additions_and_preserves_legacy_obligations(self):
+        prior = {"outbox": {
+            "columns": [("id", "UUID", False, None), ("topic", "VARCHAR(200)", False, None)],
+            "rows": [json.dumps({"id": "synthetic", "topic": "legacy"}, sort_keys=True)],
+            "indexes": [], "unique": [], "foreign_keys": [],
+        }}
+        valid = deepcopy(prior)
+        outbox = valid["outbox"]
+        additions = [("job_id", "INTEGER", True, None), ("state", "VARCHAR(32)", True, None),
+                     ("claim_token", "VARCHAR(36)", True, None), ("next_attempt_at", "TIMESTAMP", True, None),
+                     ("last_error_type", "VARCHAR(100)", True, None)]
+        outbox["columns"].extend(additions)
+        outbox["rows"] = [json.dumps({"id": "synthetic", "topic": "legacy", **{col[0]: None for col in additions}}, sort_keys=True)]
+        outbox["indexes"] = [
+            {"name": "ix_outbox_state", "column_names": ["state"], "unique": False},
+            {"name": "uq_outbox_job_id", "column_names": ["job_id"], "unique": True,
+             "duplicates_constraint": "uq_outbox_job_id"},
+        ]
+        outbox["unique"] = [{"name": "uq_outbox_job_id", "column_names": ["job_id"]}]
+        outbox["foreign_keys"] = [{"name": "fk_outbox_job_id", "constrained_columns": ["job_id"],
+            "referred_table": "jobs", "referred_columns": ["id"], "referred_schema": None, "options": {}}]
+        untouched = deepcopy(valid)
+        verifier.verify_forward_baseline(prior, valid)
+        self.assertEqual(valid, untouched)
+        for field in ("type", "nullable", "default", "old_row", "new_value", "index", "extra_column",
+                      "missing_unique", "wrong_fk", "cascading_fk", "partial_index", "nonunique_index"):
+            changed = deepcopy(valid)
+            table = changed["outbox"]
+            if field in {"type", "nullable", "default"}:
+                table["columns"][-1] = {"type": ("last_error_type", "TEXT", True, None),
+                    "nullable": ("last_error_type", "VARCHAR(100)", False, None),
+                    "default": ("last_error_type", "VARCHAR(100)", True, "unknown")}[field]
+            elif field in {"old_row", "new_value"}:
+                row = json.loads(table["rows"][0]); row["topic" if field == "old_row" else "state"] = "changed"
+                table["rows"] = [json.dumps(row, sort_keys=True)]
+            elif field == "index": table["indexes"].append({"name": "unexpected"})
+            elif field == "extra_column": table["columns"].append(("unexpected", "JSON", True, None))
+            elif field == "missing_unique": table["unique"] = []
+            elif field == "wrong_fk": table["foreign_keys"][0]["referred_table"] = "users"
+            elif field == "cascading_fk": table["foreign_keys"][0]["options"] = {"ondelete": "CASCADE"}
+            elif field == "partial_index": table["indexes"][0]["dialect_options"] = {"postgresql_where": "state IS NOT NULL"}
+            else: table["indexes"][1]["unique"] = False
+            with self.subTest(field=field), self.assertRaises(AssertionError):
+                verifier.verify_forward_baseline(prior, changed)
+
     def environment(self):
         return {**verifier.TEST_ENVIRONMENT, "PATH": "/usr/local/bin:/usr/bin"}
 
@@ -39,10 +84,12 @@ class MigrationSafetyTests(unittest.TestCase):
     @patch.object(Path, "is_file", return_value=True)
     def test_exact_test_environment_strips_inherited_credentials_and_overrides(self, *_):
         environment = self.environment()
-        environment.update(OPENAI_API_KEY="synthetic-forbidden-value", PGHOST="elsewhere.invalid", PGOPTIONS="unsafe", AWS_PROFILE="production")
+        environment.update(OPENAI_API_KEY="synthetic-forbidden-value", PGHOST="elsewhere.invalid", PGOPTIONS="unsafe", AWS_PROFILE="production",
+                           JWT_SIGNING_KEY="synthetic-inherited-key", JWT_SECRET="synthetic-alias", SECRET_KEY="synthetic-alias")
         clean = verifier.guarded_environment(environment)
         self.assertEqual(clean["DATABASE_URL"], verifier.TEST_DATABASE_URL)
-        for key in ("OPENAI_API_KEY", "PGHOST", "PGOPTIONS", "AWS_PROFILE"):
+        self.assertEqual(clean["JWT_SIGNING_KEY"], bytes(range(32)).hex())
+        for key in ("OPENAI_API_KEY", "PGHOST", "PGOPTIONS", "AWS_PROFILE", "JWT_SECRET", "SECRET_KEY"):
             self.assertNotIn(key, clean)
 
     def test_refuses_environment_or_url_changes_before_database_or_alembic(self):

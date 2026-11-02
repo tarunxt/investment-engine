@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -119,6 +120,22 @@ from app.domains.trading_bots.service import (
     build_trading_bots_overview,
     build_trading_bots_summary,
 )
+
+
+def _with_expected_returns_formula(callback):
+    """Keep fixture values while asserting the configured formula contract."""
+    def checked(value, *, now, formula):
+        assert formula == BullpenAutoLiveSettings().returns_per_day_formula
+        return callback(value, now)
+    return checked
+
+
+class _WalletFixtureClock(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        # July residues expired; August and July30 holdings remain open.
+        frozen = datetime(2026, 7, 7, tzinfo=UTC)
+        return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
 
 
 def test_event_trend_llm_outputs_restore_saved_odds_and_commentary():
@@ -297,8 +314,9 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
             observed_calls.append("get_active_run_identity")
             return None
 
-        async def get_latest_projected_run(self, user_id: int):
+        async def get_latest_projected_run(self, user_id: int, *, workspace_profile=None):
             assert user_id == 7
+            assert workspace_profile is None
             observed_calls.append("get_latest_projected_run")
             return latest_run, True, latest_run.completed_at
 
@@ -332,9 +350,9 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
             assert user_id == 7
             observed_calls.append("save_state")
 
-        async def list_runs(self, user_id: int, *, limit: int | None = None):
+        async def list_projected_runs(self, user_id: int, *, limit: int | None = None):
             assert user_id == 7
-            observed_calls.append(f"list_runs:{limit}")
+            observed_calls.append(f"list_projected_runs:{limit}")
             return [latest_run]
 
         async def list_decisions(self, user_id: int, *, limit: int | None = None):
@@ -390,7 +408,7 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
     assert observed_calls[-6:] == [
         "ensure_settings",
         "ensure_state",
-        "list_runs:10",
+        "list_projected_runs:10",
         "list_decisions",
         "save_state",
         "commit",
@@ -2258,18 +2276,33 @@ async def test_console_profile_stage_2_fails_clearly_when_frozen_targets_are_emp
 
 
 @pytest.mark.anyio
-async def test_console_profile_blocks_stage_2_and_stage_3_when_fresh_wallet_positions_fail(
+async def test_console_profile_wallet_failure_allows_candidate_only_stage2_and_blocks_stage3(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
-    candidate_market = _market(
+    # Approved main contract: ed359bf9, docs/bullpen-run-audit.md section
+    # "Candidate-only Stage 2 after wallet-read failure". No wallet-based orders.
+    candidate_market = replace(_market(
         question="Will Stage 1 wallet refresh failure block later stages?",
         slug="stage-1-wallet-refresh-failure",
-        current_yes_odds=12,
-        current_no_odds=88,
+        current_yes_odds=8,
+        current_no_odds=92,
+        close_time=(fixed_now + timedelta(days=2)).isoformat(),
+    ), volume_24hr_usd=5_000)
+    wallet_reads = []
+    reviewed_candidates = []
+    quote = AsyncMock(side_effect=AssertionError("Stage 3 must not request a quote"))
+    shared_review = _fake_console_stage_two_shared_review(
+        fixed_now=fixed_now, fair_yes=8, fair_no=92,
     )
 
+    async def fake_shared_review(**kwargs):
+        reviewed_candidates.append([row["market"].market_id for row in kwargs["llm_markets"]])
+        assert [(target.provider, target.model) for target in kwargs["settings"].console_llm_targets] == [("openai", "gpt-4o-mini")]
+        return await shared_review(**kwargs)
+
     async def fake_read_console_wallet_positions():
+        wallet_reads.append("failed")
         raise RuntimeError("fresh positions refresh failed")
 
     async def fake_scan_console_profile_markets(**_kwargs):
@@ -2301,6 +2334,10 @@ async def test_console_profile_blocks_stage_2_and_stage_3_when_fresh_wallet_posi
         "app.domains.polymarket_auto_live.engine.refresh_balance",
         _fake_ready_balance,
     )
+    monkeypatch.setattr("app.domains.polymarket_auto_live.engine.refresh_execution_quote", quote)
+    monkeypatch.setattr("app.domains.polymarket_auto_live.engine.evaluate_market_rules", lambda *_args, **_kwargs: _fake_rules(hours_remaining=48))
+    monkeypatch.setattr("app.domains.polymarket_auto_live.engine.resolve_auto_live_llm_targets", lambda _settings: [("openai", "gpt-4o-mini")])
+    monkeypatch.setattr("app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm", fake_shared_review)
 
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
@@ -2308,6 +2345,7 @@ async def test_console_profile_blocks_stage_2_and_stage_3_when_fresh_wallet_posi
             strategy_profile=CONSOLE_PROFILE_ID,
             auto_live_enabled=True,
             dry_run=True,
+            console_llm_targets=[BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(),
@@ -2331,14 +2369,23 @@ async def test_console_profile_blocks_stage_2_and_stage_3_when_fresh_wallet_posi
         if stage.outputs.get("workflow_stage_key") == "invest"
     )
 
-    assert result.run.status == "failed"
+    assert wallet_reads == ["failed", "failed"]  # fast path plus bounded recovery
+    assert reviewed_candidates == [[candidate_market.market_id]]
+    assert result.run.status == "partial_success"
     assert result.decisions == []
-    assert "could not refresh fresh bullpen wallet positions" in result.run.summary.lower()
-    assert stage1.outputs["phase_status"] == "failed"
-    assert stage2.outputs["phase_status"] == "blocked"
+    assert stage1.outputs["phase_status"] == "completed"
+    assert stage1.outputs["wallet_snapshot_status"] == "unavailable"
+    assert stage1.outputs["stage2_candidate_only"] is True
+    assert stage2.outputs["phase_status"] == "completed"
+    assert stage2.outputs["stage2_candidate_only"] is True
     assert stage3.outputs["phase_status"] == "blocked"
-    assert stage2.outputs["blocked_by_stage1_wallet_refresh"] is True
     assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+    assert "fresh positions refresh failed" in stage3.outputs["stage1_wallet_refresh_error"]
+    assert stage3.hard_block is True
+    assert result.run.orders_submitted == 0
+    assert result.run.diagnostics.new_buy_enabled is False
+    assert result.state.live_execution_allowed is False
+    quote.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -3916,11 +3963,11 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.position_returns_per_day",
-        lambda position, now: 1.0 if position.slug == active_market.slug else 0.5,
+        _with_expected_returns_formula(lambda position, now: 1.0 if position.slug == active_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5,
+        _with_expected_returns_formula(lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
@@ -4126,13 +4173,13 @@ async def test_durable_replacement_is_planned_when_pre_exit_cash_is_below_minimu
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.position_returns_per_day",
-        lambda position, now: 10.0,
+        _with_expected_returns_formula(lambda position, now: 10.0),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: (
+        _with_expected_returns_formula(lambda market, now: (
             9.0 if market.slug == candidate_market.slug else 0.5
-        ),
+        )),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
@@ -4340,13 +4387,13 @@ async def test_durable_replacement_uses_initial_free_slot_before_pairing_exit(
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.position_returns_per_day",
-        lambda *_args, **_kwargs: 10.0,
+        _with_expected_returns_formula(lambda *_args, **_kwargs: 10.0),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: (
+        _with_expected_returns_formula(lambda market, now: (
             9.0 if market.slug == higher_candidate.slug else 8.0
-        ),
+        )),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.llm_returns_per_day",
@@ -4538,11 +4585,11 @@ async def test_authoritative_dust_exit_remains_planned_and_processed_without_rem
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.position_returns_per_day",
-        lambda *_args, **_kwargs: 10.0,
+        _with_expected_returns_formula(lambda *_args, **_kwargs: 10.0),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5,
+        _with_expected_returns_formula(lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
@@ -4714,11 +4761,11 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.position_returns_per_day",
-        lambda position, now: 1.0 if position.slug == active_market.slug else 0.5,
+        _with_expected_returns_formula(lambda position, now: 1.0 if position.slug == active_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5,
+        _with_expected_returns_formula(lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
@@ -5831,7 +5878,7 @@ async def test_console_profile_defers_rate_limited_buy_without_fallback_write(
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: 8.5 if market.slug == candidate_market.slug else 0.5,
+        _with_expected_returns_formula(lambda market, now: 8.5 if market.slug == candidate_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
@@ -5980,7 +6027,7 @@ async def test_console_profile_retries_transient_rate_limited_buy_once(
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
-        lambda market, now: 8.5 if market.slug == candidate_market.slug else 0.5,
+        _with_expected_returns_formula(lambda market, now: 8.5 if market.slug == candidate_market.slug else 0.5),
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
@@ -6635,7 +6682,8 @@ async def test_console_wallet_positions_preserve_explicit_zero_payout_residues(
 
 
 @pytest.mark.anyio
-async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_trump_row_stays_active():
+async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_trump_row_stays_active(monkeypatch):
+    monkeypatch.setattr("app.domains.polymarket.position_classification.datetime", _WalletFixtureClock)
     positions = await read_console_wallet_positions(
         snapshot_payload={
             "positions": [
@@ -6731,7 +6779,8 @@ async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_t
 
 
 @pytest.mark.anyio
-async def test_console_wallet_positions_ignore_nested_history_claim_rows():
+async def test_console_wallet_positions_ignore_nested_history_claim_rows(monkeypatch):
+    monkeypatch.setattr("app.domains.polymarket.position_classification.datetime", _WalletFixtureClock)
     positions = await read_console_wallet_positions(
         snapshot_payload={
             "data": {
@@ -7137,7 +7186,7 @@ def test_console_market_filter_reasons_block_player_prop_ou_markets():
 
 
 def test_console_market_filter_reasons_honor_saved_section_toggles():
-    market = _market(
+    market = replace(_market(
         question=(
             "Will Wimbledon rain move Bitcoin after 10 tweets and a model "
             "is released by July 1?"
@@ -7145,7 +7194,9 @@ def test_console_market_filter_reasons_honor_saved_section_toggles():
         theme="Sports",
         close_time="2026-06-25T12:00:00+00:00",
         outcome_labels=["Option A", "Option B"],
-    )
+        current_yes_odds=8,
+        current_no_odds=92,
+    ), volume_24hr_usd=5_000)
     now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
 
     enabled_reasons = console_market_filter_reasons(
@@ -11444,7 +11495,11 @@ def test_console_profile_discover_walks_nested_bullpen_payload_like_manual_scan(
                     "slug": f"nested-valid-question-{index}",
                     "endDate": "2026-07-08T00:00:00Z",
                     "outcomes": json.dumps(["Yes", "No"]),
-                    "outcomePrices": json.dumps([0.55, 0.45]),
+                    "outcomePrices": json.dumps([0.08, 0.92]),
+                    "volume": 10_000,
+                    "volume24hr": 5_000,
+                    "liquidity": 5_000,
+                    "spread": 0.02,
                 }
                 for index in range(125)
             ]
@@ -11485,6 +11540,10 @@ def test_console_profile_discover_inherits_parent_category_context():
                         "endDate": "2026-07-08T00:00:00Z",
                         "outcomes": json.dumps(["Yes", "No"]),
                         "outcomePrices": json.dumps([0.08, 0.92]),
+                    "volume": 10_000,
+                    "volume24hr": 5_000,
+                    "liquidity": 5_000,
+                    "spread": 0.02,
                     }
                 ],
             }

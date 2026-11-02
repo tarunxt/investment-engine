@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from app.core.logging import get_logger
 from app.domains.polymarket.bullpen import run_first_bullpen_json
+from app.domains.polymarket.payout_provenance import raw_payout_facts
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket.position_classification import (
@@ -223,6 +224,8 @@ class ConsoleWalletPosition:
     expected_payout_usdc: float | None = None
     resolution_status: str | None = None
     authoritative_market_state: str = "unknown"
+    payout_source_facts: dict[str, object] = field(default_factory=dict)
+    payout_evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1582,6 +1585,7 @@ def _classify_console_wallet_position(
 ):
     return classify_bullpen_position(
         {
+            **position.payout_source_facts,
             "shares": position.shares,
             "resolution_status": position.resolution_status,
         },
@@ -1616,6 +1620,7 @@ def _apply_console_wallet_position_classification(
         claimable_value_usd=classification.claimable_value_usd,
         expected_payout_usdc=classification.expected_payout_usdc,
         resolution_status=classification.resolution_status,
+        payout_evidence=classification.payout_evidence,
     )
 
 
@@ -1704,6 +1709,7 @@ def _merge_console_wallet_position(
             else incoming.expected_payout_usdc
         ),
         resolution_status=existing.resolution_status or incoming.resolution_status,
+        payout_source_facts={"source_lots": [existing.payout_source_facts, incoming.payout_source_facts]},
     )
     return _apply_console_wallet_position_classification(merged_position)
 
@@ -1827,6 +1833,7 @@ def parse_console_wallet_positions_payload(
                 claimable_value_usd=claimable_value_usd,
                 expected_payout_usdc=expected_payout_usdc,
                 resolution_status=resolution_status,
+                payout_source_facts={**raw_payout_facts(row), "raw_payout_fields": row.get("raw_payout_fields", raw_payout_facts(row))},
             )
         )
 

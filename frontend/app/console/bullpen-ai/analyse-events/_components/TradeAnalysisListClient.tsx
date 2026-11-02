@@ -25,6 +25,7 @@ import type {
 } from "@/types/api";
 
 import {
+  formatConfidence,
   formatCurrency,
   formatDateTime,
   formatDuration,
@@ -132,7 +133,7 @@ function LearningCard({ title, items }: { title: string; items?: string[] }) {
             </p>
           ))
         ) : (
-          <p className="text-slate-500">No signals yet.</p>
+          <p className="text-slate-500">No observations in this category.</p>
         )}
       </CardContent>
     </Card>
@@ -230,6 +231,19 @@ export function TradeAnalysisListClient() {
 
   const summary = data?.summary;
   const learning = data?.learning_insights;
+  const hasUnknownPnl = data?.items.some((item) => !Number.isFinite(item.net_pnl));
+  const hasUnknownFees = data?.items.some((item) => !Number.isFinite(item.fees_total));
+  // Summary covers the selected cohort; visible rows may be limited independently.
+  // Legacy responses lack these fields and retain the conservative visible-row guard.
+  const hasOutcomeCoverage = summary != null
+    && typeof summary.known_outcomes === "number" && Number.isInteger(summary.known_outcomes) && summary.known_outcomes >= 0
+    && typeof summary.unknown_outcomes === "number" && Number.isInteger(summary.unknown_outcomes) && summary.unknown_outcomes >= 0
+    && summary.known_outcomes + summary.unknown_outcomes === summary.closed_positions
+    && summary.win_rate_denominator === summary.known_outcomes;
+  const hasPnlCoverage = ["complete", "partial", "unknown"].includes(summary?.net_pnl_coverage ?? "");
+  const hasFeeCoverage = ["complete", "partial", "unknown"].includes(summary?.fee_coverage ?? "");
+  const canShowWinRate = summary != null && Number.isFinite(summary.win_rate)
+    && (summary.win_rate_denominator != null ? Number.isInteger(summary.win_rate_denominator) && summary.win_rate_denominator > 0 : !hasUnknownPnl && summary.closed_positions > 0);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
@@ -418,22 +432,22 @@ export function TradeAnalysisListClient() {
           }
         />
         <StatCard
-          label="Total Net P&L"
-          value={loading ? "…" : formatCurrency(summary?.total_net_pnl)}
+          label={`Recorded Net P&L Subtotal (${summary?.net_pnl_coverage ?? "unknown"} coverage)`}
+          value={loading ? "…" : (!hasPnlCoverage && hasUnknownPnl) || summary?.net_pnl_coverage === "unknown" ? "Not evaluated" : formatCurrency(summary?.total_net_pnl)}
         />
         <StatCard
-          label="Win Rate"
+          label={hasOutcomeCoverage ? `Known-outcome Win Rate (n=${summary?.win_rate_denominator})` : "Recorded Win Rate (outcome coverage unavailable)"}
           value={
             loading
               ? "…"
-              : summary && summary.closed_positions > 0
+              : canShowWinRate && summary && summary.win_rate != null
                 ? formatPercent(summary.win_rate * 100)
                 : "Unavailable"
           }
         />
         <StatCard
-          label="Average P&L %"
-          value={loading ? "…" : formatPercent(summary?.average_pnl_percent)}
+          label="Recorded Average P&L % (known returns)"
+          value={loading ? "…" : !hasOutcomeCoverage && hasUnknownPnl ? "Not evaluated" : formatPercent(summary?.average_pnl_percent)}
         />
         <StatCard
           label="Average Holding"
@@ -444,10 +458,18 @@ export function TradeAnalysisListClient() {
           }
         />
         <StatCard
-          label="Total Fees"
-          value={loading ? "…" : formatCurrency(summary?.total_fees)}
+          label={`Recorded Fees Subtotal (${summary?.fee_coverage ?? "unknown"} coverage)`}
+          value={loading ? "…" : (!hasFeeCoverage && hasUnknownFees) || summary?.fee_coverage === "unknown" ? "Not evaluated" : formatCurrency(summary?.total_fees)}
         />
       </div>
+
+      {hasOutcomeCoverage ? (<p className="text-sm text-slate-600">
+        Selected cohort: {summary?.closed_positions ?? 0} closed, {summary?.known_outcomes ?? 0} known outcomes,
+        {" "}{summary?.unknown_outcomes ?? 0} unknown. Known zero is a non-win; win requires net P&amp;L &gt; 0.
+        Recorded execution fees only; tax, spread and FX are not verified.
+        Measured fee components: {formatCurrency(summary?.measured_fee_components_total)}
+        {" "}({summary?.known_fee_components ?? "unavailable"} known, {summary?.unknown_fee_components ?? "unavailable"} missing).
+      </p>) : null}
 
       {error ? (
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
@@ -471,6 +493,15 @@ export function TradeAnalysisListClient() {
           </CardContent>
         </Card>
       ) : null}
+
+      <section aria-label="Analysis scope and coverage" className="space-y-2 text-sm text-slate-700">
+        <p>Applied filters: {Object.entries(filters).map(([key, value]) => `${key}: ${value || "All"}`).join(" · ")}</p>
+        <p>Displayed records: {data ? data.items.length : "Unavailable"}. {hasOutcomeCoverage ? "Selected-cohort outcome coverage is reported separately above." : "Outcome-label and fee coverage denominators: unavailable in this response."} Aggregate subtotals do not establish complete coverage.</p>
+        {data ? <p>Displayed-record coverage only: known net P&amp;L {data.items.filter((item) => Number.isFinite(item.net_pnl)).length}/{data.items.length}; known fees {data.items.filter((item) => Number.isFinite(item.fees_total)).length}/{data.items.length}. These counts do not establish full-cohort coverage.</p> : null}
+        {hasFeeCoverage ? <p>Selected-cohort fee records: {summary?.known_fee_records ?? "Unavailable"} known, {summary?.unknown_fee_records ?? "Unavailable"} missing. Coverage: {summary?.fee_coverage}.</p> : null}
+        {data ? <JsonPanel title="Reported Summary Raw Evidence" value={summary} /> : null}
+        <p>Source and analysis versions: unavailable unless supplied in the raw evidence. Exit observations do not establish post-exit performance.</p>
+      </section>
 
       <Tabs defaultValue="trades" className="gap-6">
         <TabsList variant="line">
@@ -569,7 +600,7 @@ export function TradeAnalysisListClient() {
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Reasoning</p>
-                      <p>Confidence: {formatPercent((item.confidence ?? 0) * 100)}</p>
+                      <p>Confidence: {formatConfidence(item.confidence)}</p>
                       <p>Risk score: {formatNumber(item.risk_score, 2)}</p>
                       <p>{item.short_reason || "No buy summary stored."}</p>
                       <p>{item.exit_reason ? `Exit reason: ${item.exit_reason}` : "Position still open or exit reason unavailable."}</p>
@@ -589,6 +620,10 @@ export function TradeAnalysisListClient() {
             </p>
           ) : (
             <>
+              <p className="text-sm leading-6 text-slate-700">
+                Descriptive observations only. Calibration, causal attribution and weight
+                changes are not evaluated. Stored recommendations are unvalidated hypotheses.
+              </p>
               <div className="grid gap-4 lg:grid-cols-2">
                 <LearningCard
                   title="Recommendations"

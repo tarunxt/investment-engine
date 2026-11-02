@@ -141,7 +141,9 @@ def test_mock_recommendations_use_demo_confidence_badge_data():
 
 
 def test_frontend_does_not_render_empty_confidence_label():
-    with open("../frontend/app/console/profile/cost-drivers/page.tsx", encoding="utf-8") as handle:
+    from pathlib import Path
+    page_path = Path(__file__).resolve().parents[2] / "frontend/app/console/profile/cost-drivers/page.tsx"
+    with page_path.open(encoding="utf-8") as handle:
         page = handle.read()
     assert ">confidence:" not in page.lower()
 
@@ -154,7 +156,7 @@ def test_cost_dashboard_defaults_to_live_empty_when_mock_mode_unset(monkeypatch)
     monkeypatch.setattr(service, "claim_refresh_cooldown", lambda *args, **kwargs: None)
     monkeypatch.setattr(service, "_live_dashboard", lambda month=None: service._empty_live_dashboard(month))
 
-    data = service.get_dashboard(force_refresh=True)
+    data = service.get_dashboard()
 
     assert data["debug"]["mockMode"] is False
     assert data["traffic"] == []

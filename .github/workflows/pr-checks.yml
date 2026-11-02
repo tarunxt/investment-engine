@@ -50,6 +50,9 @@ jobs:
           backend/tests/test_upstox_quotes.py
           backend/tests/test_upstox_quote_guard.py
           backend/tests/test_upstox_request_contract.py
+          backend/tests/test_auth_signing_config.py
+          backend/tests/test_email_config.py
+          backend/tests/test_auth_websocket_tickets.py
           backend/tests/test_recovery_containment.py
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_ranking_integrity.py
@@ -160,13 +163,13 @@ jobs:
       - name: Install backend test dependencies
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
-          python -m pip install --disable-pip-version-check pytest aiosqlite==0.22.1
+          python -m pip install --disable-pip-version-check pytest pytest-asyncio aiosqlite==0.22.1
       - name: Verify workflow concurrency and bounded source queries
         env:
           PYTHONPATH: backend
           CREDX_AUDIT_TEST_DATABASE_URL: postgresql+asyncpg://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_AUDIT_TEST_DATABASE_ACK: disposable-local-only
-        run: pytest -q backend/tests/test_auto_rebalance_audit_postgres.py backend/tests/test_output_source_context_postgres.py
+        run: pytest -q backend/tests/test_auto_rebalance_audit_postgres.py backend/tests/test_output_source_context_postgres.py backend/tests/test_jobs_cancellation_postgres.py
 
   recommendation-audit-release-gates:
     name: Recommendation audit migration, concurrency and authenticated delivery
@@ -214,6 +217,11 @@ jobs:
         run: >-
           pytest -q --junitxml=/tmp/recommendation-audit.xml
           backend/tests/test_recommendation_audit.py
+          backend/tests/test_validation_evidence.py
+          backend/tests/test_verifier_explanations.py
+          backend/tests/test_bullpen_analysis_evidence.py
+          backend/tests/test_bullpen_trade_analysis.py
+          backend/tests/test_bullpen_trade_analysis_tasks.py
           backend/tests/test_recommendation_audit_integration.py
           backend/tests/test_historical_score_reader.py
           backend/tests/test_stock_source_observations.py
@@ -322,6 +330,7 @@ jobs:
           tests/rebalance-workflow-resilience.test.mjs
           tests/auto-rebalance-audit-persistence.test.mjs
           tests/recommendation-audit-recovery-policy.test.mjs
+          tests/verifier-explanation.test.mjs
           tests/rebalance-stage-inputs.test.mjs
           tests/rebalance-idle-provenance.test.mjs
           tests/rebalance-score-scale-contract.test.mjs
@@ -518,6 +527,41 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: npx playwright install --with-deps chromium
+
+      - name: Check candidate JavaScript budgets with local synthetic runtime
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        env:
+          PERF_CANDIDATE_SHA: ${{ github.sha }}
+          PERF_EXPECT_SHA: ${{ github.sha }}
+          PERF_EXPECT_ENVIRONMENT: ci-local-synthetic
+          PERF_MOCK_API: "true"
+          PERF_BASE_URL: http://127.0.0.1:3219
+          PERF_OUTPUT_JSON: ${{ runner.temp }}/candidate-javascript-budget.json
+        run: |
+          export PERF_LOCAL_AUTH_SECRET="$NEXTAUTH_SECRET"
+          export NEXTAUTH_URL="$PERF_BASE_URL"
+          export PERF_EXPECT_BUILD_ID="$(cat .next/BUILD_ID)"
+          export PERF_EXPECT_NOT_BEFORE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          npm run start -- --hostname 127.0.0.1 --port 3219 >"${RUNNER_TEMP}/budget-runtime.log" 2>&1 &
+          runtime_pid=$!
+          trap 'kill "$runtime_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent "$PERF_BASE_URL/api/runtime-fingerprint" >/dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/performance-audit.mjs
+          node ../scripts/check-javascript-budgets.mjs \
+            ../performance-results/javascript-budget-baseline.json \
+            "$PERF_OUTPUT_JSON"
+
+      - name: Retain candidate JavaScript budget evidence
+        if: always() && matrix.bundler == 'webpack'
+        uses: actions/upload-artifact@v7
+        with:
+          name: candidate-javascript-budget
+          path: ${{ runner.temp }}/candidate-javascript-budget.json
+          if-no-files-found: warn
 
       - name: Verify authenticated render and lazy route behavior
         if: matrix.bundler == 'webpack'

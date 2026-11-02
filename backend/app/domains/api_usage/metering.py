@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
+from app.domains.api_usage.provenance import cache_provenance, tariff_provenance
 from app.domains.api_usage.models import ApiUsageAttemptEvent
 from app.domains.api_usage.recorder import get_provider_usage_context
 from app.domains.api_usage.usage_metadata import (
@@ -304,6 +305,8 @@ class ApiAttempt:
             cost_status, reason = "unavailable", "invalid_tariff_or_usage"
         values["inferred_usage"] = {
             **(values.get("inferred_usage") or {}),
+            "accounting_provenance": tariff_provenance(values.get("tariff_rates")),
+            "cache_fields": cache_provenance(usage, values.get("inferred_usage")),
             "coverage": {
                 "version": 1, "usage_status": usage_status,
                 "usage_sources": sorted(self._usage_sources),

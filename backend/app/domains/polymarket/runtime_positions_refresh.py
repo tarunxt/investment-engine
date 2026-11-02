@@ -10,6 +10,8 @@ from urllib.parse import urlencode
 import httpx
 
 from app.domains.polymarket import runtime_broker as runtime_broker_module
+from app.domains.polymarket.position_classification import extract_bullpen_expected_payout_usdc
+from app.domains.polymarket.payout_provenance import raw_payout_facts
 
 
 # These callers are presentation-only portfolio reads. They must all resolve the
@@ -220,7 +222,7 @@ def _normalize_public_position(row: dict[str, Any]) -> dict[str, Any] | None:
         "token_id",
     )
 
-    expected_payout = max(0.0, current_value or 0.0) if redeemable else 0.0
+    expected_payout = extract_bullpen_expected_payout_usdc(row)
     return {
         "asset": str(asset) if asset is not None else None,
         "avg_price": avg_price,
@@ -239,7 +241,11 @@ def _normalize_public_position(row: dict[str, Any]) -> dict[str, Any] | None:
         "outcome": str(outcome) if outcome is not None else "",
         "pnl_percent": pnl_percent,
         "redeemable": redeemable,
-        "resolution_status": "resolved" if redeemable else "open",
+        "resolution_status": _first_value(row, "resolution_status", "resolutionStatus", "status"),
+        "raw_payout_fields": raw_payout_facts(row),
+        "currency": _first_value(row, "currency"),
+        "amount_unit": _first_value(row, "amount_unit"),
+        "payout_authority_status": "reported_unverified" if expected_payout is not None else "unknown_authority",
         "shares": shares,
         "slug": str(slug) if slug is not None else None,
         "unrealized_pnl": unrealized_pnl,
@@ -292,6 +298,9 @@ def _build_public_summary(
         "cash_balance": round(cash_balance, 6),
         "claimable_count": len(claimable_positions),
         "claimable_value": round(claimable_value, 6),
+        "claimable_value_basis": "market_valuation_estimate_not_verified_settlement",
+        "verified_entitlement": None,
+        "confirmed_realization": None,
         "redeemable_count": len(claimable_positions),
         "redeemable_value": round(claimable_value, 6),
         "total_value": round(cash_balance + positions_value + claimable_value, 6),

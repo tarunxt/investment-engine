@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User, UserRole
 from .schemas import CostDriversDashboard
-from .cache import RefreshCooldownError
+from .cache import RefreshCooldownError, CollectionUnavailableError
 from .service import get_dashboard
 import re
 
@@ -52,6 +52,8 @@ def recommendations(_: User = Depends(_allowed_admin)):
 def refresh(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
     try:
         return get_dashboard(force_refresh=True, month=_month_param(month))
+    except CollectionUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RefreshCooldownError as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

@@ -1,7 +1,7 @@
 """Offline replay/sensitivity and causal price-point simulations; never fetch data."""
 from copy import deepcopy
 from decimal import Decimal
-from .deterministic import calculate, number, sizing_layer
+from .deterministic import calculate, digest, number, sizing_layer
 from .schemas import Formula, WEIGHT_KEYS
 from .verdict import aware
 
@@ -26,6 +26,10 @@ def replay(records):
         calc = record_calculation(record, formula, record.get("technical"))
         score = number(calc["score"])
         results.append({"record_id": record.get("id"), "run_id": record.get("run_id"), "calculation": calc, "sizing": sizing_layer(calc, record.get("market")),
+            "diagnostic_version": "score-sensitivity-v1",
+            "action_policy_version": "recommendation-evidence-v1",
+            "action_thresholds": ["-2", "-1", "1"],
+            "formula_hash": digest(record["formula"]) if record.get("formula") else None,
             "threshold_margin": str(min(abs(score - edge) for edge in map(Decimal, [-2, -1, 1]))) if score is not None else None,
             "recorded_score_matches": number(record.get("calculation", {}).get("score")) == score if record.get("calculation") else None,
             "original_policy_known": formula is not None and record.get("provenance") == "prospective", "provenance": record.get("provenance", "unspecified")})
@@ -50,7 +54,7 @@ def sensitivity(record):
         result = record_calculation(record, formula, record.get("technical"), remaining)
         scenarios.append({"parameter": "leave_one_provider_model_out", "family": list(family), "score": result["score"], "action": result["formula_action"]})
     base = record_calculation(record, formula, record.get("technical"))["formula_action"]
-    return {"status": "computed", "baseline_action": base, "different_action_scenarios": sum(s["action"] != base for s in scenarios), "scenarios": scenarios,
+    return {"status": "computed", "diagnostic_version": "score-sensitivity-v1", "formula_hash": digest(record["formula"]), "baseline_action": base, "different_action_scenarios": sum(s["action"] != base for s in scenarios), "scenarios": scenarios,
         "interpretation": "One-at-a-time sensitivity, not market validation or calibrated probability"}
 
 
