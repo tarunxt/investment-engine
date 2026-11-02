@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import dynamic from "next/dynamic";
+import { getStageOneDialogEvidence } from "./bullpenStageOneEvidence";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -851,6 +852,7 @@ type StageTwoLlmRunBreakupKind =
   | "unique-llm-rows";
 
 type ScanCandidateDialogState = {
+  evidence: ReturnType<typeof getStageOneDialogEvidence>;
   runId?: string | null;
   mode: ScanCandidateDialogMode;
   isIndependentStageOne: boolean;
@@ -4509,6 +4511,29 @@ function stageOneCandidateOddsLookupId(
   return `stage-one-candidate-odds-${index}-${exactIdentity}`;
 }
 
+function useStageOneDialogFocus(onClose: () => void, childOpen = false) {
+  const root = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    root.current?.querySelector<HTMLElement>("button[aria-label^='Close']")?.focus();
+    return () => returnFocus.current?.focus();
+  }, []);
+  return {
+    ref: root,
+    onKeyDown: (event: import("react").KeyboardEvent<HTMLDivElement>) => {
+      if (childOpen) return;
+      if (event.key === "Escape") { event.stopPropagation(); onClose(); }
+      if (event.key !== "Tab") return;
+      const items = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? [])
+        .filter(item => item.getClientRects().length > 0);
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    },
+  };
+}
+
 function StageOneOutputDialog({
   state,
   onClose,
@@ -4526,6 +4551,7 @@ function StageOneOutputDialog({
     useState(false);
   const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
     useState<BullpenQuestionRow | null>(null);
+  const dialogFocus = useStageOneDialogFocus(onClose, isReturnsPerDayFormulaDialogOpen || returnsPerDayQuestion !== null || state.mode === "all-scanned");
   const [latestOdds, setLatestOdds] = useState<
     Record<string, { yesOdds?: number | null; noOdds?: number | null }>
   >({});
@@ -4746,9 +4772,9 @@ function StageOneOutputDialog({
     });
   };
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+    <div {...dialogFocus} role="dialog" aria-modal="true" aria-label="Stage 1 output" className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               {showActivePositionsFirst
@@ -4757,11 +4783,11 @@ function StageOneOutputDialog({
             </p>
             <h2 className="text-xl font-semibold text-slate-950">
               {showActivePositionsFirst
-                ? `Positions (${state.activePositionCount})`
-                : `Fresh Bullpen Opportunities (${retainedCandidateCount})`}
+                ? `Positions (${state.evidence.positionsKnown ? state.activePositionCount : "Unknown"})`
+                : `Fresh Bullpen Opportunities (${state.evidence.candidatesKnown ? retainedCandidateCount : "Unknown"})`}
             </h2>
             <p className="text-sm text-slate-600">
-              Latest Bullpen Scan Stage 1 completed at{" "}
+              Saved Stage 1 completion time:{" "}
               {formatIstDateTime(state.scanCompletedAt)}.
             </p>
             {latestOddsFetchedAt ? (
@@ -4798,13 +4824,14 @@ function StageOneOutputDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
+          <p role="status" className="mb-4 text-sm text-slate-600">{state.evidence.label}</p>
           <div className="grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
                 Available for claim
               </p>
               <p className="mt-2 text-2xl font-semibold text-emerald-950">
-                {state.claimablePositionCount}
+                {state.evidence.claimsKnown ? state.claimablePositionCount : "Unknown"}
               </p>
             </div>
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
@@ -4812,7 +4839,7 @@ function StageOneOutputDialog({
                 Active Bullpen positions found
               </p>
               <p className="mt-2 text-2xl font-semibold text-amber-950">
-                {state.activePositionCount}
+                {state.evidence.positionsKnown ? state.activePositionCount : "Unknown"}
               </p>
             </div>
             <div className="rounded-2xl border border-pink-200 bg-pink-50 px-4 py-4">
@@ -4820,7 +4847,7 @@ function StageOneOutputDialog({
                 Fresh Bullpen Opportunities
               </p>
               <p className="mt-2 text-2xl font-semibold text-pink-950">
-                {retainedCandidateCount}
+                {state.evidence.candidatesKnown ? retainedCandidateCount : "Unknown"}
               </p>
             </div>
           </div>
@@ -4838,7 +4865,7 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  {state.claimablePositionCount}{" "}
+                  {state.evidence.claimsKnown ? state.claimablePositionCount : "Unknown"}{" "}
                   {state.claimablePositionCount === 1
                     ? "position"
                     : "positions"}
@@ -4907,8 +4934,7 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-sm text-emerald-700">
-                  No claimable Bullpen positions were recorded for this Stage 1
-                  scan.
+                  {state.evidence.claimsKnown && state.claimablePositionCount === 0 ? "No claimable Bullpen positions were recorded for this Stage 1 scan." : "Claimable position details are unavailable; absence is not established."}
                 </div>
               )}
             </section>
@@ -4925,7 +4951,7 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {state.activePositionCount}{" "}
+                  {state.evidence.positionsKnown ? state.activePositionCount : "Unknown"}{" "}
                   {state.activePositionCount === 1 ? "position" : "positions"}
                 </span>
               </div>
@@ -4940,9 +4966,9 @@ function StageOneOutputDialog({
                     }
                   />
                 </div>
-              ) : state.activePositionCount > 0 ? (
+              ) : state.evidence.positionsKnown && state.activePositionCount > 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  {state.activePositionCount} active Bullpen{" "}
+                  {state.evidence.positionsKnown ? state.activePositionCount : "Unknown"} active Bullpen{" "}
                   {state.activePositionCount === 1
                     ? "position was"
                     : "positions were"}{" "}
@@ -4951,8 +4977,7 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  No active Bullpen positions were recorded for this Stage 1
-                  scan.
+                  {state.evidence.positionsKnown && state.activePositionCount === 0 ? "No active Bullpen positions were recorded for this Stage 1 scan." : "Active position details are unavailable; absence is not established."}
                 </div>
               )}
             </section>
@@ -4968,7 +4993,7 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {retainedCandidateCount}{" "}
+                  {state.evidence.candidatesKnown ? retainedCandidateCount : "Unknown"}{" "}
                   {retainedCandidateCount === 1 ? "candidate" : "candidates"}
                 </span>
               </div>
@@ -4986,8 +5011,7 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  No new event opportunity candidates were recorded for this
-                  Stage 1 scan.
+                  {state.evidence.candidatesKnown && retainedCandidateCount === 0 ? "No new event opportunity candidates were recorded for this Stage 1 scan." : "Candidate details are unavailable; absence is not established."}
                 </div>
               )}
             </section>
@@ -5029,11 +5053,12 @@ function AllScannedEventsDialog({
   state: ScanCandidateDialogState;
   onClose: () => void;
 }) {
+  const dialogFocus = useStageOneDialogFocus(onClose);
   const retainedRowCount = state.candidates.length;
   const eventRowsPerPage = 100;
   const [eventQuery, setEventQuery] = useState("");
   const [eventPage, setEventPage] = useState(1);
-  const omittedRowCount = Math.max(0, state.totalScanned - retainedRowCount);
+  const omittedRowCount = state.evidence.scanKnown ? Math.max(0, state.totalScanned - retainedRowCount) : 0;
   const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
   const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
   const normalizedEventQuery = eventQuery.trim().toLowerCase();
@@ -5084,9 +5109,9 @@ function AllScannedEventsDialog({
     : [];
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+    <div {...dialogFocus} role="dialog" aria-modal="true" aria-label="All scanned events" className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Stage 1 scan</p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -5105,7 +5130,7 @@ function AllScannedEventsDialog({
                 {activeTab === "analysis" ? (
                   "Filtered Events Analysis"
                 ) : (
-                  <>All Events Scanned ({state.totalScanned})</>
+                  <>All Events Scanned ({state.evidence.scanKnown ? state.totalScanned : "Unknown"})</>
                 )}
               </h2>
             </div>
@@ -5131,19 +5156,20 @@ function AllScannedEventsDialog({
           </div>
         </div>
         <div className="flex-1 overflow-auto p-6">
+          <p role="status" className="mb-4 text-sm text-slate-600">{state.evidence.label}</p>
           {activeTab === "analysis" ? (
             <>
               <div className="mb-4 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Filtered events</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Retained filtered events</p>
                   <p className="mt-1 text-2xl font-semibold text-slate-950">{filteredCandidates.length.toLocaleString("en-IN")}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Distinct reasons</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Retained distinct reasons</p>
                   <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.length.toLocaleString("en-IN")}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Total reason hits</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Retained reason hits</p>
                   <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.reduce((total, group) => total + group.candidates.length, 0).toLocaleString("en-IN")}</p>
                 </div>
               </div>
@@ -5173,7 +5199,7 @@ function AllScannedEventsDialog({
                             {group.candidates.length.toLocaleString("en-IN")}
                           </button>
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600">{state.totalScanned > 0 ? `${((group.candidates.length / state.totalScanned) * 100).toFixed(1)}%` : "—"}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{state.evidence.scanKnown && state.totalScanned > 0 ? `${((group.candidates.length / state.totalScanned) * 100).toFixed(1)}%` : "—"}</td>
                         <td className="px-4 py-3 text-right text-slate-600">{filteredCandidates.length > 0 ? `${((group.candidates.length / filteredCandidates.length) * 100).toFixed(1)}%` : "—"}</td>
                       </tr>
                     ))}
@@ -5266,8 +5292,8 @@ function AllScannedEventsDialog({
               <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950">
                 <p className="font-semibold">What the saved run does show</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
-                  <li>{state.totalScanned.toLocaleString("en-IN")} events were scanned.</li>
-                  <li>{state.passedFilterCount.toLocaleString("en-IN")} events passed Stage 1 filters.</li>
+                  <li>{state.evidence.scanKnown ? `${state.totalScanned.toLocaleString("en-IN")} events were scanned.` : "Scanned event count unknown."}</li>
+                  <li>{state.evidence.candidatesKnown ? `${state.passedFilterCount.toLocaleString("en-IN")} events passed Stage 1 filters.` : "Passed-filter event count unknown."}</li>
                   <li>{state.rejectedFilterCount === null ? "The rejected-event count was not retained." : `${state.rejectedFilterCount.toLocaleString("en-IN")} events were filtered out.`}</li>
                 </ul>
               </div>
@@ -5280,7 +5306,7 @@ function AllScannedEventsDialog({
       {selectedFilterReason ? (
         <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
           <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Stage 1 filter drill-down</p>
                 <h3 className="mt-2 text-lg font-semibold text-slate-950">{selectedFilterReason}</h3>
@@ -5291,6 +5317,7 @@ function AllScannedEventsDialog({
               </button>
             </div>
             <div className="flex-1 overflow-auto p-6">
+          <p role="status" className="mb-4 text-sm text-slate-600">{state.evidence.label}</p>
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -5444,7 +5471,7 @@ function Stage2TransferQueueMetricInfoDialog({
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
       <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Saved Stage 2 Transfer Queue
@@ -5520,6 +5547,7 @@ function buildRunDetailScanCandidateDialogState({
   mode: ScanCandidateDialogMode;
   activePositionsFallback?: WorkflowStageView["activePositionsFound"];
 }): ScanCandidateDialogState {
+  const evidence = getStageOneDialogEvidence(stage);
   const activePositionCounts = getStageActivePositionCounts(stage);
   const stageOneStats = getStageOneStats(stage);
   const retainedActivePositionRows =
@@ -5536,6 +5564,7 @@ function buildRunDetailScanCandidateDialogState({
   const detailedRows =
     mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
   const emptyRowsReason =
+    !evidence.scanKnown ? evidence.label :
     detailedRows.length > 0
       ? null
       : stage.state === "current"
@@ -5545,6 +5574,7 @@ function buildRunDetailScanCandidateDialogState({
           : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
 
   return {
+    evidence,
     mode,
     runId: run?.id ?? null,
     isIndependentStageOne: stage.outputs.independent_stage1_scan === true,
@@ -5552,7 +5582,7 @@ function buildRunDetailScanCandidateDialogState({
     scanCompletedAt: stage.timerCompletedAt,
     totalScanned: stageOneStats.totalScanned,
     passedFilterCount: stageOneStats.passedFilters,
-    rejectedFilterCount,
+    rejectedFilterCount: evidence.complete ? rejectedFilterCount : null,
     emptyRowsReason,
     candidates: buildScanCandidateDialogRows({
       candidates: detailedRows,

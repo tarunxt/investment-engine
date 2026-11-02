@@ -2881,3 +2881,14 @@ with EPERM; missing isolation aborts before pytest. Browser/TCP/PostgreSQL tests
 are outside this job and need separately reviewed local-only fixture harnesses.
 The six historical unguarded comparisons are quarantined observations, not
 controlled regression/eligibility evidence; the isolated job does not replay them.
+
+
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.

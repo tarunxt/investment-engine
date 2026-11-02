@@ -9,7 +9,7 @@ _BEARER = re.compile(r"(?i)\b(Bearer|Basic)\s+[^\s,;\"'<>]+")
 # and credential suffixes rather than relying on a boundary before "secret".
 _FIELDS = re.compile(
     r'''(?ix)(\b(?:(?:[a-z0-9]+_)*(?:authorization|api[-_\ ]?key|signing[-_]?key|private[-_]?key|secret[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|passwd|cookie))\b["']?\s*[:=]\s*)'''
-    r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&}\]<>]+)'''
+    r'''(?:"(?:\\[^\r\n]|[^"\\\r\n])*"|'(?:\\[^\r\n]|[^'\\\r\n])*'|[^\s,;&}\]<>]+)'''
 )
 
 
