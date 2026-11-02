@@ -54,7 +54,10 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest
       - name: Execute all cost-driver fixtures without provider transport
-        run: pytest -q --junitxml=/tmp/cost-contracts.xml backend/tests/test_cost*
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: pytest -q --junitxml=/tmp/cost-contracts.xml tests/test_cost*
       - name: Require every selected cost fixture to execute
         run: |
           python - <<'PY'
