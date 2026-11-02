@@ -1,6 +1,8 @@
 'use client';
 
-import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceHost';
+import { onWorkflowOwnerInvalidated } from '@/lib/workflowOwnerLifetime';
+import { acquireZerodhaLogin } from '@/lib/zerodhaLoginArbitration';
+import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceSlots';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -512,6 +514,7 @@ export default function ZerodhaPage() {
   const [showRedirectDetails, setShowRedirectDetails] = useState(false);
   const popupRef = useRef<Window | null>(null);
   const popupPollRef = useRef<number | null>(null);
+  const loginReleaseRef = useRef<(() => void) | null>(null);
 
   const stopPopupTracking = useCallback((updateState = true) => {
     if (popupPollRef.current !== null) {
@@ -519,10 +522,17 @@ export default function ZerodhaPage() {
       popupPollRef.current = null;
     }
     popupRef.current = null;
+    loginReleaseRef.current?.();
+    loginReleaseRef.current = null;
     if (updateState) {
       setConnectingPopup(false);
     }
   }, []);
+
+  useEffect(() => onWorkflowOwnerInvalidated(() => {
+    popupRef.current?.close();
+    stopPopupTracking();
+  }), [stopPopupTracking]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -628,6 +638,9 @@ export default function ZerodhaPage() {
       return;
     }
 
+    const release = acquireZerodhaLogin();
+    if (!release) { setError("Another Zerodha sign-in is already open. Complete or close it before retrying."); return; }
+    loginReleaseRef.current = release;
     setError(null);
     setConnectingPopup(true);
 
@@ -642,7 +655,7 @@ export default function ZerodhaPage() {
     );
 
     if (!popup) {
-      setConnectingPopup(false);
+      stopPopupTracking();
       setError('Popup blocked. Allow popups for this site or use the manual token option below.');
       return;
     }

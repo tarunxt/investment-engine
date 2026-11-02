@@ -1,6 +1,6 @@
 'use client';
 
-import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceHost';
+import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceSlots';
 import { useCallback, useEffect, useState } from 'react';
 
 import { IndMoneyUsSnapshotWorkspace } from './_components/IndMoneyUsSnapshotWorkspace';

@@ -1,5 +1,5 @@
 "use client";
-import { DashboardStockFlowSlot } from "@/app/console/_components/WorkflowSurfaceHost";
+import { DashboardStockFlowSlot } from "@/app/console/_components/WorkflowSurfaceSlots";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -2276,7 +2276,7 @@ function DashboardPageForUser({
         )}
         </section>
       </LazyMount>
-      <LazyMount deferUntilScroll minHeight={360}><DashboardStockFlowSlot /></LazyMount>
+      <DashboardStockFlowSlot deferred />
     </div>
   );
 }

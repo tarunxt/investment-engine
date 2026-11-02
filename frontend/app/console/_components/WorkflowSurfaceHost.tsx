@@ -1,18 +1,15 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Component, createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { setWorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { reconcileBrowserPrivateCacheOwner } from "@/lib/privateDashboardCache";
 
-export type WorkflowMarket = "zerodha" | "indmoneyUs";
-export type WorkflowSurface = { target: HTMLElement; market: WorkflowMarket };
+import { SurfaceContext, type WorkflowSurface } from "./WorkflowSurfaceSlots";
+export type { WorkflowSurface, WorkflowMarket } from "./WorkflowSurfaceSlots";
+export { PortfolioWorkflowSlot, DashboardStockFlowSlot } from "./WorkflowSurfaceSlots";
 const SessionSurfaces = dynamic(() => import("./WorkflowSessionSurfaces"), { ssr: false });
-const SurfaceContext = createContext<{
-  registerWorkflow: (surface: WorkflowSurface | null) => void;
-  registerStockFlow: (target: HTMLElement | null) => void;
-} | null>(null);
 
 export class WorkflowSurfaceBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -65,45 +62,3 @@ export function WorkflowSurfaceHost({ children }: { children: ReactNode }) {
   </SurfaceContext.Provider>;
 }
 
-function useWorkflowAnchor(target: HTMLElement | null) {
-  useEffect(() => {
-    if (!target) return;
-    let frame = 0;
-    const focus = () => {
-      if (window.location.hash !== `#${target.id}` || !target.childElementCount) return;
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => { target.focus({ preventScroll: true }); target.scrollIntoView({ block: "start" }); });
-    };
-    const observer = new MutationObserver(focus);
-    observer.observe(target, { childList: true });
-    window.addEventListener("hashchange", focus);
-    focus();
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("hashchange", focus); };
-  }, [target]);
-}
-
-export function PortfolioWorkflowSlot({ market }: { market: WorkflowMarket }) {
-  const host = useContext(SurfaceContext);
-  const [target, setTarget] = useState<HTMLElement | null>(null);
-  const register = host?.registerWorkflow;
-  useWorkflowAnchor(target);
-  useEffect(() => {
-    if (!target || !register) return;
-    register({ target, market });
-    return () => register(null);
-  }, [market, target, register]);
-  return <section id={market === "zerodha" ? "india-workflow" : "us-workflow"} tabIndex={-1} className="mt-8 min-w-0 scroll-mt-6" ref={setTarget} aria-label={market === "zerodha" ? "India portfolio workflow" : "US portfolio workflow"} />;
-}
-
-export function DashboardStockFlowSlot() {
-  const host = useContext(SurfaceContext);
-  const [target, setTarget] = useState<HTMLElement | null>(null);
-  const register = host?.registerStockFlow;
-  useWorkflowAnchor(target);
-  useEffect(() => {
-    if (!target || !register) return;
-    register(target);
-    return () => register(null);
-  }, [target, register]);
-  return <section id="rebalance-stock-flow" tabIndex={-1} className="min-w-0 scroll-mt-6" ref={setTarget} aria-label="Shared Rebalance Stock Flow" />;
-}

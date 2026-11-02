@@ -20,7 +20,7 @@ try {
   await mkdir(evidence,{recursive:true});
   await writeFile(path.join(tmp,'entry.tsx'),`import React from 'react';import {createRoot} from 'react-dom/client';import Page from '${root}/app/console/zerodha/page';createRoot(document.getElementById('root')).render(<main style={{padding:24}}><Page/></main>);`);
   const mainRef=execFileSync('git',['rev-parse','origin/main'],{cwd:root,encoding:'utf8'}).trim();
-  for(const name of ['page.tsx','_components/PortfolioSnapshotsPanel.tsx','_components/ZerodhaConnectionGuide.tsx']){await mkdir(path.dirname(path.join(tmp,'baseline',name)),{recursive:true});await writeFile(path.join(tmp,'baseline',name),execFileSync('git',['show',mainRef+':frontend/app/console/zerodha/'+name],{cwd:root}));}
+  for(const name of ['page.tsx','_components/PortfolioSnapshotsPanel.tsx','_components/ZerodhaConnectionGuide.tsx','_components/IndiaPortfolioNav.module.css']){await mkdir(path.dirname(path.join(tmp,'baseline',name)),{recursive:true});await writeFile(path.join(tmp,'baseline',name),execFileSync('git',['show',mainRef+':frontend/app/console/zerodha/'+name],{cwd:root}));}
   await writeFile(path.join(tmp,'entry-before.tsx'),`import React from 'react';import {createRoot} from 'react-dom/client';import Page from './baseline/page';createRoot(document.getElementById('root')).render(<main style={{padding:24}}><Page/></main>);`);
   await writeFile(path.join(tmp,'css.cjs'),`module.exports=function(){return 'export default {navigation: "india-navigation"}';}`);
   await writeFile(path.join(tmp,'link.tsx'),`import React from 'react';export default function Link(props){return <a {...props}/>}`);

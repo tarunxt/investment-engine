@@ -1,5 +1,6 @@
 "use client";
-import { captureWorkflowOwner, isCurrentWorkflowOwner } from "@/lib/workflowOwnerLifetime";
+import { acquireZerodhaLogin } from "@/lib/zerodhaLoginArbitration";
+import { captureWorkflowOwner, isCurrentWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
 import type { WorkflowSurface } from "@/app/console/_components/WorkflowSurfaceHost";
 import { IndMoneySnapshotDialog } from "./IndMoneySnapshotDialog";
@@ -6552,6 +6553,7 @@ ${zerodhaExecutionMode === "direct_market"
   }, []);
 
   const ensureZerodhaConnectedForSync = useCallback(async (preOpenedPopup?: Window | null) => {
+    let releaseLogin: (() => void) | null = null;
     try {
       const status = await apiService.zerodhaStatus();
       if (status.connected) {
@@ -6559,6 +6561,8 @@ ${zerodhaExecutionMode === "direct_market"
         return;
       }
 
+      releaseLogin = acquireZerodhaLogin();
+      if (!releaseLogin) throw new Error("Another Zerodha sign-in is already open. Complete or close it before retrying.");
       const login = await apiService.zerodhaLoginUrl();
       if (!login.configured || !login.login_url) {
         preOpenedPopup?.close();
@@ -6587,11 +6591,13 @@ ${zerodhaExecutionMode === "direct_market"
 
       await new Promise<void>((resolve, reject) => {
         let settled = false;
+        let releaseOwner: () => void = () => {};
         let statusCheckInFlight = false;
         let popupClosedAt: number | null = null;
         const finish = (error?: Error) => {
           if (settled) return;
           settled = true;
+          releaseOwner();
           window.removeEventListener("message", handleMessage);
           window.clearInterval(popupPoll);
           window.clearTimeout(timeout);
@@ -6646,9 +6652,11 @@ ${zerodhaExecutionMode === "direct_market"
           finish(new Error("Zerodha login timed out before connection completed."));
         }, ZERODHA_AUTH_TIMEOUT_MS);
         window.addEventListener("message", handleMessage);
+        releaseOwner = onWorkflowOwnerInvalidated(() => finish(new Error("Account changed before Zerodha sign-in completed.")));
         void confirmConnection();
       });
     } finally {
+      releaseLogin?.();
       // Preflight may fail before the login URL or polling cleanup exists.
       if (preOpenedPopup && !preOpenedPopup.closed) preOpenedPopup.close();
     }
