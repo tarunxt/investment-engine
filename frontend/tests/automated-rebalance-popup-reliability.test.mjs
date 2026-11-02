@@ -9,13 +9,6 @@ const bridgeSource = readFileSync(
   ),
   "utf8",
 );
-const clientSource = readFileSync(
-  new URL(
-    "../app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
 const baseWorkflowSource = readFileSync(
   new URL(
     "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",

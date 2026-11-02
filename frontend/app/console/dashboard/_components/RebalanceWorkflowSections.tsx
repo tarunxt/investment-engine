@@ -112,7 +112,6 @@ import {
   type SwingTradeMarket,
 } from "@/lib/swingTrade";
 import {
-  DEFAULT_ZERODHA_BUY_THRESHOLD,
   buildDefaultZerodhaBasketSelection,
   syncZerodhaBasketBuySelection,
   type ZerodhaBasketSelectableOrder,
@@ -7554,7 +7553,7 @@ ${zerodhaExecutionMode === "direct_market"
         });
       }
     },
-    [apiService,
+    [runtimeOwner, apiService,
       buildZerodhaPopupFeatures,
       ensureZerodhaConnectedForSync,
       markCompleted,
