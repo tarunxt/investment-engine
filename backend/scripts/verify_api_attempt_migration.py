@@ -99,7 +99,7 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
 
 
 def verify_forward_baseline(before: dict, after: dict) -> None:
-    """Permit only the registered nullable policy addition; preserve old facts."""
+    """Permit exact registered nullable additions; preserve every prior fact."""
     observed = deepcopy(after)
     workflow = observed.get("auto_rebalance_workflows")
     prior = before.get("auto_rebalance_workflows")
@@ -115,12 +115,59 @@ def verify_forward_baseline(before: dict, after: dict) -> None:
             require(policy[0] in row and row.pop(policy[0]) is None, "Forward policy changed legacy row defaults")
             rows.append(json.dumps(row, sort_keys=True, default=str))
         workflow["rows"] = sorted(rows)
+    outbox = observed.get("outbox")
+    prior_outbox = before.get("outbox")
+    if outbox is not None and prior_outbox is not None:
+        additions = [
+            ("job_id", "INTEGER", True, None),
+            ("state", "VARCHAR(32)", True, None),
+            ("claim_token", "VARCHAR(36)", True, None),
+            ("next_attempt_at", "TIMESTAMP", True, None),
+            ("last_error_type", "VARCHAR(100)", True, None),
+        ]
+        for column in additions:
+            require(not any(old[0] == column[0] for old in prior_outbox["columns"]),
+                    "Baseline unexpectedly contains forward dispatch column")
+            require([item for item in outbox["columns"] if item[0] == column[0]] == [column],
+                    "Forward dispatch column contract changed")
+            outbox["columns"].remove(column)
+        # Strip only the exact registered additions; all old metadata must still
+        # compare byte-for-byte, and unregistered additions continue to fail.
+        def remove_named(kind, name, predicate):
+            found = [item for item in outbox[kind] if item.get("name") == name]
+            require(len(found) == 1 and predicate(found[0]),
+                    "Forward dispatch constraint contract changed: " + name)
+            outbox[kind].remove(found[0])
+        remove_named("indexes", "ix_outbox_state", lambda item:
+                     item.get("column_names") == ["state"] and item.get("unique") is False
+                     and not item.get("include_columns")
+                     and not item.get("dialect_options", {}).get("postgresql_where"))
+        remove_named("indexes", "uq_outbox_job_id", lambda item:
+                     item.get("column_names") == ["job_id"] and item.get("unique") is True
+                     and item.get("duplicates_constraint") == "uq_outbox_job_id"
+                     and not item.get("include_columns"))
+        remove_named("unique", "uq_outbox_job_id", lambda item:
+                     item.get("column_names") == ["job_id"]
+                     and not item.get("dialect_options", {}).get("postgresql_nulls_not_distinct"))
+        remove_named("foreign_keys", "fk_outbox_job_id", lambda item:
+                     item.get("constrained_columns") == ["job_id"]
+                     and item.get("referred_table") == "jobs"
+                     and item.get("referred_columns") == ["id"]
+                     and item.get("referred_schema") is None and not item.get("options"))
+        rows = []
+        for raw in outbox["rows"]:
+            row = json.loads(raw)
+            for name, *_ in additions:
+                require(name in row and row.pop(name) is None,
+                        "Forward dispatch changed legacy row defaults")
+            rows.append(json.dumps(row, sort_keys=True, default=str))
+        outbox["rows"] = sorted(rows)
     require(observed == before, "Forward head upgrade changed existing schema/data")
 
 
 def seed_baseline(engine: sa.Engine) -> None:
     metadata = sa.MetaData()
-    metadata.reflect(engine, only=["users", "jobs", "universal_scan_settings", "universal_scan_states"])
+    metadata.reflect(engine, only=["users", "jobs", "outbox", "universal_scan_settings", "universal_scan_states"])
     now = datetime.now(UTC).replace(tzinfo=None)
     with engine.begin() as connection:
         connection.execute(metadata.tables["users"].insert().values(
@@ -138,6 +185,10 @@ def seed_baseline(engine: sa.Engine) -> None:
                 user_id=1, payload={"synthetic_migration_fixture": True},
                 created_at=now, updated_at=now,
             ))
+        connection.execute(metadata.tables["outbox"].insert().values(
+            id=uuid4(), topic="synthetic.legacy.never_publish", payload={"fixture": "retained"},
+            created_at=now, attempts=0,
+        ))
 
 
 def verify_schema(engine: sa.Engine) -> None:

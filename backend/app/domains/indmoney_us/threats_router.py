@@ -162,7 +162,7 @@ async def run_threat_analysis(
     finally:
         await redis.aclose()
 
-    job = await PostgresJobRepository(db).get(result.job_id)
+    job = await PostgresJobRepository(db).get_for_user(result.job_id, UserId(current_user.id))
     if not job:
         raise HTTPException(500, detail="Threat analysis job could not be loaded after creation")
 
