@@ -5470,8 +5470,10 @@ function DetailedRationaleScoreSection({
 function ScoreReferenceTables({
   formulaConfig,
   onFormulaConfigChange,
+  readableLayout = false,
 }: {
   formulaConfig: ScoreMatrixFormulaConfig;
+  readableLayout?: boolean;
   onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
 }) {
   const updateActionScore = (action: ActionCategory, value: string) => {
@@ -5502,13 +5504,13 @@ function ScoreReferenceTables({
   };
 
   return (
-    <section className="grid gap-4 lg:grid-cols-3">
+    <section className={readableLayout ? "grid gap-4" : "grid gap-4 lg:grid-cols-3"}>
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Model-action input weights</h3>
           <p className="mt-1 text-xs text-slate-600">Action → score inputs for the weighted formula. Final actions follow the calculated-score ranges and holdings context. Legacy average rationale scores are a separate measure.</p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Model-action input weights table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -5543,7 +5545,7 @@ function ScoreReferenceTables({
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Technical Scan Confidence Score</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Technical Scan Confidence Score table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -5578,7 +5580,7 @@ function ScoreReferenceTables({
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Score Symbol matrix</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Score Symbol matrix table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -6926,6 +6928,7 @@ function ActionablesFormulaModal({
             technicalScanSourceRunId: null,
           }} />
           <ScoreReferenceTables
+            readableLayout
             formulaConfig={formulaConfig}
             onFormulaConfigChange={onFormulaConfigChange}
           />
