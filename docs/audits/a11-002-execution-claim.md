@@ -145,3 +145,27 @@ unrelated changes. This correction is intentionally not imported under the
 fixture-only instruction. The assertion remains active and failing; no green CI
 or complete correction is claimed. Coordinator must resolve the runtime scope
 before this can be considered ready for integration.
+
+## Narrow reconciliation correction (2026-11-02)
+
+After the coordinator clarified that the narrow runtime fix is within the existing
+implementation authority, composed only the exact 11-line reconciliation fallback
+from integration reference 6eb000a251ae0f5e1f884de81e96238b5e3e7929. The reference
+commit's other tasks.py projection change and all unrelated integration changes
+were excluded. The existing failing assertion remains active.
+
+If the diagnostic get_fresh() read fails, the fallback uses reconcile()'s separate
+rollback/locked-row read and retains failure_metadata from the original provider
+exception, with retry_safe=False. Its token comparison and nonterminal predicate
+remain unchanged. It cannot certify success, overwrite a replacement owner, or
+resurrect cancellation. Added two focused regression cases for those terminal and
+owner fences during the same failed-read/provider-error path.
+
+Guarded verification: 253 passed (239 adjacent output/fixture cases and 14 isolated
+ownership/specialized-call cases). The prior failed-read case now passes, including
+its original-provider-error and uncertainty assertions. Compilation and diff checks
+passed. Socket/DNS/datagram operations remained blocked during the test run;
+PostgreSQL fixtures stayed stopped and were not rerun in this correction. Earlier
+PostgreSQL evidence and full deployment/broker/SDK limitations remain unchanged.
+The earlier failing CI and local runs above are retained, not replaced with a
+claim that they passed.

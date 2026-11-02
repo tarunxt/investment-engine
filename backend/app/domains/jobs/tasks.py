@@ -1706,6 +1706,17 @@ def execute_ai_job(self, job_id: int) -> None:
                     })
             except Exception:
                 logger.exception("Could not persist reconciliation state for job %s", job_id)
+                # A diagnostic/cancellation projection can fail independently of
+                # the locked ownership record. Retain the original failure via
+                # the conservative path; never certify a terminal result here.
+                try:
+                    reconcile(db, job_id, execution_token, evidence={
+                        "response": content, "tokens_in": tokens_in,
+                        "tokens_out": tokens_out, "estimated_cost": estimated_cost,
+                        "runtime_metadata_json": failure_metadata(exc, retry_safe=False),
+                    })
+                except Exception:
+                    logger.exception("Could not retain original failure for job %s", job_id)
             logger.exception("Job %s failure recorded without automatic replay", job_id)
             return
         try:

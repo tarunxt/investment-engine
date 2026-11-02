@@ -475,3 +475,42 @@ def test_expired_owner_retains_returned_usage_for_reconciliation_without_termina
     assert job.runtime_metadata_json[KEY]["state"] == "reconciliation_needed"
     assert job.runtime_metadata_json[KEY]["provider_started"] is True
     assert current_output_context() is None
+
+
+@pytest.mark.parametrize('interruption', ['canceled', 'replacement'])
+def test_failed_fresh_read_fallback_cannot_resurrect_or_replace_owner(monkeypatch, interruption):
+    job = make_job()
+    generation_failed = False
+
+    def get_fresh(repo, job_id):
+        if generation_failed:
+            raise RuntimeError('Secondary state read failure')
+        return repo.get(job_id)
+
+    def generate(**kwargs):
+        nonlocal generation_failed
+        generation_failed = True
+        if interruption == 'canceled':
+            job.status = JobStatus.FAILED
+            job.error_message = 'Cancelled by user'
+        else:
+            record = dict(job.runtime_metadata_json[KEY])
+            job.runtime_metadata_json = {
+                **job.runtime_metadata_json,
+                KEY: {**record, 'owner_token': 'replacement-owner'},
+            }
+        raise RuntimeError('Original synthetic provider failure')
+
+    monkeypatch.setattr(SyncJobRepository, 'get_fresh', get_fresh)
+    _, provider, _, failed = execute_mocked(job, generate)
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.response is None
+    assert job.runtime_metadata_json[KEY]['state'] == 'owned'
+    if interruption == 'canceled':
+        assert job.status == JobStatus.FAILED
+        assert job.error_message == 'Cancelled by user'
+    else:
+        assert job.status == JobStatus.PROCESSING
+        assert job.runtime_metadata_json[KEY]['owner_token'] == 'replacement-owner'
+    assert current_output_context() is None
