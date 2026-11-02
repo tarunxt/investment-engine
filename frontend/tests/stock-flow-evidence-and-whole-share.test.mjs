@@ -99,7 +99,7 @@ test('threshold save requires a user change plus confirmed writable preferences'
   assert.equal(threshold.shouldSaveThresholds(false,true,key,'changed'),false);assert.equal(threshold.shouldSaveThresholds(true,true,null,'changed'),false);assert.equal(threshold.shouldSaveThresholds(true,true,key,'changed'),true);
 });
 test('actual threshold effect serializes writes and ignores stale completion',async()=>{
-  const source=readFileSync(new URL(workflowPath,import.meta.url),'utf8'), ast=ts.createSourceFile('workflow.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+  const source=readFileSync(new URL("../app/console/_components/WorkflowConfiguration.tsx",import.meta.url),'utf8'), ast=ts.createSourceFile('workflow.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
   let callback;function find(node){if(ts.isCallExpression(node)&&node.expression.getText(ast)==='useEffect'&&node.arguments[0]?.getText(ast).includes('shouldSaveThresholds('))callback=node.arguments[0].getText(ast);ts.forEachChild(node,find);}find(ast);
   assert.ok(callback);const compiled=ts.transpileModule(`export const effect=${callback}`,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   const queue={current:Promise.resolve()},saved={current:threshold.thresholdSignature(2.5,2.5)}, calls=[],resolvers=[],states=[],timers=[],pending={current:0};

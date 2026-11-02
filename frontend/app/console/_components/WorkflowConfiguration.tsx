@@ -22,8 +22,12 @@ function useConfigurationOwner() {
   const [indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold] = useState(2.5);
   const [indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft] = useState("2.50");
 
+  const savedFormulaSignature = useRef(JSON.stringify(scoreMatrixFormulaConfig));
   useEffect(() => {
+    const signature = JSON.stringify(scoreMatrixFormulaConfig);
+    if (signature === savedFormulaSignature.current) return;
     saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
+    savedFormulaSignature.current = signature;
   }, [scoreMatrixFormulaConfig]);
 
   useEffect(() => {

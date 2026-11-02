@@ -38,7 +38,7 @@ function SnapshotDialogContent({
 }: SnapshotDialogProps) {
   const titleId = useId();
   const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   useEffect(() => {
     const trigger = document.activeElement;
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); closeRef.current(); } };

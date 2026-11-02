@@ -4695,7 +4695,7 @@ export function RebalanceWorkflowSections({
       lastAutoRebalanceCosts,
       savedAt: new Date().toISOString(),
     });
-  }, [runtimeOwner, 
+  }, [runtimeOwner,
     activeAutoRebalanceMetadata,
     auditStates,
     lastAutoRebalanceCosts,
@@ -7457,7 +7457,7 @@ ${zerodhaExecutionMode === "direct_market"
         }
       }
     },
-    [runtimeOwner, apiService, scoreMatrixFormulaConfig, 
+    [runtimeOwner, apiService, scoreMatrixFormulaConfig,
       analysisOnlyRuns,
       buildZerodhaPopupFeatures,
       completeSkippedStage,
@@ -7528,7 +7528,7 @@ ${zerodhaExecutionMode === "direct_market"
         });
       }
     },
-    [apiService, 
+    [apiService,
       buildZerodhaPopupFeatures,
       ensureZerodhaConnectedForSync,
       markCompleted,
