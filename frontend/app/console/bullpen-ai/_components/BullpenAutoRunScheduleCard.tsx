@@ -197,7 +197,10 @@ import {
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
 import { BullpenStage2ActionablesDialog } from "./BullpenStage2ActionablesDialog";
-import { BullpenStageOneExcelHistoryDialog } from "./BullpenStageOneExcelHistoryDialog";
+const BullpenStageOneExcelHistoryDialog = dynamic(
+  () => import("./BullpenStageOneExcelHistoryDialog").then((module) => module.BullpenStageOneExcelHistoryDialog),
+  { loading: () => <div role="status">Loading Excel scan history…</div> },
+);
 import { buildBullpenStage2Actionables } from "./bullpenStage2Actionables";
 import {
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
@@ -11421,6 +11424,18 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [isExcelHistoryDialogOpen, setIsExcelHistoryDialogOpen] =
     useState(false);
+  const [excelHistoryPresentationRequested, setExcelHistoryPresentationRequested] = useState(false);
+  // Keep the loaded dialog mounted after first use so close/reopen retains its state.
+  // Escape also works while the presentation chunk is loading.
+  useEffect(() => {
+    if (!isExcelHistoryDialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsExcelHistoryDialogOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isExcelHistoryDialogOpen]);
+
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
   const [triggerHistoryItems, setTriggerHistoryItems] = useState<
@@ -15396,7 +15411,7 @@ export function BullpenAutoRunScheduleCard({
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                         onOpenScanFilters={onOpenScanFilters}
-                        onOpenExcelHistory={() => setIsExcelHistoryDialogOpen(true)}
+                        onOpenExcelHistory={() => { setExcelHistoryPresentationRequested(true); setIsExcelHistoryDialogOpen(true); }}
                         workspaceProfile={workspaceProfile} />
                     </div>
                     <div className={`mt-5 border-t pt-3 ${isStageOneActive ? "border-amber-200/80" : "border-emerald-200/80"}`}>
@@ -16047,11 +16062,11 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        <BullpenStageOneExcelHistoryDialog
+        {excelHistoryPresentationRequested ? <BullpenStageOneExcelHistoryDialog
           open={isExcelHistoryDialogOpen}
           onClose={() => setIsExcelHistoryDialogOpen(false)}
           workspaceProfile={workspaceProfile}
-        />
+        /> : null}
 
         {isEventExitStrategiesDialogOpen ? (
           <BullpenEventExitStrategiesDialog

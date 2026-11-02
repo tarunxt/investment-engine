@@ -1,0 +1,25 @@
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {chromium} from 'playwright';
+import {createServer} from 'node:http';
+import {mkdtemp,readFile,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+const root=process.cwd(), temp=await mkdtemp('/tmp/a9-image-browser-');
+const parent=await readFile(path.join(root,'app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx'),'utf8');
+const dynamicBlock=parent.slice(parent.indexOf('const BullpenStageOneExcelHistoryDialog = dynamic('),parent.indexOf('const BullpenStageOneExcelHistoryDialog = dynamic(')+parent.slice(parent.indexOf('const BullpenStageOneExcelHistoryDialog = dynamic(')).indexOf('\n);')+4).replace('./BullpenStageOneExcelHistoryDialog',root+'/app/console/bullpen-ai/_components/BullpenStageOneExcelHistoryDialog');
+const stateBlock=parent.slice(parent.indexOf('  const [isExcelHistoryDialogOpen'),parent.indexOf('  const [runHistoryPage',parent.indexOf('  const [isExcelHistoryDialogOpen')));
+const mount=parent.slice(parent.indexOf('        {excelHistoryPresentationRequested ? <BullpenStageOneExcelHistoryDialog'),parent.indexOf('        {isEventExitStrategiesDialogOpen',parent.indexOf('        {excelHistoryPresentationRequested ? <BullpenStageOneExcelHistoryDialog')));
+await writeFile(path.join(temp,'api.ts'),`export const apiService={getBullpenAutoLiveHistory:async()=>{window.reads++;await new Promise(r=>setTimeout(r,120));if(window.failHistory)throw Error('Synthetic history failure');return{items:[{id:'synthetic-run',completed_at:'2026-01-01T00:00:00Z',stages:[{key:'scan',completed_at:'2026-01-01T00:00:00Z',succeeded_count:7}]}]}},getBullpenAutoLiveRunConsole:async()=>{throw Error('Synthetic detail unavailable')}};`);
+await writeFile(path.join(temp,'entry.tsx'),`import React,{useState,useEffect}from'react';import{createRoot}from'react-dom/client';import dynamic from'next/dynamic';${dynamicBlock}function Fixture(){${stateBlock}const workspaceProfile='bullpen';return <><button onClick={()=>{setExcelHistoryPresentationRequested(true);setIsExcelHistoryDialogOpen(true)}}>History fixture trigger</button>${mount}</>}window.reads=0;createRoot(document.getElementById('root')).render(<Fixture/>);`);
+await build({entryPoints:[path.join(temp,'entry.tsx')],outdir:temp,entryNames:'bundle',splitting:true,format:'esm',bundle:true,platform:'browser',jsx:'automatic',nodePaths:[path.join(root,'node_modules')],alias:{'@':root,'@/services/api':path.join(temp,'api.ts'),react:path.join(root,'node_modules/react'),'react-dom':path.join(root,'node_modules/react-dom')},define:{'process.env':JSON.stringify({NODE_ENV:'development',__NEXT_IMAGE_OPTS:require('next/dist/shared/lib/image-config').imageConfigDefault})}});
+
+const server=createServer(async(req,res)=>{res.setHeader('content-type',req.url.endsWith('.js')?'text/javascript':'text/html');res.end(req.url.endsWith('.js')?await readFile(path.join(temp,path.basename(req.url))):'<div id="root"></div><script type="module" src="/bundle.js"></script>');});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const origin=`http://127.0.0.1:${server.address().port}`;
+let browser;
+try{
+browser=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',async r=>{if(new URL(r.request().url()).origin!==origin)return r.abort();if(r.request().url().includes('BullpenStageOneExcelHistoryDialog'))await new Promise(resolve=>setTimeout(resolve,350));return r.continue();});await page.goto(origin);const trigger=page.getByRole('button',{name:'History fixture trigger'});assert.equal(await page.evaluate(()=>window.reads),0);await trigger.focus();await page.keyboard.press('Enter');await page.getByRole('status').filter({hasText:'Loading Excel scan history'}).waitFor();assert.equal(await trigger.evaluate(el=>el===document.activeElement),true);await page.keyboard.press('Escape');await page.getByRole('status').waitFor({state:'hidden'});await trigger.click();await page.getByRole('dialog').waitFor();await page.getByText('#1',{exact:true}).waitFor();await page.getByRole('button',{name:'Close Excel scan history'}).click();const reads=await page.evaluate(()=>window.reads);await page.evaluate(()=>window.failHistory=true);await trigger.click();await page.getByRole('alert').filter({hasText:'Synthetic history failure'}).waitFor();assert.equal(await page.evaluate(()=>window.reads),reads+1);await page.keyboard.press('Escape');assert.equal(await page.getByRole('dialog').count(),0);await page.evaluate(()=>window.failHistory=false);await trigger.click();await page.getByText('#1',{exact:true}).waitFor();assert.deepEqual(errors,[]);console.log('PASS actual parent loading/state/mount hunks and real dialog: zero closed reads, loading/focus/Escape, close/reopen, history fallback, failure and recovery');
+}finally{await browser?.close();server.close();}

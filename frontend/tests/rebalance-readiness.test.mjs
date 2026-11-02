@@ -22,7 +22,7 @@ const readiness = modules['@/lib/rebalanceReadiness'] = load(read('../lib/rebala
 modules['@/lib/llmInternetAccess'] = load(read('../lib/llmInternetAccess.ts'));
 const { RebalanceReadiness } = load(read('../app/console/_components/RebalanceReadiness.tsx'));
 const { LlmModelSelectionPanel } = load(read('../components/shared/LlmModelSelectionPanel.tsx'));
-const base = { loading: false, error: null, portfolio: { holdings: [{ symbol: 'FIXTURE' }] }, threats: { status: 'completed', report: { raw_markdown: 'Saved fixture report' } }, selectedSwingCount: 1, blockedReason: null };
+const base = { market: 'india', loading: false, error: null, portfolio: { holdings: [{ symbol: 'FIXTURE' }] }, threats: { status: 'completed', report: { raw_markdown: 'Saved fixture report' } }, selectedSwingCount: 1, blockedReason: null };
 const render = (props) => renderToStaticMarkup(RebalanceReadiness({ ...base, ...props }));
 const count = (html, value) => (html.match(new RegExp(`>${value}<`, 'g')) || []).length;
 

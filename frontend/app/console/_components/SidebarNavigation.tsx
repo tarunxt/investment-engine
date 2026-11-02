@@ -12,25 +12,8 @@ import {
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
-import {
-    DndContext,
-    KeyboardSensor,
-    MouseSensor,
-    TouchSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-    type DraggableAttributes,
-    type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-    SortableContext,
-    arrayMove,
-    sortableKeyboardCoordinates,
-    useSortable,
-    verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import type { DragEndEvent, DraggableAttributes } from '@dnd-kit/core';
+import type { useSortable } from '@dnd-kit/sortable';
 import {
     ChevronDown,
     ChevronRight,
@@ -85,10 +68,10 @@ const NAVIGATION_FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-
 const NAVIGATION_ROW = 'flex min-h-10 w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition';
 const ACTIVE_ROW = 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border';
 const IDLE_ROW = 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground';
-const ITEM_OPTIONS = 'rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground';
 const CONTEXT_ACTION = 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent';
 
 const NavigationDirectory = lazy(() => import('./NavigationDirectory'));
+const SidebarReorderNavigation = lazy(() => import('./SidebarReorderNavigation'));
 
 type SidebarNavigationProps = {
     pathname: string;
@@ -104,7 +87,7 @@ type NavigationOrderSnapshot = {
     value: SidebarOrder;
 };
 
-type DragHandleProps = {
+export type DragHandleProps = {
     attributes: DraggableAttributes;
     listeners?: SortableListeners;
     setActivatorNodeRef: (element: HTMLElement | null) => void;
@@ -129,7 +112,7 @@ type NavigationGroupRowProps = {
     pathname: string;
 };
 
-type SortableNavigationEntryProps = {
+export type SortableNavigationEntryProps = {
     entry: NavigationEntry;
     expandedGroupIds: ReadonlySet<string>;
     isReordering: boolean;
@@ -140,13 +123,13 @@ type SortableNavigationEntryProps = {
     sectionLabel: string;
 };
 
-type SortableNavigationChildProps = {
+export type SortableNavigationChildProps = {
     child: NavigationLeaf;
     groupName: string;
     onContextMenu: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
 };
 
-type SidebarSectionProps = {
+export type SidebarSectionProps = {
     expandedGroupIds: ReadonlySet<string>;
     isReordering: boolean;
     onContextMenu: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
@@ -355,27 +338,7 @@ function NavigationBadge({ badge }: { badge: NavigationBadgeType }) {
     );
 }
 
-function DragHandle({
-    attributes,
-    listeners,
-    setActivatorNodeRef,
-    label,
-}: DragHandleProps) {
-    return (
-        <button
-            ref={setActivatorNodeRef}
-            type="button"
-            aria-label={label}
-            className={cn('flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar hover:text-sidebar-foreground active:cursor-grabbing', NAVIGATION_FOCUS_OFFSET)}
-            {...attributes}
-            {...listeners}
-        >
-            <GripVertical className="h-4 w-4" />
-        </button>
-    );
-}
-
-function NavigationLeafLink({
+export function NavigationLeafLink({
     leaf,
     active,
     onContextMenu,
@@ -429,7 +392,7 @@ function NavigationLeafLink({
     );
 }
 
-function NavigationGroupRow({
+export function NavigationGroupRow({
     active,
     expanded,
     group,
@@ -502,173 +465,8 @@ function NavigationGroupRow({
     );
 }
 
-function SortableNavigationChild({
-    child,
-    groupName,
-    onContextMenu,
-}: SortableNavigationChildProps) {
-    const {
-        attributes,
-        isDragging,
-        listeners,
-        setActivatorNodeRef,
-        setNodeRef,
-        transform,
-        transition,
-    } = useSortable({ id: child.id });
-
-    return (
-        <div
-            ref={setNodeRef}
-            style={{ transform: CSS.Transform.toString(transform), transition }}
-            className={cn(
-                'flex items-center gap-2 rounded-xl border border-transparent bg-sidebar-accent/45 px-2 py-1.5 text-sm text-sidebar-foreground/75',
-                isDragging ? 'relative z-20 border-sidebar-border bg-sidebar shadow-lg' : '',
-            )}
-        >
-            <DragHandle
-                attributes={attributes}
-                listeners={listeners}
-                setActivatorNodeRef={setActivatorNodeRef}
-                label={`Drag to reorder ${child.name} within ${groupName}`}
-            />
-            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
-            <span className="min-w-0 flex-1 truncate">{child.name}</span>
-            <button
-                type="button"
-                aria-label={`Options for ${child.name}`}
-                onClick={(event) => onContextMenu({
-                    id: child.id,
-                    kind: 'item',
-                    name: child.name,
-                    defaultName: DEFAULT_NAVIGATION_NAMES[`item:${child.id}`] ?? child.name,
-                }, event)}
-                className={ITEM_OPTIONS}
-            >
-                &hellip;
-            </button>
-        </div>
-    );
-}
-
-function SortableNavigationEntry({
-    entry,
-    expandedGroupIds,
-    isReordering,
-    onContextMenu,
-    onNavigate,
-    onToggleGroup,
-    pathname,
-    sectionLabel,
-}: SortableNavigationEntryProps) {
-    const {
-        attributes,
-        isDragging,
-        listeners,
-        setActivatorNodeRef,
-        setNodeRef,
-        transform,
-        transition,
-    } = useSortable({
-        id: entry.id,
-        disabled: !isReordering,
-    });
-    const active = isEntryActive(pathname, entry);
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-    };
-
-    const rowClassName = cn(
-        NAVIGATION_ROW,
-        active
-            ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
-            : IDLE_ROW,
-        isDragging ? 'bg-sidebar shadow-lg ring-1 ring-sidebar-border' : '',
-        isReordering ? 'select-none' : '',
-    );
-
-    return (
-        <div
-            ref={setNodeRef}
-            style={style}
-            className={isDragging ? 'relative z-20' : undefined}
-        >
-            {isReordering ? (
-                <div className="space-y-1.5">
-                    <div className={rowClassName}>
-                        <DragHandle
-                            attributes={attributes}
-                            listeners={listeners}
-                            setActivatorNodeRef={setActivatorNodeRef}
-                            label={`Drag to reorder ${entry.name} within ${sectionLabel}`}
-                        />
-                        {entry.icon ? (
-                            <entry.icon
-                                className={cn(
-                                    'h-5 w-5 shrink-0',
-                                    active ? 'text-sidebar-primary' : 'text-muted-foreground',
-                                )}
-                            />
-                        ) : null}
-                        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                        <button
-                            type="button"
-                            aria-label={`Options for ${entry.name}`}
-                            onClick={(event) => onContextMenu({
-                                id: entry.id,
-                                kind: isNavigationGroup(entry) ? 'folder' : 'item',
-                                name: entry.name,
-                                defaultName: DEFAULT_NAVIGATION_NAMES[`${isNavigationGroup(entry) ? 'folder' : 'item'}:${entry.id}`] ?? entry.name,
-                            }, event)}
-                            className={ITEM_OPTIONS}
-                        >
-                            &hellip;
-                        </button>
-                    </div>
-                    {isNavigationGroup(entry) ? (
-                        <SortableContext
-                            items={entry.children.map((child) => child.id)}
-                            strategy={verticalListSortingStrategy}
-                        >
-                            <div className="ml-7 space-y-1 border-l border-sidebar-border pl-2">
-                                {entry.children.map((child) => (
-                                    <SortableNavigationChild
-                                        key={child.id}
-                                        child={child}
-                                        groupName={entry.name}
-                                        onContextMenu={onContextMenu}
-                                    />
-                                ))}
-                            </div>
-                        </SortableContext>
-                    ) : null}
-                </div>
-            ) : isNavigationGroup(entry) ? (
-                <NavigationGroupRow
-                    active={active}
-                    expanded={expandedGroupIds.has(entry.id)}
-                    group={entry}
-                    onContextMenu={onContextMenu}
-                    onNavigate={onNavigate}
-                    onToggle={() => onToggleGroup(entry.id)}
-                    pathname={pathname}
-                />
-            ) : (
-                <NavigationLeafLink
-                    leaf={entry}
-                    active={active}
-                    onContextMenu={onContextMenu}
-                    onNavigate={onNavigate}
-                />
-            )}
-        </div>
-    );
-}
-
 function SidebarSection({
     expandedGroupIds,
-    isReordering,
     onContextMenu,
     onNavigate,
     onToggleGroup,
@@ -695,26 +493,19 @@ function SidebarSection({
                     {section.label}
                 </h2>
             </div>
-            <SortableContext
-                items={section.entries.map((entry) => entry.id)}
-                strategy={verticalListSortingStrategy}
-            >
+            <>
                 <div className="space-y-1.5">
                     {section.entries.map((entry) => (
-                        <SortableNavigationEntry
-                            key={entry.id}
-                            entry={entry}
-                            expandedGroupIds={expandedGroupIds}
-                            isReordering={isReordering}
-                            onContextMenu={onContextMenu}
-                            onNavigate={onNavigate}
-                            onToggleGroup={onToggleGroup}
-                            pathname={pathname}
-                            sectionLabel={section.label}
-                        />
+                        <div key={entry.id}>
+                            {isNavigationGroup(entry) ? (
+                                <NavigationGroupRow active={isEntryActive(pathname, entry)} expanded={expandedGroupIds.has(entry.id)} group={entry} onContextMenu={onContextMenu} onNavigate={onNavigate} onToggle={() => onToggleGroup(entry.id)} pathname={pathname} />
+                            ) : (
+                                <NavigationLeafLink leaf={entry} active={isEntryActive(pathname, entry)} onContextMenu={onContextMenu} onNavigate={onNavigate} />
+                            )}
+                        </div>
                     ))}
                 </div>
-            </SortableContext>
+            </>
         </section>
     );
 }
@@ -930,23 +721,6 @@ export function SidebarNavigation({
         [expandedGroupId],
     );
 
-    const sensors = useSensors(
-        useSensor(MouseSensor, {
-            activationConstraint: {
-                distance: 6,
-            },
-        }),
-        useSensor(TouchSensor, {
-            activationConstraint: {
-                delay: 120,
-                tolerance: 6,
-            },
-        }),
-        useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
-        }),
-    );
-
     useEffect(() => {
         const navigation = navigationRef.current;
         if (!navigation || isReordering) return;
@@ -1024,7 +798,7 @@ export function SidebarNavigation({
         setContextMenu(null);
     };
 
-    const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    const handleDragEnd = ({ active, over }: DragEndEvent, arrayMove: typeof import('@dnd-kit/sortable').arrayMove) => {
         if (!over || active.id === over.id) {
             return;
         }
@@ -1131,17 +905,13 @@ export function SidebarNavigation({
 
             <div className="mt-4 min-h-0 flex-1">
                 <nav ref={navigationRef} aria-label="Console navigation" className="h-full overflow-y-auto overscroll-contain px-2 pb-4 pt-1">
-                    <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleDragEnd}
-                    >
-                        <div className="space-y-5 pr-1">
+                    {isReordering ? (
+                        <Suspense fallback={<>                        <div className="space-y-5 pr-1">
                             {sections.map((section) => (
                                 <SidebarSection
                                     key={section.id}
                                     expandedGroupIds={expandedGroupIds}
-                                    isReordering={isReordering}
+                                    isReordering={false}
                                     onContextMenu={openContextMenu}
                                     onNavigate={onNavigate}
                                     onToggleGroup={(groupId) => {
@@ -1157,7 +927,32 @@ export function SidebarNavigation({
                                 />
                             ))}
                         </div>
-                    </DndContext>
+<p role="status">Preparing navigation reordering…</p></>}>
+                            <SidebarReorderNavigation sections={sections} expandedGroupIds={expandedGroupIds} isReordering={isReordering} onContextMenu={openContextMenu} onNavigate={onNavigate} onToggleGroup={(groupId) => setNavigationExpansion({ pathname, expandedGroupId: expandedGroupId === groupId ? null : groupId })} pathname={pathname} onDragEnd={handleDragEnd} />
+                        </Suspense>
+                    ) : (
+                        <div className="space-y-5 pr-1">
+                            {sections.map((section) => (
+                                <SidebarSection
+                                    key={section.id}
+                                    expandedGroupIds={expandedGroupIds}
+                                    isReordering={false}
+                                    onContextMenu={openContextMenu}
+                                    onNavigate={onNavigate}
+                                    onToggleGroup={(groupId) => {
+                                        setNavigationExpansion({
+                                            pathname,
+                                            expandedGroupId: expandedGroupId === groupId
+                                                ? null
+                                                : groupId,
+                                        });
+                                    }}
+                                    pathname={pathname}
+                                    section={section}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </nav>
             </div>
 

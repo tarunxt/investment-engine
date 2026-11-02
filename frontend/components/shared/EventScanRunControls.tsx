@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Bot, Loader2, Sparkles, X } from "lucide-react";
@@ -9,8 +10,14 @@ import { Button } from "@/components/ui/button";
 import { getWebCapableModelKeys } from "@/lib/llmInternetAccess";
 import { cn } from "@/lib/utils";
 import { apiService, APIError } from "@/services/api";
-import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
-import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
+const LlmModelMixControls = dynamic(
+  () => import("@/components/shared/LlmModelMixControls").then((module) => module.LlmModelMixControls),
+  { loading: () => <div role="status">Loading saved model mixes…</div> },
+);
+const LlmModelSelectionPanel = dynamic(
+  () => import("@/components/shared/LlmModelSelectionPanel").then((module) => module.LlmModelSelectionPanel),
+  { loading: () => <div role="status">Loading model selection…</div> },
+);
 import type { ProviderInfo, ProviderModelTarget } from "@/types/api";
 
 const DEFAULT_EVENT_TARGET: ProviderModelTarget = {
