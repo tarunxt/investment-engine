@@ -71,7 +71,7 @@ class PreexecutionProof(unittest.IsolatedAsyncioTestCase):
             HTTPAuthorizationCredentials=HTTPAuthorizationCredentials, AsyncSession=Any,
             User=type('User', (), {'id': 0, 'profile': None}), security=HTTPBearer(auto_error=False),
             get_async_db=get_db, monotonic=lambda: 0, add_auth_duration=lambda _: None,
-            is_auth_disabled=lambda: False, JWTUtils=SimpleNamespace(verify_token=lambda _: {'sub': '71'}),
+            is_auth_disabled=lambda: False, JWTUtils=SimpleNamespace(verify_access_token=lambda _: {'sub': '71'}),
             select=lambda _: Query(), selectinload=lambda _: None,
             ZerodhaCredentialRepository=Repo, ZerodhaAuditRepository=Audit,
             _svc=SimpleNamespace(direct_market_orders_enabled=True, place_order=forbidden_placement)))

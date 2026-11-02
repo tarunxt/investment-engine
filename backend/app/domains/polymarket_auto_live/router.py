@@ -141,7 +141,7 @@ async def _resolve_persisted_status_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    payload = JWTUtils.verify_token(credentials.credentials)
+    payload = JWTUtils.verify_access_token(credentials.credentials)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 

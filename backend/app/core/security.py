@@ -12,7 +12,6 @@ pwd_context = argon2.using(
 )
 
 # JWT settings
-SECRET_KEY = "your-secret-key-change-in-production"  # TODO: Will read from env 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 15
 REFRESH_TOKEN_EXPIRE_DAYS = 7
@@ -95,7 +94,7 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(token_data, settings.jwt_signing_key.get_secret_value(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
@@ -120,7 +119,7 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(token_data, settings.jwt_signing_key.get_secret_value(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
@@ -135,11 +134,30 @@ class JWTUtils:
             Token payload if valid, None otherwise
         """
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(
+                token, settings.jwt_signing_key.get_secret_value(),
+                algorithms=[ALGORITHM], options={"require_exp": True},
+            )
             return payload
-        except JWTError:
+        except (JWTError, TypeError, ValueError, OverflowError):
             return None
     
+    @staticmethod
+    def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
+        """Accept the existing access shape, which has no type claim."""
+        payload = JWTUtils.verify_token(token)
+        if payload is None or "type" in payload:
+            return None
+        return payload
+
+    @staticmethod
+    def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
+        """Accept only the existing explicitly typed refresh shape."""
+        payload = JWTUtils.verify_token(token)
+        if payload is None or payload.get("type") != "refresh":
+            return None
+        return payload
+
     @staticmethod
     def decode_token(token: str) -> Optional[Dict[str, Any]]:
         """
@@ -154,7 +172,7 @@ class JWTUtils:
         try:
             payload = jwt.decode(
                 token,
-                key=SECRET_KEY,
+                key=settings.jwt_signing_key.get_secret_value(),
                 options={"verify_signature": False}
             )
             return payload
