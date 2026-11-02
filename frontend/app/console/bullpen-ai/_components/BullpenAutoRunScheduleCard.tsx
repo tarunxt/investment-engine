@@ -11492,6 +11492,13 @@ export function BullpenAutoRunScheduleCard({
     useState<Stage2To3StrategyDialogState | null>(null);
   const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
     useState(false);
+  const tradeAmountInfoDialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isTradeAmountInfoDialogOpen) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    tradeAmountInfoDialogRef.current?.querySelector<HTMLElement>("button[aria-label='Close trade amount formula']")?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [isTradeAmountInfoDialogOpen]);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
   const [consoleScanScope, setConsoleScanScope] = useState<
     "trending" | "full_universe"
@@ -16174,7 +16181,26 @@ export function BullpenAutoRunScheduleCard({
         ) : null}
 
         {isTradeAmountInfoDialogOpen ? (
-          <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+          <div
+            ref={tradeAmountInfoDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Trade amount formula"
+            onKeyDown={(event) => {
+              // Leave any future child dialog's keyboard handling to that child.
+              if ((event.target as HTMLElement).closest('[role="dialog"]') !== event.currentTarget) return;
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setIsTradeAmountInfoDialogOpen(false);
+              }
+              if (event.key !== "Tab") return;
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]'))
+                .filter(item => item.getClientRects().length > 0);
+              const first = items[0], last = items[items.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }}
+            className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
             <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
