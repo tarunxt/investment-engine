@@ -51,6 +51,9 @@ try{
  if(!escaped)await close.click();const focusReturn=await trigger.evaluate(node=>node===document.activeElement);checks.push({name:name+' focus return',status:focusReturn?'PASS':'FAIL'});
  await trigger.click();await close.waitFor();await screenshot('keyboard-'+name.replaceAll(' ','-'));await close.click();
  }
+ await scope.getByRole('button',{name:/06.*Actionables/i}).click();await scope.getByRole('button',{name:'Saved output',exact:true}).click();await page.getByRole('button',{name:'Close output view'}).waitFor();await page.getByRole('button',{name:'Expand FALP LLM-wise breakup',exact:true}).click();await page.getByRole('button',{name:/View matrix/}).first().click();await page.getByRole('button',{name:'Close score matrix popup'}).waitFor();await page.getByRole('button',{name:/Show original scores and rationale/}).first().click();await page.getByRole('button',{name:'Close parameter score details'}).waitFor();
+ const activeBefore=await page.evaluate(()=>({tag:document.activeElement?.tagName,text:document.activeElement?.textContent?.slice(0,120),dialog:document.activeElement?.closest('[role="dialog"]')?.getAttribute('aria-labelledby')}));
+ await page.keyboard.press('Escape');await page.getByRole('button',{name:'Close parameter score details'}).waitFor({state:'hidden'});const matrixRetained=await page.getByRole('button',{name:'Close score matrix popup'}).isVisible();checks.push({name:'nested parameter Escape retains parent matrix',status:matrixRetained?'PASS':'FAIL',activeBefore});await screenshot('nested-escape-result');
  } else {
  await page.goto(base+'/console/zerodha#india-workflow');await page.locator('#india-workflow nav').waitFor();await page.getByText('FALP',{exact:true}).first().waitFor();await screenshot('india-populated-desktop');
  await record('real styles and full India workspace precede appended workflow',async()=>{assert.equal(await page.locator('#saved-portfolio-snapshots table').count()>=3,true);assert.ok(await page.evaluate(()=>document.querySelector('#saved-portfolio-snapshots').compareDocumentPosition(document.querySelector('#india-workflow'))&Node.DOCUMENT_POSITION_FOLLOWING));assert.equal(await page.locator('#india-workflow').evaluate(node=>getComputedStyle(node).minWidth),'0px');});
@@ -98,7 +101,7 @@ try{
  await record('cold compatibility route resolves to a fixed portfolio anchor',async()=>{await page.goto(base+'/console/automated-rebalance');await page.waitForURL('**/console/zerodha#india-workflow');await page.locator('#india-workflow nav').waitFor();});
  await record('real cross-tab owner removal and clear recover only the same authenticated account',async()=>{
  const peer=await context.newPage();try{
- await peer.goto(base+'/login');
+ await peer.route(base+'/p1-storage-peer',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>P1 storage event peer</title>'}));await peer.goto(base+'/p1-storage-peer');
  for(const clear of [false,true]){
  await peer.evaluate(clear=>{if(clear)localStorage.clear();else localStorage.removeItem('investment-engine:private-cache-owner:v1')},clear);
  await page.getByRole('alert').getByText(/Account confirmation changed in another tab/).waitFor();
