@@ -133,17 +133,24 @@ async function loadRunDetailWithRetry(
   runId: number,
   options?: ApiRequestControl,
 ): Promise<RunResponse> {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal?.aborted) throw abortError();
   const requestOptions: ApiRequestControl = {
     ...options,
     timeoutMs: Math.max(options?.timeoutMs ?? 0, RUN_DETAIL_TIMEOUT_MS),
   };
   try {
-    return await apiService.getRun(runId, requestOptions);
+    const run = await apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    return run;
   } catch (error) {
+    requireWorkflowOwner(owner);
     if (options?.signal?.aborted) throw abortError();
     await wait(250);
-    return apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    const run = await apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    return run;
   }
 }
 
@@ -301,35 +308,38 @@ function toFallbackRun(item: RunListItem): RunResponse {
 }
 
 async function loadSummaryPageWithRetry(options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal?.aborted) throw abortError();
-  try {
-    return await apiService.getRuns({
-      page: 1,
-      limit: BACKEND_RUN_PAGE_LIMIT,
-      summary: true,
-    });
-  } catch (error) {
+  const read = async () => {
+    requireWorkflowOwner(owner);
+    const page = await apiService.getRuns({ page: 1, limit: BACKEND_RUN_PAGE_LIMIT, summary: true });
+    requireWorkflowOwner(owner);
+    return page;
+  };
+  try { return await read(); }
+  catch (error) {
+    requireWorkflowOwner(owner);
     if (options?.signal?.aborted) throw abortError();
     await wait(250);
-    return apiService.getRuns({
-      page: 1,
-      limit: BACKEND_RUN_PAGE_LIMIT,
-      summary: true,
-    });
+    return read();
   }
 }
 
 async function buildBoundedFullRunPage(options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   const summaryPage = await loadSummaryPageWithRetry(options);
   if (options?.signal?.aborted) throw abortError();
+  requireWorkflowOwner(owner);
   const selected = selectRecentRunSummaries(summaryPage.items);
   const items = await mapWithConcurrency(
     selected,
     RUN_DETAIL_CONCURRENCY,
     async (item) => {
+      requireWorkflowOwner(owner);
       try {
         return await getCachedRunDetail(item.id, options);
       } catch (error) {
+        requireWorkflowOwner(owner);
         console.warn(
           `Using compact fallback for run #${item.id}: ${normalizeError(error)}`,
         );
@@ -338,6 +348,7 @@ async function buildBoundedFullRunPage(options?: ApiRequestControl) {
     },
   );
 
+  requireWorkflowOwner(owner);
   return {
     items,
     total: items.length,

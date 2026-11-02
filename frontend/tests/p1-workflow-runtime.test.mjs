@@ -34,3 +34,16 @@ test('actual restored polling has three-second cadence, no overlap, display inde
 test('restored poll effect restarts only on execution identity and keeps normal handoff guard',()=>{assert.match(workflow,/\}, \[restoredPollingIdentity\]\)/);const expression=workflow.match(/const restoredPollingIdentity = ([^\n]+);/)[1];assert.doesNotMatch(expression,/cost|now|ledgerView|completedLlms/);assert.match(effect,/if \(isWorkflowExecutingRef.current\) return;/);});
 
 test('concurrent portfolio and workflow logins arbitrate one completion owner, release safely, and clear on owner teardown',()=>{const owner=load(ownerSource);owner.setWorkflowOwner(42);const {acquireZerodhaLogin}=load(read('../lib/zerodhaLoginArbitration.ts'),{},()=>owner);const portfolio=acquireZerodhaLogin();assert.equal(typeof portfolio,'function');assert.equal(acquireZerodhaLogin(),null);portfolio();const workflow=acquireZerodhaLogin();assert.equal(typeof workflow,'function');portfolio();assert.equal(acquireZerodhaLogin(),null);owner.setWorkflowOwner(43);const next=acquireZerodhaLogin();assert.equal(typeof next,'function');workflow();assert.equal(acquireZerodhaLogin(),null);next();assert.equal(typeof acquireZerodhaLogin(),'function');});
+
+test('bounded reliability adapter rejects old-owner summary and detail results before retry or fallback',async()=>{
+ const owner=load(ownerSource);owner.setWorkflowOwner(42);
+ const source=read('../app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge.tsx');
+ const ast=ts.createSourceFile('bridge.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const functions=ast.statements.filter(node=>['loadSummaryPageWithRetry','loadRunDetailWithRetry'].includes(node.name?.text)).map(node=>'export '+node.getText(ast)).join('\n');
+ let resolveSummary,resolveDetail,summaryCalls=0,detailCalls=0;
+ const bridge=load(functions,{...owner,BACKEND_RUN_PAGE_LIMIT:100,RUN_DETAIL_TIMEOUT_MS:15000,wait:async()=>{},abortError:()=>Error('aborted'),apiService:{getRuns:()=>{summaryCalls++;return new Promise(resolve=>resolveSummary=resolve)},getRun:()=>{detailCalls++;return new Promise(resolve=>resolveDetail=resolve)}}});
+ const summary=bridge.loadSummaryPageWithRetry();const detail=bridge.loadRunDetailWithRetry(77);
+ owner.setWorkflowOwner(43);resolveSummary({items:[{id:77}]});resolveDetail({id:77});
+ await assert.rejects(summary,/owner changed/);await assert.rejects(detail,/owner changed/);
+ assert.equal(summaryCalls,1);assert.equal(detailCalls,1);
+});
