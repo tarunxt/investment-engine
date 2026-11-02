@@ -470,7 +470,7 @@ export default function ApisPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">APIs</h1>
           <p className="text-sm text-gray-600">
@@ -489,7 +489,7 @@ export default function ApisPage() {
         </div>
         <button
           onClick={refreshAll}
-          className="inline-flex items-center border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+          className="inline-flex min-h-9 items-center rounded-md border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh usage summary and cost trend

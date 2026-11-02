@@ -920,10 +920,8 @@ export function TradingBotsOverviewPage() {
     },
     {
       label: "Highest risk bot",
-      value: portfolioSummary.highestRiskBot?.name || "—",
-      detail: portfolioSummary.highestRiskStatus
-        ? `${portfolioSummary.highestRiskStatus.label} • ${portfolioSummary.highestRiskStatus.detail}`
-        : "Risk posture will update as each bot reports state.",
+      value: "Unavailable",
+      detail: "Comparable financial-risk evidence is unavailable. Per-bot runtime posture is shown separately.",
     },
     {
       label: "Last updated",
