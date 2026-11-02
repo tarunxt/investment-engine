@@ -90,6 +90,16 @@ class UserSession(Base):
     user = relationship("User", back_populates="sessions")
 
 
+class AuthSessionFamily(Base):
+    __tablename__ = "auth_session_families"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    refresh_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class APIKey(Base):
     __tablename__ = "api_keys"
 

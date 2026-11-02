@@ -19,6 +19,8 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.logging import get_logger
 from app.core.security import JWTUtils
+from app.domains.auth.session_lifecycle import SessionLifecycle
+from app.domains.auth.session_store import SqlSessionFamilies
 from app.domains.auth.dependencies import (
     get_current_user,
     get_or_create_dev_user,
@@ -144,6 +146,8 @@ async def _resolve_persisted_status_user_id(
     payload = JWTUtils.verify_access_token(credentials.credentials)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    await SessionLifecycle(SqlSessionFamilies(session)).require_active(payload)
 
     try:
         user_id = int(payload.get("sub"))

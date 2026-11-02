@@ -29,6 +29,7 @@ type BackendRefreshResponse = {
 };
 
 export type BackendSessionContext = {
+  refreshAllowed: boolean;
   accessToken: string | null;
   refreshToken: string | null;
   accessTokenExpiresAt: number | null;
@@ -118,6 +119,7 @@ export async function createBackendSessionContext(
     typeof token?.sub === "string" && token.sub.trim() ? token.sub.trim() : null;
 
   return {
+    refreshAllowed: request instanceof Request,
     accessToken: accessToken || null,
     refreshToken: refreshToken || null,
     accessTokenExpiresAt: expiresAt,
@@ -128,10 +130,37 @@ export async function createBackendSessionContext(
   };
 }
 
+export class BackendSessionHandlerRequiredError extends Error {
+  constructor() {
+    super("A supported request handler is required for session refresh.");
+    this.name = "BackendSessionHandlerRequiredError";
+  }
+}
+
+export async function fetchBackendJsonReadOnly<T = unknown>(
+  context: BackendSessionContext,
+  path: string,
+): Promise<T> {
+  if (!context.accessToken || (context.accessTokenExpiresAt !== null &&
+      context.accessTokenExpiresAt <= Date.now())) {
+    if (context.refreshToken) throw new BackendSessionHandlerRequiredError();
+    throw new BackendRuntimeHttpError(401, { detail: "Not authenticated" });
+  }
+  try {
+    return await fetchBackendRuntimeJson<T>(path, { accessToken: context.accessToken });
+  } catch (error) {
+    if (error instanceof BackendRuntimeHttpError && error.status === 401 && context.refreshToken) {
+      throw new BackendSessionHandlerRequiredError();
+    }
+    throw error;
+  }
+}
+
 export async function rotateBackendTokens(
   context: BackendSessionContext,
   signal?: AbortSignal,
 ) {
+  if (context.refreshAllowed === false) throw new BackendSessionHandlerRequiredError();
   if (signal?.aborted) {
     throw new DOMException("Request aborted", "AbortError");
   }
@@ -207,6 +236,10 @@ export async function fetchBackendJsonWithSession<T = unknown>(
     method?: "GET" | "POST";
   } = {},
 ): Promise<T> {
+  if (context.refreshAllowed === false) {
+    if (method !== "GET" || body !== undefined) throw new BackendSessionHandlerRequiredError();
+    return fetchBackendJsonReadOnly<T>(context, path);
+  }
   if (
     context.accessTokenExpiresAt !== null &&
     context.accessTokenExpiresAt <= Date.now()

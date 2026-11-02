@@ -67,7 +67,8 @@ class JWTUtils:
         user_id: int,
         email: str,
         role: str,
-        expires_delta: Optional[timedelta] = None
+        expires_delta: Optional[timedelta] = None,
+        session_id: Optional[str] = None
     ) -> str:
         """
         Create JWT access token.
@@ -94,11 +95,14 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
+        if session_id is not None:
+            token_data["sid"] = session_id
+
         encoded_jwt = jwt.encode(token_data, settings.jwt_signing_key.get_secret_value(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
-    def create_refresh_token(user_id: int, email: str) -> str:
+    def create_refresh_token(user_id: int, email: str, session_id: Optional[str] = None, refresh_id: Optional[str] = None) -> str:
         """
         Create JWT refresh token.
         
@@ -119,6 +123,11 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
+        if session_id is not None:
+            token_data["sid"] = session_id
+        if refresh_id is not None:
+            token_data["jti"] = refresh_id
+
         encoded_jwt = jwt.encode(token_data, settings.jwt_signing_key.get_secret_value(), algorithm=ALGORITHM)
         return encoded_jwt
     
@@ -184,7 +193,7 @@ class AuthUtils:
     """Combined authentication utilities."""
     
     @staticmethod
-    def create_tokens(user_id: int, email: str, role: str) -> Dict[str, str]:
+    def create_tokens(user_id: int, email: str, role: str, session_id: Optional[str] = None, refresh_id: Optional[str] = None) -> Dict[str, str]:
         """
         Create both access and refresh tokens.
         
@@ -197,7 +206,7 @@ class AuthUtils:
             Dictionary with access_token and refresh_token
         """
         return {
-            "access_token": JWTUtils.create_access_token(user_id, email, role),
-            "refresh_token": JWTUtils.create_refresh_token(user_id, email),
+            "access_token": JWTUtils.create_access_token(user_id, email, role, session_id=session_id),
+            "refresh_token": JWTUtils.create_refresh_token(user_id, email, session_id=session_id, refresh_id=refresh_id),
             "token_type": "bearer"
         }
