@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
-import { Component, useCallback, useEffect, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { setWorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { reconcileBrowserPrivateCacheOwner } from "@/lib/privateDashboardCache";
@@ -29,6 +29,11 @@ export function WorkflowSurfaceHost({ children }: { children: ReactNode }) {
   const [workflowActivated, setWorkflowActivated] = useState<number | null>(null);
   const [reconciledOwner, setReconciledOwner] = useState<number | null>(null);
   const owner = !loading && user?.is_active && Number.isSafeInteger(user.id) && user.id > 0 ? user.id : null;
+  // Invalidate during commit, before old passive-effect queues can use new ambient auth.
+  useLayoutEffect(() => {
+    setWorkflowOwner(null);
+    return () => setWorkflowOwner(null);
+  }, [owner]);
   useEffect(() => {
     if (owner !== null) reconcileBrowserPrivateCacheOwner(owner);
     setWorkflowOwner(owner);
