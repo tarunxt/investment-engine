@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 from typing import Any, Generic, Literal, TypeVar
 from zoneinfo import ZoneInfo
+
+from app.domains.polymarket.payout_provenance import SettlementAttestation, describe_payout_evidence
 
 BullpenPositionClassificationState = Literal[
     "active",
@@ -15,7 +17,7 @@ BullpenPositionClassificationState = Literal[
     "closed",
 ]
 
-BULLPEN_POSITION_CLASSIFIER_VERSION = 4
+BULLPEN_POSITION_CLASSIFIER_VERSION = 5
 
 _VALUE_EPSILON = 0.000001
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
@@ -60,6 +62,7 @@ class BullpenPositionClassification:
     claimable_value_usd: float | None
     expected_payout_usdc: float | None
     resolution_status: str | None
+    payout_evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -232,6 +235,8 @@ def classify_bullpen_position(
     claimable_value_usd: float | None = None,
     authoritative_market_is_open: bool | None = None,
     now: datetime | None = None,
+    settlement_entitlement: SettlementAttestation | None = None,
+    confirmed_realization: SettlementAttestation | None = None,
 ) -> BullpenPositionClassification:
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
     parsed_shares = shares if shares is not None else (_read_number(row.get("shares")) or 0.0)
@@ -297,14 +302,19 @@ def classify_bullpen_position(
     # `redeemable` for still-open child markets; those rows are holdings, not
     # claimable payouts.  Do not let any wallet claim evidence promote an
     # authoritatively open market into the Stage 1 claim queue.
-    positive_payout_verified = not current_market_is_open and (
-        _is_positive_value(parsed_expected_payout_usdc)
-        or _is_positive_value(parsed_claimable_value_usd)
-        or (
-            (past_close_time is True or resolved_by_status)
-            and _is_positive_value(parsed_current_value)
-        )
+    evidence_row = dict(row)
+    if parsed_expected_payout_usdc is not None and "expected_payout_usdc" not in evidence_row:
+        evidence_row["expected_payout_usdc"] = parsed_expected_payout_usdc
+    if parsed_claimable_value_usd is not None and "claimableValue" not in evidence_row:
+        evidence_row["claimableValue"] = parsed_claimable_value_usd
+    payout_evidence = describe_payout_evidence(
+        evidence_row, valuation=parsed_current_value, now=current_time,
+        entitlement=settlement_entitlement, realization=confirmed_realization,
     )
+    if current_market_is_open and payout_evidence["verified_entitlement"] is not None:
+        payout_evidence = {**payout_evidence, "authority_status": "conflict", "verified_entitlement": None, "entitlement_reference": None}
+    verified_amount = payout_evidence["verified_entitlement"]
+    positive_payout_verified = not current_market_is_open and _is_positive_value(verified_amount)
     redeemability_exists = normalized_claimable_flag or parsed_upstream_redeemable_flag
     close_time_is_past = past_close_time is True and not current_market_is_open
 
@@ -316,38 +326,34 @@ def classify_bullpen_position(
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if positive_payout_verified:
         return BullpenPositionClassification(
             state="positive_payout_claimable",
-            reason="Bullpen reported verified positive payout evidence for this resolved position.",
+            reason="A compatible internally verified settlement entitlement is positive; this does not establish cash receipt.",
             is_claimable=True,
-            claimable_value_usd=(
-                parsed_claimable_value_usd
-                if parsed_claimable_value_usd is not None
-                else parsed_expected_payout_usdc
-                if parsed_expected_payout_usdc is not None
-                else parsed_current_value
-            ),
+            claimable_value_usd=verified_amount,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if (
         close_time_is_past
-        and _is_explicit_zero_value(parsed_current_value)
-        and _is_explicit_zero_value(parsed_expected_payout_usdc)
+        and _is_explicit_zero_value(verified_amount)
     ):
         return BullpenPositionClassification(
             state="resolved_zero_payout",
             reason=(
-                "The market has closed and both current value and expected payout are explicitly zero."
+                "A compatible verified settlement entitlement is explicitly zero."
             ),
             is_claimable=False,
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if close_time_is_past and redeemability_exists:
@@ -360,6 +366,7 @@ def classify_bullpen_position(
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if parsed_current_price is None and parsed_current_value is None:
@@ -372,6 +379,7 @@ def classify_bullpen_position(
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if close_time_is_past:
@@ -384,6 +392,7 @@ def classify_bullpen_position(
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if resolved_by_status and not current_market_is_open:
@@ -396,6 +405,7 @@ def classify_bullpen_position(
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     if current_market_is_closed:
@@ -409,6 +419,7 @@ def classify_bullpen_position(
             claimable_value_usd=None,
             expected_payout_usdc=parsed_expected_payout_usdc,
             resolution_status=resolution_status,
+            payout_evidence=payout_evidence,
         )
 
     return BullpenPositionClassification(
@@ -422,6 +433,7 @@ def classify_bullpen_position(
         claimable_value_usd=None,
         expected_payout_usdc=parsed_expected_payout_usdc,
         resolution_status=resolution_status,
+        payout_evidence=payout_evidence,
     )
 
 

@@ -3105,6 +3105,7 @@ def _manual_console_market(
         current_yes_odds=row.current_yes_odds,
         current_no_odds=row.current_no_odds,
         volume_usd=row.volume_usd,
+        volume_24hr_usd=row.volume_24hr_usd,
         liquidity_usd=row.liquidity_usd,
         description=row.rules or row.event_description,
         outcome_labels=["Yes", "No"],
@@ -3286,6 +3287,7 @@ def _serialize_scan_candidate(
         "current_yes_odds": market.current_yes_odds,
         "current_no_odds": market.current_no_odds,
         "volume_usd": market.volume_usd,
+        "volume_24hr_usd": market.volume_24hr_usd,
         "liquidity_usd": market.liquidity_usd,
         "best_bid_cents": market.best_bid_cents,
         "best_ask_cents": market.best_ask_cents,
@@ -3391,6 +3393,7 @@ def _serialize_active_wallet_position(
         "classification_reason": position.classification_reason,
         "claimable_value_usd": position.claimable_value_usd,
         "expected_payout_usdc": position.expected_payout_usdc,
+        "payout_evidence": getattr(position, "payout_evidence", {}),
         "resolution_status": position.resolution_status,
     }
 

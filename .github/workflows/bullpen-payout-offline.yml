@@ -1,0 +1,51 @@
+name: Bullpen payout offline contracts
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/bullpen-payout-offline.yml'
+      - 'backend/app/domains/polymarket/**'
+      - 'backend/app/domains/polymarket_auto_live/**'
+      - 'backend/app/domains/bullpen_run_audit/constants.py'
+      - 'backend/scripts/run_bullpen_offline_tests.py'
+      - 'backend/tests/test_private_bullpen_*'
+      - 'backend/tests/test_bullpen_position_classification.py'
+      - 'backend/tests/test_bullpen_run_audit.py'
+      - 'backend/tests/conftest.py'
+      - 'backend/requirements.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-payout-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PYTHONPATH: backend
+      BULLPEN_TEST_SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout exact proposed source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up isolated Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prepare test dependencies without application initialization
+        run: |
+          python -m venv .bullpen-offline-venv
+          .bullpen-offline-venv/bin/python -m pip install --disable-pip-version-check -r backend/requirements.txt pytest aiosqlite==0.22.1
+      - name: Require available kernel guard library
+        run: test -r /lib/x86_64-linux-gnu/libseccomp.so.2
+      - name: Run only synthetic in-memory payout and volume contracts
+        run: >-
+          .bullpen-offline-venv/bin/python -S backend/scripts/run_bullpen_offline_tests.py
+          backend/tests/test_private_bullpen_payout_provenance.py
+          backend/tests/test_private_bullpen_volume_transport.py
+          backend/tests/test_private_bullpen_payout_metadata_boundary.py
+          backend/tests/test_bullpen_run_audit.py::test_algorithm_registry_contains_required_audit_keys
+          backend/tests/test_bullpen_position_classification.py::test_authoritative_closed_market_can_never_remain_active
+          -q --disable-warnings

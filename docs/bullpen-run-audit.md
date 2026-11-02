@@ -2853,3 +2853,31 @@ Stored exit and calibration fields remain unvalidated hypotheses in the detail
 view; raw in-hold observations do not establish executable post-exit opportunity.
 The combined rendering fixtures cover mixed full-cohort outcomes with a single
 displayed unknown row, legacy missing metadata and zero known-outcome populations.
+
+
+### Payout authority and candidate volume preservation
+
+Classifier v5 and evidence JSON v1 separate supplied payout facts (including
+explicit zero), valuation estimates, verified entitlement and confirmed cash
+realization. Raw field names, redeemable flags and elapsed close time do not
+establish authority. No production settlement-verification adapter is enabled:
+reported/unverified rows, including zero-value rows, remain held. Original
+snapshots are not backfilled. Registry v33 records classifier-v5/evidence-v1.
+Submission, retries and activation implementations are unchanged; the derived
+redeem-eligible set excludes unsupported evidence. This is a conservative hold,
+not complete settlement integration or permission to submit claims.
+
+Console volume_24hr_usd passes through schema/normalization/snapshot capture as a
+nullable supplied fact, with no inference from lifetime volume or relaxation of
+existing filters. Mapping: A10-001-R05, cross-link A10-003-R02; payout mapping:
+A10-004-R01, cross-link A10-001-R05 terminal/cash reconciliation. Finding closure
+and full population/settlement acceptance are not established by these changes.
+
+The dedicated offline CI job uses python -S and an inherited Linux seccomp fence
+before application/SDK imports. It denies internet sockets, connect and io_uring,
+DNS, unapproved subprocesses and HTTP/SDK requests, allowing only explicit
+in-memory HTTPX fixtures and SQLite. Native and child-process probes must fail
+with EPERM; missing isolation aborts before pytest. Browser/TCP/PostgreSQL tests
+are outside this job and need separately reviewed local-only fixture harnesses.
+The six historical unguarded comparisons are quarantined observations, not
+controlled regression/eligibility evidence; the isolated job does not replay them.

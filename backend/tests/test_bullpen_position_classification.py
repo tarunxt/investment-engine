@@ -90,7 +90,7 @@ def test_authoritative_closed_market_can_never_remain_active():
         now=datetime(2026, 7, 21, 0, 0, tzinfo=UTC),
     )
 
-    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 4
+    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 5
     assert classification.state == "stale_or_unknown"
     assert classification.is_claimable is False
     assert "not open" in classification.reason
