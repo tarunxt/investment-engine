@@ -17,6 +17,9 @@ const perf=await readFile(path.join(root,'scripts/performance-audit.mjs'),'utf8'
 let mode='populated',owner=9001,delayUs=null;
 function payload(url){
  if(url.pathname.endsWith('/dashboard/summary')){const data=dashboardSummaryFixture();data.zerodha.snapshot={...data.zerodha.snapshot,...india};data.indmoney_us.snapshot={...data.indmoney_us.snapshot,...us};return data;}
+ if(mode==='partial'&&url.pathname.endsWith('/indmoney-us/portfolio'))return{latest:{...us,parse_status:'partial',reported_holdings_count:3,parse_warnings:['Synthetic partial source']},history:[us]};
+ if(mode==='failed-stage'&&url.pathname.includes('/auto-rebalance-history')){const data=structuredClone(response(url.pathname,url.searchParams,owner));const item=data.items?.[0]??data;const stage=item.stages.find(item=>item.stage==='swing');stage.status='failed';stage.summary.run_status='failed';stage.error_message='Synthetic saved stage failure';return data;}
+ if(mode==='restored-running'&&/\/runs\/100$/.test(url.pathname))return{...runs[0],status:'processing',run_jobs:runs[0].run_jobs.map(link=>({...link,job:{...link.job,status:'processing'}}))};
  if(mode==='empty'&&/\/(zerodha|indmoney-us)\/portfolio$/.test(url.pathname))return{latest:null,history:[]};
  const found=response(url.pathname,url.searchParams,owner);if(found!==undefined)return found;
  const legacy=legacyDashboardFixture(url.pathname);if(legacy!==undefined&&legacy!==null)return legacy;
@@ -28,8 +31,8 @@ const port=3120,base=`http://127.0.0.1:${port}`;
 const server=spawn(process.execPath,[path.join(root,'node_modules/next/dist/bin/next'),'start','-H','127.0.0.1','-p',String(port)],{cwd:root,env:{...process.env,BACKEND_API_URL:backendBase,API_URL:backendBase,NEXTAUTH_URL:base},stdio:['ignore','pipe','pipe']});let serverLog='';server.stdout.on('data',data=>serverLog+=data);server.stderr.on('data',data=>serverLog+=data);
 let browser,context,page;
 async function authenticate(id){owner=id;const now=Math.floor(Date.now()/1000);const value=await encode({secret:'local-auth-disabled-fallback-secret',salt:'authjs.session-token',token:{id:String(id),sub:String(id),email:user(id).email,name:user(id).full_name,username:user(id).username,role:'user',accessToken:'p1-synthetic-access',refreshToken:'p1-synthetic-refresh',expiresIn:3600,userData:user(id),iat:now,exp:now+3600}});await context.addCookies([{name:'authjs.session-token',value,url:base,httpOnly:true,secure:false,sameSite:'Lax',expires:now+3600}]);}
-async function screenshot(name){await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});await writeFile(path.join(output,name+'.txt'),await page.locator('body').innerText());}
-async function record(name,action){try{await action();checks.push({name,status:'PASS'});}catch(error){checks.push({name,status:'FAIL',error:error.message});await screenshot('failure-'+checks.length);}}
+async function screenshot(name){await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});await writeFile(path.join(output,name+'.txt'),await page.locator('body').innerText());await writeFile(path.join(output,name+'-controls.json'),JSON.stringify(await page.locator('button').filter({visible:true}).evaluateAll(nodes=>nodes.map(node=>({text:node.innerText,label:node.getAttribute('aria-label'),title:node.getAttribute('title')}))),null,2));}
+async function record(name,action){try{await action();checks.push({name,status:'PASS'});console.log('PASS '+name);}catch(error){checks.push({name,status:'FAIL',error:error.message});console.log('FAIL '+name+': '+error.message.split('\n')[0]);await screenshot('failure-'+checks.length);}}
 async function closeVisible(){const close=page.locator('button[aria-label^="Close"], button:has(svg.lucide-x)').filter({visible:true});if(await close.count())await close.last().click();else await page.keyboard.press('Escape');}
 try{
  await writeFile(path.join(output,'processes.json'),JSON.stringify({serverPid:server.pid,backendPort:backend.address().port}));let ready=false;for(let i=0;i<80;i++){try{if((await fetch(base+'/login')).ok){ready=true;break;}}catch{}await new Promise(resolve=>setTimeout(resolve,250));}assert.ok(ready,'local server ready');
@@ -46,11 +49,33 @@ try{
  await record('sibling portfolio client navigation, Back and Forward retain runtime and append outside US tabs',async()=>{await workflow().getByRole('button',{name:'US stage ledger',exact:true}).click();await page.locator('#us-workflow nav').waitFor();assert.equal(new URL(page.url()).pathname,'/console/indmoney-us');assert.ok(await page.evaluate(()=>document.querySelector('[role="tablist"]').compareDocumentPosition(document.querySelector('#us-workflow'))&Node.DOCUMENT_POSITION_FOLLOWING));await page.goBack();await page.locator('#india-workflow nav').waitFor();await page.goForward();await page.locator('#us-workflow nav').waitFor();});
  await record('US local tabs retain populated holdings and paste draft',async()=>{await page.getByRole('tab',{name:'Paste snapshot',exact:true}).click();await page.getByLabel('Paste INDmoney data here').fill('Synthetic retained draft');await page.getByRole('tab',{name:'Saved US snapshot'}).click();await page.getByRole('tab',{name:'Paste snapshot',exact:true}).click();assert.equal(await page.getByLabel('Paste INDmoney data here').inputValue(),'Synthetic retained draft');await page.getByRole('tab',{name:'Saved US snapshot'}).click();assert.ok(await page.locator('#us-snapshot-panel-saved').getByText('Synthetic Alpha',{exact:true}).count());});
  await screenshot('us-populated-desktop');
- await record('snapshot review Escape, focus return, reopen and navigation teardown',async()=>{const trigger=workflow().getByRole('button',{name:'Sync Now',exact:true});await trigger.focus();await trigger.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});assert.equal(await trigger.evaluate(node=>node===document.activeElement),true);await trigger.click();await page.getByRole('dialog').waitFor();await workflow().getByRole('button',{name:'India stage ledger'}).click();await page.locator('#india-workflow nav').waitFor();assert.equal(await page.getByRole('dialog').count(),0);});
+ await record('snapshot review Escape, focus return, reopen and navigation teardown',async()=>{const trigger=workflow().getByRole('button',{name:'Sync Now',exact:true});await trigger.focus();await trigger.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});assert.equal(await trigger.evaluate(node=>node===document.activeElement),true);await trigger.click();await page.getByRole('dialog').waitFor();await page.goBack();await page.locator('#india-workflow nav').waitFor();assert.equal(await page.getByRole('dialog').count(),0);});
+ await record('pending saved-snapshot verification cannot continue after real-router Back',async()=>{
+ await workflow().getByRole('button',{name:'US stage ledger',exact:true}).click();await page.locator('#us-workflow nav').waitFor();
+ await workflow().getByRole('button',{name:'Sync Now',exact:true}).click();await page.getByRole('dialog').waitFor();
+ await page.getByRole('radio',{name:/Continue with latest snapshot/}).check();
+ let release;delayUs=new Promise(resolve=>release=resolve);await page.getByRole('button',{name:'Continue Rebalance',exact:true}).click();
+ try { assert.equal(await page.getByRole('button',{name:'Continue Rebalance',exact:true}).isDisabled(),true);await page.goBack();await page.locator('#india-workflow nav').waitFor(); } finally {release();delayUs=null;}
+ await page.waitForTimeout(100);assert.equal(await page.getByRole('dialog').count(),0);assert.deepEqual(writes,[]);
+ });
  await record('owner change and reload reject previous private surface state',async()=>{await authenticate(9002);await page.reload();await page.locator('#india-workflow nav').waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('investment-engine:private-cache-owner:v1')),'9002');});
  await record('cold compatibility route resolves to a fixed portfolio anchor',async()=>{await page.goto(base+'/console/automated-rebalance');await page.waitForURL('**/console/zerodha#india-workflow');await page.locator('#india-workflow nav').waitFor();});
  for(const width of [1440,390]){await page.setViewportSize({width,height:1000});await screenshot('india-final-'+width);await record('responsive viewport '+width,async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true));}
  await record('Dashboard preserves existing content and defers inline Stock Flow until scroll',async()=>{await page.goto(base+'/console/dashboard');await page.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();await page.locator('#rebalance-stock-flow').scrollIntoViewIfNeeded();await page.getByText('Rebalance Stock Flow',{exact:true}).waitFor();assert.equal(await page.locator('#india-workflow,#us-workflow').count(),0);await screenshot('dashboard-stock-flow');});
+ for(const state of ['empty','partial','failed','failed-stage','restored-running','queued']){
+ await record('conditional saved/workflow state '+state,async()=>{
+ mode=state;
+ if(['restored-running','queued'].includes(state))await page.evaluate(value=>localStorage.setItem('investment-engine:rebalance-workflow-state:v1',JSON.stringify(value)),savedState('zerodha',state==='queued'?'queued':'running'));
+ await page.goto(base+(state==='partial'||state==='failed'||state==='empty'?'/console/indmoney-us':'/console/zerodha')+'#'+(state==='partial'||state==='failed'||state==='empty'?'us-workflow':'india-workflow'));
+ await page.locator('#india-workflow nav,#us-workflow nav').waitFor();
+ if(state==='empty')await page.getByText('No INDmoney snapshots yet',{exact:true}).waitFor();
+ if(state==='partial')await page.getByText('Synthetic partial source',{exact:false}).first().waitFor();
+ if(state==='failed')assert.ok(await page.locator('#us-snapshot-panel-saved').getByText(/unavailable|failed/i).count());
+ if(state==='failed-stage')await workflow().getByText('Synthetic saved stage failure',{exact:false}).first().waitFor();
+ if(state==='restored-running'){await workflow().getByText(/running|processing/i).first().waitFor();const initial=calls.filter(call=>/\/runs\/100$/.test(call.path)).length;await page.waitForTimeout(3200);assert.ok(calls.filter(call=>/\/runs\/100$/.test(call.path)).length>initial);}
+ await screenshot('state-'+state);mode='populated';
+ });
+ }
  await record('zero external/provider or financial mutations',async()=>assert.deepEqual(writes,[]));
 } catch(error){checks.push({name:'fixture setup/continuation',status:'FAIL',error:error.message});if(page)await screenshot('setup-failure');}
 finally{
