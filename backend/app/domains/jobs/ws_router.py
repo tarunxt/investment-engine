@@ -7,7 +7,8 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.domains.jobs.repository import PostgresJobRepository
 from app.shared.types import JobId
-from app.shared.ws_relay import relay_channel, user_id_from_ws_token
+from app.domains.jobs.public_projection import public_job_details
+from app.shared.ws_relay import relay_channel, user_id_from_ws_token, session_identity_active
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def ws_job_list(websocket: WebSocket, token: str | None = Query(None)):
     await websocket.accept()
     logger.info("WS /ws/jobs connected user_id=%s", user_id)
     try:
-        await relay_channel(websocket, f"user_job_updates:{user_id}")
+        await relay_channel(websocket, f"user_job_updates:{user_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs disconnected user_id=%s", user_id)
     except Exception as e:
@@ -49,13 +50,19 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
     # job still receive the final status (Redis pub/sub drops events with no subscriber).
     try:
         async with AsyncSessionLocal() as db:
-            job = await PostgresJobRepository(db).get(job_id)
-            if job and job.user_id == user_id:
+            job = await PostgresJobRepository(db).get_for_user(job_id, user_id)
+            if job is None:
+                await websocket.close(code=1008, reason="Job unavailable")
+                return
+            if not await session_identity_active(user_id):
+                await websocket.close(code=1008, reason="Session expired or revoked")
+                return
+            if job is not None:
                 status_val = (
                     job.status.value if hasattr(job.status, "value") else str(job.status)
                 )
                 await websocket.send_json(
-                    {
+                    public_job_details({
                         "type": "job.updated",
                         "job_id": job.id,
                         "status": status_val,
@@ -69,13 +76,15 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
                         "web_sources": job.web_sources,
                         "runtime_metadata_json": job.runtime_metadata_json,
                         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-                    }
+                    })
                 )
     except Exception:
         logger.warning("Failed to send initial state for job %d", job_id, exc_info=True)
+        await websocket.close(code=1011, reason="Job unavailable")
+        return
 
     try:
-        await relay_channel(websocket, f"job_updates:{job_id}")
+        await relay_channel(websocket, f"job_updates:{job_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs/%d disconnected user_id=%s", job_id, user_id)
     except Exception as e:

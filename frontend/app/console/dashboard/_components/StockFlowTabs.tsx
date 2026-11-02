@@ -1,5 +1,6 @@
 "use client";
 
+import { captureWorkflowOwner, requireWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ChevronDown,
@@ -273,11 +274,13 @@ const stockFlowLastSuccessfulSources = new Map<
   RebalanceStockFlowPortfolio,
   { data: StockFlowSourceData; cachedAt: number }
 >();
+onWorkflowOwnerInvalidated(() => { stockFlowSourcePromises.clear(); stockFlowLastSuccessfulSources.clear(); });
 const STOCK_FLOW_TRANSIENT_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 
 export function fetchRebalanceStockFlowSource(
   portfolio: RebalanceStockFlowPortfolio,
 ): Promise<StockFlowSourceData> {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   const cached = stockFlowSourcePromises.get(portfolio);
   if (cached) return cached;
 
@@ -289,6 +292,7 @@ export function fetchRebalanceStockFlowSource(
       : apiService.indmoneyUsPortfolioOverview(),
   ]).then(
     ([runs, overview]) => {
+      requireWorkflowOwner(owner);
       stockFlowSourcePromises.delete(portfolio);
       const data = {
         runs,
@@ -302,6 +306,7 @@ export function fetchRebalanceStockFlowSource(
       return data;
     },
     (error) => {
+      requireWorkflowOwner(owner);
       stockFlowSourcePromises.delete(portfolio);
       const fallback = stockFlowLastSuccessfulSources.get(portfolio);
       if (

@@ -146,3 +146,22 @@ def test_invalid_month_never_starts_collection(monkeypatch):
                 assert response.status_code == 422
 
     asyncio.run(scenario())
+
+
+def test_refresh_unavailable_is_explicit_and_gets_are_passive(monkeypatch):
+    from app.domains.cost_drivers import cache
+    monkeypatch.delenv("COST_DASHBOARD_MOCK_MODE", raising=False)
+    monkeypatch.setattr(cache, "_redis_client", lambda: None)
+    cache.reset_local_cost_dashboard_cache_state()
+    monkeypatch.setattr(service, "_aws_client", lambda *args: pytest.fail("passive route called AWS"))
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=_app()), base_url="http://test") as client:
+            for path in ["/summary?month=2026-07", "/aws", "/traffic", "/recommendations"]:
+                response = await client.get("/api/admin/cost-drivers" + path)
+                assert response.status_code == 200
+                if path.startswith("/summary"):
+                    assert response.json()["summary"]["monthToDateAwsCost"] is None
+            response = await client.post("/api/admin/cost-drivers/refresh?month=2026-07")
+            assert response.status_code == 503
+            assert "no collection started" in response.json()["detail"]
+    asyncio.run(scenario())

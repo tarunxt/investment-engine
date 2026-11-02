@@ -53,6 +53,20 @@ type LlmUsageBreakdownResponse = {
   fx_status: string;
   request_metric: string;
   coverage_note: string;
+  attempt_coverage?: {
+    persisted_read_state?: string;
+    invocation_coverage_state?: string;
+    processed_event_rows: number;
+    read_cutoff?: string;
+    summary: {
+      tariff_freshness?: string;
+      tariff_versions?: Record<string, number>;
+      cache_fields?: Record<string, {
+        reported_tokens: number | null; inferred_tokens: number | null;
+        reported_attempts: number; inferred_attempts: number; unknown_attempts: number;
+      }>;
+    };
+  };
   items: LlmUsageBreakdownItem[];
   runs: LlmUsageRunItem[];
 };
@@ -330,16 +344,25 @@ export default function LlmUsageBreakdown() {
             LLM API Usage Breakdown
           </h2>
           <p className="text-sm text-gray-600">
-            Actual provider-ledger usage where available; older days fall back to
-            reconstructed Cred-X job estimates.
+            Tariff estimates and provider day totals are distinct from settled billed charges.
+            Invocation coverage and hidden SDK retries remain unknown.
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => { if (!loading) void load(); }}
+          aria-disabled={loading}
+          className="inline-flex min-h-9 items-center border rounded-md border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        >
+          <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Refreshing daily breakdown…' : error ? 'Retry daily breakdown' : 'Refresh daily breakdown'}
+        </button>
 
       </div>
 
       {error ? (
         <div role="alert" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {error} Usage has not been verified. Use Refresh to retry.
+          {error} Usage has not been verified. Use Retry daily breakdown to retry.
         </div>
       ) : null}
       {data && (error || loading || data.from_date !== selectedDate) ? (
@@ -379,15 +402,7 @@ export default function LlmUsageBreakdown() {
             </button>
           </div>
         </label>
-        <button
-          type="button"
-          onClick={() => { if (!loading) void load(); }}
-          aria-disabled={loading}
-          className="inline-flex h-9 items-center border rounded-md border-indigo-600 bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-        >
-          <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+
         <div className="pb-2 text-sm font-medium text-gray-700">
           {formatDate(selectedDate)} · {data?.timezone ?? API_TIMEZONE}
         </div>
@@ -493,11 +508,11 @@ export default function LlmUsageBreakdown() {
                                     {formatUsd(run.estimated_cost)}
                                   </div>
                                   {run.measurement === 'actual' ? (
-                                    <div className="text-xs font-semibold text-emerald-700">Actual</div>
+                                    <div className="text-xs font-semibold text-emerald-700">Provider day total · settlement unknown</div>
                                   ) : run.measurement === 'reconciled' ? (
-                                    <div className="text-xs font-semibold text-amber-700">Reconciled</div>
+                                    <div className="text-xs font-semibold text-amber-700">Allocated provider day total</div>
                                   ) : (
-                                    <div className="text-xs text-gray-500">Estimated</div>
+                                    <div className="text-xs text-gray-500">Tariff estimate</div>
                                   )}
                                 </td>
                               </tr>
@@ -512,7 +527,7 @@ export default function LlmUsageBreakdown() {
                     )}
                     {area.runs.some((run) => run.measurement === 'reconciled') ? (
                       <p className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-                        Reconciled rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
+                        Allocated rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
                       </p>
                     ) : null}
                   </section>
@@ -523,6 +538,29 @@ export default function LlmUsageBreakdown() {
         </div>
       )}
 
+      {data?.attempt_coverage ? (
+        <details className="mt-3 text-xs text-gray-600" open>
+          <summary>Saved attempt coverage and tariff provenance</summary>
+          <p role="status">
+            Selected persisted read: {data.attempt_coverage.persisted_read_state ?? 'unknown'}
+            {' · '}{data.attempt_coverage.processed_event_rows} saved events.
+            {' '}Invocation and billed-charge completeness remain unknown.
+            {data.attempt_coverage.read_cutoff ? ` Read cutoff ${formatTimestamp(data.attempt_coverage.read_cutoff)}.` : ''}
+          </p>
+          <p>Tariff freshness: {data.attempt_coverage.summary.tariff_freshness ?? 'unknown'}; effective date unknown.</p>
+          {Object.entries(data.attempt_coverage.summary.tariff_versions ?? {}).map(([version, count]) => (
+            <p key={version} className="break-all">{version}: {count} attempts</p>
+          ))}
+          {Object.entries(data.attempt_coverage.summary.cache_fields ?? {}).map(([field, values]) => (
+            <p key={field}>
+              {field === 'cache_read_input_tokens' ? 'Cache read' : 'Cache miss'} tokens:
+              {' '}reported {values.reported_tokens ?? 'unknown'}, inferred {values.inferred_tokens ?? 'unknown'}
+              {' · '}{values.unknown_attempts} attempts without this field.
+            </p>
+          ))}
+          <p>Attempt estimates are separate from daily totals and are never added to them.</p>
+        </details>
+      ) : null}
       {data?.coverage_note ? (
         <p className="mt-3 text-xs text-gray-500">{data.coverage_note}</p>
       ) : null}

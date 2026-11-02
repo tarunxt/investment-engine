@@ -1,3 +1,4 @@
+import type { LogoutResponse } from "@/lib/logoutOutcome";
 import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
 import type { StockSourceObservationPage } from "@/types/api";
 
@@ -124,11 +125,12 @@ export type ApiRequestControl = {
 // Define the API service interface with proper types
 export interface IApiService {
     setSessionGeneration(generation: string): void;
+    beginLogout(): void;
 
     // Auth endpoints
     login(data: { email?: string; username?: string; password: string }): Promise<LoginResponse>;
     register(data: { email: string; username: string; password: string; full_name?: string }): Promise<RegisterResponse>;
-    logout(token?: string): Promise<void>;
+    logout(token?: string): Promise<LogoutResponse>;
     getCurrentUser(token?: string): Promise<UserResponse>;
     updatePassword(data: UpdatePasswordRequest, token?: string): Promise<void>;
     getProfile(token?: string): Promise<UpdateProfileRequest>;

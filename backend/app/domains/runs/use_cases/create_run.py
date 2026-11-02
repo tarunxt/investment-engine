@@ -16,7 +16,8 @@ from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.presentation import build_run_prompt_preview
 from app.domains.runs.repository import PostgresRunRepository
-from app.infrastructure.messaging.task_registry import register_job_task
+from app.infrastructure.database.outbox.dispatch import obligation, dispatch_one
+from app.domains.jobs.admission import utc_schedule
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 from app.shared.exceptions import ConflictException, ValidationException
 from app.shared.types import JobStatus, UserId
@@ -97,9 +98,7 @@ class CreateRunUseCase:
             )
 
         now = datetime.now(timezone.utc)
-        scheduled_at = cmd.scheduled_at
-        if scheduled_at is not None and scheduled_at.tzinfo is None:
-            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        scheduled_at = utc_schedule(cmd.scheduled_at)
         is_future = scheduled_at is not None and scheduled_at > now
         initial_status = JobStatus.SCHEDULED if is_future else JobStatus.PENDING
 
@@ -158,7 +157,7 @@ class CreateRunUseCase:
                         status=initial_status,
                         request_context_json=(output_source_context if output_source_context is not None
                                               else cmd.polymarket_event_context),
-                        scheduled_at=scheduled_at,
+                        scheduled_at=scheduled_at.replace(tzinfo=None) if scheduled_at else None,
                         auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
                         auto_rebalance_sequence=cmd.auto_rebalance_sequence,
                         auto_rebalance_label=cmd.auto_rebalance_label,
@@ -168,8 +167,18 @@ class CreateRunUseCase:
 
                 await self._session.flush()  # populate job IDs
 
+                messages = []
+                gemini_offset = 0
                 for job in jobs:
                     self._session.add(RunJob(run_id=run.id, job_id=job.id, stage=1))
+                    offset = 0
+                    if job.provider.strip().lower() == "gemini":
+                        offset = gemini_offset
+                        gemini_offset += 20
+                    eta = (scheduled_at if is_future else now) + timedelta(seconds=offset)
+                    message = obligation(job, eta)
+                    self._session.add(message)
+                    messages.append(message)
 
                 from app.core.config import settings
                 if settings.recommendation_audit_enabled:
@@ -180,26 +189,14 @@ class CreateRunUseCase:
         except LockAcquisitionError:
             raise ConflictException("Another run creation is in progress. Retry shortly.")
 
-        # Fan out one Celery task per job.
-        # Stagger Gemini launches to reduce burst quota/rate-limit collisions.
-        from app.domains.jobs.tasks import execute_ai_job
-
-        gemini_offset = 0
-        for job in jobs:
-            countdown = 0
-            eta = scheduled_at
-            if job.provider.strip().lower() == "gemini":
-                countdown = gemini_offset
-                gemini_offset += 20
-                if eta is not None:
-                    eta = eta + timedelta(seconds=countdown)
-            if is_future:
-                task = execute_ai_job.apply_async(args=[job.id], eta=eta)  # type: ignore
-            else:
-                task = execute_ai_job.apply_async(args=[job.id], countdown=countdown)  # type: ignore
-            await register_job_task(job.id, task.id)
+        # Every child already has a durable obligation. A failed publication
+        # preserves prior acknowledgements and leaves later children pending.
+        run_id = run.id
+        message_ids = [message.id for message in messages]
+        for message_id in message_ids:
+            await dispatch_one(self._session, message_id)
 
         # Re-fetch with all relationships loaded for the response
-        result = await self._run_repo.get(run.id)
-        assert result is not None, f"Run {run.id} not found after creation"
+        result = await self._run_repo.get(run_id)
+        assert result is not None, f"Run {run_id} not found after creation"
         return result

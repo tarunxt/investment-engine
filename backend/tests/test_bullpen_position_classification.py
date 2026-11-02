@@ -15,8 +15,7 @@ from app.domains.polymarket.position_classification import (
 
 
 def test_resolved_zero_payout_residue_is_not_claimable():
-    classification = classify_bullpen_position(
-        {
+    source = {
             "market": "Will Claude Fable 5 be restored for US customers by July 3?",
             "outcome": "No",
             "shares": 6.0975,
@@ -27,16 +26,24 @@ def test_resolved_zero_payout_residue_is_not_claimable():
             "resolution_status": "unknown",
             "end_date": "2026-07-03",
         }
+    before = dict(source)
+    classification = classify_bullpen_position(
+        source,
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert classification.state == "resolved_zero_payout"
+    assert classification.state == "settlement_pending"
     assert classification.is_claimable is False
     assert classification.claimable_value_usd is None
+    assert classification.payout_evidence["verified_entitlement"] is None
+    assert classification.payout_evidence["confirmed_realization"] is None
+    assert source == before
+    assert classification.payout_evidence["raw_fields"]["expected_payout_usdc"] == 0
+    assert classification.payout_evidence["estimated_valuation"] == 0
 
 
 def test_positive_claimable_value_stays_claimable():
-    classification = classify_bullpen_position(
-        {
+    source = {
             "market": "Resolved winner",
             "outcome": "No",
             "shares": 3,
@@ -46,11 +53,20 @@ def test_positive_claimable_value_stays_claimable():
             "claimableValue": 3,
             "end_date": "2026-07-03",
         }
+    before = dict(source)
+    classification = classify_bullpen_position(
+        source,
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert classification.state == "positive_payout_claimable"
-    assert classification.is_claimable is True
-    assert classification.claimable_value_usd == 3
+    assert classification.state == "settlement_pending"
+    assert classification.is_claimable is False
+    assert classification.claimable_value_usd is None
+    assert classification.payout_evidence["verified_entitlement"] is None
+    assert classification.payout_evidence["confirmed_realization"] is None
+    assert source == before
+    assert classification.payout_evidence["raw_fields"]["claimableValue"] == 3
+    assert classification.payout_evidence["estimated_valuation"] == 3
 
 
 def test_authoritative_open_market_overrides_stale_redeemable_evidence():
@@ -90,7 +106,7 @@ def test_authoritative_closed_market_can_never_remain_active():
         now=datetime(2026, 7, 21, 0, 0, tzinfo=UTC),
     )
 
-    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 4
+    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 5
     assert classification.state == "stale_or_unknown"
     assert classification.is_claimable is False
     assert "not open" in classification.reason
@@ -113,8 +129,7 @@ def test_unresolved_missing_price_stays_stale_unknown():
 
 
 def test_upstream_redeemable_zero_value_v0115_row_stays_non_active():
-    classification = classify_bullpen_position(
-        {
+    source = {
             "market": "Will Claude Fable 5 be restored for US customers by July 3, 2026?",
             "outcome": "No",
             "shares": 6.0975,
@@ -125,13 +140,21 @@ def test_upstream_redeemable_zero_value_v0115_row_stays_non_active():
             "upstream_redeemable": True,
             "resolution_status": "unknown",
             "end_date": "2026-07-03",
-        },
+        }
+    before = dict(source)
+    classification = classify_bullpen_position(
+        source,
         now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
     )
 
-    assert classification.state == "resolved_zero_payout"
+    assert classification.state == "settlement_pending"
     assert classification.is_claimable is False
     assert classification.claimable_value_usd is None
+    assert classification.payout_evidence["verified_entitlement"] is None
+    assert classification.payout_evidence["confirmed_realization"] is None
+    assert source == before
+    assert classification.payout_evidence["raw_fields"]["expected_payout_usdc"] == 0
+    assert classification.payout_evidence["estimated_valuation"] == 0
 
 
 def test_future_open_position_with_temporary_pricing_gap_is_quarantined():

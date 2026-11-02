@@ -608,6 +608,7 @@ class BullpenAutoLiveConsoleCandidateInput(BaseModel):
     current_yes_odds: float | None = Field(default=None, ge=0, le=100)
     current_no_odds: float | None = Field(default=None, ge=0, le=100)
     volume_usd: float | None = Field(default=None, ge=0)
+    volume_24hr_usd: float | None = Field(default=None, ge=0)
     liquidity_usd: float | None = Field(default=None, ge=0)
     best_bid_cents: float | None = Field(default=None, ge=0, le=100)
     best_ask_cents: float | None = Field(default=None, ge=0, le=100)

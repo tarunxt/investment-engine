@@ -11,14 +11,14 @@ function load(path, mocks = {}) {
   const code = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
-  const module = { exports: {} };
+  const loadedModule = { exports: {} };
   new Function('require', 'module', 'exports', code)(
-    (name) => mocks[name] ?? require(name), module, module.exports,
+    (name) => mocks[name] ?? require(name), loadedModule, loadedModule.exports,
   );
-  return module.exports;
+  return loadedModule.exports;
 }
 const fx = load('../lib/fxPresentation.ts');
-function render({ rate = 0, costs = [2, 0, null], loading = false, empty = false } = {}) {
+function render({ rate = 0, costs = [2, 0, null], loading = false, empty = false, error = null, verified = true } = {}) {
   let stateIndex = 0;
   const run = {
     id: 1, status: 'completed', current_stage: 1, prompt_preview: 'Swing trade',
@@ -42,7 +42,7 @@ function render({ rate = 0, costs = [2, 0, null], loading = false, empty = false
       getJobSheetsPresentation: () => ({ state: 'failed', label: 'Export failed' }),
     },
     '../_context': { INDIA_TIMEZONE: 'Asia/Kolkata', STATUS_ICONS: {}, STATUS_STYLES: {},
-      useDashboard: () => ({ runs: empty ? [] : [run], runsTotal: empty ? 0 : 1, loadingRuns: loading }) },
+      useDashboard: () => ({ runs: empty ? [] : [run], runsTotal: empty ? 0 : 1, loadingRuns: loading, runsError: error, lastUpdated: verified ? new Date("2026-11-02T06:00:00Z") : null }) },
   });
   return renderToStaticMarkup(React.createElement(RecentJobsTable));
 }
@@ -71,9 +71,31 @@ test('verified FX changes the header, rows and total together', () => {
 });
 
 test('loading, empty and unknown costs do not invent zero totals', () => {
-  assert.match(render({ loading: true }), /Loading jobs…/);
+  assert.match(render({ loading: true }), /Refreshing jobs; showing previously loaded rows/);
   assert.match(render({ empty: true }), /No jobs yet/);
   const html = render({ costs: [null] });
   assert.match(html, /Not captured/);
   assert.doesNotMatch(html, /\$0.00|₹0.00/);
+});
+
+// DATA-ERROR-20261102-02: shared body/footer predicates and retained partial rows.
+test('initial loading and failed reads never claim settled empty jobs', () => {
+  for (const props of [{ loading: true, empty: true, verified: false }, { error: 'Synthetic timeout', empty: true }, { empty: true, verified: false }]) {
+    const html = render(props);
+    assert.doesNotMatch(html, /No jobs yet/);
+  }
+  assert.match(render({ empty: true, loading: true }), /Loading jobs…/);
+  assert.match(render({ empty: true, error: 'Synthetic timeout' }), /Jobs unavailable/);
+  assert.match(render({ empty: true, verified: false }), /Jobs not yet verified/);
+  assert.match(render({ empty: true }), /No jobs yet/);
+});
+test('partial and stale jobs retain data and unverified costs while announcing refresh failure', () => {
+  const html = render({ costs: [0.25, null], error: 'Synthetic timeout' });
+  assert.match(html, /Showing previously loaded jobs/);
+  assert.match(html, /USD \$0.25/);
+  assert.match(html, /1 not captured/);
+  assert.doesNotMatch(html, /No jobs yet/);
+  const refresh = render({ loading: true, costs: [0.25, null] });
+  assert.match(refresh, /Refreshing jobs/);
+  assert.match(refresh, /USD \$0.25/);
 });

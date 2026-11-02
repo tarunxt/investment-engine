@@ -33,10 +33,10 @@ export function ConsoleShell({
         performance.mark('console-shell-rendered');
     }, []);
     useEffect(() => {
-        if (!loading && !user) {
+        if (!loading && !user && !error) {
             router.replace(URLs.routes.login());
         }
-    }, [loading, router, user]);
+    }, [error, loading, router, user]);
 
     useEffect(() => {
         if (!hasRedirectToParam) return;
@@ -129,7 +129,11 @@ export function ConsoleShell({
                             {error}
                         </div>
                     ) : null}
-                    {children}
+                    {user ? children : error ? (
+                        <button type="button" onClick={() => void logout()} className="rounded border px-4 py-2">
+                            Retry sign-out
+                        </button>
+                    ) : null}
                 </main>
             </div>
         </div>

@@ -12,7 +12,12 @@ _DEFAULT_TTL = 86_400  # 24 h
 
 
 class IdempotencyStore:
-    """Redis-backed idempotency key store for state-changing endpoints."""
+    """Optional cache of hints; never an authorization or admission authority.
+
+    Creation callers supply actor/operation/key-hash/payload-fingerprint identity
+    from jobs.admission.request_identity and always reread the durable owner.
+    Legacy unscoped entries are deliberately not consumed by admission.
+    """
 
     def __init__(self, redis: Redis) -> None:
         self._redis = redis

@@ -8,7 +8,7 @@ BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
 )
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-09-20-ups-filter-integrity-v32"
+    "2026-11-01-private-payout-provenance-v33"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -44,6 +44,13 @@ AUDIT_SECTION_KEYS: Final[tuple[str, ...]] = (
 )
 
 AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
+    {
+        "algorithm_key": "wallet_payout_authority",
+        "stage": "stage-1", "algorithm_version": "classifier-v5-evidence-v1",
+        "source_module": "app.domains.polymarket.position_classification",
+        "source_function": "classify_bullpen_position",
+        "label": "Separate valuation, reported payout, verified entitlement and realization; unknown authority withheld",
+    },
     {
         "algorithm_key": "ups_filter_integrity",
         "stage": "stage-1", "algorithm_version": "v1",

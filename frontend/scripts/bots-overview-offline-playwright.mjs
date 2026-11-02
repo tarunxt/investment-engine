@@ -40,6 +40,14 @@ try {
   for(const [name,metric] of [['Runtime context','Bots running'],['Capital and performance','Total money invested'],['Positions and exposure','Live exposure']]){
    const tab=page.getByRole('tab',{name,exact:true});await tab.click();
    await page.waitForFunction(()=>{const el=document.querySelector('[role=tab][aria-selected=true]');const color=getComputedStyle(el).color;return color==='rgb(255, 255, 255)'||color==='oklch(1 0 0)';});await page.getByRole('tabpanel').getByRole('rowheader',{name:metric,exact:true}).waitFor();
+   // A5-R02: runtime posture is not a comparable financial-risk rank.
+   if(name==='Runtime context'){
+    const risk=page.getByRole('tabpanel').getByRole('row').filter({has:page.getByRole('rowheader',{name:'Highest risk bot',exact:true})});
+    assert.match(await risk.innerText(),/Unavailable/);
+    assert.match(await risk.innerText(),/Comparable financial-risk evidence is unavailable/);
+    assert.match(await risk.innerText(),/Per-bot runtime posture is shown separately/);
+   }
+
    if(state==='loading'||state==='empty'||state==='failed'){
     if(name!=='Runtime context')assert.match(await page.getByRole('tabpanel').textContent(),/—/);
    }

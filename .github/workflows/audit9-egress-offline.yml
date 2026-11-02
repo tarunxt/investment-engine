@@ -1,0 +1,51 @@
+name: Audit9 offline egress evidence
+on:
+  pull_request:
+    paths:
+      - 'backend/app/domains/ai_providers/**'
+      - 'backend/app/domains/jobs/output_contracts/**'
+      - 'backend/tests/test_search_egress_boundary.py'
+      - 'frontend/components/shared/MarkdownRenderer.tsx'
+      - 'frontend/tests/markdown-renderer-offline.test.mjs'
+      - '.github/workflows/audit9-egress-offline.yml'
+permissions:
+  contents: read
+jobs:
+  offline-boundaries:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/testdb
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r backend/requirements.txt pytest aiosqlite
+      - name: Synthetic search, output and side-effect checks
+        env:
+          PYTHONPATH: backend
+        run: >-
+          python -m pytest -q
+          backend/tests/test_search_egress_boundary.py
+          backend/tests/test_web_search_tool.py
+          backend/tests/test_openai_provider.py
+          backend/tests/test_output_contracts.py
+          backend/tests/test_rebalance_side_effect_policy.py
+          backend/tests/test_google_sheets_output_contracts.py
+          backend/tests/test_deepseek_provider.py
+          backend/tests/test_polymarket_event_preflight.py
+          backend/tests/test_polymarket_auto_live_evidence.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --fund=false
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Actual renderer and lifecycle with blocked outbound requests
+        run: node --test tests/markdown-renderer-offline.test.mjs
+        working-directory: frontend

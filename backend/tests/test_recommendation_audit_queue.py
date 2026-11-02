@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import JWTUtils
-from app.domains.auth.models import User, UserProfile, UserRole
+from app.domains.auth.models import User, UserProfile, UserRole, AuthSessionFamily
 from app.domains.recommendation_audit.models import DecisionRecord, EvidenceRecord, SpendAccount, SpendAttempt, VerificationRecord
 from app.domains.recommendation_audit.router import router
 from app.domains.recommendation_audit.service import create_verification
@@ -41,7 +41,7 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     from app.domains.recommendation_audit.tasks import verify_reversal
     database=tmp_path/"audit-auth-queue.sqlite"
     engine=create_engine(f"sqlite:///{database}",connect_args={"check_same_thread":False})
-    Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
+    Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,AuthSessionFamily,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
     monkeypatch.setattr(settings,"recommendation_audit_enabled",True)
     monkeypatch.setattr(settings,"recommendation_audit_recovery_stored_only_enabled",recovery)
     monkeypatch.setattr(settings,"recommendation_audit_external_enabled",False)
@@ -50,7 +50,8 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     monkeypatch.setattr(settings,"database_url",f"sqlite:///{database}")
     monkeypatch.setattr(settings,"auth_disabled",False)
     monkeypatch.setattr(settings,"environment","test")
-    monkeypatch.setattr(security_module,"SECRET_KEY","disposable-fixture-signing-key-only")
+    from pydantic import SecretStr
+    monkeypatch.setattr(security_module.settings, "jwt_signing_key", SecretStr(bytes(range(32)).hex()))
     monkeypatch.setenv("CREDX_RECOVERY_MODE","1" if recovery else "0")
     with Session(engine) as session:
         session.add_all([User(id=i,email=f"fixture-{i}@invalid.test",username=f"fixture-{i}",password_hash="unused-fixture",role=UserRole.USER,is_active=True) for i in (1,2)])
@@ -80,8 +81,11 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
             return run_verification(session,record_id,settings,external_collector=prohibited)
     def unavailable(*args,**kwargs): raise RuntimeError("fixture broker unavailable")
     monkeypatch.setattr(verify_reversal,"apply_async",unavailable)
-    token=JWTUtils.create_access_token(1,"fixture-1@invalid.test","user")
-    other=JWTUtils.create_access_token(2,"fixture-2@invalid.test","user")
+    from session_family_fixture import persist_active_session_tokens
+    with Session(engine) as session:
+        token = persist_active_session_tokens(session, session.get(User, 1))["access_token"]
+        other = persist_active_session_tokens(session, session.get(User, 2))["access_token"]
+        session.commit()
     previous_current=getattr(_state._tls,"current_app",None)
     previous_default=_state.default_app
     try:
@@ -92,6 +96,9 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
             async with AsyncClient(transport=ASGITransport(app=app),base_url="http://fixture.test") as client:
                 assert (await client.post("/runs/recommendation-audit/verifications",json=body)).status_code==401
                 assert (await client.post("/runs/recommendation-audit/verifications",json=body,headers={"Authorization":"Bearer invalid"})).status_code==401
+                legacy = JWTUtils.create_access_token(1, "fixture-1@invalid.test", "user")
+                assert (await client.post("/runs/recommendation-audit/verifications", json=body,
+                    headers={"Authorization": f"Bearer {legacy}"})).status_code == 401
                 headers={"Authorization":f"Bearer {token}"}
                 if recovery:
                     capabilities=(await client.get("/runs/recommendation-audit/comparison?run_id=10&market=india&symbol=FIXTUREEQ&exchange=NSE",headers=headers)).json()["capabilities"]

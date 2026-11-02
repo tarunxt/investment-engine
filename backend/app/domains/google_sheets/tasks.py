@@ -13,6 +13,7 @@ from app.domains.google_sheets.stock_service import (
     parse_complete_stock_recommendations,
 )
 from app.domains.jobs.models import Job
+from app.domains.jobs.public_projection import public_text
 from app.domains.jobs.output_contracts import NormalizationResult, export_tables
 from app.domains.jobs.output_contracts.schemas import SWING_COLUMNS
 from app.domains.jobs.output_contracts.validation import aliases, header_key
@@ -38,6 +39,8 @@ INSUFFICIENT_RECOMMENDATIONS_ERROR_MARKER = "returned insufficient recommendatio
 
 
 def _error_text(exc: Exception) -> str:
+    # Stored diagnostics retain their original bounded text; public returns and
+    # JobResponse/export projections minimize copies at their boundary.
     text = str(exc).strip()
     if text:
         return text[:500]
@@ -144,7 +147,7 @@ def _format_validated_output_for_sheet(
         table = tables.get(block.index)
         if table is None:
             if block.text:
-                rows.append([block.text])
+                rows.append([public_text(block.text)])
             continue
         table_headers, table_rows = _with_run_metadata_columns(
             list(table.headers),
@@ -176,11 +179,11 @@ def _format_validated_output_for_sheet(
     if result.findings:
         rows.append(["Validation findings", "Severity", "Code", "Message", "Source Fragment", "Source Row", "Source Line", "Field"])
         rows.extend([
-            "", finding.severity, finding.code, finding.message,
+            "", finding.severity, finding.code, public_text(finding.message),
             finding.source.fragment if finding.source else "",
             finding.source.row if finding.source else "",
             finding.source.line if finding.source and finding.source.line is not None else "",
-            finding.field or "",
+            public_text(finding.field or ""),
         ] for finding in result.findings)
     return headers, rows
 
@@ -273,7 +276,7 @@ def export_job_to_sheets_task(
                 job_repo.update_export_state(job, export_status="failed", export_error=reason)
                 _publish_job_update(job)
                 _refresh_run_status(db, job.id)
-                return {"status": "failed", "error": reason}
+                return {"status": "failed", "error": public_text(reason)}
 
             access_token = decrypt_token(cred.access_token_enc)
             refresh_token = (
@@ -397,7 +400,7 @@ def export_job_to_sheets_task(
                 "Export job %d to Sheets failed for user %d", job_id, user_id
             )
             if is_last_attempt:
-                return {"status": "failed", "error": _error_text(exc)}
+                return {"status": "failed", "error": public_text(_error_text(exc))}
             raise self.retry(exc=exc, countdown=10)
 
 
@@ -466,7 +469,7 @@ def export_run_to_sheets_task(
                 except ValueError as exc:
                     reason = f"Job {job.id}: {_error_text(exc)}"[:500]
                     run_repo.update_export_state(run, export_status="failed", export_error=reason)
-                    return {"status": "failed", "error": reason}
+                    return {"status": "failed", "error": public_text(reason)}
                 if validated is not None:
                     output_sections.append((job, run_job.stage, validated, []))
                     canonical_count += validated.coverage.canonical_rows
@@ -595,7 +598,7 @@ def export_run_to_sheets_task(
                 "Export run %d to Sheets failed for user %d", run_id, user_id
             )
             if is_last_attempt:
-                return {"status": "failed", "error": _error_text(exc)}
+                return {"status": "failed", "error": public_text(_error_text(exc))}
             raise self.retry(exc=exc, countdown=10)
 
 

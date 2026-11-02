@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from statistics import mean
+from math import isfinite
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -16,13 +18,14 @@ def _to_float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return float(value) if isfinite(value) else None
     if isinstance(value, str):
         cleaned = value.replace("$", "").replace("%", "").replace(",", "").strip()
         if not cleaned:
             return None
         try:
-            return float(cleaned)
+            numeric = float(cleaned)
+            return numeric if isfinite(numeric) else None
         except ValueError:
             return None
     return None
@@ -124,163 +127,86 @@ def _bucket_metric(
     ]
 
 
+ANALYSIS_VERSION = "bullpen-descriptive-v2"
+
+
+def normalize_declared_price(value: Any, unit: str | None) -> float | None:
+    """Normalize declared operands only; magnitude never establishes provenance."""
+    numeric = _to_float(value)
+    if numeric is None or not isinstance(unit, str) or unit not in {"cents", "unit_price"}:
+        return None
+    normalized = numeric / 100 if unit == "cents" else numeric
+    return normalized if 0 <= normalized <= 1 else None
+
+
 def generate_bullpen_post_trade_analysis(
     trade: Mapping[str, Any] | object,
 ) -> dict[str, Any]:
-    net_pnl = _to_float(_read(trade, "net_pnl")) or 0.0
-    buy_notional = _to_float(_read(trade, "buy_notional")) or _to_float(
-        _read(trade, "buy_filled_amount")
-    )
-    fees_total = _to_float(_read(trade, "fees_total")) or 0.0
-    buy_spread = _to_float(_read(trade, "buy_spread_score"))
-    buy_liquidity = _to_float(_read(trade, "buy_liquidity_score"))
-    buy_probability_delta = _to_float(_read(trade, "buy_probability_delta"))
-    buy_confidence = _to_float(_read(trade, "buy_confidence"))
-    best_possible_exit = _to_float(_read(trade, "best_possible_exit_price_after_buy"))
-    exit_price = _to_float(_read(trade, "sell_average_fill_price")) or _to_float(
-        _read(trade, "sell_requested_price")
-    )
-    drawdown = _to_float(_read(trade, "drawdown_while_held"))
-    sell_reason = str(_read(trade, "sell_reason") or "").strip()
-    final_tag = str(_read(trade, "final_tag") or "").strip()
-
-    reinforcement_signal = "NEUTRAL"
-    reinforcement_score = 0.0
-    pnl_percent = _to_float(_read(trade, "pnl_percent"))
-    if net_pnl > 0:
-        reinforcement_signal = "REWARD"
-        reinforcement_score = min(1.0, max(0.1, abs(net_pnl) / max(buy_notional or 1, 1)))
-    elif net_pnl < 0:
-        reinforcement_signal = "PENALTY"
-        reinforcement_score = -min(
-            1.0,
-            max(0.1, abs(net_pnl) / max(buy_notional or 1, 1)),
-        )
-
-    what_worked: list[str] = []
-    what_went_wrong: list[str] = []
-    suggestions: list[str] = []
-    mistake_category = "NONE"
-    human_review_required = False
-    should_avoid_similar_trade = False
-    should_increase_confidence = False
-
-    if net_pnl > 0:
-        what_worked.append("The trade closed green after fees.")
-    elif net_pnl < 0:
-        what_went_wrong.append("The trade finished red after fees.")
-
-    if buy_liquidity is not None and buy_liquidity < 0.35:
-        mistake_category = "LOW_LIQUIDITY"
-        what_went_wrong.append("Entry liquidity was weak.")
-        suggestions.append(
-            "Require stronger liquidity confirmation before buying low-volume markets."
-        )
-        should_avoid_similar_trade = net_pnl < 0
-
-    if buy_spread is not None and buy_spread < 0.35:
-        mistake_category = "POOR_LIQUIDITY_OR_SPREAD"
-        what_went_wrong.append("The spread was wide when the position was opened.")
-        suggestions.append("Avoid buying when spreadScore falls below 0.35.")
-        should_avoid_similar_trade = net_pnl < 0
-
-    if buy_confidence is not None and buy_confidence >= 0.75 and net_pnl < 0:
-        mistake_category = "OVERCONFIDENT_LLM"
-        what_went_wrong.append("Model confidence was high, but the outcome still lost.")
-        suggestions.append(
-            "Reduce confidence weight when the model is highly certain but the market edge is small."
-        )
-        human_review_required = True
-
-    if (
-        buy_probability_delta is not None
-        and abs(buy_probability_delta) < 3
-        and net_pnl < 0
-    ):
-        mistake_category = "WEAK_EDGE"
-        what_went_wrong.append("The entry edge was narrow relative to market pricing.")
-        suggestions.append("Penalize trades where probability delta is smaller than 3 points.")
-
-    if buy_notional and fees_total > 0 and net_pnl >= 0 and fees_total >= max(abs(net_pnl), 0.01):
-        mistake_category = "FEE_DRAG"
-        what_went_wrong.append("Fees consumed most of the gross edge.")
-        suggestions.append("Increase minimum expected value so fees do not erase the trade edge.")
-
-    if drawdown is not None and drawdown <= -0.15 and net_pnl < 0:
-        mistake_category = "LATE_EXIT"
-        what_went_wrong.append("The trade absorbed a large adverse move before exit.")
-        suggestions.append("Increase exit urgency after a fast adverse move exceeds 15%.")
-
-    if (
-        best_possible_exit is not None
-        and exit_price is not None
-        and best_possible_exit > exit_price * 1.2
-        and net_pnl >= 0
-    ):
-        mistake_category = "EARLY_EXIT"
-        what_went_wrong.append("The position kept improving after the exit.")
-        suggestions.append("Give profitable trades slightly more time before exiting when momentum stays favorable.")
-
-    if net_pnl > 0 and (buy_liquidity or 0) >= 0.6 and (buy_confidence or 0) >= 0.6:
-        what_worked.append("Confidence and liquidity were both supportive.")
-        suggestions.append("Increase weight for setups that combine solid liquidity with confident LLM agreement.")
-        should_increase_confidence = True
-
-    if final_tag in {"REDEEMED", "RULE_EXIT", "LLM_EXIT"}:
-        what_worked.append(f"Exit path followed the {final_tag.lower().replace('_', ' ')} workflow.")
-
-    exit_timing = "reasonable"
-    if mistake_category == "LATE_EXIT":
-        exit_timing = "too late"
-    elif mistake_category == "EARLY_EXIT":
-        exit_timing = "too early"
-
-    if not suggestions:
-        suggestions.append("Keep monitoring more closed trades before changing the rules.")
-
-    analysis_summary = (
-        f"Net P&L {'gain' if net_pnl >= 0 else 'loss'} of {net_pnl:.2f}"
-        + (f" ({pnl_percent:.2f}%)." if pnl_percent is not None else ".")
-    )
-    if what_went_wrong:
-        analysis_summary += f" Main issue: {what_went_wrong[0]}"
-    elif what_worked:
-        analysis_summary += f" Main strength: {what_worked[0]}"
-
+    pnl = _to_float(_read(trade, "net_pnl"))
+    confidence = _to_float(_read(trade, "buy_confidence"))
+    liquidity = _to_float(_read(trade, "buy_liquidity_score"))
+    spread = _to_float(_read(trade, "buy_spread_score"))
+    known_fees = _to_float(_read(trade, "fees_total"))
+    facts = []
+    leads = []
+    if pnl is None:
+        summary = "Net P&L is unknown; outcome not evaluated."
+    else:
+        outcome = "gain" if pnl > 0 else "loss" if pnl < 0 else "breakeven"
+        summary = f"Recorded net P&L {outcome} of {pnl:.2f}."
+        if known_fees is None:
+            summary += " Execution fee coverage is unknown; complete after-cost result is not verified."
+    if confidence is not None:
+        facts.append(f"Recorded confidence: {confidence:g}; scale/calibration not evaluated.")
+    if confidence is not None and confidence >= .75 and pnl is not None and pnl < 0:
+        leads.append("High recorded confidence and a loss co-occurred; this does not establish miscalibration or cause.")
+    if liquidity is not None and liquidity < .35:
+        leads.append("Low recorded liquidity score; any causal explanation is an unvalidated hypothesis for human review.")
+    if spread is not None and spread < .35:
+        leads.append("Low recorded spread score; any causal explanation is an unvalidated hypothesis for human review.")
+    metadata = _read(trade, "metadata_json") or {}
+    contract = metadata.get("analysis_price_contract", {}) if isinstance(metadata, Mapping) else {}
+    if not isinstance(contract, Mapping):
+        contract = {}
+    raw_peak = _to_float(_read(trade, "best_possible_exit_price_after_buy"))
+    raw_fill = _to_float(_read(trade, "sell_average_fill_price"))
     return {
-        "analysis_summary": analysis_summary,
-        "mistake_category": mistake_category,
-        "improvement_suggestion": suggestions[0],
-        "reinforcement_signal": reinforcement_signal,
-        "reinforcement_score": round(reinforcement_score, 4),
-        "should_avoid_similar_trade": should_avoid_similar_trade,
-        "should_increase_confidence_for_similar_trade": should_increase_confidence,
-        "human_review_required": human_review_required,
-        "what_worked": what_worked,
-        "what_went_wrong": what_went_wrong,
-        "exit_timing": exit_timing,
-        "entry_too_expensive": bool(net_pnl < 0 and buy_probability_delta is not None and buy_probability_delta < 0),
-        "liquidity_or_spread_issue": bool(
-            (buy_liquidity is not None and buy_liquidity < 0.35)
-            or (buy_spread is not None and buy_spread < 0.35)
-        ),
-        "llm_confidence_aligned": bool(
-            (buy_confidence is None)
-            or (net_pnl >= 0 and buy_confidence >= 0.6)
-            or (net_pnl < 0 and buy_confidence < 0.75)
-        ),
-        "suggested_platform_rule_changes": suggestions,
-        "suggested_prompt_changes": [
-            "Ask the model to explicitly justify why the edge is large enough after fees."
-        ]
-        if mistake_category in {"OVERCONFIDENT_LLM", "WEAK_EDGE"}
-        else [],
-        "suggested_risk_management_changes": [
-            "Escalate human review for high-confidence losses and repeated low-liquidity losses."
-        ]
-        if human_review_required or should_avoid_similar_trade
-        else [],
-        "sell_reason": sell_reason or None,
+        "algorithm_version": ANALYSIS_VERSION,
+        "calculated_at": datetime.now(UTC).isoformat(),
+        "source_trade_id": str(_read(trade, "id")) if _read(trade, "id") is not None else None,
+        "evidence_status": "descriptive_not_validated",
+        "analysis_summary": summary,
+        "mistake_category": "NOT_EVALUATED",
+        "improvement_suggestion": "Review descriptive evidence; no policy change is validated.",
+        "reinforcement_signal": "NOT_EVALUATED",
+        "reinforcement_score": None,
+        "should_avoid_similar_trade": False,
+        "should_increase_confidence_for_similar_trade": False,
+        "human_review_required": bool(leads),
+        "what_worked": facts,
+        "what_went_wrong": leads,
+        "exit_timing": "not evaluated",
+        "entry_too_expensive": False,
+        "liquidity_or_spread_issue": bool(leads and ((liquidity is not None and liquidity < .35) or (spread is not None and spread < .35))),
+        "llm_confidence_aligned": None,
+        "confidence_alignment_status": "not_evaluated",
+        "suggested_platform_rule_changes": [],
+        "suggested_prompt_changes": [],
+        "suggested_risk_management_changes": [],
+        "sell_reason": _read(trade, "sell_reason"),
+        "exit_analysis": {
+            "status": "not_evaluated",
+            "reason": "No approved bounded post-exit window or timestamped executable liquidity/cost evidence.",
+            "in_hold_maximum_raw": raw_peak,
+            "in_hold_maximum_unit": contract.get("in_hold_maximum_unit"),
+            "in_hold_maximum_unit_price": normalize_declared_price(raw_peak, contract.get("in_hold_maximum_unit")),
+            "fill_raw": raw_fill,
+            "fill_unit": contract.get("fill_unit"),
+            "fill_unit_price": normalize_declared_price(raw_fill, contract.get("fill_unit")) if contract.get("fill_source") == "verified_execution" else None,
+            "fill_source": contract.get("fill_source", "unknown"),
+            "requested_price_raw": _to_float(_read(trade, "sell_requested_price")),
+            "interpretation": "In-position observation; not an executable post-exit best price.",
+        },
     }
 
 
@@ -288,6 +214,10 @@ def build_trade_learning_insights(
     trades: Sequence[Mapping[str, Any] | object],
 ) -> dict[str, Any]:
     closed = [trade for trade in trades if _read(trade, "closed_at") is not None]
+    tag_population_counts: dict[str, int] = defaultdict(int)
+    for trade in closed:
+        for tag in _normalize_tags(_read(trade, "buy_computed_tags_json")):
+            tag_population_counts[tag] += 1
     tags_stats: dict[str, list[float]] = defaultdict(list)
     strategy_stats: dict[str, list[float]] = defaultdict(list)
     exit_reason_stats: dict[str, list[float]] = defaultdict(list)
@@ -312,7 +242,7 @@ def build_trade_learning_insights(
 
         if (_to_float(_read(trade, "buy_confidence")) or 0) >= 0.75 and pnl < 0:
             high_confidence_losses += 1
-        if (_to_float(_read(trade, "buy_liquidity_score")) or 1) < 0.35 and pnl < 0:
+        if _to_float(_read(trade, "buy_liquidity_score")) is not None and _to_float(_read(trade, "buy_liquidity_score")) < 0.35 and pnl < 0:
             low_liquidity_losses += 1
 
         hold = _to_int(_read(trade, "holding_period_seconds"))
@@ -350,25 +280,10 @@ def build_trade_learning_insights(
         key=lambda item: (item["average_pnl"], item["total_pnl"]),
     )
 
-    recommendations: list[str] = []
-    if low_liquidity_losses > 0:
-        recommendations.append(
-            "Losses cluster in weak-liquidity entries. Raise the minimum liquidity threshold."
-        )
-    if high_confidence_losses > 0:
-        recommendations.append(
-            "High-confidence losses are present. Recalibrate confidence thresholds before scaling size."
-        )
-    if unprofitable_tags:
-        recommendations.append(
-            f"Reduce weight for tag {unprofitable_tags[0]['tag']} because it underperformed."
-        )
-    if profitable_tags:
-        recommendations.append(
-            f"Increase weight for tag {profitable_tags[0]['tag']} because it produced the best average P&L."
-        )
+    recommendations = ["Descriptive selected-cohort results only; no weight, confidence or risk change is validated."]
 
     return {
+        "tag_population_counts": dict(tag_population_counts),
         "win_rate_by_tag": profitable_tags + unprofitable_tags,
         "average_pnl_by_tag": profitable_tags + unprofitable_tags,
         "total_pnl_by_strategy_version": [
@@ -395,7 +310,14 @@ def build_trade_learning_insights(
             value_key="buy_liquidity_score",
             bucket_fn=liquidity_bucket,
         ),
-        "losses_caused_by_low_liquidity": low_liquidity_losses,
+        "losses_caused_by_low_liquidity": 0,  # Legacy causal field cannot assert causation.
+        "losses_with_low_liquidity": low_liquidity_losses,
+        "evidence_status": "insufficient",
+        "validated_recommendations": [],
+        "closed_count": len(closed),
+        "known_outcome_count": sum(_to_float(_read(t, "net_pnl")) is not None for t in closed),
+        "unknown_outcome_count": sum(_to_float(_read(t, "net_pnl")) is None for t in closed),
+        "limitations": ["Selected cohort; raw-dollar means are not risk/stake matched.", "Event dependence, model versions and effective sample size are not validated.", "Costs/exposure, frozen candidate definitions, uncertainty, multiplicity and untouched chronological test are unverified."],
         "high_confidence_losses": high_confidence_losses,
         "profitable_tags": profitable_tags,
         "unprofitable_tags": unprofitable_tags,

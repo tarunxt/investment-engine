@@ -170,7 +170,7 @@ test('all full-history consumers delegate to the summary-first service and Scann
   assert.match(scanner, /if \(!ignore\) \{\s*setCountsStatus\('error'\)/);
 });
 
-function authSessionRegistration(service, session, user) {
+function authSessionRegistration(service, session, user, logoutRequestedRef = { current: false }) {
   const source = ts.createSourceFile('AuthProvider.tsx', read('../providers/AuthProvider.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let registration;
   function visit(node) {
@@ -179,7 +179,7 @@ function authSessionRegistration(service, session, user) {
   }
   visit(source);
   assert.ok(registration);
-  const register = new Function('apiService', 'session', 'user', `return (${registration.arguments[0].getText(source)});`)(service, session, user);
+  const register = new Function('apiService', 'session', 'user', 'logoutRequestedRef', `return (${registration.arguments[0].getText(source)});`)(service, session, user, logoutRequestedRef);
   return { phase: registration.expression.getText(source), register };
 }
 
@@ -241,4 +241,12 @@ test('Auth.js token refresh preserves the existing authenticated session generat
   const refreshed = await callback({ token, trigger: 'update', session: { accessToken: 'synthetic-after', refreshToken: 'synthetic-refresh-after', expiresIn: 900 } });
   assert.equal(refreshed.sessionGeneration, 'fixture-session-71');
   assert.equal(refreshed.accessToken, 'synthetic-after');
+});
+
+
+test('logout fence prevents delayed authenticated history identity restoration', () => {
+  const generations = [];
+  authSessionRegistration({ setSessionGeneration: (value) => generations.push(value) },
+    { generation: 'fixture-old-session' }, { id: 71 }, { current: true }).register();
+  assert.deepEqual(generations, ['anonymous']);
 });

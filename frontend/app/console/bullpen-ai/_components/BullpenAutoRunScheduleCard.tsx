@@ -1,5 +1,9 @@
 "use client";
 
+import { RunWarningsDialog, DecisionLlmOddsDialog, PlannedOrderDetailDialog, StageTwoLlmFailureDialog, StageTwoInputPromptDialog, StageTwoLlmEventInputDialog, StageTwoDecisionDetailDialog } from "./BullpenDeferredDetailPresentation";
+import { formatOddsPercent, formatUsdCost, formatPriceCents, isRecord, readFirstReturnedValue } from "./bullpenDetailPresentationSupport";
+import type { StageTwoDecisionDialogState, StageTwoDecisionDialogMode, StageTwoLlmEventInputDialogState, RunSummaryWarning, PlannedOrderDetailState, DecisionLlmOddsState, StageTwoRunSummaryStatus, StageTwoLlmRunSummaryRow, StageTwoLlmFailureDialogRow } from "./bullpenDetailPresentationSupport";
+
 import {
   useCallback,
   useEffect,
@@ -10,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import dynamic from "next/dynamic";
+import { getStageOneDialogEvidence } from "./bullpenStageOneEvidence";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -145,7 +150,7 @@ import {
   BullpenEventTrendsTable,
   type BullpenEventTableSnapshot,
 } from "./BullpenEventTrendsTable";
-import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
+import { BullpenDeferredRunHistoryContent as BullpenRunHistoryContent } from "./BullpenDeferredRunHistoryContent";
 import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import {
@@ -196,7 +201,10 @@ import {
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
 import { BullpenStage2ActionablesDialog } from "./BullpenStage2ActionablesDialog";
-import { BullpenStageOneExcelHistoryDialog } from "./BullpenStageOneExcelHistoryDialog";
+const BullpenStageOneExcelHistoryDialog = dynamic(
+  () => import("./BullpenStageOneExcelHistoryDialog").then((module) => module.BullpenStageOneExcelHistoryDialog),
+  { loading: () => <div role="status">Loading Excel scan history…</div> },
+);
 import { buildBullpenStage2Actionables } from "./bullpenStage2Actionables";
 import {
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
@@ -826,17 +834,11 @@ function preserveCompletedStageEvidence(
   };
 }
 
-type StageTwoDecisionDialogState = {
-  decision: BullpenAutoLiveDecision;
-  llmContext: Record<string, unknown> | null;
-};
 
-type StageTwoDecisionDialogMode = "tag" | "llm-inputs";
 
-type StageTwoLlmEventInputDialogState = {
-  title: string;
-  llmContext: Record<string, unknown> | null;
-};
+
+
+
 
 type Stage2To3StrategyDialogState = {
   sourceKey: string;
@@ -851,6 +853,7 @@ type StageTwoLlmRunBreakupKind =
   | "unique-llm-rows";
 
 type ScanCandidateDialogState = {
+  evidence: ReturnType<typeof getStageOneDialogEvidence>;
   runId?: string | null;
   mode: ScanCandidateDialogMode;
   isIndependentStageOne: boolean;
@@ -1075,10 +1078,7 @@ function formatIstDateTime(value: string | null | undefined) {
   });
 }
 
-function formatOddsPercent(value: number | null) {
-  if (value === null) return "—";
-  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
-}
+
 
 function formatOddsPair(yesOdds: number | null, noOdds: number | null) {
   return (
@@ -1117,13 +1117,7 @@ function formatMoney(value: number | null) {
   return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
-function formatUsdCost(value: number | null) {
-  if (value === null) return "—";
-  return `$${value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  })}`;
-}
+
 
 type ConsoleTradeAmountView = {
   tradeAmountUsd: number | null;
@@ -1329,10 +1323,7 @@ function missingStage2TargetsError(): ErrorState {
   };
 }
 
-function formatPriceCents(value: number | null) {
-  if (value === null) return "—";
-  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
-}
+
 
 function formatShares(value: number | null) {
   if (value === null) return "—";
@@ -2993,9 +2984,7 @@ function readStageTwoActionableDisplayContract(
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
+
 
 function normalizeMatchKey(value: string | null | undefined) {
   if (typeof value !== "string") return null;
@@ -3320,17 +3309,13 @@ function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
   );
 }
 
-type RunSummaryWarning = { label: string; detail: string };
+
 type RunSummaryDetails = {
   overview: string | null;
   warnings: RunSummaryWarning[];
 };
-type PlannedOrderDetailState = {
-  title: string;
-  summary: string;
-  detail: string;
-};
-type DecisionLlmOddsState = { decision: BullpenAutoLiveDecision };
+
+
 
 function getRunSummaryDetails(
   summary: string | null | undefined,
@@ -4509,6 +4494,30 @@ function stageOneCandidateOddsLookupId(
   return `stage-one-candidate-odds-${index}-${exactIdentity}`;
 }
 
+function useStageOneDialogFocus(onClose: () => void, childOpen = false, active = true) {
+  const root = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    root.current?.querySelector<HTMLElement>("button[aria-label^='Close']")?.focus();
+    return () => returnFocus.current?.focus();
+  }, [active]);
+  return {
+    ref: root,
+    onKeyDown: (event: import("react").KeyboardEvent<HTMLDivElement>) => {
+      if (childOpen) return;
+      if (event.key === "Escape") { event.stopPropagation(); onClose(); }
+      if (event.key !== "Tab") return;
+      const items = Array.from(root.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]') ?? [])
+        .filter(item => item.getClientRects().length > 0);
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    },
+  };
+}
+
 function StageOneOutputDialog({
   state,
   onClose,
@@ -4526,6 +4535,7 @@ function StageOneOutputDialog({
     useState(false);
   const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
     useState<BullpenQuestionRow | null>(null);
+  const dialogFocus = useStageOneDialogFocus(onClose, isReturnsPerDayFormulaDialogOpen || returnsPerDayQuestion !== null || state.mode === "all-scanned");
   const [latestOdds, setLatestOdds] = useState<
     Record<string, { yesOdds?: number | null; noOdds?: number | null }>
   >({});
@@ -4746,9 +4756,9 @@ function StageOneOutputDialog({
     });
   };
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+    <div {...dialogFocus} role="dialog" aria-modal="true" aria-label="Stage 1 output" className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               {showActivePositionsFirst
@@ -4757,11 +4767,11 @@ function StageOneOutputDialog({
             </p>
             <h2 className="text-xl font-semibold text-slate-950">
               {showActivePositionsFirst
-                ? `Positions (${state.activePositionCount})`
-                : `Fresh Bullpen Opportunities (${retainedCandidateCount})`}
+                ? `Positions (${state.evidence.positionsKnown ? state.activePositionCount : "Unknown"})`
+                : `Fresh Bullpen Opportunities (${state.evidence.candidatesKnown ? retainedCandidateCount : "Unknown"})`}
             </h2>
             <p className="text-sm text-slate-600">
-              Latest Bullpen Scan Stage 1 completed at{" "}
+              Saved Stage 1 completion time:{" "}
               {formatIstDateTime(state.scanCompletedAt)}.
             </p>
             {latestOddsFetchedAt ? (
@@ -4798,13 +4808,14 @@ function StageOneOutputDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
+          <p role="status" className="mb-4 text-sm text-slate-600">{state.evidence.label}</p>
           <div className="grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
                 Available for claim
               </p>
               <p className="mt-2 text-2xl font-semibold text-emerald-950">
-                {state.claimablePositionCount}
+                {state.evidence.claimsKnown ? state.claimablePositionCount : "Unknown"}
               </p>
             </div>
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
@@ -4812,7 +4823,7 @@ function StageOneOutputDialog({
                 Active Bullpen positions found
               </p>
               <p className="mt-2 text-2xl font-semibold text-amber-950">
-                {state.activePositionCount}
+                {state.evidence.positionsKnown ? state.activePositionCount : "Unknown"}
               </p>
             </div>
             <div className="rounded-2xl border border-pink-200 bg-pink-50 px-4 py-4">
@@ -4820,7 +4831,7 @@ function StageOneOutputDialog({
                 Fresh Bullpen Opportunities
               </p>
               <p className="mt-2 text-2xl font-semibold text-pink-950">
-                {retainedCandidateCount}
+                {state.evidence.candidatesKnown ? retainedCandidateCount : "Unknown"}
               </p>
             </div>
           </div>
@@ -4838,7 +4849,7 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  {state.claimablePositionCount}{" "}
+                  {state.evidence.claimsKnown ? state.claimablePositionCount : "Unknown"}{" "}
                   {state.claimablePositionCount === 1
                     ? "position"
                     : "positions"}
@@ -4907,8 +4918,7 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-sm text-emerald-700">
-                  No claimable Bullpen positions were recorded for this Stage 1
-                  scan.
+                  {state.evidence.claimsKnown && state.claimablePositionCount === 0 ? "No claimable Bullpen positions were recorded for this Stage 1 scan." : "Claimable position details are unavailable; absence is not established."}
                 </div>
               )}
             </section>
@@ -4925,7 +4935,7 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {state.activePositionCount}{" "}
+                  {state.evidence.positionsKnown ? state.activePositionCount : "Unknown"}{" "}
                   {state.activePositionCount === 1 ? "position" : "positions"}
                 </span>
               </div>
@@ -4940,9 +4950,9 @@ function StageOneOutputDialog({
                     }
                   />
                 </div>
-              ) : state.activePositionCount > 0 ? (
+              ) : state.evidence.positionsKnown && state.activePositionCount > 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  {state.activePositionCount} active Bullpen{" "}
+                  {state.evidence.positionsKnown ? state.activePositionCount : "Unknown"} active Bullpen{" "}
                   {state.activePositionCount === 1
                     ? "position was"
                     : "positions were"}{" "}
@@ -4951,8 +4961,7 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  No active Bullpen positions were recorded for this Stage 1
-                  scan.
+                  {state.evidence.positionsKnown && state.activePositionCount === 0 ? "No active Bullpen positions were recorded for this Stage 1 scan." : "Active position details are unavailable; absence is not established."}
                 </div>
               )}
             </section>
@@ -4968,7 +4977,7 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {retainedCandidateCount}{" "}
+                  {state.evidence.candidatesKnown ? retainedCandidateCount : "Unknown"}{" "}
                   {retainedCandidateCount === 1 ? "candidate" : "candidates"}
                 </span>
               </div>
@@ -4986,8 +4995,7 @@ function StageOneOutputDialog({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-                  No new event opportunity candidates were recorded for this
-                  Stage 1 scan.
+                  {state.evidence.candidatesKnown && retainedCandidateCount === 0 ? "No new event opportunity candidates were recorded for this Stage 1 scan." : "Candidate details are unavailable; absence is not established."}
                 </div>
               )}
             </section>
@@ -5033,9 +5041,11 @@ function AllScannedEventsDialog({
   const eventRowsPerPage = 100;
   const [eventQuery, setEventQuery] = useState("");
   const [eventPage, setEventPage] = useState(1);
-  const omittedRowCount = Math.max(0, state.totalScanned - retainedRowCount);
+  const omittedRowCount = state.evidence.scanKnown ? Math.max(0, state.totalScanned - retainedRowCount) : 0;
   const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
   const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
+  const dialogFocus = useStageOneDialogFocus(onClose, selectedFilterReason !== null);
+  const filterDetailFocus = useStageOneDialogFocus(() => setSelectedFilterReason(null), false, selectedFilterReason !== null);
   const normalizedEventQuery = eventQuery.trim().toLowerCase();
   const matchingCandidates = normalizedEventQuery
     ? state.candidates.filter((candidate) =>
@@ -5084,9 +5094,9 @@ function AllScannedEventsDialog({
     : [];
 
   return (
-    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+    <div {...dialogFocus} role="dialog" aria-modal="true" aria-label="All scanned events" className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Stage 1 scan</p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -5105,7 +5115,7 @@ function AllScannedEventsDialog({
                 {activeTab === "analysis" ? (
                   "Filtered Events Analysis"
                 ) : (
-                  <>All Events Scanned ({state.totalScanned})</>
+                  <>All Events Scanned ({state.evidence.scanKnown ? state.totalScanned : "Unknown"})</>
                 )}
               </h2>
             </div>
@@ -5131,19 +5141,20 @@ function AllScannedEventsDialog({
           </div>
         </div>
         <div className="flex-1 overflow-auto p-6">
+          <p role="status" className="mb-4 text-sm text-slate-600">{state.evidence.label}</p>
           {activeTab === "analysis" ? (
             <>
               <div className="mb-4 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Filtered events</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Retained filtered events</p>
                   <p className="mt-1 text-2xl font-semibold text-slate-950">{filteredCandidates.length.toLocaleString("en-IN")}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Distinct reasons</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Retained distinct reasons</p>
                   <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.length.toLocaleString("en-IN")}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Total reason hits</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Retained reason hits</p>
                   <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.reduce((total, group) => total + group.candidates.length, 0).toLocaleString("en-IN")}</p>
                 </div>
               </div>
@@ -5173,7 +5184,7 @@ function AllScannedEventsDialog({
                             {group.candidates.length.toLocaleString("en-IN")}
                           </button>
                         </td>
-                        <td className="px-4 py-3 text-right text-slate-600">{state.totalScanned > 0 ? `${((group.candidates.length / state.totalScanned) * 100).toFixed(1)}%` : "—"}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{state.evidence.scanKnown && state.totalScanned > 0 ? `${((group.candidates.length / state.totalScanned) * 100).toFixed(1)}%` : "—"}</td>
                         <td className="px-4 py-3 text-right text-slate-600">{filteredCandidates.length > 0 ? `${((group.candidates.length / filteredCandidates.length) * 100).toFixed(1)}%` : "—"}</td>
                       </tr>
                     ))}
@@ -5266,8 +5277,8 @@ function AllScannedEventsDialog({
               <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950">
                 <p className="font-semibold">What the saved run does show</p>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
-                  <li>{state.totalScanned.toLocaleString("en-IN")} events were scanned.</li>
-                  <li>{state.passedFilterCount.toLocaleString("en-IN")} events passed Stage 1 filters.</li>
+                  <li>{state.evidence.scanKnown ? `${state.totalScanned.toLocaleString("en-IN")} events were scanned.` : "Scanned event count unknown."}</li>
+                  <li>{state.evidence.candidatesKnown ? `${state.passedFilterCount.toLocaleString("en-IN")} events passed Stage 1 filters.` : "Passed-filter event count unknown."}</li>
                   <li>{state.rejectedFilterCount === null ? "The rejected-event count was not retained." : `${state.rejectedFilterCount.toLocaleString("en-IN")} events were filtered out.`}</li>
                 </ul>
               </div>
@@ -5278,9 +5289,9 @@ function AllScannedEventsDialog({
         </div>
       </div>
       {selectedFilterReason ? (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
+        <div {...filterDetailFocus} role="dialog" aria-modal="true" aria-label="Stage 1 filter detail" className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
           <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+            <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Stage 1 filter drill-down</p>
                 <h3 className="mt-2 text-lg font-semibold text-slate-950">{selectedFilterReason}</h3>
@@ -5291,6 +5302,7 @@ function AllScannedEventsDialog({
               </button>
             </div>
             <div className="flex-1 overflow-auto p-6">
+          <p role="status" className="mb-4 text-sm text-slate-600">{state.evidence.label}</p>
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -5444,7 +5456,7 @@ function Stage2TransferQueueMetricInfoDialog({
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
       <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Saved Stage 2 Transfer Queue
@@ -5520,6 +5532,7 @@ function buildRunDetailScanCandidateDialogState({
   mode: ScanCandidateDialogMode;
   activePositionsFallback?: WorkflowStageView["activePositionsFound"];
 }): ScanCandidateDialogState {
+  const evidence = getStageOneDialogEvidence(stage);
   const activePositionCounts = getStageActivePositionCounts(stage);
   const stageOneStats = getStageOneStats(stage);
   const retainedActivePositionRows =
@@ -5536,6 +5549,7 @@ function buildRunDetailScanCandidateDialogState({
   const detailedRows =
     mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
   const emptyRowsReason =
+    !evidence.scanKnown ? evidence.label :
     detailedRows.length > 0
       ? null
       : stage.state === "current"
@@ -5545,6 +5559,7 @@ function buildRunDetailScanCandidateDialogState({
           : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
 
   return {
+    evidence,
     mode,
     runId: run?.id ?? null,
     isIndependentStageOne: stage.outputs.independent_stage1_scan === true,
@@ -5552,7 +5567,7 @@ function buildRunDetailScanCandidateDialogState({
     scanCompletedAt: stage.timerCompletedAt,
     totalScanned: stageOneStats.totalScanned,
     passedFilterCount: stageOneStats.passedFilters,
-    rejectedFilterCount,
+    rejectedFilterCount: evidence.complete ? rejectedFilterCount : null,
     emptyRowsReason,
     candidates: buildScanCandidateDialogRows({
       candidates: detailedRows,
@@ -6266,169 +6281,11 @@ export function BullpenRunDetailScreen({
   );
 }
 
-function RunWarningsDialog({
-  warnings,
-  onClose,
-}: {
-  warnings: RunSummaryWarning[];
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-        <div className="flex items-start justify-between gap-4 border-b border-amber-100 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
-              Brief warnings / errors
-            </p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">
-              Detailed messages
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close warnings"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="overflow-y-auto px-6 py-5">
-          <div className="space-y-3">
-            {warnings.map((warning, index) => (
-              <div
-                key={`${warning.label}-${index}`}
-                className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4"
-              >
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">
-                  {warning.label}
-                </p>
-                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
-                  {warning.detail}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function DecisionLlmOddsDialog({
-  state,
-  onClose,
-}: {
-  state: DecisionLlmOddsState;
-  onClose: () => void;
-}) {
-  const { decision } = state;
-  return (
-    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-700">
-              LLM Odds Breakdown
-            </p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">
-              {decision.market_title}
-            </h3>
-            <p className="mt-2 text-sm text-slate-600">
-              Consensus Yes{" "}
-              {formatOddsPercent(decision.fair_yes_probability_pct ?? null)} ·
-              Consensus No{" "}
-              {formatOddsPercent(decision.fair_no_probability_pct ?? null)}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close LLM odds breakdown"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="overflow-y-auto px-6 py-5">
-          {decision.llm_outputs.length ? (
-            <div className="space-y-3">
-              {decision.llm_outputs.map((output, index) => (
-                <div
-                  key={`${output.provider}-${output.model}-${index}`}
-                  className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-950">
-                      {output.provider} · {output.model}
-                    </p>
-                    <div className="flex gap-2 text-xs font-semibold">
-                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">
-                        Yes {formatOddsPercent(output.llm_yes_odds ?? null)}
-                      </span>
-                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">
-                        No {formatOddsPercent(output.llm_no_odds ?? null)}
-                      </span>
-                    </div>
-                  </div>
-                  {output.rationale ? (
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                      {output.rationale}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              No per-model LLM outputs were recorded for this decision.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function PlannedOrderDetailDialog({
-  state,
-  onClose,
-}: {
-  state: PlannedOrderDetailState;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Planned but not submitted
-            </p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">
-              {state.title}
-            </h3>
-            <p className="mt-2 text-sm text-slate-600">{state.summary}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close planned order detail"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="overflow-y-auto px-6 py-5">
-          <pre className="whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-            {state.detail}
-          </pre>
-        </div>
-      </div>
-    </div>
-  );
-}
+
+
+
 
 function getDecisionDaysUntilClose(decision: BullpenAutoLiveDecision) {
   if (decision.hours_remaining && decision.hours_remaining > 0) {
@@ -7211,37 +7068,13 @@ function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
   );
 }
 
-type StageTwoRunSummaryStatus =
-  | "completed"
-  | "failed"
-  | "partial"
-  | "pending"
-  | "running";
+
 
 const STAGE_TWO_LLM_IDENTITY_ERROR =
   "Data integrity error: Stage 2 recorded an LLM target execution without a provider/model identity.";
-type StageTwoLlmRunSummaryRow = {
-  key: string;
-  provider: string;
-  model: string;
-  displayModel: string;
-  requestedModel: string | null;
-  status: StageTwoRunSummaryStatus;
-  runtime: string;
-  cost: number | null;
-  error: string | null;
-  failureCategory: string | null;
-  firstError: Record<string, unknown> | null;
-  lastError: Record<string, unknown> | null;
-  batchErrors: Record<string, unknown>[];
-  failedEventCount: number | null;
-  invalidEventCount: number | null;
-  blockedEventCount: number | null;
-  retryRequestCount: number | null;
-  recoveryBatchCount: number | null;
-};
 
-type StageTwoLlmFailureDialogRow = StageTwoLlmRunSummaryRow;
+
+
 
 function formatStageTwoRuntimeSeconds(value: number | null) {
   if (value === null) return "—";
@@ -7559,151 +7392,9 @@ function getStageTwoLlmRunSummaryRows(
   ].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
 }
 
-function getStageTwoLlmFailureFixAdvice(row: StageTwoLlmFailureDialogRow) {
-  const error = (row.error ?? "").toLowerCase();
-  const provider = row.provider.toLowerCase();
 
-  if (
-    /api key|authentication|unauthorized|permission|credential|token/.test(
-      error,
-    )
-  ) {
-    return `Check the ${row.provider} API key/credentials in the backend environment, restart investor-backend and investor-celery-worker, then rerun Stage 2.`;
-  }
-  if (/rate limit|quota|429|resource exhausted|too many requests/.test(error)) {
-    return `Reduce ${row.provider} concurrency or selected models, wait for quota to recover, verify billing/quota, then rerun this LLM.`;
-  }
-  if (
-    /timeout|timed out|deadline|network|fetch failed|connection|econnreset/.test(
-      error,
-    )
-  ) {
-    return `Check provider connectivity from the worker, increase/retry-safe task timeout if needed, and rerun after the network/provider stabilizes.`;
-  }
-  if (/json|parse|schema|invalid|malformed|unusable/.test(error)) {
-    return `Review the Stage 2 prompt/schema instructions for ${row.model}, keep the model response JSON-only, and rerun this model.`;
-  }
-  if (provider.includes("gemini")) {
-    return "Verify Gemini model availability, API key, quota, and safety/block settings before rerunning this Gemini target.";
-  }
-  if (provider.includes("openai")) {
-    return "Verify OpenAI model access, API key, project billing/quota, and request limits before rerunning this OpenAI target.";
-  }
-  if (provider.includes("deepseek")) {
-    return "Verify Deepseek API key, model availability, account credits/quota, and request limits before rerunning this Deepseek target.";
-  }
-  return "Open backend/Celery logs for the exact traceback, fix the provider/configuration issue, then rerun Stage 2 for this model.";
-}
 
-function StageTwoLlmFailureDialog({
-  row,
-  onClose,
-}: {
-  row: StageTwoLlmFailureDialogRow;
-  onClose: () => void;
-}) {
-  const errorMessage =
-    row.error || "No safe provider error was captured for this target.";
-  const diagnosticJson = JSON.stringify(
-    {
-      provider: row.provider,
-      requested_model: row.requestedModel,
-      actual_model: row.model,
-      failure_category: row.failureCategory,
-      first_error: row.firstError,
-      last_error: row.lastError,
-      batch_errors: row.batchErrors,
-    },
-    null,
-    2,
-  );
-  const diagnostics = [
-    ["Runtime", row.runtime],
-    ["Cost", formatUsdCost(row.cost)],
-    ["Failure category", row.failureCategory ?? "—"],
-    ["Requested model", row.requestedModel ?? "—"],
-    ["Actual model", row.model],
-    ["Failed events", row.failedEventCount?.toLocaleString("en-IN") ?? "—"],
-    ["Invalid events", row.invalidEventCount?.toLocaleString("en-IN") ?? "—"],
-    ["Blocked events", row.blockedEventCount?.toLocaleString("en-IN") ?? "—"],
-    ["Retry requests", row.retryRequestCount?.toLocaleString("en-IN") ?? "—"],
-    [
-      "Recovery batches",
-      row.recoveryBatchCount?.toLocaleString("en-IN") ?? "—",
-    ],
-  ];
 
-  return (
-    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-4">
-      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-red-200 bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-6 py-5">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">
-              LLM failure details
-            </p>
-            <h3 className="mt-1 text-xl font-extrabold text-slate-950">
-              {row.provider} · {row.model}
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-100"
-            aria-label="Close LLM failure details"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="space-y-5 px-6 py-5">
-          <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              Why it failed / error
-            </p>
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-800">
-              {errorMessage}
-            </pre>
-          </section>
-          <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              What to do to fix it
-            </p>
-            <p className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-              {getStageTwoLlmFailureFixAdvice(row)}
-            </p>
-          </section>
-          <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              Run diagnostics
-            </p>
-            <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-              {diagnostics.map(([label, value]) => (
-                <div
-                  key={label}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-                >
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
-                    {label}
-                  </dt>
-                  <dd className="mt-1 font-mono text-sm font-bold text-slate-900">
-                    {value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-          <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-              Copyable diagnostic JSON
-            </p>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-800">
-              {diagnosticJson}
-            </pre>
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
   if (status === "completed")
@@ -8599,35 +8290,13 @@ function getStageTwoDecisionLlmContext(
   );
 }
 
-function hasReturnedValue(value: unknown) {
-  return value !== undefined && value !== null && value !== "";
-}
 
-function formatJsonForDisplay(value: unknown) {
-  if (!hasReturnedValue(value)) return "Not returned for this run.";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
 
-function readNestedRecord(
-  value: unknown,
-  keys: string[],
-): Record<string, unknown> | null {
-  let cursor = value;
-  for (const key of keys) {
-    if (!isRecord(cursor)) return null;
-    cursor = cursor[key];
-  }
-  return isRecord(cursor) ? cursor : null;
-}
 
-function readFirstReturnedValue(...values: unknown[]) {
-  return values.find(hasReturnedValue);
-}
+
+
+
+
 
 function getStageTwoRunPromptTemplate(
   stage: WorkflowStageView | null | undefined,
@@ -8635,406 +8304,25 @@ function getStageTwoRunPromptTemplate(
   return readFirstReturnedValue(stage?.outputs?.llm_prompt_template);
 }
 
-function getStageTwoDisplayedPrompt(
-  llmContext: Record<string, unknown> | null,
-  promptTemplate: unknown,
-) {
-  return readFirstReturnedValue(llmContext?.llm_prompt, promptTemplate);
-}
 
-function getStageTwoLlmPromptInputs(
-  llmContext: Record<string, unknown> | null,
-) {
-  return readFirstReturnedValue(
-    llmContext?.llm_prompt_inputs,
-    llmContext?.prompt_inputs,
-  );
-}
 
-function getStageTwoLlmPromptInputMarket(
-  llmContext: Record<string, unknown> | null,
-) {
-  return readNestedRecord(getStageTwoLlmPromptInputs(llmContext), ["market"]);
-}
 
-function getStageTwoLlmPromptInputEvidencePacket(
-  llmContext: Record<string, unknown> | null,
-) {
-  return readFirstReturnedValue(
-    llmContext?.evidence_packet,
-    readNestedRecord(getStageTwoLlmPromptInputs(llmContext), [
-      "evidence_packet",
-    ]),
-  );
-}
 
-function getStageTwoLlmMissingValueReason(
-  label: string,
-  primaryValue: unknown,
-  fallbackValue?: unknown,
-) {
-  if (hasReturnedValue(primaryValue)) return null;
-  if (hasReturnedValue(fallbackValue)) {
-    return `${label} was not returned as a top-level Stage 2 field for this run, so the console is showing it from the organised prompt inputs captured with the LLM review.`;
-  }
-  return `${label} was not returned in this run payload. This usually means the run was created before that field was persisted, or the upstream Polymarket scan did not supply that optional value for this market.`;
-}
 
-function getStageTwoPromptMissingValueReason(
-  label: string,
-  llmContext: Record<string, unknown> | null,
-  promptTemplate: unknown,
-) {
-  const prompt = llmContext?.llm_prompt;
-  if (hasReturnedValue(prompt)) return null;
-  if (hasReturnedValue(promptTemplate)) {
-    return `${label} was not returned as a per-row Stage 2 field for this run, so the console is showing the saved Stage 2 prompt template used for shared LLM execution.`;
-  }
-  return getStageTwoLlmMissingValueReason(label, prompt);
-}
 
-function MissingValueNote({ children }: { children: ReactNode }) {
-  return (
-    <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-4 text-amber-800">
-      {children}
-    </p>
-  );
-}
 
-function StageTwoInputPromptDialog({
-  llmContext,
-  promptTemplate,
-  onClose,
-}: {
-  llmContext: Record<string, unknown> | null;
-  promptTemplate: unknown;
-  onClose: () => void;
-}) {
-  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
-  const missingReason = getStageTwoPromptMissingValueReason(
-    "Stage 2 Input prompt",
-    llmContext,
-    promptTemplate,
-  );
 
-  return (
-    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Stage 2 Input prompt
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              Stage 2 Input prompt
-            </h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close Stage 2 input prompt"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
-          <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs leading-5 text-slate-800">
-            {formatJsonForDisplay(prompt)}
-          </pre>
-          {missingReason ? (
-            <MissingValueNote>{missingReason}</MissingValueNote>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function StageTwoLlmEventInputDialog({
-  state,
-  promptTemplate,
-  onClose,
-}: {
-  state: StageTwoLlmEventInputDialogState;
-  promptTemplate: unknown;
-  onClose: () => void;
-}) {
-  const { title, llmContext } = state;
-  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
-  const promptInputs = getStageTwoLlmPromptInputs(llmContext);
-  const promptInputMarket = getStageTwoLlmPromptInputMarket(llmContext);
-  const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
-  const promptMissingReason = getStageTwoPromptMissingValueReason(
-    "Common prompt sent to LLM",
-    llmContext,
-    promptTemplate,
-  );
-  const eventInputEntries = [
-    ["market_id", llmContext?.market_id, promptInputMarket?.market_id],
-    ["slug", llmContext?.slug, promptInputMarket?.slug],
-    [
-      "question",
-      llmContext?.question ?? llmContext?.market_title,
-      promptInputMarket?.question,
-    ],
-    ["market_url", llmContext?.market_url, promptInputMarket?.market_url],
-    [
-      "current_yes_odds",
-      llmContext?.current_yes_odds,
-      promptInputMarket?.current_yes_odds,
-    ],
-    [
-      "current_no_odds",
-      llmContext?.current_no_odds,
-      promptInputMarket?.current_no_odds,
-    ],
-    ["volume_usd", llmContext?.volume_usd, promptInputMarket?.volume_usd],
-    [
-      "liquidity_usd",
-      llmContext?.liquidity_usd,
-      promptInputMarket?.liquidity_usd,
-    ],
-    ["close_time", llmContext?.close_time, promptInputMarket?.close_time],
-    ["theme", llmContext?.theme, promptInputMarket?.theme],
-    ["source", llmContext?.source, promptInputMarket?.source],
-  ] as const;
 
-  return (
-    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Event LLM input
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              {title}
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Input data and common prompt used for the LLM review of this
-              event.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close event LLM input"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
-              <p className="font-semibold text-sky-950">
-                Easy-read event input
-              </p>
-              <dl className="mt-3 space-y-2">
-                {eventInputEntries.map(([key, primaryValue, fallbackValue]) => {
-                  const value = readFirstReturnedValue(
-                    primaryValue,
-                    fallbackValue,
-                  );
-                  const missingReason = getStageTwoLlmMissingValueReason(
-                    key.replaceAll("_", " "),
-                    primaryValue,
-                    fallbackValue,
-                  );
-                  return (
-                    <div key={key} className="rounded-xl bg-white/80 px-3 py-2">
-                      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        {key.replaceAll("_", " ")}
-                      </dt>
-                      <dd className="mt-1 break-words font-medium text-slate-900">
-                        {formatJsonForDisplay(value)}
-                      </dd>
-                      {missingReason ? (
-                        <MissingValueNote>{missingReason}</MissingValueNote>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </dl>
-            </section>
-            <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
-              <p className="font-semibold text-violet-950">
-                Common prompt sent to LLM
-              </p>
-              <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
-                {formatJsonForDisplay(prompt)}
-              </pre>
-              {promptMissingReason ? (
-                <MissingValueNote>{promptMissingReason}</MissingValueNote>
-              ) : null}
-            </section>
-          </div>
-          <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="font-semibold text-slate-950">
-              Full organised prompt inputs
-            </p>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">
-              {formatJsonForDisplay(promptInputs)}
-            </pre>
-          </section>
-          <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-            <p className="font-semibold text-amber-950">Evidence packet</p>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
-              {formatJsonForDisplay(evidencePacket)}
-            </pre>
-            {getStageTwoLlmMissingValueReason(
-              "Evidence packet",
-              llmContext?.evidence_packet,
-              evidencePacket,
-            ) ? (
-              <MissingValueNote>
-                {getStageTwoLlmMissingValueReason(
-                  "Evidence packet",
-                  llmContext?.evidence_packet,
-                  evidencePacket,
-                )}
-              </MissingValueNote>
-            ) : null}
-          </section>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function StageTwoDecisionDetailDialog({
-  mode,
-  state,
-  promptTemplate,
-  onClose,
-}: {
-  mode: StageTwoDecisionDialogMode;
-  state: StageTwoDecisionDialogState;
-  promptTemplate: unknown;
-  onClose: () => void;
-}) {
-  const { decision, llmContext } = state;
-  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
-  const promptInputs = getStageTwoLlmPromptInputs(llmContext);
-  const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
-  const title =
-    mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
-  const promptMissingReason = getStageTwoPromptMissingValueReason(
-    "Prompt sent to the LLM",
-    llmContext,
-    promptTemplate,
-  );
 
-  return (
-    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              {title}
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              {decision.market_title}
-            </h2>
-            <p className="mt-2 text-sm text-slate-600">
-              {decision.decision} · {decision.risk_status} · {decision.side}{" "}
-              side · Current YES/NO{" "}
-              {formatPriceCents(decision.current_yes_odds ?? null)} /{" "}
-              {formatPriceCents(decision.current_no_odds ?? null)}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close decision details"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
-          {mode === "tag" ? (
-            <div className="space-y-4">
-              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="font-semibold text-slate-950">
-                  What this tag means
-                </p>
-                <p className="mt-2 leading-6">
-                  Action <b>{decision.decision}</b> with risk status{" "}
-                  <b>{decision.risk_status}</b> means the Stage 2 LLM/rules
-                  pipeline classified this event as{" "}
-                  {decision.decision === "EXIT"
-                    ? "an event exit candidate that should move to the exit flow"
-                    : decision.decision === "SKIP"
-                      ? "not currently actionable for investment"
-                      : "an actionable portfolio decision"}
-                  .
-                </p>
-              </section>
-              <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="font-semibold text-slate-950">
-                  Why this event was tagged this way
-                </p>
-                <p className="mt-2 leading-6">
-                  <span className="font-semibold">Summary:</span>{" "}
-                  {decision.summary || decision.reason}
-                </p>
-                <p className="mt-2 leading-6">
-                  <span className="font-semibold">Rationale:</span>{" "}
-                  {decision.rationale || decision.reason}
-                </p>
-                {decision.exit_signals.length ? (
-                  <ul className="mt-3 list-disc space-y-1 pl-5">
-                    {decision.exit_signals.map((signal, index) => (
-                      <li key={`${signal.reasonCode}-${index}`}>
-                        <b>{signal.label}:</b> {signal.description}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </section>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
-                <p className="font-semibold text-violet-950">
-                  Prompt sent to the LLM
-                </p>
-                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
-                  {formatJsonForDisplay(prompt)}
-                </pre>
-                {promptMissingReason ? (
-                  <MissingValueNote>{promptMissingReason}</MissingValueNote>
-                ) : null}
-              </section>
-              <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="font-semibold text-slate-950">
-                  Organised prompt inputs
-                </p>
-                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">
-                  {formatJsonForDisplay(promptInputs)}
-                </pre>
-              </section>
-              <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
-                <p className="font-semibold text-amber-950">Evidence packet</p>
-                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
-                  {formatJsonForDisplay(evidencePacket)}
-                </pre>
-              </section>
-              {!llmContext ? (
-                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">
-                  This run did not return a matching Stage 2 LLM review context
-                  for this decision.
-                </p>
-              ) : null}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+
+
+
+
+
+
+
 
 function getStageTwoBreakupMatchKey(value: string | null | undefined) {
   return normalizeMatchKey(value);
@@ -11389,6 +10677,18 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [isExcelHistoryDialogOpen, setIsExcelHistoryDialogOpen] =
     useState(false);
+  const [excelHistoryPresentationRequested, setExcelHistoryPresentationRequested] = useState(false);
+  // Keep the loaded dialog mounted after first use so close/reopen retains its state.
+  // Escape also works while the presentation chunk is loading.
+  useEffect(() => {
+    if (!isExcelHistoryDialogOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsExcelHistoryDialogOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isExcelHistoryDialogOpen]);
+
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
   const [triggerHistoryItems, setTriggerHistoryItems] = useState<
@@ -11445,6 +10745,13 @@ export function BullpenAutoRunScheduleCard({
     useState<Stage2To3StrategyDialogState | null>(null);
   const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
     useState(false);
+  const tradeAmountInfoDialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isTradeAmountInfoDialogOpen) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    tradeAmountInfoDialogRef.current?.querySelector<HTMLElement>("button[aria-label='Close trade amount formula']")?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [isTradeAmountInfoDialogOpen]);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
   const [consoleScanScope, setConsoleScanScope] = useState<
     "trending" | "full_universe"
@@ -15364,7 +14671,7 @@ export function BullpenAutoRunScheduleCard({
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                         onOpenScanFilters={onOpenScanFilters}
-                        onOpenExcelHistory={() => setIsExcelHistoryDialogOpen(true)}
+                        onOpenExcelHistory={() => { setExcelHistoryPresentationRequested(true); setIsExcelHistoryDialogOpen(true); }}
                         workspaceProfile={workspaceProfile} />
                     </div>
                     <div className={`mt-5 border-t pt-3 ${isStageOneActive ? "border-amber-200/80" : "border-emerald-200/80"}`}>
@@ -16015,11 +15322,11 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        <BullpenStageOneExcelHistoryDialog
+        {excelHistoryPresentationRequested ? <BullpenStageOneExcelHistoryDialog
           open={isExcelHistoryDialogOpen}
           onClose={() => setIsExcelHistoryDialogOpen(false)}
           workspaceProfile={workspaceProfile}
-        />
+        /> : null}
 
         {isEventExitStrategiesDialogOpen ? (
           <BullpenEventExitStrategiesDialog
@@ -16127,7 +15434,26 @@ export function BullpenAutoRunScheduleCard({
         ) : null}
 
         {isTradeAmountInfoDialogOpen ? (
-          <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+          <div
+            ref={tradeAmountInfoDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Trade amount formula"
+            onKeyDown={(event) => {
+              // Leave any future child dialog's keyboard handling to that child.
+              if ((event.target as HTMLElement).closest('[role="dialog"]') !== event.currentTarget) return;
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setIsTradeAmountInfoDialogOpen(false);
+              }
+              if (event.key !== "Tab") return;
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]'))
+                .filter(item => item.getClientRects().length > 0);
+              const first = items[0], last = items[items.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }}
+            className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
             <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>

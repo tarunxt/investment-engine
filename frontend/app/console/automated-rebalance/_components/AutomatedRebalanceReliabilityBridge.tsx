@@ -1,5 +1,6 @@
 "use client";
 
+import { captureWorkflowOwner, requireWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -10,6 +11,7 @@ import {
 } from "react";
 import { Loader2, X } from "lucide-react";
 
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { normalizeError } from "@/app/console/dashboard/_components/dashboardOverviewUtils";
 import { apiService } from "@/services/api";
 import type { ApiRequestControl } from "@/services/api.types";
@@ -53,6 +55,7 @@ const RUN_DETAIL_TIMEOUT_MS = 15_000;
 const ACTIVE_RUN_CACHE_MS = 2_500;
 const TERMINAL_RUN_CACHE_MS = 60_000;
 const runDetailCache = new Map<number, CachedRun>();
+onWorkflowOwnerInvalidated(() => runDetailCache.clear());
 let safeFullRunAdapterInstalled = false;
 
 const TERMINAL_RUN_STATUSES = new Set([
@@ -131,21 +134,29 @@ async function loadRunDetailWithRetry(
   runId: number,
   options?: ApiRequestControl,
 ): Promise<RunResponse> {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal?.aborted) throw abortError();
   const requestOptions: ApiRequestControl = {
     ...options,
     timeoutMs: Math.max(options?.timeoutMs ?? 0, RUN_DETAIL_TIMEOUT_MS),
   };
   try {
-    return await apiService.getRun(runId, requestOptions);
+    const run = await apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    return run;
   } catch (error) {
+    requireWorkflowOwner(owner);
     if (options?.signal?.aborted) throw abortError();
     await wait(250);
-    return apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    const run = await apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    return run;
   }
 }
 
 function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal) return loadRunDetailWithRetry(runId, options);
 
   pruneRunDetailCache();
@@ -158,6 +169,7 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
   };
   entry.promise = loadRunDetailWithRetry(runId)
     .then((run) => {
+      requireWorkflowOwner(owner);
       entry.expiresAt =
         Date.now() +
         (TERMINAL_RUN_STATUSES.has((run.status || "").toLowerCase())
@@ -166,7 +178,7 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
       return run;
     })
     .catch((error) => {
-      runDetailCache.delete(runId);
+      if (runDetailCache.get(runId) === entry) runDetailCache.delete(runId);
       throw error;
     });
   runDetailCache.set(runId, entry);
@@ -297,35 +309,38 @@ function toFallbackRun(item: RunListItem): RunResponse {
 }
 
 async function loadSummaryPageWithRetry(options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal?.aborted) throw abortError();
-  try {
-    return await apiService.getRuns({
-      page: 1,
-      limit: BACKEND_RUN_PAGE_LIMIT,
-      summary: true,
-    });
-  } catch (error) {
+  const read = async () => {
+    requireWorkflowOwner(owner);
+    const page = await apiService.getRuns({ page: 1, limit: BACKEND_RUN_PAGE_LIMIT, summary: true });
+    requireWorkflowOwner(owner);
+    return page;
+  };
+  try { return await read(); }
+  catch (error) {
+    requireWorkflowOwner(owner);
     if (options?.signal?.aborted) throw abortError();
     await wait(250);
-    return apiService.getRuns({
-      page: 1,
-      limit: BACKEND_RUN_PAGE_LIMIT,
-      summary: true,
-    });
+    return read();
   }
 }
 
 async function buildBoundedFullRunPage(options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   const summaryPage = await loadSummaryPageWithRetry(options);
   if (options?.signal?.aborted) throw abortError();
+  requireWorkflowOwner(owner);
   const selected = selectRecentRunSummaries(summaryPage.items);
   const items = await mapWithConcurrency(
     selected,
     RUN_DETAIL_CONCURRENCY,
     async (item) => {
+      requireWorkflowOwner(owner);
       try {
         return await getCachedRunDetail(item.id, options);
       } catch (error) {
+        requireWorkflowOwner(owner);
         console.warn(
           `Using compact fallback for run #${item.id}: ${normalizeError(error)}`,
         );
@@ -334,6 +349,7 @@ async function buildBoundedFullRunPage(options?: ApiRequestControl) {
     },
   );
 
+  requireWorkflowOwner(owner);
   return {
     items,
     total: items.length,
@@ -365,6 +381,7 @@ function compactText(value: string | null | undefined) {
 function findMetricElement(target: HTMLElement, root: HTMLElement) {
   let element: HTMLElement | null = target;
   while (element && element !== root) {
+    if (element.dataset.autoRebalanceLlmMetric === "true") return element;
     const text = compactText(element.textContent);
     if (text.length <= 180 && /^LLMs completed\s*:/i.test(text)) return element;
     element = element.parentElement;
@@ -391,6 +408,12 @@ function inferMetricContext(
   metricElement: HTMLElement,
   root: HTMLElement,
 ): LlmMetricContext | null {
+  const explicitStage = metricElement.dataset.workflowStage;
+  const explicitPortfolio = metricElement.dataset.workflowPortfolio;
+  if (["threats", "swing", "rebalance", "technical"].includes(explicitStage ?? "") && ["india", "indmoney_us"].includes(explicitPortfolio ?? "")) {
+    const total = Number(metricElement.dataset.workflowTotal);
+    return { stage: explicitStage as LlmStage, portfolio: explicitPortfolio as AutoRebalancePortfolioKey, expectedTotal: Number.isSafeInteger(total) && total > 0 ? total : null };
+  }
   const metricText = compactText(metricElement.textContent);
   const countMatch = metricText.match(/LLMs completed\s*:\s*\d+\s*\/\s*(\d+)/i);
   let stage: LlmStage | null = null;
@@ -785,13 +808,7 @@ function LlmDetailsDialog({
     };
   }, [context]);
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
+  const reviewDialog = useReviewDialog<HTMLElement>(true, onClose);
 
   const passed = rows.filter(({ job }) =>
     ["completed", "success", "passed", "partial"].includes(
@@ -809,6 +826,7 @@ function LlmDetailsDialog({
       }}
     >
       <section
+        {...reviewDialog}
         role="dialog"
         aria-modal="true"
         aria-label={`${stageLabel(context.stage)} LLM details`}
