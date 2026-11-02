@@ -146,7 +146,7 @@ import {
   BullpenEventTrendsTable,
   type BullpenEventTableSnapshot,
 } from "./BullpenEventTrendsTable";
-import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
+import { BullpenDeferredRunHistoryContent as BullpenRunHistoryContent } from "./BullpenDeferredRunHistoryContent";
 import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import {
