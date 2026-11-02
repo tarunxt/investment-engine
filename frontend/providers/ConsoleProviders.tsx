@@ -5,6 +5,7 @@ import type { Session } from "next-auth";
 import type { UserResponse } from "@/types/api";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { WorkflowSurfaceHost } from "@/app/console/_components/WorkflowSurfaceHost";
+import { SessionPromptDrafts } from "@/providers/SessionPromptDrafts";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 
 export function ConsoleProviders({
@@ -22,7 +23,7 @@ export function ConsoleProviders({
       refetchOnWindowFocus={false}
     >
       <AuthProvider initialUser={initialUser}>
-        <ThemeProvider><WorkflowSurfaceHost>{children}</WorkflowSurfaceHost></ThemeProvider>
+        <SessionPromptDrafts><ThemeProvider><WorkflowSurfaceHost>{children}</WorkflowSurfaceHost></ThemeProvider></SessionPromptDrafts>
       </AuthProvider>
     </SessionProvider>
   );
