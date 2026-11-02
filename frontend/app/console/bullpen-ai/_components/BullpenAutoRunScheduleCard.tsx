@@ -1,7 +1,7 @@
 "use client";
 
-import { RunWarningsDialog, DecisionLlmOddsDialog, PlannedOrderDetailDialog, StageTwoLlmFailureDialog, MissingValueNote, StageTwoInputPromptDialog, StageTwoLlmEventInputDialog, StageTwoDecisionDetailDialog } from "./BullpenDetailPresentation";
-import { formatOddsPercent, formatUsdCost, formatPriceCents, isRecord, getStageTwoLlmFailureFixAdvice, hasReturnedValue, formatJsonForDisplay, readNestedRecord, readFirstReturnedValue, getStageTwoDisplayedPrompt, getStageTwoLlmPromptInputs, getStageTwoLlmPromptInputMarket, getStageTwoLlmPromptInputEvidencePacket, getStageTwoLlmMissingValueReason, getStageTwoPromptMissingValueReason } from "./bullpenDetailPresentationSupport";
+import { RunWarningsDialog, DecisionLlmOddsDialog, PlannedOrderDetailDialog, StageTwoLlmFailureDialog, StageTwoInputPromptDialog, StageTwoLlmEventInputDialog, StageTwoDecisionDetailDialog } from "./BullpenDeferredDetailPresentation";
+import { formatOddsPercent, formatUsdCost, formatPriceCents, isRecord, readFirstReturnedValue } from "./bullpenDetailPresentationSupport";
 import type { StageTwoDecisionDialogState, StageTwoDecisionDialogMode, StageTwoLlmEventInputDialogState, RunSummaryWarning, PlannedOrderDetailState, DecisionLlmOddsState, StageTwoRunSummaryStatus, StageTwoLlmRunSummaryRow, StageTwoLlmFailureDialogRow } from "./bullpenDetailPresentationSupport";
 
 import {
