@@ -1,4 +1,5 @@
 "use client";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
 import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
 import { mergeSummarySourceRows, originalRebalanceSources, originalSourceCell } from "@/lib/summarySourceRows";
@@ -3868,6 +3869,7 @@ export function ConsensusBreakupButton({
   action: ActionCategory;
 }) {
   const [open, setOpen] = useState(false);
+  const reviewDialog = useReviewDialog<HTMLDivElement>(open, () => setOpen(false));
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
   const consensusText = `${stock.actionCounts[action]}/${stock.totalSuggestions}`;
 
@@ -3887,6 +3889,7 @@ export function ConsensusBreakupButton({
       </button>
       {open ? (
         <div
+          {...reviewDialog}
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
           role="dialog"
           aria-modal="true"
@@ -5828,6 +5831,8 @@ export function ScoreMatrixModal({
 
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
 
+  const reviewDialog = useReviewDialog<HTMLDivElement>(Boolean(editedDetail && validationSummary), onClose);
+
   if (!editedDetail || !validationSummary) return null;
   const matchedRule = editedDetail.rules.find((rule) => rule.matched) ?? null;
   const sourceRows = editedDetail.rows.filter((row) => !row.isSummary);
@@ -5835,6 +5840,7 @@ export function ScoreMatrixModal({
   return (
     <>
     <div
+      {...reviewDialog}
       inert={selectedParameter ? true : undefined}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
