@@ -21,7 +21,7 @@ _PING_INTERVAL = 25  # seconds — below typical 30 s idle timeout
 
 
 def user_id_from_token(token: str) -> int | None:
-    payload = JWTUtils.verify_token(token)
+    payload = JWTUtils.verify_access_token(token)
     if not payload:
         return None
     try:

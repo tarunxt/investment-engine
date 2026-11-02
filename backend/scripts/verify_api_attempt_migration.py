@@ -47,7 +47,12 @@ def guarded_environment(environment: Mapping[str, str]) -> dict[str, str]:
         raise RuntimeError("Refusing to load a backend .env during migration verification")
     # Do not pass inherited provider credentials, libpq overrides, or service URLs
     # into Alembic/model imports. The fixed URL can address only the CI service.
-    return {**TEST_ENVIRONMENT, "PATH": environment.get("PATH", ""), "PYTHONPATH": str(BACKEND)}
+    return {
+        **TEST_ENVIRONMENT, "PATH": environment.get("PATH", ""), "PYTHONPATH": str(BACKEND),
+        # Model discovery imports auth settings. Only this deterministic test
+        # fixture enters the guarded subprocess; never inherit a real key.
+        "JWT_SIGNING_KEY": bytes(range(32)).hex(),
+    }
 
 
 def alembic(*arguments: str) -> None:

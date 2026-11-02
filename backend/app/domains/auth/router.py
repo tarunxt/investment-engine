@@ -147,8 +147,8 @@ async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_async_
 
 @router.post("/refresh", response_model=LoginResponse)
 async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends(get_async_db)):
-    payload = JWTUtils.verify_token(request.refresh_token)
-    if not payload or payload.get("type") != "refresh":
+    payload = JWTUtils.verify_refresh_token(request.refresh_token)
+    if not payload:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
 
     sub = payload.get("sub")
