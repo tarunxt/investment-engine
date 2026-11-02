@@ -633,13 +633,9 @@ test("Bullpen auto-run bootstraps legacy Stage 2 LLM selections into canonical s
 });
 
 test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt template", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = [
+    "BullpenAutoRunScheduleCard.tsx", "BullpenDetailPresentation.tsx", "bullpenDetailPresentationSupport.ts",
+  ].map((file) => readFileSync(new URL(`../app/console/bullpen-ai/_components/${file}`, import.meta.url), "utf8")).join("\n");
 
   assert.match(autoRunCardSource, /llm_prompt_template/);
   assert.match(autoRunCardSource, /getStageTwoDisplayedPrompt/);
@@ -1460,4 +1456,14 @@ test("Bullpen portfolio uses Stage 1 verification only as a live-data fallback",
     source,
     /verifiedStage1Portfolio\?\.activePositions \?\? activePositions/,
   );
+});
+
+
+test("separated Stage 2 prompt reader preserves reported, saved and unknown evidence", async () => {
+  const source = readFileSync(new URL("../app/console/bullpen-ai/_components/bullpenDetailPresentationSupport.ts", import.meta.url), "utf8");
+  const { outputText } = ts.transpileModule(source, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020}});
+  const reader = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+  assert.equal(reader.getStageTwoDisplayedPrompt(null, "Synthetic saved prompt"), "Synthetic saved prompt");
+  assert.equal(reader.getStageTwoDisplayedPrompt({llm_prompt:"Synthetic reported prompt"}, "Synthetic saved prompt"), "Synthetic reported prompt");
+  assert.equal(reader.getStageTwoDisplayedPrompt(null, null), undefined);
 });
