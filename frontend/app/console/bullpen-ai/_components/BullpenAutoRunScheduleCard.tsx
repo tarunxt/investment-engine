@@ -4511,14 +4511,15 @@ function stageOneCandidateOddsLookupId(
   return `stage-one-candidate-odds-${index}-${exactIdentity}`;
 }
 
-function useStageOneDialogFocus(onClose: () => void, childOpen = false) {
+function useStageOneDialogFocus(onClose: () => void, childOpen = false, active = true) {
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    if (!active) return;
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     root.current?.querySelector<HTMLElement>("button[aria-label^='Close']")?.focus();
     return () => returnFocus.current?.focus();
-  }, []);
+  }, [active]);
   return {
     ref: root,
     onKeyDown: (event: import("react").KeyboardEvent<HTMLDivElement>) => {
@@ -5053,7 +5054,6 @@ function AllScannedEventsDialog({
   state: ScanCandidateDialogState;
   onClose: () => void;
 }) {
-  const dialogFocus = useStageOneDialogFocus(onClose);
   const retainedRowCount = state.candidates.length;
   const eventRowsPerPage = 100;
   const [eventQuery, setEventQuery] = useState("");
@@ -5061,6 +5061,8 @@ function AllScannedEventsDialog({
   const omittedRowCount = state.evidence.scanKnown ? Math.max(0, state.totalScanned - retainedRowCount) : 0;
   const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
   const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
+  const dialogFocus = useStageOneDialogFocus(onClose, selectedFilterReason !== null);
+  const filterDetailFocus = useStageOneDialogFocus(() => setSelectedFilterReason(null), false, selectedFilterReason !== null);
   const normalizedEventQuery = eventQuery.trim().toLowerCase();
   const matchingCandidates = normalizedEventQuery
     ? state.candidates.filter((candidate) =>
@@ -5304,7 +5306,7 @@ function AllScannedEventsDialog({
         </div>
       </div>
       {selectedFilterReason ? (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
+        <div {...filterDetailFocus} role="dialog" aria-modal="true" aria-label="Stage 1 filter detail" className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
           <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
             <div className="flex flex-col items-start justify-between gap-4 sm:flex-row border-b border-slate-200 px-6 py-5">
               <div>

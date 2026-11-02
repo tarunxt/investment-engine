@@ -29,7 +29,7 @@ function StageOneFixture() {
   };
   const stage = {...base, outputs, timerCompletedAt:complete ? '2026-11-01T00:00:00Z' : null};
   if (['populated', 'cached', 'partial'].includes(name)) {
-    const candidate = {question:'Synthetic retained opportunity',marketId:'synthetic-event',marketUrl:'https://example.com/synthetic-event',scanStatus:'passed',filterReasons:[],closeTime:'2026-11-03T00:00:00Z',currentYesOdds:50,currentNoOdds:50,volumeUsd:100,liquidityUsd:100,returnsPerDay:null,theme:'Synthetic',slug:null,conditionId:null,questionId:null,bestBidCents:null,bestAskCents:null,spreadCents:null,forceInclude:false,forceIncludedPosition:false,selected:null,rules:null,eventDescription:null,marketContext:null,resolutionSource:null,preflightEvidenceBlock:null};
+    const candidate = {question:'Synthetic retained opportunity',marketId:'synthetic-event',marketUrl:'https://example.com/synthetic-event',scanStatus:'passed',filterReasons:['Synthetic fixture reason'],closeTime:'2026-11-03T00:00:00Z',currentYesOdds:50,currentNoOdds:50,volumeUsd:100,liquidityUsd:100,returnsPerDay:null,theme:'Synthetic',slug:null,conditionId:null,questionId:null,bestBidCents:null,bestAskCents:null,spreadCents:null,forceInclude:false,forceIncludedPosition:false,selected:null,rules:null,eventDescription:null,marketContext:null,resolutionSource:null,preflightEvidenceBlock:null};
     stage.scanCandidates = [candidate];
     stage.scannedCandidates = [candidate];
   }
