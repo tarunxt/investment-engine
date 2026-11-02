@@ -1,5 +1,6 @@
 "use client";
 
+import { captureWorkflowOwner, requireWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -53,6 +54,7 @@ const RUN_DETAIL_TIMEOUT_MS = 15_000;
 const ACTIVE_RUN_CACHE_MS = 2_500;
 const TERMINAL_RUN_CACHE_MS = 60_000;
 const runDetailCache = new Map<number, CachedRun>();
+onWorkflowOwnerInvalidated(() => runDetailCache.clear());
 let safeFullRunAdapterInstalled = false;
 
 const TERMINAL_RUN_STATUSES = new Set([
@@ -146,6 +148,7 @@ async function loadRunDetailWithRetry(
 }
 
 function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal) return loadRunDetailWithRetry(runId, options);
 
   pruneRunDetailCache();
@@ -158,6 +161,7 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
   };
   entry.promise = loadRunDetailWithRetry(runId)
     .then((run) => {
+      requireWorkflowOwner(owner);
       entry.expiresAt =
         Date.now() +
         (TERMINAL_RUN_STATUSES.has((run.status || "").toLowerCase())
@@ -166,7 +170,7 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
       return run;
     })
     .catch((error) => {
-      runDetailCache.delete(runId);
+      if (runDetailCache.get(runId) === entry) runDetailCache.delete(runId);
       throw error;
     });
   runDetailCache.set(runId, entry);

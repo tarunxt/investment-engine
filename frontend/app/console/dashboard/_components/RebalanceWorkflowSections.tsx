@@ -1,4 +1,7 @@
 "use client";
+import { captureWorkflowOwner, isCurrentWorkflowOwner } from "@/lib/workflowOwnerLifetime";
+import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
+import type { WorkflowSurface } from "@/app/console/_components/WorkflowSurfaceHost";
 import { IndMoneySnapshotDialog } from "./IndMoneySnapshotDialog";
 import { readIndmoneySnapshotSource } from "@/lib/indmoneySnapshotSource";
 
@@ -10,6 +13,8 @@ import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_componen
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AutomatedRebalanceReliabilityBridge } from "@/app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge";
 import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
 import { threatInputRationale } from "./threatInputRationale";
 import { PromptTemplateDialog } from "@/app/console/automated-rebalance/_components/PromptTemplateDialog";
@@ -32,7 +37,7 @@ import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
 import { BasketUnitsPopup } from "@/components/BasketUnitsPopup";
 import { BasketColumnTable, BasketColumnPicker, BasketColumnRename } from "@/components/BasketColumnPicker";
 import type { BasketUnitsTrace } from "@/lib/basketUnitsExplanation";
-import { shouldSaveThresholds, thresholdSignature, type ThresholdPersistence } from "@/lib/buyThresholdPersistence";
+import { useWorkflowConfiguration } from "@/app/console/_components/WorkflowConfiguration";
 import { mergeStageEvidence } from "@/lib/stockFlowEvidence";
 import { assertWholeShareOrdersReviewed, isWholeShareOrderSelectable, needsWholeShareTrimReview, type WholeShareChoice } from "@/lib/wholeShareReview";
 import {
@@ -65,8 +70,6 @@ import {
   ScoreMatrixModal,
   StockDetailsButton,
   getTechnicalScanForStock,
-  loadScoreMatrixFormulaConfig,
-  saveScoreMatrixFormulaConfig,
   getScoreMatrixValidationSummary,
   type ScoreMatrixFormulaConfig,
   type ActionCategory,
@@ -114,6 +117,7 @@ import {
   type ZerodhaBasketSelectableOrder,
 } from "@/lib/zerodhaBasketSelection";
 import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt } from "@/lib/runPresentation";
+import { apiService as workflowApiService } from "@/services/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import { buildOutputSourceJobs } from "@/lib/outputSourceJobs";
@@ -158,7 +162,6 @@ import { normalizeError } from "./dashboardOverviewUtils";
 import {
   RebalanceStockFlowDialog,
   RebalanceStockFlowTrigger,
-  RebalanceStockFlowWidget,
   fetchRebalanceStockFlowSource,
   type RebalanceStockFlowPortfolio,
 } from "./StockFlowTabs";
@@ -4383,10 +4386,15 @@ export function RebalanceWorkflowSections({
   // themselves; only embedded consumers need an additional dashboard refresh.
   onDashboardRefresh = NO_DASHBOARD_REFRESH,
   stageLedger = false,
+  surface,
 }: {
   onDashboardRefresh?: () => Promise<void>;
   stageLedger?: boolean;
+  surface?: WorkflowSurface | null;
 }) {
+  const router = useRouter();
+  const [runtimeOwner] = useState(captureWorkflowOwner);
+  const apiService = useMemo(() => workflowOwnedApi(workflowApiService, runtimeOwner), [runtimeOwner]);
   const usdInrRate = useUsdInrRate();
   const { user: basketOwner } = useAuth();
   const basketSafety = useBasketSubmissionSafety(basketOwner?.id ?? null);
@@ -4632,18 +4640,7 @@ export function RebalanceWorkflowSections({
     threatsAnalysis: null,
     error: null,
   });
-  const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
-  const [zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold] = useState(DEFAULT_ZERODHA_BUY_THRESHOLD);
-  const [zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft] = useState(
-    DEFAULT_ZERODHA_BUY_THRESHOLD.toFixed(2),
-  );
-  const [buyThresholdPreferencesLoaded, setBuyThresholdPreferencesLoaded] = useState(false);
-  const [buyThresholdPreferencesWritable, setBuyThresholdPreferencesWritable] = useState(false);
-  const [buyThresholdPersistence, setBuyThresholdPersistence] = useState<ThresholdPersistence>("loading");
-  const savedBuyThresholdSignature = useRef<string | null>(null);
-  const buyThresholdSaveQueue = useRef<Promise<void>>(Promise.resolve());
-  const pendingBuyThresholdSaves = useRef(0);
-  const [buyThresholdSaveError, setBuyThresholdSaveError] = useState<string | null>(null);
+  const { scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold, zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft, indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold, indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft, buyThresholdSaveError, buyThresholdPersistence } = useWorkflowConfiguration();
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
@@ -4657,8 +4654,6 @@ export function RebalanceWorkflowSections({
     threatsAnalysis: null,
     error: null,
   });
-  const [indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold] = useState(2.5);
-  const [indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft] = useState("2.50");
   const [selectedIndmoneyBasketIds, setSelectedIndmoneyBasketIds] = useState<Set<string>>(new Set());
   const activeExecutionRefsRef = useRef<Array<{ kind: "run" | "job"; id: number }>>([]);
   const activeAutoRebalanceMetadataRef = useRef<
@@ -4670,6 +4665,7 @@ export function RebalanceWorkflowSections({
   const isWorkflowExecutingRef = useRef(false);
 
   useEffect(() => {
+    if (!isCurrentWorkflowOwner(runtimeOwner)) return;
     persistWorkflow({
       states,
       runningPortfolio,
@@ -4699,7 +4695,7 @@ export function RebalanceWorkflowSections({
       lastAutoRebalanceCosts,
       savedAt: new Date().toISOString(),
     });
-  }, [
+  }, [runtimeOwner, 
     activeAutoRebalanceMetadata,
     auditStates,
     lastAutoRebalanceCosts,
@@ -4738,82 +4734,7 @@ export function RebalanceWorkflowSections({
     } finally {
       setCostHistoryLoading(false);
     }
-  }, []);
-
-  useEffect(() => {
-    saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
-  }, [scoreMatrixFormulaConfig]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void apiService.getProfile()
-      .then((profile) => {
-        if (cancelled) return;
-        const zerodhaThreshold = Number(profile.zerodha_buy_threshold);
-        const indmoneyThreshold = Number(profile.indmoney_buy_threshold);
-        if (Number.isFinite(zerodhaThreshold)) {
-          setZerodhaBasketBuyThreshold(zerodhaThreshold);
-          setZerodhaBasketBuyThresholdDraft(zerodhaThreshold.toFixed(2));
-        }
-        if (Number.isFinite(indmoneyThreshold)) {
-          setIndmoneyBasketBuyThreshold(indmoneyThreshold);
-          setIndmoneyBasketBuyThresholdDraft(indmoneyThreshold.toFixed(2));
-        }
-        savedBuyThresholdSignature.current = thresholdSignature(
-          Number.isFinite(zerodhaThreshold) ? zerodhaThreshold : DEFAULT_ZERODHA_BUY_THRESHOLD,
-          Number.isFinite(indmoneyThreshold) ? indmoneyThreshold : 2.5,
-        );
-        const writable = profile.preferences_writable === true;
-        setBuyThresholdPreferencesWritable(writable);
-        setBuyThresholdPersistence(writable ? "saved" : profile.preferences_writable === false ? "local_only" : "unconfirmed");
-        setBuyThresholdPreferencesLoaded(true);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setBuyThresholdSaveError(`Could not load saved Buy Threshold: ${normalizeError(error)}`);
-          setBuyThresholdPersistence("error");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const signature = thresholdSignature(zerodhaBasketBuyThreshold, indmoneyBasketBuyThreshold);
-    if (!shouldSaveThresholds(buyThresholdPreferencesLoaded, buyThresholdPreferencesWritable, savedBuyThresholdSignature.current, signature, pendingBuyThresholdSaves.current > 0)) return;
-    let active = true;
-    const timer = window.setTimeout(() => {
-      setBuyThresholdSaveError(null);
-      setBuyThresholdPersistence("saving");
-      pendingBuyThresholdSaves.current += 1;
-      const save = buyThresholdSaveQueue.current.then(async () => {
-        if (!active) return false;
-        await apiService.updateProfile({
-        zerodha_buy_threshold: zerodhaBasketBuyThreshold,
-        indmoney_buy_threshold: indmoneyBasketBuyThreshold,
-        });
-        return true;
-      });
-      buyThresholdSaveQueue.current = save.then(() => undefined, () => undefined);
-      void save.then((written) => {
-        if (written) savedBuyThresholdSignature.current = signature;
-        if (!active) return;
-        setBuyThresholdPersistence("saved");
-      }).catch((error) => {
-        if (!active) return;
-        setBuyThresholdSaveError(`Could not save Buy Threshold: ${normalizeError(error)}`);
-        setBuyThresholdPersistence("error");
-        if (/analysis-only recovery/i.test(normalizeError(error))) setBuyThresholdPreferencesWritable(false);
-      }).finally(() => { pendingBuyThresholdSaves.current -= 1; });
-    }, 400);
-    return () => { active = false; window.clearTimeout(timer); };
-  }, [
-    buyThresholdPreferencesLoaded,
-    buyThresholdPreferencesWritable,
-    indmoneyBasketBuyThreshold,
-    zerodhaBasketBuyThreshold,
-  ]);
+  }, [apiService, ]);
 
   const zerodhaBasketHistoricalRows = useMemo(
     () => buildHistoricalDashboardActionRows(
@@ -4883,7 +4804,7 @@ export function RebalanceWorkflowSections({
       setZerodhaBasketSubmission(null);
       return next;
     });
-  }, [zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
+  }, [setScoreMatrixFormulaConfig, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
 
   const closeAutoRebalanceCostHistory = useCallback(() => {
     setCostHistoryPortfolio(null);
@@ -4978,7 +4899,7 @@ export function RebalanceWorkflowSections({
     } finally {
       if (generation === zerodhaPreparation.current) setZerodhaBasketLoading(false);
     }
-  }, [scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold]);
+  }, [apiService, scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold]);
 
   const openIndmoneyBasketPreview = useCallback(async () => {
     const generation = ++indmoneyPreparation.current;
@@ -5036,7 +4957,7 @@ export function RebalanceWorkflowSections({
     } finally {
       if (generation === indmoneyPreparation.current) setIndmoneyBasketLoading(false);
     }
-  }, [indmoneyBasketBuyThreshold, scoreMatrixFormulaConfig]);
+  }, [apiService, indmoneyBasketBuyThreshold, scoreMatrixFormulaConfig]);
 
   const updateZerodhaBasketBuyThresholdDraft = useCallback((value: string) => {
     setZerodhaBasketBuyThresholdDraft(value);
@@ -5049,7 +4970,7 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketBuyThreshold(parsed);
     setZerodhaBasketSubmission(null);
 
-  }, [zerodhaBasketOrders]);
+  }, [setZerodhaBasketBuyThreshold, setZerodhaBasketBuyThresholdDraft, zerodhaBasketOrders]);
 
   const toggleZerodhaBasketOrder = useCallback((id: string) => {
     setSelectedZerodhaBasketIds((current) => {
@@ -5121,7 +5042,7 @@ export function RebalanceWorkflowSections({
 
     setIndmoneyBasketBuyThreshold(parsed);
 
-  }, [indmoneyBasketOrders]);
+  }, [setIndmoneyBasketBuyThreshold, setIndmoneyBasketBuyThresholdDraft, indmoneyBasketOrders]);
 
   const toggleIndmoneyBasketOrder = useCallback((id: string) => {
     setSelectedIndmoneyBasketIds(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
@@ -5275,7 +5196,7 @@ ${zerodhaExecutionMode === "direct_market"
             const previousOverview = await retryWorkflowRead(
               () => apiService.zerodhaPortfolioOverview(),
               "Zerodha portfolio overview before sync",
-              () => cancelRequestedRef.current,
+              () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
             );
             await apiService.zerodhaSyncPortfolio();
             const overview = await waitForZerodhaPortfolioSync(previousOverview.latest?.captured_at);
@@ -5399,7 +5320,7 @@ ${zerodhaExecutionMode === "direct_market"
     } finally {
       setZerodhaBasketPlacing(false);
     }
-  }, [basketSafety, zerodhaBasketPlacing, zerodhaBasketLtpRefreshing, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
+  }, [runtimeOwner, apiService, basketSafety, zerodhaBasketPlacing, zerodhaBasketLtpRefreshing, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
 
   const loadLatestIdleStageInfo = useCallback(async () => {
     const [
@@ -5618,7 +5539,7 @@ ${zerodhaExecutionMode === "direct_market"
       );
       return next;
     });
-  }, [usdInrRate]);
+  }, [apiService, usdInrRate]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -5637,7 +5558,9 @@ ${zerodhaExecutionMode === "direct_market"
       stage: WorkflowStageKey,
       info: Partial<StageInfo>,
     ) => {
+      if (!isCurrentWorkflowOwner(runtimeOwner)) return;
       setStates((current) => {
+        if (!isCurrentWorkflowOwner(runtimeOwner)) return current;
         const next = {
           ...current,
           [portfolio]: {
@@ -5656,7 +5579,7 @@ ${zerodhaExecutionMode === "direct_market"
         return next;
       });
     },
-    [],
+    [runtimeOwner, ],
   );
 
   const getAuditSession = useCallback((
@@ -5690,7 +5613,7 @@ ${zerodhaExecutionMode === "direct_market"
     });
     auditSessionsRef.current[portfolio] = session;
     return session;
-  }, []);
+  }, [apiService, ]);
 
   const recordAutoRebalanceStage = useCallback(
     async (
@@ -5708,6 +5631,7 @@ ${zerodhaExecutionMode === "direct_market"
       info: Partial<StageInfo> = {},
       links?: { runId?: number | null; jobId?: number | null },
     ) => {
+      if (!isCurrentWorkflowOwner(runtimeOwner)) return;
       const metadata = activeAutoRebalanceMetadataRef.current[portfolio];
       if (!metadata) return;
       const payload = {
@@ -5736,7 +5660,7 @@ ${zerodhaExecutionMode === "direct_market"
       };
       return getAuditSession(portfolio, metadata).record(stage as AutoRebalanceStageKey, payload);
     },
-    [getAuditSession],
+    [runtimeOwner, getAuditSession],
   );
 
   const resetPortfolio = useCallback((portfolio: WorkflowPortfolio) => {
@@ -5849,7 +5773,12 @@ ${zerodhaExecutionMode === "direct_market"
     [recordAutoRebalanceStage, updateStage, usdInrRate],
   );
 
+  // Poll ownership changes only with execution identity, never progress/cost/display updates.
+  const restoredPollingIdentity = JSON.stringify([runningPortfolio, runningPortfolio ? STAGE_ORDER.map(stage => [stage, states[runningPortfolio][stage].state, states[runningPortfolio][stage].activeRunId ?? null]) : null]);
+  const restoredPollingContext = useRef({ states, specificMode, selectedStages, markCompleted, recordAutoRebalanceStage, updateStage, usdInrRate });
+  restoredPollingContext.current = { states, specificMode, selectedStages, markCompleted, recordAutoRebalanceStage, updateStage, usdInrRate };
   useEffect(() => {
+    const { states, specificMode, selectedStages, recordAutoRebalanceStage } = restoredPollingContext.current;
     if (!runningPortfolio) return;
     // The visible workflow is driven by runWorkflow while this tab is open.
     // Its stages briefly hand off from a completed job to the next queued job;
@@ -5931,7 +5860,12 @@ ${zerodhaExecutionMode === "direct_market"
     }));
 
     let cancelled = false;
+    let inFlight = false;
     const poll = async () => {
+      if (cancelled || inFlight || !isCurrentWorkflowOwner(runtimeOwner)) return;
+      inFlight = true;
+      const { markCompleted, updateStage, usdInrRate } = restoredPollingContext.current;
+      try {
       await Promise.allSettled(
         runningEntries.map(async ({ stage, runId }) => {
           if (stage === "threats") {
@@ -6014,6 +5948,7 @@ ${zerodhaExecutionMode === "direct_market"
           }
         }),
       );
+      } finally { inFlight = false; }
     };
 
     void poll();
@@ -6022,16 +5957,9 @@ ${zerodhaExecutionMode === "direct_market"
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [
-    markCompleted,
-    recordAutoRebalanceStage,
-    runningPortfolio,
-    selectedStages,
-    specificMode,
-    states,
-    updateStage,
-    usdInrRate,
-  ]);
+  // Execution identity is the only restart trigger; current callbacks live in the ref above.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoredPollingIdentity]);
 
   const toggleSpecificMode = useCallback((portfolio: WorkflowPortfolio) => {
     setSpecificMode((current) => {
@@ -6155,7 +6083,7 @@ ${zerodhaExecutionMode === "direct_market"
         setInputCandidatesLoading(false);
       }
     },
-    [],
+    [apiService, ],
   );
 
   const openInputSelection = useCallback(
@@ -6260,7 +6188,7 @@ ${zerodhaExecutionMode === "direct_market"
           runId,
           (progressRun) =>
             updateStage(portfolio, stage, getRunProgress(progressRun)),
-          () => cancelRequestedRef.current,
+          () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
         );
       } catch (error) {
         if (error instanceof APIError && error.status === 401) {
@@ -6299,7 +6227,7 @@ ${zerodhaExecutionMode === "direct_market"
         `Run #${runId} ended with status "${run.status}". Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs.${error ? ` Error: ${error}` : ""}`,
       );
     },
-    [recordAutoRebalanceStage, updateStage],
+    [runtimeOwner, recordAutoRebalanceStage, updateStage],
   );
 
   const showStageLlmInfo = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
@@ -6366,7 +6294,7 @@ ${zerodhaExecutionMode === "direct_market"
         setLlmDialogLoading(false);
       }
     }
-  }, [usdInrRate]);
+  }, [apiService, usdInrRate]);
 
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey, requestedRunId?: number) => {
@@ -6474,7 +6402,7 @@ ${zerodhaExecutionMode === "direct_market"
         });
       }
     },
-    [],
+    [apiService, ],
   );
 
   useEffect(() => {
@@ -6642,7 +6570,7 @@ ${zerodhaExecutionMode === "direct_market"
         ? preOpenedPopup
         : window.open(
             login.login_url,
-            "zerodha-connect",
+            "zerodha-workflow-connect",
             buildZerodhaPopupFeatures(),
           );
 
@@ -6687,6 +6615,7 @@ ${zerodhaExecutionMode === "direct_market"
         };
         const handleMessage = (event: MessageEvent) => {
           if (event.origin !== window.location.origin) return;
+          if (event.source !== popup) return;
           const data = event.data as
             | { type?: string; message?: string }
             | null
@@ -6723,7 +6652,7 @@ ${zerodhaExecutionMode === "direct_market"
       // Preflight may fail before the login URL or polling cleanup exists.
       if (preOpenedPopup && !preOpenedPopup.closed) preOpenedPopup.close();
     }
-  }, [buildZerodhaPopupFeatures]);
+  }, [apiService, buildZerodhaPopupFeatures]);
 
   const runWorkflow = useCallback(
     async (
@@ -6752,7 +6681,7 @@ ${zerodhaExecutionMode === "direct_market"
       // and Chrome/Safari can block the popup, making Run appear to do nothing.
       const zerodhaPopup =
         portfolio === "zerodha" && shouldRunCurrentStage("sync")
-          ? window.open("about:blank", "zerodha-connect", buildZerodhaPopupFeatures())
+          ? window.open("about:blank", "zerodha-workflow-connect", buildZerodhaPopupFeatures())
           : null;
 
       isWorkflowExecutingRef.current = true;
@@ -6915,7 +6844,7 @@ ${zerodhaExecutionMode === "direct_market"
             const synced = await queueZerodhaPortfolioSyncWithAuthRetry();
             const overview = await waitForZerodhaPortfolioSync(
               previousOverview.latest?.captured_at,
-              () => cancelRequestedRef.current,
+              () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
             );
             workflowSnapshot = overview.latest;
             await markCompleted(portfolio, "sync", {
@@ -6940,7 +6869,7 @@ ${zerodhaExecutionMode === "direct_market"
             const overview = { latest: workflowSnapshot ?? await retryWorkflowRead(
               () => readIndmoneySnapshotSource(readLatestIndmoneySnapshot),
               "IndMoney portfolio overview",
-              () => cancelRequestedRef.current,
+              () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
             ) };
             workflowSnapshot = overview.latest;
             await markCompleted(portfolio, "sync", {
@@ -6999,7 +6928,7 @@ ${zerodhaExecutionMode === "direct_market"
                     ),
                   }),
                 "configured LLM providers",
-                () => cancelRequestedRef.current,
+                () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
               )
             : [];
         const swingTargets = shouldRunCurrentStage("swing")
@@ -7066,7 +6995,7 @@ ${zerodhaExecutionMode === "direct_market"
             const completedThreat = await waitForThreatCompletion(
               portfolio,
               queuedThreat.job_id,
-              () => cancelRequestedRef.current,
+              () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
             );
             if (![
               "completed",
@@ -7117,7 +7046,7 @@ ${zerodhaExecutionMode === "direct_market"
               origin: "selected",
             }))),
             "selected threat scan inputs",
-            () => cancelRequestedRef.current,
+            () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
           );
           const selectedThreatParts = deduplicateThreatStageInputs([
             ...(swingInputSelection.has("swing:next") && generatedThreatInput ? [generatedThreatInput] : []),
@@ -7177,7 +7106,7 @@ ${zerodhaExecutionMode === "direct_market"
           const selectedSwingRunIds = getSelectedStageRunIds(selectedRebalanceInputs, "swing");
           const fullRunCandidates = await retryWorkflowRead(
             () => Promise.all(selectedSwingRunIds.map(runId => apiService.getRun(runId))),
-            "explicitly selected swing scan inputs", () => cancelRequestedRef.current,
+            "explicitly selected swing scan inputs", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
           );
           if (selectedRebalanceInputs.has("rebalance:next") && !generatedSwingRun) {
             throw new Error("Next Swing output is unavailable. Run Swing in this workflow or explicitly select saved Swing jobs. Refresh Select Inputs and start a new workflow.");
@@ -7189,13 +7118,13 @@ ${zerodhaExecutionMode === "direct_market"
           if (!swingRuns.length) throw new Error("Select at least one Swing input; historical scans are never added automatically.");
           const portfolioRes = workflowSnapshot ? { latest: workflowSnapshot } : await retryWorkflowRead(
             async (): Promise<{ latest: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null }> => portfolio === "zerodha" ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
-            "portfolio snapshot", () => cancelRequestedRef.current,
+            "portfolio snapshot", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
           );
           workflowSnapshot = portfolioRes.latest;
           if (!workflowSnapshot) throw new Error("The workflow portfolio snapshot is unavailable.");
           const threatsRes = generatedThreatInput ? { analysis: generatedThreatInput.analysis } : await retryWorkflowRead(
             () => portfolio === "zerodha" ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
-            "threat report", () => cancelRequestedRef.current,
+            "threat report", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
           );
           if (!threatsRes.analysis?.captured_at || Date.parse(threatsRes.analysis.captured_at) !== Date.parse(workflowSnapshot.captured_at) ||
               (portfolio === "indmoneyUs" && "id" in workflowSnapshot && (!("snapshot_id" in threatsRes.analysis) || threatsRes.analysis.snapshot_id !== workflowSnapshot.id))) {
@@ -7264,7 +7193,7 @@ ${zerodhaExecutionMode === "direct_market"
           const selectedRebalanceRunIds = getSelectedStageRunIds(selectedTechnicalInputs, "rebalance");
           const allRuns = await retryWorkflowRead(
             () => Promise.all(selectedRebalanceRunIds.map(runId => apiService.getRun(runId))),
-            "explicit technical scan inputs", () => cancelRequestedRef.current,
+            "explicit technical scan inputs", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
           );
           if (selectedTechnicalInputs.has("technical:next") && !generatedRebalanceRun) {
             throw new Error("Technical input unavailable: Next Rebalance was selected, but this invocation produced no Rebalance run. No Technical provider job was created. Select saved completed/partial Rebalance jobs explicitly, or include Rebalance in the selected stages. Previous tile output is not substituted.");
@@ -7528,7 +7457,7 @@ ${zerodhaExecutionMode === "direct_market"
         }
       }
     },
-    [
+    [runtimeOwner, apiService, scoreMatrixFormulaConfig, 
       analysisOnlyRuns,
       buildZerodhaPopupFeatures,
       completeSkippedStage,
@@ -7556,7 +7485,7 @@ ${zerodhaExecutionMode === "direct_market"
     ) => {
       const zerodhaPopup =
         portfolio === "zerodha"
-          ? window.open("about:blank", "zerodha-connect", buildZerodhaPopupFeatures())
+          ? window.open("about:blank", "zerodha-workflow-connect", buildZerodhaPopupFeatures())
           : null;
       try {
         markRunning(portfolio, "sync");
@@ -7599,7 +7528,7 @@ ${zerodhaExecutionMode === "direct_market"
         });
       }
     },
-    [
+    [apiService, 
       buildZerodhaPopupFeatures,
       ensureZerodhaConnectedForSync,
       markCompleted,
@@ -8033,36 +7962,32 @@ ${zerodhaExecutionMode === "direct_market"
     );
   };
 
+  useEffect(() => {
+    setLedgerView("ledger");
+    setDialogOpen(false);
+    setIndMoneySyncOnly(false);
+    setStockFlowPortfolio(null);
+    setCostHistoryPortfolio(null);
+    setLlmDialogStage(null);
+    setPromptDialog(null);
+    closeOutputDialog();
+    setInputDialog(null);
+    setZerodhaBasketOpen(false);
+    setIndmoneyBasketOpen(false);
+    outputRequestRef.current += 1;
+    llmDialogRequestRef.current += 1;
+  }, [surface?.target, surface?.market, closeOutputDialog]);
+
   const zerodhaSection = sections[0];
   const indmoneySection = sections[1];
 
-  return (
-    <>
+  const content = (
+    <AutomatedRebalanceReliabilityBridge>
       {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
-      {stageLedger ? <WorkflowStageLedgerViews market={ledgerMarket} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
+      {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} view={ledgerView} onChange={(market, view) => { if (surface && market !== surface.market) { router.push(market === "zerodha" ? "/console/zerodha#india-workflow" : "/console/indmoney-us#us-workflow"); return; } setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
-        {(!stageLedger || ledgerMarket === "zerodha") && renderSectionCard(zerodhaSection)}
-        {(!stageLedger || ledgerMarket === "indmoneyUs") && renderSectionCard(indmoneySection)}
-      </section>
-
-      <section className="mt-6">
-        <RebalanceStockFlowWidget
-          formulaConfig={scoreMatrixFormulaConfig}
-          buyThresholds={{
-            zerodha: zerodhaBasketBuyThreshold,
-            indmoneyUs: indmoneyBasketBuyThreshold,
-          }}
-          buyThresholdDrafts={{
-            zerodha: zerodhaBasketBuyThresholdDraft,
-            indmoneyUs: indmoneyBasketBuyThresholdDraft,
-          }}
-          onBuyThresholdDraftChange={(portfolio, value) => {
-            if (portfolio === "zerodha") updateZerodhaBasketBuyThresholdDraft(value);
-            else updateIndmoneyBasketBuyThresholdDraft(value);
-          }}
-          buyThresholdSaveError={buyThresholdSaveError}
-          buyThresholdPersistence={buyThresholdPersistence}
-        />
+        {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}
+        {(!stageLedger || (surface?.market ?? ledgerMarket) === "indmoneyUs") && renderSectionCard(indmoneySection)}
       </section>
 
       <RebalanceStockFlowDialog
@@ -8301,6 +8226,8 @@ ${zerodhaExecutionMode === "direct_market"
           onContinue={handleIndMoneyContinue}
         />
       ) : null}
-    </>
+    </AutomatedRebalanceReliabilityBridge>
   );
+  if (surface === null) return null;
+  return surface ? createPortal(content, surface.target) : content;
 }

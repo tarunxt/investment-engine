@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AlertCircle, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,15 @@ function SnapshotDialogContent({
   onClose,
   onContinue,
 }: SnapshotDialogProps) {
+  const titleId = useId();
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const trigger = document.activeElement;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.stopPropagation(); closeRef.current(); } };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { window.removeEventListener("keydown", closeOnEscape); if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus(); };
+  }, []);
   const [mode, setMode] = useState<IndMoneySyncMode>("paste");
   const [rawText, setRawText] = useState("");
   const pasteInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -102,10 +111,10 @@ function SnapshotDialogContent({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="w-full max-w-2xl rounded-3xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-slate-950">
+            <h3 id={titleId} className="text-lg font-semibold text-slate-950">
               Sync INDmoney US Portfolio
             </h3>
             <p className="mt-1 text-sm text-slate-500">
@@ -116,6 +125,7 @@ function SnapshotDialogContent({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close snapshot review"
             className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           >
             <X className="size-4" />

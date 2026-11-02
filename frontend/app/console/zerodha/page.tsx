@@ -1,5 +1,6 @@
 'use client';
 
+import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceHost';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -636,7 +637,7 @@ export default function ZerodhaPage() {
     const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
     const popup = window.open(
       loginUrl,
-      'zerodha-connect',
+      'zerodha-portfolio-connect',
       `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`,
     );
 
@@ -691,6 +692,7 @@ export default function ZerodhaPage() {
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) return;
+      if (!popupRef.current || ev.source !== popupRef.current) return;
       if (ev.data?.type === 'zerodha_connected') {
         stopPopupTracking();
         const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
@@ -1012,6 +1014,7 @@ export default function ZerodhaPage() {
           </div>
         </>
       )}
+      <PortfolioWorkflowSlot market="zerodha" />
     </div>
   );
 }

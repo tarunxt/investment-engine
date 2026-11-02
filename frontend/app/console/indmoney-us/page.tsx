@@ -1,5 +1,6 @@
 'use client';
 
+import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceHost';
 import { useCallback, useEffect, useState } from 'react';
 
 import { IndMoneyUsSnapshotWorkspace } from './_components/IndMoneyUsSnapshotWorkspace';
@@ -143,6 +144,7 @@ export default function IndMoneyUsPage() {
   };
 
   return (
+    <>
     <IndMoneyUsSnapshotWorkspace
       overview={overview}
       selectedSnapshot={selectedSnapshot}
@@ -156,5 +158,7 @@ export default function IndMoneyUsPage() {
       onCreateSnapshot={handleCreateSnapshot}
       onSelectSnapshot={handleSelectSnapshot}
     />
+    <PortfolioWorkflowSlot market="indmoneyUs" />
+    </>
   );
 }

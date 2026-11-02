@@ -110,6 +110,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
+    runtimeOwner: {}, isCurrentWorkflowOwner: () => true,
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,

@@ -56,10 +56,10 @@ test("one slow historic run cannot reject the current automated-rebalance workfl
   assert.match(bridgeSource, /getCachedRunDetail\(item\.id, options\)/);
 });
 
-test("the dedicated automated-rebalance route installs the reliability bridge", () => {
+test("the workflow installs the reliability bridge inside its visible surface", () => {
   assert.match(
-    clientSource,
-    /<AutomatedRebalanceReliabilityBridge>[\s\S]*?<RebalanceWorkflowSections/,
+    workflowSource,
+    /<AutomatedRebalanceReliabilityBridge>[\s\S]*?<WorkflowStageLedgerViews/,
   );
 });
 
