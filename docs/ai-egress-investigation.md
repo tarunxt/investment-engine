@@ -1,3 +1,13 @@
+# Current candidate — 2026-11-03
+
+PR1393 now incorporates current main ece97f64, preserving its privacy logging,
+verifier and UI fixes. See [current release boundary](a9-public-query-release.md).
+The original baseline below is historical evidence, not the current acceptance
+ledger: previously accepted arbitrary query text and rejected-query metadata are
+now blocked in the candidate. This does not establish a live prompt-injection
+exploit or universal injection resistance. Independent review and exact-head
+integration/deployment remain root-owned.
+
 # A9-005 investigation and A9-R17 child evidence
 
 Baseline: fresh `origin/main` at `8d25f34a33242adcaab092afdb07af7956f327bd`,

@@ -12,6 +12,7 @@ import requests
 
 from app.domains.api_usage.metering import ApiAttempt, metered_call
 from app.core.config import settings
+from app.domains.ai_providers.tools.public_queries import PUBLIC_MARKETS, PUBLIC_TOPICS, project_query
 
 logger = logging.getLogger("app")
 
@@ -29,20 +30,15 @@ TOOL_DEFINITIONS: list[dict] = [
         "function": {
             "name": "web_search",
             "description": (
-                "Search the web for real-time information: live stock prices, market indices, "
-                "breaking news, economic data, company announcements, or any current data "
-                "needed for analysis. Always prefer this over training-data knowledge when "
-                "current figures are required."
+                "Search approved public market/index context only using market/topic enums. "
+                "Custom company, portfolio and private queries are unavailable. "
+                "If a request is rejected, report missing current evidence; never imply a lookup succeeded."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 512,
-                        "description": "Specific search query, e.g. 'NIFTY 50 live price today' or 'Reliance Industries Q4 2025 results'",
-                    },
+                    "market": {"type": "string", "enum": list(PUBLIC_MARKETS)},
+                    "topic": {"type": "string", "enum": list(PUBLIC_TOPICS)},
                     "max_results": {
                         "type": "integer",
                         "minimum": 1,
@@ -51,7 +47,7 @@ TOOL_DEFINITIONS: list[dict] = [
                         "default": 5,
                     },
                 },
-                "required": ["query"],
+                "required": ["market", "topic"],
                 "additionalProperties": False,
             },
         },
@@ -60,17 +56,15 @@ TOOL_DEFINITIONS: list[dict] = [
 
 
 def execute(name: str, args: dict[str, Any]) -> str:
-    # Tool arguments are model-authored data, not permission to invoke a tool.
-    # This shape check does NOT establish that free-text query content is public.
+    # Application constants alone become outbound queries. No prompt/portfolio
+    # extraction or model assertion of public status can authorize egress.
     if name != "web_search":
         return _tool_error("Unknown tool")
-    if not isinstance(args, dict) or set(args) - {"query", "max_results"}:
-        return _tool_error("Invalid search arguments")
-    query = args.get("query")
+    query = project_query(args)
+    if query is None:
+        return _tool_error("Search blocked: approved public market/topic required; current evidence unavailable")
     count = args.get("max_results", 5)
-    if (not isinstance(query, str) or not query.strip() or len(query) > 512
-            or any(ord(char) < 32 for char in query)
-            or type(count) is not int or not 1 <= count <= 8):
+    if type(count) is not int or not 1 <= count <= 8:
         return _tool_error("Invalid search arguments")
     try:
         logger.info("Executing web_search tool")
@@ -131,6 +125,8 @@ def _bounded_tool_result(payload: str, query: str, count: int) -> str:
 
 
 def _web_search(query: str, max_results: int = 5) -> str:
+    if project_query({"query": query}) is None or type(max_results) is not int or not 1 <= max_results <= 8:
+        return _tool_error("Search blocked: approved public market/topic required; current evidence unavailable")
     max_results = max(1, min(max_results, 8))
     errors: list[str] = []
 
