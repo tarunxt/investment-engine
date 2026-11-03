@@ -28,8 +28,9 @@ or revocation findings.
 
 This is a coordinated authentication release, separate from viewer and layout
 releases. Do not merge until the coordinator and sole existing local operator have
-verified the deployment and rollback gates below. Main pushes trigger production
-deployment. A green PR alone is insufficient to authorize that trigger.
+verified the deployment and rollback gates below. The configured main-push
+workflow must remain held for this first rotation. A green PR alone is
+insufficient to authorize activation.
 
 1. Verify fresh main and the exact reviewed candidate, checks and independent
    review. Serialize with other releases; keep viewer grants/start held until
@@ -38,9 +39,9 @@ deployment. A green PR alone is insufficient to authorize that trigger.
    ExecStartPre, and all deployment/rollback commands. The checked-in backend unit
    template invokes `sync-bullpen-operator-credentials.sh` before start, which can
    invoke the Bullpen CLI. Actual recovery units must have the reviewed contained
-   behavior; refuse unreviewed hooks. The coordinator's read-only host preflight
-   found no actual pre-start/stop hooks or worker-start dependencies. The existing
-   credential wrapper remains part of restart; honor any runtime denial rather
+   behavior; refuse unreviewed hooks. Historical host preflight found no actual
+   pre-start/stop hooks or worker-start dependencies; recheck before activation.
+   The existing credential wrapper remains part of restart; honor any runtime denial rather
    than replacing or bypassing it. Do not run the ordinary broad redeploy:
    it executes migrations and restarts financial services.
 3. Resolve the existing root-owned backend EnvironmentFile privately on the
@@ -62,9 +63,10 @@ deployment. A green PR alone is insufficient to authorize that trigger.
 5. Under the production deployment lock, verify the stopped financial services,
    then promote only reviewed source and restart only the necessary backend and
    isolated recovery processes: backend first, verify readiness, then recovery.
-   Preserve recovery queue policy, units, owner
-   boundaries and environment permissions. No migrations, broad deploy, financial
-   worker starts, provider calls, trades or paid runs.
+   Preserve recovery queue policy, units, owner boundaries and environment
+   permissions. All financial workers must remain
+   stopped, not merely the services needed for this change. No migrations,
+   broad deploy, financial worker starts, provider calls, trades or paid runs.
 6. Verify the loaded revision and readiness, absence of key material in outputs,
    authentication rejection without credentials, and financial services still
    stopped. Have the owner sign in again and verify authorized access before any
@@ -81,7 +83,9 @@ This proposal does not change workflow state or authorize a merge by itself.
 
 1. Hold just `Deploy to Production` (`.github/workflows/deploy.yml`) before merge,
    leaving PR checks enabled. Verify that this workflow is disabled and that no
-   queued or running deployment can later acquire the host deployment lock.
+   queued or running deployment can later change production. A workflow hold
+   alone does not cancel existing runs; the host deployment lock alone does not
+   prevent a stale deployment after the lock is released.
    Coordinate the hold with the sole local operator; do not rely on cancellation
    after a main push to beat the deployment race.
 2. Obtain successful exact-head checks and independent review, then merge only
@@ -113,6 +117,33 @@ This proposal does not change workflow state or authorize a merge by itself.
    the installed secure revision will be the next rollback baseline and that no
    queued deployment or older artifact can restore fixed-key code. Record the
    workflow state, release SHA and verification result for the operator handoff.
+
+## Current integration and route status (3 November 2026)
+
+The signing-key candidate is reconciled with main
+`ece97f648e52deb357f6d262448f577e28edbe4e`; newer privacy, UI, display-quote and
+audit fixes are retained. The runtime application delta for this lane remains
+only `backend/app/core/config.py` and `backend/app/core/security.py`. Test-only
+fixture updates supply isolated synthetic configured keys to migration discovery
+and authenticated queue tests. No dependency, schema or production unit change
+is required by this lane. Other Audit 9 lanes must integrate against the eventual
+auth-first main revision and must not restore the removed signing constant.
+
+The sole operator's 3 November 17:27 UTC verification supersedes the earlier
+absence-of-containment assessment: the instance has only the EIC security group,
+and direct GitHub SSH is blocked. The Space artifact-transfer route returned a
+file-service 403. These are verified boundaries, not permission to add ingress,
+credentials or an alternate transfer route. Root owns release-route resolution.
+Recheck containment and absence of already-running stale deployment sessions at
+activation; never label the old run drained from its age or conflicting attempt
+metadata alone. The operator must also recheck all financial services are stopped,
+actual source/state, unit commands, environment overlays and rollback provenance.
+
+Code/test completion does not complete the runtime prerequisites. Exact reviewed
+source must reach the operator through an authorized route, and the required
+specific action-time approval must cover any production key generation/configuration
+or security/access change. Key generation/storage stays server-local and private.
+Keep the new key with vetted configured-key source on rollback, or fail unavailable.
 
 ## Local verification
 
