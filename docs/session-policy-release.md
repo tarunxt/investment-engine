@@ -81,6 +81,9 @@ deadline are discarded. Auth.js updates accept only same-request trusted async
 context bound to the previous credential, account and generation; browser-supplied
 update fields cannot replace credentials or identity.
 
+The recovery allowlist admits the two new authentication routes only; their JWT
+and family checks still apply, and financial/worker restrictions are unchanged.
+
 Logout uses the existing family-bound refresh credential solely to revoke, without
 competing for refresh intent or needing an unexpired access credential. The response
 claims confirmed revocation only after commit. Local cleanup, SDK sign-out and

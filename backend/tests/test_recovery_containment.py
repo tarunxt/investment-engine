@@ -356,6 +356,7 @@ def test_worker_ready_hooks_do_not_dispatch_or_touch_legacy_state(recovery):
 @pytest.mark.parametrize("method,path,allowed", [
     ("GET", "/indmoney-us/portfolio", True), ("GET", "/providers", True), ("POST", "/runs", True),
     ("POST", "/auth/login", True), ("GET", "/runs/123", True),
+    ("POST", "/auth/refresh-intent", True), ("POST", "/auth/logout-refresh", True),
     ("POST", "/indmoney-us/events/run", True), ("POST", "/indmoney-us/threats/run", True),
     ("GET", "/polymarket/state", False), ("GET", "/polymarket-direct/state", False),
     ("GET", "/zerodha/status", True), ("GET", "/zerodha/login-url", True),
