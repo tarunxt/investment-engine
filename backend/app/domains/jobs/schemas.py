@@ -1,16 +1,27 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_serializer, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 from app.shared.types import JobStatus
+from app.shared.exceptions import ValidationException
+from .resource_policy import MAX_PROMPT_CHARS, validate_prompt
+from .resource_validation import MODEL_IDENTIFIER_MAX_CHARS
 
 
 class JobCreate(BaseModel):
-    prompt: str
-    provider: str
-    model: str
+    prompt: str = Field(max_length=MAX_PROMPT_CHARS)
+    provider: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
+    model: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
     scheduled_at: Optional[datetime] = None
+
+    @field_validator("prompt")
+    @classmethod
+    def bounded_prompt(cls, value):
+        try:
+            return validate_prompt(value)
+        except ValidationException as exc:
+            raise ValueError(exc.message) from None
 
 
 class JobResponse(BaseModel):

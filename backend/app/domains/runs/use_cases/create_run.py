@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.domains.jobs.resource_policy import validate_prompt, validate_targets
+from app.domains.jobs.resource_validation import validate_model_identifiers
+
 from app.core.recovery import recovery_mode, require_equity_analysis
 
 import logging
@@ -61,6 +64,11 @@ class CreateRunUseCase:
 
     async def execute(self, cmd: CreateRunCommand) -> Run:
         require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
+        validate_prompt(cmd.prompt)
+        validate_targets(cmd.targets)
+        for target in cmd.targets:
+            validate_model_identifiers(target.provider, target.model)
+
         from app.domains.runs.side_effect_policy import execution_allows_side_effects
         if recovery_mode() or not await execution_allows_side_effects(self._session, cmd):
             # Existing six-stage UI requests sheet exports; contain that optional

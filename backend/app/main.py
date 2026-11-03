@@ -1,5 +1,6 @@
 
 from app.core.recovery import RecoveryMiddleware
+from app.domains.jobs.resource_body import ResourceBodyMiddleware
 
 from app.core.recovery import recovery_mode
 import json
@@ -280,6 +281,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 app.add_middleware(RecoveryMiddleware)
+app.add_middleware(ResourceBodyMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
