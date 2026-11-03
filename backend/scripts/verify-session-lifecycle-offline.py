@@ -533,6 +533,22 @@ class BoundaryProof(unittest.IsolatedAsyncioTestCase):
             await self.active(pair["access_token"])
         await self.active(other["access_token"])
 
+    async def test_refresh_based_logout_rejects_wrong_purpose_expiry_and_legacy(self):
+        pair = await self.issue()
+        payload = JWT.verify_refresh_token(pair["refresh_token"])
+        claims = {"sub": "42", "sid": payload["sid"], "type": "refresh"}
+        credentials = [pair["access_token"], "malformed.fixture",
+            jwt.encode({**claims, "exp": -1}, KEY, algorithm="HS256"),
+            jwt.encode(claims, KEY, algorithm="HS256"),
+            ns["AuthUtils"].create_tokens(42, "fixture@example.invalid", "user")["refresh_token"]]
+        route = self.route_runtime()["logout_refresh"]
+        for credential in credentials:
+            store = Store(self.db)
+            store.add = lambda value: None
+            with self.assertRaises(Denied):
+                await route(SimpleNamespace(refresh_token=credential), store)
+            await self.active(pair["access_token"])
+
     async def test_logout_acknowledgement_requires_successful_commit(self):
         pair = await self.issue()
         route = self.route_runtime()["logout"]

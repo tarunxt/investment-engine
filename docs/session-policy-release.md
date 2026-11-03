@@ -124,7 +124,7 @@ the disposable database has `--network none`, no exposed ports and no production
 credentials/data. New migration tests run only inside a disposable Docker backend.
 
 - 49 token purpose/expiry cases, through the guarded pytest wrapper (`--noconftest`).
-- 22 lifecycle/HTTP-body/WebSocket/cleanup cases in
+- 23 lifecycle/HTTP-body/WebSocket/cleanup cases in
   `backend/scripts/verify-session-lifecycle-offline.py`.
 - 14 actual PostgreSQL cases in `verify-session-postgres-disposable.py`, including
   actual FastAPI intent/refresh/logout handlers, row-lock contention, reuse commit,
