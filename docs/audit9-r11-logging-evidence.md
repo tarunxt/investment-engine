@@ -1,0 +1,25 @@
+# A9-R11 — sensitive logging source fix and scope
+
+Status: source logging defect established and patched; no production credential exposure established. Baseline: `8d25f34a33242adcaab092afdb07af7956f327bd`; review date 2026-11-01.
+
+T01 source review establishes that `main.py` logged `settings.redis_url` verbatim. Credential-bearing configuration could therefore reach application console/file logs. This is a conditional source path, not evidence that configured credentials or historical logs contained secrets. Runtime settings and logs were not accessed.
+
+Startup now reports database/Redis configuration booleans only. `core/redaction.py` adds final-output formatter redaction for URI userinfo, bearer/basic authorization and named secret fields; standard/detailed formatters cover console/application/worker handlers configured by `core/logging.py`. Sanitization happens after message interpolation and exception/stack rendering, preserving job IDs, status, error type, traceback location and non-sensitive endpoint diagnostics. Records are not mutated between handlers.
+
+T02 synthetic verification: credential-bearing Redis/Postgres URLs, API-key query values, quoted secrets, authorization headers, formatted arguments and exception traceback text across two handlers. Startup AST guard prevents connection-value logging. Additional checks cover configured handler formatters and synthetic request hashing through the isolated metering hash function. Run `python -m unittest discover -s backend/tests -p test_privacy_redaction.py -v` without importing settings or connecting to services.
+
+T03 review: `api_usage/metering.py` stores canonical SHA-256 request hashes rather than raw request bodies in attempt events; error storage uses exception class only; persistence failures log attempt IDs without DB exception parameters. Hashes remain potentially linkable and are not anonymization. Search error results and `jobs/failure_diagnostics.py` can retain exception/provider text; stored diagnostics, job response/context fields and original financial evidence are outside this logging-only patch. Existing job diagnostics regex is not a universal privacy guarantee.
+
+Limits: patterns are defense in depth, not a detector for arbitrary financial or private text, bare unlabeled secrets, every cookie syntax, encoded blobs or structured extras rendered by custom sinks. Other Celery/third-party handlers, system journal configuration, direct prints and historical files are unverified. This does not erase past logs or provider data. Any broader persistence sanitization must be separately scoped to preserve useful diagnostics and original provenance. No live test, production log/settings read, credential rotation, retention modification or provider call occurred.
+
+Acceptance remains partial overall: synthetic source controls pass; deployment and actual sink coverage require the existing coordinator's exact candidate checks and independent review. No entire finding is closed. Canonical remote task deduplication remains pending after a `Forbidden` lookup.
+
+## Synthetic consumer/sink follow-up, 2026-11-02
+
+Read-only Git remote reconciliation found PR1405 head and work/privacy-evidence-20261101 both at aa9de77bc992d8eeb909e9b47f5ef3ef662d5019, matching the starting local revision. PR draft/base/check status was not queried through the previously denied API route.
+
+A new isolated test reproduced a final-output redaction gap: escaped quote characters inside a JSON credential value terminated the quoted-value regex early, exposing the remaining synthetic suffix. The smallest change makes quoted values consume escaped characters before recognizing their closing delimiter. Auth/session files, serializer contracts, settings, original financial evidence and retention are unchanged.
+
+`python -m unittest discover -s backend/tests -p test_privacy_logging_consumers.py` failed before the fix. After the fix, `python -m unittest discover -s backend/tests -p 'test_privacy*.py' -v` passed all 8 tests. The added test passes synthetic telemetry/error/export-field text, fake credential-bearing Redis URLs and exception traces through an actual StreamHandler and temporary RotatingFileHandler. It checks absence of synthetic sensitive markers while retaining job/status/row-count, error type, traceback and endpoint diagnostics. Only pass/fail summaries were emitted during reproduction; no real secret, setting, log or account record was loaded.
+
+These tests establish final rendered logging behavior only, not export serialization minimization or all consumer privacy. Historical logs, operational sink coverage, custom structured extras, arbitrary private text, retention/deletion, provider contract applicability, encryption and secret-store controls remain unverified unless separately evidenced. No production setting/header/access change, deployment, external send or native/runtime probe occurred. Integrator review and exact integrated-candidate checks remain required; no whole finding is closed.

@@ -1,0 +1,128 @@
+{
+  "review_date": "2026-11-01",
+  "source_revision": "8d25f34a33242adcaab092afdb07af7956f327bd",
+  "scope": "Eleven selected primary advisories; not exhaustive; deployed installed state unknown",
+  "advisories": [
+    {
+      "package": "next",
+      "ecosystem": "npm",
+      "locked_version": "16.2.5",
+      "affected_specifier": ">=16.2.0,<16.3.6",
+      "advisory": "GHSA-vcvr-r3jv-pc5j",
+      "source_url": "https://github.com/advisories/GHSA-vcvr-r3jv-pc5j",
+      "source_updated_or_published": "2026-09-22",
+      "version_matches": true,
+      "reachability": "No next/og or ImageResponse use found in application source; bundled paths unassessed."
+    },
+    {
+      "package": "next",
+      "ecosystem": "npm",
+      "locked_version": "16.2.5",
+      "affected_specifier": ">=16.0.0,<16.2.5",
+      "advisory": "GHSA-c4j6-fc7j-m34r",
+      "source_url": "https://github.com/advisories/GHSA-c4j6-fc7j-m34r",
+      "source_updated_or_published": "2026-05-14",
+      "version_matches": false,
+      "reachability": "Built-in Next server is used; reviewed WebSocket SSRF version range excludes this lock pin."
+    },
+    {
+      "package": "python-jose",
+      "ecosystem": "pypi",
+      "locked_version": "3.5.0",
+      "affected_specifier": "<=3.5.0",
+      "advisory": "GHSA-3qf3-8w2g-rqmx",
+      "source_url": "https://github.com/advisories/GHSA-3qf3-8w2g-rqmx",
+      "source_updated_or_published": "2026-10-05",
+      "version_matches": true,
+      "reachability": "HS256 allowlist observed; baseline fixed source key, not configured-signing remediation. DER-key precondition unestablished."
+    },
+    {
+      "package": "starlette",
+      "ecosystem": "pypi",
+      "locked_version": "1.0.0",
+      "affected_specifier": "<0.47.2",
+      "advisory": "GHSA-2c2j-9gv5-cj73",
+      "source_url": "https://github.com/advisories/GHSA-2c2j-9gv5-cj73",
+      "source_updated_or_published": "2025-07-21",
+      "version_matches": false,
+      "reachability": "FastAPI runtime middleware reachable; no direct Form/UploadFile/request.form application use found; affected version excluded."
+    },
+    {
+      "package": "requests",
+      "ecosystem": "pypi",
+      "locked_version": "2.33.1",
+      "affected_specifier": "<2.32.4",
+      "advisory": "GHSA-9hjg-9r4m-mvj7",
+      "source_url": "https://github.com/advisories/GHSA-9hjg-9r4m-mvj7",
+      "source_updated_or_published": "2026-10-19",
+      "version_matches": false,
+      "reachability": "requests.get/post occur in provider search and direct market adapters; netrc behavior not inspected; affected version excluded."
+    },
+    {
+      "package": "axios",
+      "ecosystem": "npm",
+      "locked_version": "1.16.0",
+      "affected_specifier": ">=1.7.0,<1.16.0",
+      "advisory": "GHSA-777c-7fjr-54vf",
+      "source_url": "https://github.com/advisories/GHSA-777c-7fjr-54vf",
+      "source_updated_or_published": "2026-06-12",
+      "version_matches": false,
+      "reachability": "No direct axios import/configured fetch adapter in application source; services use fetch; transitive callers unassessed."
+    },
+    {
+      "package": "axios",
+      "ecosystem": "npm",
+      "locked_version": "1.16.0",
+      "affected_specifier": ">=1.0.0,<1.16.0",
+      "advisory": "GHSA-p92q-9vqr-4j8v",
+      "source_url": "https://github.com/advisories/GHSA-p92q-9vqr-4j8v",
+      "source_updated_or_published": "2026-06-12",
+      "version_matches": false,
+      "reachability": "No direct application axios proxy configuration or Proxy-Authorization use found; transitive Node adapters unassessed."
+    },
+    {
+      "package": "axios",
+      "ecosystem": "npm",
+      "locked_version": "1.16.0",
+      "affected_specifier": ">=1.0.0,<1.16.0",
+      "advisory": "GHSA-hfxv-24rg-xrqf",
+      "source_url": "https://github.com/advisories/GHSA-hfxv-24rg-xrqf",
+      "source_updated_or_published": "2026-06-11",
+      "version_matches": false,
+      "reachability": "No application axios or xsrfCookieName configuration found; transitive callers unassessed."
+    },
+    {
+      "package": "postcss",
+      "ecosystem": "npm",
+      "locked_version": "8.5.14",
+      "affected_specifier": "<8.5.10",
+      "advisory": "GHSA-qx2v-qp2m-jg93",
+      "source_url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+      "source_updated_or_published": "2026-04-24",
+      "version_matches": false,
+      "reachability": "Build path configured in frontend/postcss.config.mjs with @tailwindcss/postcss; affected version excluded."
+    },
+    {
+      "package": "postcss",
+      "ecosystem": "npm",
+      "locked_version": "8.5.14",
+      "affected_specifier": "<=8.5.11",
+      "advisory": "GHSA-6g55-p6wh-862q",
+      "source_url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+      "source_updated_or_published": "2026-07-23",
+      "version_matches": false,
+      "reachability": "PostCSS build path reachable; no runtime user-supplied CSS processing route found; affected version excluded."
+    },
+    {
+      "package": "python-multipart",
+      "ecosystem": "pypi",
+      "locked_version": "0.0.27",
+      "affected_specifier": "<0.0.30",
+      "advisory": "GHSA-vffw-93wf-4j4q",
+      "source_url": "https://github.com/advisories/GHSA-vffw-93wf-4j4q",
+      "source_updated_or_published": "2026-07-15",
+      "version_matches": true,
+      "reachability": "No direct Form/UploadFile/request.form application use found; framework and indirect multipart entrypoints unassessed."
+    }
+  ]
+}
