@@ -314,9 +314,14 @@ def test_full_api_lifespan_and_route_guard_with_isolated_dependencies(recovery, 
     from unittest.mock import AsyncMock
     from fastapi.testclient import TestClient
     import app.main as main
+    schema_reads = []
     class Session:
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
+        async def execute(self, query):
+            table = query.get_final_froms()[0].name
+            assert table in {"auth_session_families", "auth_refresh_intents"}
+            schema_reads.append(table)
     monkeypatch.setattr(main, "AsyncSessionLocal", Session)
     monkeypatch.setattr(main, "seed_system_prompts", AsyncMock())
     monkeypatch.setattr(main, "get_bullpen_runtime_broker", lambda: SimpleNamespace(validate_startup=lambda: None))
@@ -330,6 +335,7 @@ def test_full_api_lifespan_and_route_guard_with_isolated_dependencies(recovery, 
             assert client.get(route).status_code == 503
         assert client.post("/zerodha/orders", json={}).status_code == 503
         assert client.post("/runs/123/cancel").status_code == 503
+    assert schema_reads == ["auth_session_families", "auth_refresh_intents"]
     for manager in (main.polymarket_bot_manager, main.polymarket_direct_bot_manager,
                     main.polymarket_auto_live_bot_manager):
         manager.get_bot.assert_not_called()
