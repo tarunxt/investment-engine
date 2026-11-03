@@ -26,8 +26,19 @@ test("read-side lookup preserves in-flight orphans and incomplete Universal owne
       exportId: id, ownerHash: createHash("sha256").update("42:universal").digest("hex"),
       universalSource: true, completed: false,
     }));
-    await module.openLatestStageOneGammaExport({ ownerKey: "42:universal" });
+    assert.equal(await module.openLatestStageOneGammaExport({ ownerKey: "42:universal" }), null,
+      "a running or stopped incomplete capture is never a workflow input");
     assert.ok(existsSync(rows), "running Universal capture must survive read-side cleanup");
+    await assert.rejects(module.forkUniversalScan("42"), /Run Universal Polymarket Scan in Trading Bots first/);
+    const metadataPath = join(directory, `${id}.json`);
+    const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+    writeFileSync(metadataPath, JSON.stringify({...metadata, completed: true, filterPending: true}));
+    assert.equal(await module.openLatestStageOneGammaExport({ownerKey:"42:universal"}), null,
+      "pending filtering is not a completed workflow input");
+    writeFileSync(metadataPath, JSON.stringify({...metadata, completed: true, updatedAt:"2026-11-03T00:00:00Z"}));
+    assert.equal((await module.openLatestStageOneGammaExport({ownerKey:"42:universal"})).metadata.exportId, id);
+    assert.equal(await module.openLatestStageOneGammaExport({ownerKey:"43:universal"}), null,
+      "completed captures remain owner isolated");
   } finally {
     if (oldDirectory === undefined) delete process.env.BULLPEN_STAGE_ONE_EXPORT_DIRECTORY;
     else process.env.BULLPEN_STAGE_ONE_EXPORT_DIRECTORY = oldDirectory;

@@ -935,6 +935,18 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
     volumeUsd: 1200.5,
     liquidityUsd: 450,
     forceInclude: true,
+    bestAskCents: null,
+    bestBidCents: null,
+    conditionId: null,
+    eventDescription: null,
+    forceIncludedPosition: false,
+    marketContext: null,
+    preflightEvidenceBlock: null,
+    resolutionSource: null,
+    returnsPerDay: null,
+    rules: null,
+    selected: null,
+    spreadCents: null,
     scanStatus: "passed",
     filterReasons: [],
   });
@@ -1011,6 +1023,7 @@ test("Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions", 
       "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     isClaimable: false,
     classification: null,
+    returnsPerDay: null,
   });
 });
 

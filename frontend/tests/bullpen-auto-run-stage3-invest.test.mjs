@@ -1322,10 +1322,13 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /CheckCircle2/);
   assert.match(source, /Open Stage 3 \$\{counter\.label\.toLowerCase\(\)\} details/);
   assert.match(source, /Explain Stage 2 to Stage 3 planned strategy/);
-  assert.match(source, /formatOddsPercent\(candidate\.llmYesOdds\)/);
-  assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
-  assert.match(source, /formatReturnsPerDay\(candidate\.returnsPerDay\)/);
-  assert.match(source, /formatInvestAmount\(candidate\.amountToBeInvested\)/);
+  // Shared table owns probability/return/amount cells; the schedule supplies rows.
+  const table = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx", import.meta.url), "utf8");
+  assert.match(source, /questionRows = buildStage2TopTenEventsSummaryRows\(rows\)/);
+  assert.match(table, /question.llmYesOdds/);
+  assert.match(table, /question.llmNoOdds/);
+  assert.match(table, /question.returnsPerDay/);
+  assert.match(table, /question.amountToBeInvested/);
   assert.match(source, />LLM Yes Odds<\/th>/);
   assert.match(source, />LLM No Odds<\/th>/);
   assert.match(source, />Returns\/day<\/th>/);

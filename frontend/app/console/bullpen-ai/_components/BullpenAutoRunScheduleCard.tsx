@@ -4835,11 +4835,16 @@ export function BullpenAutoRunScheduleCard({
   const independentStageOneView = independentScanSnapshot
     ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
     : null;
-  useEffect(() => {
-    if (independentScanSnapshot) {
-      setStageOneResultSource("independent");
-    }
-  }, [independentScanSnapshot?.snapshotId]);
+  // Reset the selection only when the snapshot identity changes, preserving
+  // manual selections across refreshes of the same snapshot. React retries
+  // this component before committing, so no stale selection is painted.
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState(
+    independentScanSnapshot?.snapshotId,
+  );
+  if (selectedSnapshotId !== independentScanSnapshot?.snapshotId) {
+    setSelectedSnapshotId(independentScanSnapshot?.snapshotId);
+    if (independentScanSnapshot) setStageOneResultSource("independent");
+  }
   const handleIndependentStageOneScan = async (
     downloadScope: "filtered" | "all-scanned" | null = null,
   ) => {

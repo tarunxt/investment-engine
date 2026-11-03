@@ -2243,9 +2243,25 @@ export function BullpenRunDetailScreen({
   runId: string;
   workspaceProfile?: BullpenWorkspaceProfile;
 }) {
+  // Each run owns its request and dialog state, including when navigating back
+  // to a previously opened run before another request has completed.
+  return <BullpenRunDetailScreenContent key={runId.trim()} runId={runId} workspaceProfile={workspaceProfile} />;
+}
+
+function BullpenRunDetailScreenContent({
+  runId,
+  workspaceProfile = "bullpen007",
+}: {
+  runId: string;
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
   const router = useRouter();
-  const [state, setState] = useState<RunDetailDialogState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    runId: string;
+    reloadKey: number;
+    state: RunDetailDialogState | null;
+    error: string | null;
+  } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
@@ -2256,16 +2272,15 @@ export function BullpenRunDetailScreen({
   const [investMetricDialog, setInvestMetricDialog] =
     useState<InvestMetricDialogState | null>(null);
   const normalizedRunId = runId.trim();
+  // A previous request must never appear under another run or retry identity.
+  const currentResult = result?.runId === normalizedRunId && result.reloadKey === reloadKey
+    ? result : null;
+  const state = currentResult?.state ?? null;
+  const error = !normalizedRunId ? "A run id is required." : currentResult?.error ?? null;
 
   useEffect(() => {
-    if (!normalizedRunId) {
-      setError("A run id is required.");
-      return;
-    }
-
+    if (!normalizedRunId) return;
     const controller = new AbortController();
-    setState(null);
-    setError(null);
 
     void (async () => {
       try {
@@ -2345,17 +2360,25 @@ export function BullpenRunDetailScreen({
           decisionListLimit = consoleDetail.decisions_limit;
         }
 
-        setState({
-          run: detailRun,
-          decisions: detailDecisions,
-          decisionListTruncated,
-          decisionListLimit,
+        setResult({
+          runId: normalizedRunId,
+          reloadKey,
+          state: {
+            run: detailRun,
+            decisions: detailDecisions,
+            decisionListTruncated,
+            decisionListLimit,
+          },
+          error: null,
         });
       } catch (nextError) {
         if (controller.signal.aborted || isRequestAbort(nextError)) return;
-        setError(
-          `Run ${normalizedRunId} details could not be loaded. ${formatUnknownError(nextError)}`,
-        );
+        setResult({
+          runId: normalizedRunId,
+          reloadKey,
+          state: null,
+          error: `Run ${normalizedRunId} details could not be loaded. ${formatUnknownError(nextError)}`,
+        });
       }
     })();
 
