@@ -60,7 +60,7 @@ SDK, HTTP, Celery and SMTP guards before app imports; clears inherited environme
 uses an empty temporary cwd instead of reading operator .env; only scripted SDK and
 search doubles are permitted. Guard violations are fatal even if caught by app code.
 
-Local current candidate: **250 passed, zero guard violations**, including all twelve
+Local current candidate: **320 passed, zero guard violations**, including all twelve
 public projections, private/ambiguous field denial before invocation, actual
 OpenAI/DeepSeek loops, sensitive-query metadata denial, malformed args, tool-disabled
 recovery, hostile-content SQLite notification/export lifecycle fixtures, shared
@@ -95,3 +95,12 @@ leave metered transport signatures and accounting placement unchanged. No cap
 branch payload is imported, no certified-provider gate is removed, and no financial
 worker is started. Keep all independent admission/owner/side-effect gates when
 resolving overlaps. Merge/deploy are root/sole-production-operator actions only.
+
+CI correction history: at head25fd3370, Audit9 offline workflow41686749693 and
+API migration41686749692 passed. PR run41686749691 exposed one inherited metering
+fixture that attempted the now-denied literal `private search` (1381 passed, one
+failed, one skipped,22 subtests). The positive fallback fixture now uses a canonical
+public query without dropping ledger assertions; a new negative fixture verifies
+private denial produces zero transport calls and zero attempt rows. All accounting
+cases now join the pre-import guarded local runner:320 passed, zero violations.
+The original failed run is retained; new exact-head CI is required.

@@ -71,7 +71,7 @@ with TemporaryDirectory(prefix='a9-empty-cwd-') as cwd, ExitStack() as stack:
     args = [str(ROOT / 'tests' / name) for name in [
         'test_providers.py::GeminiProviderConfigTests', 'test_gemini_search_egress.py', 'test_public_query_projection.py', 'test_search_consumer_dispatch.py', 'test_search_egress_boundary.py',
         'test_rebalance_side_effect_policy.py', 'test_openai_provider.py', 'test_deepseek_provider.py',
-        'test_web_search_tool.py', 'test_polymarket_event_preflight.py',
+        'test_api_usage_attempts.py', 'test_web_search_tool.py', 'test_polymarket_event_preflight.py',
         'test_polymarket_auto_live_evidence.py', 'test_output_contracts.py',
         'test_google_sheets_output_contracts.py',
     ]]
