@@ -6,6 +6,8 @@ on:
       - 'backend/app/domains/jobs/output_contracts/**'
       - 'backend/tests/test_search_egress_boundary.py'
       - 'backend/tests/test_public_query_projection.py'
+      - 'backend/tests/test_gemini_search_egress.py'
+      - 'backend/tests/test_providers.py'
       - 'backend/tests/test_search_consumer_dispatch.py'
       - 'backend/scripts/verify-search-consumers-offline.py'
       - 'backend/app/domains/polymarket/event_preflight.py'

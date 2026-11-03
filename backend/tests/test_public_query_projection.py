@@ -64,3 +64,8 @@ def test_metadata_cannot_be_forged_with_private_query():
     from app.domains.ai_providers.tools.public_queries import admitted_query
     assert admitted_query(json.dumps({'query':'private account fixture','results':[]})) is None
     assert admitted_query(json.dumps({'query':'NIFTY 50 live price today','errors':['blocked']})) is None
+
+
+def test_provider_capability_does_not_claim_native_search_is_attached():
+    from app.domains.ai_providers.factory import ProviderFactory
+    assert ProviderFactory.get_provider_internet_access('gemini')['mode']=='none'

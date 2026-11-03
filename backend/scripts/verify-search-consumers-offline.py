@@ -53,6 +53,7 @@ with TemporaryDirectory(prefix='a9-empty-cwd-') as cwd, ExitStack() as stack:
     import requests
     import httpx
     import openai
+    from google import genai
     import smtplib
     from celery.app.task import Task
     for target, attr, kind in [
@@ -60,6 +61,7 @@ with TemporaryDirectory(prefix='a9-empty-cwd-') as cwd, ExitStack() as stack:
         (httpx.Client, 'send', 'httpx'), (httpx.AsyncClient, 'send', 'httpx.async'),
         (openai.OpenAI, '__init__', 'openai.constructor'),
         (openai.AsyncOpenAI, '__init__', 'openai.async.constructor'),
+        (genai.Client, '__init__', 'gemini.constructor'),
         (Task, 'apply_async', 'celery.dispatch'),
         (smtplib.SMTP, '__init__', 'smtp'), (smtplib.SMTP_SSL, '__init__', 'smtp.ssl'),
     ]:
@@ -67,7 +69,7 @@ with TemporaryDirectory(prefix='a9-empty-cwd-') as cwd, ExitStack() as stack:
     # Import pytest only after guards; plugin loading is explicitly bounded.
     import pytest
     args = [str(ROOT / 'tests' / name) for name in [
-        'test_public_query_projection.py', 'test_search_consumer_dispatch.py', 'test_search_egress_boundary.py',
+        'test_providers.py::GeminiProviderConfigTests', 'test_gemini_search_egress.py', 'test_public_query_projection.py', 'test_search_consumer_dispatch.py', 'test_search_egress_boundary.py',
         'test_rebalance_side_effect_policy.py', 'test_openai_provider.py', 'test_deepseek_provider.py',
         'test_web_search_tool.py', 'test_polymarket_event_preflight.py',
         'test_polymarket_auto_live_evidence.py', 'test_output_contracts.py',

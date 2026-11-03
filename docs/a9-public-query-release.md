@@ -39,6 +39,10 @@ properties are unmeasured, not universal injection resistance.
   from admitted tool output, never rejected model/constructed strings. Rejected
   attempts do not claim search usage or carry private-query metadata. DSML recovery
   follows the same rule. This does not rewrite historical saved metadata.
+- Gemini native Google Search grounding is disabled because its provider-managed
+  queries cannot pass through the local projection. Original analysis and observed
+  token accounting stay intact; unsolicited query/source metadata is not stored or
+  treated as admitted evidence. No alternate native search is enabled. Provider capability metadata now reports native search unavailable rather than advertising attached grounding.
 - Malformed/raw/non-object tool args reject without a consumer crash. DeepSeek's
   existing evidence-only marker blocks unsolicited calls AND DSML search recovery;
   no-tool formatting recovery remains. Unknown send/export/trade/policy tools deny.
@@ -56,7 +60,7 @@ SDK, HTTP, Celery and SMTP guards before app imports; clears inherited environme
 uses an empty temporary cwd instead of reading operator .env; only scripted SDK and
 search doubles are permitted. Guard violations are fatal even if caught by app code.
 
-Local current candidate: **242 passed, zero guard violations**, including all twelve
+Local current candidate: **250 passed, zero guard violations**, including all twelve
 public projections, private/ambiguous field denial before invocation, actual
 OpenAI/DeepSeek loops, sensitive-query metadata denial, malformed args, tool-disabled
 recovery, hostile-content SQLite notification/export lifecycle fixtures, shared
