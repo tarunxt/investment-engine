@@ -133,3 +133,16 @@ def test_cli_invalid_timestamp_preserves_previous_report_and_source(tmp_path, in
     assert output.read_bytes() == old and source.read_bytes() == before
     assert 'No new report was published' in result.stderr
     assert not list(tmp_path.glob('.*.tmp'))
+
+
+def test_cli_preserves_preexisting_record_bounds_without_new_byte_ceiling(tmp_path):
+    source, output = tmp_path/'input.json', tmp_path/'report.json'
+    legacy = record(); legacy['execution_costs'] = ['synthetic-legacy-metadata']
+    data = {'records': [legacy], 'prices': prices(), 'simulation': {'train_fraction': 0},
+            'synthetic_unused_padding': 'x' * 20_000_001}
+    source.write_text(json.dumps(data))
+    script = Path(__file__).resolve().parents[1]/'scripts'/'replay_recommendations.py'
+    result = subprocess.run([sys.executable, str(script), str(source), str(output)], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert json.loads(output.read_text())['walk_forward']['status'] == 'computed'
+    assert source.stat().st_size > 20_000_000

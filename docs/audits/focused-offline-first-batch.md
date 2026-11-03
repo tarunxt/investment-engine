@@ -2,7 +2,7 @@
 
 Based on main b67bec4e390f55eb3faf9e66d454cbfa499f15d4. This branch selectively reuses reviewed candidate work; it does not merge the combined 281-file PR #1407.
 
-- A10-006/007: UTC-aware instant identity for offline replay, duplicate-instant rejection, positive integer horizons and atomic report output. Raw timestamps remain in outputs; valid simulation economics, causal fills, default horizons and replay/sensitivity response fields remain unchanged. The broader validation dossier and evidence-only CLI option are excluded.
+- A10-006/007: UTC-aware instant identity for offline replay, duplicate-instant rejection, positive integer horizons and atomic report output. Raw timestamps remain in outputs; valid simulation economics, causal fills, default horizons and replay/sensitivity response fields remain unchanged. The broader validation dossier and evidence-only CLI option are excluded. Review removed an unrelated candidate byte ceiling and execution-cost metadata schema restriction; existing row bounds and uninterpreted legacy metadata remain compatible.
 - A10-005: additive per-claim explanation metadata and escaped UI text from PR #1406. Existing verdicts, policy version, critical-claim gates and saved history remain unchanged. No calibrated learning or financial-policy change.
 - A9-R11: formatter-level credential-pattern redaction and startup presence-only connection diagnostics from PR #1405. All configured output formatters use the redactor. This is bounded pattern protection, not a general private-content detector; separately configured handlers/sinks need their own verification. No historical logs are read or purged.
 - A12-005: strict finite numeric nonnegative byte/baseline validation, explicit missing/failed measurement state, candidate identity/time metadata and local synthetic provenance producer from PR #1404. Invalid profile containers and expected build times also fail closed. Existing fixed and relative byte budgets are unchanged. Older reports without evidence now fail as Not measured; they are not grandfathered as passes.
@@ -19,7 +19,7 @@ node --test scripts/check-javascript-budgets.test.mjs
 node --test frontend/tests/verifier-explanation.test.mjs frontend/tests/recommendation-audit-recovery-policy.test.mjs frontend/tests/runtime-performance-regressions.test.mjs frontend/tests/rebalance-side-effect-policy.test.mjs frontend/tests/investment-recommendation-schema.test.mjs frontend/tests/investment-recommendation-fallback.test.mjs
 ```
 
-Local result: **82 Python tests plus 25 subtests, 67 budget tests and 31 frontend tests passed, zero failures/skips.**
+Local result: **83 Python tests plus 25 subtests, 67 budget tests and 31 frontend tests passed, zero failures/skips.**
 
 TypeScript no-emit, scoped component ESLint, changed Python compile checks, JavaScript syntax and diff whitespace checks also pass. Local frontend checks reuse dependencies from the identical main lockfile; no production artifact is built from that test-only symlink.
 
