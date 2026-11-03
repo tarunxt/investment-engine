@@ -126,10 +126,10 @@ credentials/data. New migration tests run only inside a disposable Docker backen
 - 49 token purpose/expiry cases, through the guarded pytest wrapper (`--noconftest`).
 - 22 lifecycle/HTTP-body/WebSocket/cleanup cases in
   `backend/scripts/verify-session-lifecycle-offline.py`.
-- 13 actual PostgreSQL cases in `verify-session-postgres-disposable.py`, including
+- 14 actual PostgreSQL cases in `verify-session-postgres-disposable.py`, including
   actual FastAPI intent/refresh/logout handlers, row-lock contention, reuse commit,
   account isolation, before/after commit faults, deterministic password race,
-  historical cutover and fail-closed missing schema.
+  historical cutover, preserved inactive-user HTTP 403 and fail-closed missing schema.
 - A separate three-OS-process PostgreSQL claim race: one committed intent and two
   conflicts; no replacement disclosure and the family remains active.
 - 27 logout/SSR cases plus six actual BFF/Auth.js callback fixtures via

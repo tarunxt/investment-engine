@@ -74,8 +74,6 @@ async def get_current_user(
             )
 
         sub = subject(payload)
-        await SessionLifecycle(SqlSessionFamilies(db)).require_active(payload)
-
         result = await db.execute(
             select(User).where(User.id == int(sub)).options(selectinload(User.profile))
         )
@@ -84,6 +82,7 @@ async def get_current_user(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
         if not user.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive")
+        await SessionLifecycle(SqlSessionFamilies(db)).require_active(payload)
         return user
     finally:
         add_auth_duration((monotonic() - started_at) * 1000)

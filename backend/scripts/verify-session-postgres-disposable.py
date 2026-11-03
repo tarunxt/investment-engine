@@ -61,7 +61,11 @@ class Proof(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin()as db:await db.run_sync(Base.metadata.create_all)
         async with self.sessions()as db:
             for uid in [self.uid,self.uid+1]:
-                if await db.get(User,uid) is None:
+                existing = await db.get(User,uid)
+                if existing is not None:
+                    existing.is_active = True
+                    existing.password_hash = 'synthetic-not-a-real-password'
+                else:
                     db.add(User(id=uid,email=f'fixture{uid}@example.invalid',username=f'fixture{uid}',password_hash='synthetic-not-a-real-password',role=UserRole.USER,is_active=True,is_verified=True))
             await db.commit()
     async def asyncTearDown(self):await self.engine.dispose()
@@ -170,6 +174,31 @@ class Proof(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ack.json()['session_revocation'],'confirmed')
         with self.assertRaises(HTTPException):await self.active(rotated)
         await self.active(other)
+    async def test_actual_api_dependency_preserves_inactive_403_and_enforces_family(self):
+        import ast
+        from fastapi import Depends, status
+        from fastapi.security import HTTPAuthorizationCredentials,HTTPBearer
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from sqlalchemy.orm import selectinload
+        from time import monotonic
+        lifecycle=__import__('app.domains.auth.session_lifecycle',fromlist=['subject'])
+        tree=ast.parse((Path(__file__).resolve().parents[1]/'app/domains/auth/dependencies.py').read_text())
+        node=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef)and n.name=='get_current_user')
+        async def unused():raise AssertionError('explicit test session required')
+        scope=dict(Depends=Depends,HTTPException=HTTPException,HTTPAuthorizationCredentials=HTTPAuthorizationCredentials,
+            AsyncSession=AsyncSession,security=HTTPBearer(auto_error=False),get_async_db=unused,User=User,select=select,
+            selectinload=selectinload,monotonic=monotonic,add_auth_duration=lambda *a:None,JWTUtils=JWTUtils,
+            subject=lifecycle.subject,SessionLifecycle=SessionLifecycle,SqlSessionFamilies=SqlSessionFamilies,
+            is_auth_disabled=lambda:False,status=status)
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'actual-api-dependency','exec'),scope)
+        pair=await self.issue();credentials=HTTPAuthorizationCredentials(scheme='Bearer',credentials=pair['access_token'])
+        async with self.sessions()as db:
+            user=await scope['get_current_user'](credentials,db);self.assertEqual(user.id,self.uid)
+        async with self.sessions()as db:
+            user=await db.get(User,self.uid);user.is_active=False;await db.commit()
+        async with self.sessions()as db:
+            with self.assertRaises(HTTPException)as denied:await scope['get_current_user'](credentials,db)
+            self.assertEqual(denied.exception.status_code,403)
     async def test_started_intent_survives_rotation_rollback(self):
         a=await self.issue();nonce=await self.claim(a)
         async with self.sessions()as db:
