@@ -24,6 +24,7 @@ import {
   type RunResponse,
 } from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
+import { useSessionPromptDrafts } from '@/providers/SessionPromptDrafts';
 import { type SwingTradeMarket } from '@/lib/swingTrade';
 
 export const DASHBOARD_RUN_LIMIT = 50;
@@ -101,6 +102,7 @@ interface DashboardContextValue {
 
   // Form state
   prompt: string;
+  hasUnsavedPromptDraft: boolean;
   setPrompt: React.Dispatch<React.SetStateAction<string>>;
   setOutputSourceSelection: React.Dispatch<React.SetStateAction<OutputSourceSelection | null>>;
   providers: ProviderInfo[];
@@ -202,8 +204,11 @@ export function DashboardProvider({
     refresh: refreshRuns,
   } = useRuns({ limit: DASHBOARD_RUN_LIMIT });
 
+  const promptDrafts = useSessionPromptDrafts();
+  const promptDraftKey = runScopeMarket ? `${runScopeMarket}:${runScopeKind}` : null;
+  const [restoredPromptDraft] = useState(() => promptDraftKey ? promptDrafts?.get(promptDraftKey) : undefined);
   const [prompt, setPrompt] = useState(() =>
-    promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : '',
+    restoredPromptDraft ?? (promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : ''),
   );
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [outputSourceSelection, setOutputSourceSelection] = useState<OutputSourceSelection | null>(null);
@@ -379,7 +384,7 @@ export function DashboardProvider({
       const defaultTemplate = defaultTemplateName
         ? templates.find((tpl) => tpl.name === defaultTemplateName)
         : undefined;
-      if (defaultTemplate) {
+      if (defaultTemplate && restoredPromptDraft === undefined) {
         setSelectedTemplateId(String(defaultTemplate.id));
         setPrompt(defaultTemplate.body);
       }
@@ -390,7 +395,7 @@ export function DashboardProvider({
     }
 
     setIsLoading(false);
-  }, [defaultTemplateName, prompt, refreshGoogleSheetsStatus]);
+  }, [defaultTemplateName, prompt, refreshGoogleSheetsStatus, restoredPromptDraft]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -420,7 +425,7 @@ export function DashboardProvider({
   }, [prompt]);
 
   useEffect(() => {
-    if (!promptPreset) return;
+    if (!promptPreset || restoredPromptDraft !== undefined) return;
 
     const nextAmount = exportInvestmentAmount.trim() || promptPreset.initialInvestmentAmount;
     const previousAmount = presetAmountRef.current || promptPreset.initialInvestmentAmount;
@@ -441,7 +446,7 @@ export function DashboardProvider({
 
     presetAmountRef.current = nextAmount;
     presetPromptRef.current = nextGeneratedPrompt;
-  }, [exportInvestmentAmount, promptPreset]);
+  }, [exportInvestmentAmount, promptPreset, restoredPromptDraft]);
 
   const fetchTemplates = useCallback(async (q: string) => {
     templateControllerRef.current?.abort('New search started');
@@ -466,17 +471,22 @@ export function DashboardProvider({
   );
 
   const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setPrompt(e.target.value);
-  }, []);
+    const value = e.target.value;
+    if (promptDraftKey) promptDrafts?.set(promptDraftKey, value);
+    setPrompt(value);
+  }, [promptDraftKey, promptDrafts]);
 
   const handleTemplateChange = useCallback(
     (id: string) => {
       if (id === 'none') return;
       setSelectedTemplateId(id);
       const tpl = promptTemplates.find((p) => String(p.id) === id);
-      if (tpl) setPrompt(tpl.body);
+      if (tpl) {
+        if (promptDraftKey) promptDrafts?.set(promptDraftKey, tpl.body);
+        setPrompt(tpl.body);
+      }
     },
-    [promptTemplates],
+    [promptTemplates, promptDraftKey, promptDrafts],
   );
 
   const toggleTarget = useCallback((key: string) => {
@@ -752,6 +762,7 @@ export function DashboardProvider({
         runScopeLabel,
         runScopeKind,
         prompt,
+        hasUnsavedPromptDraft: Boolean(promptDraftKey && promptDrafts?.has(promptDraftKey)),
         setPrompt,
         setOutputSourceSelection,
         providers,

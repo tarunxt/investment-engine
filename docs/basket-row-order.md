@@ -1,6 +1,6 @@
 # Basket row order
 
-The India Place Order Basket groups rows by **Action New**, in this order:
+The shared India Place Order Basket and INDmoney Final Order Basket group rows by **Action New**, in this order:
 Sell All, Trim, Buy New, Buy More (internally `Add more`), Hold, Unavailable.
 There is currently no explicit row-sort control. Column dragging changes columns,
 not stock order.
@@ -12,7 +12,7 @@ and score retain their source order, including exact-venue rows. Hold and
 Unavailable use finite-score availability followed by symbol, without score
 magnitude ordering.
 
-Editable India drafts use Action New as their sort identity. Units, percentage,
+Editable drafts in both brokers use Action New as their sort identity. Units, percentage,
 Amount, checkbox selection and calculation-popup state are not sort inputs.
 Reducing a Sell All quantity below the full holding must not move it into a
 hidden Trim subgroup of its unchanged visible Sell All section. The prior sorter
@@ -29,3 +29,27 @@ browser fixture with external requests blocked. They cover manual decrease and
 increase, crossing 100%, zero quantity, reactive Amount, selection, repeated
 popup renders, ties, exact-venue identity and new-score ordering. They are not
 production browser acceptance or authorization to place an order.
+
+
+INDmoney USD estimates retain fractional shares. Target Amount is Target Weight
+(as a fraction) × (current holdings value + parsed USD wallet balance); Action
+Amount subtracts the stock's invested value, as explicitly requested. Shares
+divide those unrounded amounts by a verified vendor LTP. A difference between
+invested-cost action direction and current-value Action New blocks readiness.
+Missing margin, price or invested value is unavailable, never silently zero.
+
+The shared table exposes the same nine calculated columns for both brokers;
+the four Action/Target sizing labels use the broker name. Raw/effective score
+explanations appear only in Historical Weighted Score details. Original saved
+scores and stage colours are unchanged.
+
+The US quote adapter is dormant and owner scoped, using explicit Alpaca IEX
+coverage only. Credentials and verified listing mappings are not configured;
+missing configuration returns Unavailable. The existing Google Finance HTML
+scraper is not expanded to this basket. IEX is not consolidated US-market LTP.
+Receipt time is not a trade timestamp. See indmoney-alpaca-display.md for the
+normalized quote contract, separate secure setup approval and readiness limits.
+Generic US and competing explicit venues are excluded from allocation until a
+verified listing mapping is available; no symbol-only alias merge is performed.
+Original rows/history remain visible for review. Partial sources and oversized
+sell estimates cannot be reported ready. This is not broker execution support.

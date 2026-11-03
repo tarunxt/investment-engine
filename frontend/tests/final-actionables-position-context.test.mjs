@@ -21,15 +21,19 @@ function load(path, bindings = {}, exports = '') {
 const actionColors = load('../lib/actionColorScheme.ts');
 const parser = load('../components/InvestmentRecommendationTable.tsx', actionColors);
 const bindings = {
+  AlertTriangle: () => null,
+  cn: (...values) => values.filter(Boolean).join(" "),
   ...parser,
   ...actionColors,
   ...load('../lib/technicalSetups.ts'),
   ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'),
   ...load('../lib/runPresentation.ts'),
+  ...load('../lib/usSecurityIdentity.ts'),
+  ...load('../lib/actionableQuantityDisplay.ts'),
 };
 const helpers = load('../app/console/_components/FinalActionablesConsole.tsx', bindings,
-  'export { getPositionContextLabel, getZerodhaHoldingForStock, getZerodhaBuyTransactionsForStock, historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
+  'export { buildActionablesCalculationRows, getPositionContextLabel, getZerodhaHoldingForStock, getZerodhaBuyTransactionsForStock, historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
 const actionHeader = 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)';
 const timestamp = '2026-09-01T10:00:00Z';
 
@@ -280,4 +284,67 @@ test('partial rows with unavailable model units use frozen holdings for final ac
     }
     assert.deepEqual(source, before, 'captured evidence is unchanged');
   }
+});
+
+// Synthetic 20-security/33-row shape only; no real portfolio data or live vendor calls.
+const syntheticUsMapping = (symbol, exchange='NASDAQ', suffix='') => ({instrument:`${exchange}:${symbol}`,symbol,listing_mic:exchange==='NASDAQ'?'XNAS':'XNYS',share_class:'common',security_id:`synthetic:${symbol}:${exchange}${suffix}`,vendor_symbol:`${symbol}${suffix}`,currency:'USD',verified:true});
+function oneUsJob(rows,id=12300) {
+ const run=runWithRows([rows[0]],'us',id),headers=parser.REBALANCE_HEADER_ORDER;
+ run.run_jobs[0].job.response=`| ${headers.join(' | ')} |\n| ${headers.map(()=>'---').join(' | ')} |\n${rows.map(row=>`| ${headers.map(header=>row[header]??(header.startsWith('Score Rationale')?'3':'—')).join(' | ')} |`).join('\n')}`;
+ return run;
+}
+function syntheticUsFixture() {
+ const mappings=Array.from({length:20},(_,i)=>syntheticUsMapping(`SIM${String(i).padStart(2,'0')}`,i%2?'NYSE':'NASDAQ'));
+ const explicit=mappings.map(item=>modelRow(1,{'Stock Symbol':item.symbol,'Exchange Symbol':item.instrument.split(':')[0]}));
+ const rows=[...explicit,...explicit.slice(0,13).map(row=>({...row,'Exchange Symbol':'US'}))];
+ const snapshot={parse_status:'parsed',captured_at:timestamp,holdings_count:20,reported_holdings_count:20,holdings:mappings.map(item=>({symbol:item.symbol,company_name:'Synthetic fixture',quantity:1,current_value:100,invested_value:80}))};
+ return {mappings,rows,snapshot};
+}
+test('verified US mapping resolves synthetic Run123 33 raw rows into 20 securities before consensus and holding attachment',()=>{
+ const f=syntheticUsFixture(),run=oneUsJob(f.rows),before=structuredClone(run);
+ const stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run],f.mappings);
+ assert.equal(stocks.length,20);assert.equal(helpers.calculationsCountSummary(stocks,false),"LLMs consolidated in this view: 1. Stocks: 20.");assert.equal(stocks.reduce((n,s)=>n+s.rows.length,0),33);assert.equal(stocks.reduce((n,s)=>n+s.consensusRows.length,0),20);
+ assert.equal(stocks.reduce((n,s)=>n+s.positionContext.currentUnits,0),20);assert.equal(stocks.reduce((n,s)=>n+s.positionContext.currentInvestmentAmount,0),2000);
+ assert.equal(stocks.reduce((n,s)=>n+s.sourceRowLinks.length,0),33);
+ const linked=stocks.flatMap(s=>s.sourceRowLinks);assert.equal(new Set(linked.map(link=>`${link.runId}:${link.jobId}:${link.rowIndex}`)).size,33);
+ for(const stock of stocks){assert.equal(stock.identityIssue,null);assert.equal(stock.actionCounts['Buy New'],1);assert.equal(stock.totalSuggestions,1);assert.equal(stock.positionContext.holdingMatch,'matched');assert.ok(stock.usIdentity.listing);}
+ assert.equal(stocks.filter(s=>s.rows.some(row=>row.cells['Exchange Symbol']==='US')).length,13);
+ const visible=helpers.buildActionablesCalculationRows(stocks,'us',{},helpers.DEFAULT_SCORE_MATRIX_FORMULA_CONFIG);assert.equal(visible.length,73);assert.equal(new Set(visible.map(row=>row.id)).size,73,'all 33 original rows and both summary rows per security have unique render identities');
+ assert.deepEqual(run,before,'source jobs and original alias cells are never rewritten');
+});
+test('contradictory aliases in one US job retain both originals, receive no duplicate vote, and block the decision',()=>{
+ const f=syntheticUsFixture();f.rows[20]={...f.rows[20],[actionHeader]:'Sell All'};
+ const run=oneUsJob(f.rows),stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run],f.mappings),conflict=stocks.find(s=>s.symbol==='SIM00');
+ assert.equal(stocks.length,20);assert.equal(conflict.rows.length,2);assert.equal(conflict.consensusRows.length,0);assert.match(conflict.identityIssue,/contradictory/);assert.equal(conflict.actionCounts['Buy New'],0);assert.equal(conflict.actionCounts['Sell All'],0);assert.equal(conflict.sourceRowLinks.length,2);assert.equal(conflict.positionContext.currentUnits,1);
+ const entry=conflict.breakupEntries[0];assert.equal(entry.row,null);assert.equal(entry.sourceRows.length,2);
+});
+test('different US source jobs retain legitimate contradictory votes after verified alias resolution',()=>{
+ const mapping=syntheticUsMapping('SIM00'),row=modelRow(1,{'Stock Symbol':'SIM00','Exchange Symbol':'US'}),a=oneUsJob([row],12301),b=oneUsJob([{...row,'Exchange Symbol':'NASDAQ',[actionHeader]:'Sell All'}],12302);
+ const [stock]=helpers.buildConsensusRows([a,b],'us',null,[a,b],[mapping]);assert.equal(stock.rows.length,2);assert.equal(stock.consensusRows.length,2);assert.equal(stock.actionCounts['Buy New'],1);assert.equal(stock.actionCounts['Sell All'],1);assert.equal(stock.totalSuggestions,2);assert.equal(stock.identityIssue,null);
+});
+test('missing verified mapping preserves all synthetic 33 identities as unresolved and never attaches holdings or invents zeros',()=>{
+ const f=syntheticUsFixture(),run=oneUsJob(f.rows),stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run]);assert.equal(stocks.length,33);
+ for(const stock of stocks){assert.match(stock.identityIssue,/mapping unavailable/);assert.equal(stock.positionContext.currentUnits,null);assert.equal(stock.positionContext.currentInvestmentAmount,null);assert.equal(stock.positionContext.holdingMatch,'unresolved');}
+});
+test('true dual US listings stay distinct; generic alias and generic holding remain ambiguous',()=>{
+ const mappings=[syntheticUsMapping('DUAL','NASDAQ','A'),syntheticUsMapping('DUAL','NYSE','B')],rows=['US','NASDAQ','NYSE'].map(exchange=>modelRow(1,{'Stock Symbol':'DUAL','Exchange Symbol':exchange})),run=oneUsJob(rows),snapshot={parse_status:'parsed',captured_at:timestamp,holdings_count:1,reported_holdings_count:1,holdings:[{symbol:'DUAL',quantity:7,current_value:700}]};
+ const stocks=helpers.buildConsensusRows([run],'us',snapshot,[run],mappings);assert.equal(stocks.length,3);assert.equal(new Set(stocks.map(s=>s.key)).size,3);assert.equal(stocks.filter(s=>s.usIdentity.listing).length,2);
+ for(const stock of stocks){assert.ok(stock.identityIssue);assert.equal(stock.positionContext.currentUnits,null);}
+ assert.match(stocks.find(s=>s.exchange==='US').identityIssue,/Multiple verified listings/);
+});
+
+
+test('US identity resolution rejects conflicting symbol prefixes and forged model verification',()=>{
+ const mapping=syntheticUsMapping('SIM00');
+ assert.match(bindings.resolveUsIdentity({symbol:'NYSE:SIM00',exchange:'NASDAQ'},[mapping]).issue,/prefix conflicts/);
+ assert.ok(bindings.resolveUsIdentity({symbol:'SIM00',exchange:'US'},[{...mapping,verified:false}]).issue);
+ const row=modelRow(1,{'Stock Symbol':'SIM00','Exchange Symbol':'US','verified':'true','security_id':'invented'}),run=oneUsJob([row]);
+ assert.ok(helpers.buildConsensusRows([run],'us')[0].identityIssue,'model cells cannot establish verified identity');
+});
+
+
+test('canonical US identity tuple encoding cannot merge distinct listings containing delimiters',()=>{
+ const a={...syntheticUsMapping('SIM01'),security_id:'synthetic:A',share_class:'class:XNYS:common'},b={...syntheticUsMapping('SIM02','NYSE'),security_id:'synthetic:A:XNAS:class',share_class:'common'};
+ const run=oneUsJob([modelRow(1,{'Stock Symbol':'SIM01','Exchange Symbol':'NASDAQ'}),modelRow(1,{'Stock Symbol':'SIM02','Exchange Symbol':'NYSE'})]);
+ const stocks=helpers.buildConsensusRows([run],'us',null,[run],[a,b]);assert.equal(stocks.length,2);assert.equal(new Set(stocks.map(stock=>stock.key)).size,2);
 });

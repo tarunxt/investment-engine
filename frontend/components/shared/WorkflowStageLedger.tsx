@@ -3,7 +3,7 @@
 import { useId, useState, type ComponentProps, type ReactElement } from "react";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { StageErrorDetails } from "./StageErrorDetails";
-import { getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
+import { getStageBackgroundClass, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
@@ -36,10 +36,11 @@ export function WorkflowStageLedgerViews({ market, view, onChange }: {
 const control = "inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2";
 
 /** Presentation adapter: the workflow continues to own every value and callback. */
-export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick }: {
+export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market }: {
   children: ReactElement<Stage>[];
   enabled: boolean;
   view?: WorkflowLedgerView;
+  market?: "zerodha" | "indmoneyUs";
   historyHref: string;
   onStockFlowClick: () => void;
 }) {
@@ -67,7 +68,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const error = rows.find(row => row.label === "Error")!;
           const time = rows[0].value;
-          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${selected.stage === item.stage ? "bg-indigo-50" : ""}`}>
+          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${getStageBackgroundClass(item.info.state)}`}>
             <th scope="row" className="px-3 py-2 font-normal">
               <div className="flex items-start gap-2">
                 {item.selectable ? <input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} aria-label={`Select ${getStageTileLabel(item.stage)} for the next run`} className="mt-2 size-4 accent-indigo-700" /> : null}
@@ -79,7 +80,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               </div>
             </th>
             <td className="px-3 py-2 whitespace-nowrap">{time}</td>
-            <td className="max-w-56 px-3 py-2">{rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</td>
+            <td className="max-w-56 px-3 py-2">{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined} aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</td>
             <td className="px-3 py-2">{rowValue(item, "Stocks recommended")}</td>
             <td className="px-3 py-2 whitespace-nowrap">{rows.some(row => row.label === "Duration") ? <button type="button" aria-haspopup="dialog" aria-label={`Show duration breakdown for ${STAGE_METADATA[item.stage].idle}`} className="rounded text-indigo-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" onClick={() => openDuration(item)}>{rowValue(item, "Duration")}</button> : "—"}</td>
             <td className={`max-w-44 px-3 py-2 ${error.detail ? "text-amber-900" : ""}`}>{error.value}{error.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>

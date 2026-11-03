@@ -1,14 +1,9 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync(
-  new URL(
-    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const source = readBullpenScheduleSource();
 
 test("scanned events dialog uses the authoritative total and explains missing rows", () => {
   assert.match(

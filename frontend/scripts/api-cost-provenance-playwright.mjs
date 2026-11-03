@@ -28,6 +28,8 @@ const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors
 
 const settle=async(index,data,fail=false)=>page.evaluate(({index,data,fail})=>window.requests[index][fail?'reject':'resolve'](fail?Error(data):data),{index,data,fail});
 const usage=()=>page.getByRole('region',{name:'Daily LLM usage'});
+// Keep one scoped locator valid while the same focused button changes state.
+const dailyRefresh=()=>usage().getByRole('button',{name:/^(?:Refresh daily breakdown|Retry daily breakdown|Refreshing daily breakdown…)$/});
 const trend=()=>page.getByRole('region',{name:'LLM cost trend'});
 const item={provider:'openai',provider_name:'OpenAI',model:'fixture-model',source:'bullpen',source_label:'Bullpen',workflow:'Fixture workflow',requests:2,tokens_in:100,tokens_out:20,estimated_cost:0.125,estimated_cost_inr:null,measurement:'estimated'};
 const respond=async(index,items=[],fail=false)=>page.evaluate(({index,items,fail})=>{const r=window.breakdowns[index];const q=new URL(r.url,location.href).searchParams;const date=q.get('custom_start');r.resolve({ok:!fail,json:async()=>fail?{detail:'The backend did not respond in time (4 seconds). Please retry.'}:{timezone:'Asia/Kolkata',from_date:date,to_date:date,period_label:date,usd_inr_rate:null,fx_status:'unavailable',coverage_note:'Fixture partial attribution: older days reconstructed from job estimates.',items,runs:[]}})},{index,items,fail});
@@ -35,14 +37,14 @@ const start=async()=>{await page.goto(base);await page.waitForFunction(()=>reque
 try{
  for(const width of [1180,390]){
   await page.setViewportSize({width,height:757});await start();
-  await usage().getByText('Loading LLM usage breakdown...').waitFor();await page.screenshot({path:path.join(output,`loading-${width}.png`),fullPage:true});
+  await usage().getByText('Loading LLM usage breakdown...').waitFor();assert.equal(await dailyRefresh().innerText(),'Refreshing daily breakdown…');await page.screenshot({path:path.join(output,`loading-${width}.png`),fullPage:true});
   for(let i=1;i<=4;i++)await settle(i,'Cost history could not be loaded.',true);
-  await respond(0,[],true);await usage().getByRole('alert').waitFor();assert.equal(await usage().getByText(/No non-zero/).count(),0);
+  await respond(0,[],true);await usage().getByRole('alert').waitFor();assert.equal(await dailyRefresh().innerText(),'Retry daily breakdown');assert.equal(await usage().getByText(/No non-zero/).count(),0);
   await page.screenshot({path:path.join(output,`failed-${width}.png`),fullPage:true});
-  await usage().getByRole('button',{name:'Refresh',exact:true}).focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>breakdowns.length===2);await respond(1,[]);await usage().getByText(/No non-zero/).waitFor();await page.screenshot({path:path.join(output,`verified-empty-${width}.png`),fullPage:true});
-  await usage().getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>breakdowns.length===3);await respond(2,[],true);await usage().getByRole('alert').waitFor();assert.equal(await usage().getByText(/No non-zero/).count(),0);
-  await usage().getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>breakdowns.length===4);await respond(3,[item]);await usage().getByText('OpenAI · fixture-model').waitFor();await page.screenshot({path:path.join(output,`loaded-${width}.png`),fullPage:true});
-  await usage().getByRole('button',{name:'Refresh',exact:true}).click();await page.waitForFunction(()=>breakdowns.length===5);await respond(4,[],true);await usage().getByRole('alert').waitFor();await usage().getByText('OpenAI · fixture-model').waitFor();await usage().getByText(/Showing previously loaded usage/).waitFor();await page.screenshot({path:path.join(output,`stale-${width}.png`),fullPage:true});
+  await dailyRefresh().focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>breakdowns.length===2);await respond(1,[]);await usage().getByText(/No non-zero/).waitFor();assert.equal(await dailyRefresh().innerText(),'Refresh daily breakdown');await page.screenshot({path:path.join(output,`verified-empty-${width}.png`),fullPage:true});
+  await dailyRefresh().click();await page.waitForFunction(()=>breakdowns.length===3);await respond(2,[],true);await usage().getByRole('alert').waitFor();assert.equal(await usage().getByText(/No non-zero/).count(),0);
+  await dailyRefresh().click();await page.waitForFunction(()=>breakdowns.length===4);await respond(3,[item]);await usage().getByText('OpenAI · fixture-model').waitFor();await page.screenshot({path:path.join(output,`loaded-${width}.png`),fullPage:true});
+  await dailyRefresh().click();await page.waitForFunction(()=>breakdowns.length===5);await respond(4,[],true);await usage().getByRole('alert').waitFor();await usage().getByText('OpenAI · fixture-model').waitFor();await usage().getByText(/Showing previously loaded usage/).waitFor();await page.screenshot({path:path.join(output,`stale-${width}.png`),fullPage:true});
   await usage().getByRole('button',{name:'Show previous breakdown day'}).click();await page.waitForFunction(()=>breakdowns.length===6);await respond(5,[]);await usage().getByText(/No non-zero/).waitFor();
   await usage().getByRole('button',{name:'Show next breakdown day'}).click();await page.waitForFunction(()=>breakdowns.length===7);await respond(6,[item]);await usage().getByText('OpenAI · fixture-model').waitFor();
   await trend().getByRole('button',{name:'Retry cost trend',exact:true}).click();await page.waitForFunction(()=>requests.length===9);
@@ -65,7 +67,7 @@ try{
  for(const width of [1180,390]){
   await page.setViewportSize({width,height:757});await start();
   const dateInput=usage().locator('input[aria-label="Breakdown date"]');
-  const refresh=usage().getByRole('button',{name:'Refresh',exact:true});
+  const refresh=dailyRefresh();
   const selected=await dateInput.inputValue();
   const focused=async control=>assert.equal(await control.evaluate(e=>e===document.activeElement),true);
   await dateInput.focus();await respond(0,[],true);await usage().getByRole('alert').waitFor();await focused(dateInput);assert.equal(await dateInput.inputValue(),selected);

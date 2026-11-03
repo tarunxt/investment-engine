@@ -96,9 +96,9 @@ test("dashboard cache is user-scoped and below-fold panels mount on visibility",
   assert.doesNotMatch(dashboard, /RebalanceWorkflowSections/);
   assert.match(dashboard, /automatedRebalance\(\)/);
   assert.match(automatedRebalance, /RebalanceWorkflowSections/);
-  assert.match(dashboard, /Its histories, editors, polling, and model/);
+  assert.match(dashboard, /Start and monitor each market’s multi-stage workflow below its portfolio page/);
   assert.doesNotMatch(dashboard, /DashboardFinalActionablesTables/);
-  assert.match(dashboard, /Full histories, model evidence, and action tables load only/);
+  assert.match(dashboard, /Open the market-specific report for full histories, model evidence, and action tables/);
   assert.match(dashboard, /onVisible=\{\(\) => \{[\s\S]*loadThreats/);
   assert.match(dashboard, /data-performance-usable=/);
   assert.match(lazyMount, /IntersectionObserver/);
