@@ -215,6 +215,10 @@ jobs:
         run: >-
           pytest -q --junitxml=/tmp/recommendation-audit.xml
           backend/tests/test_recommendation_audit.py
+          backend/tests/test_walk_forward_input_contract.py
+          backend/tests/test_verifier_explanations.py
+          backend/tests/test_privacy_redaction.py
+          backend/tests/test_privacy_logging_consumers.py
           backend/tests/test_recommendation_audit_integration.py
           backend/tests/test_historical_score_reader.py
           backend/tests/test_stock_source_observations.py
@@ -323,6 +327,7 @@ jobs:
           tests/rebalance-workflow-resilience.test.mjs
           tests/auto-rebalance-audit-persistence.test.mjs
           tests/recommendation-audit-recovery-policy.test.mjs
+          tests/verifier-explanation.test.mjs
           tests/rebalance-stage-inputs.test.mjs
           tests/rebalance-idle-provenance.test.mjs
           tests/rebalance-score-scale-contract.test.mjs
