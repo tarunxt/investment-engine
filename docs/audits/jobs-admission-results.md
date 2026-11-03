@@ -1,3 +1,64 @@
+# Current A9-002 release candidate — November 3
+
+This section supersedes the earlier combined A9/A11 release scope below; all
+prior receipts and limitations remain historical evidence. Existing PR #1392 is
+retained, with no duplicate PR and no rewritten Git history. Fresh-main base is
+ece97f648e52deb357f6d262448f577e28edbe4e; newer privacy, verifier and UI fixes were
+merged without replacing them. The merged baseline commit is 8588706235f03b981a31092a19c9665aa54b95e3.
+
+Included: A9-002-A01 owner-scoped list/detail/final create fetches; A02 explicit
+actor/operation/normalized-payload cache identity and owned/current-body replay;
+A03 API/BFF/WebSocket/export/cancellation preservation; A9-R05 minimized public
+copies with untouched stored originals and historical one-column xfail. Both
+cancellation-vs-completion winners remain serialized and preserve terminal facts.
+A04 deployed runtime acceptance still belongs to the coordinator/sole operator.
+
+Excluded: A11-001 durable request uniqueness, A11-003 per-child obligations and
+relay. Keeping them would require the new migration plus separately integrated
+consumer fencing and recovery acceptance, blocking an independent A9 release.
+Their complete implementation remains in published 08bff6b4 Git history; completed
+synthetic tests are retained as .source archive fixtures, not silently counted as
+current passes. No JobAdmission import/model, new migration, outbox columns,
+per-child run fanout changes, dispatch-status projection or relay remains in the
+net release diff. Existing main run creation/outbox/model registry/migration
+verification scripts are restored byte-for-byte, not production data rolled back.
+
+Cache identity is v2 actor + operation + hashed request key with a normalized UTC
+payload fingerprint envelope. Legacy unscoped entries are ignored. Reused key with
+changed body returns conflict; foreign/missing cached IDs return uniform 404;
+owned-but-wrong-body pointers are rejected. Current DB state is replayed across
+pending/scheduled/processing/completed/partial/failed/canceled states. Unknown
+cache errors propagate before creation; no cache/lease is called durable. Existing
+24-hour TTL is unchanged; expiry/cache loss/lease loss can still admit another
+job, the explicitly deferred A11-001 finding. Existing broker dispatch/fanout is
+not relabeled as durable delivery or an A11-003 closure.
+
+New November 3 local evidence: 93 owner/cache/containment cases passed, then 182
+broader cases passed. Four real disposable PostgreSQL 16.2 cases passed: both
+cancellation race winners with actual lock contention, actor/cache isolation on
+main's unchanged schema, and transaction rollback retaining old job facts/schema.
+A larger guarded suite passed 315 cases plus 25 subtests, with one historical
+xfail and zero skips; UNIX sockets only, TCP/DNS/datagrams denied by a local test
+plugin. The actual BFF/transport component test passed with synthetic session and
+upstream doubles. Final additional state-replay cases and exact-head CI are
+recorded in the returned result; old branch CI is not integration acceptance.
+
+No new migration: current-main schema/model discovery/outbox/migration scripts
+are unchanged. Existing CI's containerized migration upgrade/downgrade/re-upgrade
+preservation job must pass on the new exact head. Application rollback preserves
+schema, historical rows, IDs, source contexts, outputs and costs; rollback cannot
+serve as authorization to erase any old A11 ledger if separately applied.
+
+Dependencies: secure A9-001 auth baseline for deployed denial evidence; current
+main stability; independent review of the narrowed exact head; sole operator's
+release/runtime read-back. A11 consumer 1bd38177 remains separate: its repository
+entry overlaps must be reconciled with the A9 terminal guard when that lane is
+integrated. There is no A11 migration/relay/fencing dependency for deploying A9
+against current main. No relay/Beat/service change, financial-worker activation,
+trade, paid/provider call, real export or credential change is included.
+
+---
+
 # Jobs admission lane: implementation and acceptance register
 
 Draft PR: https://github.com/tarunxt/investment-engine/pull/1392
@@ -232,3 +293,10 @@ No changes to cancellation, execution ownership contract, admission/outbox,
 migrations, financial provenance, stored originals or workflow settings. This is
 an unpublished private delta against fa455bb6 for independent re-review; no claim
 of deployment, real-data exposure proof, arbitrary secret detection or closure.
+
+November 3 final guarded receipt: 321 passed, 25 subtests passed, one unchanged
+historical xfail, zero skips. This includes all four disposable PostgreSQL cases
+and six added current-state cache replays. BFF component fixture: one passed.
+Current-main migration-safety guards: seven passed. Syntax/diff checks passed.
+Main was re-fetched as ece97f64 immediately before the candidate commit. The exact
+head's CI and independent review remain required; no old result is substituted.

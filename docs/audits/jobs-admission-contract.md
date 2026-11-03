@@ -1,3 +1,33 @@
+# Current release boundary — 2026-11-03
+
+PR #1392 is narrowed to A9-002 ownership/cache scoping and A9-R05 public-copy
+minimization, plus the reviewed serialized cancellation/terminal-preservation fix.
+The proposal below is HISTORICAL, not the current release contract. The combined
+A11 implementation/tests remain at published commit 08bff6b4; its synthetic tests
+are retained under backend/tests/fixtures/a11_combined_08bff6b4/*.source.
+
+Current owner queries and cached-result replay use current-main schema only.
+There is no JobAdmission model/table, new migration, dispatch-status column,
+per-child outbox producer or relay in this release. Legacy outbox and run fanout
+match main. No Beat or financial-worker activation is included. Redis entries bind
+actor, operation and normalized payload and always recheck DB owner and body;
+cache expiry/loss and lease-loss durable uniqueness remain OPEN A11 work.
+
+A11 consumer head 1bd38177818aada3acc99973aba878e511d0725e was source-reviewed.
+It has no schema dependency but overlaps SyncJobRepository.update_status and
+PostgresJobRepository.update_status. A future integrator must retain its token
+fence and claim-preserving merge as well as this lane's terminal preservation for
+unclaimed writers. Do not replace that fence with the simpler A9 guard. A9 does
+not import, activate or claim acceptance for the separate consumer implementation.
+
+No migration is needed for the narrowed release; baseline migration files/model
+registry/outbox model are byte-identical to current main. No destructive rollback
+or ledger cleanup is authorized. If an operator discovers the previously proposed
+A11 revision already applied, preserve its records and resolve that state before
+running a release migration command; do not blindly downgrade it.
+
+---
+
 # A9-002 / A11-001 / A11-003 proposed integration contract
 
 Base: origin/main 8d25f34a33242adcaab092afdb07af7956f327bd.

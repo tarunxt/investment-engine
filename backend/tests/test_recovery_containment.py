@@ -160,13 +160,11 @@ def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery,
                 "beat_schedule", "task_always_eager", "worker_enable_remote_control", "imports"):
         monkeypatch.setitem(app.conf, key, app.conf.get(key))
     configure_recovery_queue(app)
-    jobs, publications, obligations = [], [], []
+    jobs, publications = [], []
     class Session:
         flush = AsyncMock()
         commit = AsyncMock()
         def add(self, obj):
-            from app.infrastructure.database.outbox.models import OutboxMessage
-            if isinstance(obj, OutboxMessage): obligations.append(obj)
             if isinstance(obj, Job):
                 obj.id = len(jobs) + 1
                 jobs.append(obj)
@@ -182,11 +180,7 @@ def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery,
                producer.RunModelTarget("fixture-b", "model-b")]
     monkeypatch.setattr(producer, "freeze_output_source_context", AsyncMock(return_value=None))
     monkeypatch.setattr(producer, "filter_recently_available_targets", AsyncMock(return_value=(targets, [])))
-    async def dispatch_fixture(db, message_id):
-        from app.infrastructure.database.outbox.dispatch import celery_publisher
-        message = next(m for m in obligations if m.id == message_id)
-        celery_publisher(message.job_id, str(message.id), None)
-    monkeypatch.setattr(producer, "dispatch_one", dispatch_fixture)
+    monkeypatch.setattr(producer, "register_job_task", AsyncMock())
     def publish(self, name, **options):
         publications.append((name, options))
         return SimpleNamespace(id="fixture-task-" + str(len(publications)))
@@ -511,12 +505,7 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
         @asynccontextmanager
         async def acquire(self, *args, **kwargs): yield None
     monkeypatch.setattr(producer, "PostgresJobRepository", Repo)
-    from app.domains.jobs import admission
-    from app.infrastructure.database.outbox import dispatch
-    monkeypatch.setattr(admission, "replay_admission", AsyncMock(return_value=None))
-    async def dispatch_fixture(db, message_id):
-        dispatch.celery_publisher(jobs[0].id, str(message_id), None)
-    monkeypatch.setattr(dispatch, "dispatch_one", dispatch_fixture)
+    monkeypatch.setattr(producer, "register_job_task", AsyncMock())
     monkeypatch.setattr(routes, "PostgresJobRepository", Repo)
     monkeypatch.setattr(routes, "ZerodhaPortfolioSnapshotRepository", lambda _: SimpleNamespace(get_latest_by_user=AsyncMock(return_value=snapshot)))
     monkeypatch.setattr(routes, "_resolve_threat_target", AsyncMock(return_value=("fixture-provider", "fixture-model")))

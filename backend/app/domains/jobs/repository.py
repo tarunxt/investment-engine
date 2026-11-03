@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.domains.jobs.models import Job
-from app.infrastructure.database.outbox.models import OutboxMessage
 from app.shared.pagination import PagedQuery, PagedResult
 from app.shared.exceptions import ForbiddenException
 from app.shared.types import JobId, JobStatus, UserId
@@ -66,16 +65,9 @@ class PostgresJobRepository:
         if user_id is None:
             return None
         result = await self._session.execute(
-            select(Job, OutboxMessage.state).outerjoin(
-                OutboxMessage, OutboxMessage.job_id == Job.id,
-            ).where(Job.id == job_id, Job.user_id == user_id)
+            select(Job).where(Job.id == job_id, Job.user_id == user_id)
         )
-        row = result.one_or_none()
-        if row is None:
-            return None
-        job, state = row
-        job.dispatch_status = state  # Additive projection; legacy rows stay unknown.
-        return job
+        return result.scalar_one_or_none()
 
     async def cancel_for_user(self, job_id: JobId, user_id: UserId) -> tuple[Job | None, bool]:
         """Serialize cancellation against completion; caller commits the transition.
