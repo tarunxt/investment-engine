@@ -99,14 +99,17 @@ export function CombinedLlmCostChart({
           <h2 className="text-lg font-semibold text-gray-950">Combined LLM API Cost Trend</h2>
           <p className="text-sm text-gray-600">Daily API cost by provider using Asia/Kolkata calendar days. Provider-ledger totals take precedence over reconstructed job estimates. Y-axis: {chart.currency}; X-axis: day.</p>
         </div>
+        {failures.length > 0 ? (
+          <button type="button" disabled={loading} onClick={onRetry} className="inline-flex min-h-9 items-center rounded-md border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50">
+            {loading ? 'Retrying cost trend…' : 'Retry cost trend'}
+          </button>
+        ) : null}
       </div>
 
       {failures.length > 0 ? (
         <div role="alert" className="mb-4 border rounded-md border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           Cost trend unavailable for {failedNames}. {hasHistory ? 'Available history is shown; previously loaded history for failed providers may be out of date.' : 'Cost history could not be loaded.'}
-          <button type="button" disabled={loading} onClick={onRetry} className="ml-3 rounded-md bg-indigo-600 px-3 py-2 text-white hover:bg-indigo-700 disabled:opacity-50">
-            {loading ? 'Retrying cost trend…' : 'Retry cost trend'}
-          </button>
+
         </div>
       ) : null}
         <div className="mb-3 flex flex-wrap gap-3" aria-label="Toggle LLM API cost lines">
