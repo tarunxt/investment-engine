@@ -45,7 +45,7 @@ function extract(start, end) {
   assert.ok(index >= 0 && finish > index);
   return workflowSource.slice(index, finish);
 }
-const callbacks = extract("  const getAuditSession = useCallback(", "  useEffect(() => {");
+const callbacks = extract("  const getAuditSession = useCallback(", "  // Poll ownership changes");
 const workflow = extract("  const runWorkflow = useCallback(", "  const syncPortfolioNow = useCallback(");
 const executable = compile(`${callbacks}\n${workflow}\nreturn { getAuditSession, recordAutoRebalanceStage, markCompleted, runWorkflow };`);
 const stages = ["sync", "threats", "swing", "rebalance", "technical", "actionables"];
@@ -110,6 +110,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
+    runtimeOwner: {}, isCurrentWorkflowOwner: () => true,
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
@@ -339,7 +340,7 @@ test("email failure is visible and does not turn completed model work into a fai
 });
 
 test("actual workflow card renders pending and failed history independently of output controls", () => {
-  const source = compile(`${extract("  const renderSectionCard =", "  const zerodhaSection =")}\nreturn renderSectionCard;`);
+  const source = compile(`${extract("  const renderSectionCard =", "  useEffect(() => {")}\nreturn renderSectionCard;`);
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {

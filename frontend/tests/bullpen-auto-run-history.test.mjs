@@ -1,14 +1,9 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const scheduleCard = readFileSync(
-  new URL(
-    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const scheduleCard = readBullpenScheduleSource();
 const historyContent = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx", import.meta.url), "utf8");
 const historyScreen = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryScreen.tsx", import.meta.url), "utf8");
 const trendsTable = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx", import.meta.url), "utf8");
@@ -427,7 +422,7 @@ test("Stage 1 Excel split button opens the last 10 workspace-scoped scans", () =
   assert.match(scheduleCard, /setIsExcelHistoryDialogOpen\(true\)/);
   assert.match(
     scheduleCard,
-    /open=\{isExcelHistoryDialogOpen\}[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
+    /hasOpenedExcelHistoryDialog \? <BullpenStageOneExcelHistoryDialog\s+open=\{isExcelHistoryDialogOpen\}[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
   );
   assert.match(scheduleCard, /Events that Passed Filters/);
   assert.match(

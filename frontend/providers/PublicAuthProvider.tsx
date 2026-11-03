@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { signIn } from "next-auth/react";
 
 import { AuthContext, type AuthContextType } from "@/hooks/useAuth";
 
@@ -98,6 +97,7 @@ export function PublicAuthProvider({
       setLoading(true);
       try {
         const isEmail = emailOrUsername.includes("@");
+        const { signIn } = await import("next-auth/react");
         const result = await signIn("credentials", {
           [isEmail ? "email" : "username"]: emailOrUsername,
           password,

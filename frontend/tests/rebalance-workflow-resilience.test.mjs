@@ -180,7 +180,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   const runWorkflowSource = source.slice(start, end);
   const popupIndex = runWorkflowSource.indexOf('window.open("about:blank"');
   const reservationIndex = runWorkflowSource.indexOf(
-    "await reserveAutoRebalanceRunMetadata(portfolio, spendOwner, spendChoice, analysisOnlyRuns[portfolio])",
+    "await reserveAutoRebalanceRunMetadata(portfolio, spendOwner, spendChoice, analysisOnlyRuns[portfolio], apiService)",
   );
   assert.ok(popupIndex >= 0, "Zerodha popup should be pre-opened");
   assert.ok(reservationIndex >= 0, "run metadata should still be reserved");
@@ -204,11 +204,11 @@ test("Zerodha login waits for durable token readiness and retries sync only once
   assert.match(source, /ZERODHA_AUTH_CLOSE_GRACE_MS/);
   assert.match(source, /async function queueZerodhaPortfolioSyncWithAuthRetry/);
   assert.match(source, /if \(!isZerodhaAuthPropagationError\(error\)\) throw error/);
-  assert.match(source, /await confirmZerodhaConnectionReady\(\)/);
+  assert.match(source, /await confirmZerodhaConnectionReady\(undefined, owner\)/);
   assert.equal(
-    (source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(\)/g) ?? []).length,
-    3,
-    "the helper plus full-run and Sync Now callers should be present",
+    (source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(runtimeOwner\)/g) ?? []).length,
+    2,
+    "full-run and Sync Now callers must retain their captured owner",
   );
   assert.match(apiSource, /zerodhaSyncPortfolio\(\)[\s\S]*?skipUnauthorizedRefresh: true/);
 });

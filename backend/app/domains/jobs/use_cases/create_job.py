@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.domains.jobs.resource_policy import validate_prompt
+from app.domains.jobs.resource_validation import validate_model_identifiers
+
 from app.core.recovery import require_equity_analysis
 
 from dataclasses import dataclass
@@ -55,6 +58,9 @@ class CreateJobUseCase:
 
     async def execute(self, cmd: CreateJobCommand) -> CreateJobResult:
         require_equity_analysis(cmd.auto_rebalance_portfolio)
+        validate_prompt(cmd.prompt)
+        validate_model_identifiers(cmd.provider, cmd.model)
+
         # ── 1. Idempotency fast-path ─────────────────────────────────────────
         if cmd.idempotency_key:
             if cached := await self._idempotency.get(cmd.idempotency_key):

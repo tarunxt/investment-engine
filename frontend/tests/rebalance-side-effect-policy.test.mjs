@@ -8,7 +8,7 @@ const node=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='r
 const code=ts.transpileModule(node.getText(ast),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const choice={intent:'new_workflow',revision:0};
 const authorization={spend_intent:'new_workflow',spend_request_id:'synthetic',spend_observed_revision:0,side_effect_policy:{version:1,mode:'analysis_only'}};
-function load(api){return new Function('apiService','getAutoRebalancePortfolioKey','authorizeAndClaimWorkflow',code+';return reserveAutoRebalanceRunMetadata;')({getAutoRebalanceSpendReadiness:async()=>({paid_execution_available:true}),...api},()=> 'india',async options=>options.reserve(authorization));}
+function load(api){const scopedApi={getAutoRebalanceSpendReadiness:async()=>({paid_execution_available:true}),...api};const reserve=new Function('apiService','getAutoRebalancePortfolioKey','authorizeAndClaimWorkflow',code+';return reserveAutoRebalanceRunMetadata;')({getAutoRebalanceSpendReadiness:async()=>({paid_execution_available:true}),...api},()=> 'india',async options=>options.reserve(authorization));return (...args)=>reserve(...args,scopedApi);}
 for(const policy of [undefined,null,{}, {version:0,mode:'analysis_only'}, {version:1,mode:'existing_preferences'}]){
  test(`unconfirmed opt-out fails before workflow starts: ${JSON.stringify(policy)}`,async()=>{
   const reserve=load({reserveAutoRebalanceRunLabel:async()=>({portfolio:'india',sequence:1,label:'Synthetic',side_effect_policy:policy})});
