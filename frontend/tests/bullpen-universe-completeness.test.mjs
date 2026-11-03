@@ -1,7 +1,8 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-const source = readFileSync(new URL('../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx', import.meta.url), 'utf8');
+const source = readBullpenScheduleSource();
 const start = source.indexOf('              const isIncompleteUniverse =');
 const end = source.indexOf('              const showStageSpinner', start);
 assert.ok(start > 0 && end > start);

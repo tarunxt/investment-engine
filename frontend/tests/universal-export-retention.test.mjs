@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync, mkdtempSync, writeFileSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,7 +65,7 @@ test("latest export lookup reuses unchanged metadata and detects a newer complet
 });
 
 test("failed filters render unavailable counts and blocked downstream stages", () => {
-  const source = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url), "utf8");
+  const source = readBullpenScheduleSource();
   assert.match(source, /function stageOneNotEvaluated/);
   assert.match(source, /Not evaluated/);
   assert.match(source, /Blocked by upstream failure/);

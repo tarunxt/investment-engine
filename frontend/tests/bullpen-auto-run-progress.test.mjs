@@ -1,15 +1,10 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 
-const scheduleCard = readFileSync(
-  new URL(
-    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const scheduleCard = readBullpenScheduleSource();
 
 test("stale persisted workflows cannot keep run controls active", () => {
   assert.match(scheduleCard, /ACTIVE_RUN_UI_MAX_AGE_MS = 2 \* 60 \* 60 \* 1_000/);
@@ -1245,7 +1240,7 @@ test("Bullpen auto-run workflow view exposes detailed Stage 1 progress commentar
 });
 
 test("an active Auto Run takes precedence over a saved independent scan", () => {
-  const source = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url), "utf8");
+  const source = readBullpenScheduleSource();
   assert.match(source, /function selectStageOneDisplayStage/);
   assert.match(source, /independentTimestamp >= workflowTimestamp/);
   assert.match(source, /stageOneResultSource === "independent" && !runIsActive/);

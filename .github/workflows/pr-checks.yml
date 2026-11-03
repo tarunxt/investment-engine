@@ -328,6 +328,7 @@ jobs:
           tests/auto-rebalance-audit-persistence.test.mjs
           tests/recommendation-audit-recovery-policy.test.mjs
           tests/verifier-explanation.test.mjs
+          tests/bullpen-deferred-loading.test.mjs
           tests/rebalance-stage-inputs.test.mjs
           tests/rebalance-idle-provenance.test.mjs
           tests/rebalance-score-scale-contract.test.mjs
@@ -569,6 +570,7 @@ jobs:
         if: matrix.bundler == 'webpack'
         working-directory: frontend
         run: |
+          node scripts/bullpen-deferred-loading-offline.mjs
           npm run test:basket-offline
           npm run test:indmoney-basket-offline
 
