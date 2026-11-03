@@ -48,6 +48,9 @@ class PreexecutionProof(unittest.IsolatedAsyncioTestCase):
         class DB:
             async def execute(self, _): return SimpleNamespace(scalar_one_or_none=lambda: user)
 
+        async def active_session(payload):
+            return None  # Lifecycle transaction behavior has its own offline proof.
+
         db = DB()
         async def get_db(): yield db
 
@@ -72,6 +75,9 @@ class PreexecutionProof(unittest.IsolatedAsyncioTestCase):
             User=type('User', (), {'id': 0, 'profile': None}), security=HTTPBearer(auto_error=False),
             get_async_db=get_db, monotonic=lambda: 0, add_auth_duration=lambda _: None,
             is_auth_disabled=lambda: False, JWTUtils=SimpleNamespace(verify_access_token=lambda _: {'sub': '71'}),
+            subject=lambda payload: int(payload['sub']),
+            SqlSessionFamilies=lambda database: database,
+            SessionLifecycle=lambda store: SimpleNamespace(require_active=active_session),
             select=lambda _: Query(), selectinload=lambda _: None,
             ZerodhaCredentialRepository=Repo, ZerodhaAuditRepository=Audit,
             _svc=SimpleNamespace(direct_market_orders_enabled=True, place_order=forbidden_placement)))

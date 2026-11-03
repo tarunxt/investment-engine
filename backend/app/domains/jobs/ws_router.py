@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.domains.jobs.repository import PostgresJobRepository
 from app.shared.types import JobId
-from app.shared.ws_relay import relay_channel, user_id_from_ws_token
+from app.shared.ws_relay import relay_channel, user_id_from_ws_token, session_identity_active
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ async def ws_job_list(websocket: WebSocket, token: str | None = Query(None)):
     await websocket.accept()
     logger.info("WS /ws/jobs connected user_id=%s", user_id)
     try:
-        await relay_channel(websocket, f"user_job_updates:{user_id}")
+        await relay_channel(websocket, f"user_job_updates:{user_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs disconnected user_id=%s", user_id)
     except Exception as e:
@@ -50,7 +50,13 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
     try:
         async with AsyncSessionLocal() as db:
             job = await PostgresJobRepository(db).get(job_id)
-            if job and job.user_id == user_id:
+            if job is None or job.user_id != user_id:
+                await websocket.close(code=1008, reason="Job unavailable")
+                return
+            if not await session_identity_active(user_id):
+                await websocket.close(code=1008, reason="Session expired or revoked")
+                return
+            if job is not None:
                 status_val = (
                     job.status.value if hasattr(job.status, "value") else str(job.status)
                 )
@@ -75,7 +81,7 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
         logger.warning("Failed to send initial state for job %d", job_id, exc_info=True)
 
     try:
-        await relay_channel(websocket, f"job_updates:{job_id}")
+        await relay_channel(websocket, f"job_updates:{job_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs/%d disconnected user_id=%s", job_id, user_id)
     except Exception as e:

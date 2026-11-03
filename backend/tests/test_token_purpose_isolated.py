@@ -95,7 +95,7 @@ def test_custom_access_lifetime_preserved(utils):
     ("app/domains/auth/dependencies.py", "verify_access_token"),
     ("app/shared/ws_relay.py", "verify_access_token"),
     ("app/domains/polymarket_auto_live/router.py", "verify_access_token"),
-    ("app/domains/auth/router.py", "verify_refresh_token"),
+    ("app/domains/auth/session_lifecycle.py", "verify_refresh_token"),
 ])
 def test_each_existing_consumer_uses_intended_verifier(path, method):
     tree = ast.parse((ROOT / path).read_text())
@@ -169,7 +169,23 @@ def test_consumer_bodies_with_synthetic_database(utils, consumer, credential):
             return SimpleNamespace(scalar_one_or_none=lambda: user, one_or_none=lambda: user)
 
     db = Database()
+    async def require_active(payload):
+        return None  # Durable lifecycle is tested by verify-session-lifecycle-offline.py.
+
+    async def rotate(refresh_token, intent_nonce=None):
+        payload = verifier.verify_refresh_token(refresh_token)
+        if not payload:
+            raise Denied(401)
+        await db.execute(None)
+        return user, issuer.create_tokens(user.id, user.email, user.role.value)
+
+    async def commit():
+        return None
+
+    db.commit = commit
     namespace = dict(JWTUtils=verifier, AuthUtils=issuer, HTTPException=Denied,
+                     SessionLifecycle=lambda store: SimpleNamespace(require_active=require_active, rotate=rotate),
+                     SqlSessionFamilies=lambda database: database, subject=lambda payload: int(payload["sub"]),
                      status=SimpleNamespace(HTTP_401_UNAUTHORIZED=401, HTTP_403_FORBIDDEN=403),
                      monotonic=monotonic, add_auth_duration=lambda *_: None,
                      select=lambda *_: Query(), selectinload=lambda *_: None,
@@ -187,7 +203,7 @@ def test_consumer_bodies_with_synthetic_database(utils, consumer, credential):
     if consumer == "websocket":
         assert function(token) == (42 if credential == "intended" else None)
         return
-    request = SimpleNamespace(refresh_token=token) if refresh_consumer else SimpleNamespace(credentials=token)
+    request = SimpleNamespace(refresh_token=token, intent_nonce=None) if refresh_consumer else SimpleNamespace(credentials=token)
     if credential != "intended":
         with pytest.raises(Denied) as error:
             asyncio.run(function(request, db))

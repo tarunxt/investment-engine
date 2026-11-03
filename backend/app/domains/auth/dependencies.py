@@ -11,6 +11,8 @@ from app.core.security import JWTUtils, PasswordUtils
 from app.core.logging import get_logger
 from app.core.request_timing import add_auth_duration
 from app.domains.auth.models import User, UserRole, UserProfile
+from app.domains.auth.session_lifecycle import SessionLifecycle, subject
+from app.domains.auth.session_store import SqlSessionFamilies
 from app.infrastructure.database.session import get_async_db
 
 logger = get_logger(__name__)
@@ -71,9 +73,8 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        sub = payload.get("sub")
-        if not sub:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+        sub = subject(payload)
+        await SessionLifecycle(SqlSessionFamilies(db)).require_active(payload)
 
         result = await db.execute(
             select(User).where(User.id == int(sub)).options(selectinload(User.profile))
