@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
+import { bullpenPerformanceFixture } from "./fixtures/bullpen-performance.mjs";
 
 import { chromium, devices } from "playwright";
 import { encode } from "next-auth/jwt";
@@ -303,6 +304,8 @@ function dashboardSummaryFixture() {
 
 function legacyDashboardFixture(pathname) {
   const now = new Date().toISOString();
+  const bullpenFixture = bullpenPerformanceFixture(pathname, now);
+  if (bullpenFixture !== null) return bullpenFixture;
   if (pathname.endsWith("/zerodha/status")) {
     return { connected: true, login_time: now, expires_at: now };
   }
@@ -725,9 +728,8 @@ async function measureTarget(context, profile, targetName, target, visit) {
         .waitFor({ state: "attached", timeout: 8_000 })
         .then(() => true)
         .catch(() => false);
-      if (appeared) {
-        meaningfulUsableMs = await page.evaluate(() => performance.now());
-      }
+      if (!appeared) throw new Error(`Meaningful ${targetName} UI did not become ready`);
+      meaningfulUsableMs = await page.evaluate(() => performance.now());
     }
     await exerciseNonMutatingInteraction(page, targetName);
     await page.waitForTimeout(50);

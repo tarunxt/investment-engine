@@ -329,6 +329,7 @@ jobs:
           tests/recommendation-audit-recovery-policy.test.mjs
           tests/verifier-explanation.test.mjs
           tests/bullpen-deferred-loading.test.mjs
+          tests/bullpen-performance-fixture.test.mjs
           tests/rebalance-stage-inputs.test.mjs
           tests/rebalance-idle-provenance.test.mjs
           tests/rebalance-score-scale-contract.test.mjs

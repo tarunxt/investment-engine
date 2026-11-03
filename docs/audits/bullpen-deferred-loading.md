@@ -17,3 +17,7 @@ History, Excel history, badge explanations and table dialogs load only when open
 - Lint retains the baseline two errors and five warnings; the new loading-boundary modules pass lint. Existing lint failures are not waived.
 
 Fresh production build and unchanged packaged-runtime/browser byte gates must be measured on the committed source. A source split or dynamic import is not itself a budget pass. The baseline browser overage and all prior release holds remain recorded until actual verification establishes otherwise.
+
+## Benchmark fixture qualification
+
+The first numeric byte pass on the loading commit had three missing meaningful-UI markers. Debugging found that the existing benchmark supplied `{}` for provider collections and Bullpen read contracts, producing render errors instead of a usable console. Those results remain partial evidence. `fixtures/bullpen-performance.mjs` now supplies invented, read-only contract-shaped values (including providers as an array); no action is enabled. Missing meaningful readiness now fails the measurement explicitly. Numeric limits, sample counts and profile settings are unchanged. Both baseline and candidate must be rerun with this same corrected fixture; byte passes must not be inferred from error views.
