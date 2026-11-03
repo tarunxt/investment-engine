@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -250,13 +251,7 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
   const autoRunProgressSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts",
@@ -317,13 +312,7 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
 });
 
 test("Bullpen x AI auto-run card exposes the dynamic trade amount formula", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
   const strategySource = readFileSync(
     new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
     "utf8",
@@ -344,13 +333,7 @@ test("Bullpen x AI auto-run card exposes the dynamic trade amount formula", () =
 });
 
 test("Bullpen x AI auto-run card defers bounded summary hydration behind fast status", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
   const overviewSource = readFileSync(
     new URL(
       "../app/console/trading-bots/_components/TradingBotsOverviewPage.tsx",
@@ -398,13 +381,7 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
 });
 
 test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without persisting a timestamp", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(autoRunCardSource, /setScheduleStartInput\("Now"\);/);
   assert.match(autoRunCardSource, /setScheduleSettingsDirty\(true\);/);
@@ -461,13 +438,7 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
 });
 
 test("Bullpen auto-run cannot enable a future schedule without Stage 2 LLM targets", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(
     autoRunCardSource,
@@ -480,13 +451,7 @@ test("Bullpen auto-run cannot enable a future schedule without Stage 2 LLM targe
 });
 
 test("Bullpen auto-run persists scan scope outside the shared filters popup", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
   const scanFiltersPopupSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenScanFiltersPopupBridge.tsx",
@@ -527,13 +492,7 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(bullpenAiPageSource, /execution_options:\s*\{/);
   assert.match(bullpenAiPageSource, /execution_mode:\s*bullpenLlmExecutionMode/);
@@ -590,13 +549,7 @@ test("Bullpen auto-run only persists LLM target changes after explicit user inte
 });
 
 test("Bullpen auto-run serializes LLM target saves so rapid multi-select changes do not overwrite newer selections", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(autoRunCardSource, /pendingSelectedLlmTargetsSaveRef/);
   assert.match(autoRunCardSource, /selectedLlmTargetsSaveInFlightRef/);
@@ -611,13 +564,7 @@ test("Bullpen auto-run serializes LLM target saves so rapid multi-select changes
 });
 
 test("Bullpen auto-run bootstraps legacy Stage 2 LLM selections into canonical server settings", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(autoRunCardSource, /readLegacyBullpenLlmTargetsFromStorage/);
   assert.match(autoRunCardSource, /legacyBullpenLlmTargetsBootstrapEligibleRef/);
@@ -633,13 +580,7 @@ test("Bullpen auto-run bootstraps legacy Stage 2 LLM selections into canonical s
 });
 
 test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt template", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(autoRunCardSource, /llm_prompt_template/);
   assert.match(autoRunCardSource, /getStageTwoDisplayedPrompt/);
@@ -688,13 +629,7 @@ test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
 });
 
 test("Bullpen x AI serializes active-run control mutations", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(autoRunCardSource, /const startNowActionRequested = action === "start-now";/);
   assert.match(autoRunCardSource, /startNowActionRequested \|\|/);
@@ -726,13 +661,7 @@ test("Bullpen x AI serializes active-run control mutations", () => {
 });
 
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {
-  const autoRunCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const autoRunCardSource = readBullpenScheduleSource();
 
   assert.match(autoRunCardSource, /splitApiErrorSummary/);
   assert.match(autoRunCardSource, /error\.details/);
@@ -1210,13 +1139,7 @@ test("Bullpen x AI treats saved odds or timestamps as clickable LLM analysis", a
 });
 
 test("Bullpen auto-run summary sync keeps completed run visible after refresh", () => {
-  const scheduleCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const scheduleCardSource = readBullpenScheduleSource();
 
   assert.match(
     scheduleCardSource,
@@ -1253,13 +1176,7 @@ test("Bullpen x AI keeps BullpenQuestionsTable as the single canonical Events Su
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
-  const scheduleCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const scheduleCardSource = readBullpenScheduleSource();
   const questionsTableSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
@@ -1378,13 +1295,7 @@ test("Bullpen Top 10 helper keeps only strongest-odds rows and orders them by re
 });
 
 test("Bullpen x AI Stage 2 popup keeps responsive dialog sizing and left-edge table scroll reset", () => {
-  const scheduleCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const scheduleCardSource = readBullpenScheduleSource();
   const questionsTableSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
@@ -1445,13 +1356,7 @@ test("auto-run active position sync uses the shared event identity resolver", ()
 });
 
 test("Bullpen portfolio uses Stage 1 verification only as a live-data fallback", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /shouldUseVerifiedStage1PortfolioFallback/);
   assert.match(source, /useHistoryPortfolioSource/);

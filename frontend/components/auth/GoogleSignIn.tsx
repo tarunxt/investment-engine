@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { signIn } from "next-auth/react";
 import { resolveAuthRedirectTarget } from "@/lib/authRedirect";
 
 type GoogleIdentity = {
@@ -76,6 +75,7 @@ export function GoogleSignIn({ redirectTo }: { redirectTo: string }) {
     setBusy(true);
     setMessage("");
     try {
+      const { signIn } = await import("next-auth/react");
       const result = await signIn("google", { credential, redirect: false });
       if (result?.error || !result?.ok) {
         setMessage("Google sign-in failed. Please try again or contact support if your account is disabled.");

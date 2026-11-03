@@ -4002,3 +4002,14 @@ export type StockSourceObservation = { id: string; run_id: number; job_id: numbe
 export type StockSourceObservationPage = { market: "india" | "us"; symbol: string; items: StockSourceObservation[]; next_cursor: string | null; has_more: boolean; examined_sources: number; coverage_note: string };
 
 export type ZerodhaDisplayQuoteResponse = { quotes: { instrument: string; price: number; as_of: string; source: string }[]; missing: string[]; upstox_quotes?: { instrument: string; price: number; as_of: string; source: string }[] };
+
+export interface UsVendorDisplayQuote {
+  instrument: string; security_id: string; symbol: string; listing_mic: string; share_class: string;
+  vendor_symbol: string; currency: 'USD'; provider: 'Alpaca'; feed: 'iex'; coverage: string;
+  price: number; as_of: string; received_at: string; session: string; stale: boolean;
+  delay_reason: string | null; eligible_for_readiness: boolean; source: string;
+}
+export interface UsVendorDisplayQuotes {
+  quotes: UsVendorDisplayQuote[]; missing: { instrument: string; reason: string }[];
+  provider: 'Alpaca'; feed: 'iex';
+}

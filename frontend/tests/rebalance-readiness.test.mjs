@@ -22,7 +22,7 @@ const readiness = modules['@/lib/rebalanceReadiness'] = load(read('../lib/rebala
 modules['@/lib/llmInternetAccess'] = load(read('../lib/llmInternetAccess.ts'));
 const { RebalanceReadiness } = load(read('../app/console/_components/RebalanceReadiness.tsx'));
 const { LlmModelSelectionPanel } = load(read('../components/shared/LlmModelSelectionPanel.tsx'));
-const base = { loading: false, error: null, portfolio: { holdings: [{ symbol: 'FIXTURE' }] }, threats: { status: 'completed', report: { raw_markdown: 'Saved fixture report' } }, selectedSwingCount: 1, blockedReason: null };
+const base = { market: 'india', loading: false, error: null, portfolio: { holdings: [{ symbol: 'FIXTURE' }] }, threats: { status: 'completed', report: { raw_markdown: 'Saved fixture report' } }, selectedSwingCount: 1, blockedReason: null };
 const render = (props) => renderToStaticMarkup(RebalanceReadiness({ ...base, ...props }));
 const count = (html, value) => (html.match(new RegExp(`>${value}<`, 'g')) || []).length;
 
@@ -126,3 +126,17 @@ if (process.env.READINESS_FIXTURE_DIR) {
     ['failed', { error: 'Offline fixture', blockedReason: 'Offline fixture' }, {}],
   ]) writeFileSync(`${dir}/${name}.html`, `<!doctype html><html><meta charset="utf-8"><title>Offline rebalance fixture: ${name}</title><style>body{font:16px system-ui;max-width:1100px;margin:30px;color:#172130}section{border:1px solid #ccd4dd;border-radius:12px;padding:16px;margin-bottom:24px}ul{display:flex;gap:16px;padding:0;list-style:none}li{flex:1;padding:12px;border:1px solid #ddd;border-radius:8px}li div{display:flex;justify-content:space-between;gap:20px}p{line-height:1.6}h1{font-size:22px}svg{width:16px;height:16px}button{padding:8px}span{margin-right:8px}</style><body><h1>Offline rebalance readiness fixture: ${name}</h1>${render(props)}${modelPanel(estimates, { loading: props.loading || false })}</body></html>`);
 }
+
+// DATA-ERROR-20261102-01: copy must match the market without changing input guards.
+test('paired India and US readiness copy preserves each existing execution decision', () => {
+  for (const props of [{}, {portfolio:null}, {loading:true}, {error:'Synthetic read failure',blockedReason:'Synthetic read failure'}]) {
+    const india = render({...props,market:'india'});
+    const us = render({...props,market:'us'});
+    assert.match(india,/India holdings, when supplied/);
+    assert.match(india,/missing India snapshot is allowed/);
+    assert.doesNotMatch(india,/US holdings must pass/);
+    assert.match(us,/US holdings must pass the existing snapshot validation/);
+    assert.doesNotMatch(us,/India holdings/);
+    for (const html of [india,us]) assert.match(html,props.blockedReason ? /Execution blocked: Synthetic read failure/ : /Execution may proceed/);
+  }
+});

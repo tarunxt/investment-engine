@@ -1,4 +1,6 @@
 "use client";
+import { groupUsIdentityRows, usIdentityHolding, type VerifiedUsListing, type UsIdentity } from "@/lib/usSecurityIdentity";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
 import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
 import { mergeSummarySourceRows, originalRebalanceSources, originalSourceCell } from "@/lib/summarySourceRows";
@@ -112,6 +114,7 @@ type ActionablesInputCandidate = {
 };
 
 type ConsensusBreakupEntry = {
+  sourceRows?: LlmBreakupRow[];
   meta: LlmMeta;
   row: LlmBreakupRow | null;
 };
@@ -154,7 +157,7 @@ type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
 
 type PositionContext = {
   source: "portfolio-snapshot" | "captured-model-rows";
-  holdingMatch?: "matched" | "absent";
+  holdingMatch?: "matched" | "absent" | "unresolved";
   currentUnits: number | null;
   currentInvestmentAmount: number | null;
 };
@@ -336,6 +339,10 @@ export function getSetupStockActionClasses(action: ActionCategory) {
 }
 
 export type StockConsensus = {
+  usIdentity?: UsIdentity;
+  identityIssue?: string | null;
+  sourceRowLinks?: {runId:number;jobId:number;rowIndex:number;originalExchange:string;originalSymbol:string}[];
+  consensusRows?: LlmBreakupRow[];
   key: string;
   exchange: string;
   symbol: string;
@@ -1389,6 +1396,7 @@ function getStockPositionContext(stock: StockConsensus): PositionContext {
 
 function getPositionContextLabel(stock: StockConsensus) {
   const position = getStockPositionContext(stock);
+  if (position.holdingMatch === "unresolved") return "Verified US listing/holding identity unresolved; holdings unavailable";
   return position.source === "portfolio-snapshot"
     ? position.holdingMatch === "absent"
       ? "Latest portfolio snapshot · no matching instrument; zero inferred from snapshot absence, not a verified holding quantity"
@@ -1900,7 +1908,7 @@ function buildDetailedRationaleScoreRows(
     {
       id: "cruxx",
       parameter: "Average of Score Rationale Cruxx",
-      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Cruxx"),
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale Cruxx"),
       multiplier: config.detailedRationaleMultipliers.cruxx,
       validationRule: {
         min: SCORE_GUARDRAIL_MIN,
@@ -1910,7 +1918,7 @@ function buildDetailedRationaleScoreRows(
     {
       id: "technical-short",
       parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
-      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
       multiplier: config.detailedRationaleMultipliers["technical-short"],
       validationRule: {
         min: SCORE_GUARDRAIL_MIN,
@@ -1920,7 +1928,7 @@ function buildDetailedRationaleScoreRows(
     {
       id: "technical-medium",
       parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
-      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
       multiplier: config.detailedRationaleMultipliers["technical-medium"],
       validationRule: {
         min: SCORE_GUARDRAIL_MIN,
@@ -1930,7 +1938,7 @@ function buildDetailedRationaleScoreRows(
     {
       id: "technical-long",
       parameter: "Average of Score Rationale - Technical Setup (Long Term)",
-      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Technical Setup (Long Term)"),
       multiplier: config.detailedRationaleMultipliers["technical-long"],
       validationRule: {
         min: SCORE_GUARDRAIL_MIN,
@@ -1940,7 +1948,7 @@ function buildDetailedRationaleScoreRows(
     {
       id: "fundamentals-short",
       parameter: "Average of Score Rationale - Fundamentals Short Term",
-      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Fundamentals Short Term"),
       multiplier: config.detailedRationaleMultipliers["fundamentals-short"],
       validationRule: {
         min: SCORE_GUARDRAIL_MIN,
@@ -1950,7 +1958,7 @@ function buildDetailedRationaleScoreRows(
     {
       id: "fundamentals-medium-long",
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
-      score: getAverageRationaleScoreCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
       multiplier: config.detailedRationaleMultipliers["fundamentals-medium-long"],
       validationRule: {
         min: SCORE_GUARDRAIL_MIN,
@@ -2195,7 +2203,7 @@ function buildScoreMatrixDetail(
   technicalScanSourceLabel?: string | null,
   technicalScanSourceRunId?: number | null,
 ): ScoreMatrixDetail {
-  const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
+  const entries: ScoreMatrixEntry[] = (stock.consensusRows ?? stock.rows).map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
     return {
       id: `${row.meta.runId}-${row.meta.jobId}-matrix`,
@@ -3499,6 +3507,7 @@ export function buildConsensusRows(
   market: SwingTradeMarket,
   portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
   allRuns: RunResponse[] = runs,
+  verifiedUsListings: readonly VerifiedUsListing[] = [],
 ): StockConsensus[] {
   const sourceRuns = uniqueRunJobSources(runs);
   const sourceHistoryRuns = allRuns === runs ? sourceRuns : uniqueRunJobSources(allRuns);
@@ -3514,19 +3523,29 @@ export function buildConsensusRows(
   const outputLlmMetas = llmMetas.filter((meta) => outputMetaKeys.has(getMetaKey(meta)));
   const consensusDenominator = outputMetaKeys.size || parsedRows.length;
 
-  const venuesBySymbol = new Map<string, Set<string>>();
-  parsedRows.forEach(row => { const symbol = getStockKey(row.cells); const venues = venuesBySymbol.get(symbol) ?? new Set<string>(); venues.add(row.cells["Exchange Symbol"]?.trim().toUpperCase() ?? ""); venuesBySymbol.set(symbol, venues); });
-  parsedRows.forEach((row) => {
-    const symbol = getStockKey(row.cells);
-    const key = (venuesBySymbol.get(symbol)?.size ?? 0) > 1 ? `${row.cells["Exchange Symbol"]?.trim().toUpperCase()}:${symbol}` : symbol;
-    const rows = grouped.get(key) ?? [];
-    rows.push(row);
-    grouped.set(key, rows);
-  });
+  const usGroups = market === "us" ? groupUsIdentityRows(parsedRows, verifiedUsListings, ACTION_HEADER, normalizeAction) : null;
+  if (usGroups) {
+    usGroups.forEach((group,key) => grouped.set(key,group.sourceRows));
+  } else {
+    const venuesBySymbol = new Map<string, Set<string>>();
+    parsedRows.forEach(row => { const symbol = getStockKey(row.cells); const venues = venuesBySymbol.get(symbol) ?? new Set<string>(); venues.add(row.cells["Exchange Symbol"]?.trim().toUpperCase() ?? ""); venuesBySymbol.set(symbol, venues); });
+    parsedRows.forEach((row) => {
+      const symbol = getStockKey(row.cells);
+      const key = (venuesBySymbol.get(symbol)?.size ?? 0) > 1 ? `${row.cells["Exchange Symbol"]?.trim().toUpperCase()}:${symbol}` : symbol;
+      const rows = grouped.get(key) ?? [];
+      rows.push(row);
+      grouped.set(key, rows);
+    });
+  }
 
   return Array.from(grouped.entries())
-    .map(([key, rows]) => {
-      const positionContext = buildPositionContext(rows, currentValueSnapshots, Boolean(portfolioSnapshot));
+    .map(([key, sourceRows]) => {
+      const usGroup = usGroups?.get(key);
+      const rows = usGroup?.decisionRows ?? sourceRows;
+      const positionContext: PositionContext = usGroup && portfolioSnapshot
+        ? {source:"portfolio-snapshot", ...usIdentityHolding(usGroup.identity, portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail)}
+        : buildPositionContext(rows, currentValueSnapshots, Boolean(portfolioSnapshot));
+      const identityIssue = usGroup?.issue ?? (usGroup && positionContext.holdingMatch === "unresolved" ? "US snapshot cannot be attached to a single verified listing and share class." : null);
       const actionCounts = ACTION_CATEGORIES.reduce(
         (acc, action) => {
           acc[action] = 0;
@@ -3561,13 +3580,14 @@ export function buildConsensusRows(
         .map((meta) => ({
           meta,
           row: rowByMeta.get(getMetaKey(meta)) ?? null,
+          ...(usGroup ? {sourceRows:sourceRows.filter(row => getMetaKey(row.meta) === getMetaKey(meta))} : {}),
         }))
         .sort(compareConsensusBreakupEntries);
       const totalSuggestions = consensusDenominator || rows.length;
 
-      const first = getRepresentativeConsensusRow(rows);
+      const first: CanonicalRow = {...getRepresentativeConsensusRow(rows.length ? rows : sourceRows), ...(usGroup?.identity.listing ? {"Exchange Symbol":usGroup.identity.exchange,"Stock Symbol":usGroup.identity.symbol} : {})};
       const swingScanEntries = getSwingScanBreakupEntriesForStock(sourceHistoryRuns, market, first, parsedSwingSources);
-      const representative = { ...first };
+      const representative: CanonicalRow = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
           .map((action) => `${action} (${actionCounts[action]}/${totalSuggestions})`)
@@ -3594,15 +3614,16 @@ export function buildConsensusRows(
 
       return {
         key,
-        exchange: first["Exchange Symbol"] || "",
-        symbol: first["Stock Symbol"] || first["Stock Name"] || key,
+        exchange: usGroup?.identity.listing ? usGroup.identity.exchange : first["Exchange Symbol"] || "",
+        symbol: usGroup?.identity.symbol || first["Stock Symbol"] || first["Stock Name"] || key,
+        ...(usGroup ? {usIdentity:usGroup.identity,identityIssue,sourceRowLinks:usGroup.sourceLinks,consensusRows:rows} : {}),
         consensusAction,
         actionCounts,
         actionAverages,
         totalSuggestions,
         representative,
         positionContext,
-        rows,
+        rows: sourceRows,
         breakupEntries,
         swingScanEntries,
       };
@@ -3868,6 +3889,7 @@ export function ConsensusBreakupButton({
   action: ActionCategory;
 }) {
   const [open, setOpen] = useState(false);
+  const reviewDialog = useReviewDialog<HTMLDivElement>(open, () => setOpen(false));
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
   const consensusText = `${stock.actionCounts[action]}/${stock.totalSuggestions}`;
 
@@ -3887,6 +3909,7 @@ export function ConsensusBreakupButton({
       </button>
       {open ? (
         <div
+          {...reviewDialog}
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
           role="dialog"
           aria-modal="true"
@@ -3967,7 +3990,7 @@ export function ConsensusBreakupButton({
               <div className="space-y-3">
                 {stock.breakupEntries.map((entry, index) => {
                   const rowAction = getConsensusBreakupAction(entry);
-                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : "Not mentioned";
+                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : entry.sourceRows?.length ? "Conflicting source observations" : "Not mentioned";
                   return (
                     <div
                       key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`}
@@ -4783,8 +4806,8 @@ function ScopedStockDetailsButton({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-violet-100">
-                      {stock.rows.slice(rawPage * 25, (rawPage + 1) * 25).map((row) => (
-                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details`}>
+                      {stock.rows.slice(rawPage * 25, (rawPage + 1) * 25).map((row, sourceIndex) => (
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details${stock.usIdentity ? `-raw-${rawPage * 25 + sourceIndex}` : ""}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
                             {row.meta.runLabel}<br />{row.meta.provider} {row.meta.model}<br />
                             <span className="text-gray-400">{formatDateTime(row.meta.createdAt)}</span>
@@ -5467,8 +5490,10 @@ function DetailedRationaleScoreSection({
 function ScoreReferenceTables({
   formulaConfig,
   onFormulaConfigChange,
+  readableLayout = false,
 }: {
   formulaConfig: ScoreMatrixFormulaConfig;
+  readableLayout?: boolean;
   onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
 }) {
   const updateActionScore = (action: ActionCategory, value: string) => {
@@ -5499,13 +5524,13 @@ function ScoreReferenceTables({
   };
 
   return (
-    <section className="grid gap-4 lg:grid-cols-3">
+    <section className={readableLayout ? "grid gap-4" : "grid gap-4 lg:grid-cols-3"}>
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Model-action input weights</h3>
           <p className="mt-1 text-xs text-slate-600">Action → score inputs for the weighted formula. Final actions follow the calculated-score ranges and holdings context. Legacy average rationale scores are a separate measure.</p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Model-action input weights table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -5540,7 +5565,7 @@ function ScoreReferenceTables({
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Technical Scan Confidence Score</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Technical Scan Confidence Score table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -5575,7 +5600,7 @@ function ScoreReferenceTables({
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Score Symbol matrix</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Score Symbol matrix table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -5828,6 +5853,8 @@ export function ScoreMatrixModal({
 
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
 
+  const reviewDialog = useReviewDialog<HTMLDivElement>(Boolean(editedDetail && validationSummary), onClose);
+
   if (!editedDetail || !validationSummary) return null;
   const matchedRule = editedDetail.rules.find((rule) => rule.matched) ?? null;
   const sourceRows = editedDetail.rows.filter((row) => !row.isSummary);
@@ -5835,6 +5862,7 @@ export function ScoreMatrixModal({
   return (
     <>
     <div
+      {...reviewDialog}
       inert={selectedParameter ? true : undefined}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
@@ -6528,6 +6556,7 @@ function renderStockInfoBlock(
           <div className="text-sm font-medium leading-5 text-slate-900">{stockName}</div>
         </div>
         <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">{stock.exchange || "—"}</div>
+        {stock.identityIssue ? <p role="status" className="text-sm text-amber-800">{stock.identityIssue}</p> : null}
       </div>
     </div>
   );
@@ -6568,8 +6597,8 @@ function buildActionablesCalculationRows(
       isConsolidated?: boolean;
       isFormula?: boolean;
     }> = [
-      ...stock.rows.map((row) => ({
-        id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}`,
+      ...stock.rows.map((row, sourceIndex) => ({
+        id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}${stock.usIdentity ? `-raw-${sourceIndex}` : ""}`,
         jobRun: formatJobRunTimestamp(row.meta),
         llmName: `${row.meta.provider} ${row.meta.model}`.trim(),
         cells: row.cells,
@@ -6825,6 +6854,31 @@ function SortableCalculationHeader({
   );
 }
 
+/** Keep keyboard ownership local to nested review dialogs, outside the outer output shell. */
+function useNestedReviewModal(open: boolean, onClose: () => void) {
+  const panel = useRef<HTMLDivElement | null>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement;
+    panel.current?.focus();
+    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
+  }, [open]);
+  const onKeyDown = useCallback((event: import("react").KeyboardEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element) || event.target.closest('[role="dialog"],dialog') !== panel.current) return;
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close.current(); return; }
+    if (event.key !== "Tab") return;
+    event.stopPropagation();
+    const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]') ?? []).filter(node => node.getClientRects().length > 0);
+    const first = controls[0], last = controls.at(-1);
+    if (!first) { event.preventDefault(); panel.current?.focus(); }
+    else if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) { event.preventDefault(); first.focus(); }
+  }, []);
+  return { ref: panel, tabIndex: -1, onKeyDown };
+}
+
 function ActionablesFormulaModal({
   open,
   formulaConfig,
@@ -6836,12 +6890,14 @@ function ActionablesFormulaModal({
   onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   onClose: () => void;
 }) {
+  const reviewModal = useNestedReviewModal(open, onClose);
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
 
   if (!open) return null;
 
   return (
     <div
+      {...reviewModal}
       className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
       aria-modal="true"
@@ -6893,6 +6949,7 @@ function ActionablesFormulaModal({
             technicalScanSourceRunId: null,
           }} />
           <ScoreReferenceTables
+            readableLayout
             formulaConfig={formulaConfig}
             onFormulaConfigChange={onFormulaConfigChange}
           />
@@ -7174,11 +7231,11 @@ function ActionablesInputSelectionDialog({
   );
 }
 
-export function calculationsCountSummary(stocks: { rows: unknown[] }[], loading: boolean, error?: string | null): string {
+export function calculationsCountSummary(stocks: { rows: unknown[]; usIdentity?: unknown; totalSuggestions?: number }[], loading: boolean, error?: string | null): string {
   if (!stocks.length && (loading || error)) {
     return loading ? "LLMs consolidated in this view: Loading… Stocks: Loading…" : "LLMs consolidated in this view: Unknown. Stocks: Unknown.";
   }
-  const counts = `LLMs consolidated in this view: ${Math.max(...stocks.map(stock => stock.rows.length), 0)}. Stocks: ${stocks.length}.`;
+  const counts = `LLMs consolidated in this view: ${Math.max(...stocks.map(stock => stock.usIdentity && typeof stock.totalSuggestions === "number" ? stock.totalSuggestions : stock.rows.length), 0)}. Stocks: ${stocks.length}.`;
   return loading || error ? `${counts} Previously available results; ${loading ? "refresh in progress" : "refresh failed"}.` : counts;
 }
 
@@ -7222,6 +7279,7 @@ function OpenActionablesCalculationsModal({
   loadError?: string | null;
   onRetry?: () => void;
 }) {
+  const reviewModal = useNestedReviewModal(open, onClose);
   const [sortState, setSortState] = useState<ActionablesCalculationSortState>({ key: "Stock Info", direction: "asc" });
   const [columnLayout, setColumnLayout] = useState<ActionablesCalculationColumnLayout>(() => loadActionablesCalculationLayout(market));
   const [draggedHeader, setDraggedHeader] = useState<ActionablesCalculationHeader | null>(null);
@@ -7381,6 +7439,7 @@ function OpenActionablesCalculationsModal({
   return (
     <>
       <div
+        {...reviewModal}
         className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
         role="dialog"
         aria-modal="true"
@@ -9323,8 +9382,8 @@ function FragmentRows({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {stock.rows.map((row) => (
-                        <tr key={`${row.meta.runId}-${row.meta.jobId}`}>
+                      {stock.rows.map((row, sourceIndex) => (
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}${stock.usIdentity ? `-raw-${sourceIndex}` : ""}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                             <div className="font-semibold">
                               {row.meta.runLabel}

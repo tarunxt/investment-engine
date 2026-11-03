@@ -12,8 +12,9 @@ export type BasketScoreHistory = { market: 'india' | 'us'; symbols: string[]; as
 export type DisplayParameters = { maximumStocks: number; days: number; cash: number; normalised: number; valid: boolean };
 export const defaultDisplayParameters = (): DisplayParameters => ({ maximumStocks: 20, days: 5, cash: 5, normalised: 9.5, valid: true });
 export const stockIdentity = (symbol: string, exchange: string) => `${exchange.toUpperCase()}:${symbol.toUpperCase()}`;
-export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation) {
+export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation, verifiedIdentity?: {securityId:string;exchangeAliases:readonly string[]}) {
   const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
+  const acceptedVenues = new Set([exchange.toUpperCase(), ...(history.market === 'us' && verifiedIdentity?.securityId ? verifiedIdentity.exchangeAliases.filter(value => value === 'US') : [])]);
   const seen = new Set<number>();
   const excludedRows: ExcludedScoreObservation[] = [];
   // New current observations explicitly opt into the versioned effective-score contract.
@@ -26,14 +27,24 @@ export function historicalMean(history: BasketScoreHistory, symbol: string, exch
   const currentTime = Date.parse(current?.calculatedAt ?? '');
   const validCurrent = current && current.symbol.toUpperCase() === symbol.toUpperCase() && current.exchange.toUpperCase() === exchange.toUpperCase() && current.market === history.market && typeof currentScore === 'number' && Number.isFinite(currentScore) && currentScore >= -3 && currentScore <= 3 && (!current.scorePolicy || effectiveCurrent) && currentTime > start && currentTime <= end && current.sources.length > 0 && current.sources.every(source => Number.isSafeInteger(source.runId) && source.runId > 0 && (source.completed === true || source.status === 'partial') && source.market === history.market && Date.parse(source.createdAt) > start && Date.parse(source.createdAt) <= end);
   const currentIds = new Set(validCurrent ? current.sources.map(source => source.runId) : []);
+  const fingerprints = new Map<number, Set<string>>();
+  for (const row of history.observations) {
+    const time = Date.parse(row?.covered_at ?? '');
+    if (history.market === 'us' && verifiedIdentity?.securityId && row?.symbol?.toUpperCase() === symbol.toUpperCase() && acceptedVenues.has(row.exchange?.toUpperCase() ?? '') && time > start && time <= end && (row.completed || row.eligible) && row.coverage_status === 'suggested' && typeof row.score === 'number' && Number.isFinite(row.score)) {
+      const values = fingerprints.get(row.run_id) ?? new Set<string>(); values.add(JSON.stringify([row.score,row.action])); fingerprints.set(row.run_id,values);
+    }
+  }
   const rows = history.observations.filter(row => {
     if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string') return false;
     const time = Date.parse(row.covered_at);
-    if (row.symbol?.toUpperCase() === symbol.toUpperCase() && row.exchange?.toUpperCase() === exchange.toUpperCase()
+    if ((fingerprints.get(row.run_id)?.size ?? 0) > 1 && row.symbol.toUpperCase() === symbol.toUpperCase() && acceptedVenues.has(row.exchange.toUpperCase())) {
+      excludedRows.push({row,reason:'Conflicting saved alias observations from the same run; original scores and identities are preserved and no observation is chosen.'}); return false;
+    }
+    if (row.symbol?.toUpperCase() === symbol.toUpperCase() && acceptedVenues.has(row.exchange?.toUpperCase())
       && Number.isFinite(time) && time > start && time <= end && typeof row.score === 'number' && Number.isFinite(row.score) && (row.score < -3 || row.score > 3)) {
       excludedRows.push({ row, reason: 'Original saved score is outside −3 through +3. Legacy eligibility is unchanged; no effective score has been substituted.' });
     }
-    if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string' || !Number.isSafeInteger(row.run_id) || seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || row.exchange?.toUpperCase() !== exchange.toUpperCase() || (row.completed !== true && row.eligible !== true) || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
+    if (!row || typeof row.symbol !== 'string' || typeof row.exchange !== 'string' || !Number.isSafeInteger(row.run_id) || seen.has(row.run_id) || row.symbol.toUpperCase() !== symbol.toUpperCase() || !acceptedVenues.has(row.exchange?.toUpperCase()) || (row.completed !== true && row.eligible !== true) || row.coverage_status !== 'suggested' || typeof row.score !== 'number' || !Number.isFinite(row.score) || row.score < -3 || row.score > 3 || time <= start || time > end || !Number.isFinite(time)) return false;
     if (currentIds.has(row.run_id)) return false;
     seen.add(row.run_id); return true;
   });
@@ -58,8 +69,9 @@ export function brokerDisplayAllocation(weight: number | undefined, assets: numb
   if (!Number.isFinite(unroundedAmount)) return null;
   const validPrice = ltp !== null && Number.isFinite(ltp) && ltp > 0;
   if (market === 'us') {
-    const amount = excelRound(unroundedAmount);
-    return { unroundedAmount, unroundedStocks: validPrice ? amount / ltp! : null, amount, stocks: validPrice ? amount / ltp! : null };
+    const amount = unroundedAmount;
+    const stocks = validPrice && Number.isFinite(amount / ltp!) ? amount / ltp! : null;
+    return { unroundedAmount, unroundedStocks: stocks, amount, stocks };
   }
   if (!validPrice) return { unroundedAmount, unroundedStocks: null, amount: null, stocks: null };
   const unroundedStocks = unroundedAmount / ltp!, stocks = excelRound(unroundedStocks);
@@ -196,4 +208,27 @@ export function allocationDisclosure(weights: Map<string, number>, amounts: (num
   const sumAmount = weight !== null && assets !== null && Number.isFinite(assets) && assets >= 0 && amounts.length === weights.size && amounts.every(value => value !== null && Number.isFinite(value)) ? amounts.reduce<number>((sum, value) => sum + value!, 0) : null;
   const roundedAmount = sumAmount !== null && Number.isFinite(sumAmount) ? sumAmount : null;
   return { weight, residualWeight: weight === null ? null : 1 - weight, roundedAmount, roundedResidual: roundedAmount === null || assets === null ? null : assets - roundedAmount };
+}
+
+/** USD calculations preserve fractional shares and full intermediate precision. */
+export function indmoneyActionSizing(targetWeight: number | null, totalAssets: number | null, invested: number | null, vendorLtp: number | null) {
+  const valid = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+  const targetAmount = valid(targetWeight) && targetWeight >= 0 && targetWeight <= 1 && valid(totalAssets) && totalAssets >= 0 && valid(targetWeight * totalAssets) ? targetWeight * totalAssets : null;
+  const price = valid(vendorLtp) && vendorLtp > 0 ? vendorLtp : null;
+  const amount = targetAmount !== null && valid(invested) && invested >= 0 && valid(targetAmount - invested) ? targetAmount - invested : null;
+  const stocks = amount !== null && price !== null && valid(amount / price) ? amount / price : null;
+  return { targetAmount, targetStocks: targetAmount !== null && price !== null && valid(targetAmount / price) ? targetAmount / price : null, amount, stocks, price };
+}
+
+/** A pasted holding has no venue. Attach it only to a unique explicit US listing in the basket. */
+export function indmoneyHolding(snapshot: { parse_status: string; captured_at: string; holdings_count: number; reported_holdings_count: number | null; holdings: { symbol: string; current_value: number | null; invested_value: number | null; quantity: number | null }[] } | null, symbol: string, exchange: string, universe: { symbol: string; exchange: string }[]) {
+  if (!snapshot || snapshot.parse_status !== 'parsed' || !Number.isFinite(Date.parse(snapshot.captured_at)) || snapshot.holdings_count !== snapshot.holdings.length || snapshot.reported_holdings_count !== null && snapshot.reported_holdings_count !== snapshot.holdings.length) return null;
+  const key = symbol.trim().toUpperCase(), venue = exchange.trim().toUpperCase();
+  const venues = new Set(universe.filter(row => row.symbol.trim().toUpperCase() === key).map(row => row.exchange.trim().toUpperCase()));
+  if (!['NASDAQ', 'NYSE', 'NYSEARCA', 'NYSEAMERICAN'].includes(venue) || venues.size !== 1 || !venues.has(venue)) return null;
+  const matches = snapshot.holdings.filter(row => row.symbol.trim().toUpperCase() === key);
+  if (matches.length > 1) return null;
+  const holding = matches[0];
+  const value = (input: number | null | undefined) => typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : null;
+  return holding ? { currentValue: value(holding.current_value), investedValue: value(holding.invested_value), quantity: value(holding.quantity) } : { currentValue: 0, investedValue: 0, quantity: 0 };
 }
