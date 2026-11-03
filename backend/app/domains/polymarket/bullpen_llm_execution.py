@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextvars import copy_context
 import concurrent.futures
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -915,13 +916,28 @@ def _call_provider_once_with_timeout(
     provider_name: str,
     model_name: str,
     prompt: str,
+    execution_ownership=None,
 ) -> AIProviderResponse:
     provider = ProviderFactory.create(provider_name)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     semaphore = _provider_semaphore(provider_name)
     semaphore.acquire()
     try:
-        future = executor.submit(provider.generate, prompt=prompt, model=model_name)
+        def generate_owned():
+            if execution_ownership is not None:
+                execution_ownership.before_call()
+            try:
+                response = provider.generate(prompt=prompt, model=model_name)
+            except Exception:
+                if execution_ownership is not None:
+                    execution_ownership.block()
+                raise
+            if execution_ownership is not None:
+                execution_ownership.after_call()
+            return response
+        future = (executor.submit(copy_context().run, generate_owned)
+                  if execution_ownership is not None
+                  else executor.submit(generate_owned))
         return future.result(timeout=BULLPEN_LLM_REQUEST_TIMEOUT_SECONDS)
     except concurrent.futures.TimeoutError as exc:
         future.cancel()
@@ -954,6 +970,7 @@ def execute_provider_batch_call(
     provider_name: str,
     model_name: str,
     prompt: str,
+    execution_ownership=None,
 ) -> BullpenProviderBatchCall:
     health = ProviderFactory.validate_target(provider_name, model_name)
     if not health.available:
@@ -984,13 +1001,16 @@ def execute_provider_batch_call(
     while attempts < BULLPEN_LLM_MAX_REQUEST_ATTEMPTS:
         attempts += 1
         try:
+            call_kwargs = ({"execution_ownership": execution_ownership}
+                           if execution_ownership is not None else {})
             response = _call_provider_once_with_timeout(
-                provider_name,
-                model_name,
-                prompt,
+                provider_name, model_name, prompt, **call_kwargs,
             )
             break
         except Exception as exc:  # pragma: no cover - exercised via tests with stubs
+            if execution_ownership is not None:
+                execution_ownership.block()
+                raise  # An uncertain request must not become an internal replay.
             retryable = (
                 exc.retryable
                 if isinstance(exc, ProviderCallError)
@@ -1200,6 +1220,7 @@ def execute_bullpen_llm_target(
     provider_name: str,
     model_name: str,
     prepared_context: PreparedPolymarketEventContext | None = None,
+    execution_ownership=None,
 ) -> BullpenLlmTargetExecutionResult:
     prepared_context = (
         prepared_context
@@ -1394,10 +1415,11 @@ def execute_bullpen_llm_target(
             prompt_template=context.prompt_template,
             events=batch_events,
         )
+        call_kwargs = ({"execution_ownership": execution_ownership}
+                       if execution_ownership is not None else {})
         return batch, execute_provider_batch_call(
-            provider_name=provider_name,
-            model_name=model_name,
-            prompt=prompt,
+            provider_name=provider_name, model_name=model_name,
+            prompt=prompt, **call_kwargs,
         )
 
     pending_batches: list[BullpenLlmBatch] = list(plan.batches)
@@ -1415,7 +1437,9 @@ def execute_bullpen_llm_target(
                 if circuit_open:
                     break
                 next_batch = pending_batches.pop(0)
-                future = executor.submit(run_batch, next_batch)
+                future = (executor.submit(copy_context().run, run_batch, next_batch)
+                          if execution_ownership is not None
+                          else executor.submit(run_batch, next_batch))
                 running[future] = next_batch
                 max_observed_concurrency = max(max_observed_concurrency, len(running))
 
@@ -1428,6 +1452,9 @@ def execute_bullpen_llm_target(
                 try:
                     completed_batch, batch_call = future.result()
                 except Exception as exc:  # pragma: no cover - defensive
+                    if execution_ownership is not None:
+                        execution_ownership.block()
+                        raise
                     completed_batch = batch
                     batch_call = BullpenProviderBatchCall(
                         provider=provider_name,

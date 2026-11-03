@@ -1201,6 +1201,12 @@ def execute_ai_job(self, job_id: int) -> None:
     job: Job | None = None
     provider_usage_token = None
     output_context_token = None
+    execution_token = None
+    returned_response = None
+    ownership = None
+    from app.domains.jobs.execution_claim import (
+        admit, reconcile, LostExecutionOwner, ExecutionOwnership, KEY,
+    )
 
     def with_output_validation(metadata: dict | None) -> dict | None:
         validation = output_validation_metadata(content)
@@ -1222,8 +1228,6 @@ def execute_ai_job(self, job_id: int) -> None:
         )
 
     try:
-        if self.request.id:
-            register_job_task_sync(job_id, self.request.id)
         job = repo.get(job_id)
         if not job:
             logger.warning("Job %s not found", job_id)
@@ -1231,6 +1235,16 @@ def execute_ai_job(self, job_id: int) -> None:
         if job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
             logger.info("Skipping terminal job redelivery %s", job_id)
             return
+        execution_token = admit(db, job_id, getattr(self.request, "id", None))
+        if execution_token is None:
+            logger.info("Job %s delivery not admitted: terminal, owned, or reconciliation needed", job_id)
+            return
+        repo.execution_token = execution_token
+        if self.request.id:
+            register_job_task_sync(job_id, self.request.id)
+        ownership = ExecutionOwnership(SyncSessionLocal, job_id, execution_token)
+        repo.execution_owner_lost = ownership.lost_event.is_set
+        ownership.start()
         usage_dimensions = resolve_job_usage_identity(db, job)
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
@@ -1303,6 +1317,7 @@ def execute_ai_job(self, job_id: int) -> None:
                     provider_name=job.provider.strip().lower(),
                     model_name=job.model,
                     prepared_context=polymarket_event_context.prepared_context,
+                    execution_ownership=ownership,
                 )
                 content = execution_result.response_text
                 tokens_in = execution_result.tokens_in
@@ -1368,7 +1383,20 @@ def execute_ai_job(self, job_id: int) -> None:
                 )
                 return
 
-        provider = ProviderFactory.create(job.provider)
+        provider_impl = ProviderFactory.create(job.provider)
+        class OwnedProvider:
+            def generate(self, **kwargs):
+                nonlocal returned_response
+                ownership.before_call()
+                try:
+                    result = provider_impl.generate(**kwargs)
+                except Exception:
+                    ownership.block()
+                    raise
+                returned_response = result
+                ownership.after_call()
+                return result
+        provider = OwnedProvider()
         with provider_usage_phase("initial_generation"):
             result = provider.generate(prompt=prompt_to_execute, model=job.model)
         if _job_was_cancelled(repo, job_id):
@@ -1615,6 +1643,19 @@ def execute_ai_job(self, job_id: int) -> None:
             "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
         )
 
+    except LostExecutionOwner:
+        try:
+            evidence = None
+            if returned_response is not None:
+                evidence = {"response": (returned_response.content or "").strip(),
+                            "tokens_in": returned_response.tokens_in,
+                            "tokens_out": returned_response.tokens_out,
+                            "estimated_cost": returned_response.cost}
+            reconcile(db, job_id, execution_token, evidence=evidence)
+        except Exception:
+            logger.exception("Could not record lost ownership for job %s", job_id)
+        logger.warning("Job %s result discarded after ownership loss", job_id)
+        return
     except MaxRetriesExceededError as exc:
         _mark_failed(
             db,
@@ -1633,6 +1674,51 @@ def execute_ai_job(self, job_id: int) -> None:
         logger.exception("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
+        if execution_token:
+            if content is None and returned_response is not None:
+                content = (returned_response.content or "").strip()
+                tokens_in = returned_response.tokens_in
+                tokens_out = returned_response.tokens_out
+                estimated_cost = returned_response.cost
+            # Provider acceptance and DB commit failures can be ambiguous. Keep
+            # lineage and usage evidence; never turn this into a Celery replay.
+            try:
+                db.rollback()
+                current = repo.get_fresh(job_id)
+                record = (current.runtime_metadata_json or {}).get(KEY, {}) if current else {}
+                if (ownership is not None and not ownership.lost_event.is_set()
+                        and record.get("pending_calls", 0) == 0):
+                    # A returned provider response followed by deterministic validation
+                    # failure is known, unlike a timeout or uncertain commit.
+                    _mark_failed(
+                        db, repo, job_id, str(exc), response=content,
+                        tokens_in=tokens_in, tokens_out=tokens_out,
+                        estimated_cost=estimated_cost,
+                        web_search_used=web_search_used,
+                        web_search_queries=web_search_queries, web_sources=web_sources,
+                        runtime_metadata_json=failure_metadata(exc, retry_safe=False),
+                    )
+                else:
+                    reconcile(db, job_id, execution_token, evidence={
+                        "response": content, "tokens_in": tokens_in,
+                        "tokens_out": tokens_out, "estimated_cost": estimated_cost,
+                        "runtime_metadata_json": failure_metadata(exc, retry_safe=False),
+                    })
+            except Exception:
+                logger.exception("Could not persist reconciliation state for job %s", job_id)
+                # A diagnostic/cancellation projection can fail independently of
+                # the locked ownership record. Retain the original failure via
+                # the conservative path; never certify a terminal result here.
+                try:
+                    reconcile(db, job_id, execution_token, evidence={
+                        "response": content, "tokens_in": tokens_in,
+                        "tokens_out": tokens_out, "estimated_cost": estimated_cost,
+                        "runtime_metadata_json": failure_metadata(exc, retry_safe=False),
+                    })
+                except Exception:
+                    logger.exception("Could not retain original failure for job %s", job_id)
+            logger.exception("Job %s failure recorded without automatic replay", job_id)
+            return
         try:
             if _job_was_cancelled(repo, job_id):
                 return
@@ -1682,6 +1768,8 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        if ownership is not None:
+            ownership.close()
         reset_output_context(output_context_token)
         reset_provider_usage_context(provider_usage_token)
         db.close()
