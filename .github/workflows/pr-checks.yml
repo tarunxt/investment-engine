@@ -312,6 +312,7 @@ jobs:
         run: >-
           node --test
           tests/api-read-fallbacks.test.mjs
+          tests/api-recovery-controls.test.mjs
           tests/universal-export-retention.test.mjs
           tests/sports-rankings-recovery.test.mjs
           tests/sports-rankings-summary.test.mjs
@@ -556,6 +557,22 @@ jobs:
           node scripts/audit7-snapshot-label-offline-playwright.mjs
           node scripts/audit7-f11-offline-playwright.mjs
           node scripts/workflow-schema-readiness-offline-playwright.mjs
+
+      - name: Verify focused UI recovery states offline
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        env:
+          API_RECOVERY_EVIDENCE_DIR: ${{ runner.temp }}/ui-recovery-api
+          DASHBOARD_EVIDENCE_DIR: ${{ runner.temp }}/ui-recovery-dashboard
+          SWING_READ_STATE_EVIDENCE_DIR: ${{ runner.temp }}/ui-recovery-swing
+          READINESS_EVIDENCE_DIR: ${{ runner.temp }}/ui-recovery-readiness
+        run: |
+          export PLAYWRIGHT_CHROMIUM_EXECUTABLE="$(node --input-type=module -e 'import {chromium} from "playwright"; process.stdout.write(chromium.executablePath())')"
+          export CHROMIUM_PATH="$PLAYWRIGHT_CHROMIUM_EXECUTABLE"
+          node scripts/api-recovery-controls-offline.mjs
+          node scripts/dashboard-freshness-playwright.mjs
+          node scripts/data-error-20261102-02-offline.mjs
+          node scripts/rebalance-market-readiness-offline.mjs
 
       - name: Verify saved-output states and keyboard behavior offline
         if: matrix.bundler == 'webpack'

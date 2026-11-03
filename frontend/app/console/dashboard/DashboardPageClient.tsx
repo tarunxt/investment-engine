@@ -681,7 +681,7 @@ function PortfolioCommandSummary({
           ? "Incomplete total"
           : "Unavailable";
   };
-  const availability = (status: TotalDataStatusInfo) => (
+  const availability = (status: TotalDataStatusInfo, includeSourceState = true) => (
     <div className="text-xs leading-5 text-slate-600" data-total-complete={status.complete}>
       <p>
         {status.pending ? "Refreshing… · " : ""}
@@ -691,7 +691,7 @@ function PortfolioCommandSummary({
             ? "Incomplete · Portfolio or cash unverified"
             : "Incomplete · Missing portfolio or cash"}
       </p>
-      <SnapshotAvailability info={status} />
+      {includeSourceState ? <SnapshotAvailability info={status} /> : null}
     </div>
   );
   const saved = (row: (typeof rows)[number]) => (
@@ -840,7 +840,7 @@ function PortfolioCommandSummary({
                 <tr>
                   {[
                     "Source",
-                    "Refresh",
+                    "Source status",
                     "Captured snapshot text",
                     "Age",
                     "INR",
@@ -898,7 +898,7 @@ function PortfolioCommandSummary({
                               ? "Available"
                               : "Incomplete total"}
                         </p>
-                        {availability(status)}
+                        {availability(status, false)}
                       </td>
                     </tr>
                   );
