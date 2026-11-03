@@ -177,3 +177,14 @@ def test_pipe_holding_descendant_is_not_mistaken_for_completed_invocation(tmp_pa
         invoke_local_json_process(command(code),{},remaining_job_seconds=3,request_seconds=.15)
     time.sleep(.55)
     assert not marker.exists()
+
+
+@pytest.mark.parametrize('provider,model', [
+    ('openai', 'selected-model'), ('deepseek', 'deepseek-v4-flash'),
+    ('anthropic', 'selected-model'), ('gemini', 'selected-model'), ('tavily', None),
+])
+def test_request_helpers_never_certify_an_inr_adapter(provider, model):
+    from app.domains.rebalance_budget.policy import resolve_bound
+    from app.domains.rebalance_budget.ledger import SpendCapBlocked
+    with pytest.raises(SpendCapBlocked, match='No paid request was dispatched'):
+        resolve_bound(provider=provider, model=model, request={'bounded_helper_is_not_certification': True})

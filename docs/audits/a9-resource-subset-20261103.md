@@ -68,3 +68,30 @@ review; Gemini provider-managed grounding remains owned by the search-privacy
 lane and must stay disabled where it bypasses public-query projection. No native
 search/tools can be certified merely by token/output bounds. No paid experiments,
 credentials, runtime changes, financial actions or worker activation are included.
+
+## Exact integration handoff
+
+No provider/model path can admit a paid call **under this proposed INR cap**:
+OpenAI Responses/chat, DeepSeek chat (including Flash), Anthropic messages,
+Gemini and Tavily/search remain unqualified. Ordinary untagged analysis follows
+its existing uncapped route; its availability is not evidence of cap enforcement.
+The five-path offline rejection fixture explicitly locks this distinction.
+
+Shared-file composition belongs to the sole integrator:
+
+| Shared boundary | Required composition, not implemented here |
+| --- | --- |
+| jobs/tasks.py | Claim/fence ownership; first-execution 600-second deadline; preserve across repair, retry, redelivery; local cancel uncertainty retains spend and resource reservations |
+| jobs/use_cases/create_job.py, runs/use_cases/create_run.py | Compose active input guards with actor-aware durable queue/concurrency admission; no new grant on retries |
+| api_usage/metering.py | Attribute every actual transport attempt, phase and late outcome; current metered_call passes kwargs through and does not control hidden retries |
+| ai_providers/openai.py, deepseek.py, anthropic.py | Apply reviewed zero-retry SDK settings and correct endpoint-specific limits at every initial, rewrite, repair and tool-followup request; use durable atomic token/tool reservations |
+| ai_providers/gemini.py | Privacy lane owns adapter changes: preserve disabled unmediated grounding, selected model and full analysis prompt; native streaming completion and absolute deadline remain unqualified |
+| ai_providers/tools/web_search.py | Preserve privacy-owned public-query projection; reserve each billed query/fetch and never infer total tool consumption from a final response alone |
+| rebalance_budget/runtime.py, ledger.py, policy.py | Keep one original logical allowance and retained uncertain attempts; no resolve_bound activation without finite all-attempt and supported actual-INR settlement proof |
+
+Pure helper contracts are resource_request.bounded_token_request (returns kwargs,
+never dispatches/reserves), validate_tool_batch (checks a complete response batch,
+never dispatches), remaining_reserved_output (requires complete generated usage,
+not charge evidence), and resource_process.invoke_local_json_process (only local
+POSIX lifecycle). No worker imports these request/process helpers. Unknown or
+late remote charges, parent crashes and remote continued execution remain open.
