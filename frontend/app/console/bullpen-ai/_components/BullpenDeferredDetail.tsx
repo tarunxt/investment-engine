@@ -13,10 +13,10 @@ function DetailLoadNotice({ failed = false, retry, close }: { failed?: boolean; 
   </div>;
 }
 
-class DetailLoadBoundary extends Component<{ children: ReactNode; retry: () => void; close?: () => void }, { failed: boolean }> {
+class DetailLoadBoundary extends Component<{ children: ReactNode; retry: () => void; close?: () => void; active: boolean }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  render() { return this.state.failed ? <DetailLoadNotice failed retry={this.props.retry} close={this.props.close} /> : this.props.children; }
+  render() { return this.state.failed ? (this.props.active ? <DetailLoadNotice failed retry={this.props.retry} close={this.props.close} /> : null) : this.props.children; }
 }
 
 /** A fresh lazy instance on retry permits a failed chunk request to be retried. */
@@ -27,8 +27,14 @@ export function deferBullpenDetail<P extends object>(load: () => Promise<Compone
     useEffect(() => () => { if (opener.current?.isConnected) opener.current.focus(); }, []);
     const [View, setView] = useState(() => lazy(async () => ({ default: await load() })));
     const close = (props as { onClose?: () => void }).onClose;
-    return <DetailLoadBoundary key={attempt} retry={() => { setView(() => lazy(async () => ({ default: await load() }))); setAttempt(value => value + 1); }} close={close}>
-      <Suspense fallback={<DetailLoadNotice close={close} />}><View {...props} /></Suspense>
+    const active = (props as { open?: boolean }).open !== false;
+    const wasActive = useRef(active);
+    useEffect(() => {
+      if (wasActive.current && !active && opener.current?.isConnected) opener.current.focus();
+      wasActive.current = active;
+    }, [active]);
+    return <DetailLoadBoundary active={active} key={attempt} retry={() => { setView(() => lazy(async () => ({ default: await load() }))); setAttempt(value => value + 1); }} close={close}>
+      <Suspense fallback={active ? <DetailLoadNotice close={close} /> : null}><View {...props} /></Suspense>
     </DetailLoadBoundary>;
   };
 }

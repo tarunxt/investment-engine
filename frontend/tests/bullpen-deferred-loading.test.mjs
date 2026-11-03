@@ -13,7 +13,7 @@ test('live schedule remains the state/effect owner and does not statically impor
  for (const name of ['BullpenScheduleDetails','BullpenRunHistoryContent','BullpenStageOneExcelHistoryDialog','BullpenAutoRunBadgeRationaleDialog']) assert.ok(!imports(live).includes('./'+name));
  for (const name of ['getPersistedAutoRunStatus','handleStage3Retry','setInterval','getBullpenAutoLiveDashboardSummary']) assert.ok(live.includes(name));
  assert.match(live,/isRunHistoryDialogOpen \?/);
- assert.match(live,/isExcelHistoryDialogOpen \? <BullpenStageOneExcelHistoryDialog/);
+ assert.match(live,/hasOpenedExcelHistoryDialog \? <BullpenStageOneExcelHistoryDialog/);
 });
 test('details and shared helpers have no static import back to the live schedule owner', () => {
  for (const name of ['BullpenScheduleDetails.tsx','bullpenScheduleShared.tsx']) assert.ok(!imports(read(name)).includes('./BullpenAutoRunScheduleCard'));

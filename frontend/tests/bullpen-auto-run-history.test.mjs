@@ -422,7 +422,7 @@ test("Stage 1 Excel split button opens the last 10 workspace-scoped scans", () =
   assert.match(scheduleCard, /setIsExcelHistoryDialogOpen\(true\)/);
   assert.match(
     scheduleCard,
-    /isExcelHistoryDialogOpen \? <BullpenStageOneExcelHistoryDialog\s+open[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
+    /hasOpenedExcelHistoryDialog \? <BullpenStageOneExcelHistoryDialog\s+open=\{isExcelHistoryDialogOpen\}[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
   );
   assert.match(scheduleCard, /Events that Passed Filters/);
   assert.match(

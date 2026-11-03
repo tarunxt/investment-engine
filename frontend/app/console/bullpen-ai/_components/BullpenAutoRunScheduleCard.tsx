@@ -2434,6 +2434,7 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [isExcelHistoryDialogOpen, setIsExcelHistoryDialogOpen] =
     useState(false);
+  const [hasOpenedExcelHistoryDialog, setHasOpenedExcelHistoryDialog] = useState(false);
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
   const [triggerHistoryItems, setTriggerHistoryItems] = useState<
@@ -6409,7 +6410,7 @@ export function BullpenAutoRunScheduleCard({
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                         onOpenScanFilters={onOpenScanFilters}
-                        onOpenExcelHistory={() => setIsExcelHistoryDialogOpen(true)}
+                        onOpenExcelHistory={() => { setHasOpenedExcelHistoryDialog(true); setIsExcelHistoryDialogOpen(true); }}
                         workspaceProfile={workspaceProfile} />
                     </div>
                     <div className={`mt-5 border-t pt-3 ${isStageOneActive ? "border-amber-200/80" : "border-emerald-200/80"}`}>
@@ -7060,8 +7061,8 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        {isExcelHistoryDialogOpen ? <BullpenStageOneExcelHistoryDialog
-          open
+        {hasOpenedExcelHistoryDialog ? <BullpenStageOneExcelHistoryDialog
+          open={isExcelHistoryDialogOpen}
           onClose={() => setIsExcelHistoryDialogOpen(false)}
           workspaceProfile={workspaceProfile}
         /> : null}
