@@ -47,6 +47,7 @@ jobs:
         run: >-
           pytest -q
           backend/tests/test_zerodha_display_quotes.py
+          backend/tests/test_indmoney_alpaca_quotes.py
           backend/tests/test_upstox_quotes.py
           backend/tests/test_upstox_quote_guard.py
           backend/tests/test_upstox_request_contract.py
@@ -562,7 +563,9 @@ jobs:
       - name: Verify offline basket fixture interactions and quote counters
         if: matrix.bundler == 'webpack'
         working-directory: frontend
-        run: npm run test:basket-offline
+        run: |
+          npm run test:basket-offline
+          npm run test:indmoney-basket-offline
 
       - name: Verify fingerprint, auth, routes, assets, and backend proxy
         id: runtime

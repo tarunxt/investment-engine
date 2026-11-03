@@ -1,4 +1,5 @@
 "use client";
+import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 
 import { captureWorkflowOwner, requireWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -256,6 +257,8 @@ type RebalanceStockFlowSubwidgetProps = {
 };
 
 type StockFlowSourceData = {
+  verifiedUsListings?: VerifiedUsListing[];
+  identityWarning?: string | null;
   runs: RunResponse[];
   coverage?: DashboardRunCoverage;
   cachedAt?: number;
@@ -290,14 +293,18 @@ export function fetchRebalanceStockFlowSource(
     portfolio === "zerodha"
       ? apiService.zerodhaPortfolioOverview()
       : apiService.indmoneyUsPortfolioOverview(),
+    portfolio === "indmoneyUs" && apiService.indmoneyVerifiedListings
+      ? apiService.indmoneyVerifiedListings().catch(() => ({listings:[],reason:"Verified US listing metadata unavailable"}))
+      : Promise.resolve({listings:[],reason:null}),
   ]).then(
-    ([runs, overview]) => {
+    ([runs, overview, listingResult]) => {
       requireWorkflowOwner(owner);
       stockFlowSourcePromises.delete(portfolio);
       const data = {
         runs,
         coverage,
         portfolioSnapshot: overview.latest,
+        ...(portfolio === "indmoneyUs" ? {verifiedUsListings:listingResult.listings,identityWarning:listingResult.reason} : {}),
       };
       stockFlowLastSuccessfulSources.set(portfolio, {
         data,
@@ -494,7 +501,7 @@ function RebalanceStockFlowSubwidget({
     const swingEvidence = buildSwingFlow(swingRuns);
     const swing = swingEvidence.stocks;
     const rebalance = matchingRebalanceRuns.length
-      ? buildConsensusRows(matchingRebalanceRuns, portfolio.market, portfolioSnapshot, runs)
+      ? buildConsensusRows(matchingRebalanceRuns, portfolio.market, portfolioSnapshot, runs, sourceInfo?.verifiedUsListings ?? [])
       : [];
     const actionables = buildDashboardActionRows(
       rebalance,
@@ -547,7 +554,7 @@ function RebalanceStockFlowSubwidget({
       swingMeta: stageRunMeta(swingRun),
       rebalanceMeta: stageRunMeta(rebalanceRun),
     };
-  }, [buyThreshold, formulaConfig, portfolioId, portfolioSnapshot, runs]);
+  }, [buyThreshold, formulaConfig, portfolioId, portfolioSnapshot, runs, sourceInfo?.verifiedUsListings]);
 
   return (
     <section
