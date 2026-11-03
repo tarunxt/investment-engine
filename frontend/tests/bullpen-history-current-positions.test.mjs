@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -18,13 +19,7 @@ const polymarketMarketUrls = readFileSync(
   ),
   "utf8",
 );
-const scheduleCard = readFileSync(
-  new URL(
-    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const scheduleCard = readBullpenScheduleSource();
 const dedicatedRunPage = readFileSync(
   new URL(
     "../app/console/bullpen-ai/runs/[runId]/RunDetailClient.tsx",

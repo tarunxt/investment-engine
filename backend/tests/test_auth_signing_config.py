@@ -179,3 +179,11 @@ def test_custom_access_expiration_and_expired_token_rejection(monkeypatch):
     assert payload["exp"] - payload["iat"] == 120
     expired = security.JWTUtils.create_access_token(7, "fixture@example.invalid", "user", timedelta(seconds=-5))
     assert security.JWTUtils.verify_token(expired) is None
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_current_main_log_redaction_covers_signing_configuration_names(name):
+    from app.core.redaction import redact_sensitive_text
+    rendered = redact_sensitive_text(f"configuration {name}={KEY}")
+    assert KEY not in rendered
+    assert "[REDACTED]" in rendered

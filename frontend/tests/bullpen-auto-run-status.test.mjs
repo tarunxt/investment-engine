@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -325,13 +326,7 @@ test("Bullpen auto-run status uses only a validated summary as its secondary sem
 });
 
 test("Bullpen auto-run status component bounds automatic retries and records semantic fallbacks", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3/);
   assert.match(source, /normalizeBullpenAutoRunStatusFromSummary/);
