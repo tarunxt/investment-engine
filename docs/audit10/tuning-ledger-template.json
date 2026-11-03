@@ -1,0 +1,30 @@
+{
+  "schema_version": "tuning-ledger-draft-v1",
+  "status": "empty_not_historical_predeclaration",
+  "entries": [],
+  "required_event_fields": [
+    "event",
+    "at",
+    "previous_entry_hash",
+    "contract_hash",
+    "corpus_hash",
+    "code_hash",
+    "reason",
+    "split_version",
+    "original_output_ids"
+  ],
+  "freeze_fields": [
+    "test_start_at",
+    "test_end_at"
+  ],
+  "selection_fields": [
+    "selected_parameters"
+  ],
+  "allowed_events": [
+    "freeze",
+    "inspect",
+    "tune",
+    "select",
+    "retry"
+  ]
+}
