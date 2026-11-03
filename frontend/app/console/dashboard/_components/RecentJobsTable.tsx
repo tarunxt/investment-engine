@@ -96,7 +96,7 @@ const PROVIDER_CONSOLE_URL: Record<string, string> = {
 };
 
 export function RecentJobsTable() {
-  const { runs, runsTotal, loadingRuns, lastUpdated, runScopeMarket, runScopeLabel, runScopeKind } = useDashboard();
+  const { runs, runsTotal, loadingRuns, runsError, lastUpdated, runScopeMarket, runScopeLabel, runScopeKind } = useDashboard();
   const router = useRouter();
   const [usdInrRate, setUsdInrRate] = useState(0);
   const [tickNow, setTickNow] = useState(() => Date.now());
@@ -109,6 +109,15 @@ export function RecentJobsTable() {
           : isRunInSwingTradeMarket(run.prompt_preview, runScopeMarket),
       )
     : runs;
+
+  // DATA-ERROR-20261102-02: body and footer use the same read-state evidence.
+  const emptyMessage = loadingRuns
+    ? 'Loading jobs…'
+    : runsError
+      ? 'Jobs unavailable. The latest request failed.'
+      : !lastUpdated
+        ? 'Jobs not yet verified.'
+        : runScopeLabel ? `No recent ${runScopeLabel} jobs matched` : 'No jobs yet';
 
   useEffect(() => {
     let mounted = true;
@@ -220,7 +229,12 @@ export function RecentJobsTable() {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      {visibleRuns.length > 0 && (loadingRuns || runsError) ? (
+        <p role="status" className="px-5 py-3 text-xs text-amber-800">
+          {loadingRuns ? 'Refreshing jobs; showing previously loaded rows.' : 'Showing previously loaded jobs; the latest request failed and rows may be out of date.'}
+        </p>
+      ) : null}
+      <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Recent jobs table">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
@@ -236,9 +250,9 @@ export function RecentJobsTable() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">
-            {loadingRuns ? (
+            {loadingRuns && visibleRuns.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-5 py-10 text-center text-sm text-gray-500">
+                <td role="status" colSpan={3} className="px-5 py-10 text-center text-sm text-gray-500">
                   <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
                   Loading jobs…
                 </td>
@@ -246,7 +260,7 @@ export function RecentJobsTable() {
             ) : visibleRuns.length === 0 ? (
               <tr>
                 <td colSpan={3} className="px-5 py-10 text-center text-sm text-gray-500">
-                  {runScopeLabel ? `No ${runScopeLabel} jobs yet` : 'No jobs yet'}
+                  {emptyMessage}
                 </td>
               </tr>
             ) : (
@@ -480,12 +494,10 @@ export function RecentJobsTable() {
 
       <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
         <span className="text-xs text-gray-500">
-          {runScopeLabel
-            ? visibleRuns.length === 0
-              ? `No ${runScopeLabel} jobs yet`
-              : `Showing ${visibleRuns.length} recent ${runScopeLabel} job${visibleRuns.length !== 1 ? 's' : ''}`
-            : runsTotal === 0
-              ? 'No jobs yet'
+          {visibleRuns.length === 0
+            ? emptyMessage
+            : runScopeLabel
+              ? `Showing ${visibleRuns.length} recent ${runScopeLabel} job${visibleRuns.length !== 1 ? 's' : ''}`
               : `Showing ${runs.length} of ${runsTotal} job${runsTotal !== 1 ? 's' : ''}`}
         </span>
         <Link
