@@ -406,3 +406,26 @@ for (const scenario of ['valid','expired','missing-access','backend-401','no-ses
     assert.ok(fixture.calls.every(call=>!call.url.includes('/auth/refresh')));
   });
 }
+
+test('default logout timers retain the browser global receiver', async () => {
+  const context = vm.createContext({});
+  vm.runInContext(`
+    globalThis.setTimeout = function(callback, delay) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      return 1;
+    };
+    globalThis.clearTimeout = function(timer) {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+    };
+  `, context);
+  const source = stripTypeScriptTypes(read('../lib/logoutOutcome.ts'), { mode: 'transform' })
+    .replaceAll('export ', '');
+  vm.runInContext(source + '\nglobalThis.runLogout = performLogout;', context);
+  const outcome = await context.runLogout({
+    revoke: async () => ({ session_revocation: 'confirmed' }),
+    signOut: async () => {},
+    cleanup: () => {},
+  });
+  assert.equal(outcome.serverRevocation, 'confirmed');
+  assert.equal(outcome.authJsSignOut, 'completed');
+});

@@ -59,7 +59,12 @@ export async function performLogout(steps: {
   } catch {
     // Still attempt sign-out, while reporting local cleanup as incomplete.
   }
-  const timers = steps.timers || { set: setTimeout, clear: clearTimeout };
+  // Native browser timers require their Window receiver. Calling a borrowed
+  // setTimeout as timers.set(...) otherwise throws before logout dispatch.
+  const timers = steps.timers || {
+    set: (callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs),
+    clear: (timer: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(timer),
+  };
   if (outcome.serverRevocation !== "confirmed") {
     try {
       const reply = await boundedStep(steps.revoke, timers);
