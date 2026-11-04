@@ -14,13 +14,15 @@ on:
       - 'frontend/providers/AuthProvider.tsx'
       - 'frontend/app/api/bullpen-ai/_lib/serverBackendSession.ts'
       - 'frontend/tests/session*'
+      - 'frontend/tests/session-http-browser/**'
+      - 'frontend/app/backend-api/**'
       - '.github/workflows/session-policy-checks.yml'
 permissions:
   contents: read
 jobs:
   session-policy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -60,6 +62,18 @@ jobs:
       - name: New migrations in disposable Docker backend
         run: |
           docker run --rm --network none --env PYTHONPATH=/venv/lib/python3.12/site-packages --mount type=bind,source=/tmp/a9-session-venv-20261103,target=/venv,readonly --mount type=bind,source="$PWD/backend",target=/backend,readonly --mount type=bind,source=/tmp/a9-session-pg-socket-20261103,target=/var/run/postgresql python:3.12-slim python /backend/scripts/verify-session-migrations-disposable.py
+      - name: Install actual application and browser fixture dependencies
+        run: |
+          /tmp/a9-session-venv-20261103/bin/pip install -r backend/requirements.txt
+          npm ci --ignore-scripts --prefix frontend
+          cd frontend && npx playwright install --with-deps chromium
+      - name: Actual main import and missing-schema startup rejection
+        run: /tmp/a9-session-venv-20261103/bin/python backend/scripts/verify-session-full-startup-offline.py --schema-only
+      - name: Actual browser cookies and two independent HTTP BFF processes
+        run: |
+          export SESSION_PROOF_PYTHON=/tmp/a9-session-venv-20261103/bin/python
+          export SESSION_PROOF_CHROMIUM=$(cd frontend && node -p "require('playwright').chromium.executablePath()")
+          node frontend/tests/session-http-browser/run.mjs
       - name: Remove only the synthetic fixture
         if: always()
         run: docker stop a9-session-pg-20261103 || true
