@@ -506,6 +506,7 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
             job.id, job.created_at = 123, now
             jobs.append(job)
         async def get(self, job_id): return jobs[0]
+        async def get_for_user(self, job_id, user_id): return jobs[0] if jobs[0].user_id == user_id else None
     class Lock:
         def __init__(self, *args): pass
         @asynccontextmanager
