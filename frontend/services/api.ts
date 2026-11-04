@@ -1308,10 +1308,10 @@ class apiServiceClass implements IApiService {
     });
   }
 
-  zerodhaDisplayQuotes(instruments: string[]): Promise<ZerodhaDisplayQuoteResponse> {
+  zerodhaDisplayQuotes(instruments: string[], signal?: AbortSignal): Promise<ZerodhaDisplayQuoteResponse> {
     const query = new URLSearchParams();
     instruments.forEach(instrument => query.append("instruments", instrument));
-    return this.get<ZerodhaDisplayQuoteResponse>(`${URLs.zerodha.portfolio()}/quotes?${query}`, { skipUnauthorizedRefresh: true });
+    return this.get<ZerodhaDisplayQuoteResponse>(`${URLs.zerodha.portfolio()}/quotes?${query}`, { skipUnauthorizedRefresh: true, signal });
   }
 
   zerodhaQuoteCapabilities(): Promise<{ upstox_ltp_enabled: boolean }> {
