@@ -1,6 +1,6 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
-from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
+from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession, AuthSessionFamily, AuthRefreshIntent
 from app.domains.api_usage.models import (
     ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
@@ -151,6 +151,8 @@ __all__ = [
     "User",
     "UserProfile",
     "UserSession",
+    "AuthSessionFamily",
+    "AuthRefreshIntent",
     "ZerodhaAuditLog",
     "ZerodhaCredential",
     "ZerodhaPortfolioSnapshot",

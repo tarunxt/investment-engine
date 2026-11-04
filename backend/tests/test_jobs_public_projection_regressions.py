@@ -1,3 +1,5 @@
+from test_jobs_ownership import database
+from session_composition_fixtures import active_identity
 """Review-reproduced credential labels/auth schemes at actual public boundaries."""
 import base64
 from contextlib import asynccontextmanager
@@ -68,7 +70,7 @@ def test_review_labels_at_actual_ws_update_boundary(message, hidden, monkeypatch
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("message,hidden", CASES)
-async def test_review_labels_at_actual_ws_initial_boundary(message, hidden, monkeypatch):
+async def test_review_labels_at_actual_ws_initial_boundary(message, hidden, monkeypatch, database):
     from app.domains.jobs import ws_router
     original = source(message)
     before = deepcopy(vars(original))
@@ -76,7 +78,10 @@ async def test_review_labels_at_actual_ws_initial_boundary(message, hidden, monk
     async def session(): yield object()
     monkeypatch.setattr(ws_router, "AsyncSessionLocal", session)
     monkeypatch.setattr(ws_router, "PostgresJobRepository", lambda db: SimpleNamespace(get_for_user=AsyncMock(return_value=original)))
-    monkeypatch.setattr(ws_router, "user_id_from_ws_token", AsyncMock(return_value=7))
+    from app.shared import ws_relay
+    identity = await active_identity(database, 7)
+    monkeypatch.setattr(ws_relay, "AsyncSessionLocal", database)
+    monkeypatch.setattr(ws_router, "user_id_from_ws_token", AsyncMock(return_value=identity))
     monkeypatch.setattr(ws_router, "relay_channel", AsyncMock())
     socket = SimpleNamespace(accept=AsyncMock(), send_json=AsyncMock(), close=AsyncMock())
     await ws_router.ws_job_detail(socket, 41, "synthetic-ws-ticket")

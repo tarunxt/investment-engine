@@ -121,6 +121,9 @@ cors_allowed_origins = _build_cors_allowed_origins()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     recovery_mode()  # Refuse malformed recovery configuration before startup work.
+    from app.domains.auth.session_startup import require_session_schema
+    async with AsyncSessionLocal() as session_schema_db:
+        await require_session_schema(session_schema_db)
     logger.info("Starting AI Investment Platform Backend")
     logger.info("Database configured: %s", bool(settings.database_url))
     logger.info("Redis configured: %s", bool(settings.redis_url))

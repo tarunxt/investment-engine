@@ -8,7 +8,7 @@ from app.infrastructure.database.session import AsyncSessionLocal
 from app.domains.jobs.repository import PostgresJobRepository
 from app.shared.types import JobId
 from app.domains.jobs.public_projection import public_job_details
-from app.shared.ws_relay import relay_channel, user_id_from_ws_token
+from app.shared.ws_relay import relay_channel, user_id_from_ws_token, session_identity_active
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ async def ws_job_list(websocket: WebSocket, token: str | None = Query(None)):
     await websocket.accept()
     logger.info("WS /ws/jobs connected user_id=%s", user_id)
     try:
-        await relay_channel(websocket, f"user_job_updates:{user_id}")
+        await relay_channel(websocket, f"user_job_updates:{user_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs disconnected user_id=%s", user_id)
     except Exception as e:
@@ -53,6 +53,9 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
             job = await PostgresJobRepository(db).get_for_user(job_id, user_id)
             if job is None:
                 await websocket.close(code=1008, reason="Job unavailable")
+                return
+            if not await session_identity_active(user_id):
+                await websocket.close(code=1008, reason="Session expired or revoked")
                 return
             if job is not None:
                 status_val = (
@@ -81,7 +84,7 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
         return
 
     try:
-        await relay_channel(websocket, f"job_updates:{job_id}")
+        await relay_channel(websocket, f"job_updates:{job_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/jobs/%d disconnected user_id=%s", job_id, user_id)
     except Exception as e:

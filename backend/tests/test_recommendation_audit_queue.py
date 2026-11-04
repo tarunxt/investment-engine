@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import JWTUtils
-from app.domains.auth.models import User, UserProfile, UserRole
+from app.domains.auth.models import User, UserProfile, UserRole, AuthSessionFamily
+from datetime import datetime, timedelta
 from app.domains.recommendation_audit.models import DecisionRecord, EvidenceRecord, SpendAccount, SpendAttempt, VerificationRecord
 from app.domains.recommendation_audit.router import router
 from app.domains.recommendation_audit.service import create_verification
@@ -41,7 +42,7 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     from app.domains.recommendation_audit.tasks import verify_reversal
     database=tmp_path/"audit-auth-queue.sqlite"
     engine=create_engine(f"sqlite:///{database}",connect_args={"check_same_thread":False})
-    Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
+    Base.metadata.create_all(engine,tables=[m.__table__ for m in (User,UserProfile,AuthSessionFamily,Run,EvidenceRecord,DecisionRecord,VerificationRecord,SpendAccount,SpendAttempt)])
     monkeypatch.setattr(settings,"recommendation_audit_enabled",True)
     monkeypatch.setattr(settings,"recommendation_audit_recovery_stored_only_enabled",recovery)
     monkeypatch.setattr(settings,"recommendation_audit_external_enabled",False)
@@ -50,10 +51,15 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
     monkeypatch.setattr(settings,"database_url",f"sqlite:///{database}")
     monkeypatch.setattr(settings,"auth_disabled",False)
     monkeypatch.setattr(settings,"environment","test")
-    monkeypatch.setattr(security_module,"SECRET_KEY","disposable-fixture-signing-key-only")
+    from pydantic import SecretStr
+    monkeypatch.setattr(security_module.settings, "jwt_signing_key", SecretStr(bytes(range(32)).hex()))
     monkeypatch.setenv("CREDX_RECOVERY_MODE","1" if recovery else "0")
     with Session(engine) as session:
         session.add_all([User(id=i,email=f"fixture-{i}@invalid.test",username=f"fixture-{i}",password_hash="unused-fixture",role=UserRole.USER,is_active=True) for i in (1,2)])
+        session.flush()
+        for uid in (1, 2):
+            session.add(AuthSessionFamily(id=f"synthetic-audit-family-{uid:032d}", user_id=uid,
+                refresh_digest="0"*64, expires_at=datetime.utcnow()+timedelta(days=7), is_active=True))
         session.add(Run(id=10,user_id=1,prompt="fixture",prompt_preview="fixture"))
         current=decision(session);body=request(current).model_dump(mode="json")
     async_engine=create_async_engine(f"sqlite+aiosqlite:///{database}")
@@ -80,8 +86,8 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
             return run_verification(session,record_id,settings,external_collector=prohibited)
     def unavailable(*args,**kwargs): raise RuntimeError("fixture broker unavailable")
     monkeypatch.setattr(verify_reversal,"apply_async",unavailable)
-    token=JWTUtils.create_access_token(1,"fixture-1@invalid.test","user")
-    other=JWTUtils.create_access_token(2,"fixture-2@invalid.test","user")
+    token=JWTUtils.create_access_token(1,"fixture-1@invalid.test","user", session_id=f"synthetic-audit-family-{1:032d}")
+    other=JWTUtils.create_access_token(2,"fixture-2@invalid.test","user", session_id=f"synthetic-audit-family-{2:032d}")
     previous_current=getattr(_state._tls,"current_app",None)
     previous_default=_state.default_app
     try:
@@ -107,7 +113,6 @@ async def test_authenticated_api_delivers_to_isolated_celery_worker(tmp_path, mo
                 from app.domains.recommendation_audit.outbox import RelayService
                 with Session(engine) as session:
                     row=session.get(VerificationRecord,record_id)
-                    from datetime import timedelta
                     from app.domains.recommendation_audit.models import utcnow
                     row.last_dispatch_at=utcnow()-timedelta(seconds=16);session.commit()
                 delivered=[]
