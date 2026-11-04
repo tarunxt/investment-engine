@@ -52,6 +52,7 @@ class UserLoginRequest(BaseModel):
 class RefreshTokenRequest(BaseModel):
     """Refresh token request."""
     refresh_token: str
+    intent_nonce: str | None = None
 
 
 class UpdatePasswordRequest(BaseModel):
