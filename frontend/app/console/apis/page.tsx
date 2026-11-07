@@ -470,7 +470,7 @@ export default function ApisPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">APIs</h1>
           <p className="text-sm text-gray-600">
@@ -489,10 +489,10 @@ export default function ApisPage() {
         </div>
         <button
           onClick={refreshAll}
-          className="inline-flex items-center border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+          className="inline-flex min-h-9 items-center rounded-md border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          Refresh usage summary and cost trend
         </button>
       </div>
 
@@ -557,7 +557,7 @@ export default function ApisPage() {
       </div>
 
       {error ? (
-        <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error} Usage for the selected period is unverified; this is not a zero-usage result. Use Refresh to retry.</div>
+        <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error} Usage for the selected period is unverified; this is not a zero-usage result. Use Refresh usage summary and cost trend to retry.</div>
       ) : null}
 
       {error && data?.items.length ? <p role="status" className="text-xs text-amber-800">Showing previously loaded summary for {data.period_label}; the latest request failed and values may be out of date.</p> : null}
@@ -595,7 +595,7 @@ export default function ApisPage() {
                 </td>
               </tr>
             ) : error && !data?.items.length ? (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-red-700">API usage is unavailable. Use Refresh to retry.</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-red-700">API usage is unavailable. Use Refresh usage summary and cost trend to retry.</td></tr>
             ) : data && data.items.length > 0 ? (
               data.items
                 .filter((item) => {

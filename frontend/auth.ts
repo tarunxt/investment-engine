@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import type { NextAuthConfig, Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
+import { trustedSessionReplacement } from "@/lib/trustedSessionUpdate";
 
 import { apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
@@ -136,7 +137,7 @@ export const authConfig = {
       // Browser and server route refreshes both use Auth.js's update trigger so
       // hard navigations cannot restore the access token that just returned 401.
       if (trigger === "update") {
-        const update = session as Record<string, unknown> | undefined;
+        const update = trustedSessionReplacement(token as Record<string, unknown>);
         const accessToken = update?.accessToken;
         const refreshToken = update?.refreshToken;
         const expiresIn = update?.expiresIn;

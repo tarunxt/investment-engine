@@ -31,10 +31,10 @@ test('Zerodha sync routes have a bounded budget below the 20s browser deadline',
   }
 });
 
-function preflight(apiService) {
+function preflight(apiService, acquireZerodhaLogin = () => () => {}) {
   const start = workflow.indexOf('const ensureZerodhaConnectedForSync = useCallback(');
-  const end = workflow.indexOf('\n  }, [buildZerodhaPopupFeatures]);',start) + '\n  }, [buildZerodhaPopupFeatures]);'.length;
-  return vm.runInNewContext(compile(workflow.slice(start,end) + '\nglobalThis.preflight = ensureZerodhaConnectedForSync;') + '\npreflight', {apiService, useCallback:fn=>fn, buildZerodhaPopupFeatures:()=>''});
+  const end = workflow.indexOf('\n  const runWorkflow = useCallback(',start);
+  return vm.runInNewContext(compile(workflow.slice(start,end) + '\nglobalThis.preflight = ensureZerodhaConnectedForSync;') + '\npreflight', {apiService, acquireZerodhaLogin, useCallback:fn=>fn, buildZerodhaPopupFeatures:()=>''});
 }
 
 for (const failure of ['status','login']) {
@@ -55,3 +55,5 @@ test('already connected preflight closes the reserved popup without starting log
   assert.equal(popup.closed,true);
   assert.equal(login,false);
 });
+
+test('actual workflow connection refuses a competing portfolio login before requesting a login URL and closes its reserved popup',async()=>{let calls=0,closed=0;const popup={closed:false,close(){closed++;this.closed=true}};await assert.rejects(preflight({zerodhaStatus:async()=>({connected:false}),zerodhaLoginUrl:async()=>{calls++;return{}}},()=>null)(popup),/already open/);assert.equal(calls,0);assert.equal(closed,1);});

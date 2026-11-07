@@ -1,5 +1,6 @@
 
 from app.core.recovery import RecoveryMiddleware
+from app.domains.jobs.resource_body import ResourceBodyMiddleware
 
 from app.core.recovery import recovery_mode
 import json
@@ -120,9 +121,12 @@ cors_allowed_origins = _build_cors_allowed_origins()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     recovery_mode()  # Refuse malformed recovery configuration before startup work.
+    from app.domains.auth.session_startup import require_session_schema
+    async with AsyncSessionLocal() as session_schema_db:
+        await require_session_schema(session_schema_db)
     logger.info("Starting AI Investment Platform Backend")
-    logger.info("Database: %s", settings.database_url.split("@")[-1])
-    logger.info("Redis: %s", settings.redis_url)
+    logger.info("Database configured: %s", bool(settings.database_url))
+    logger.info("Redis configured: %s", bool(settings.redis_url))
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
     # Do not terminalize persisted Auto-Live runs during FastAPI startup.
@@ -280,6 +284,7 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 app.add_middleware(RecoveryMiddleware)
+app.add_middleware(ResourceBodyMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -677,7 +677,8 @@ def _publish_job_update(job: Job) -> None:
     r: _sync_redis.Redis | None = None
     try:
         status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
-        payload = json.dumps({
+        from app.domains.jobs.public_projection import public_job_details
+        payload = json.dumps(public_job_details({
             "type": "job.updated",
             "job_id": job.id,
             "provider": job.provider,
@@ -697,7 +698,7 @@ def _publish_job_update(job: Job) -> None:
             "exported_at": job.exported_at.isoformat() if job.exported_at else None,
             "exported_sheet_url": job.exported_sheet_url,
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-        })
+        }))
         
         redis_url = settings.redis_url
         logger.info("Publishing WS update for job_id=%s to Redis at %s", job.id, redis_url)

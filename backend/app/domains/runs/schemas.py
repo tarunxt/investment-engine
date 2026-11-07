@@ -13,12 +13,15 @@ from app.domains.polymarket.stage2_models import (
     Stage2MarketContext,
 )
 from app.shared.types import JobStatus
+from app.shared.exceptions import ValidationException
+from app.domains.jobs.resource_policy import MAX_PROMPT_CHARS, MAX_TARGETS, validate_prompt
+from app.domains.jobs.resource_validation import MODEL_IDENTIFIER_MAX_CHARS
 from app.domains.runs.side_effect_policy import RunSideEffectPolicy
 
 
 class RunModelTarget(BaseModel):
-    provider: str
-    model: str
+    provider: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
+    model: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
 
 
 class PolymarketEventEvidenceOptions(BaseModel):
@@ -370,8 +373,8 @@ from app.domains.recommendation_audit.schemas import AuditRunContext
 
 class RunCreate(BaseModel):
     recommendation_audit: AuditRunContext | None = None
-    prompt: str
-    targets: list[RunModelTarget]
+    prompt: str = Field(max_length=MAX_PROMPT_CHARS)
+    targets: list[RunModelTarget] = Field(min_length=1, max_length=MAX_TARGETS)
     polymarket_event_context: PolymarketEventRunContext | None = None
     output_source_jobs: list[OutputSourceJobReference] | None = Field(default=None, max_length=MAX_OUTPUT_SOURCE_JOBS)
     prompt_id: Optional[int] = None
@@ -386,6 +389,14 @@ class RunCreate(BaseModel):
     auto_rebalance_portfolio: Optional[str] = None
     auto_rebalance_sequence: Optional[int] = None
     auto_rebalance_label: Optional[str] = None
+
+    @field_validator("prompt")
+    @classmethod
+    def bounded_prompt(cls, value):
+        try:
+            return validate_prompt(value)
+        except ValidationException as exc:
+            raise ValueError(exc.message) from None
 
     @field_validator("targets")
     @classmethod

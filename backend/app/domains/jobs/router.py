@@ -64,7 +64,9 @@ async def create_job(
 
     # Re-fetch to return full JobResponse (use case only returns minimal result)
     repo = PostgresJobRepository(db)
-    job = await repo.get(result.job_id)
+    job = await repo.get_for_user(result.job_id, UserId(current_user.id))
+    if job is None:
+        raise HTTPException(404, detail="Job not found")
     return job
 
 
@@ -75,6 +77,7 @@ async def list_jobs(
     status: str | None = Query(None),
     q: str | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
     status_filter: JobStatus | None = None
@@ -84,21 +87,25 @@ async def list_jobs(
         except ValueError:
             raise HTTPException(400, detail=f"Invalid status: '{status}'")
 
-    result = await repo.list(
-        PagedQuery(page=page, limit=limit),
+    result = await repo.list_for_user(
+        UserId(current_user.id), PagedQuery(page=page, limit=limit),
         status=status_filter,
         search=q or None,
     )
-    return result.to_dict()
+    # List responses must use the same public DTO projection as detail/create.
+    payload = result.to_dict()
+    payload["items"] = [JobResponse.model_validate(job).model_dump(mode="json") for job in result.items]
+    return payload
 
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get(JobId(job_id))
+    job = await repo.get_for_user(JobId(job_id), UserId(current_user.id))
     if not job:
         raise HTTPException(404, detail="Job not found")
     return job
@@ -111,30 +118,17 @@ async def cancel_job(
     current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get(JobId(job_id))
+    job, changed = await repo.cancel_for_user(JobId(job_id), UserId(current_user.id))
     if not job:
         raise HTTPException(404, detail="Job not found")
-    if job.user_id != current_user.id:
-        raise HTTPException(403, detail="Not allowed")
-
-    if job.status not in JobStatus.active():
-        return job
-
-    job.status = JobStatus.FAILED
-    job.error_message = "Cancelled by user"
-    if (job.export_status or "").lower() in {"", "pending", "queued", "processing"}:
-        job.export_status = "failed"
-        job.export_error = "Cancelled by user"
-
     await db.commit()
 
-    job = await repo.get(JobId(job_id))
+    job = await repo.get_for_user(JobId(job_id), UserId(current_user.id))
     if not job:
         raise HTTPException(404, detail="Job not found")
 
-    await revoke_registered_job_task(job_id)
-
-    from app.domains.jobs.tasks import _publish_job_update
-
-    _publish_job_update(job)
+    if changed:
+        await revoke_registered_job_task(job_id)
+        from app.domains.jobs.tasks import _publish_job_update
+        _publish_job_update(job)
     return job
