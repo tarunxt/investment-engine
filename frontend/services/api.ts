@@ -1,5 +1,6 @@
 import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
+import type { LogoutResponse } from "@/lib/logoutOutcome";
 import type { StockSourceObservationPage } from "@/types/api";
 
 import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
@@ -269,6 +270,7 @@ async function reconcileTimedOutAutoRebalanceStart<TResponse>(
 type ApiRequestOptions = RequestInit & {
   skipAuth?: boolean;
   skipUnauthorizedRefresh?: boolean;
+  logoutRequest?: boolean;
 } & ApiRequestControl;
 
 type RequestAbortContext = {
@@ -480,6 +482,12 @@ const apiReadCircuitBreaker = new ApiReadCircuitBreaker();
  */
 class apiServiceClass implements IApiService {
   private readonly readDeduplicator = new PrivateRequestDeduplicator();
+  private logoutInProgress = false;
+
+  beginLogout() {
+    this.logoutInProgress = true;
+    this.readDeduplicator.setSessionGeneration("anonymous");
+  }
 
   setSessionGeneration(generation: string) {
     this.readDeduplicator.setSessionGeneration(generation);
@@ -515,6 +523,9 @@ class apiServiceClass implements IApiService {
     this.groupCollapsed(`🚀 API Request: ${method} ${url}`);
 
     try {
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
+      }
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...((options.headers as Record<string, string>) || {}),
@@ -527,6 +538,7 @@ class apiServiceClass implements IApiService {
       const {
         skipAuth: _skipAuth,
         skipUnauthorizedRefresh: _skipUnauthorizedRefresh,
+        logoutRequest: _logoutRequest,
         timeoutMs: _timeoutMs,
         validate: _validate,
         signal: callerSignal,
@@ -534,6 +546,7 @@ class apiServiceClass implements IApiService {
       } = options;
       void _skipAuth;
       void _skipUnauthorizedRefresh;
+      void _logoutRequest;
       void _timeoutMs;
       void _validate;
       abortContext = createRequestAbortContext(callerSignal, timeoutMs);
@@ -551,6 +564,9 @@ class apiServiceClass implements IApiService {
         signal: abortContext.signal,
       });
 
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
+      }
       if (!response.ok) {
         // The same-origin BFF already performed the one permitted server-side
         // refresh within this request's absolute deadline. A remaining 401 is
@@ -559,10 +575,14 @@ class apiServiceClass implements IApiService {
         if (
           response.status === 401 &&
           !options.skipUnauthorizedRefresh &&
-          !devAuthDisabled
+          !devAuthDisabled &&
+          !this.logoutInProgress
         ) {
           if (typeof window !== "undefined") {
-            await signOut({ redirect: true, callbackUrl: "/login" });
+            // Navigation stays here so an already-running generic sign-out
+            // cannot overwrite the dedicated logout warning/retry flow.
+            await signOut({ redirect: false, callbackUrl: "/login" });
+            if (!this.logoutInProgress) window.location.href = "/login";
           }
         }
 
@@ -611,6 +631,9 @@ class apiServiceClass implements IApiService {
       }
       if (durationMs >= SLOW_API_REQUEST_THRESHOLD_MS) {
         this.warn("Slow API request:", { method, url, durationMs });
+      }
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
       }
       return data as T;
 
@@ -855,8 +878,8 @@ class apiServiceClass implements IApiService {
   /**
    * Logout user
    */
-  logout(): Promise<void> {
-    return this.post<void>(URLs.auth.logout(), {});
+  logout(): Promise<LogoutResponse> {
+    return this.post<LogoutResponse>(URLs.auth.logout(), {}, { skipUnauthorizedRefresh: true, logoutRequest: true });
   }
 
   /**

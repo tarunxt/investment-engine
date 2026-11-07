@@ -1,0 +1,11 @@
+{
+  "frontend/tests/session-http-browser/page.tsx.fixture": "15e74adc896d11bdeedcb329ea46fa70df43de0eaa86fb348bcd5c994f1d98ea",
+  "frontend/tests/session-http-browser/guard.cjs": "4b0a4ba2424407bbd4cacf8cab0434d74663e49a4dd7dda329ee080aa9421d6b",
+  "frontend/tests/session-http-browser/backend.py": "3e5814395fdaa43268c20e19ebacfee0a17bf8644aeef5e477153d74e1112b14",
+  "frontend/tests/session-http-browser/run.mjs": "2c924c05eb3b6c624a1f23df4161c79b3a72c93eaadb2cf4ec10e12413103125",
+  "frontend/tests/session-http-browser/README.md": "5fdb4c9925ce312543662262d6107703478a5b6baebf976c223091e5fa7cb256",
+  "frontend/tests/session-http-browser/Proof.tsx.fixture": "8b33d5c1148823ec7a435fc47ef4f7fef74402de13af3f198614506c958524aa",
+  "frontend/tests/session-http-browser/worker.mjs": "d016aa42af2e34c9be94759eb7f1d335f018e31d883f0da6069814d2473f1983",
+  "backend/scripts/verify-session-full-startup-offline.py": "d3a1c934aa213c14f732c2c7c02d7af46e3a2a57207e1d3e99fc2a6222eec327",
+  ".github/workflows/session-policy-checks.yml": "5c7c0dddf874a3f58b188afd2bbd060561dd60b715dd7abbff5434926a8c0bcb"
+}

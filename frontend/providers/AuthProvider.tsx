@@ -7,6 +7,7 @@ import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import { performLogout, logoutRedirect, logoutWarning } from "@/lib/logoutOutcome";
 import {
   clearBrowserPrivateCacheOwner,
   purgeBrowserPrivateDashboardCaches,
@@ -57,6 +58,11 @@ export function AuthProvider({
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
   const previousUserIdRef = useRef<number | null>(initialUser?.id ?? null);
+  const logoutRequestedRef = useRef(false);
+  // Evidence is scoped to this provider's current logout/retry flow only. It is
+  // neither browser-persisted nor accepted from session updates or URL fields.
+  const logoutServerConfirmedRef = useRef(false);
+  const logoutInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     const nextUserId = user?.id ?? null;
@@ -153,6 +159,8 @@ export function AuthProvider({
       return;
     }
 
+    if (logoutRequestedRef.current) return;
+
     if (status === "authenticated" && session) {
       const userData = session.userData as unknown as UserResponse | undefined;
       performance.mark("auth-client-session-ready");
@@ -162,6 +170,7 @@ export function AuthProvider({
         "auth-client-session-ready",
       );
       const timer = window.setTimeout(() => {
+        if (logoutRequestedRef.current) return;
         if (userData) {
           setUser(userData);
         }
@@ -191,7 +200,8 @@ export function AuthProvider({
   // the singleton's session key. This also runs before StrictMode effect replay.
   useLayoutEffect(() => {
     apiService.setSessionGeneration(
-      session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
+      logoutRequestedRef.current ? "anonymous" :
+        session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
     );
   }, [session?.generation, user]);
 
@@ -290,35 +300,82 @@ export function AuthProvider({
     }
   }, [clearErrorState, login, normalizeAuthError, setStructuredError]);
 
-  const logout = useCallback(async () => {
-    if (devAuthDisabled) {
-      setUser(devUser);
-      clearErrorState();
-      setLoading(false);
-      window.location.href = "/console/dashboard";
-      return;
-    }
-
-    clearErrorState();
-    setLoading(true);
-
-    try {
-      if (user) {
-        await apiService.logout().catch(console.error);
+  const logout = useCallback(() => {
+    if (logoutInFlightRef.current) return logoutInFlightRef.current;
+    let resolveDone!: () => void;
+    let rejectDone!: (error: unknown) => void;
+    const done = new Promise<void>((resolve, reject) => {
+      resolveDone = resolve;
+      rejectDone = reject;
+    });
+    logoutInFlightRef.current = done;
+    const execute = async () => {
+      if (devAuthDisabled) {
+        setUser(devUser);
+        clearErrorState();
+        setLoading(false);
+        window.location.href = "/console/dashboard";
+        return;
       }
-    } catch (err) {
-      console.error("Logout API error:", err);
-    } finally {
-      await nextSignOut({ redirect: false });
-      purgeBrowserPrivateDashboardCaches();
-      clearBrowserPrivateCacheOwner();
-      apiService.setSessionGeneration("anonymous");
-      clearAuthCookies();
+
+      logoutRequestedRef.current = true;
+      apiService.beginLogout();
+      setUser(null);
+      clearErrorState();
+      setLoading(true);
+
+      const outcome = await performLogout({
+        previousServerRevocation: logoutServerConfirmedRef.current ? "confirmed" : "unconfirmed",
+        onServerConfirmed: () => { logoutServerConfirmedRef.current = true; },
+        // Authentication is owned by the server session, not a stale browser
+        // user projection. A retry retains prior acknowledged revocation and
+        // repeats only the unfinished local steps.
+        revoke: () => apiService.logout(),
+        signOut: () => nextSignOut({ redirect: false }),
+        cleanup: () => {
+          // Attempt every local cleanup even if one storage implementation fails.
+          const actions = [
+            purgeBrowserPrivateDashboardCaches,
+            clearBrowserPrivateCacheOwner,
+            () => apiService.setSessionGeneration("anonymous"),
+            clearAuthCookies,
+          ];
+          let failed = false;
+          for (const action of actions) {
+            try { action(); } catch { failed = true; }
+          }
+          if (failed) throw new Error("Local cleanup incomplete");
+        },
+      });
       setUser(null);
       setLoading(false);
-      window.location.href = "/login";
-    }
-  }, [clearErrorState, user]);
+      const destination = logoutRedirect(outcome);
+      if (destination) {
+        if (outcome.serverRevocation === "unconfirmed") {
+          setStructuredError(logoutWarning("server-revocation-unconfirmed") || "Server revocation unconfirmed.");
+        }
+        window.location.href = destination;
+      } else {
+        setStructuredError(
+          "Local sign-out could not be completed. Retry sign-out. " +
+            (outcome.serverRevocation === "confirmed"
+              ? "The server confirmed revocation of this session."
+              : "Server session revocation could not be confirmed."),
+        );
+      }
+    };
+    void execute().then(
+      () => {
+        if (logoutInFlightRef.current === done) logoutInFlightRef.current = null;
+        resolveDone();
+      },
+      (error) => {
+        if (logoutInFlightRef.current === done) logoutInFlightRef.current = null;
+        rejectDone(error);
+      },
+    );
+    return done;
+  }, [clearErrorState, setStructuredError]);
 
   const refreshAuth = useCallback(async () => {
     if (devAuthDisabled) {

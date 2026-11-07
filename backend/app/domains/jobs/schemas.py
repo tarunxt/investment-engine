@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 from app.shared.types import JobStatus
 from app.shared.exceptions import ValidationException
@@ -50,6 +50,11 @@ class JobResponse(BaseModel):
     scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer("error_message", "export_error", "request_context_json", "runtime_metadata_json")
+    def public_details(self, value):
+        from .public_projection import public_value
+        return public_value(value)
 
     @model_validator(mode="after")
     def partial_usage_projection(self):

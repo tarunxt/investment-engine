@@ -94,6 +94,7 @@ def test_private_reconciliation_has_one_head_after_f08_without_running_migration
             revisions[values['revision']] = values.get('down_revision')
             previous = values.get('down_revision')
             parents.update(previous if isinstance(previous, (tuple, list)) else [previous] if previous else [])
-    assert revisions['rebalance_spend_cap_001'] == 'audit7_run_policy_001'
+    assert revisions['rebalance_spend_cap_001'] == 'auth_session_merge_001'
     assert revisions['rebalance_spend_refund_002'] == 'rebalance_spend_cap_001'
     assert set(revisions) - parents == {'rebalance_spend_refund_002'}
+

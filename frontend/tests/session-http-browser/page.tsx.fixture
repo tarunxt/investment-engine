@@ -1,0 +1,3 @@
+import { auth } from '@/auth';
+import { Proof } from './Proof';
+export default async function Page() { return <Proof initialSession={await auth()} />; }

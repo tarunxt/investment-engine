@@ -314,9 +314,14 @@ def test_full_api_lifespan_and_route_guard_with_isolated_dependencies(recovery, 
     from unittest.mock import AsyncMock
     from fastapi.testclient import TestClient
     import app.main as main
+    schema_reads = []
     class Session:
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
+        async def execute(self, query):
+            table = query.get_final_froms()[0].name
+            assert table in {"auth_session_families", "auth_refresh_intents"}
+            schema_reads.append(table)
     monkeypatch.setattr(main, "AsyncSessionLocal", Session)
     monkeypatch.setattr(main, "seed_system_prompts", AsyncMock())
     monkeypatch.setattr(main, "get_bullpen_runtime_broker", lambda: SimpleNamespace(validate_startup=lambda: None))
@@ -330,6 +335,7 @@ def test_full_api_lifespan_and_route_guard_with_isolated_dependencies(recovery, 
             assert client.get(route).status_code == 503
         assert client.post("/zerodha/orders", json={}).status_code == 503
         assert client.post("/runs/123/cancel").status_code == 503
+    assert schema_reads == ["auth_session_families", "auth_refresh_intents"]
     for manager in (main.polymarket_bot_manager, main.polymarket_direct_bot_manager,
                     main.polymarket_auto_live_bot_manager):
         manager.get_bot.assert_not_called()
@@ -350,6 +356,7 @@ def test_worker_ready_hooks_do_not_dispatch_or_touch_legacy_state(recovery):
 @pytest.mark.parametrize("method,path,allowed", [
     ("GET", "/indmoney-us/portfolio", True), ("GET", "/providers", True), ("POST", "/runs", True),
     ("POST", "/auth/login", True), ("GET", "/runs/123", True),
+    ("POST", "/auth/refresh-intent", True), ("POST", "/auth/logout-refresh", True),
     ("POST", "/indmoney-us/events/run", True), ("POST", "/indmoney-us/threats/run", True),
     ("GET", "/polymarket/state", False), ("GET", "/polymarket-direct/state", False),
     ("GET", "/zerodha/status", True), ("GET", "/zerodha/login-url", True),
@@ -499,6 +506,7 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
             job.id, job.created_at = 123, now
             jobs.append(job)
         async def get(self, job_id): return jobs[0]
+        async def get_for_user(self, job_id, user_id): return jobs[0] if jobs[0].user_id == user_id else None
     class Lock:
         def __init__(self, *args): pass
         @asynccontextmanager

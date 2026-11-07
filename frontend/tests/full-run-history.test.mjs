@@ -14,7 +14,7 @@ const compile = (source) => ts.transpileModule(source, {
 
 function loadPureModule(path) {
   const loadedModule = { exports: {} };
-  new Function('exports', 'module', compile(read(path)))(loadedModule.exports, loadedModule);
+  new Function('exports', 'module', 'require', compile(read(path)))(loadedModule.exports, loadedModule, (name) => { assert.ok(name.startsWith('node:')); return require(name); });
   return loadedModule.exports;
 }
 
@@ -179,7 +179,7 @@ function authSessionRegistration(service, session, user) {
   }
   visit(source);
   assert.ok(registration);
-  const register = new Function('apiService', 'session', 'user', `return (${registration.arguments[0].getText(source)});`)(service, session, user);
+  const register = new Function('apiService', 'session', 'user', 'logoutRequestedRef', `return (${registration.arguments[0].getText(source)});`)(service, session, user, {current: false});
   return { phase: registration.expression.getText(source), register };
 }
 
@@ -236,9 +236,12 @@ test('Auth.js token refresh preserves the existing authenticated session generat
   }
   visit(source);
   assert.ok(jwtCallback);
-  const callback = new Function(compile(`${jwtCallback.getText(source).replace(/^async jwt\(/, 'async function jwt(')}\nreturn jwt;`))();
+  const trusted = loadPureModule('../lib/trustedSessionUpdate.ts');
+  const callback = new Function('trustedSessionReplacement', compile(`${jwtCallback.getText(source).replace(/^async jwt\(/, 'async function jwt(')}\nreturn jwt;`))(trusted.trustedSessionReplacement);
   const token = { id: '71', sessionGeneration: 'fixture-session-71', accessToken: 'synthetic-before', refreshToken: 'synthetic-refresh-before' };
-  const refreshed = await callback({ token, trigger: 'update', session: { accessToken: 'synthetic-after', refreshToken: 'synthetic-refresh-after', expiresIn: 900 } });
+  const rejected = await callback({ token, trigger: 'update', session: { accessToken: 'browser-untrusted', refreshToken: 'browser-untrusted' } });
+  assert.equal(rejected.accessToken, 'synthetic-before');
+  const refreshed = await trusted.withTrustedSessionUpdate({subject: '71', generation: 'fixture-session-71', previousRefreshToken: 'synthetic-refresh-before', replacement: {accessToken: 'synthetic-after', refreshToken: 'synthetic-refresh-after', expiresIn: 900}}, () => callback({token, trigger: 'update', session: {}}));
   assert.equal(refreshed.sessionGeneration, 'fixture-session-71');
   assert.equal(refreshed.accessToken, 'synthetic-after');
 });
