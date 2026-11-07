@@ -163,6 +163,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -179,6 +180,40 @@ jobs:
           CREDX_AUDIT_TEST_DATABASE_URL: postgresql+asyncpg://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
           CREDX_AUDIT_TEST_DATABASE_ACK: disposable-local-only
         run: pytest -q backend/tests/test_auto_rebalance_audit_postgres.py backend/tests/test_output_source_context_postgres.py backend/tests/test_jobs_cancellation_postgres.py backend/tests/test_jobs_ownership_postgres.py
+
+      - name: Verify standalone A11 native ownership and durable dispatch at exact head
+        env:
+          PYTHONPATH: backend
+          CREDX_RECOVERY_MODE: "0"
+          CREDX_AUDIT_TEST_DATABASE_URL: postgresql+asyncpg://audit_test:audit_test@127.0.0.1:5432/credx_audit_test_ci
+          CREDX_AUDIT_TEST_DATABASE_ACK: disposable-local-only
+        run: |
+          pytest -q --junitxml=/tmp/a11-native.xml backend/tests/test_jobs_admission_postgres.py backend/tests/isolated/test_postgresql_execution.py backend/tests/isolated/test_execution_health_postgres.py backend/tests/isolated/test_execution_progress_postgres.py
+          python - <<'PYCODE'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('/tmp/a11-native.xml').getroot()
+          cases = root.findall('.//testcase')
+          assert cases and not root.findall('.//testcase/skipped'), 'A11 native qualification must execute with zero skips'
+          names = {case.attrib['name'] for case in cases}
+          assert {'test_postgres_concurrent_actor_identity_and_scheduled_dispatch', 'test_postgres_stale_dispatch_ack_preserves_replacement_claim', 'test_two_celery_deliveries_while_provider_is_live'} <= names
+          print('Standalone A11 native cases executed:', len(cases))
+          PYCODE
+      - name: Verify standalone A11 lifecycle and backend-only startup containment
+        env:
+          PYTHONPATH: backend
+        run: >-
+          pytest -q backend/tests/test_jobs_admission_dispatch.py
+          backend/tests/isolated/test_execution_claim.py
+          backend/tests/isolated/test_execution_claim_lock_time.py
+          backend/tests/isolated/test_execution_progress_capture.py
+          backend/tests/isolated/test_execution_health_target.py
+          backend/tests/test_execution_health_passive.py
+          backend/tests/test_execution_health_reader.py
+          backend/tests/test_execution_health_route_integration.py
+          backend/tests/test_execution_progress_reader.py
+          backend/tests/test_analysis_outbox_startup.py
+          backend/tests/test_execution_dispatch_boundary.py
+          backend/tests/test_providers.py
 
   recommendation-audit-release-gates:
     name: Recommendation audit migration, concurrency and authenticated delivery
@@ -241,6 +276,7 @@ jobs:
           backend/tests/test_recommendation_audit_recovery.py
           backend/tests/test_recommendation_audit_fundamentals.py
           backend/tests/test_recommendation_audit_postgres.py
+          backend/tests/test_a11_migration.py
           backend/tests/test_rebalance_side_effect_policy_postgres.py
           backend/tests/test_output_contracts.py
           backend/tests/test_output_runtime.py
@@ -732,3 +768,4 @@ jobs:
             echo
             echo "Webpack remains mandatory for production artifacts. A successful Turbopack benchmark is compatibility evidence only."
           } >>"${GITHUB_STEP_SUMMARY}"
+

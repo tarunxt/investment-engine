@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.domains.jobs.models import Job
+from app.infrastructure.database.outbox.models import OutboxMessage
 from app.shared.pagination import PagedQuery, PagedResult
 from app.shared.exceptions import ForbiddenException
 from app.shared.types import JobId, JobStatus, UserId
@@ -65,9 +66,16 @@ class PostgresJobRepository:
         if user_id is None:
             return None
         result = await self._session.execute(
-            select(Job).where(Job.id == job_id, Job.user_id == user_id)
+            select(Job, OutboxMessage.state).outerjoin(
+                OutboxMessage, OutboxMessage.job_id == Job.id,
+            ).where(Job.id == job_id, Job.user_id == user_id)
         )
-        return result.scalar_one_or_none()
+        row = result.one_or_none()
+        if row is None:
+            return None
+        job, state = row
+        job.dispatch_status = state
+        return job
 
     async def cancel_for_user(self, job_id: JobId, user_id: UserId) -> tuple[Job | None, bool]:
         """Serialize cancellation against completion; caller commits the transition.
@@ -155,7 +163,11 @@ class PostgresJobRepository:
         web_sources: list[str] | None = None,
         runtime_metadata_json: dict | None = None,
     ) -> None:
-        job = await self.get(job_id)
+        result = await self._session.execute(
+            select(Job).where(Job.id == job_id).with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        job = result.scalar_one_or_none()
         if not job:
             return
         job.status = status
@@ -176,7 +188,11 @@ class PostgresJobRepository:
         if web_sources is not None:
             job.web_sources = web_sources
         if runtime_metadata_json is not None:
-            job.runtime_metadata_json = runtime_metadata_json
+            from app.domains.jobs.execution_claim import KEY
+            existing_claim = (job.runtime_metadata_json or {}).get(KEY)
+            job.runtime_metadata_json = {**(job.runtime_metadata_json or {}), **runtime_metadata_json}
+            if existing_claim is not None:
+                job.runtime_metadata_json = {**job.runtime_metadata_json, KEY: existing_claim}
         await self._session.flush()
 
 
@@ -210,6 +226,13 @@ class SyncJobRepository:
         web_sources: list[str] | None = None,
         runtime_metadata_json: dict | None = None,
     ) -> None:
+        from app.domains.jobs.execution_claim import KEY, require_owner, LostExecutionOwner
+        token = getattr(self, "execution_token", None)
+        claim = None
+        if token:
+            if getattr(self, "execution_owner_lost", lambda: False)():
+                raise LostExecutionOwner("Renewal failed")
+            job, claim = require_owner(self._session, job.id, token)
         with self._session.no_autoflush:
             current = self._session.execute(
                 select(Job).where(Job.id == job.id).with_for_update()
@@ -220,6 +243,12 @@ class SyncJobRepository:
             self._session.commit()
             return
         job = current
+        if token and getattr(self, "execution_owner_lost", lambda: False)():
+            self._session.rollback()
+            raise LostExecutionOwner("Renewal failed during ownership lock")
+        if not token and (job.runtime_metadata_json or {}).get(KEY):
+            self._session.rollback()
+            raise LostExecutionOwner("Claimed job requires its execution token")
         job.status = status
         if response is not None:
             job.response = response
@@ -238,7 +267,11 @@ class SyncJobRepository:
         if web_sources is not None:
             job.web_sources = web_sources
         if runtime_metadata_json is not None:
-            job.runtime_metadata_json = runtime_metadata_json
+            job.runtime_metadata_json = {**(job.runtime_metadata_json or {}), **runtime_metadata_json}
+        if claim is not None:
+            if status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
+                claim = {**claim, "state": "finished"}
+            job.runtime_metadata_json = {**(job.runtime_metadata_json or {}), KEY: claim}
         from app.core.config import settings
         if settings.recommendation_audit_enabled:
             from app.domains.recommendation_audit.capture import capture_terminal
@@ -255,6 +288,9 @@ class SyncJobRepository:
                     **(job.runtime_metadata_json or {}),
                     "recommendation_audit": {"status": "capture_failed", "error_type": type(exc).__name__},
                 }
+        if token and getattr(self, "execution_owner_lost", lambda: False)():
+            self._session.rollback()
+            raise LostExecutionOwner("Renewal failed before result commit")
         self._session.commit()
 
     def update_export_state(

@@ -9,7 +9,7 @@ import json
 import pytest
 from sqlalchemy import func, select
 
-from test_jobs_ownership import database
+from test_jobs_admission_dispatch import database
 from app.domains.jobs.creation_identity import OPERATION, payload_fingerprint, request_key
 from app.domains.jobs.models import Job
 from app.domains.jobs.use_cases.create_job import CreateJobCommand, CreateJobUseCase
@@ -40,11 +40,13 @@ def usecase(db, redis):
 
 @pytest.fixture
 def queue(monkeypatch):
-    from app.domains.jobs.tasks import execute_ai_job
-    calls = Mock(return_value=SimpleNamespace(id="synthetic-task"))
-    monkeypatch.setattr(execute_ai_job, "delay", calls)
-    monkeypatch.setattr(execute_ai_job, "apply_async", calls)
-    monkeypatch.setattr("app.domains.jobs.use_cases.create_job.register_job_task", AsyncMock())
+    from app.infrastructure.database.outbox import dispatch
+    calls = Mock()
+    real_dispatch = dispatch.dispatch_one
+    async def publish(db, message_id):
+        return await real_dispatch(db, message_id, calls)
+    monkeypatch.setattr(dispatch, "dispatch_one", publish)
+    monkeypatch.setattr("app.infrastructure.messaging.task_registry.register_job_task", AsyncMock())
     return calls
 
 
@@ -74,16 +76,18 @@ async def test_cache_miss_hit_and_actor_or_payload_changes(database, queue):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cached_id", [900, 999])
-async def test_stale_foreign_and_missing_cache_ids_are_uniform(database, queue, cached_id):
+async def test_stale_foreign_and_missing_cache_ids_never_authorize_replay(database, queue, cached_id):
     redis = Redis()
     async with database() as db:
         db.add(Job(id=900, user_id=2, prompt="foreign synthetic", provider="fixture", model="model"))
         await db.commit()
         await IdempotencyStore(redis).set_for_request(1, OPERATION, 'same-key', payload_fingerprint(command()), {'job_id': cached_id})
-        with pytest.raises(NotFoundException, match="Job not found"):
-            await usecase(db, redis).execute(command())
-        queue.assert_not_called()
-        assert await db.scalar(select(func.count()).select_from(Job)) == 1
+        created = await usecase(db, redis).execute(command())
+        assert created.job_id not in {900, 999}
+        assert (await db.get(Job, created.job_id)).user_id == 1
+        assert (await db.get(Job, 900)).user_id == 2
+        assert queue.call_count == 1
+        assert await db.scalar(select(func.count()).select_from(Job)) == 2
 
 
 @pytest.mark.asyncio
@@ -93,8 +97,11 @@ async def test_owned_but_wrong_payload_cache_id_is_not_replayed(database, queue)
         db.add(Job(id=901, user_id=1, prompt="different synthetic", provider="fixture", model="model"))
         await db.commit()
         await IdempotencyStore(redis).set_for_request(1, OPERATION, 'same-key', payload_fingerprint(command()), {'job_id': 901})
-        with pytest.raises(ConflictException): await usecase(db, redis).execute(command())
-        queue.assert_not_called()
+        created = await usecase(db, redis).execute(command())
+        assert created.job_id != 901
+        assert (await db.get(Job, created.job_id)).prompt == command().prompt
+        assert (await db.get(Job, 901)).prompt == "different synthetic"
+        assert queue.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -119,13 +126,16 @@ def test_normalized_schedule_and_cache_identity_are_explicit():
 
 
 @pytest.mark.asyncio
-async def test_unknown_cache_error_never_becomes_creation_success(database, queue):
+async def test_cache_outage_cannot_block_durable_creation_or_authorize_replay(database, queue):
     redis = Redis()
     redis.get = AsyncMock(side_effect=ConnectionError("synthetic cache unavailable"))
     async with database() as db:
-        with pytest.raises(ConnectionError): await usecase(db, redis).execute(command())
-        assert await db.scalar(select(func.count()).select_from(Job)) == 0
-        queue.assert_not_called()
+        first = await usecase(db, redis).execute(command())
+        replay = await usecase(db, redis).execute(command())
+        assert replay.job_id == first.job_id
+        redis.get.assert_not_awaited()
+        assert await db.scalar(select(func.count()).select_from(Job)) == 1
+        assert queue.call_count == 1
 
 
 @pytest.mark.asyncio

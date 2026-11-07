@@ -311,6 +311,37 @@ class GeminiProviderConfigTests(unittest.TestCase):
 
 
 class ExecuteAIJobTests(unittest.TestCase):
+    def persisted(self, ident, prompt, session_mock, repo_mock):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session, sessionmaker
+        from sqlalchemy.pool import StaticPool
+        from app.domains.jobs.models import Job
+        from app.domains.jobs.repository import SyncJobRepository
+        class TrackingSession(Session):
+            closed = False
+            rolled_back = False
+            def rollback(self):
+                self.rolled_back = True
+                super().rollback()
+            def close(self):
+                for obj in list(self.identity_map.values()):
+                    for column in obj.__table__.columns:
+                        getattr(obj, column.key)
+                self.closed = True
+                super().close()
+        engine = create_engine('sqlite://', poolclass=StaticPool, connect_args={'check_same_thread':False})
+        Job.__table__.create(engine)
+        factory = sessionmaker(engine, class_=TrackingSession, expire_on_commit=False)
+        db = factory()
+        job = Job(id=ident, prompt=prompt, provider='openai', model='gpt-4o-mini', status=JobStatus.PENDING)
+        db.add(job); db.commit()
+        first = [db]
+        session_mock.side_effect = lambda: first.pop() if first else factory()
+        repo_mock.side_effect = SyncJobRepository
+        self.addCleanup(engine.dispose)
+        self.addCleanup(db.close)
+        return job, db
+
     @patch("app.domains.jobs.tasks._refresh_run_status")
     @patch("app.domains.jobs.tasks._publish_job_update")
     @patch("app.domains.ai_providers.factory.ProviderFactory.create")
@@ -324,26 +355,7 @@ class ExecuteAIJobTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
-            id=1,
-            prompt="analyze apple",
-            provider="openai",
-            model="gpt-4o-mini",
-            status=JobStatus.PENDING,
-            response=None,
-            error_message=None,
-            tokens_in=None,
-            tokens_out=None,
-            estimated_cost=None,
-            web_search_used=None,
-            web_search_queries=None,
-            web_sources=None,
-        )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        job, fake_db = self.persisted(1, 'analyze apple', sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.return_value = AIProviderResponse(
@@ -378,7 +390,7 @@ class ExecuteAIJobTests(unittest.TestCase):
     @patch("app.domains.ai_providers.factory.ProviderFactory.create")
     @patch("app.domains.jobs.tasks.SyncJobRepository")
     @patch("app.domains.jobs.tasks.SyncSessionLocal")
-    def test_execute_ai_job_marks_job_failed_when_provider_errors(
+    def test_execute_ai_job_retains_uncertain_provider_failure_without_replay(
         self,
         sync_session_local_mock,
         sync_repo_cls_mock,
@@ -387,26 +399,7 @@ class ExecuteAIJobTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
-            id=2,
-            prompt="analyze risk",
-            provider="openai",
-            model="gpt-4o-mini",
-            status=JobStatus.PENDING,
-            response=None,
-            error_message=None,
-            tokens_in=None,
-            tokens_out=None,
-            estimated_cost=None,
-            web_search_used=None,
-            web_search_queries=None,
-            web_sources=None,
-        )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        job, fake_db = self.persisted(2, 'analyze risk', sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.side_effect = RuntimeError("boom")
@@ -414,8 +407,11 @@ class ExecuteAIJobTests(unittest.TestCase):
 
         tasks.execute_ai_job.run(2)
 
-        self.assertEqual(job.status, JobStatus.FAILED)
-        self.assertEqual(job.error_message, "boom")
+        self.assertEqual(job.status, JobStatus.PROCESSING)
+        self.assertEqual(job.runtime_metadata_json['execution_claim']['state'], 'reconciliation_needed')
+        self.assertTrue(job.runtime_metadata_json['execution_claim']['provider_started'])
+        provider.generate.assert_called_once()
+        self.assertIn('boom', str(job.runtime_metadata_json))
         self.assertTrue(fake_db.rolled_back)
         self.assertTrue(fake_db.closed)
 
