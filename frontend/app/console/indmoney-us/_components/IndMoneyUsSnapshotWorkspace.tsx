@@ -80,13 +80,11 @@ export function IndMoneyUsSnapshotWorkspace({
               <details className="text-sm">
                 <summary className="cursor-pointer rounded text-purple-800 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-purple-700">Source details</summary>
                 <div className="mt-2 max-w-xl rounded border border-gray-200 bg-white p-3 text-gray-600">
-                  <p>Manual US portfolio tracking for INDmoney when no direct API is available.</p>
                   <p className="mt-1">Paste the INDmoney portfolio screen daily and save a timestamped snapshot. Raw text is parsed into holdings, allocation, returns, market context and reconciliation checks as far as the pasted structure allows.</p>
                   {selectedSnapshot ? <p className="mt-1 capitalize">Source: {selectedSnapshot.source.replaceAll('_', ' ')} · Snapshot date: {selectedSnapshot.snapshot_date}</p> : null}
                 </div>
               </details>
             </div>
-            <p className="mt-1 text-xs text-gray-500">Manual US portfolio tracking when no direct API is available.</p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button type="button" size="sm" onClick={() => setView('paste')} aria-controls="us-snapshot-panel-paste" className="bg-purple-700 text-white hover:bg-purple-800">
@@ -98,9 +96,6 @@ export function IndMoneyUsSnapshotWorkspace({
           </div>
         </header>
 
-        <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Saved snapshot is not a live market feed. Parsed does not mean current prices or a live broker connection. Totals and wallet values belong to the selected historical snapshot, not live account balance or buying power.
-        </p>
         {loadError ? (
           <div role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
             <p>{selectedSnapshot ? 'Display read failed. Showing previously loaded saved data.' : 'Saved portfolio data could not be loaded.'}</p>
