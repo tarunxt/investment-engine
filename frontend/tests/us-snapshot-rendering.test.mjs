@@ -29,6 +29,7 @@ before(async () => {
 export class APIError extends Error {}
 const fixture = () => window.fixture;
 export const apiService = {
+  async get() { const last = fixture().snapshots.reduce((a,b)=>a.id>b.id?a:b); return {raw_text:last.raw_text,pasted_at:last.captured_at}; },
   async indmoneyUsPortfolioOverview() {
     const f = fixture(); f.reads++;
     if (f.delay) await new Promise(resolve => setTimeout(resolve, f.delay));
@@ -49,11 +50,13 @@ export const apiService = {
   }
 };`);
   writeFileSync(join(temp, 'entry.tsx'), `import React from 'react'; import {createRoot} from 'react-dom/client'; import Page from ${JSON.stringify(join(frontend, 'app/console/indmoney-us/page.tsx'))}; window.fixture = {...window.fixtureConfig, reads:0, detailReads:[], saves:[]}; const root = createRoot(document.getElementById('app')); root.render(<Page/>);`);
+  writeFileSync(join(temp,'style.cjs'), "module.exports=()=>'module.exports={}'");
+  writeFileSync(join(temp,'workflow.js'),'export const PortfolioWorkflowSlot=()=>null');
   const compiler = webpack({
     mode: 'development', devtool: false, context: frontend, entry: join(temp, 'entry.tsx'),
     output: { path: temp, filename: 'bundle.js' },
-    resolve: { extensions: ['.tsx', '.ts', '.jsx', '.js'], modules: [join(frontend, 'node_modules'), 'node_modules'], alias: { '@/services/api$': join(temp, 'api.js'), 'next/link$': join(temp, 'link.jsx'), '@': frontend } },
-    module: { rules: [{ test: /\.(tsx?|jsx)$/, exclude: /node_modules/, use: join(temp, 'ts-loader.cjs') }] },
+    resolve: { extensions: ['.tsx', '.ts', '.jsx', '.js'], modules: [join(frontend, 'node_modules'), 'node_modules'], alias: { '@/app/console/_components/WorkflowSurfaceSlots$':join(temp,'workflow.js'), '@/services/api$': join(temp, 'api.js'), 'next/link$': join(temp, 'link.jsx'), '@': frontend } },
+    module: { rules: [{test:/\.css$/,use:join(temp,'style.cjs')},{ test: /\.(tsx?|jsx)$/, exclude: /node_modules/, use: join(temp, 'ts-loader.cjs') }] },
     plugins: [new webpack.DefinePlugin({ 'process.env': JSON.stringify({ NODE_ENV: 'development' }) })],
     optimization: { minimize: false },
   });
@@ -110,14 +113,14 @@ test('actual hydrated page preserves data and all three views at desktop and nar
       const holdings = page.locator('#us-snapshot-panel-saved table').first();
       assert.equal(await holdings.locator('th').count(), 10);
       assert.match(await holdings.innerText(), /Fixture Alpha[\s\S]*Fixture Beta/);
-      for (const name of ['Top Allocation', 'Top Gainers', 'Laggards', 'Reconciliation', 'Market Indices', 'Raw Pasted Snapshot']) assert.equal(await page.getByRole('heading', { name, exact: true }).count(), 1);
+      for (const name of ['Top Allocation', 'Top Gainers', 'Laggards', 'Reconciliation', 'Market Indices']) assert.equal(await page.getByRole('heading', { name, exact: true }).count(), 1);
       await screenshot(page, `${width}-saved-partial`);
       await page.getByText('Source details', { exact: true }).click();
       assert.match(await page.locator('details').filter({ has: page.getByText('Source details', { exact: true }) }).innerText(), /no direct API[\s\S]*manual paste/i);
       await screenshot(page, `${width}-source-details`);
       await page.getByText('Source details', { exact: true }).click();
       const reads = await page.evaluate(() => window.fixture.reads);
-      await page.getByRole('button', { name: 'Import snapshot', exact: true }).click();
+      await page.getByRole('tab', { name: 'Paste snapshot', exact: true }).click();
       assert.equal(await page.getByRole('tab', { name: 'Paste snapshot', exact: true }).getAttribute('aria-selected'), 'true');
       assert.equal(await page.getByRole('button', { name: 'Save Snapshot', exact: true }).isDisabled(), true);
       assert.equal(await page.getByLabel('Snapshot timestamp').inputValue() !== '', true);
@@ -133,26 +136,17 @@ test('actual hydrated page preserves data and all three views at desktop and nar
       assert.equal(await page.getByLabel('Snapshot timestamp').inputValue(), '2026-10-21T09:30');
       assert.equal(await page.getByRole('button', { name: 'Save Snapshot', exact: true }).isEnabled(), true);
       await screenshot(page, `${width}-paste-draft`);
-      await page.getByRole('tab', { name: 'Market and stage navigation' }).click();
-      const navigation = page.getByRole('navigation', { name: 'Portfolio market and stage destinations' });
-      assert.equal(await navigation.getByRole('link').count(), 18);
-      const routes = ['/console/zerodha', '/console/indmoney-us'];
-      for (const [name, suffix] of [['Portfolio', ''], ['Swing Trade', '/swing-trade'], ['Threats', '/threats'], ['Events', '/events'], ['Rebalance', '/rebalance'], ['Final Actionables', '/final-actionables']]) {
-        for (const [index, market] of ['India', 'US'].entries()) assert.equal(await navigation.getByRole('link', { name: `${name} — ${market}`, exact: true }).getAttribute('href'), `${routes[index]}${suffix}`);
+      const navigation = page.getByRole('navigation', { name: 'US portfolio stages' });
+      for (const [name,suffix] of [['Portfolio',''],['Swing Trade','/swing-trade'],['Threats','/threats'],['Events','/events'],['Rebalance','/rebalance'],['Final Actionables','/final-actionables']]) {
+        assert.equal(await navigation.getByRole('link',{name:'US '+name,exact:true}).getAttribute('href'),'/console/indmoney-us'+suffix);
       }
-      assert.equal(await navigation.getByRole('link', { name: 'Portfolio — US', exact: true }).getAttribute('aria-current'), 'page');
-      await screenshot(page, `${width}-navigation`);
-      await page.getByRole('tab', { name: 'Market and stage navigation' }).focus();
-      await page.keyboard.press('ArrowLeft');
-      await page.waitForFunction(() => document.activeElement?.textContent === 'Paste snapshot');
-      assert.equal(await page.getByRole('tab', { name: 'Paste snapshot', exact: true }).getAttribute('aria-selected'), 'true');
+      await page.getByRole('tab',{name:'Paste snapshot',exact:true}).focus();
       await page.keyboard.press('Home');
       await page.waitForFunction(() => document.activeElement?.textContent === 'Saved US snapshot');
       assert.equal(await page.getByRole('tab', { name: 'Saved US snapshot' }).getAttribute('aria-selected'), 'true');
       assert.equal(await page.evaluate(() => window.fixture.reads), reads, 'view changes must not reload broker or stored records');
       assert.equal(await page.evaluate(() => window.fixture.saves.length), 0, 'view changes must not save');
-      await page.getByRole('tab', { name: 'Market and stage navigation' }).click();
-      await navigation.getByRole('link', { name: 'Threats — US', exact: true }).click();
+      await navigation.getByRole('link', { name: 'US Threats', exact: true }).click();
       await page.getByRole('heading', { name: 'Local fixture stage destination' }).waitFor();
       await page.goBack();
       await waitLoaded(page);
@@ -217,7 +211,7 @@ test('save failure retains draft, explicit fixture save preserves copied timesta
   const { page, errors } = await openFixture({ failSave: true });
   try {
     await waitLoaded(page);
-    await page.getByRole('button', { name: 'Import snapshot', exact: true }).click();
+    await page.getByRole('tab', { name: 'Paste snapshot', exact: true }).click();
     await page.getByLabel('Snapshot timestamp').fill('2026-10-21T09:30');
     await page.getByLabel('Paste INDmoney data here').fill('  Fixture full holdings text  ');
     await page.getByRole('button', { name: 'Save Snapshot', exact: true }).click();
@@ -229,12 +223,16 @@ test('save failure retains draft, explicit fixture save preserves copied timesta
     await page.getByText('Snapshot saved. Check its parse status and reconciliation warnings in Saved US snapshot.').waitFor();
     assert.equal(await page.getByLabel('Paste INDmoney data here').inputValue(), '');
     const payload = await page.evaluate(() => window.fixture.saves.at(-1));
-    assert.equal(payload.raw_text, 'Fixture full holdings text');
+    assert.equal(payload.raw_text, '  Fixture full holdings text  ');
     assert.equal(payload.captured_at, '2026-10-21T09:30:00.000Z');
     await page.getByRole('tab', { name: 'Saved US snapshot' }).click();
     assert.match(await page.locator('header').innerText(), /21 Oct 2026[\s\S]*partial/i);
     assert.equal(await page.getByText('Fixture: totals do not reconcile.', { exact: true }).count(), 1);
-    assert.match(await page.locator('#us-snapshot-panel-saved pre').innerText(), /Fixture full holdings text/);
+    assert.equal(await page.locator('#us-snapshot-panel-saved pre').count(),0);
+    await page.getByRole('button',{name:'View last pasted snapshot'}).click();
+    const dialog = page.getByRole('dialog',{name:'Last pasted snapshot'});
+    assert.equal(await dialog.locator('pre').textContent(),payload.raw_text);
+    await dialog.getByRole('button',{name:'Done'}).click();
     await screenshot(page, '1180-saved-after-fixture-import');
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
