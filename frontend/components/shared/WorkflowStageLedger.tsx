@@ -12,8 +12,9 @@ function evidenceLabel(item: Stage) {
   return item.info.state === "idle" ? "Source unavailable" : "Workflow stage state · see History for invocation identity";
 }
 export type WorkflowLedgerView = "ledger" | "evidence" | "execution";
-export function WorkflowStageLedgerViews({ market, view, onChange }: {
+export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly = false }: {
   market: "zerodha" | "indmoneyUs";
+  portfolioOnly?: boolean;
   view: WorkflowLedgerView;
   onChange: (market: "zerodha" | "indmoneyUs", view: WorkflowLedgerView) => void;
 }) {
@@ -23,7 +24,7 @@ export function WorkflowStageLedgerViews({ market, view, onChange }: {
       { label: "US stage ledger", market: "indmoneyUs", view: "ledger" },
       { label: "Saved evidence and configuration", market, view: "evidence" },
       { label: "Run and order controls", market, view: "execution" },
-    ] as const).map(item => {
+    ] as const).filter(item => !portfolioOnly || (item.market === market && item.view === "ledger")).map(item => {
       const active = market === item.market && view === item.view;
       return <button key={item.label} type="button" aria-pressed={active}
         onClick={() => onChange(item.market, item.view)}
@@ -93,8 +94,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         <h3 className="font-semibold text-slate-900">Saved evidence and configuration · {getStageTileLabel(selected.stage)}</h3>
         {view === "evidence" ? <label className="text-xs">Stage <select aria-label="Stage" value={selected.stage} onChange={event => setSelectedStage(event.target.value)} className="ml-2 rounded border border-indigo-200 bg-white p-2 text-sm text-slate-900">{stages.map(item => <option key={item.stage} value={item.stage}>{STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}</option>)}</select></label> : null}
       </div>
-      <p className="mt-1 text-xs">{selected.stage === "sync" ? "Inspect the saved holdings, cash, and exposure snapshot." : STAGE_METADATA[selected.stage].tileDescription}</p>
-      <p className="mt-1 text-xs">{evidenceLabel(selected)}. Stage rows may refer to different workflows; no shared invocation is implied.</p>
+      {selected.stage !== "sync" && <p className="mt-1 text-xs">{STAGE_METADATA[selected.stage].tileDescription}</p>}
       <ul aria-label="Evidence sources" className="mt-1 text-xs">
         {(selected.info.evidence?.references ?? [
           selected.info.activeRunId || selected.info.lastRunId ? `Run #${selected.info.activeRunId || selected.info.lastRunId}` : null,
@@ -115,7 +115,6 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     </section> : null}
     <section aria-label="Sync and order controls" className="rounded-xl border border-slate-300 bg-slate-50 p-3">
       <h3 className="font-semibold text-slate-900">Run and order controls</h3>
-      <p className="mt-1 text-xs">Review saved evidence before syncing holdings or placing an order.</p>
       <p className="mt-1 text-xs">Next run: {stages.some(item => item.selectable) ? stages.filter(item => item.selected).map(item => getStageTileLabel(item.stage)).join(", ") || "No stages selected" : "Use the Run controls above"}.</p>
       {view === "execution" && stages.some(item => item.selectable) ? <fieldset className="mt-2 flex flex-wrap gap-3">
         <legend className="mb-1 text-xs font-semibold">Run specific Stages</legend>
