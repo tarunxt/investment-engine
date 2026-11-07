@@ -1,6 +1,5 @@
 """Current-main schema: actor ownership, cache replay and transaction rollback."""
 from copy import deepcopy
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -9,9 +8,9 @@ from sqlalchemy import func, inspect, select
 from test_jobs_cancellation_postgres import cancel_postgres
 from test_jobs_cache_ownership import Redis, command, usecase
 from app.domains.auth.models import User
+from app.domains.jobs.admission import JobAdmission
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
-from app.infrastructure.database.base import Base
 from app.infrastructure.database.outbox.models import OutboxMessage
 from app.shared.pagination import PagedQuery
 from app.shared.types import JobStatus
@@ -27,13 +26,22 @@ def schema(connection):
 @pytest.mark.asyncio
 async def test_pg_actor_cache_isolation_and_current_main_schema_preservation(cancel_postgres, monkeypatch):
     fixture = cancel_postgres
-    from app.domains.jobs.tasks import execute_ai_job
-    queue = Mock(return_value=SimpleNamespace(id="synthetic-pg-task"))
-    monkeypatch.setattr(execute_ai_job, "delay", queue)
-    monkeypatch.setattr("app.domains.jobs.use_cases.create_job.register_job_task", AsyncMock())
+    from app.infrastructure.database.outbox import dispatch
+    queue = Mock()
+    real_dispatch = dispatch.dispatch_one
+    async def publish(db, message_id):
+        return await real_dispatch(db, message_id, queue)
+    monkeypatch.setattr(dispatch, "dispatch_one", publish)
+    registration = AsyncMock()
+    monkeypatch.setattr("app.infrastructure.messaging.task_registry.register_job_task", registration)
+    # The shared cancellation fixture intentionally builds only cancellation tables.
+    # Complete this test's synthetic schema before capturing its invariant snapshot.
+    async with fixture.engine.begin() as c:
+        await c.run_sync(lambda connection: JobAdmission.__table__.create(connection))
     async with fixture.engine.connect() as c: before_schema = await c.run_sync(schema)
-    assert 'job_admissions' not in Base.metadata.tables
-    assert set(OutboxMessage.__table__.columns.keys()) == {'id','topic','payload','created_at','published_at','attempts'}
+    assert 'job_admissions' in before_schema
+    assert {'id','topic','payload','created_at','published_at','attempts'} <= set(OutboxMessage.__table__.columns.keys())
+    assert {'job_id','state','claim_token','next_attempt_at','last_error_type'} <= set(OutboxMessage.__table__.columns.keys())
     redis = Redis()
     async with fixture.sessions() as db:
         original = await db.get(Job, 1)
@@ -45,6 +53,8 @@ async def test_pg_actor_cache_isolation_and_current_main_schema_preservation(can
         owned = await db.get(Job, first.job_id)
         owned.status, owned.response = JobStatus.PARTIAL, 'original partial evidence'
         await db.commit()
+        # Durable actor/key/payload replay must survive losing every Redis hint.
+        redis.values.clear()
         replay = await usecase(db, redis).execute(command())
         other = await usecase(db, redis).execute(command(user_id=2))
         assert replay.job_id == first.job_id and replay.status == JobStatus.PARTIAL
@@ -57,6 +67,18 @@ async def test_pg_actor_cache_isolation_and_current_main_schema_preservation(can
         old = await db.get(Job,1,populate_existing=True)
         assert {key:getattr(old,key) for key in legacy} == legacy
         assert queue.call_count == 2
+        assert registration.await_count == 2
+        admissions = list((await db.scalars(select(JobAdmission))).all())
+        assert {(row.user_id, row.job_id) for row in admissions} == {(1, first.job_id), (2, other.job_id)}
+        obligations = list((await db.scalars(select(OutboxMessage).where(
+            OutboxMessage.topic == dispatch.TOPIC))).all())
+        assert {row.job_id for row in obligations} == {first.job_id, other.job_id}
+        assert all(row.state == 'delivered' and row.attempts == 1 and row.published_at is not None
+                   and row.claim_token for row in obligations)
+        assert {tuple(call.args) for call in queue.call_args_list} == {
+            (row.job_id, str(row.id), None) for row in obligations}
+        assert {tuple(call.args) for call in registration.await_args_list} == {
+            (row.job_id, str(row.id)) for row in obligations}
     async with fixture.engine.connect() as c: assert await c.run_sync(schema) == before_schema
 
 
