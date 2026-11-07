@@ -110,6 +110,7 @@ For each stock, evaluate:
 - Probability of reaching target in 2–12 weeks
 
 Output Rules:
+${market === 'us' ? "Report the actual listing exchange for each security in Exchange Symbol (for example NASDAQ or NYSE). US is a market, not an exchange." : ""}
 Return ONLY one markdown table.
 No intro. No explanation. No notes. No disclaimer. No text before or after the table.
 

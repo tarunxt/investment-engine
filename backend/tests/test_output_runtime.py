@@ -402,3 +402,8 @@ def test_nonrecoverable_failures_stay_failed(error, response):
     job = make_job('rebalance', status=JobStatus.FAILED, error_message=error, response=response,
                    updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
     assert JobResponse.model_validate(job).status == JobStatus.FAILED
+
+def test_market_scoped_indmoney_snapshot_preserves_market_for_holding_match():
+    prompt = "## 1. Latest Portfolio Snapshot\n| Market | Stock Symbol | Current Units |\n|---|---|---|\n| US | SMCI | 3 |"
+    assert holdings_from_prompt(prompt) == ({"exchange_symbol": "US", "stock_symbol": "SMCI", "current_units": "3"},)
+    assert holdings_from_prompt(prompt.replace("| US |", "| Europe |")) is None
