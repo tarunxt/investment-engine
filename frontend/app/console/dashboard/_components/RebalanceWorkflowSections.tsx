@@ -15,7 +15,6 @@ import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_componen
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AutomatedRebalanceReliabilityBridge } from "@/app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge";
 import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
 import { threatInputRationale } from "./threatInputRationale";
@@ -4378,7 +4377,6 @@ export function RebalanceWorkflowSections({
   stageLedger?: boolean;
   surface?: WorkflowSurface | null;
 }) {
-  const router = useRouter();
   const [runtimeOwner] = useState(captureWorkflowOwner);
   const apiService = useMemo(() => workflowOwnedApi(workflowApiService, runtimeOwner), [runtimeOwner]);
   const usdInrRate = useUsdInrRate();
@@ -7673,7 +7671,7 @@ ${zerodhaExecutionMode === "direct_market"
               Last run:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
-            {stageLedger ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
+            {stageLedger && !surface ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
             {audit?.status === "pending" ? (
               <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
                 <Loader2 className="size-4 shrink-0 animate-spin" />
@@ -7796,8 +7794,8 @@ ${zerodhaExecutionMode === "direct_market"
                 </Button>
               )}
             </div>
-            <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
-              onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />
+            {!surface && <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
+              onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />}
             <button
               type="button"
               disabled={isBusy}
@@ -7988,7 +7986,7 @@ ${zerodhaExecutionMode === "direct_market"
   const content = (
     <AutomatedRebalanceReliabilityBridge>
       {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
-      {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} view={ledgerView} onChange={(market, view) => { if (surface && market !== surface.market) { router.push(market === "zerodha" ? "/console/zerodha#india-workflow" : "/console/indmoney-us#us-workflow"); return; } setLedgerMarket(market); setLedgerView(view); }} /> : null}
+      {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} portfolioOnly={Boolean(surface)} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "indmoneyUs") && renderSectionCard(indmoneySection)}

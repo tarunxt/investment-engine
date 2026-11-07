@@ -671,9 +671,6 @@ export function PortfolioSnapshotsPanel({
             <h2 className="text-lg font-semibold text-gray-950">
               Portfolio Snapshots
             </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Saved historical holdings and positions. Values and available margin belong to the selected snapshot; they are not live account balance or buying power.
-            </p>
             <p className="mt-1 text-xs text-gray-500">
               Source: {selectedSnapshot.source} · Holdings: {formatCount(selectedSnapshot.holdings_count)}
             </p>
