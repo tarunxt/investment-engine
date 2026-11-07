@@ -308,9 +308,9 @@ export default function PlatformCostDriversPage() {
       data
         ? [
             [
-              "Selected month AWS actual cost",
+              "Selected month AWS billing snapshot",
               money(data.summary.monthToDateAwsCost as number),
-              "AWS actuals, delayed",
+              "Coverage and estimate state shown above",
             ],
             [
               "Projected end-of-month cost",
@@ -376,7 +376,7 @@ export default function PlatformCostDriversPage() {
         <div>
           <h3 className="text-lg font-medium">Platform Cost Drivers</h3>
           <p className="text-sm text-muted-foreground">
-            Read-only AWS billing actuals plus website route/asset attribution
+            Stored AWS billing snapshots plus website route/asset attribution
             for Cred-x bandwidth, bots, media, API traffic, EC2, storage, logs,
             and hidden resources.
           </p>

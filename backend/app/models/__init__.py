@@ -47,6 +47,7 @@ from app.domains.bullpen_trade_analysis.models import (
 )
 from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.cost_drivers.models import (
+    CostCollectionIntent,
     CostRecommendation,
     CostSnapshot,
     TrafficCostRollup,
@@ -124,6 +125,7 @@ __all__ = [
     "BullpenTradeAnalysisLlmRecord",
     "BullpenTradeAnalysisRecord",
     "BullpenTradeAnalysisSnapshotRecord",
+    "CostCollectionIntent",
     "CostRecommendation",
     "DashboardPortfolioDailySnapshot",
     "CostSnapshot",
