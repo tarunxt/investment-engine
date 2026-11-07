@@ -3511,11 +3511,22 @@ export interface BullpenTradeAnalysisSummaryStats {
   total_executed_trades: number;
   open_positions: number;
   closed_positions: number;
-  total_net_pnl: number;
-  win_rate: number;
+  total_net_pnl: number | null;
+  win_rate: number | null;
   average_pnl_percent?: number | null;
   average_holding_period_seconds?: number | null;
-  total_fees: number;
+  total_fees: number | null;
+  known_outcomes?: number;
+  unknown_outcomes?: number;
+  win_rate_denominator?: number;
+  known_fee_records?: number;
+  unknown_fee_records?: number;
+  fee_coverage?: string;
+  net_pnl_coverage?: string;
+  measured_fee_components_total?: number | null;
+  known_fee_components?: number;
+  unknown_fee_components?: number;
+
 }
 
 export interface BullpenTradeAnalysisListItem {
@@ -3634,7 +3645,9 @@ export interface BullpenTradeAnalysisActionableLearning {
   exit_timing: string;
   entry_too_expensive: boolean;
   liquidity_or_spread_issue: boolean;
-  llm_confidence_aligned: boolean;
+  llm_confidence_aligned: boolean | null;
+  algorithm_version?: string | null;
+  evidence_status?: string;
   suggested_platform_rule_changes: string[];
   suggested_prompt_changes: string[];
   suggested_risk_management_changes: string[];

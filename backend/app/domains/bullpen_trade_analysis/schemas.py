@@ -55,11 +55,24 @@ class BullpenTradeAnalysisSummaryStats(BaseModel):
     total_executed_trades: int = 0
     open_positions: int = 0
     closed_positions: int = 0
-    total_net_pnl: float = 0
-    win_rate: float = 0
+    total_net_pnl: float | None = None
+    win_rate: float | None = None
     average_pnl_percent: float | None = None
     average_holding_period_seconds: float | None = None
-    total_fees: float = 0
+    total_fees: float | None = None
+    known_outcomes: int = 0
+    unknown_outcomes: int = 0
+    win_rate_denominator: int = 0
+    measured_fee_components_total: float | None = None
+    known_fee_components: int = 0
+    unknown_fee_components: int = 0
+    known_fee_records: int = 0
+    unknown_fee_records: int = 0
+    fee_coverage: str = "unknown"
+    net_pnl_coverage: str = "unknown"
+    win_rate_scope: str = "Known closed outcomes in the selected cohort only"
+    breakeven_policy: str = "Known zero is a non-win; win requires net_pnl > 0"
+    cost_scope: str = "Recorded execution fees only; tax, spread and FX not verified"
 
 
 class BullpenTradeAnalysisRecordResponse(BaseModel):
@@ -262,6 +275,14 @@ class BullpenTradeAnalysisListItem(BaseModel):
 
 
 class BullpenTradeAnalysisLearningInsights(BaseModel):
+    tag_population_counts: dict[str, int] = Field(default_factory=dict)
+    evidence_status: str = "insufficient"
+    validated_recommendations: list[dict[str, Any]] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    closed_count: int = 0
+    known_outcome_count: int = 0
+    unknown_outcome_count: int = 0
+    losses_with_low_liquidity: int = 0
     win_rate_by_tag: list[dict[str, Any]] = Field(default_factory=list)
     average_pnl_by_tag: list[dict[str, Any]] = Field(default_factory=list)
     total_pnl_by_strategy_version: list[dict[str, Any]] = Field(default_factory=list)
@@ -310,7 +331,27 @@ class BullpenTradeAnalysisComparison(BaseModel):
     exit_probability_delta: float | None = None
 
 
+class BullpenTradeAnalysisExitEvidence(BaseModel):
+    status: str = "not_evaluated"
+    reason: str | None = None
+    in_hold_maximum_raw: float | None = None
+    in_hold_maximum_unit: str | None = None
+    in_hold_maximum_unit_price: float | None = None
+    fill_raw: float | None = None
+    fill_unit: str | None = None
+    fill_unit_price: float | None = None
+    fill_source: str = "unknown"
+    requested_price_raw: float | None = None
+    interpretation: str | None = None
+
+
 class BullpenTradeAnalysisActionableLearning(BaseModel):
+    algorithm_version: str | None = None
+    calculated_at: datetime | None = None
+    source_trade_id: str | None = None
+    evidence_status: str = "descriptive_not_validated"
+    confidence_alignment_status: str = "not_evaluated"
+    exit_analysis: BullpenTradeAnalysisExitEvidence = Field(default_factory=BullpenTradeAnalysisExitEvidence)
     analysis_summary: str | None = None
     mistake_category: str | None = None
     improvement_suggestion: str | None = None
@@ -324,7 +365,7 @@ class BullpenTradeAnalysisActionableLearning(BaseModel):
     exit_timing: str = "reasonable"
     entry_too_expensive: bool = False
     liquidity_or_spread_issue: bool = False
-    llm_confidence_aligned: bool = False
+    llm_confidence_aligned: bool | None = None
     suggested_platform_rule_changes: list[str] = Field(default_factory=list)
     suggested_prompt_changes: list[str] = Field(default_factory=list)
     suggested_risk_management_changes: list[str] = Field(default_factory=list)
