@@ -2786,3 +2786,21 @@ for the successfully verified current request. Filtered zero results describe a
 filter match, never the existence of all saved history. The supplemental Bullpen
 run source remains independent and is labeled as unfiltered. A history retry only
 repeats the existing list read; it does not invoke explicit materialization.
+
+### Public-search admission provenance (A9-005)
+
+Current Stage 2 preflight and auto-live evidence packets record only queries
+admitted by the closed application-owned public market/topic projection. A
+rejected custom/private/event query contributes no search query or source and
+retains its generic unavailable-evidence warning. Evidence sufficiency and
+financial decision rules remain unchanged; lack of admitted sources does not
+establish evidence support or permission to trade. Capture continues to retain
+the packet and warning fields through the existing snapshot adapters. The same
+query-list/warning schemas represent empty admission without a migration or
+reinterpretation of frozen snapshots. Historical raw query lists remain frozen;
+no backfill removes or rewrites them. The provider projection is not semantic
+validation of a source or universal prompt-injection resistance.
+
+Offline regression coverage: guarded `test_search_consumer_dispatch.py`,
+`test_public_query_projection.py`, `test_polymarket_event_preflight.py`,
+`test_polymarket_auto_live_evidence.py` and the existing financial-contract suite.

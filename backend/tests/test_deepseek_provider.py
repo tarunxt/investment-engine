@@ -80,7 +80,7 @@ class DeepSeekProviderTests(unittest.TestCase):
         dsml_trace = (
             "<｜｜DSML｜｜tool_calls>\n"
             '<｜｜DSML｜｜invoke name="web_search">\n'
-            '<｜｜DSML｜｜parameter name="query" string="true">Indian stocks bullish breakout February 2025 brokerage upgrade</｜｜DSML｜｜parameter>\n'
+            '<｜｜DSML｜｜parameter name="query" string="true">NIFTY 50 earnings announcements</｜｜DSML｜｜parameter>\n'
             '<｜｜DSML｜｜parameter name="max_results" string="false">5</｜｜DSML｜｜parameter>\n'
             "</｜｜DSML｜｜invoke>\n"
             "</｜｜DSML｜｜tool_calls>"
@@ -113,7 +113,7 @@ class DeepSeekProviderTests(unittest.TestCase):
             ),
         ]
         openai_cls_mock.return_value = mock_client
-        web_search_execute_mock.return_value = '{"query":"Indian stocks bullish breakout February 2025 brokerage upgrade","results":[{"title":"Moneycontrol","url":"https://www.moneycontrol.com"}]}'
+        web_search_execute_mock.return_value = '{"query":"NIFTY 50 earnings announcements","results":[{"title":"Moneycontrol","url":"https://www.moneycontrol.com"}]}'
 
         provider = DeepSeekProvider()
         result = provider.generate(
@@ -131,13 +131,13 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.web_search_used, True)
         self.assertEqual(
             result.web_search_queries,
-            ["Indian stocks bullish breakout February 2025 brokerage upgrade"],
+            ["NIFTY 50 earnings announcements"],
         )
         self.assertEqual(result.web_sources, ["https://www.moneycontrol.com"])
         web_search_execute_mock.assert_called_once_with(
             "web_search",
             {
-                "query": "Indian stocks bullish breakout February 2025 brokerage upgrade",
+                "query": "NIFTY 50 earnings announcements",
                 "max_results": 5,
             },
         )

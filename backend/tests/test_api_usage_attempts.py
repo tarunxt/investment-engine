@@ -335,7 +335,7 @@ def test_search_records_one_call_per_fallback_and_no_fake_free_price(ledger, mon
     monkeypatch.setitem(sys.modules, "tavily", NS(TavilyClient=lambda **kwargs: tavily))
     monkeypatch.setitem(sys.modules, "duckduckgo_search", NS(DDGS=lambda: ddg))
     monkeypatch.setattr(web_search.settings, "tavily_api_key", "test-key")
-    result = json.loads(web_search._web_search("private search", 5))
+    result = json.loads(web_search._web_search("NIFTY 50 live price today", 5))
     assert len(result["results"]) == 1
     first, second = ledger()
     assert [first.actual_provider, second.actual_provider] == ["tavily", "duckduckgo"]
@@ -343,7 +343,7 @@ def test_search_records_one_call_per_fallback_and_no_fake_free_price(ledger, mon
     assert first.tariff_estimated_cost_usd is None and second.tariff_estimated_cost_usd is None
     assert first.search_result_count is None and second.search_result_count == 1
     assert first.reuse_status == second.reuse_status == "not_reused"
-    ddg.text.assert_called_once_with("private search", max_results=5)
+    ddg.text.assert_called_once_with("NIFTY 50 live price today", max_results=5)
 
 
 def test_anthropic_cache_and_server_tool_usage_are_provider_reported(ledger, monkeypatch):
@@ -843,3 +843,17 @@ def test_request_response_identity_bridge_quarantines_both_prior_estimates(ledge
     coverage = summarize_attempt_coverage(ledger(None))
     assert coverage["summary"]["ambiguous_attempts"] == 3
     assert coverage["summary"]["known_token_estimate_subtotal_usd"] is None
+
+
+def test_rejected_private_search_creates_no_provider_attempts(ledger, monkeypatch):
+    from app.domains.ai_providers.tools import web_search
+    providers=[]
+    for name in ('_tavily_search','_ddg_search','_bing_rss_search'):
+        provider=Mock(side_effect=AssertionError('Denied query reached provider'))
+        providers.append(provider)
+        monkeypatch.setattr(web_search,name,provider)
+    result=json.loads(web_search._web_search('synthetic private account query',5))
+    assert result['errors'] and result['results']==[]
+    assert ledger()==[]
+    for provider in providers:
+        provider.assert_not_called()

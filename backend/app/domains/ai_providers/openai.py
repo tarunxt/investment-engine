@@ -14,6 +14,7 @@ from app.domains.ai_providers.base import (
     BaseAIProvider,
 )
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.tools.public_queries import admitted_query
 from app.domains.ai_providers.web_metadata import (
     extract_web_search_sources,
     merge_web_metadata,
@@ -211,12 +212,12 @@ class OpenAIProvider(BaseAIProvider):
             for tool_call in tool_calls:
                 arguments = self._safe_tool_arguments(tool_call.function.arguments)
                 result = web_search_tool.execute(tool_call.function.name, arguments)
-                query = arguments.get("query")
+                query = admitted_query(result)
                 web_search_used, web_search_queries, web_sources = merge_web_metadata(
                     web_search_used,
                     web_search_queries,
                     web_sources,
-                    response_used=True,
+                    response_used=query is not None,
                     response_queries=[query] if isinstance(query, str) and query.strip() else None,
                     response_sources=extract_web_search_sources(result),
                 )
@@ -325,7 +326,7 @@ class OpenAIProvider(BaseAIProvider):
         try:
             parsed = json.loads(arguments)
             return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             return {}
 
     @staticmethod
