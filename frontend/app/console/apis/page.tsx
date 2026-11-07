@@ -372,20 +372,22 @@ export default function ApisPage() {
   const loadCombinedCostHistories = useCallback(async () => {
     const request = ++combinedCostRequest.current;
     setCombinedCostLoading(true);
-    const results = await Promise.allSettled(
-      COMBINED_LLM_PROVIDERS.map((provider) => apiService.getLlmCostHistory({
-        provider: provider.key, day_limit: 30, run_limit: 1,
-      })),
-    );
-    if (request !== combinedCostRequest.current) return;
-    const successful: Partial<Record<CombinedLlmProviderKey, LlmCostHistoryResponse>> = {};
     const failures: CombinedLlmProviderKey[] = [];
-    results.forEach((result, index) => {
-      const key = COMBINED_LLM_PROVIDERS[index].key;
-      if (result.status === 'fulfilled') successful[key] = result.value;
-      else failures.push(key);
-    });
-    setCombinedCostHistories((previous) => ({ ...previous, ...successful }));
+    await Promise.allSettled(COMBINED_LLM_PROVIDERS.map(async (provider) => {
+      try {
+        const history = await apiService.getLlmCostHistory({
+          provider: provider.key, day_limit: 30, run_limit: 1,
+        });
+        if (request !== combinedCostRequest.current) return;
+        setCombinedCostHistories((previous) => ({ ...previous, [provider.key]: history }));
+        setCombinedCostFailures((previous) => previous.filter((key) => key !== provider.key));
+      } catch {
+        if (request !== combinedCostRequest.current) return;
+        failures.push(provider.key);
+        setCombinedCostFailures((previous) => Array.from(new Set([...previous, provider.key])));
+      }
+    }));
+    if (request !== combinedCostRequest.current) return;
     setCombinedCostFailures(failures);
     setCombinedCostLoading(false);
   }, []);
@@ -653,7 +655,7 @@ export default function ApisPage() {
                     )}
                     {item.usage_measurement === 'actual' ? (
                       <div className="mt-1 text-xs font-semibold text-emerald-700">
-                        Actual provider total · {formatUsd(item.daily_estimated_cost)}
+                        Provider day total · {formatUsd(item.daily_estimated_cost)}
                       </div>
                     ) : null}
                   </td>
