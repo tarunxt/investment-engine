@@ -1396,7 +1396,6 @@ function getStockPositionContext(stock: StockConsensus): PositionContext {
 
 function getPositionContextLabel(stock: StockConsensus) {
   const position = getStockPositionContext(stock);
-  if (position.holdingMatch === "unresolved") return "Verified US listing/holding identity unresolved; holdings unavailable";
   return position.source === "portfolio-snapshot"
     ? position.holdingMatch === "absent"
       ? "Latest portfolio snapshot · no matching instrument; zero inferred from snapshot absence, not a verified holding quantity"
@@ -3507,7 +3506,7 @@ export function buildConsensusRows(
   market: SwingTradeMarket,
   portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
   allRuns: RunResponse[] = runs,
-  verifiedUsListings: readonly VerifiedUsListing[] = [],
+  verifiedUsListings?: readonly VerifiedUsListing[],
 ): StockConsensus[] {
   const sourceRuns = uniqueRunJobSources(runs);
   const sourceHistoryRuns = allRuns === runs ? sourceRuns : uniqueRunJobSources(allRuns);
@@ -3523,7 +3522,7 @@ export function buildConsensusRows(
   const outputLlmMetas = llmMetas.filter((meta) => outputMetaKeys.has(getMetaKey(meta)));
   const consensusDenominator = outputMetaKeys.size || parsedRows.length;
 
-  const usGroups = market === "us" ? groupUsIdentityRows(parsedRows, verifiedUsListings, ACTION_HEADER, normalizeAction) : null;
+  const usGroups = market === "us" && verifiedUsListings ? groupUsIdentityRows(parsedRows, verifiedUsListings, ACTION_HEADER, normalizeAction) : null;
   if (usGroups) {
     usGroups.forEach((group,key) => grouped.set(key,group.sourceRows));
   } else {
@@ -3990,7 +3989,7 @@ export function ConsensusBreakupButton({
               <div className="space-y-3">
                 {stock.breakupEntries.map((entry, index) => {
                   const rowAction = getConsensusBreakupAction(entry);
-                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : entry.sourceRows?.length ? "Conflicting source observations" : "Not mentioned";
+                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : "Not mentioned";
                   return (
                     <div
                       key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`}
@@ -4807,7 +4806,7 @@ function ScopedStockDetailsButton({
                     </thead>
                     <tbody className="divide-y divide-violet-100">
                       {stock.rows.slice(rawPage * 25, (rawPage + 1) * 25).map((row, sourceIndex) => (
-                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details${stock.usIdentity ? `-raw-${rawPage * 25 + sourceIndex}` : ""}`}>
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details-${rawPage * 25 + sourceIndex}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
                             {row.meta.runLabel}<br />{row.meta.provider} {row.meta.model}<br />
                             <span className="text-gray-400">{formatDateTime(row.meta.createdAt)}</span>
@@ -6556,7 +6555,6 @@ function renderStockInfoBlock(
           <div className="text-sm font-medium leading-5 text-slate-900">{stockName}</div>
         </div>
         <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">{stock.exchange || "—"}</div>
-        {stock.identityIssue ? <p role="status" className="text-sm text-amber-800">{stock.identityIssue}</p> : null}
       </div>
     </div>
   );
@@ -9383,7 +9381,7 @@ function FragmentRows({
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {stock.rows.map((row, sourceIndex) => (
-                        <tr key={`${row.meta.runId}-${row.meta.jobId}${stock.usIdentity ? `-raw-${sourceIndex}` : ""}`}>
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}-${sourceIndex}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                             <div className="font-semibold">
                               {row.meta.runLabel}

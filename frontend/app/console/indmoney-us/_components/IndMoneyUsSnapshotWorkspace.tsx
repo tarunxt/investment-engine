@@ -17,6 +17,7 @@ import type {
 } from '@/types/api';
 import { IndMoneyUsPasteCard } from './IndMoneyUsPasteCard';
 import { IndMoneyUsSnapshotsPanel } from './IndMoneyUsSnapshotsPanel';
+import { AlpacaIexDisplayPanel } from './AlpacaIexDisplayPanel';
 
 const stages = [
   { label: 'Portfolio', india: URLs.routes.console.zerodha(), us: URLs.routes.console.indmoneyUs() },
@@ -31,6 +32,7 @@ const views = [
   { value: 'saved', label: 'Saved US snapshot' },
   { value: 'paste', label: 'Paste snapshot' },
   { value: 'navigation', label: 'Market and stage navigation' },
+  { value: 'iex', label: 'IEX estimates' },
 ];
 
 export function IndMoneyUsSnapshotWorkspace({
@@ -111,6 +113,9 @@ export function IndMoneyUsSnapshotWorkspace({
 
         <TabsContent value="saved" forceMount hidden={view !== 'saved'} id="us-snapshot-panel-saved" aria-labelledby="us-snapshot-tab-saved">
           <IndMoneyUsSnapshotsPanel overview={overview} selectedSnapshot={selectedSnapshot} selectedSnapshotId={selectedSnapshotId} loading={loading} selecting={selecting} error={null} onSelectSnapshot={onSelectSnapshot} />
+        </TabsContent>
+        <TabsContent value="iex" id="us-snapshot-panel-iex" aria-labelledby="us-snapshot-tab-iex">
+          <AlpacaIexDisplayPanel />
         </TabsContent>
         <TabsContent value="paste" forceMount hidden={view !== 'paste'} id="us-snapshot-panel-paste" aria-labelledby="us-snapshot-tab-paste">
           <IndMoneyUsPasteCard saving={saving} error={saveError} onSubmit={onCreateSnapshot} />

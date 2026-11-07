@@ -21,16 +21,16 @@ function load(path, bindings = {}, exports = '') {
 const actionColors = load('../lib/actionColorScheme.ts');
 const parser = load('../components/InvestmentRecommendationTable.tsx', actionColors);
 const bindings = {
-  AlertTriangle: () => null,
+  ...load('../lib/actionableQuantityDisplay.ts'),
   cn: (...values) => values.filter(Boolean).join(" "),
+  AlertTriangle: () => null,
+  ...load("../lib/usSecurityIdentity.ts"),
   ...parser,
   ...actionColors,
   ...load('../lib/technicalSetups.ts'),
   ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'),
   ...load('../lib/runPresentation.ts'),
-  ...load('../lib/usSecurityIdentity.ts'),
-  ...load('../lib/actionableQuantityDisplay.ts'),
 };
 const helpers = load('../app/console/_components/FinalActionablesConsole.tsx', bindings,
   'export { buildActionablesCalculationRows, getPositionContextLabel, getZerodhaHoldingForStock, getZerodhaBuyTransactionsForStock, historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
@@ -323,7 +323,7 @@ test('different US source jobs retain legitimate contradictory votes after verif
  const [stock]=helpers.buildConsensusRows([a,b],'us',null,[a,b],[mapping]);assert.equal(stock.rows.length,2);assert.equal(stock.consensusRows.length,2);assert.equal(stock.actionCounts['Buy New'],1);assert.equal(stock.actionCounts['Sell All'],1);assert.equal(stock.totalSuggestions,2);assert.equal(stock.identityIssue,null);
 });
 test('missing verified mapping preserves all synthetic 33 identities as unresolved and never attaches holdings or invents zeros',()=>{
- const f=syntheticUsFixture(),run=oneUsJob(f.rows),stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run]);assert.equal(stocks.length,33);
+ const f=syntheticUsFixture(),run=oneUsJob(f.rows),stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run],[]);assert.equal(stocks.length,33);
  for(const stock of stocks){assert.match(stock.identityIssue,/mapping unavailable/);assert.equal(stock.positionContext.currentUnits,null);assert.equal(stock.positionContext.currentInvestmentAmount,null);assert.equal(stock.positionContext.holdingMatch,'unresolved');}
 });
 test('true dual US listings stay distinct; generic alias and generic holding remain ambiguous',()=>{
@@ -341,7 +341,7 @@ test('US identity resolution rejects conflicting symbol prefixes and forged mode
  assert.match(bindings.resolveUsIdentity({symbol:'NYSE:SIM00',exchange:'NASDAQ'},[mapping]).issue,/prefix conflicts/);
  assert.ok(bindings.resolveUsIdentity({symbol:'SIM00',exchange:'US'},[{...mapping,verified:false}]).issue);
  const row=modelRow(1,{'Stock Symbol':'SIM00','Exchange Symbol':'US','verified':'true','security_id':'invented'}),run=oneUsJob([row]);
- assert.ok(helpers.buildConsensusRows([run],'us')[0].identityIssue,'model cells cannot establish verified identity');
+ assert.ok(helpers.buildConsensusRows([run],'us',null,[run],[])[0].identityIssue,'model cells cannot establish verified identity');
 });
 
 

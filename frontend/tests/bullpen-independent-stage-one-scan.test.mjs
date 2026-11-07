@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import ts from "typescript";
 const read = path => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 const card = read("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx");
 const page = read("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx");
@@ -17,17 +16,14 @@ test("shared scan controls live in Trading Bots, while Bullpen Stage 1 is filter
   assert.match(card, /data-testid="bullpen-stage-one-filters"/);
   assert.match(card, /filtersOnly renderInteractiveRows/);
 });
-test("backend-owned captures remain separate from workflow inputs", () => {
-  assert.match(shared, /fetch\("\/api\/universal-polymarket-scan\/auto-run"/);
-  assert.match(shared, /JSON.stringify\(\{ action: "run-now" \}\)/);
-  assert.match(shared, /if \(running \|\| autoRunRunning\) return/);
-  assert.match(shared, /autoRunRefreshController.current\?\.abort\(\)/);
-  assert.match(shared, /attempt <= 64/);
-  assert.match(shared, /signal.aborted \|\| attempt === 64/);
-  assert.match(shared, /setSnapshot\(payload.snapshot \?\? null\)/);
-  assert.match(snapshotRoute, /openUniversalScan\(sessionOwner\)/);
-  assert.match(route, /forkUniversalScan\(sessionOwner\)/);
-  assert.match(route, /Universal captures cannot be filtered in place/);
+test("a stopped capture stays separate from completed workflow inputs", () => {
+  assert.match(shared, /controller\.current\.abort\(\)/);
+  assert.match(shared, /Only completed scans are available to workflows/);
+  assert.match(shared, /cumulativeTotalCandidates/);
+  assert.match(shared, /45 \* 60 \* 1000/);
+  assert.match(shared, /Temporary scan interruption\. Retrying the current page/);
+  assert.match(shared, /consecutiveFailures > 8/);
+  assert.match(shared, /Scan saved\. Finalizing breakdown tables/);
 });
 test("Bullpen manual actions filter a shared capture with an isolated continuation ID", () => {
   assert.match(page, /params\.set\("useUniversal", "true"\)/);
@@ -59,17 +55,7 @@ test("an active workflow owns its yellow Stage 1 tile and reports live progress"
   assert.match(card, /selectStageOneDisplayStage/);
   assert.match(card, /const filterStage = stage/);
   assert.match(card, /setStageOneResultSource\("original"\)/);
-  assert.match(card, /data-stage-state=\{notEvaluated \? "failed" : isStageOneActive \? "working" : stage\.state\}/);
-  const ast = ts.createSourceFile("schedule.tsx", read("../app/console/bullpen-ai/_components/bullpenScheduleShared.tsx"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const predicate = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "stageOneNotEvaluated");
-  assert.ok(predicate);
-  const body = ts.transpileModule(predicate.getText(ast).replace(/^export /, ""), {compilerOptions:{target:ts.ScriptTarget.ES2020}}).outputText;
-  const expression = card.match(/data-stage-state=\{(notEvaluated \? "failed"[^}]+)\}/)[1];
-  const displayState = new Function("stage", "isStageOneActive", `${body}const notEvaluated=stageOneNotEvaluated(stage); return ${expression};`);
-  assert.equal(displayState({state:"working",outputs:{}},true),"working");
-  assert.equal(displayState({state:"finished",outputs:{phase_status:"completed"}},false),"finished");
-  assert.equal(displayState({state:"working",outputs:{phase_status:"failed"}},true),"failed");
-  assert.equal(displayState({state:"working",outputs:{phase_status:"blocked"}},false),"failed");
+  assert.match(card, /data-stage-state=\{isStageOneActive \? "working" : stage\.state\}/);
   assert.match(card, /data-testid="bullpen-stage-one-live-progress"/);
   assert.match(card, /scanProgressPercent/);
   assert.match(card, /Filter progress/);

@@ -1,4 +1,3 @@
-import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -23,7 +22,13 @@ async function loadStrategyModule() {
 }
 
 test("Stage 3 Planned metric keeps the strategy info button beside Planned and stops the metric click from leaking through", () => {
-  const scheduleCardSource = readBullpenScheduleSource();
+  const scheduleCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
   assert.match(
     scheduleCardSource,

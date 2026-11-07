@@ -34,7 +34,6 @@ const imported = {
   ...load('../lib/actionableQuantityDisplay.ts'),
   ...load('../components/AllocationScoreContext.tsx', load('../lib/basketDisplayCalculations.ts')),
   ...load('../lib/summarySourceRows.ts'),
-  ...load('../lib/usSecurityIdentity.ts'),
 };
 const ui = Object.fromEntries([
   'Link', 'AlertTriangle', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'ChevronDown', 'ChevronRight', 'ChevronUp',

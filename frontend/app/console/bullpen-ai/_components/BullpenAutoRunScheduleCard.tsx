@@ -1,71 +1,250 @@
 "use client";
-import { deferBullpenDetail } from "./BullpenDeferredDetail";
-const BullpenRunHistoryContent = deferBullpenDetail(() => import("./BullpenRunHistoryContent").then(module => module.BullpenRunHistoryContent));
-const BullpenAutoRunBadgeRationaleDialog = deferBullpenDetail(() => import("./BullpenAutoRunBadgeRationaleDialog").then(module => module.BullpenAutoRunBadgeRationaleDialog));
-const BullpenStageOneExcelHistoryDialog = deferBullpenDetail(() => import("./BullpenStageOneExcelHistoryDialog").then(module => module.BullpenStageOneExcelHistoryDialog));
 
-import { useCallback, useEffect, useEffectEvent, useRef, useState, type ChangeEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Copy, History, ExternalLink, Filter, Info, Bot, RefreshCw, Wallet, Loader2, LogIn, LogOut, PauseCircle, PlayCircle, ShieldAlert, Square, X, Zap } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarClock,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  Copy,
+  History,
+  ExternalLink,
+  FileSpreadsheet,
+  Filter,
+  Info,
+  Bot,
+  RefreshCw,
+  Wallet,
+  Loader2,
+  LogIn,
+  LogOut,
+  Menu,
+  PauseCircle,
+  PlayCircle,
+  ShieldAlert,
+  SlidersHorizontal,
+  Square,
+  X,
+  Zap,
+} from "lucide-react";
+
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { type BullpenQuestion, type BullpenQuestionRow, type BullpenScanSnapshot } from "@/lib/bullpen-ai";
+import {
+  type BullpenQuestion,
+  type BullpenQuestionRow,
+  type BullpenScanSnapshot,
+  getBullpenAmountToBeInvestedBreakdown,
+  getBullpenReturnsPerDayBreakdown,
+} from "@/lib/bullpen-ai";
 import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
 import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
+import { formatApiTimestamp } from "@/lib/datetime";
 import { useAuth } from "@/hooks/useAuth";
-import { BullpenEventIdentityResolver, buildBullpenEventIdentityFromDecision, buildBullpenEventIdentityFromPosition } from "@/lib/bullpenEventIdentityResolver";
-import { isActiveBullpenPosition, isClaimableBullpenPosition, resolveBullpenPreferredPortfolioValue, resolveBullpenTotalPortfolioValue, sumBullpenPortfolioPositionValue, sumCurrentPositionValue, type BullpenActivePositionView, type BullpenPositionsSnapshotLineage, type BullpenPositionsSource, type BullpenPositionsSummary } from "@/lib/bullpenPositions";
-import { resolveLatestVerifiedStage1Portfolio, resolveVerifiedStage1PortfolioSnapshot, selectLatestVerifiedStage1Portfolio, shouldUseVerifiedStage1PortfolioFallback } from "@/lib/bullpenVerifiedPortfolio";
+import {
+  BullpenEventIdentityResolver,
+  buildBullpenEventIdentityFromDecision,
+  buildBullpenEventIdentityFromPosition,
+} from "@/lib/bullpenEventIdentityResolver";
+import {
+  isActiveBullpenPosition,
+  isClaimableBullpenPosition,
+  resolveBullpenPreferredPortfolioValue,
+  resolveBullpenTotalPortfolioValue,
+  sumBullpenPortfolioPositionValue,
+  sumCurrentPositionValue,
+  type BullpenActivePositionView,
+  type BullpenPositionsSnapshotLineage,
+  type BullpenPositionsSource,
+  type BullpenPositionsSummary,
+} from "@/lib/bullpenPositions";
+import {
+  resolveLatestVerifiedStage1Portfolio,
+  resolveVerifiedStage1PortfolioSnapshot,
+  selectLatestVerifiedStage1Portfolio,
+  shouldUseVerifiedStage1PortfolioFallback,
+} from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
-import { BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT, type BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
-import { bullpenWorkspaceHistoryPath, bullpenWorkspacePath } from "@/lib/bullpenWorkspaceRoutes";
-import { mergeBullpenConsoleDecisionProjection, mergeBullpenConsoleRunProjection, reconcileBullpenConsoleRunCopies } from "@/lib/bullpenRunConsoleDetail";
+import {
+  BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+  type BullpenWorkspaceProfile,
+} from "@/lib/bullpenStageOneSettings";
+import {
+  bullpenWorkspaceHistoryPath,
+  bullpenWorkspacePath,
+} from "@/lib/bullpenWorkspaceRoutes";
+import {
+  mergeBullpenConsoleDecisionProjection,
+  mergeBullpenConsoleRunProjection,
+  reconcileBullpenConsoleRunCopies,
+} from "@/lib/bullpenRunConsoleDetail";
 import { APIError, RequestTimeoutError, apiService } from "@/services/api";
-import type { BullpenAutoLiveDecision, BullpenAutoLiveHistoryItem, BullpenAutoLiveHistoryPage, BullpenAutoLiveEventTrendsResponse, BullpenAutoLiveOutcomeSide, BullpenAutoLiveRun, BullpenAutoLiveRunOnceRequest, BullpenAutoLiveSummaryResponse, BullpenLlmExecutionMode, ProviderModelTarget, PolymarketBotState } from "@/types/api";
-import { buildBullpenAutoRunWorkflowView, isBullpenAutoRunWorkflowSettled } from "./bullpenAutoRunProgress";
-import { downloadIndependentStageOneExcel } from "./bullpenStageOneExcel";
-import { createAbortableBullpenAutoRunRequestDeduper, getBullpenAutoRunActiveRunId, getBullpenAutoRunStatusCacheKey, getBullpenAutoRunStatusBadges, getBullpenAutoRunBadgeRationale, getBullpenAutoRunStatusRetryDelay, isBullpenAutoRunProgressActive, isBullpenAutoRunSchedulerEnabled, isBullpenAutoRunPageVisible, logBullpenAutoRunStatusFallback, normalizeBullpenAutoRunStatusData, normalizeBullpenAutoRunStatusFromSummary, readCachedBullpenAutoRunStatus, writeCachedBullpenAutoRunStatus, type BullpenAutoRunStatusData, type BullpenAutoRunStatusLoadState, type BullpenAutoRunBadgeKind } from "./bullpenAutoRunStatus";
+import type {
+  BullpenAutoLiveDecision,
+  BullpenAutoLiveHistoryItem,
+  BullpenAutoLiveHistoryPage,
+  BullpenAutoLiveEventTrendsResponse,
+  BullpenAutoLiveOutcomeSide,
+  BullpenAutoLiveRun,
+  BullpenAutoLiveRunOnceRequest,
+  BullpenAutoLiveSummaryResponse,
+  BullpenLlmExecutionMode,
+  ProviderModelTarget,
+  PolymarketBotState,
+} from "@/types/api";
 
+import { useReviewDialog } from "@/hooks/useReviewDialog";
+import { resolveStageOneDisplayEvidence } from "@/lib/bullpenStageOneDisplayEvidence";
 
+import {
+  buildBullpenAutoRunWorkflowView,
+  isBullpenAutoRunWorkflowSettled,
+} from "./bullpenAutoRunProgress";
+import {
+  downloadCompleteStageOneRunExcel,
+  downloadIndependentStageOneExcel,
+  downloadStageOneAllScannedEventsExcel,
+  downloadStageOneFilteredEventsExcel,
+} from "./bullpenStageOneExcel";
+import {
+  createAbortableBullpenAutoRunRequestDeduper,
+  getBullpenAutoRunActiveRunId,
+  getBullpenAutoRunStatusCacheKey,
+  getBullpenAutoRunStatusBadges,
+  getBullpenAutoRunBadgeRationale,
+  getBullpenAutoRunStatusRetryDelay,
+  isBullpenAutoRunProgressActive,
+  isBullpenAutoRunSchedulerEnabled,
+  isBullpenAutoRunPageVisible,
+  logBullpenAutoRunStatusFallback,
+  normalizeBullpenAutoRunStatusData,
+  normalizeBullpenAutoRunStatusFromSummary,
+  readCachedBullpenAutoRunStatus,
+  writeCachedBullpenAutoRunStatus,
+  type BullpenAutoRunStatusData,
+  type BullpenAutoRunStatusLoadState,
+  type BullpenAutoRunBadgeKind,
+} from "./bullpenAutoRunStatus";
+import { BullpenAutoRunBadgeRationaleDialog } from "./BullpenAutoRunBadgeRationaleDialog";
+import {
+  BullpenReturnsPerDayFormulaDialog,
+  BullpenReturnsPerDayHeader,
+  BullpenReturnsPerDayValueButton,
+} from "./BullpenReturnsPerDayInfo";
+import {
+  BullpenEventTrendsTable,
+  type BullpenEventTableSnapshot,
+} from "./BullpenEventTrendsTable";
+import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
-import { buildBullpenStage3InvestPreviewSteps, buildBullpenStage3OnlyInvestExecutionPlan, NO_STAGE2_QUALIFIED_EVENTS_REASON, type BullpenStage3AlreadyInvestedRecord, selectBullpenStage3OnlyInvestSource } from "./bullpenAutoRunStage3Invest";
-import { isSubmittedOrExecutedInvestOrderPlan, type InvestMetricDialogKind } from "./bullpenAutoRunInvestMetrics";
+import {
+  buildBullpenStage3InvestPreviewSteps,
+  buildBullpenStage3OnlyInvestExecutionPlan,
+  NO_STAGE2_QUALIFIED_EVENTS_REASON,
+  type BullpenStage3AlreadyInvestedRecord,
+  selectBullpenStage3OnlyInvestSource,
+} from "./bullpenAutoRunStage3Invest";
+import {
+  deriveInvestExecutionStepStatus,
+  getStage2TransferQueueMetricInfo,
+  getInvestMetricDialogDefinition,
+  getInvestMetricRows,
+  getInvestStepMetricDialogKind,
+  getSellInvestMetricDialogKind,
+  isCompletedWithoutSubmissionInvestDecision,
+  isProcessedInvestOrderPlan,
+  isSubmittedOrExecutedInvestOrderPlan,
+  partitionInvestDecisionsByExecutionEvidence,
+  summarizeInvestStepCountsFromDecisions,
+  type InvestExecutionStepStatus,
+  type InvestMetricDialogKind,
+  type Stage2TransferQueueMetricInfoKind,
+} from "./bullpenAutoRunInvestMetrics";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
+import { getBullpenStage3SellExecutionTelemetry } from "./bullpenStage3SellExecution";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
-import { formatElapsedRunTime, formatStageElapsedTime } from "./bullpenAutoRunTimers";
+import {
+  BullpenQuestionsTable,
+  type BullpenQuestionsTableExtraColumn,
+  type BullpenTableSortKey,
+  type BullpenTableSortState,
+} from "./BullpenQuestionsTable";
+import {
+  buildStageTwoEventsSummaryRows as buildHistoricalStageTwoEventsSummaryRows,
+  getStageTwoLlmReviewedRows as getHistoricalStageTwoLlmReviewedRows,
+  getStageTwoLlmTableRows as getHistoricalStageTwoLlmTableRows,
+  resolveStageTwoEventsSummaryUpdatedAt,
+  resolveStageTwoHistoricalAsOfTimestamp,
+} from "./bullpenAutoRunStageTwoHistory";
+import {
+  buildBullpenStage2TopTenHandoffRows,
+  type BullpenStage2TopTenHandoffRow,
+} from "./bullpenStage2TopTenHandoff";
+import {
+  formatElapsedRunTime,
+  formatStageElapsedTime,
+} from "./bullpenAutoRunTimers";
+import { BullpenStage2ActionablesDialog } from "./BullpenStage2ActionablesDialog";
+import { BullpenStageOneExcelHistoryDialog } from "./BullpenStageOneExcelHistoryDialog";
+import { buildBullpenStage2Actionables } from "./bullpenStage2Actionables";
+import {
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_FIELD,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_TIE_BREAK,
+  formatBullpenStage2To3RankingFieldLabel,
+  formatBullpenStage2To3RankingTieBreakLabel,
+  formatBullpenStage2To3SizingFormulaLabel,
+  mergeBullpenStage2To3StrategyOutputs,
+  readBullpenStage2To3StrategyMetadata,
+  readBullpenStage2UniverseStatus,
+  type BullpenStage2To3StrategyMetadata,
+  type BullpenStage2UniverseStatus,
+} from "./bullpenStage2To3Strategy";
 
-import { DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_FIELD, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_TIE_BREAK, formatBullpenStage2To3RankingFieldLabel, formatBullpenStage2To3RankingTieBreakLabel, formatBullpenStage2To3SizingFormulaLabel, mergeBullpenStage2To3StrategyOutputs, readBullpenStage2To3StrategyMetadata, readBullpenStage2UniverseStatus, type BullpenStage2To3StrategyMetadata, type BullpenStage2UniverseStatus } from "./bullpenStage2To3Strategy";
-import { StageOneOutputDialog, RunDetailDialog, SimpleInfoDialog, StageTwoLlmRunDetailsDialog, StageTwoBypassDialog, StageTwoInvestEventsDialog, InvestMetricDetailsDialog, Stage3PreviewDialog } from "./BullpenScheduleLazyDetails";
-import { type ScanCandidateDialogState, type InvestMetricDialogState, type Stage3PreviewDialogState, type RunDetailDialogState, type StageTwoInvestEventsDialogState, type StageTwoLlmRunDialogState, type StageTwoBypassDialogState, isRequestAbort, readStageOutputNumber, mergeInvestStageDecisionRows, formatIstDateTime, formatMoney, type ScanCandidateDialogMode, buildRunDetailScanCandidateDialogState, getRunSummaryDetails, getInvestStageMetric, readStageOutputString, readStageOutputBoolean, RUN_TIMER_INTERVAL_MS, getInvestStageExecutionSteps, getInvestStageCounters, isRecord, getWorkflowToneClasses, stageOneNotEvaluated, getStageOneStats, StageOneRunStats, formatStageLastRunLabel, StageTwoRunStats, InvestExecutionStepsSummary, ErrorCodeWithDetails, type WorkflowStageView, formatOddsPercent, calculateDaysUntilClose, formatReturnsPerDay, getLastInvestExecutionStep, findRunStage } from "./bullpenScheduleShared";
-
-export const BullpenStage2To3StrategyDialog = dynamic(
+const BullpenInvestmentMathDialog = dynamic(
+  () =>
+    import("./BullpenInvestmentMathDialog").then(
+      (module) => module.BullpenInvestmentMathDialog,
+    ),
+  { ssr: false },
+);
+const BullpenStage2To3StrategyDialog = dynamic(
   () =>
     import("./BullpenStage2To3StrategyDialog").then(
       (module) => module.BullpenStage2To3StrategyDialog,
     ),
   { ssr: false },
 );
-
-export const BullpenEventExitStrategiesDialog = dynamic(
+const BullpenEventExitStrategiesDialog = dynamic(
   () =>
     import("./BullpenEventExitStrategiesDialog").then(
       (module) => module.BullpenEventExitStrategiesDialog,
     ),
   { ssr: false },
 );
-
-export const BullpenEventHistoricalAssessmentTable = dynamic(
+const BullpenEventHistoricalAssessmentTable = dynamic(
   () =>
     import("./BullpenEventHistoricalAssessmentTable").then(
       (module) => module.BullpenEventHistoricalAssessmentTable,
     ),
   { ssr: false },
 );
-
-export const BullpenAutoRunStageOutputDialog = dynamic(
+const BullpenAutoRunStageOutputDialog = dynamic(
   () =>
     import("./BullpenAutoRunStageOutputDialog").then(
       (module) => module.BullpenAutoRunStageOutputDialog,
@@ -73,13 +252,17 @@ export const BullpenAutoRunStageOutputDialog = dynamic(
   { ssr: false },
 );
 
-export const BULLPEN_LOGIN_COMMAND =
-  "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
+type BullpenEventSummaryHighlight =
+  | "active-retained"
+  | "event-exit"
+  | "new-opportunity";
 
-export const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
+const BULLPEN_LOGIN_COMMAND =
+  "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
+const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 
-export type BullpenAutoRunScheduleCardProps = {
+type BullpenAutoRunScheduleCardProps = {
   workspaceProfile?: BullpenWorkspaceProfile;
   onRunCompleted?: () => void | Promise<void>;
   onRefreshPortfolioPositions?: () => void | Promise<void>;
@@ -121,7 +304,7 @@ export type BullpenIndependentStageOneProgress = {
   message: string;
 };
 
-export type ActionState =
+type ActionState =
   | "enable"
   | "invest-now"
   | "start-now"
@@ -131,13 +314,12 @@ export type ActionState =
   | "kill-run"
   | "retry-stage3"
   | null;
-
-export type ErrorState = {
+type ErrorState = {
   message: string;
   details: string | null;
 };
 
-export type UniversalScanTriggerStatus = {
+type UniversalScanTriggerStatus = {
   next_run_at?: string | null;
   last_run_at?: string | null;
   last_completed_at?: string | null;
@@ -147,7 +329,7 @@ export type UniversalScanTriggerStatus = {
   running?: boolean;
 };
 
-export function triggerOutcome(run: BullpenAutoLiveHistoryItem | undefined) {
+function triggerOutcome(run: BullpenAutoLiveHistoryItem | undefined) {
   if (!run) return "Unknown · no recorded trigger";
   if (run.status === "running" || run.status === "confirming") {
     return "In progress";
@@ -158,7 +340,7 @@ export function triggerOutcome(run: BullpenAutoLiveHistoryItem | undefined) {
   return "Failed";
 }
 
-export function triggerOutcomeClasses(run: BullpenAutoLiveHistoryItem | undefined) {
+function triggerOutcomeClasses(run: BullpenAutoLiveHistoryItem | undefined) {
   const outcome = triggerOutcome(run);
   if (outcome === "Passed") return "text-emerald-700";
   if (outcome === "Failed") return "text-rose-700";
@@ -166,24 +348,73 @@ export function triggerOutcomeClasses(run: BullpenAutoLiveHistoryItem | undefine
   return "text-slate-500";
 }
 
-export type PreviewCandidateRow =
+type InvestMetricDialogState = {
+  kind: InvestMetricDialogKind;
+  run: BullpenAutoLiveRun;
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null;
+  decisions: BullpenAutoLiveDecision[];
+};
+
+type PreviewCandidateRow =
   NonNullable<
     NonNullable<BullpenAutoLiveRunOnceRequest["console_profile"]>["candidate_rows"]
   >[number];
 
-export type PreviewExitEntry =
+type PreviewExitEntry =
   ReturnType<typeof buildBullpenInvestmentDisplay>["activePositionsNeedingAttention"][number];
 
-export const STAGE_TWO_BYPASS_REASON =
+type Stage3PreviewDialogState = {
+  sourceRun: BullpenAutoLiveRun | null;
+  request: BullpenAutoLiveRunOnceRequest | null;
+  decisions: BullpenAutoLiveDecision[];
+  plannedOrders: number;
+  sellPlannedOrders: number;
+  buyPlannedOrders: number;
+};
+
+type ScanCandidateDialogMode =
+  | "all-scanned"
+  | "fresh-opportunities"
+  | "active-positions";
+
+type RunDetailDialogState = {
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+  decisionListTruncated?: boolean;
+  decisionListLimit?: number | null;
+};
+
+type StageTwoInvestEventsDialogState = {
+  rows: BullpenQuestionRow[];
+  stage: WorkflowStageView | null;
+  decisions: BullpenAutoLiveDecision[];
+  updatedAt: string | null;
+  updateUnavailableReason?: string;
+};
+
+type StageTwoLlmRunDialogState = {
+  run: BullpenAutoLiveRun | null;
+  stage: WorkflowStageView;
+  decisions: BullpenAutoLiveDecision[];
+};
+
+type StageTwoBypassDialogState = {
+  reason: string;
+  steps: string[];
+};
+
+const STAGE_TWO_BYPASS_REASON =
   "Stage 3 has already started while Stage 2 is still marked In Queue because this run is reusing the latest saved Stage 2-qualified output instead of launching a new LLM review for the current pass.";
 
-export const STAGE_TWO_BYPASS_RECTIFICATION_STEPS = [
+const STAGE_TWO_BYPASS_RECTIFICATION_STEPS = [
   "Open Stage 2 Output or the latest completed run details and confirm the saved Stage 2 top-10 rows are fresh enough for the current investment decision.",
   "If fresh LLM review is required, stop the active Stage 3 pass, run Stage 2 · Run LLM again, and wait until the Stage 2 container shows Finished.",
   "After Stage 2 finishes, rerun Stage 3 · Exit and Invest so orders are planned from the newly completed Stage 2 snapshot.",
 ];
 
-export function normalizePreviewConfidence(
+function normalizePreviewConfidence(
   value: string | null | undefined,
 ): BullpenAutoLiveDecision["confidence"] {
   if (value === "Low" || value === "Medium" || value === "High") {
@@ -192,7 +423,7 @@ export function normalizePreviewConfidence(
   return "High";
 }
 
-export function normalizePreviewEvidenceStatus(
+function normalizePreviewEvidenceStatus(
   value: string | null | undefined,
 ): BullpenAutoLiveDecision["evidence_status"] {
   if (value === "Low" || value === "Moderate" || value === "Strong") {
@@ -201,20 +432,20 @@ export function normalizePreviewEvidenceStatus(
   return "Strong";
 }
 
-export function normalizePreviewOutcomeSide(
+function normalizePreviewOutcomeSide(
   value: string | null | undefined,
 ): BullpenAutoLiveOutcomeSide {
   return value?.trim().toUpperCase() === "YES" ? "YES" : "NO";
 }
 
-export function computePreviewHoursRemaining(closeTime: string | null | undefined) {
+function computePreviewHoursRemaining(closeTime: string | null | undefined) {
   if (!closeTime) return null;
   const closeMs = Date.parse(closeTime);
   if (!Number.isFinite(closeMs)) return null;
   return Math.max(0, Number(((closeMs - Date.now()) / (60 * 60 * 1000)).toFixed(2)));
 }
 
-export function resolvePreviewBuySide(
+function resolvePreviewBuySide(
   candidate: Pick<PreviewCandidateRow, "llm_yes_odds" | "llm_no_odds">,
 ): BullpenAutoLiveDecision["side"] {
   const yesOdds = candidate.llm_yes_odds ?? Number.NEGATIVE_INFINITY;
@@ -222,7 +453,7 @@ export function resolvePreviewBuySide(
   return yesOdds > noOdds ? "YES" : "NO";
 }
 
-export function buildStage3PreviewBuyDecision({
+function buildStage3PreviewBuyDecision({
   sourceRun,
   candidate,
   index,
@@ -328,7 +559,7 @@ export function buildStage3PreviewBuyDecision({
   };
 }
 
-export function buildStage3PreviewSellDecision({
+function buildStage3PreviewSellDecision({
   sourceRun,
   entry,
   question,
@@ -443,7 +674,7 @@ export function buildStage3PreviewSellDecision({
   };
 }
 
-export function buildStage3PreviewDialogState({
+function buildStage3PreviewDialogState({
   sourceRun,
   plan,
   attentionEntries,
@@ -528,7 +759,7 @@ export function buildStage3PreviewDialogState({
   };
 }
 
-export function resolveStageTwoLlmRunDialogState({
+function resolveStageTwoLlmRunDialogState({
   currentState,
   fallbackRun,
   summary,
@@ -569,7 +800,7 @@ export function resolveStageTwoLlmRunDialogState({
   };
 }
 
-export function preserveCompletedStageEvidence(
+function preserveCompletedStageEvidence(
   previousSummary: BullpenAutoLiveSummaryResponse | null,
   nextSummary: BullpenAutoLiveSummaryResponse,
   trackedRun: BullpenAutoLiveRun | null,
@@ -598,49 +829,100 @@ export function preserveCompletedStageEvidence(
   };
 }
 
-export type Stage2To3StrategyDialogState = {
+type StageTwoDecisionDialogState = {
+  decision: BullpenAutoLiveDecision;
+  llmContext: Record<string, unknown> | null;
+};
+
+type StageTwoDecisionDialogMode = "tag" | "llm-inputs";
+
+type StageTwoLlmEventInputDialogState = {
+  title: string;
+  llmContext: Record<string, unknown> | null;
+};
+
+type Stage2To3StrategyDialogState = {
   sourceKey: string;
   strategyMetadata: BullpenStage2To3StrategyMetadata;
   universeStatus: BullpenStage2UniverseStatus;
 };
 
-export const CONSOLE_PROFILE_ID = "bullpen_console_top10";
+type StageTwoLlmRunBreakupKind =
+  | "active-positions"
+  | "new-opportunities"
+  | "overlap"
+  | "unique-llm-rows";
 
-export const DEFAULT_CONSOLE_ORDER_USD = 5;
+type ScanCandidateDialogState = {
+  displayEvidence: ReturnType<typeof resolveStageOneDisplayEvidence>;
+  hydrationWarning?: string;
+  runId?: string | null;
+  mode: ScanCandidateDialogMode;
+  isIndependentStageOne: boolean;
+  scanExportId: string | null;
+  scanCompletedAt: string | null;
+  totalScanned: number;
+  passedFilterCount: number;
+  rejectedFilterCount: number | null;
+  emptyRowsReason: string | null;
+  candidates: ScanCandidateDialogCandidate[];
+  activePositions: ReturnType<
+    typeof buildBullpenAutoRunWorkflowView
+  >["stages"][number]["activePositionsFound"];
+  activePositionCount: number;
+  claimablePositionCount: number;
+};
 
-export const CONSOLE_MAX_ACTIVE_POSITIONS =
+type ScanCandidateDialogCandidate = ReturnType<
+  typeof buildBullpenAutoRunWorkflowView
+>["stages"][number]["scanCandidates"][number] & {
+  llmYesOdds: number | null;
+  llmNoOdds: number | null;
+  returnsPerDay: number | null;
+  amountToBeInvested: number | null;
+};
+
+const CONSOLE_PROFILE_ID = "bullpen_console_top10";
+const DEFAULT_CONSOLE_ORDER_USD = 5;
+const CONSOLE_MAX_ACTIVE_POSITIONS =
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS;
+const DEFAULT_LLM_EXECUTION_MODE: BullpenLlmExecutionMode = "chunked_parallel";
+const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
+// The summary already includes the recent runs and decisions. Refreshing it at
+// this cadence keeps run progress visible without saturating the backend while
+// a long-running Auto-Live task is active.
 
-export const DEFAULT_LLM_EXECUTION_MODE: BullpenLlmExecutionMode = "chunked_parallel";
+const POLL_INTERVAL_MS = 2_000;
+// The run summary refreshes quickly while a run is active. Updating this very large
+// card every second only changes elapsed labels, so a five-second cadence
+// avoids needless whole-card renders while retaining useful timing feedback.
+const RUN_TIMER_INTERVAL_MS = 5_000;
+// Production database pool pressure can briefly delay the otherwise lightweight
+// persisted-status read. Match the backend's bounded recovery window so a
+// healthy schedule does not paint as unavailable after only two seconds.
+const AUTO_RUN_STATUS_TIMEOUT_MS = 12_000;
+const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
+const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
+const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;
+const AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3;
 
-export const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
-
-export const POLL_INTERVAL_MS = 2_000;
-
-export const AUTO_RUN_STATUS_TIMEOUT_MS = 12_000;
-
-export const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
-
-export const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
-
-export const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;
-
-export const AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3;
-
-export function markBullpenAutoRunPerformance(name: string) {
+function markBullpenAutoRunPerformance(name: string) {
   if (typeof performance === "undefined") return;
   if (performance.getEntriesByName(name, "mark").length > 0) return;
   performance.mark(name);
 }
 
-export const persistedAutoRunStatusRequestDedupers = new Map<
+// React Strict Mode may mount this card twice in development. Keep one
+// resource-level request for the lightweight endpoint so that neither a
+// remount nor a manual retry fans out duplicate status reads.
+const persistedAutoRunStatusRequestDedupers = new Map<
   string,
   ReturnType<
     typeof createAbortableBullpenAutoRunRequestDeduper<BullpenAutoRunStatusData>
   >
 >();
 
-export function getPersistedAutoRunStatus(scope: string, signal: AbortSignal) {
+function getPersistedAutoRunStatus(scope: string, signal: AbortSignal) {
   let dedupeRequest = persistedAutoRunStatusRequestDedupers.get(scope);
   if (!dedupeRequest) {
     dedupeRequest = createAbortableBullpenAutoRunRequestDeduper<
@@ -665,12 +947,16 @@ export function getPersistedAutoRunStatus(scope: string, signal: AbortSignal) {
   return dedupeRequest(signal);
 }
 
-export function readBrowserCachedAutoRunStatus(cacheKey: string | null) {
+function isRequestAbort(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function readBrowserCachedAutoRunStatus(cacheKey: string | null) {
   if (typeof window === "undefined" || !cacheKey) return null;
   return readCachedBullpenAutoRunStatus(window.sessionStorage, {}, cacheKey);
 }
 
-export function saveBrowserCachedAutoRunStatus(
+function saveBrowserCachedAutoRunStatus(
   data: BullpenAutoRunStatusData,
   cacheKey: string | null,
 ) {
@@ -685,7 +971,7 @@ export function saveBrowserCachedAutoRunStatus(
   return savedAt;
 }
 
-export function formatScheduleInputFromDate(date: Date) {
+function formatScheduleInputFromDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata",
     hour: "2-digit",
@@ -702,7 +988,7 @@ export function formatScheduleInputFromDate(date: Date) {
   return `${byType.hour}:${byType.minute}:${byType.second} ${byType.day} ${byType.month}, ${byType.year}`;
 }
 
-export function formatDateTimeLocalValue(date: Date) {
+function formatDateTimeLocalValue(date: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
@@ -718,7 +1004,7 @@ export function formatDateTimeLocalValue(date: Date) {
   return `${byType.year}-${byType.month}-${byType.day}T${byType.hour}:${byType.minute}`;
 }
 
-export function parseScheduleInputToDateTimeLocalValue(value: string) {
+function parseScheduleInputToDateTimeLocalValue(value: string) {
   const normalized = value.trim();
   if (!normalized || normalized.toLowerCase() === "now") {
     return formatDateTimeLocalValue(new Date());
@@ -755,7 +1041,7 @@ export function parseScheduleInputToDateTimeLocalValue(value: string) {
   return `${datePart}T${timePart}`;
 }
 
-export function formatScheduleInputFromDateTimeLocal(value: string) {
+function formatScheduleInputFromDateTimeLocal(value: string) {
   if (!value) return "";
   const [datePart, timePart] = value.split("T");
   if (!datePart || !timePart) return value;
@@ -767,7 +1053,7 @@ export function formatScheduleInputFromDateTimeLocal(value: string) {
   return formatScheduleInputFromDate(date);
 }
 
-export function normalizeError(error: unknown) {
+function normalizeError(error: unknown) {
   if (error instanceof APIError) {
     const { statusText, message, details } = splitApiErrorSummary(error);
     return {
@@ -785,7 +1071,21 @@ export function normalizeError(error: unknown) {
   } satisfies ErrorState;
 }
 
-export function formatOddsPair(yesOdds: number | null, noOdds: number | null) {
+function formatIstDateTime(value: string | null | undefined) {
+  return formatApiTimestamp(value, {
+    emptyValue: "—",
+    timeZone: "Asia/Kolkata",
+    timeZoneName: "short",
+    second: "2-digit",
+  });
+}
+
+function formatOddsPercent(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatOddsPair(yesOdds: number | null, noOdds: number | null) {
   return (
     <div className="space-y-1 text-xs font-semibold">
       <div>
@@ -799,7 +1099,38 @@ export function formatOddsPair(yesOdds: number | null, noOdds: number | null) {
   );
 }
 
-export type ConsoleTradeAmountView = {
+function getLlmOddsHighlightClass(value: number | null) {
+  if (value === null) return "font-semibold text-violet-700";
+  if (value >= 95)
+    return "rounded-md bg-lime-400 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 90)
+    return "rounded-md bg-lime-300 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 85)
+    return "rounded-md bg-emerald-300 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 80)
+    return "rounded-md bg-emerald-200 px-2 py-1 font-extrabold text-slate-950";
+  return "font-semibold text-violet-700";
+}
+
+function formatReturnsPerDay(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+}
+
+function formatMoney(value: number | null) {
+  if (value === null) return "—";
+  return `$${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+}
+
+function formatUsdCost(value: number | null) {
+  if (value === null) return "—";
+  return `$${value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  })}`;
+}
+
+type ConsoleTradeAmountView = {
   tradeAmountUsd: number | null;
   cashInHandUsd: number | null;
   activePositions: number | null;
@@ -808,7 +1139,7 @@ export type ConsoleTradeAmountView = {
   source: "live" | "last-calculated" | "unavailable";
 };
 
-export function calculateConsoleTradeAmountUsd(
+function calculateConsoleTradeAmountUsd(
   cashInHandUsd: number,
   availableSlots: number,
 ) {
@@ -816,7 +1147,7 @@ export function calculateConsoleTradeAmountUsd(
   return Number((cashInHandUsd / availableSlots).toFixed(2));
 }
 
-export function resolvePositiveConsoleOrderUsd(
+function resolvePositiveConsoleOrderUsd(
   ...candidates: Array<number | null | undefined>
 ) {
   return (
@@ -829,7 +1160,7 @@ export function resolvePositiveConsoleOrderUsd(
   );
 }
 
-export function buildConsoleTradeAmountView({
+function buildConsoleTradeAmountView({
   cashInHandUsd,
   activePositions,
   lastCalculatedTradeAmountUsd,
@@ -888,7 +1219,7 @@ export function buildConsoleTradeAmountView({
   };
 }
 
-export function parseLlmEventsPerPrompt(value: string) {
+function parseLlmEventsPerPrompt(value: string) {
   const normalized = value.trim();
   if (!/^\d+$/.test(normalized)) return null;
   const parsed = Number.parseInt(normalized, 10);
@@ -898,7 +1229,7 @@ export function parseLlmEventsPerPrompt(value: string) {
   return parsed;
 }
 
-export function buildLlmExecutionSummary(
+function buildLlmExecutionSummary(
   mode: BullpenLlmExecutionMode,
   eventsPerPrompt: number,
 ) {
@@ -908,7 +1239,7 @@ export function buildLlmExecutionSummary(
   return `Stage 2 will use Batched parallel with up to ${eventsPerPrompt} events per prompt on the next run.`;
 }
 
-export function areProviderTargetsEqual(
+function areProviderTargetsEqual(
   left: ProviderModelTarget[],
   right: ProviderModelTarget[],
 ) {
@@ -919,7 +1250,7 @@ export function areProviderTargetsEqual(
   });
 }
 
-export function serializeProviderTargets(targets: ProviderModelTarget[]) {
+function serializeProviderTargets(targets: ProviderModelTarget[]) {
   return JSON.stringify(
     targets.map((target) => ({
       provider: target.provider,
@@ -928,7 +1259,7 @@ export function serializeProviderTargets(targets: ProviderModelTarget[]) {
   );
 }
 
-export function normalizeStoredProviderTarget(
+function normalizeStoredProviderTarget(
   value: unknown,
 ): ProviderModelTarget | null {
   if (!value || typeof value !== "object") {
@@ -950,7 +1281,7 @@ export function normalizeStoredProviderTarget(
   return { provider, model };
 }
 
-export function readLegacyBullpenLlmTargetsFromStorage() {
+function readLegacyBullpenLlmTargetsFromStorage() {
   if (typeof window === "undefined") return [];
 
   try {
@@ -981,7 +1312,7 @@ export function readLegacyBullpenLlmTargetsFromStorage() {
   }
 }
 
-export function resolveCanonicalStage2TargetSelection(
+function resolveCanonicalStage2TargetSelection(
   selectedTargets: ProviderModelTarget[],
   serverTargets: ProviderModelTarget[],
   legacyTargets: ProviderModelTarget[] | null,
@@ -995,7 +1326,7 @@ export function resolveCanonicalStage2TargetSelection(
   return legacyTargets ?? [];
 }
 
-export function missingStage2TargetsError(): ErrorState {
+function missingStage2TargetsError(): ErrorState {
   return {
     message:
       "Select at least one LLM before starting Auto-Live Stage 2. The saved target list is empty.",
@@ -1003,7 +1334,34 @@ export function missingStage2TargetsError(): ErrorState {
   };
 }
 
-export function buildWorkflowPortfolioPositionFallback(
+function formatPriceCents(value: number | null) {
+  if (value === null) return "—";
+  return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
+}
+
+function formatShares(value: number | null) {
+  if (value === null) return "—";
+  return value.toLocaleString("en-IN", { maximumFractionDigits: 6 });
+}
+
+function readStageOutputNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+type WorkflowStageView = ReturnType<
+  typeof buildBullpenAutoRunWorkflowView
+>["stages"][number];
+
+function isWorkflowActivePosition(position: WorkflowStageView["activePositionsFound"][number]) {
+  return !position.isClaimable && (position.classification === null || position.classification === "active");
+}
+
+function buildWorkflowPortfolioPositionFallback(
   positions: BullpenActivePositionView[],
 ): WorkflowStageView["activePositionsFound"] {
   return positions.map((position) => ({
@@ -1028,13 +1386,13 @@ export function buildWorkflowPortfolioPositionFallback(
   }));
 }
 
-export function readIndependentScanNumber(value: string | null) {
+function readIndependentScanNumber(value: string | null) {
   if (!value) return null;
   const parsed = Number(value.replace(/[^0-9.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-export function buildIndependentStageOneView(
+function buildIndependentStageOneView(
   snapshot: BullpenScanSnapshot,
   positions: BullpenActivePositionView[],
 ): WorkflowStageView {
@@ -1137,7 +1495,46 @@ export function buildIndependentStageOneView(
   };
 }
 
-export function getStageOneEvidenceTimestamp(stage: WorkflowStageView) {
+function getStageActivePositionCounts(stage: WorkflowStageView) {
+  const claimableFromOutputs = Array.isArray(stage.outputs.available_for_claim)
+    ? stage.outputs.available_for_claim.length
+    : null;
+  const claimableFromSnapshot = stage.activePositionsFound.filter(
+    (position) => position.isClaimable,
+  ).length;
+  const openFromOutputs =
+    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+    readStageOutputNumber(stage.outputs.active_position_rows) ??
+    readStageOutputNumber(stage.outputs.active_positions_total);
+  const openFromSnapshot = stage.activePositionsFound.length;
+
+  return {
+    open: openFromOutputs ?? openFromSnapshot,
+    claimable: claimableFromOutputs ?? claimableFromSnapshot,
+  };
+}
+
+function getStageOneStats(stage: WorkflowStageView) {
+  const { open: activePositions, claimable: claimablePositions } =
+    getStageActivePositionCounts(stage);
+  const totalScanned =
+    readStageOutputNumber(stage.outputs.scanned_candidates) ??
+    readStageOutputNumber(stage.outputs.total_items) ??
+    stage.scanCandidates.length;
+  const passedFilters =
+    readStageOutputNumber(stage.outputs.accepted_candidates_count) ??
+    readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
+    stage.scanCandidates.length;
+
+  return { activePositions, claimablePositions, totalScanned, passedFilters };
+}
+
+function stageOneNotEvaluated(stage: WorkflowStageView) {
+  return ["failed", "blocked", "aborted", "cancelled"].includes(String(stage.outputs.phase_status))
+    && !stage.outputs.filters_completed_at;
+}
+
+function getStageOneEvidenceTimestamp(stage: WorkflowStageView) {
   const timestamps = [
     readStageOutputString(stage.outputs.filters_completed_at),
     stage.timerCompletedAt,
@@ -1152,7 +1549,7 @@ export function getStageOneEvidenceTimestamp(stage: WorkflowStageView) {
   return Number.NaN;
 }
 
-export function selectStageOneDisplayStage({
+function selectStageOneDisplayStage({
   workflowStage,
   independentStage,
   preferIndependent,
@@ -1171,7 +1568,1537 @@ export function selectStageOneDisplayStage({
     : workflowStage;
 }
 
-export function resolveStage2To3StrategyDialogOutputs(
+function getStageOneIncludedActiveCount(
+  stage: WorkflowStageView,
+  stats: ReturnType<typeof getStageOneStats>,
+  llmStage?: WorkflowStageView,
+  decisions: BullpenAutoLiveDecision[] = [],
+  run: BullpenAutoLiveRun | null = null,
+) {
+  if (stats.activePositions === 0 || stats.passedFilters === 0) return 0;
+
+  if (llmStage) {
+    const llmStats = getStageTwoStats(llmStage, decisions, run);
+    const aggregatesDescribeSameStageOneInput =
+      llmStats.llmRanOn > 0 &&
+      llmStats.activePositions === stats.activePositions &&
+      llmStats.newOpportunities === stats.passedFilters;
+
+    if (aggregatesDescribeSameStageOneInput) {
+      return Math.min(
+        stats.activePositions,
+        stats.passedFilters,
+        Math.max(
+          0,
+          stats.activePositions + stats.passedFilters - llmStats.llmRanOn,
+        ),
+      );
+    }
+  }
+
+  const activeRows = stage.activePositionsFound.filter(
+    (position) => !position.isClaimable,
+  );
+  // Compact historical projections may retain aggregate counts without the
+  // corresponding event rows. In that case the exact overlap is unknowable,
+  // so omit the suffix instead of presenting the full active count as though
+  // every active position passed the fresh-event filters.
+  if (
+    activeRows.length !== stats.activePositions ||
+    stage.scanCandidates.length !== stats.passedFilters
+  ) {
+    return null;
+  }
+
+  const passedFilterKeys = new Set(
+    stage.scanCandidates
+      .flatMap((candidate) => [
+        candidate.marketId,
+        candidate.slug,
+        candidate.marketUrl,
+        candidate.question,
+      ])
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key)),
+  );
+
+  return activeRows.filter((position) =>
+    [
+      position.marketId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ].some((value) => {
+      const key = normalizeMatchKey(value);
+      return key ? passedFilterKeys.has(key) : false;
+    }),
+  ).length;
+}
+
+function getStageTwoStats(
+  stage: WorkflowStageView,
+  decisions: BullpenAutoLiveDecision[] = [],
+  run: BullpenAutoLiveRun | null = null,
+) {
+  const { open: activePositions, claimable: claimablePositions } =
+    getStageActivePositionCounts(stage);
+  const explicitNewOpportunities =
+    readStageOutputNumber(stage.outputs.stage1_accepted_candidate_count) ??
+    readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
+    readStageOutputNumber(stage.inputs.candidate_rows_before_llm) ??
+    (stage.scanCandidates.length > 0 ? stage.scanCandidates.length : null);
+  const llmRanOn =
+    readStageOutputNumber(stage.outputs.llm_candidate_count) ??
+    readStageOutputNumber(stage.outputs.total_items) ??
+    activePositions + (explicitNewOpportunities ?? 0);
+  // A compact or legacy run can retain the authoritative LLM total while its
+  // Stage 1 row arrays/count aliases are absent. Keep the displayed equation
+  // internally consistent instead of reporting “44 unique rows (0 + 0)”.
+  const newOpportunities =
+    explicitNewOpportunities ?? Math.max(0, llmRanOn - activePositions);
+
+  const llmsCompleted = getStageTwoCompletedLlmCount(stage);
+  const llmOutcomeCounts = getStageTwoLlmOutcomeCounts(stage, llmsCompleted);
+  const stageTwoTargets = getStageTwoLlmTargets(stage);
+  const llmsSelected =
+    readStageOutputNumber(stage.outputs.llm_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_selected_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_target_count) ??
+    readStageOutputNumber(stage.inputs.llm_provider_target_count) ??
+    readStageOutputNumber(stage.inputs.llm_selected_target_count) ??
+    readStageOutputNumber(stage.inputs.llm_target_count) ??
+    (stageTwoTargets.length > 0
+      ? stageTwoTargets.filter((target) => hasStageTwoLlmIdentity(target)).length
+      : null) ??
+    Math.max(llmsCompleted, 0);
+  const actionableContract = readStageTwoActionableDisplayContract(stage.outputs);
+  const newEventsToInvestIn = actionableContract.buyCount ?? 0;
+
+  return {
+    activePositions,
+    claimablePositions,
+    newOpportunities,
+    llmRanOn,
+    llmsCompleted,
+    llmsPassed: llmOutcomeCounts.passed,
+    llmsFailed: llmOutcomeCounts.failed,
+    llmsSelected,
+    newEventsToInvestIn,
+  };
+}
+
+function buildStageTwoInvestEventsDialogState({
+  run,
+  decisions,
+}: {
+  run: BullpenAutoLiveRun | null;
+  decisions: BullpenAutoLiveDecision[];
+}): StageTwoInvestEventsDialogState | null {
+  if (!run) return null;
+
+  const workflowView = buildBullpenAutoRunWorkflowView(run);
+  const scanWorkflowStage =
+    workflowView.stages.find((stage) => stage.key === "scan") ?? null;
+  const llmWorkflowStage =
+    workflowView.stages.find((stage) => stage.key === "llm") ?? null;
+
+  if (!llmWorkflowStage) {
+    return {
+      rows: [],
+      stage: null,
+      decisions,
+      updatedAt: null,
+      updateUnavailableReason:
+        "Timestamp unavailable because this run did not save a Stage 2 Events Summary.",
+    };
+  }
+
+  const scanStageResult = getRunWorkflowStageResult(run, "scan", 1);
+  const llmStageResult = getRunWorkflowStageResult(run, "llm", 2);
+  const reviewedRows = getStageTwoLlmReviewedRows(
+    llmWorkflowStage,
+    scanWorkflowStage?.scanCandidates ?? [],
+    decisions,
+  );
+  const eventsSummaryAsOfTimestamp = resolveStageTwoHistoricalAsOfTimestamp({
+    reviewedRows,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+    stageCompletedAt:
+      llmStageResult?.completed_at ?? llmWorkflowStage.timerCompletedAt,
+    runStartedAt: run.started_at ?? llmWorkflowStage.timerStartedAt,
+    runCompletedAt: run.completed_at ?? null,
+    nowMs: Date.now(),
+  });
+  const eventsSummaryRows = buildHistoricalStageTwoEventsSummaryRows({
+    reviewedRows,
+    decisions,
+    runId: run.id,
+    asOfTimestamp: eventsSummaryAsOfTimestamp,
+  });
+  const updatedAt = resolveStageTwoEventsSummaryUpdatedAt({
+    reviewedRows,
+    stageCompletedAt:
+      llmStageResult?.completed_at ?? llmWorkflowStage.timerCompletedAt,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+  });
+  const actionableContract = readStageTwoActionableDisplayContract(
+    llmWorkflowStage.outputs,
+  );
+  const authoritativeBuyMarketIds = actionableContract.buyMarketIds;
+
+  const authoritativeBuyRows = authoritativeBuyMarketIds
+    .map((marketId) => {
+      const normalizedMarketId = normalizeMatchKey(marketId);
+      if (!normalizedMarketId) return null;
+      return (
+        eventsSummaryRows.find((row) =>
+          getStageTwoSummaryRowMatchKeys(row).includes(normalizedMarketId),
+        ) ?? null
+      );
+    })
+    .filter((row): row is BullpenQuestionRow => row !== null);
+
+  return {
+    stage: llmWorkflowStage,
+    decisions,
+    rows: actionableContract.hasExactMarketIds ? authoritativeBuyRows : [],
+    updatedAt,
+    updateUnavailableReason: updatedAt
+      ? undefined
+      : "Timestamp unavailable because this view is reconstructed from the saved Stage 2 Events Summary.",
+  };
+}
+
+function getStageTwoLlmOutcomeCounts(
+  stage: WorkflowStageView,
+  completedCount: number,
+) {
+  const explicitPassed =
+    readStageOutputNumber(stage.outputs.llm_usable_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_passed_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_successful_provider_target_count);
+  const explicitFailed =
+    readStageOutputNumber(stage.outputs.llm_failed_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llm_failed_model_count);
+  if (explicitPassed !== null || explicitFailed !== null) {
+    const passed =
+      explicitPassed ?? Math.max(0, completedCount - (explicitFailed ?? 0));
+    const failed = explicitFailed ?? Math.max(0, completedCount - passed);
+    return { passed, failed };
+  }
+
+  const targetRuns = getStageTwoLlmTargetRuns(stage);
+  if (targetRuns.length) {
+    const validTargetRuns = targetRuns.filter((run) => hasStageTwoLlmIdentity(run));
+    const failed = validTargetRuns.filter((run) =>
+      isFailedStageTwoTargetRun(run),
+    ).length;
+    const passed = validTargetRuns.filter((run) =>
+      isUsableStageTwoTargetRun(run),
+    ).length;
+    return { passed, failed };
+  }
+
+  return { passed: completedCount, failed: 0 };
+}
+
+function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
+  const targetRuns = getStageTwoLlmTargetRuns(stage);
+  if (targetRuns.length) {
+    return targetRuns.filter((run) => {
+      if (!hasStageTwoLlmIdentity(run)) return false;
+      const status = normalizeStageTwoRunStatus(
+        readLlmContextString(run, "status"),
+      );
+      return (
+        status === "completed" || status === "partial" || status === "failed"
+      );
+    }).length;
+  }
+
+  const completedFromOutput =
+    readStageOutputNumber(stage.outputs.llm_completed_provider_target_count) ??
+    readStageOutputNumber(stage.outputs.llms_completed) ??
+    readStageOutputNumber(stage.outputs.llm_completed_model_count);
+  if (completedFromOutput !== null) return completedFromOutput;
+
+  const completedTargets = new Set<string>();
+  const addTarget = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const provider =
+      typeof record.provider === "string" ? record.provider.trim() : "";
+    const model = typeof record.model === "string" ? record.model.trim() : "";
+    if (provider || model) completedTargets.add(`${provider}/${model}`);
+  };
+
+  const reviewedCandidates = stage.outputs.llm_reviewed_candidates;
+  if (Array.isArray(reviewedCandidates)) {
+    reviewedCandidates.forEach((candidate) => {
+      if (!candidate || typeof candidate !== "object") return;
+      const llmOutputs = (candidate as Record<string, unknown>).llm_outputs;
+      if (Array.isArray(llmOutputs)) llmOutputs.forEach(addTarget);
+    });
+  }
+
+  return completedTargets.size;
+}
+
+function formatStageTwoInvestExecutionStatus(decision: BullpenAutoLiveDecision) {
+  if (decision.order_plan?.action === "buy") {
+    if (
+      !isSubmittedOrExecutedInvestOrderPlan(decision.order_plan) &&
+      [
+        "submitted",
+        "confirming",
+        "partially_filled",
+        "settlement_pending",
+        "confirmed",
+        "filled",
+      ].includes(decision.order_plan.status)
+    ) {
+      return `${decision.order_plan.status.replaceAll("_", " ")} · no submission evidence`;
+    }
+    return decision.order_plan.status.replaceAll("_", " ");
+  }
+  if (
+    decision.decision === "BUY_NEW" &&
+    decision.stage3_result === "SELECTED"
+  ) {
+    return "queued for Stage 3";
+  }
+  return decision.decision.replaceAll("_", " ");
+}
+
+function getStageTwoInvestExecutionTone(
+  decision: BullpenAutoLiveDecision,
+) {
+  const status = decision.order_plan?.status ?? null;
+  if (isSubmittedOrExecutedInvestOrderPlan(decision.order_plan)) {
+    return "success";
+  }
+  if (
+    status === "failed" ||
+    status === "failed_permanent" ||
+    status === "cancelled" ||
+    status === "rejected" ||
+    status === "timed_out" ||
+    status === "deferred" ||
+    status === "rpc_rate_limited" ||
+    status === "waiting_for_collateral" ||
+    status === "skipped"
+  ) {
+    return "warning";
+  }
+  if (decision.decision === "BUY_NEW") {
+    return "info";
+  }
+  return "neutral";
+}
+
+function formatStage2TopTenHandoffOutcome(row: BullpenStage2TopTenHandoffRow) {
+  if (row.missingFromStage3) return "Missing from Stage 3";
+  return row.displayDecision.stage3_result?.replaceAll("_", " ") ?? "Pending";
+}
+
+function buildStage2TopTenEventsSummaryRows(
+  rows: BullpenStage2TopTenHandoffRow[],
+) {
+  return rows.map((row) => {
+    const plannedAmount =
+      row.displayDecision.order_plan?.order_size_usd ??
+      (row.displayDecision.target_exposure_usd > 0
+        ? row.displayDecision.target_exposure_usd
+        : row.question.amountToBeInvested);
+
+    return {
+      ...row.question,
+      amountToBeInvested:
+        plannedAmount && plannedAmount > 0
+          ? plannedAmount
+          : row.question.amountToBeInvested,
+    };
+  });
+}
+
+function Stage2TopTenEventsSummaryTable({
+  rows,
+  run,
+  displayDensity = "default",
+  emptyMessage,
+  headerContent,
+  testId,
+}: {
+  rows: BullpenStage2TopTenHandoffRow[];
+  run: BullpenAutoLiveRun | null;
+  displayDensity?: "default" | "compact";
+  emptyMessage: string;
+  headerContent?: ReactNode;
+  testId?: string;
+}) {
+  const [sortState, setSortState] = useState<BullpenTableSortState>({
+    key: "returnsPerDay",
+    direction: "desc",
+  });
+  const isCompact = displayDensity === "compact";
+  const questionRows = buildStage2TopTenEventsSummaryRows(rows);
+  const rowByQuestionId = new Map(
+    questionRows.map((question, index) => [question.id, rows[index]]),
+  );
+  const extraColumns: BullpenQuestionsTableExtraColumn[] = [
+    {
+      id: "stage3-status",
+      label: "Stage 3 status",
+      width: 190,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const executionTone = row.missingFromStage3
+          ? "warning"
+          : getStageTwoInvestExecutionTone(row.displayDecision);
+        const executionStatus = row.missingFromStage3
+          ? "Missing from Stage 3"
+          : formatStageTwoInvestExecutionStatus(row.displayDecision);
+        const badgeClassName =
+          executionTone === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : executionTone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : executionTone === "info"
+                ? "border-sky-200 bg-sky-50 text-sky-800"
+                : "border-slate-200 bg-white text-slate-700";
+
+        return (
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Rank #{row.rank}
+            </p>
+            <span
+              className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize ${badgeClassName}`}
+            >
+              {executionStatus}
+            </span>
+            <p
+              className={`text-xs text-slate-500${isCompact ? " line-clamp-1" : ""}`}
+              title={
+                row.missingFromBuyPlan
+                  ? "Still waiting for a concrete Step 2 buy plan."
+                  : "Concrete Step 2 buy plan was created."
+              }
+            >
+              {row.missingFromBuyPlan ? "Plan pending" : "Plan ready"}
+            </p>
+          </div>
+        );
+      },
+    },
+    {
+      id: "stage3-outcome",
+      label: "Stage 3 outcome",
+      width: 200,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+
+        return (
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+            <p
+              className={`font-semibold text-slate-950${isCompact ? " line-clamp-1" : ""}`}
+              title={formatStage2TopTenHandoffOutcome(row)}
+            >
+              {formatStage2TopTenHandoffOutcome(row)}
+            </p>
+            <p
+              className={`text-xs text-slate-500${isCompact ? " line-clamp-1" : ""}`}
+              title={`${decision.decision.replaceAll("_", " ")} · Side ${decision.side}`}
+            >
+              {decision.decision.replaceAll("_", " ")} · Side {decision.side}
+            </p>
+            {isCompact ? null : (
+              <p className="text-xs text-slate-500">
+                {decision.risk_status.replaceAll("_", " ")}
+              </p>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: "order-blocker",
+      label: "Order / blocker",
+      width: 300,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+
+        if (!decision.order_plan) {
+          return (
+            <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+              <p className="truncate font-semibold text-slate-950">No order planned</p>
+              <p
+                className={`text-xs leading-5 text-slate-600${isCompact ? " line-clamp-2" : ""}`}
+                title={row.reason}
+              >
+                {row.reason}
+              </p>
+            </div>
+          );
+        }
+
+        return (
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+            <p className="font-semibold capitalize text-slate-950">
+              {decision.order_plan.status.replaceAll("_", " ")}
+            </p>
+            <p className="text-xs text-slate-500">
+              {formatMoney(decision.order_plan.order_size_usd)} at{" "}
+              {formatPriceCents(decision.order_plan.limit_price_cents)}
+            </p>
+            {isCompact ? (
+              <p
+                className="line-clamp-2 text-xs leading-5 text-slate-600"
+                title={getPlannedOrderBrief(decision)}
+              >
+                {getPlannedOrderBrief(decision)}
+              </p>
+            ) : (
+              <div className="text-xs leading-5 text-slate-600">
+                <ErrorCodeWithDetails
+                  detail={decision.order_plan.detail}
+                  detailClassName="text-slate-600"
+                />
+              </div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: "details",
+      label: "Details",
+      width: 340,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+        const rationale =
+          decision.rationale || decision.reason || row.question.llmNotes;
+        const executionReason = row.reason;
+
+        return (
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+            <p
+              className={
+                isCompact
+                  ? "line-clamp-2 text-xs leading-5 text-slate-700"
+                  : "text-sm leading-6 text-slate-700"
+              }
+              title={rationale || "No in-depth details were captured for this row."}
+            >
+              {rationale || "No in-depth details were captured for this row."}
+            </p>
+            {executionReason !== rationale && !isCompact ? (
+              <p className="text-xs leading-5 text-slate-500">
+                <span className="font-semibold text-slate-700">
+                  Execution blocker / detail:
+                </span>{" "}
+                {executionReason}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div data-testid={testId}>
+      <BullpenQuestionsTable
+        snapshot={null}
+        rowsOverride={questionRows}
+        emptyMessage={emptyMessage}
+        headerContent={headerContent}
+        updatedAt={run?.completed_at ?? run?.started_at ?? null}
+        updateUnavailableReason="Timestamp unavailable because this view is reconstructed from the saved Stage 2 Top 10 handoff."
+        scrollResetKey={`${run?.id ?? "stage2-top10"}-${rows.length}`}
+        isLoading={false}
+        historicalRuns={run ? [run] : undefined}
+        historicalDecisions={rows.map((row) => row.decision ?? row.displayDecision)}
+        visibleColumnIds={[
+          "serialNumber",
+          "question",
+          "closeTime",
+          "category",
+          "yesOdds",
+          "llmYesOdds",
+          "returnsPerDay",
+          "amountToBeInvested",
+        ]}
+        persistColumnPreferences={false}
+        showPresetFilters={false}
+        displayDensity={displayDensity}
+        rowHighlightById={Object.fromEntries(
+          rows.map((row) => [
+            row.question.id,
+            row.displayDecision.decision === "HOLD"
+              ? "active-retained"
+              : row.displayDecision.decision === "EXIT"
+                ? "event-exit"
+                : "new-opportunity",
+          ] as const),
+        )}
+        extraColumns={extraColumns}
+        onSortChange={(key) =>
+          setSortState((current) => ({
+            key,
+            direction:
+              current.key === key && current.direction === "desc"
+                ? "asc"
+                : "desc",
+          }))
+        }
+        selectedQuestionIds={new Set<string>()}
+        selectionEnabled={false}
+        sortState={sortState}
+        onToggleQuestion={() => undefined}
+        onToggleSelectAll={() => undefined}
+      />
+    </div>
+  );
+}
+function StageOneRunStats({
+  stage,
+  llmStage,
+  decisions = [],
+  run = null,
+  hideNumbers = false,
+  filtersOnly = false,
+  renderInteractiveRows = false,
+  onOpenScanCandidateDialog,
+  onOpenScanFilters,
+  onOpenExcelHistory,
+  onRecoverLegacyExport,
+  workspaceProfile = "bullpen007",
+}: {
+  stage: WorkflowStageView;
+  llmStage?: WorkflowStageView;
+  decisions?: BullpenAutoLiveDecision[];
+  run?: BullpenAutoLiveRun | null;
+  hideNumbers?: boolean;
+  filtersOnly?: boolean;
+  renderInteractiveRows?: boolean;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
+  onOpenScanFilters?: () => void;
+  onOpenExcelHistory?: () => void;
+  onRecoverLegacyExport?: (
+    exportScope: "filtered" | "all-scanned",
+  ) => void;
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
+  const stats = getStageOneStats(stage);
+  const includedActiveCount = getStageOneIncludedActiveCount(
+    stage,
+    stats,
+    llmStage,
+    decisions,
+    run,
+  );
+  hideNumbers = hideNumbers || stageOneNotEvaluated(stage);
+  const includedActiveLabel =
+    !hideNumbers && includedActiveCount !== null
+      ? ` (Includes ${includedActiveCount} active event${includedActiveCount === 1 ? "" : "s"})`
+      : "";
+  const displayStat = (value: number) => (hideNumbers ? "—" : value);
+  const scanScope = readStageOutputString(stage.outputs.scan_scope);
+  const scanCompleteness = readStageOutputString(
+    stage.outputs.scan_completeness,
+  );
+  const fullUniverseMetrics = [
+    ["Bullpen trending rows", stage.outputs.bullpen_trending_rows],
+    ["Complete catalogue markets", stage.outputs.complete_catalogue_markets],
+    ["Active wallet positions", stage.outputs.active_wallet_positions],
+    ["Filter-eligible markets", stage.outputs.accepted_candidates_count],
+    [
+      "Wallet markets added to union",
+      stage.outputs.active_wallet_markets_added_to_union,
+    ],
+    ["Missing wallet markets", stage.outputs.missing_active_market_count],
+  ] as const;
+  const rowClassName = renderInteractiveRows
+    ? "block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
+    : undefined;
+  const filteredEventRows = buildScanCandidateDialogRows({
+    candidates: stage.scanCandidates,
+    run,
+    decisions,
+  });
+  const allScannedEventRows = buildScanCandidateDialogRows({
+    candidates: stage.scannedCandidates,
+    run,
+    decisions,
+  });
+  const isIndependentStageOne = stage.outputs.independent_stage1_scan === true;
+  const independentExportId = readStageOutputString(
+    stage.outputs.scan_export_id,
+  );
+  const downloadAllScannedEvents = () => {
+    if (isIndependentStageOne) {
+      if (independentExportId) {
+        downloadIndependentStageOneExcel(
+          independentExportId,
+          "all-scanned",
+          workspaceProfile,
+        );
+      } else {
+        onRecoverLegacyExport?.("all-scanned");
+      }
+      return;
+    }
+    if (run?.id) {
+      downloadCompleteStageOneRunExcel(run.id);
+      return;
+    }
+    void downloadStageOneAllScannedEventsExcel({
+      candidates: allScannedEventRows,
+      scanCompletedAt: stage.timerCompletedAt,
+    });
+  };
+  const allScannedDownloadUnavailable =
+    hideNumbers ||
+    stats.totalScanned === 0 ||
+    (isIndependentStageOne
+      ? !independentExportId && !onRecoverLegacyExport
+      : !run?.id && allScannedEventRows.length === 0);
+  const isLegacyExportRecovery =
+    isIndependentStageOne && !independentExportId;
+  const filteredDownloadUnavailable =
+    hideNumbers ||
+    stats.passedFilters === 0 ||
+    (isIndependentStageOne
+      ? !independentExportId && !onRecoverLegacyExport
+      : !run?.id && filteredEventRows.length === 0);
+  const filteredDownloadLabel = hideNumbers
+    ? "Download Excel · filtered event count unknown"
+    : `Download Excel with all ${stats.passedFilters} filtered events`;
+  const allScannedDownloadLabel = hideNumbers
+    ? "Download Excel · scanned event count unknown"
+    : isLegacyExportRecovery
+    ? `Rescan and download Excel with all currently active events; legacy scan contained ${stats.totalScanned} events`
+    : `Download Excel with all ${stats.totalScanned} scanned events`;
+  const allScannedDownloadTitle = hideNumbers
+    ? "Scanned event count unknown; source evidence unavailable."
+    : isLegacyExportRecovery
+    ? "Run a fresh exhaustive scan and download all events Excel"
+    : "Download all scanned events Excel";
+  const downloadFilteredEvents = () => {
+    if (isIndependentStageOne) {
+      if (independentExportId) {
+        downloadIndependentStageOneExcel(
+          independentExportId,
+          "filtered",
+          workspaceProfile,
+        );
+      } else {
+        onRecoverLegacyExport?.("filtered");
+      }
+      return;
+    }
+    if (run?.id) {
+      downloadCompleteStageOneRunExcel(run.id, "filtered");
+      return;
+    }
+    void downloadStageOneFilteredEventsExcel({
+      candidates: filteredEventRows,
+      scanCompletedAt: stage.timerCompletedAt,
+    });
+  };
+
+  if (filtersOnly) {
+    const formattedPassedFilters = hideNumbers
+      ? "Not evaluated"
+      : stats.passedFilters.toLocaleString("en-IN");
+    const formattedIncludedActive =
+      hideNumbers || includedActiveCount === null
+        ? "—"
+        : includedActiveCount.toLocaleString("en-IN");
+
+    return (
+      <div className="flex h-full flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => onOpenScanCandidateDialog?.(stage, "fresh-opportunities")}
+          disabled={!renderInteractiveRows || !onOpenScanCandidateDialog}
+          className="group flex w-full items-center gap-3 rounded-xl border border-emerald-200/80 bg-white/80 p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:pointer-events-none"
+          aria-label={hideNumbers ? "Open events that passed filters · count unknown" : `Open ${stats.passedFilters} events that passed filters`}
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-200">
+            <Filter className="h-5 w-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+              Events that Passed Filters
+            </span>
+            <span className="mt-0.5 block text-2xl font-bold tabular-nums text-emerald-950">
+              {formattedPassedFilters}
+            </span>
+          </span>
+          <ChevronDown className="h-4 w-4 -rotate-90 text-emerald-500 transition-transform group-hover:translate-x-0.5" />
+        </button>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-emerald-200/80 bg-emerald-100/65 p-3">
+            <div className="flex items-center gap-2 text-emerald-700">
+              <Wallet className="h-4 w-4" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.1em]">
+                Active included
+              </span>
+            </div>
+            <p className="mt-2 text-xl font-bold tabular-nums text-emerald-950">
+              {formattedIncludedActive}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] overflow-hidden rounded-xl border border-emerald-200/80 bg-white/75 transition hover:border-emerald-300 hover:bg-white focus-within:ring-2 focus-within:ring-emerald-300">
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={filteredDownloadUnavailable}
+              className="p-3 text-left disabled:cursor-not-allowed disabled:opacity-45"
+              aria-label={filteredDownloadLabel}
+              title="Download filtered events Excel"
+            >
+              <div className="flex items-center gap-2 text-emerald-700">
+                <FileSpreadsheet className="h-4 w-4" />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.1em]">
+                  Export
+                </span>
+              </div>
+              <p className="mt-2 text-sm font-bold text-emerald-950">
+                Download Excel
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenExcelHistory}
+              className="inline-flex items-center justify-center border-l border-emerald-200 text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-400"
+              aria-label="Open last 10 Excel scans"
+              title="Last 10 Excel scans"
+            >
+              <Menu className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        {onOpenScanFilters ? (
+          <button
+            type="button"
+            onClick={onOpenScanFilters}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
+            aria-label="Open scan filters"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            View & edit filters
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      {!filtersOnly ? <>
+      {scanScope ? (
+        <div className="pb-1 text-xs font-semibold text-slate-700">
+          Scan: {scanScope === "full_universe" ? "Full Universe" : "Trending"}
+          {scanCompleteness
+            ? ` · ${scanCompleteness.charAt(0).toUpperCase()}${scanCompleteness.slice(1)}`
+            : ""}
+        </div>
+      ) : null}
+      {scanScope === "full_universe" ? (
+        <dl className="mb-2 grid grid-cols-2 gap-x-3 gap-y-0.5 rounded-lg border border-emerald-100 bg-white/70 p-2 text-[11px]">
+          {fullUniverseMetrics.map(([label, rawValue]) => (
+            <div key={label} className="contents">
+              <dt className="text-slate-500">{label}</dt>
+              <dd className="text-right font-semibold tabular-nums text-slate-800">
+                {hideNumbers
+                  ? "—"
+                  : (readStageOutputNumber(rawValue) ?? "—")}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {renderInteractiveRows && onOpenScanCandidateDialog ? (
+        <button
+          type="button"
+          onClick={() => onOpenScanCandidateDialog(stage, "active-positions")}
+          className={`${rowClassName} pt-2`}
+        >
+          Available for Claim:{" "}
+          <span className="font-semibold tabular-nums">
+            {displayStat(stats.claimablePositions)}
+          </span>
+          <br />
+          Active Positions:{" "}
+          <span className="font-semibold tabular-nums">
+            {displayStat(stats.activePositions)}
+          </span>
+        </button>
+      ) : (
+        <div className="pt-2">
+          Available for Claim:{" "}
+          <span className="font-semibold tabular-nums">
+            {displayStat(stats.claimablePositions)}
+          </span>
+          <br />
+          Active Positions:{" "}
+          <span className="font-semibold tabular-nums">
+            {displayStat(stats.activePositions)}
+          </span>
+        </div>
+      )}
+      {scanScope === "full_universe" && scanCompleteness !== "complete" && (
+        <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          Full Universe is incomplete. This count covers only collected markets.
+          {readStageOutputString(stage.outputs.scan_details) || readStageOutputString(stage.outputs.scan_warning)
+            ? ` ${readStageOutputString(stage.outputs.scan_details) || readStageOutputString(stage.outputs.scan_warning)}`
+            : " Completion of the final API page has not been verified."}
+        </p>
+      )}
+      {renderInteractiveRows && onOpenScanCandidateDialog ? (
+        <div className="flex items-center gap-1.5 pt-2">
+          <button
+            type="button"
+            onClick={() => onOpenScanCandidateDialog(stage, "all-scanned")}
+            className={rowClassName}
+          >
+            Total Events Scanned:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.totalScanned)}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={downloadAllScannedEvents}
+            disabled={allScannedDownloadUnavailable}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={allScannedDownloadLabel}
+            title={allScannedDownloadTitle}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 pt-2">
+          <span>
+            Total Events Scanned:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.totalScanned)}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={downloadAllScannedEvents}
+            disabled={allScannedDownloadUnavailable}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={allScannedDownloadLabel}
+            title={allScannedDownloadTitle}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+      </> : null}
+      {renderInteractiveRows && onOpenScanCandidateDialog ? (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() =>
+                onOpenScanCandidateDialog(stage, "fresh-opportunities")
+              }
+              className={rowClassName}
+            >
+              Events that passed Filters:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.passedFilters)}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={filteredDownloadUnavailable}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label={filteredDownloadLabel}
+              title="Download Excel"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+            </button>
+            {includedActiveLabel ? <span>{includedActiveLabel}</span> : null}
+          </div>
+          {onOpenScanFilters ? (
+            <button
+              type="button"
+              onClick={onOpenScanFilters}
+              className="ml-auto inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              aria-label="Open scan filters"
+            >
+              Filters
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span>
+              Events that passed Filters:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.passedFilters)}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={filteredDownloadUnavailable}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label={filteredDownloadLabel}
+              title="Download Excel"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+            </button>
+            {includedActiveLabel ? <span>{includedActiveLabel}</span> : null}
+          </span>
+          {onOpenScanFilters ? (
+            <button
+              type="button"
+              onClick={onOpenScanFilters}
+              className="ml-auto inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+              aria-label="Open scan filters"
+            >
+              Filters
+            </button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StageTwoRunStats({
+  run,
+  stage,
+  hideNumbers = false,
+  decisions = [],
+  onOpenInvestEvents,
+  onOpenLlmRunDetails,
+  onOpenScanCandidateDialog,
+  scanStageForPositionSnapshot,
+  activePositionRowsFallback = [],
+  activePositionQuestions = [],
+}: {
+  run: BullpenAutoLiveRun | null;
+  stage: WorkflowStageView;
+  hideNumbers?: boolean;
+  decisions?: BullpenAutoLiveDecision[];
+  scanStageForPositionSnapshot?: WorkflowStageView;
+  activePositionRowsFallback?: WorkflowStageView["activePositionsFound"];
+  activePositionQuestions?: BullpenQuestionRow[];
+  onOpenInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
+  onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
+}) {
+  const [isActionablesDialogOpen, setIsActionablesDialogOpen] =
+    useState(false);
+  const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({
+    run,
+    decisions,
+  });
+  const stats = getStageTwoStats(stage, decisions, run);
+  const positionDialogStage = scanStageForPositionSnapshot ?? stage;
+  const actionableActivePositions =
+    positionDialogStage.activePositionsFound.length > 0
+      ? positionDialogStage.activePositionsFound
+      : activePositionRowsFallback;
+  const positionStats = scanStageForPositionSnapshot
+    ? getStageOneStats(scanStageForPositionSnapshot)
+    : {
+        activePositions: stats.activePositions,
+        claimablePositions: stats.claimablePositions,
+      };
+  const deDuplicatedCount = Math.max(
+    0,
+    positionStats.activePositions + stats.newOpportunities - stats.llmRanOn,
+  );
+  const displayStat = (value: number) => (hideNumbers ? "—" : value);
+  const actionableContract = readStageTwoActionableDisplayContract(stage.outputs);
+  const hasActionableDisplay = actionableContract.hasDisplayCounts;
+  const canOpenActionablesDialog = actionableContract.hasExactMarketIds;
+  const actionables = canOpenActionablesDialog
+      ? buildBullpenStage2Actionables({
+        activePositions: actionableActivePositions,
+        activePositionQuestions,
+        decisions,
+        selectedRows: stage2InvestEventsState?.rows ?? [],
+        authoritativeActionables: {
+          exitMarketIds: actionableContract.exitMarketIds,
+          buyMarketIds: actionableContract.buyMarketIds,
+        },
+      })
+    : { eventExits: [], buyNew: [], hold: [] };
+
+  return (
+    <div className="space-y-0.5 pt-2">
+      <div>
+        {onOpenScanCandidateDialog ? (
+          <button
+            type="button"
+            onClick={() =>
+              onOpenScanCandidateDialog(positionDialogStage, "active-positions")
+            }
+            className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+          >
+            Available for Claim:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(positionStats.claimablePositions)}
+            </span>
+            <br />
+            Active Positions:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(positionStats.activePositions)}
+            </span>
+          </button>
+        ) : (
+          <>
+            Available for Claim:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(positionStats.claimablePositions)}
+            </span>
+            <br />
+            Active Positions:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(positionStats.activePositions)}
+            </span>
+          </>
+        )}
+      </div>
+      <div>
+        {onOpenScanCandidateDialog ? (
+          <button
+            type="button"
+            onClick={() =>
+              onOpenScanCandidateDialog(
+                positionDialogStage,
+                "fresh-opportunities",
+              )
+            }
+            className="text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+          >
+            New Opportunities:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.newOpportunities)}
+            </span>
+          </button>
+        ) : (
+          <>
+            New Opportunities:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.newOpportunities)}
+            </span>
+          </>
+        )}
+      </div>
+      <div>
+        {onOpenLlmRunDetails ? (
+          <button
+            type="button"
+            onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
+            className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label={`Open details for ${displayStat(stats.llmRanOn)} LLM-reviewed rows`}
+          >
+            LLM ran on:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmRanOn)}
+            </span>{" "}
+            unique rows ({" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(positionStats.activePositions)}
+            </span>{" "}
+            Active +{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.newOpportunities)}
+            </span>{" "}
+            New Opportunities
+            {deDuplicatedCount > 0 ? (
+              <>
+                ,{" "}
+                <span className="font-semibold tabular-nums">
+                  {displayStat(deDuplicatedCount)}
+                </span>{" "}
+                overlap/de-duped
+              </>
+            ) : null}
+            )
+          </button>
+        ) : (
+          <>
+            LLM ran on:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmRanOn)}
+            </span>{" "}
+            unique rows ({displayStat(positionStats.activePositions)} Active +{" "}
+            {displayStat(stats.newOpportunities)} New Opportunities
+            {deDuplicatedCount > 0
+              ? `, ${displayStat(deDuplicatedCount)} overlap/de-duped`
+              : ""}
+            )
+          </>
+        )}
+      </div>
+      <div>
+        {onOpenLlmRunDetails ? (
+          <div className="flex items-start gap-1.5">
+            <button
+              type="button"
+              onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
+              className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+              aria-label={`Open details for ${displayStat(stats.llmsCompleted)} completed LLM runs`}
+            >
+              Current run LLMs completed:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsCompleted)}
+              </span>
+              /
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsSelected)}
+              </span>{" "}
+              (Passed:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsPassed)}
+              </span>{" "}
+              | Failed:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsFailed)}
+              </span>
+              )
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
+              className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 shadow-sm transition hover:border-amber-400 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300"
+              aria-label="Open LLM completion diagnostics, including selected targets, failures, and captured errors"
+              title="Why can selected LLMs show as zero? Open diagnostics"
+            >
+              <Info className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>
+        ) : (
+          <>
+            Current run LLMs completed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsCompleted)}
+            </span>
+            /
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsSelected)}
+            </span>{" "}
+            (Passed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsPassed)}
+            </span>{" "}
+            | Failed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsFailed)}
+            </span>
+            )
+          </>
+        )}
+      </div>
+      <div>
+        {onOpenInvestEvents && (stage2InvestEventsState?.rows.length ?? 0) > 0 ? (
+          <button
+            type="button"
+            onClick={() => {
+              if (stage2InvestEventsState) {
+                onOpenInvestEvents(stage2InvestEventsState);
+              }
+            }}
+            className="text-left font-medium text-emerald-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            aria-label={`Open details for ${displayStat(stats.newEventsToInvestIn)} new events to invest in`}
+          >
+            New Events to Invest in:{" "}
+            <span className="font-semibold tabular-nums">
+              {hasActionableDisplay
+                ? displayStat(stats.newEventsToInvestIn)
+                : "—"}
+            </span>
+          </button>
+        ) : (
+          <>
+            New Events to Invest in:{" "}
+            <span className="font-semibold tabular-nums">
+              {hasActionableDisplay
+                ? displayStat(stats.newEventsToInvestIn)
+                : "—"}
+            </span>
+          </>
+        )}
+      </div>
+      <div>
+        {hasActionableDisplay && canOpenActionablesDialog ? (
+          <button
+            type="button"
+            onClick={() => setIsActionablesDialogOpen(true)}
+            className="text-left font-medium text-slate-950 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label={`Open authoritative Stage 2 actionables with ${actionables.eventExits.length} exits and ${actionables.buyNew.length} buys`}
+            aria-haspopup="dialog"
+            aria-expanded={isActionablesDialogOpen}
+          >
+            Actionables: Exit=
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionables.eventExits.length)}
+            </span>
+            {" | Buy="}
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionables.buyNew.length)}
+            </span>
+          </button>
+        ) : hasActionableDisplay ? (
+          <span
+            className="font-medium text-slate-950"
+            title="Persisted Stage 2 action counts are available; compact row IDs were unavailable for this run."
+          >
+            Actionables: Exit=
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionableContract.exitCount ?? 0)}
+            </span>
+            {" | Buy="}
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionableContract.buyCount ?? 0)}
+            </span>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setIsActionablesDialogOpen(true)}
+            className="text-left font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label="Explain why Stage 2 actionables are awaiting the authoritative contract"
+          >
+            Actionables: awaiting authoritative Stage 2 contract
+          </button>
+        )}
+      </div>
+      {isActionablesDialogOpen ? (
+        canOpenActionablesDialog ? (
+          <BullpenStage2ActionablesDialog
+            actionables={actionables}
+            onClose={() => setIsActionablesDialogOpen(false)}
+          />
+        ) : (
+          <SimpleInfoDialog
+            eyebrow="Stage 2 actionables"
+            title="Awaiting authoritative Stage 2 contract"
+            onClose={() => setIsActionablesDialogOpen(false)}
+            sections={[
+              { title: "Meaning", body: "Stage 2 has not yet persisted the exact authoritative Exit and Buy market-id contract that Stage 3 is allowed to execute. The UI intentionally avoids guessing actionables from partial or compact progress data." },
+              { title: "What is happening now", body: "Stage 2 may still be running selected LLM targets, parsing model output, validating probabilities, ranking rows, or writing the final action contract. Until that durable contract exists, Stage 3 should wait or continue from a previously saved contract only." },
+              { title: "Done and waiting", body: `LLM selected: ${displayStat(stats.llmsSelected)}. Completed: ${displayStat(stats.llmsCompleted)}. Passed: ${displayStat(stats.llmsPassed)}. Failed: ${displayStat(stats.llmsFailed)}. New events currently visible: ${hasActionableDisplay ? displayStat(stats.newEventsToInvestIn) : "not authoritative yet"}.` },
+              { title: "Current progress", body: "When Stage 2 finishes and saves exact Exit and Buy IDs, this line changes to clickable Exit and Buy counts. If it stays here after Stage 2 is finished, refresh the run detail and check worker logs for a Stage 2 persistence or validation error." },
+            ]}
+          />
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function readStageOutputString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function readStageOutputBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return false;
+}
+
+function readStageOutputStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((item) => readStageOutputString(item))
+    .filter((item): item is string => {
+      if (!item) return false;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+type StageTwoActionableDisplayContract = {
+  hasDisplayCounts: boolean;
+  hasExactMarketIds: boolean;
+  exitMarketIds: string[];
+  buyMarketIds: string[];
+  exitCount: number | null;
+  buyCount: number | null;
+};
+
+function readStageTwoActionableDisplayContract(
+  outputs: Record<string, unknown>,
+): StageTwoActionableDisplayContract {
+  const exitMarketIds = readStageOutputStringList(
+    outputs.stage2_actionable_exit_market_ids,
+  );
+  const buyMarketIds = readStageOutputStringList(
+    outputs.stage2_actionable_buy_market_ids,
+  );
+  const hasExactMarketIds =
+    Array.isArray(outputs.stage2_actionable_exit_market_ids) &&
+    Array.isArray(outputs.stage2_actionable_buy_market_ids);
+  const hasAuthoritativeContract =
+    readStageOutputBoolean(
+      outputs.stage2_actionable_contract_authoritative,
+    ) ||
+    readStageOutputBoolean(
+      outputs.stage2_actionable_contract_display_recovered,
+    );
+  const exitCount = hasExactMarketIds
+    ? exitMarketIds.length
+    : readStageOutputNumber(outputs.stage2_actionable_exit_count);
+  const buyCount = hasExactMarketIds
+    ? buyMarketIds.length
+    : readStageOutputNumber(outputs.stage2_actionable_buy_count);
+
+  return {
+    hasDisplayCounts:
+      hasAuthoritativeContract && exitCount !== null && buyCount !== null,
+    hasExactMarketIds,
+    exitMarketIds,
+    buyMarketIds,
+    exitCount,
+    buyCount,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeMatchKey(value: string | null | undefined) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function getStageTwoSummaryRowMatchKeys(row: BullpenQuestionRow) {
+  return [row.marketId, row.slug, row.marketUrl, row.question]
+    .map((key) => normalizeMatchKey(key))
+    .filter((key): key is string => Boolean(key));
+}
+
+function getStageTwoActivePositionMatchKeys(
+  position: WorkflowStageView["activePositionsFound"][number],
+) {
+  return [position.marketId, position.slug, position.marketUrl, position.marketTitle]
+    .map((key) => normalizeMatchKey(key))
+    .filter((key): key is string => Boolean(key));
+}
+
+function buildStageTwoActivePositionKeySet(stage: WorkflowStageView) {
+  return new Set(
+    stage.activePositionsFound.flatMap((position) =>
+      getStageTwoActivePositionMatchKeys(position),
+    ),
+  );
+}
+
+function getStageTwoDecisionForSummaryRow(
+  row: BullpenQuestionRow,
+  decisions: BullpenAutoLiveDecision[],
+) {
+  const rowKeys = new Set(getStageTwoSummaryRowMatchKeys(row));
+  return (
+    decisions.find((decision) =>
+      [decision.market_id, decision.slug ?? null]
+        .map((key) => normalizeMatchKey(key))
+        .some((key) => Boolean(key && rowKeys.has(key))),
+    ) ?? null
+  );
+}
+
+function buildStageTwoEventsSummaryHighlightById({
+  rows,
+  stage,
+  decisions,
+  includeEventExits,
+}: {
+  rows: BullpenQuestionRow[];
+  stage: WorkflowStageView | null;
+  decisions: BullpenAutoLiveDecision[];
+  includeEventExits: boolean;
+}) {
+  const activePositionKeys = stage
+    ? buildStageTwoActivePositionKeySet(stage)
+    : new Set<string>();
+
+  return Object.fromEntries(
+    rows.map((row) => {
+      const rowKeys = getStageTwoSummaryRowMatchKeys(row);
+      const isActivePosition = rowKeys.some((key) => activePositionKeys.has(key));
+      const decision = isActivePosition
+        ? getStageTwoDecisionForSummaryRow(row, decisions)
+        : null;
+      let highlight: BullpenEventSummaryHighlight = "new-opportunity";
+
+      if (isActivePosition) {
+        highlight =
+          includeEventExits && decision?.decision === "EXIT"
+            ? "event-exit"
+            : "active-retained";
+      }
+
+      return [row.id, highlight] as const;
+    }),
+  );
+}
+function findRunStage(
+  run: BullpenAutoLiveRun | null,
+  workflowStageKey: "scan" | "llm" | "invest",
+  fallbackStageNumber: number,
+) {
+  if (!run) return null;
+  return (
+    run.stage_results.find(
+      (stage) =>
+        readStageOutputString(stage.outputs?.workflow_stage_key) ===
+        workflowStageKey,
+    ) ??
+    run.stage_results.find(
+      (stage) => stage.stage_number === fallbackStageNumber,
+    ) ??
+    null
+  );
+}
+
+function resolveStage2To3StrategyDialogOutputs(
   run: BullpenAutoLiveRun | null,
   primaryOutputs: Record<string, unknown> | null,
 ) {
@@ -1188,7 +3115,208 @@ export function resolveStage2To3StrategyDialogOutputs(
   );
 }
 
-export function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
+function calculateDaysUntilClose(closeTime: string | null) {
+  if (!closeTime) return null;
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+  return Number(
+    ((closeDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)).toFixed(1),
+  );
+}
+
+function buildScanCandidateDialogRows({
+  candidates,
+  run,
+  decisions,
+}: {
+  candidates: ReturnType<
+    typeof buildBullpenAutoRunWorkflowView
+  >["stages"][number]["scanCandidates"];
+  run: BullpenAutoLiveRun | null;
+  decisions: BullpenAutoLiveDecision[];
+}): ScanCandidateDialogCandidate[] {
+  const stage2 = findRunStage(run, "llm", 2);
+  const rawReviewedCandidates = stage2?.outputs?.llm_reviewed_candidates;
+  const reviewedCandidates = Array.isArray(rawReviewedCandidates)
+    ? rawReviewedCandidates.filter(isRecord)
+    : [];
+  const reviewedCandidateByLookupKey = new Map<
+    string,
+    {
+      llmYesOdds: number | null;
+      llmNoOdds: number | null;
+      returnsPerDay: number | null;
+      amountToBeInvested: number | null;
+    }
+  >();
+
+  const addReviewedCandidateLookup = (
+    keys: Array<string | null>,
+    lookupValue: {
+      llmYesOdds: number | null;
+      llmNoOdds: number | null;
+      returnsPerDay: number | null;
+      amountToBeInvested: number | null;
+    },
+  ) => {
+    keys
+      .map((key) => normalizeMatchKey(key))
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => {
+        if (!reviewedCandidateByLookupKey.has(key)) {
+          reviewedCandidateByLookupKey.set(key, lookupValue);
+        }
+      });
+  };
+
+  for (const reviewedCandidate of reviewedCandidates) {
+    const llmYesOdds =
+      readStageOutputNumber(reviewedCandidate.fair_yes_probability_pct) ??
+      readStageOutputNumber(reviewedCandidate.llm_yes_odds);
+    const llmNoOdds =
+      readStageOutputNumber(reviewedCandidate.fair_no_probability_pct) ??
+      readStageOutputNumber(reviewedCandidate.llm_no_odds);
+    const returnsPerDay = readStageOutputNumber(
+      reviewedCandidate.returns_per_day,
+    );
+    const amountToBeInvested =
+      readStageOutputNumber(reviewedCandidate.amount_to_be_invested) ??
+      getBullpenAmountToBeInvestedBreakdown({
+        llmYesOdds,
+        llmNoOdds,
+        returnsPerDay,
+      }).result;
+    const lookupValue = {
+      llmYesOdds,
+      llmNoOdds,
+      returnsPerDay,
+      amountToBeInvested,
+    };
+
+    addReviewedCandidateLookup(
+      [
+        readStageOutputString(reviewedCandidate.market_id),
+        readStageOutputString(reviewedCandidate.slug),
+        readStageOutputString(reviewedCandidate.market_url),
+        readStageOutputString(reviewedCandidate.question),
+      ],
+      lookupValue,
+    );
+  }
+
+  for (const decision of decisions) {
+    const llmYesOdds = readStageOutputNumber(decision.fair_yes_probability_pct);
+    const llmNoOdds = readStageOutputNumber(decision.fair_no_probability_pct);
+    const returnsPerDay = getDecisionReturnsPerDay(decision);
+    addReviewedCandidateLookup(
+      [
+        decision.market_id,
+        decision.slug ?? null,
+        decision.market_url ?? null,
+        decision.market_title,
+      ],
+      {
+        llmYesOdds,
+        llmNoOdds,
+        returnsPerDay,
+        amountToBeInvested: getBullpenAmountToBeInvestedBreakdown({
+          llmYesOdds,
+          llmNoOdds,
+          returnsPerDay,
+        }).result,
+      },
+    );
+  }
+
+  return candidates.map((candidate) => {
+    const matchedReviewedCandidate =
+      [
+        normalizeMatchKey(candidate.marketId),
+        normalizeMatchKey(candidate.slug),
+        normalizeMatchKey(candidate.marketUrl),
+        normalizeMatchKey(candidate.question),
+      ]
+        .map((key) =>
+          key ? (reviewedCandidateByLookupKey.get(key) ?? null) : null,
+        )
+        .find((item) => item !== null) ?? null;
+    const llmYesOdds = matchedReviewedCandidate?.llmYesOdds ?? null;
+    const llmNoOdds = matchedReviewedCandidate?.llmNoOdds ?? null;
+    const derivedReturnsPerDay =
+      matchedReviewedCandidate?.returnsPerDay ??
+      getBullpenReturnsPerDayBreakdown({
+        yesOdds: candidate.currentYesOdds,
+        noOdds: candidate.currentNoOdds,
+        llmYesOdds,
+        llmNoOdds,
+        daysUntilClose: calculateDaysUntilClose(candidate.closeTime),
+      }).result;
+    const amountToBeInvested =
+      matchedReviewedCandidate?.amountToBeInvested ??
+      getBullpenAmountToBeInvestedBreakdown({
+        llmYesOdds,
+        llmNoOdds,
+        returnsPerDay: derivedReturnsPerDay,
+      }).result;
+
+    return {
+      ...candidate,
+      llmYesOdds,
+      llmNoOdds,
+      returnsPerDay: derivedReturnsPerDay,
+      amountToBeInvested,
+    };
+  });
+}
+
+function isInvestMetricDecisionRow(
+  value: unknown,
+): value is BullpenAutoLiveDecision {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.run_id === "string" &&
+    typeof value.market_id === "string" &&
+    typeof value.market_title === "string" &&
+    typeof value.decision === "string" &&
+    typeof value.side === "string" &&
+    typeof value.reason === "string"
+  );
+}
+
+function readInvestStageDecisionRows(
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null,
+) {
+  if (!stage || stage.key !== "invest") return [];
+  const rawDecisionRows = stage.outputs.decision_rows;
+  if (!Array.isArray(rawDecisionRows)) return [];
+  return rawDecisionRows.filter(isInvestMetricDecisionRow);
+}
+
+function mergeInvestStageDecisionRows({
+  stage,
+  persistedDecisions,
+}: {
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null;
+  persistedDecisions: BullpenAutoLiveDecision[];
+}) {
+  const merged = new Map<string, BullpenAutoLiveDecision>();
+
+  for (const decision of readInvestStageDecisionRows(stage)) {
+    merged.set(decision.id, decision);
+  }
+  for (const decision of persistedDecisions) {
+    merged.set(decision.id, decision);
+  }
+
+  return [...merged.values()];
+}
+
+function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
   return (
     decision.order_plan?.executed_at?.trim() ||
     decision.updated_at?.trim() ||
@@ -1197,7 +3325,68 @@ export function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision
   );
 }
 
-export function buildLatestSubmittedBuyTimestampsByMarketId(
+type RunSummaryWarning = { label: string; detail: string };
+type RunSummaryDetails = {
+  overview: string | null;
+  warnings: RunSummaryWarning[];
+};
+type PlannedOrderDetailState = {
+  title: string;
+  summary: string;
+  detail: string;
+};
+type DecisionLlmOddsState = { decision: BullpenAutoLiveDecision };
+
+function getRunSummaryDetails(
+  summary: string | null | undefined,
+): RunSummaryDetails {
+  const text = summary?.trim();
+  if (!text) return { overview: null, warnings: [] };
+
+  const normalized = text
+    .replace(/\s+([✗✓✔])\s+/g, "\n$1 ")
+    .replace(/\s+(?=0x[a-f0-9]{6,}:)/gi, "\n")
+    .replace(/:\s+(\[(?:warn|warning|error|fail|info)\])/gi, ":\n$1")
+    .replace(/\s+(?=\[(?:warn|warning|error|fail|info)\])/gi, "\n");
+
+  const lineItems = normalized
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const firstDetailIndex = lineItems.findIndex((item) =>
+    /^(?:0x[a-f0-9]{6,}:|[✗✓✔]|\[(?:warn|warning|error|fail|info)\])/i.test(
+      item,
+    ),
+  );
+  const overviewItems =
+    firstDetailIndex === -1 ? lineItems : lineItems.slice(0, firstDetailIndex);
+  const detailItems =
+    firstDetailIndex === -1 ? [] : lineItems.slice(firstDetailIndex);
+
+  return {
+    overview: overviewItems.join(" ").trim() || null,
+    warnings: detailItems.map((detail, index) => {
+      const bracketMatch = detail.match(/^\[([^\]]+)\]\s*(.*)$/);
+      if (bracketMatch) {
+        return {
+          label: bracketMatch[1].trim(),
+          detail: bracketMatch[2].trim() || "—",
+        };
+      }
+      const prefixedMatch = detail.match(/^(0x[a-f0-9]{6,}:)\s*(.*)$/i);
+      if (prefixedMatch) {
+        return {
+          label: prefixedMatch[1],
+          detail: prefixedMatch[2].trim() || "—",
+        };
+      }
+      return { label: `Detail ${index + 1}`, detail };
+    }),
+  };
+}
+
+function buildLatestSubmittedBuyTimestampsByMarketId(
   decisions: BullpenAutoLiveDecision[],
 ) {
   const lookup = new Map<string, string>();
@@ -1231,7 +3420,7 @@ export function buildLatestSubmittedBuyTimestampsByMarketId(
   return lookup;
 }
 
-export function buildLiveAlreadyInvestedRecords({
+function buildLiveAlreadyInvestedRecords({
   activePositions,
   decisions,
 }: {
@@ -1262,7 +3451,7 @@ export function buildLiveAlreadyInvestedRecords({
   return [...records.values()];
 }
 
-export function findGuardrailCheck(
+function findGuardrailCheck(
   summary: BullpenAutoLiveSummaryResponse | null,
   guardrailId: string,
 ) {
@@ -1277,7 +3466,339 @@ export function findGuardrailCheck(
   );
 }
 
-export function buildQueuedInvestPreviewSteps(
+function getInvestStageMetric(
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null,
+  key: string,
+  fallback: number,
+) {
+  if (!stage || stage.key !== "invest") return fallback;
+  return readStageOutputNumber(stage.outputs[key]) ?? fallback;
+}
+
+function usesPersistedStage3ExecutionCounters(
+  outputs: Record<string, unknown> | null | undefined,
+) {
+  if (!outputs) return false;
+  const counters = outputs.persisted_execution_counters;
+  return (
+    isRecord(counters) &&
+    readStageOutputString(counters.source) === "persisted_order_intents"
+  );
+}
+
+type InvestExecutionStepView = {
+  key: "sell" | "buy";
+  stepNumber: number;
+  stepTotal: number;
+  label: string;
+  status: InvestExecutionStepStatus;
+  displayStatusLabel?: string;
+  detail: string | null;
+  plannedOrders: number | null;
+  processedOrders: number | null;
+  submittedOrders: number | null;
+  eventExitRows?: number | null;
+  rankingLlmPlannedOrders?: number | null;
+  forcedExitPlannedOrders?: number | null;
+  redeemPlannedOrders?: number | null;
+  redeemProcessedOrders?: number | null;
+  redeemSubmittedOrders?: number | null;
+  rankingLlmSubmittedOrders?: number | null;
+  forcedExitSubmittedOrders?: number | null;
+};
+
+function normalizeInvestExecutionStepStatus(
+  value: unknown,
+): InvestExecutionStepStatus | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "completed" ||
+    normalized === "blocked"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function getSubmittedSellSubpartCounts(decisions: BullpenAutoLiveDecision[]) {
+  const counts = summarizeInvestStepCountsFromDecisions("sell", decisions);
+
+  return {
+    redeem: counts.redeemSubmittedOrders ?? 0,
+    rankingOrLlm: counts.rankingLlmSubmittedOrders ?? 0,
+    forced: counts.forcedExitSubmittedOrders ?? 0,
+  };
+}
+
+function getInvestStageExecutionSteps(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+  decisions: BullpenAutoLiveDecision[] = [],
+) {
+  if (stage.key !== "invest") return [];
+
+  const submittedSellSubpartCounts = getSubmittedSellSubpartCounts(decisions);
+  const sellDecisionCounts = summarizeInvestStepCountsFromDecisions(
+    "sell",
+    decisions,
+  );
+  const buyDecisionCounts = summarizeInvestStepCountsFromDecisions(
+    "buy",
+    decisions,
+  );
+  const usePersistedCounters = usesPersistedStage3ExecutionCounters(
+    stage.outputs,
+  );
+
+  const rawSteps = stage.outputs.execution_steps;
+  if (!Array.isArray(rawSteps)) return [];
+
+  return rawSteps
+    .map((step): InvestExecutionStepView | null => {
+      if (!isRecord(step)) return null;
+      const key = readStageOutputString(step.key);
+      const label = readStageOutputString(step.label);
+      const status = normalizeInvestExecutionStepStatus(step.status);
+      const stepNumber = readStageOutputNumber(step.step_number);
+      const stepTotal = readStageOutputNumber(step.step_total);
+      if (
+        (key !== "sell" && key !== "buy") ||
+        !label ||
+        !status ||
+        stepNumber === null ||
+        stepTotal === null
+      ) {
+        return null;
+      }
+
+      const decisionCounts = key === "sell" ? sellDecisionCounts : buyDecisionCounts;
+      const plannedOrders = usePersistedCounters
+        ? (readStageOutputNumber(step.planned_orders) ?? 0)
+        : Math.max(
+            readStageOutputNumber(step.planned_orders) ?? 0,
+            decisionCounts.plannedOrders,
+          );
+      const processedOrders = usePersistedCounters
+        ? (readStageOutputNumber(step.processed_orders) ?? 0)
+        : Math.max(
+            readStageOutputNumber(step.processed_orders) ?? 0,
+            decisionCounts.processedOrders,
+          );
+
+      return {
+        key,
+        stepNumber,
+        stepTotal,
+        label,
+        status: deriveInvestExecutionStepStatus({
+          status,
+          plannedOrders,
+          processedOrders,
+        }),
+        displayStatusLabel: undefined,
+        detail: readStageOutputString(step.detail),
+        plannedOrders,
+        processedOrders,
+        submittedOrders: usePersistedCounters
+          ? (readStageOutputNumber(step.submitted_orders) ?? 0)
+          : Math.max(
+              readStageOutputNumber(step.submitted_orders) ?? 0,
+              decisionCounts.submittedOrders,
+            ),
+        eventExitRows:
+          key === "sell" && !usePersistedCounters
+            ? Math.max(
+                readStageOutputNumber(step.event_exit_rows) ?? 0,
+                sellDecisionCounts.eventExitRows ?? 0,
+              )
+            : readStageOutputNumber(step.event_exit_rows),
+        rankingLlmPlannedOrders:
+          key === "sell" && !usePersistedCounters
+            ? Math.max(
+                readStageOutputNumber(step.ranking_llm_planned_orders) ?? 0,
+                sellDecisionCounts.rankingLlmPlannedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.ranking_llm_planned_orders),
+        forcedExitPlannedOrders:
+          key === "sell" && !usePersistedCounters
+            ? Math.max(
+                readStageOutputNumber(step.forced_exit_planned_orders) ?? 0,
+                sellDecisionCounts.forcedExitPlannedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.forced_exit_planned_orders),
+        redeemPlannedOrders:
+          key === "sell" && !usePersistedCounters
+            ? Math.max(
+                readStageOutputNumber(step.redeem_planned_orders) ?? 0,
+                sellDecisionCounts.redeemPlannedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.redeem_planned_orders),
+        redeemProcessedOrders:
+          key === "sell" && !usePersistedCounters
+            ? Math.max(
+                readStageOutputNumber(step.redeem_processed_orders) ?? 0,
+                sellDecisionCounts.redeemProcessedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.redeem_processed_orders),
+        redeemSubmittedOrders:
+          key === "sell" && !usePersistedCounters
+            ? Math.max(
+                readStageOutputNumber(step.redeem_submitted_orders) ?? 0,
+                submittedSellSubpartCounts.redeem,
+              )
+            : readStageOutputNumber(step.redeem_submitted_orders),
+        rankingLlmSubmittedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.ranking_llm_submitted_orders) ?? 0,
+                submittedSellSubpartCounts.rankingOrLlm,
+              )
+            : readStageOutputNumber(step.ranking_llm_submitted_orders),
+        forcedExitSubmittedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.forced_exit_submitted_orders) ?? 0,
+                submittedSellSubpartCounts.forced,
+              )
+            : readStageOutputNumber(step.forced_exit_submitted_orders),
+      };
+    })
+    .filter((step): step is InvestExecutionStepView => step !== null);
+}
+
+function getLastInvestExecutionStep(
+  run: BullpenAutoLiveRun | null,
+  key: "sell" | "buy",
+  decisions: BullpenAutoLiveDecision[] = [],
+) {
+  const investStage = run?.stage_results.find(
+    (stage) => stage.stage_number === 3 || stage.stage_name === "invest",
+  );
+  const rawSteps = investStage?.outputs.execution_steps;
+  if (!Array.isArray(rawSteps)) return null;
+  const usePersistedCounters = usesPersistedStage3ExecutionCounters(
+    investStage?.outputs,
+  );
+  const decisionCounts =
+    !usePersistedCounters && decisions.length > 0
+      ? summarizeInvestStepCountsFromDecisions(key, decisions)
+      : null;
+
+  for (const rawStep of rawSteps) {
+    if (!isRecord(rawStep) || readStageOutputString(rawStep.key) !== key) {
+      continue;
+    }
+
+    return {
+      plannedOrders: Math.max(
+        readStageOutputNumber(rawStep.planned_orders) ?? 0,
+        decisionCounts?.plannedOrders ?? 0,
+      ),
+      processedOrders: Math.max(
+        readStageOutputNumber(rawStep.processed_orders) ?? 0,
+        decisionCounts?.processedOrders ?? 0,
+      ),
+      submittedOrders: Math.max(
+        readStageOutputNumber(rawStep.submitted_orders) ?? 0,
+        decisionCounts?.submittedOrders ?? 0,
+      ),
+      eventExitRows:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.event_exit_rows) ?? 0,
+              decisionCounts?.eventExitRows ?? 0,
+            )
+          : readStageOutputNumber(rawStep.event_exit_rows),
+      rankingLlmPlannedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.ranking_llm_planned_orders) ?? 0,
+              decisionCounts?.rankingLlmPlannedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.ranking_llm_planned_orders),
+      forcedExitPlannedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.forced_exit_planned_orders) ?? 0,
+              decisionCounts?.forcedExitPlannedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.forced_exit_planned_orders),
+      redeemPlannedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.redeem_planned_orders) ?? 0,
+              decisionCounts?.redeemPlannedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.redeem_planned_orders),
+      redeemProcessedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.redeem_processed_orders) ?? 0,
+              decisionCounts?.redeemProcessedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.redeem_processed_orders),
+      redeemSubmittedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.redeem_submitted_orders) ?? 0,
+              decisionCounts?.redeemSubmittedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.redeem_submitted_orders),
+      rankingLlmSubmittedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.ranking_llm_submitted_orders) ?? 0,
+              decisionCounts?.rankingLlmSubmittedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.ranking_llm_submitted_orders),
+      forcedExitSubmittedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.forced_exit_submitted_orders) ?? 0,
+              decisionCounts?.forcedExitSubmittedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.forced_exit_submitted_orders),
+    };
+  }
+
+  if (key !== "sell" || !investStage) return null;
+  return {
+    plannedOrders:
+      readStageOutputNumber(investStage.outputs.event_exit_planned) ?? 0,
+    processedOrders:
+      readStageOutputNumber(investStage.outputs.event_exit_processed) ?? 0,
+    submittedOrders:
+      readStageOutputNumber(investStage.outputs.event_exit_submitted) ?? 0,
+    eventExitRows: readStageOutputNumber(investStage.outputs.event_exit_rows),
+    rankingLlmPlannedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_ranking_llm_planned,
+    ),
+    forcedExitPlannedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_forced_planned,
+    ),
+    redeemPlannedOrders: readStageOutputNumber(
+      investStage.outputs.redeem_planned,
+    ),
+    redeemProcessedOrders: readStageOutputNumber(
+      investStage.outputs.redeem_processed,
+    ),
+    redeemSubmittedOrders: readStageOutputNumber(
+      investStage.outputs.redeem_submitted,
+    ),
+    rankingLlmSubmittedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_ranking_llm_submitted,
+    ),
+    forcedExitSubmittedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_forced_submitted,
+    ),
+  };
+}
+
+function buildQueuedInvestPreviewSteps(
   plan: Parameters<typeof buildBullpenStage3InvestPreviewSteps>[0],
   lastRun: BullpenAutoLiveRun | null,
 ) {
@@ -1305,7 +3826,6382 @@ export function buildQueuedInvestPreviewSteps(
   );
 }
 
-export function buildConsoleSettingsUpdate(
+function getInvestExecutionStepClasses(status: InvestExecutionStepStatus) {
+  if (status === "completed") {
+    return {
+      container:
+        "border-emerald-200 bg-emerald-50/80 dark:border-emerald-400/30 dark:bg-emerald-950/35",
+      badge:
+        "border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-100",
+      text: "text-emerald-950 dark:text-emerald-50",
+      muted: "text-emerald-900/80 dark:text-emerald-100/75",
+    };
+  }
+  if (status === "blocked") {
+    return {
+      container:
+        "border-rose-200 bg-rose-50/80 dark:border-rose-400/30 dark:bg-rose-950/35",
+      badge:
+        "border-rose-200 bg-rose-100 text-rose-900 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-rose-100",
+      text: "text-rose-950 dark:text-rose-50",
+      muted: "text-rose-900/80 dark:text-rose-100/75",
+    };
+  }
+  if (status === "running") {
+    return {
+      container:
+        "border-amber-200 bg-amber-50/80 dark:border-amber-400/30 dark:bg-amber-950/35",
+      badge:
+        "border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100",
+      text: "text-amber-950 dark:text-amber-50",
+      muted: "text-amber-900/80 dark:text-amber-100/75",
+    };
+  }
+  return {
+    container:
+      "border-slate-200 bg-slate-50/80 dark:border-slate-700/80 dark:bg-slate-950/60",
+    badge:
+      "border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-200",
+    text: "text-slate-950 dark:text-slate-50",
+    muted: "text-slate-600 dark:text-slate-300",
+  };
+}
+
+function extractErrorCodeFromDetail(detail: string | null | undefined) {
+  const trimmed = detail?.trim();
+  if (!trimmed) return null;
+
+  const jsonStart = trimmed.indexOf("{");
+  const jsonText = jsonStart >= 0 ? trimmed.slice(jsonStart) : trimmed;
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      error_code?: unknown;
+      code?: unknown;
+      status?: unknown;
+    };
+    const code =
+      typeof parsed.error_code === "string" &&
+      parsed.error_code.trim().length > 0
+        ? parsed.error_code.trim()
+        : typeof parsed.code === "string" && parsed.code.trim().length > 0
+          ? parsed.code.trim()
+          : null;
+    if (code) return code;
+  } catch {
+    // Fall through to regex extraction for non-JSON / prefixed messages.
+  }
+
+  const errorCodeMatch = trimmed.match(
+    /["']?error_code["']?\s*[:=]\s*["']?([A-Z0-9_:-]+)["']?/i,
+  );
+  if (errorCodeMatch?.[1]) return errorCodeMatch[1];
+
+  if (
+    /insufficient balance/i.test(trimmed) ||
+    /balance_insufficient/i.test(trimmed)
+  ) {
+    return "BALANCE_INSUFFICIENT";
+  }
+
+  return null;
+}
+
+function SimpleInfoDialog({
+  eyebrow,
+  title,
+  sections,
+  onClose,
+}: {
+  eyebrow: string;
+  title: string;
+  sections: Array<{ title: string; body: string }>;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bullpen-simple-info-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-left shadow-[0_30px_90px_-28px_rgba(15,23,42,0.6)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              {eyebrow}
+            </p>
+            <h2 id="bullpen-simple-info-title" className="mt-2 text-xl font-semibold text-slate-950">
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 space-y-3 overflow-y-auto px-6 py-5">
+          {sections.map((section) => (
+            <section key={section.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <h3 className="text-sm font-bold text-slate-950">{section.title}</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-700">{section.body}</p>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ErrorCodeWithDetails({
+  detail,
+  detailClassName = "text-slate-700",
+  summaryPrefix,
+}: {
+  detail: string;
+  detailClassName?: string;
+  summaryPrefix?: string | null;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const code = extractErrorCodeFromDetail(detail);
+  if (!code) return <>{detail}</>;
+
+  return (
+    <span className="block">
+      <span className="inline-flex items-center gap-1.5 align-middle">
+        {summaryPrefix ? <span>{summaryPrefix}</span> : null}
+        <span className="font-semibold">{code}</span>
+        <button
+          type="button"
+          onClick={() => setIsOpen((current) => !current)}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current/30 bg-white/60 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+          aria-expanded={isOpen}
+          aria-label={isOpen ? "Hide error details" : "Show error details"}
+          title={isOpen ? "Hide error details" : "Show error details"}
+        >
+          <Info className="h-3 w-3" />
+        </button>
+      </span>
+      {isOpen ? (
+        <span
+          className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bullpen-error-detail-title"
+          onClick={() => setIsOpen(false)}
+        >
+          <span
+            className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-[0_28px_80px_-24px_rgba(15,23,42,0.55)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Error detail
+                </span>
+                <span
+                  id="bullpen-error-detail-title"
+                  className="mt-1 block text-lg font-semibold text-slate-950"
+                >
+                  {code}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close error details"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </span>
+            <span
+              className={`block flex-1 overflow-auto whitespace-pre-wrap break-words bg-rose-50/80 px-5 py-4 text-xs leading-6 ${detailClassName}`}
+            >
+              {detail}
+            </span>
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function getInvestExecutionStepStatusLabel(status: InvestExecutionStepStatus) {
+  if (status === "completed") return "Finished";
+  if (status === "blocked") return "Blocked";
+  if (status === "running") return "Working";
+  return "Pending";
+}
+
+function getInvestStageCounters(
+  stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+  decisions: BullpenAutoLiveDecision[] = [],
+) {
+  if (stage.key !== "invest") return [];
+
+  const sellCounts = summarizeInvestStepCountsFromDecisions("sell", decisions);
+  const buyCounts = summarizeInvestStepCountsFromDecisions("buy", decisions);
+  const rawPlanned = readStageOutputNumber(stage.outputs.orders_planned);
+  const rawSubmitted = readStageOutputNumber(stage.outputs.orders_submitted);
+  const usePersistedCounters = usesPersistedStage3ExecutionCounters(
+    stage.outputs,
+  );
+  const derivedPlanned = sellCounts.plannedOrders + buyCounts.plannedOrders;
+  const derivedSubmitted = sellCounts.submittedOrders + buyCounts.submittedOrders;
+  if (
+    rawPlanned === null &&
+    rawSubmitted === null &&
+    derivedPlanned === 0 &&
+    derivedSubmitted === 0
+  ) {
+    return [];
+  }
+  const planned = usePersistedCounters
+    ? (rawPlanned ?? 0)
+    : Math.max(rawPlanned ?? 0, derivedPlanned);
+  const submitted = usePersistedCounters
+    ? (rawSubmitted ?? 0)
+    : Math.max(rawSubmitted ?? 0, derivedSubmitted);
+
+  return [
+    { label: "Planned", value: planned ?? 0 },
+    { label: "Submitted", value: submitted ?? 0 },
+  ];
+}
+
+type InvestProgressLogEntry = {
+  tone: "info" | "warning" | "error" | "success";
+  label: string;
+  detail: string;
+};
+
+function getInvestProgressLogEntries({
+  stage,
+  run,
+  decisions,
+  steps,
+}: {
+  stage:
+    | ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number]
+    | null;
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+  steps: InvestExecutionStepView[];
+}): InvestProgressLogEntry[] {
+  const entries: InvestProgressLogEntry[] = [];
+  if (!stage) return entries;
+
+  const stageError = readStageOutputString(stage.outputs.error_message);
+  const runError = readStageOutputString(run.error_message);
+  const executionGateReason = readStageOutputString(
+    stage.outputs.execution_gate_reason,
+  );
+  const executionModeReason = readStageOutputString(
+    stage.outputs.execution_mode_reason,
+  );
+  const executionStepLabel = readStageOutputString(
+    stage.outputs.execution_step_label,
+  );
+  const executionStepDetail = readStageOutputString(
+    stage.outputs.execution_step_detail,
+  );
+
+  if (stageError || runError) {
+    entries.push({
+      tone: "error",
+      label: "Worker error",
+      detail: stageError ?? runError ?? "The worker reported an error.",
+    });
+  }
+  if (executionGateReason) {
+    entries.push({
+      tone: "error",
+      label: "Execution gate",
+      detail: executionGateReason,
+    });
+  }
+  if (executionModeReason) {
+    entries.push({
+      tone: "info",
+      label: "Execution mode",
+      detail: executionModeReason,
+    });
+  }
+  if (executionStepDetail) {
+    entries.push({
+      tone: "warning",
+      label: executionStepLabel ?? "Current worker step",
+      detail: executionStepDetail,
+    });
+  }
+
+  for (const step of steps) {
+    if (step.status === "running" || step.status === "blocked") {
+      entries.push({
+        tone: step.status === "blocked" ? "error" : "warning",
+        label: `Step ${step.stepNumber} of ${step.stepTotal} · ${step.label}`,
+        detail: `${step.processedOrders} processed / ${step.plannedOrders} planned / ${step.submittedOrders} submitted. ${step.detail ?? "Waiting for the next worker update."}`,
+      });
+    }
+  }
+
+  for (const decision of [...decisions].reverse()) {
+    const orderPlan = decision.order_plan;
+    if (!orderPlan) continue;
+    const status = orderPlan.status?.trim().toLowerCase();
+    const detail = orderPlan.detail?.trim();
+    if (!status || !detail) continue;
+    if (
+      status === "planned" ||
+      status === "failed" ||
+      status === "skipped" ||
+      status === "cancelled"
+    ) {
+      entries.push({
+        tone:
+          status === "failed" || status === "cancelled"
+            ? "error"
+            : status === "skipped"
+              ? "warning"
+              : "info",
+        label: `${status.replaceAll("_", " ")} · ${decision.market_title}`,
+        detail,
+      });
+    }
+    if (entries.length >= 8) break;
+  }
+
+  const completedItems = readStageOutputNumber(stage.outputs.completed_items);
+  const totalItems = readStageOutputNumber(stage.outputs.total_items);
+  if (stage.state === "current" && entries.length === 0) {
+    entries.push({
+      tone: "info",
+      label: "Waiting for worker update",
+      detail: totalItems
+        ? `Stage 3 has reviewed ${completedItems ?? 0} of ${totalItems} rows. This panel refreshes as the worker saves each step.`
+        : "This panel refreshes as the worker saves progress, errors, and order results.",
+    });
+  }
+
+  return entries.slice(0, 8);
+}
+
+function InvestExecutionStepsSummary({
+  steps,
+  compact = false,
+  onOpenMetricDetails,
+  onOpenEventExitInfo,
+  onOpenInvestEligibilityInfo,
+}: {
+  steps: InvestExecutionStepView[];
+  compact?: boolean;
+  onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
+  onOpenEventExitInfo?: () => void;
+  onOpenInvestEligibilityInfo?: (trigger: HTMLButtonElement | null) => void;
+}) {
+  if (steps.length === 0) return null;
+
+  const gridClasses = compact ? "grid gap-2" : "grid gap-2 md:grid-cols-2";
+
+  const renderMetricCard = ({
+    label,
+    value,
+    kind,
+    toneClasses,
+    onOpenInfo,
+  }: {
+    label: string;
+    value: number | null | undefined;
+    kind?: InvestMetricDialogKind;
+    toneClasses: ReturnType<typeof getInvestExecutionStepClasses>;
+    onOpenInfo?: () => void;
+  }) => {
+    const body = (
+      <>
+        <p className="flex items-center gap-1 text-[10px] uppercase tracking-[0.1em]">
+          <span>{label}</span>
+          {onOpenInfo ? (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenInfo();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onOpenInfo();
+                }
+              }}
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current/30 bg-white/70"
+              aria-label={`Explain ${label}`}
+              title={`Explain ${label}`}
+            >
+              <Info className="h-2.5 w-2.5" />
+            </span>
+          ) : null}
+        </p>
+        <p className={`mt-1 text-sm font-semibold ${toneClasses.text}`}>
+          {value ?? "—"}
+        </p>
+      </>
+    );
+
+    const className = `min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 text-left`;
+    if (!kind || !onOpenMetricDetails) {
+      return <div className={className}>{body}</div>;
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenMetricDetails(kind)}
+        className={`${className} transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300`}
+      >
+        {body}
+      </button>
+    );
+  };
+
+  return (
+    <div className={gridClasses}>
+      {steps.map((step) => {
+        const renderedStatus = step.status;
+        const renderedStatusLabel =
+          step.displayStatusLabel ??
+          getInvestExecutionStepStatusLabel(renderedStatus);
+        const toneClasses = getInvestExecutionStepClasses(renderedStatus);
+        return (
+          <div
+            key={step.key}
+            className={`rounded-xl border px-3 py-3 ${toneClasses.container}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p
+                  className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                >
+                  Step {step.stepNumber} of {step.stepTotal}
+                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                    {step.label}
+                  </p>
+                  {step.key === "sell" && onOpenEventExitInfo ? (
+                    <button
+                      type="button"
+                      onClick={onOpenEventExitInfo}
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white/70 ${toneClasses.text}`}
+                      aria-label="Explain Event Exit strategies"
+                      title="Explain Event Exit strategies"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  {step.key === "buy" && onOpenInvestEligibilityInfo ? (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenInvestEligibilityInfo(event.currentTarget);
+                      }}
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white/70 ${toneClasses.text}`}
+                      aria-label="Explain Stage 2 to Stage 3 planned strategy"
+                      title="Explain Stage 2 to Stage 3 planned strategy"
+                      aria-haspopup="dialog"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+              >
+                {renderedStatusLabel}
+              </span>
+            </div>
+            {step.key === "buy" && step.plannedOrders === 0 ? null : (
+              <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+                {step.detail ?? "Waiting for the worker to update this step."}
+              </p>
+            )}
+            <div
+              className={`mt-3 flex flex-wrap gap-2 text-xs ${toneClasses.muted}`}
+            >
+              {renderMetricCard({
+                label: "Planned",
+                value: step.plannedOrders,
+                kind: getInvestStepMetricDialogKind(step.key, "planned"),
+                toneClasses,
+              })}
+              {renderMetricCard({
+                label: "Processed",
+                value: step.processedOrders,
+                kind: getInvestStepMetricDialogKind(step.key, "processed"),
+                toneClasses,
+              })}
+              <div className="min-w-[5.25rem] flex-[2_1_14rem] rounded-lg border border-white/70 bg-white/60 px-2.5 py-2">
+                {renderMetricCard({
+                  label: "Submitted",
+                  value: step.submittedOrders,
+                  kind: getInvestStepMetricDialogKind(step.key, "submitted"),
+                  toneClasses,
+                })}
+                {step.key === "sell" ? (
+                  <div className="mt-2 border-t border-white/70 pt-2">
+                    <p className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${toneClasses.muted}`}>
+                      Submitted sub-parts
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                      {renderMetricCard({
+                        label: "Redeem",
+                        value: step.redeemSubmittedOrders,
+                        kind: getSellInvestMetricDialogKind("redeem"),
+                        toneClasses,
+                        onOpenInfo: onOpenEventExitInfo,
+                      })}
+                      {renderMetricCard({
+                        label: "Event out of Top 10",
+                        value: step.rankingLlmSubmittedOrders,
+                        kind: getSellInvestMetricDialogKind("ranking-llm"),
+                        toneClasses,
+                        onOpenInfo: onOpenEventExitInfo,
+                      })}
+                      {renderMetricCard({
+                        label: "Forced Exit",
+                        value: step.forcedExitSubmittedOrders,
+                        kind: getSellInvestMetricDialogKind("forced-exit"),
+                        toneClasses,
+                        onOpenInfo: onOpenEventExitInfo,
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildStageOnePositionTableEvent(
+  position: ScanCandidateDialogState["activePositions"][number],
+  index: number,
+  asOf: number,
+): BullpenEventTableSnapshot {
+  const marketId = position.marketId || position.conditionId || position.slug || `active-position-${index + 1}`;
+  const side = position.side?.trim().toUpperCase();
+  return {
+    market_id: marketId,
+    market_title: position.marketTitle,
+    market_url: position.marketUrl,
+    close_time: position.closeTime,
+    score: 0,
+    scan_scores: [],
+    scan_sides: [],
+    scan_timestamps: [],
+    current_yes_odds: position.currentYesOdds,
+    current_no_odds: position.currentNoOdds,
+    llm_yes_odds: null,
+    llm_no_odds: null,
+    returns_per_day:
+      position.returnsPerDay ??
+      calculateStageOneReturnsPerDay({
+        currentYesOdds: position.currentYesOdds,
+        currentNoOdds: position.currentNoOdds,
+        llmYesOdds: side === "YES" ? 100 : side === "NO" ? 0 : null,
+        llmNoOdds: side === "NO" ? 100 : side === "YES" ? 0 : null,
+        closeTime: position.closeTime,
+        asOf,
+      }),
+    is_active_position: true,
+    active_position_side: side === "YES" || side === "NO" ? side : null,
+    position_side: position.side,
+    position_shares: position.shares,
+    position_exposure_usd: position.exposureUsd,
+    position_average_price_cents: position.averagePriceCents,
+  };
+}
+
+function calculateStageOneReturnsPerDay({
+  currentYesOdds,
+  currentNoOdds,
+  llmYesOdds,
+  llmNoOdds,
+  closeTime,
+  asOf,
+}: {
+  currentYesOdds: number | null;
+  currentNoOdds: number | null;
+  llmYesOdds: number | null;
+  llmNoOdds: number | null;
+  closeTime: string | null;
+  asOf: number;
+}) {
+  const closeTimeMs = closeTime ? Date.parse(closeTime) : Number.NaN;
+  const daysUntilClose = Number.isFinite(closeTimeMs)
+    ? Number(((closeTimeMs - asOf) / 86_400_000).toFixed(1))
+    : null;
+  return getBullpenReturnsPerDayBreakdown({
+    yesOdds: currentYesOdds,
+    noOdds: currentNoOdds,
+    llmYesOdds,
+    llmNoOdds,
+    daysUntilClose,
+  }).result;
+}
+
+function buildStageOneOpportunityTableEvent(
+  candidate: ScanCandidateDialogCandidate,
+  index: number,
+): BullpenEventTableSnapshot {
+  return {
+    market_id: candidate.marketId || candidate.questionId || candidate.slug || `fresh-opportunity-${index + 1}`,
+    market_title: candidate.question,
+    market_url: candidate.marketUrl,
+    close_time: candidate.closeTime,
+    score: Math.max(candidate.llmYesOdds ?? 0, candidate.llmNoOdds ?? 0),
+    scan_scores: [],
+    scan_sides: [],
+    scan_timestamps: [],
+    current_yes_odds: candidate.currentYesOdds,
+    current_no_odds: candidate.currentNoOdds,
+    llm_yes_odds: candidate.llmYesOdds,
+    llm_no_odds: candidate.llmNoOdds,
+    returns_per_day: candidate.returnsPerDay,
+    amount_to_be_invested: candidate.amountToBeInvested,
+    volume_usd: candidate.volumeUsd,
+    liquidity_usd: candidate.liquidityUsd,
+  };
+}
+
+function stageOneActiveOddsLookupId(
+  position: ScanCandidateDialogState["activePositions"][number],
+  index: number,
+) {
+  const exactIdentity =
+    position.conditionId ??
+    position.slug ??
+    position.marketUrl ??
+    position.marketId ??
+    position.marketTitle;
+  return `stage-one-active-odds-${index}-${exactIdentity}`;
+}
+
+function stageOneCandidateOddsLookupId(
+  candidate: ScanCandidateDialogCandidate,
+  index: number,
+) {
+  const exactIdentity =
+    candidate.conditionId ??
+    candidate.slug ??
+    candidate.marketUrl ??
+    candidate.marketId ??
+    candidate.questionId ??
+    candidate.question;
+  return `stage-one-candidate-odds-${index}-${exactIdentity}`;
+}
+
+function StageOneOutputDialog({
+  state,
+  onClose,
+  onRecoverLegacyExport,
+  workspaceProfile = "bullpen007",
+}: {
+  state: ScanCandidateDialogState;
+  onClose: () => void;
+  onRecoverLegacyExport?: (
+    exportScope: "filtered" | "all-scanned",
+  ) => void;
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
+  const reviewDialog = useReviewDialog<HTMLDivElement>(state.mode !== "all-scanned", onClose);
+  const evidence = state.displayEvidence;
+  const countLabel = (value: number | null) => value === null ? "Unknown" : String(value);
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
+  const [latestOdds, setLatestOdds] = useState<
+    Record<string, { yesOdds?: number | null; noOdds?: number | null }>
+  >({});
+  const [latestOddsFetchedAt, setLatestOddsFetchedAt] = useState<string | null>(
+    null,
+  );
+  const [dialogOpenedAt] = useState(() => Date.now());
+  useEffect(() => {
+    if (state.mode === "all-scanned") return;
+    const lookupRows = [
+      ...state.activePositions.map((position, index) => ({
+        id: stageOneActiveOddsLookupId(position, index),
+        conditionId: position.conditionId,
+        slug: position.slug,
+        marketUrl: position.marketUrl,
+        question: position.marketTitle,
+        category: position.theme,
+      })),
+      ...state.candidates.map((candidate, index) => ({
+        id: stageOneCandidateOddsLookupId(candidate, index),
+        conditionId: candidate.conditionId,
+        slug: candidate.slug,
+        marketUrl: candidate.marketUrl,
+        question: candidate.question,
+        category: candidate.theme,
+      })),
+    ];
+    if (lookupRows.length === 0) return;
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
+    void fetch("/api/bullpen-ai/current-odds", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "Cache-Control": "no-cache",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ questions: lookupRows }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          markets?: Record<
+            string,
+            { yesOdds?: number | null; noOdds?: number | null }
+          >;
+          fetchedAt?: string | null;
+        };
+        if (!response.ok || controller.signal.aborted) return;
+        setLatestOdds(payload.markets ?? {});
+        setLatestOddsFetchedAt(payload.fetchedAt ?? new Date().toISOString());
+      })
+      .catch(() => undefined)
+      .finally(() => window.clearTimeout(timeoutId));
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [state]);
+  if (state.mode === "all-scanned") {
+    return <AllScannedEventsDialog state={state} onClose={onClose} />;
+  }
+  const showActivePositionsFirst = state.mode === "active-positions";
+  const retainedCandidateCount = Math.max(
+    state.passedFilterCount,
+    state.candidates.length,
+  );
+  const claimablePositions = state.activePositions.filter(
+    (position) => position.isClaimable,
+  );
+  const activePositions = state.activePositions.filter(isWorkflowActivePosition);
+  const latestAsOf = latestOddsFetchedAt
+    ? Date.parse(latestOddsFetchedAt)
+    : dialogOpenedAt;
+  const enrichLatestOdds = (
+    event: BullpenEventTableSnapshot,
+    chosenSide?: string | null,
+    lookupId: string = event.market_id,
+  ): BullpenEventTableSnapshot => {
+    const market = latestOdds[lookupId];
+    const currentYesOdds =
+      typeof market?.yesOdds === "number"
+        ? market.yesOdds
+        : event.current_yes_odds ?? null;
+    const currentNoOdds =
+      typeof market?.noOdds === "number"
+        ? market.noOdds
+        : event.current_no_odds ?? null;
+    const normalizedSide = chosenSide?.trim().toUpperCase();
+    return {
+      ...event,
+      current_yes_odds: currentYesOdds,
+      current_no_odds: currentNoOdds,
+      returns_per_day: event.is_claimable_position
+        ? null
+        : calculateStageOneReturnsPerDay({
+            currentYesOdds,
+            currentNoOdds,
+            llmYesOdds:
+              normalizedSide === "YES"
+                ? 100
+                : normalizedSide === "NO"
+                  ? 0
+                  : event.llm_yes_odds ?? null,
+            llmNoOdds:
+              normalizedSide === "NO"
+                ? 100
+                : normalizedSide === "YES"
+                  ? 0
+                  : event.llm_no_odds ?? null,
+            closeTime: event.close_time ?? null,
+            asOf: latestAsOf,
+          }) ?? event.returns_per_day ?? null,
+    };
+  };
+  const activeSideByKey = new Map<string, string>();
+  const candidateCloseTimeByKey = new Map<string, string>();
+  for (const candidate of state.candidates) {
+    if (!candidate.closeTime) continue;
+    [
+      candidate.conditionId,
+      candidate.slug,
+      candidate.marketUrl,
+      candidate.question,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => candidateCloseTimeByKey.set(key, candidate.closeTime as string));
+  }
+  for (const position of activePositions) {
+    if (!position.side) continue;
+    [
+      position.conditionId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => activeSideByKey.set(key, position.side as string));
+  }
+  const activePositionEvents = activePositions.map((position, index) => {
+    const matchingCandidateCloseTime = [
+      position.conditionId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .map((key) => candidateCloseTimeByKey.get(key) ?? null)
+      .find((closeTime) => closeTime !== null);
+    const event = buildStageOnePositionTableEvent(position, index, dialogOpenedAt);
+    return enrichLatestOdds(
+      matchingCandidateCloseTime
+        ? { ...event, close_time: matchingCandidateCloseTime }
+        : event,
+      position.side,
+      stageOneActiveOddsLookupId(position, index),
+    );
+  });
+  const freshOpportunityEvents = state.candidates.map((candidate, index) => {
+    const activeSide = [
+      candidate.conditionId,
+      candidate.slug,
+      candidate.marketUrl,
+      candidate.question,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .map((key) => activeSideByKey.get(key) ?? null)
+      .find((side) => side !== null);
+    return enrichLatestOdds(
+      buildStageOneOpportunityTableEvent(candidate, index),
+      activeSide,
+      stageOneCandidateOddsLookupId(candidate, index),
+    );
+  });
+  const filteredEventExportRows = state.candidates.map((candidate, index) => {
+    const event = freshOpportunityEvents[index];
+    return {
+      ...candidate,
+      currentYesOdds: event.current_yes_odds ?? candidate.currentYesOdds,
+      currentNoOdds: event.current_no_odds ?? candidate.currentNoOdds,
+      llmYesOdds: event.llm_yes_odds ?? candidate.llmYesOdds,
+      llmNoOdds: event.llm_no_odds ?? candidate.llmNoOdds,
+      returnsPerDay: event.returns_per_day ?? candidate.returnsPerDay,
+      amountToBeInvested:
+        event.amount_to_be_invested ?? candidate.amountToBeInvested,
+      volumeUsd: event.volume_usd ?? candidate.volumeUsd,
+      liquidityUsd: event.liquidity_usd ?? candidate.liquidityUsd,
+    };
+  });
+  const downloadFilteredEvents = () => {
+    if (state.scanExportId) {
+      downloadIndependentStageOneExcel(
+        state.scanExportId,
+        state.mode === "all-scanned" ? "all-scanned" : "filtered",
+        workspaceProfile,
+      );
+      return;
+    }
+    if (state.isIndependentStageOne && onRecoverLegacyExport) {
+      onClose();
+      onRecoverLegacyExport(state.mode === "all-scanned" ? "all-scanned" : "filtered");
+      return;
+    }
+    if (state.runId && !state.isIndependentStageOne) {
+      downloadCompleteStageOneRunExcel(state.runId, state.mode === "all-scanned" ? "all-scanned" : "filtered");
+      return;
+    }
+    const download = state.mode === "all-scanned" ? downloadStageOneAllScannedEventsExcel : downloadStageOneFilteredEventsExcel;
+    void download({
+      candidates: filteredEventExportRows,
+      scanCompletedAt: state.scanCompletedAt,
+    });
+  };
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label="Stage 1 output" className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              {showActivePositionsFirst
+                ? "Active Bullpen Positions"
+                : "Fresh Bullpen Opportunities"}
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              {showActivePositionsFirst
+                ? `Positions (${countLabel(evidence.active)})`
+                : `Fresh Bullpen Opportunities (${countLabel(evidence.candidates)})`}
+            </h2>
+            <p className="text-sm text-slate-600">
+              {evidence.source} · {evidence.status}. Recorded completion: {state.scanCompletedAt ? formatIstDateTime(state.scanCompletedAt) : "Unknown"}.
+            </p>
+            {latestOddsFetchedAt ? (
+              <p className="text-xs font-semibold text-slate-500">
+                Current Bullpen odds fetched/updated at{" "}
+                {formatIstDateTime(latestOddsFetchedAt)}.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={
+                !state.scanExportId &&
+                !(state.isIndependentStageOne && onRecoverLegacyExport) &&
+                !(!state.isIndependentStageOne && state.runId) &&
+                filteredEventExportRows.length === 0
+              }
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Download Excel
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              aria-label="Close Stage 1 output"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+          <p className="mb-4 text-sm text-slate-600">Counts above zero are retained saved evidence; unknown completeness is not an empty result. Wallet verification: {evidence.walletVerified ? "fresh saved snapshot" : "Unknown or unverified"}. Filter completion: {evidence.filtersVerified ? "verified saved completion" : "Unknown or incomplete"}.</p>
+          {state.hydrationWarning ? <p role="status" className="mb-4 text-sm text-amber-800">{state.hydrationWarning}</p> : null}
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                Available for claim
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-emerald-950">
+                {countLabel(evidence.claimable)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                Active Bullpen positions found
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-amber-950">
+                {countLabel(evidence.active)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-pink-200 bg-pink-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-pink-700">
+                Fresh Bullpen Opportunities
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-pink-950">
+                {countLabel(evidence.candidates)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-5">
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                    Available for Claim
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Claimable Bullpen wallet positions separated from active
+                    positions.
+                  </p>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  {countLabel(evidence.claimable)}{" "}
+                  {state.claimablePositionCount === 1
+                    ? "position"
+                    : "positions"}
+                </span>
+              </div>
+
+              {claimablePositions.length > 0 ? (
+                <div className="overflow-hidden rounded-2xl border border-emerald-200">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-emerald-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                      <tr>
+                        <th className="px-4 py-3">Position</th>
+                        <th className="px-4 py-3">Side & size</th>
+                        <th className="px-4 py-3">Odds</th>
+                        <th className="px-4 py-3">Close time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {claimablePositions.map((position) => (
+                        <tr key={position.positionKey}>
+                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
+                            <div className="font-semibold text-slate-950">
+                              {position.marketUrl ? (
+                                <a
+                                  className="hover:text-sky-700 hover:underline"
+                                  href={position.marketUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {position.marketTitle}
+                                </a>
+                              ) : (
+                                position.marketTitle
+                              )}
+                            </div>
+                            <div className="mt-1 flex gap-2 overflow-hidden whitespace-nowrap text-[11px] text-slate-500">
+                              {position.theme ? (
+                                <span>{position.theme}</span>
+                              ) : null}
+                              {position.conditionId ? (
+                                <span>{position.conditionId}</span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            {position.side ?? "—"}
+                            <br />
+                            Shares {formatShares(position.shares)}
+                            <br />
+                            Exposure {formatMoney(position.exposureUsd)}
+                            <br />
+                            Avg {formatPriceCents(position.averagePriceCents)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            Yes {formatOddsPercent(position.currentYesOdds)}
+                            <br />
+                            No {formatOddsPercent(position.currentNoOdds)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            {formatIstDateTime(position.closeTime)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-sm text-emerald-700">
+                  {evidence.claimable === 0 ? "The verified saved wallet snapshot contains no claimable positions." : "Claimable positions are unknown; no detailed rows were retained for this source."}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Active Bullpen positions found
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {evidence.walletVerified ? "These positions belong to the verified fresh saved wallet snapshot for this run." : "Saved position rows, if present, do not establish a completed or fresh live wallet sync."}
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {countLabel(evidence.active)}{" "}
+                  {state.activePositionCount === 1 ? "position" : "positions"}
+                </span>
+              </div>
+
+              {activePositions.length > 0 ? (
+                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <BullpenEventTrendsTable
+                    events={activePositionEvents}
+                    variant="active-positions"
+                    onReturnsFormula={() =>
+                      setIsReturnsPerDayFormulaDialogOpen(true)
+                    }
+                  />
+                </div>
+              ) : state.activePositionCount > 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  {countLabel(evidence.active)} active Bullpen{" "}
+                  {state.activePositionCount === 1
+                    ? "position was"
+                    : "positions were"}{" "}
+                  recorded for this source, but the detailed rows were not stored in
+                  this run record.
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  {evidence.active === 0 ? "The verified saved wallet snapshot contains no active positions." : "Active positions are unknown; no detailed rows were retained for this source."}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Fresh Bullpen Opportunities
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {evidence.filtersVerified ? "Saved Bullpen events that passed the completed Stage 1 filters." : "Retained candidates, if present; completed filter coverage is unverified."}
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {countLabel(evidence.candidates)}{" "}
+                  {retainedCandidateCount === 1 ? "candidate" : "candidates"}
+                </span>
+              </div>
+
+              {state.candidates.length > 0 ? (
+                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <BullpenEventTrendsTable
+                    events={freshOpportunityEvents}
+                    variant="fresh-opportunities"
+                    onReturns={(question) => setReturnsPerDayQuestion(question)}
+                    onReturnsFormula={() =>
+                      setIsReturnsPerDayFormulaDialogOpen(true)
+                    }
+                  />
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
+                  {evidence.candidates === 0 ? "The verified completed Stage 1 filters returned no opportunity candidates." : "Opportunity candidates are unknown; no detailed rows were retained for this source."}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      </div>
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function AllScannedEventsDialog({
+  state,
+  onClose,
+}: {
+  state: ScanCandidateDialogState;
+  onClose: () => void;
+}) {
+  const retainedRowCount = state.candidates.length;
+  const eventRowsPerPage = 100;
+  const [eventQuery, setEventQuery] = useState("");
+  const [eventPage, setEventPage] = useState(1);
+  const omittedRowCount = Math.max(0, state.totalScanned - retainedRowCount);
+  const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
+  const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
+  const normalizedEventQuery = eventQuery.trim().toLowerCase();
+  const matchingCandidates = normalizedEventQuery
+    ? state.candidates.filter((candidate) =>
+        [
+          candidate.question,
+          candidate.slug ?? "",
+          candidate.filterReasons.join(" "),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedEventQuery),
+      )
+    : state.candidates;
+  const eventPageCount = Math.max(
+    1,
+    Math.ceil(matchingCandidates.length / eventRowsPerPage),
+  );
+  const boundedEventPage = Math.min(eventPage, eventPageCount);
+  const eventPageStart = (boundedEventPage - 1) * eventRowsPerPage;
+  const visibleCandidates = matchingCandidates.slice(
+    eventPageStart,
+    eventPageStart + eventRowsPerPage,
+  );
+  const filteredCandidates = state.candidates.filter(
+    (candidate) => candidate.filterReasons.length > 0,
+  );
+  const filterReasonGroups = Array.from(
+    state.candidates.reduce((groups, candidate) => {
+      candidate.filterReasons.forEach((reason) => {
+        const matching = groups.get(reason) ?? [];
+        matching.push(candidate);
+        groups.set(reason, matching);
+      });
+      return groups;
+    }, new Map<string, typeof state.candidates>()),
+  )
+    .map(([reason, candidates]) => ({ reason, candidates }))
+    .sort(
+      (left, right) =>
+        right.candidates.length - left.candidates.length ||
+        left.reason.localeCompare(right.reason),
+    );
+  const selectedFilterCandidates = selectedFilterReason
+    ? filterReasonGroups.find((group) => group.reason === selectedFilterReason)
+        ?.candidates ?? []
+    : [];
+
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Stage 1 scan</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {activeTab === "analysis" ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("events")}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  aria-label="Back to all scanned events"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back
+                </button>
+              ) : null}
+              <h2 className="text-xl font-semibold text-slate-950">
+                {activeTab === "analysis" ? (
+                  "Filtered Events Analysis"
+                ) : (
+                  <>All Events Scanned ({state.totalScanned})</>
+                )}
+              </h2>
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              {activeTab === "analysis"
+                ? "Every assigned filter reason is counted. An event can appear under more than one reason."
+                : `Scanned at ${formatIstDateTime(state.scanCompletedAt)}. Filtered rows are included.`}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {activeTab === "events" ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab("analysis")}
+                className="inline-flex h-10 items-center rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              >
+                Analyse Filtered Events
+              </button>
+            ) : null}
+            <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close all scanned events">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-auto p-6">
+          {activeTab === "analysis" ? (
+            <>
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Filtered events</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950">{filteredCandidates.length.toLocaleString("en-IN")}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Distinct reasons</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.length.toLocaleString("en-IN")}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Total reason hits</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.reduce((total, group) => total + group.candidates.length, 0).toLocaleString("en-IN")}</p>
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">#</th>
+                      <th className="px-4 py-3">Filter reason</th>
+                      <th className="px-4 py-3 text-right">Events caught</th>
+                      <th className="px-4 py-3 text-right">% of scanned</th>
+                      <th className="px-4 py-3 text-right">% of filtered</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filterReasonGroups.map((group, index) => (
+                      <tr key={group.reason}>
+                        <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800">{group.reason}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedFilterReason(group.reason)}
+                            className="inline-flex min-w-12 justify-center rounded-full bg-sky-50 px-3 py-1 font-semibold text-sky-700 transition hover:bg-sky-100 hover:underline"
+                            aria-label={`Show ${group.candidates.length} events caught by ${group.reason}`}
+                          >
+                            {group.candidates.length.toLocaleString("en-IN")}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-600">{state.totalScanned > 0 ? `${((group.candidates.length / state.totalScanned) * 100).toFixed(1)}%` : "—"}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{filteredCandidates.length > 0 ? `${((group.candidates.length / filteredCandidates.length) * 100).toFixed(1)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filterReasonGroups.length === 0 ? (
+                <div className="py-10 text-center text-sm text-slate-600">No per-event filter reasons are available for this run.</div>
+              ) : null}
+              {omittedRowCount > 0 ? (
+                <p className="py-4 text-center text-sm text-amber-700">Analysis covers the {retainedRowCount.toLocaleString("en-IN")} retained event rows. {omittedRowCount.toLocaleString("en-IN")} additional rows were not retained in the saved run.</p>
+              ) : null}
+            </>
+          ) : <>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <label className="min-w-64 flex-1">
+              <span className="sr-only">Search scanned events</span>
+              <input
+                type="search"
+                aria-label="Search scanned events"
+                value={eventQuery}
+                onChange={(event) => {
+                  setEventQuery(event.target.value);
+                  setEventPage(1);
+                }}
+                placeholder="Search question, slug, or filter reason"
+                className="h-10 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+              />
+            </label>
+            <p className="text-sm text-slate-600">
+              {matchingCandidates.length === 0
+                ? "No matching rows."
+                : `Showing ${eventPageStart + 1}–${Math.min(
+                    eventPageStart + visibleCandidates.length,
+                    matchingCandidates.length,
+                  )} of ${matchingCandidates.length.toLocaleString("en-IN")} matching rows.`}
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {visibleCandidates.map((candidate, index) => (
+                  <tr key={`${candidate.marketId ?? candidate.slug ?? candidate.question}-${index}`}>
+                    <td className="px-4 py-3 text-slate-500">{eventPageStart + index + 1}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
+                    <td className="px-4 py-3"><span title={candidate.filterReasons.join("; ") || undefined} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${candidate.scanStatus === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{candidate.scanStatus === "passed" ? "Passed" : "Filtered"}</span></td>
+                    <td className="max-w-xs px-4 py-3 text-slate-600">{candidate.filterReasons.join("; ") || "Passed all Stage 1 filters."}</td>
+                    <td className="px-4 py-3">{formatOddsPercent(candidate.currentYesOdds)}</td>
+                    <td className="px-4 py-3">{formatOddsPercent(candidate.currentNoOdds)}</td>
+                    <td className="px-4 py-3">{formatIstDateTime(candidate.closeTime)}</td>
+                    <td className="px-4 py-3">{formatMoney(candidate.volumeUsd)}</td>
+                    <td className="px-4 py-3">{formatMoney(candidate.liquidityUsd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {matchingCandidates.length > eventRowsPerPage ? (
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                disabled={boundedEventPage <= 1}
+                onClick={() => setEventPage((page) => Math.max(1, page - 1))}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-slate-600">
+                Page {boundedEventPage} of {eventPageCount}
+              </span>
+              <button
+                type="button"
+                disabled={boundedEventPage >= eventPageCount}
+                onClick={() =>
+                  setEventPage((page) => Math.min(eventPageCount, page + 1))
+                }
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
+          {retainedRowCount === 0 ? (
+            <div className="mx-auto max-w-2xl py-8 text-center">
+              <p className="font-semibold text-slate-800">No detailed event rows are available.</p>
+              <p className="mt-2 text-sm text-slate-600">{state.emptyRowsReason ?? "The run payload contains the scan total, but it does not contain the individual scanned-event records."}</p>
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950">
+                <p className="font-semibold">What the saved run does show</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  <li>{state.totalScanned.toLocaleString("en-IN")} events were scanned.</li>
+                  <li>{state.passedFilterCount.toLocaleString("en-IN")} events passed Stage 1 filters.</li>
+                  <li>{state.rejectedFilterCount === null ? "The rejected-event count was not retained." : `${state.rejectedFilterCount.toLocaleString("en-IN")} events were filtered out.`}</li>
+                </ul>
+              </div>
+            </div>
+          ) : omittedRowCount > 0 ? (
+            <p className="py-4 text-center text-sm text-amber-700">Showing {retainedRowCount.toLocaleString("en-IN")} retained rows. {omittedRowCount.toLocaleString("en-IN")} additional scanned rows were not retained in the console payload.</p>
+          ) : null}</>}
+        </div>
+      </div>
+      {selectedFilterReason ? (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
+          <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Stage 1 filter drill-down</p>
+                <h3 className="mt-2 text-lg font-semibold text-slate-950">{selectedFilterReason}</h3>
+                <p className="mt-1 text-sm text-slate-600">{selectedFilterCandidates.length.toLocaleString("en-IN")} event(s) caught by this filter.</p>
+              </div>
+              <button type="button" onClick={() => setSelectedFilterReason(null)} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close filtered event list">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {selectedFilterCandidates.map((candidate, index) => (
+                      <tr key={`${candidate.marketId ?? candidate.slug ?? candidate.question}-${index}`}>
+                        <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
+                        <td className="px-4 py-3">{formatOddsPercent(candidate.currentYesOdds)}</td>
+                        <td className="px-4 py-3">{formatOddsPercent(candidate.currentNoOdds)}</td>
+                        <td className="px-4 py-3">{formatIstDateTime(candidate.closeTime)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function getDecisionExitTypeDetails(decision: BullpenAutoLiveDecision) {
+  const matchingSignals = decision.exit_signals.filter(
+    (signal) =>
+      signal.strategy === "OUTSIDE_TOP_10_RETURNS_DAY" ||
+      signal.strategy === "LLM_OR_ODDS_FILTER_EXIT" ||
+      signal.strategy === "CAPITAL_AWARE_FORCED_EXIT",
+  );
+  if (matchingSignals.length === 0) return null;
+
+  const hasForcedExit = matchingSignals.some(
+    (signal) => signal.strategy === "CAPITAL_AWARE_FORCED_EXIT",
+  );
+  const hasEventOutOfTop10 = matchingSignals.some(
+    (signal) =>
+      signal.strategy === "OUTSIDE_TOP_10_RETURNS_DAY" ||
+      signal.strategy === "LLM_OR_ODDS_FILTER_EXIT",
+  );
+
+  const label = hasForcedExit
+    ? hasEventOutOfTop10
+      ? "Exit: Event out of Top 10 + Forced Exit"
+      : "Exit: Forced Exit"
+    : "Exit: Event out of Top 10";
+
+  const details = [
+    hasEventOutOfTop10
+      ? "Exit: Event out of Top 10.\nCase 1: Position is outside top 10 by Returns/day.\nCase 2: Odds filter no longer qualifies the event."
+      : null,
+    hasForcedExit
+      ? "Exit: Forced Exit.\nCase 1: Market is 99.5% or more against the held outcome.\nCase 2: Held-side best bid falls below 0.5c."
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return { label, details };
+}
+
+function formatInvestMetricOrderStatus(decision: BullpenAutoLiveDecision) {
+  if (!decision.order_plan) return "No order planned";
+  return decision.order_plan.status.replaceAll("_", " ");
+}
+
+function InvestMetricSummaryCard({
+  label,
+  value,
+  onClick,
+}: {
+  label: string;
+  value: ReactNode;
+  onClick?: () => void;
+}) {
+  const classes =
+    "rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition";
+  if (!onClick) {
+    return (
+      <div className={classes}>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          {label}
+        </p>
+        <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${classes} hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        {label}
+      </p>
+      <p className="mt-2 text-2xl font-semibold text-slate-950">{value}</p>
+    </button>
+  );
+}
+
+function Stage2TransferQueueMetricSummaryCard({
+  kind,
+  label,
+  value,
+  cardClassName,
+  labelClassName,
+  valueClassName,
+  onOpenInfo,
+}: {
+  kind: Stage2TransferQueueMetricInfoKind;
+  label: string;
+  value: ReactNode;
+  cardClassName: string;
+  labelClassName: string;
+  valueClassName: string;
+  onOpenInfo: (kind: Stage2TransferQueueMetricInfoKind) => void;
+}) {
+  return (
+    <div className={cardClassName}>
+      <div className="flex items-center gap-1.5">
+        <p className={labelClassName}>{label}</p>
+        <button
+          type="button"
+          onClick={() => onOpenInfo(kind)}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current/20 text-current transition hover:bg-white/70 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          aria-label={`Show ${label} details`}
+          title={`Show ${label} details`}
+        >
+          <Info className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+      <p className={valueClassName}>{value}</p>
+    </div>
+  );
+}
+
+function Stage2TransferQueueMetricInfoDialog({
+  kind,
+  onClose,
+}: {
+  kind: Stage2TransferQueueMetricInfoKind;
+  onClose: () => void;
+}) {
+  const definition = getStage2TransferQueueMetricInfo(kind);
+
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Saved Stage 2 Transfer Queue
+            </p>
+            <h3 className="text-xl font-semibold text-slate-950">
+              {definition.title}
+            </h3>
+            <p className="text-sm text-slate-600">{definition.summary}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label={`Close ${definition.title} details`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-6 py-5">
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Conditions
+            </p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {definition.conditions.map((item) => (
+                <li key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Prerequisites
+            </p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {definition.prerequisites.map((item) => (
+                <li key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Workflow
+            </p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {definition.workflow.map((item) => (
+                <li key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function buildRunDetailScanCandidateDialogState({
+  run,
+  decisions,
+  stage,
+  mode,
+  activePositionsFallback = [],
+}: {
+  run: BullpenAutoLiveRun | null;
+  decisions: BullpenAutoLiveDecision[];
+  stage: WorkflowStageView;
+  mode: ScanCandidateDialogMode;
+  activePositionsFallback?: WorkflowStageView["activePositionsFound"];
+}): ScanCandidateDialogState {
+  const activePositionCounts = getStageActivePositionCounts(stage);
+  const stageOneStats = getStageOneStats(stage);
+  const retainedActivePositionRows =
+    stage.activePositionsFound.length > 0
+      ? stage.activePositionsFound
+      : activePositionCounts.open === activePositionsFallback.length
+        ? activePositionsFallback
+        : [];
+  const rejectedFilterCount =
+    readStageOutputNumber(stage.outputs.rejected_candidates_count) ??
+    (Array.isArray(stage.outputs.rejected_candidates)
+      ? stage.outputs.rejected_candidates.length
+      : null);
+  const detailedRows =
+    mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
+  const emptyRowsReason =
+    detailedRows.length > 0
+      ? null
+      : stage.state === "current"
+        ? "Stage 1 has reported its scan total, but the detailed rows have not been published yet. This dialog updates after the run refreshes."
+        : stageOneStats.totalScanned > 0
+          ? "This saved run retained aggregate scan counts only. Individual event names and per-event filter reasons cannot be reconstructed from those counts."
+          : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
+
+  return {
+    displayEvidence: resolveStageOneDisplayEvidence({ outputs: stage.outputs, savedStatus: run?.stage_results.find(item => item.stage_number === 1)?.status, completedAt: stage.timerCompletedAt, runId: run?.id ?? null, activeCount: activePositionCounts.open, claimableCount: activePositionCounts.claimable, candidateCount: Math.max(stageOneStats.passedFilters, detailedRows.length) }),
+    mode,
+    runId: run?.id ?? null,
+    isIndependentStageOne: stage.outputs.independent_stage1_scan === true,
+    scanExportId: readStageOutputString(stage.outputs.scan_export_id),
+    scanCompletedAt: stage.timerCompletedAt,
+    totalScanned: stageOneStats.totalScanned,
+    passedFilterCount: stageOneStats.passedFilters,
+    rejectedFilterCount,
+    emptyRowsReason,
+    candidates: buildScanCandidateDialogRows({
+      candidates: detailedRows,
+      run,
+      decisions,
+    }),
+    activePositions: retainedActivePositionRows,
+    activePositionCount: activePositionCounts.open,
+    claimablePositionCount: activePositionCounts.claimable,
+  };
+}
+
+function RunDetailWorkerStages({
+  run,
+  decisions,
+  onOpenScanFilters,
+  onOpenScanCandidateDialog,
+  onOpenStageTwoInvestEvents,
+  onOpenStageTwoLlmRunDetails,
+  onOpenMetricDetails,
+}: {
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+  onOpenScanFilters?: () => void;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
+  onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
+  onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
+  onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
+}) {
+  const workflowView = buildBullpenAutoRunWorkflowView(run);
+  const scanStage =
+    workflowView.stages.find((stage) => stage.key === "scan") ?? undefined;
+  const timerNowMs = Date.parse(run.completed_at ?? run.started_at ?? "");
+  const stableTimerNowMs = Number.isFinite(timerNowMs) ? timerNowMs : 0;
+
+  return (
+    <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+            Background execution monitor
+          </p>
+          <h3 className="mt-2 text-base font-semibold text-slate-950">
+            {workflowView.statusCopy}
+          </h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Run {run.id} · started {formatIstDateTime(run.started_at)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-700">
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {isBullpenAutoRunWorkflowSettled(workflowView)
+              ? "All 3 stages finished"
+              : workflowView.currentStageLabel}
+          </span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {run.decisions_count} decisions
+          </span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {run.orders_planned} planned
+          </span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+            {run.orders_submitted} submitted
+          </span>
+        </div>
+      </div>
+
+      <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        Worker stages
+      </p>
+      <div className="mt-3 grid gap-3 xl:grid-cols-3">
+        {workflowView.stages.map((stage) => {
+          const immediateSuccess = getInvestStageImmediateSuccess(stage);
+          const investStageCounters = getInvestStageCounters(stage, decisions);
+          const investExecutionSteps = getInvestStageExecutionSteps(stage, decisions);
+          const toneClasses = getWorkflowToneClasses(
+            immediateSuccess ? "green" : stage.tone,
+          );
+          const stageStatusLabel = immediateSuccess
+            ? "Finished"
+            : stage.progressLabel === "Interrupted"
+              ? "Interrupted"
+              : stage.state === "current"
+                ? "Working"
+                : stage.state === "finished"
+                  ? "Finished"
+                  : "In Queue";
+          const progressPercent = immediateSuccess
+            ? 100
+            : stage.progressPercent;
+
+          return (
+            <div
+              key={stage.key}
+              className={`flex min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm ${toneClasses.container}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className={`text-sm font-semibold ${toneClasses.text}`}>
+                    {stage.title}
+                  </p>
+                  {stage.subtitle ? (
+                    <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                      {stage.subtitle}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+                  >
+                    {stageStatusLabel}
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
+                  >
+                    <Clock3 className="h-3 w-3" />
+                    {formatStageElapsedTime(
+                      stage.timerStartedAt,
+                      stage.timerCompletedAt,
+                      stableTimerNowMs,
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className={`mt-3 rounded-xl border border-white/60 bg-white/50 px-3 py-2 text-[11px] leading-5 ${toneClasses.muted}`}
+              >
+                <div>
+                  Last stage run:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {formatStageLastRunLabel(
+                      stage.timerCompletedAt ?? stage.timerStartedAt,
+                    )}
+                  </span>
+                </div>
+                <div>
+                  Time taken:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {formatStageElapsedTime(
+                      stage.timerStartedAt,
+                      stage.timerCompletedAt,
+                      stableTimerNowMs,
+                    )}
+                  </span>
+                </div>
+                {stage.key === "scan" ? (
+                  <StageOneRunStats
+                    stage={stage}
+                    llmStage={workflowView.stages.find(
+                      (item) => item.key === "llm",
+                    )}
+                    decisions={decisions}
+                    run={run}
+                    renderInteractiveRows
+                    onOpenScanCandidateDialog={onOpenScanCandidateDialog}
+                    onOpenScanFilters={onOpenScanFilters}
+                  />
+                ) : null}
+                {stage.key === "llm" ? (
+                  <StageTwoRunStats
+                    run={run}
+                    stage={stage}
+                    decisions={decisions}
+                    onOpenInvestEvents={onOpenStageTwoInvestEvents}
+                    onOpenLlmRunDetails={onOpenStageTwoLlmRunDetails}
+                    onOpenScanCandidateDialog={onOpenScanCandidateDialog}
+                    scanStageForPositionSnapshot={scanStage}
+                  />
+                ) : null}
+              </div>
+
+              {investStageCounters.length > 0 ? (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {investStageCounters.map((counter) => (
+                    <button
+                      type="button"
+                      key={counter.label}
+                      onClick={() =>
+                        onOpenMetricDetails?.(
+                          counter.label.toLowerCase() as InvestMetricDialogKind,
+                        )
+                      }
+                      disabled={!onOpenMetricDetails}
+                      className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left transition enabled:hover:-translate-y-0.5 enabled:hover:bg-white enabled:focus:outline-none enabled:focus:ring-2 enabled:focus:ring-sky-300"
+                    >
+                      <p
+                        className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                      >
+                        {counter.label}
+                      </p>
+                      <p
+                        className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}
+                      >
+                        {counter.value}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {investExecutionSteps.length > 0 ? (
+                <div className="mt-3">
+                  <InvestExecutionStepsSummary
+                    steps={investExecutionSteps}
+                    compact
+                    onOpenMetricDetails={onOpenMetricDetails}
+                  />
+                </div>
+              ) : null}
+
+              <div
+                className={`mt-4 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}
+              >
+                <div
+                  className={`h-full rounded-full ${toneClasses.progress}`}
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <p className={`mt-3 text-xs font-semibold ${toneClasses.text}`}>
+                {immediateSuccess ? "Finished" : stage.progressLabel}
+              </p>
+              {stage.key === "invest" ? null : (
+                <div className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+                  <p>{stage.detail}</p>
+                  {stage.state === "current" &&
+                  stage.progressCommentary.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-white/70 bg-white/45 px-3 py-2">
+                      <p className={`font-semibold ${toneClasses.text}`}>
+                        Progress commentary
+                      </p>
+                      <ul className="mt-2 space-y-1.5">
+                        {stage.progressCommentary.map((item, index) => (
+                          <li
+                            key={`${stage.key}-commentary-${index}`}
+                            className="flex gap-2"
+                          >
+                            <span aria-hidden="true">•</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function RunDetailDialog({
+  state,
+  onClose,
+  presentation = "dialog",
+  onOpenScanFilters,
+  onOpenScanCandidateDialog,
+  onOpenStageTwoInvestEvents,
+  onOpenStageTwoLlmRunDetails,
+  onOpenMetricDetails,
+}: {
+  state: RunDetailDialogState;
+  onClose: () => void;
+  presentation?: "dialog" | "page";
+  onOpenScanFilters?: () => void;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
+  onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
+  onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
+  onOpenMetricDetails?: (
+    run: BullpenAutoLiveRun,
+    kind: InvestMetricDialogKind,
+    decisions?: BullpenAutoLiveDecision[],
+  ) => void;
+}) {
+  const { run, decisions } = state;
+  const summaryDetails = getRunSummaryDetails(run.summary);
+  const [warningsDialogOpen, setWarningsDialogOpen] = useState(false);
+  const [plannedOrderDetail, setPlannedOrderDetail] =
+    useState<PlannedOrderDetailState | null>(null);
+  const [decisionLlmOdds, setDecisionLlmOdds] =
+    useState<DecisionLlmOddsState | null>(null);
+  const isPage = presentation === "page";
+  return (
+    <div
+      className={
+        isPage
+          ? "min-h-screen bg-slate-100 p-4 text-slate-950 md:p-8"
+          : "fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4"
+      }
+    >
+      <div
+        className={
+          isPage
+            ? "mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl"
+            : "flex max-h-[90vh] min-h-0 w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]"
+        }
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Run Details
+            </p>
+            <h2 className="max-w-5xl rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold leading-5 text-slate-950">
+              {summaryDetails.overview ?? "Run summary unavailable."}
+            </h2>
+            <p className="text-xs text-slate-500">Run {run.id}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label={isPage ? "Back to run history" : "Close run details"}
+            title={isPage ? "Back to run history" : "Close run details"}
+          >
+            {isPage ? (
+              <ArrowLeft className="h-4 w-4" />
+            ) : (
+              <X className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+        <div
+          className={
+            isPage
+              ? "flex-1 px-6 py-5"
+              : "min-h-0 flex-1 overflow-y-auto px-6 py-5"
+          }
+        >
+          <div className="grid gap-3 md:grid-cols-3">
+            <InvestMetricSummaryCard
+              label="Decisions"
+              value={run.decisions_count}
+              onClick={
+                onOpenMetricDetails
+                  ? () => onOpenMetricDetails(run, "decisions", decisions)
+                  : undefined
+              }
+            />
+            <InvestMetricSummaryCard
+              label="Planned"
+              value={run.orders_planned}
+              onClick={
+                onOpenMetricDetails
+                  ? () => onOpenMetricDetails(run, "planned", decisions)
+                  : undefined
+              }
+            />
+            <InvestMetricSummaryCard
+              label="Submitted"
+              value={run.orders_submitted}
+              onClick={
+                onOpenMetricDetails
+                  ? () => onOpenMetricDetails(run, "submitted", decisions)
+                  : undefined
+              }
+            />
+          </div>
+          {summaryDetails.warnings.length > 0 ? (
+            <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/60 px-3 py-2">
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                <span>Brief warnings / errors</span>
+                <button
+                  type="button"
+                  onClick={() => setWarningsDialogOpen(true)}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-200 bg-white text-amber-800 transition hover:bg-amber-100"
+                  aria-label="Open detailed warnings and errors"
+                  title="Open detailed warnings and errors"
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </section>
+          ) : null}
+          {run.error_message ? (
+            <div className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              <ErrorCodeWithDetails
+                detail={run.error_message}
+                detailClassName="text-rose-800"
+              />
+            </div>
+          ) : null}
+          <SubmittedExecutionEventsTable
+            decisions={decisions}
+            onOpenPlannedOrderDetail={setPlannedOrderDetail}
+            onOpenLlmOdds={(decision) => setDecisionLlmOdds({ decision })}
+          />
+          {state.decisionListTruncated ? (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Showing the newest {decisions.length} of {run.decisions_count}{" "}
+              decisions while this run is active. The bounded live refresh
+              preserves already loaded rows.
+            </p>
+          ) : null}
+          <RunDetailWorkerStages
+            run={run}
+            decisions={decisions}
+            onOpenScanFilters={onOpenScanFilters}
+            onOpenScanCandidateDialog={onOpenScanCandidateDialog}
+            onOpenStageTwoInvestEvents={onOpenStageTwoInvestEvents}
+            onOpenStageTwoLlmRunDetails={onOpenStageTwoLlmRunDetails}
+            onOpenMetricDetails={
+              onOpenMetricDetails
+                ? (kind) => onOpenMetricDetails(run, kind, decisions)
+                : undefined
+            }
+          />
+          <div className="mt-5 space-y-4">
+            {run.stage_results.map((stage) => (
+              <section
+                key={`${stage.stage_number}-${stage.stage_name}`}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Stage {stage.stage_number}
+                    </p>
+                    <h3 className="mt-1 text-base font-semibold text-slate-950">
+                      {stage.stage_name}
+                    </h3>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold capitalize text-slate-700">
+                    {stage.status}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Started {formatIstDateTime(stage.started_at)}
+                  {stage.completed_at
+                    ? ` · completed ${formatIstDateTime(stage.completed_at)}`
+                    : ""}
+                </p>
+                <pre className="mt-3 max-h-64 overflow-auto rounded-xl bg-white p-3 text-xs leading-5 text-slate-700">
+                  {JSON.stringify(stage.outputs ?? {}, null, 2)}
+                </pre>
+              </section>
+            ))}
+          </div>
+        </div>
+      </div>
+      {warningsDialogOpen ? (
+        <RunWarningsDialog
+          warnings={summaryDetails.warnings}
+          onClose={() => setWarningsDialogOpen(false)}
+        />
+      ) : null}
+      {decisionLlmOdds ? (
+        <DecisionLlmOddsDialog
+          state={decisionLlmOdds}
+          onClose={() => setDecisionLlmOdds(null)}
+        />
+      ) : null}
+      {plannedOrderDetail ? (
+        <PlannedOrderDetailDialog
+          state={plannedOrderDetail}
+          onClose={() => setPlannedOrderDetail(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+
+export function BullpenRunDetailScreen({
+  runId,
+  workspaceProfile = "bullpen007",
+}: {
+  runId: string;
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
+  const router = useRouter();
+  const [state, setState] = useState<RunDetailDialogState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [scanCandidateDialog, setScanCandidateDialog] =
+    useState<ScanCandidateDialogState | null>(null);
+  const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
+    useState<StageTwoInvestEventsDialogState | null>(null);
+  const [stageTwoLlmRunDialog, setStageTwoLlmRunDialog] =
+    useState<StageTwoLlmRunDialogState | null>(null);
+  const [investMetricDialog, setInvestMetricDialog] =
+    useState<InvestMetricDialogState | null>(null);
+  const normalizedRunId = runId.trim();
+
+  useEffect(() => {
+    if (!normalizedRunId) {
+      setError("A run id is required.");
+      return;
+    }
+
+    const controller = new AbortController();
+    setState(null);
+    setError(null);
+
+    void (async () => {
+      try {
+        const consoleDetail = await apiService.getBullpenAutoLiveRunConsole(
+          normalizedRunId,
+          {
+            signal: controller.signal,
+            timeoutMs: 10_000,
+          },
+        );
+        if (controller.signal.aborted) return;
+        const [run, decisions] = consoleDetail.projection_available
+          ? [consoleDetail.run, consoleDetail.decisions]
+          : await Promise.all([
+              // Only legacy runs without a bounded projection may read the
+              // immutable payload. Current Stage 1 snapshots can contain
+              // hundreds of thousands of audited rows and must never make
+              // this request merely to open the dedicated run page.
+              apiService.getBullpenAutoLiveRun(normalizedRunId, {
+                signal: controller.signal,
+                timeoutMs: 10_000,
+              }),
+              apiService.getBullpenAutoLiveRunDecisions(normalizedRunId, {
+                signal: controller.signal,
+                timeoutMs: 10_000,
+              }),
+            ]);
+        if (controller.signal.aborted) return;
+
+        const fullStage =
+          buildBullpenAutoRunWorkflowView(run).stages.find(
+            (workflowStage) => workflowStage.key === "invest",
+          ) ?? null;
+        let detailRun = run;
+        const persistedDecisions = Array.isArray(decisions) ? decisions : [];
+        let detailDecisions = mergeInvestStageDecisionRows({
+          stage: fullStage,
+          persistedDecisions,
+        });
+        let decisionListTruncated = false;
+        let decisionListLimit: number | undefined;
+
+        if (consoleDetail.projection_available) {
+          const projectedDecisions = Array.isArray(consoleDetail.decisions)
+            ? consoleDetail.decisions
+            : [];
+          const visibleDecisionIds = Array.isArray(
+            consoleDetail.visible_decision_ids,
+          )
+            ? consoleDetail.visible_decision_ids
+            : [];
+          const projectedStage =
+            buildBullpenAutoRunWorkflowView(consoleDetail.run).stages.find(
+              (workflowStage) => workflowStage.key === "invest",
+            ) ?? null;
+          detailRun = mergeBullpenConsoleRunProjection({
+            existing: run,
+            projected: consoleDetail.run,
+            projectionAvailable: true,
+          });
+          detailDecisions = mergeBullpenConsoleDecisionProjection({
+            existing: detailDecisions,
+            projected: mergeInvestStageDecisionRows({
+              stage: projectedStage,
+              persistedDecisions: projectedDecisions,
+            }),
+            truncated: Boolean(consoleDetail.decisions_truncated),
+            visibleDecisionIds,
+            visibleDecisionIdsTruncated: Boolean(
+              consoleDetail.visible_decision_ids_truncated,
+            ),
+          });
+          decisionListTruncated =
+            Boolean(consoleDetail.visible_decision_ids_truncated) ||
+            (Boolean(consoleDetail.decisions_truncated) &&
+              detailDecisions.length < visibleDecisionIds.length);
+          decisionListLimit = consoleDetail.decisions_limit;
+        }
+
+        setState({
+          run: detailRun,
+          decisions: detailDecisions,
+          decisionListTruncated,
+          decisionListLimit,
+        });
+      } catch (nextError) {
+        if (controller.signal.aborted || isRequestAbort(nextError)) return;
+        setError(
+          `Run ${normalizedRunId} details could not be loaded. ${formatUnknownError(nextError)}`,
+        );
+      }
+    })();
+
+    return () => controller.abort();
+  }, [normalizedRunId, reloadKey]);
+
+  const returnToHistory = () =>
+    router.push(bullpenWorkspaceHistoryPath(workspaceProfile));
+
+  if (state) {
+    const openScanCandidateDialog = (
+      stage: WorkflowStageView,
+      mode: ScanCandidateDialogMode,
+    ) =>
+      setScanCandidateDialog(
+        buildRunDetailScanCandidateDialogState({
+          run: state.run,
+          decisions: state.decisions,
+          stage,
+          mode,
+        }),
+      );
+    const openInvestMetricDialog = (
+      run: BullpenAutoLiveRun,
+      kind: InvestMetricDialogKind,
+      detailDecisions: BullpenAutoLiveDecision[] = state.decisions,
+    ) => {
+      const stage =
+        buildBullpenAutoRunWorkflowView(run).stages.find(
+          (workflowStage) => workflowStage.key === "invest",
+        ) ?? null;
+      setInvestMetricDialog({
+        kind,
+        run,
+        stage,
+        decisions: mergeInvestStageDecisionRows({
+          stage,
+          persistedDecisions: detailDecisions,
+        }),
+      });
+    };
+
+    return (
+      <>
+        <RunDetailDialog
+          state={state}
+          presentation="page"
+          onClose={returnToHistory}
+          onOpenScanCandidateDialog={openScanCandidateDialog}
+          onOpenStageTwoInvestEvents={setStageTwoInvestEventsDialog}
+          onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
+          onOpenMetricDetails={openInvestMetricDialog}
+        />
+        {scanCandidateDialog ? (
+          <StageOneOutputDialog
+            state={scanCandidateDialog}
+            onClose={() => setScanCandidateDialog(null)}
+            workspaceProfile={workspaceProfile}
+          />
+        ) : null}
+        {stageTwoInvestEventsDialog ? (
+          <StageTwoInvestEventsDialog
+            state={stageTwoInvestEventsDialog}
+            onClose={() => setStageTwoInvestEventsDialog(null)}
+          />
+        ) : null}
+        {stageTwoLlmRunDialog ? (
+          <StageTwoLlmRunDetailsDialog
+            state={stageTwoLlmRunDialog}
+            onClose={() => setStageTwoLlmRunDialog(null)}
+          />
+        ) : null}
+        {investMetricDialog ? (
+          <InvestMetricDetailsDialog
+            state={investMetricDialog}
+            onClose={() => setInvestMetricDialog(null)}
+            onSelectKind={(kind) =>
+              setInvestMetricDialog((current) =>
+                current ? { ...current, kind } : null,
+              )
+            }
+          />
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-100 p-4 text-slate-950 md:p-8">
+      <div className="mx-auto min-h-[calc(100vh-4rem)] w-full max-w-[92rem] rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
+        <button
+          type="button"
+          onClick={returnToHistory}
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to run history
+        </button>
+        {error ? (
+          <div className="mt-8 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-900">
+            <p className="font-semibold">Run details unavailable</p>
+            <p className="mt-2">{error}</p>
+            <button
+              type="button"
+              onClick={() => setReloadKey((value) => value + 1)}
+              className="mt-4 rounded-xl border border-rose-300 bg-white px-3 py-2 font-semibold transition hover:bg-rose-100"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="mt-10 flex items-center gap-3 text-sm font-semibold text-slate-600">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading run {normalizedRunId}…
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function RunWarningsDialog({
+  warnings,
+  onClose,
+}: {
+  warnings: RunSummaryWarning[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-amber-100 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+              Brief warnings / errors
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">
+              Detailed messages
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close warnings"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="overflow-y-auto px-6 py-5">
+          <div className="space-y-3">
+            {warnings.map((warning, index) => (
+              <div
+                key={`${warning.label}-${index}`}
+                className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4"
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">
+                  {warning.label}
+                </p>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                  {warning.detail}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DecisionLlmOddsDialog({
+  state,
+  onClose,
+}: {
+  state: DecisionLlmOddsState;
+  onClose: () => void;
+}) {
+  const { decision } = state;
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-700">
+              LLM Odds Breakdown
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">
+              {decision.market_title}
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Consensus Yes{" "}
+              {formatOddsPercent(decision.fair_yes_probability_pct ?? null)} ·
+              Consensus No{" "}
+              {formatOddsPercent(decision.fair_no_probability_pct ?? null)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close LLM odds breakdown"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="overflow-y-auto px-6 py-5">
+          {decision.llm_outputs.length ? (
+            <div className="space-y-3">
+              {decision.llm_outputs.map((output, index) => (
+                <div
+                  key={`${output.provider}-${output.model}-${index}`}
+                  className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-950">
+                      {output.provider} · {output.model}
+                    </p>
+                    <div className="flex gap-2 text-xs font-semibold">
+                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">
+                        Yes {formatOddsPercent(output.llm_yes_odds ?? null)}
+                      </span>
+                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">
+                        No {formatOddsPercent(output.llm_no_odds ?? null)}
+                      </span>
+                    </div>
+                  </div>
+                  {output.rationale ? (
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                      {output.rationale}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              No per-model LLM outputs were recorded for this decision.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlannedOrderDetailDialog({
+  state,
+  onClose,
+}: {
+  state: PlannedOrderDetailState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Planned but not submitted
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">
+              {state.title}
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">{state.summary}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close planned order detail"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="overflow-y-auto px-6 py-5">
+          <pre className="whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+            {state.detail}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getDecisionDaysUntilClose(decision: BullpenAutoLiveDecision) {
+  if (decision.hours_remaining && decision.hours_remaining > 0) {
+    return decision.hours_remaining / 24;
+  }
+  if (decision.close_time) {
+    const closeMs = Date.parse(decision.close_time);
+    if (Number.isFinite(closeMs)) {
+      const days = (closeMs - Date.now()) / (24 * 60 * 60 * 1000);
+      if (days > 0) return days;
+    }
+  }
+  return null;
+}
+
+function getDecisionDaysLeft(decision: BullpenAutoLiveDecision) {
+  const days = getDecisionDaysUntilClose(decision);
+  return days === null
+    ? "—"
+    : days.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+}
+
+function getDecisionReturnsPerDay(decision: BullpenAutoLiveDecision) {
+  return getBullpenReturnsPerDayBreakdown({
+    yesOdds: decision.current_yes_odds ?? null,
+    noOdds: decision.current_no_odds ?? null,
+    llmYesOdds: decision.fair_yes_probability_pct ?? null,
+    llmNoOdds: decision.fair_no_probability_pct ?? null,
+    daysUntilClose: getDecisionDaysUntilClose(decision),
+  }).result;
+}
+
+function buildDecisionReturnsPerDayQuestion(
+  decision: BullpenAutoLiveDecision,
+): BullpenQuestionRow {
+  return {
+    question: decision.market_title,
+    yesOdds: decision.current_yes_odds ?? null,
+    noOdds: decision.current_no_odds ?? null,
+    llmYesOdds: decision.fair_yes_probability_pct ?? null,
+    llmNoOdds: decision.fair_no_probability_pct ?? null,
+    daysUntilClose: getDecisionDaysUntilClose(decision),
+    returnsPerDay: getDecisionReturnsPerDay(decision),
+  } as BullpenQuestionRow;
+}
+
+function humanizeStage3CapacityMessage(
+  decision: BullpenAutoLiveDecision,
+): string | null {
+  const detail = (
+    decision.order_plan?.detail ?? decision.reason ?? decision.summary ?? ""
+  ).trim();
+  const normalized = detail.toLowerCase();
+  if (
+    normalized.includes("open or unfilled") ||
+    normalized.includes("still open") ||
+    normalized.includes("unconfirmed after the polling timeout")
+  ) {
+    return "Event Exit order is still open or unfilled; its slot remains occupied.";
+  }
+  if (
+    normalized.includes("partially filled") &&
+    (normalized.includes("meaningful") || normalized.includes("exposure"))
+  ) {
+    return "Event Exit partially filled; meaningful remaining exposure still occupies the slot.";
+  }
+  if (normalized.includes("cached") || normalized.includes("stale snapshot")) {
+    return "Bullpen returned a cached or stale positions snapshot; no replacement buy was planned.";
+  }
+  if (
+    normalized.includes("dust") ||
+    normalized.includes("resolved") ||
+    normalized.includes("non-active")
+  ) {
+    return "A dust, resolved, or non-active position was excluded from slot usage; the replacement slot was released.";
+  }
+  if (normalized.includes("portfolio capacity is genuinely full")) {
+    return "Portfolio capacity is genuinely reached: ten economically active markets already occupy the limit.";
+  }
+  if (normalized.includes("replacement slot successfully released")) {
+    return "Replacement slot successfully released after the confirmed Event Exit and live refresh.";
+  }
+  return null;
+}
+
+function getPlannedOrderBrief(decision: BullpenAutoLiveDecision) {
+  const capacityMessage = humanizeStage3CapacityMessage(decision);
+  if (capacityMessage) return capacityMessage;
+  return (
+    decision.order_plan?.detail ??
+    decision.reason ??
+    decision.summary ??
+    "Planned buy order was not submitted."
+  );
+}
+
+function Stage3SellExecutionTelemetry({
+  decision,
+}: {
+  decision: BullpenAutoLiveDecision;
+}) {
+  const telemetry = getBullpenStage3SellExecutionTelemetry(decision.order_plan);
+  if (!telemetry) return null;
+
+  return (
+    <div className="my-1.5 space-y-1">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] ${
+          telemetry.sequence === 1
+            ? "border-sky-200 bg-sky-50 text-sky-800"
+            : "border-amber-200 bg-amber-50 text-amber-800"
+        }`}
+      >
+        {telemetry.label}
+      </span>
+      {telemetry.reason ? (
+        <p className="text-[11px] leading-4 text-amber-800">
+          <span className="font-semibold">Fallback reason:</span>{" "}
+          {telemetry.reason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function Stage3DecisionTable({
+  title,
+  rows,
+  emptyMessage,
+  plannedButNotSubmitted = false,
+  onOpenPlannedOrderDetail,
+  onOpenLlmOdds,
+}: {
+  title: string;
+  rows: BullpenAutoLiveDecision[];
+  emptyMessage: string;
+  plannedButNotSubmitted?: boolean;
+  onOpenPlannedOrderDetail?: (state: PlannedOrderDetailState) => void;
+  onOpenLlmOdds?: (decision: BullpenAutoLiveDecision) => void;
+}) {
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/60">
+      <div className="border-b border-white/80 px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+          {title}
+        </p>
+      </div>
+      {rows.length ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-[78rem] divide-y divide-white/80 text-left text-xs">
+            <thead className="bg-white/70 font-semibold uppercase tracking-[0.12em] text-slate-600">
+              <tr>
+                <th className="px-4 py-3">Event</th>
+                <th className="px-4 py-3">Side</th>
+                <th className="px-4 py-3">Size</th>
+                <th className="px-4 py-3">Limit</th>
+                <th className="px-4 py-3">Event Closing time</th>
+                <th className="px-4 py-3">Days left</th>
+                <th className="px-4 py-3">Category</th>
+                <th className="px-4 py-3">Current Yes odds %</th>
+                <th className="px-4 py-3">Current No odds %</th>
+                <th className="px-4 py-3">LLM Yes Odds</th>
+                <th className="px-4 py-3">LLM No Odds</th>
+                <th className="px-4 py-3">
+                  <BullpenReturnsPerDayHeader
+                    onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+                  />
+                </th>
+                <th className="px-4 py-3">Detail</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/80 bg-white/50">
+              {rows.map((decision) => {
+                const detail = plannedButNotSubmitted
+                  ? getPlannedOrderBrief(decision)
+                  : (decision.order_plan?.detail ??
+                    "Submitted without extra execution detail.");
+                return (
+                  <tr key={decision.id} className="align-top hover:bg-white/70">
+                    <td className="min-w-72 px-4 py-3">
+                      <div className="font-semibold text-slate-950 line-clamp-2">
+                        {decision.market_url ? (
+                          <a
+                            className="hover:text-sky-700 hover:underline"
+                            href={decision.market_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {decision.market_title}
+                          </a>
+                        ) : (
+                          decision.market_title
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-semibold uppercase text-slate-800">
+                      {decision.order_plan?.side ?? decision.side}
+                    </td>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-950">
+                      {formatMoney(decision.order_plan?.order_size_usd ?? null)}
+                      <div className="mt-1 text-[11px] font-normal text-slate-500">
+                        {decision.order_plan?.shares.toLocaleString("en-IN", {
+                          maximumFractionDigits: 4,
+                        }) ?? "—"}{" "}
+                        shares
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatPriceCents(
+                        decision.order_plan?.limit_price_cents ?? null,
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-slate-700">
+                      {formatIstDateTime(decision.close_time)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {getDecisionDaysLeft(decision)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {decision.theme || "—"}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatOddsPercent(decision.current_yes_odds ?? null)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatOddsPercent(decision.current_no_odds ?? null)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800">
+                      <button
+                        type="button"
+                        onClick={() => onOpenLlmOdds?.(decision)}
+                        className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950"
+                      >
+                        {formatOddsPercent(
+                          decision.fair_yes_probability_pct ?? null,
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800">
+                      <button
+                        type="button"
+                        onClick={() => onOpenLlmOdds?.(decision)}
+                        className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950"
+                      >
+                        {formatOddsPercent(
+                          decision.fair_no_probability_pct ?? null,
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      <BullpenReturnsPerDayValueButton
+                        disabled={getDecisionReturnsPerDay(decision) === null}
+                        onOpen={() =>
+                          setReturnsPerDayQuestion(
+                            buildDecisionReturnsPerDayQuestion(decision),
+                          )
+                        }
+                        ariaLabel={`Show Returns/day calculation for ${decision.market_title}`}
+                      >
+                        {formatReturnsPerDay(getDecisionReturnsPerDay(decision))}
+                      </BullpenReturnsPerDayValueButton>
+                    </td>
+                    <td className="min-w-64 px-4 py-3 text-slate-700">
+                      <Stage3SellExecutionTelemetry decision={decision} />
+                      {plannedButNotSubmitted && onOpenPlannedOrderDetail ? (
+                        <div className="flex items-start gap-2">
+                          <span className="line-clamp-2 break-words">
+                            {detail}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPlannedOrderDetail({
+                                title: decision.market_title,
+                                summary: detail,
+                                detail:
+                                  [
+                                    decision.order_plan?.detail,
+                                    decision.order_plan?.execution_response,
+                                    decision.reason,
+                                    decision.summary,
+                                  ]
+                                    .filter(Boolean)
+                                    .join("\n\n") || detail,
+                              })
+                            }
+                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100"
+                            aria-label="Open detailed planned order error"
+                            title="Open detailed planned order error"
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <ErrorCodeWithDetails
+                          detail={detail}
+                          detailClassName="text-slate-700"
+                        />
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-4 py-5 text-sm text-slate-600">{emptyMessage}</p>
+      )}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type SubmittedExecutionStatus =
+  | "not-submitted"
+  | "submitted"
+  | "in-progress"
+  | "partial";
+
+function getSubmittedExecutionStatus(
+  totalOrders: number,
+  submittedOrders: number,
+): SubmittedExecutionStatus {
+  if (totalOrders < 1) return "in-progress";
+  if (submittedOrders >= totalOrders) return "submitted";
+  if (submittedOrders < 1) return "not-submitted";
+  return "partial";
+}
+
+function SubmittedExecutionStatusIcon({
+  status,
+}: {
+  status: SubmittedExecutionStatus;
+}) {
+  const config: Record<
+    SubmittedExecutionStatus,
+    { label: string; className: string; icon: ReactNode }
+  > = {
+    "not-submitted": {
+      label: "All not submitted",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+      icon: <X className="h-3.5 w-3.5 stroke-[3]" />,
+    },
+    submitted: {
+      label: "All submitted",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      icon: <CheckCircle2 className="h-3.5 w-3.5 stroke-[2.75]" />,
+    },
+    "in-progress": {
+      label: "In progress",
+      className: "border-sky-200 bg-sky-50 text-sky-700",
+      icon: <Loader2 className="h-3.5 w-3.5 animate-spin stroke-[2.75]" />,
+    },
+    partial: {
+      label: "Partial",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+      icon: <Square className="h-3.5 w-3.5 fill-current stroke-[2.75]" />,
+    },
+  };
+  const { label, className, icon } = config[status];
+
+  return (
+    <span
+      className={`inline-flex h-6 w-6 items-center justify-center rounded-full border ${className}`}
+      aria-label={label}
+      title={label}
+    >
+      {icon}
+    </span>
+  );
+}
+
+function SubmittedExecutionCountPill({
+  children,
+  className,
+  status,
+}: {
+  children: ReactNode;
+  className: string;
+  status?: SubmittedExecutionStatus;
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 ${className}`}
+    >
+      <span>{children}</span>
+      {status ? <SubmittedExecutionStatusIcon status={status} /> : null}
+    </span>
+  );
+}
+
+function SubmittedExecutionEventsTable({
+  decisions,
+  onOpenPlannedOrderDetail,
+  onOpenLlmOdds,
+}: {
+  decisions: BullpenAutoLiveDecision[];
+  onOpenPlannedOrderDetail: (state: PlannedOrderDetailState) => void;
+  onOpenLlmOdds: (decision: BullpenAutoLiveDecision) => void;
+}) {
+  const {
+    submittedOrExecuted: successfulOrPendingSubmittedDecisions,
+    submittedButUnsuccessful,
+    completedWithoutSubmission,
+    notSubmitted,
+  } = partitionInvestDecisionsByExecutionEvidence(decisions);
+  const submittedDecisions = [
+    ...successfulOrPendingSubmittedDecisions,
+    ...submittedButUnsuccessful,
+  ];
+  const exitDecisions = decisions.filter(
+    (decision) =>
+      decision.order_plan?.action === "sell" ||
+      decision.order_plan?.action === "redeem",
+  );
+  const buyDecisions = decisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+  const successfulOrPendingExitDecisions =
+    successfulOrPendingSubmittedDecisions.filter(
+      (decision) =>
+        decision.order_plan?.action === "sell" ||
+        decision.order_plan?.action === "redeem",
+    );
+  const submittedExitDecisions = submittedDecisions.filter(
+    (decision) =>
+      decision.order_plan?.action === "sell" ||
+      decision.order_plan?.action === "redeem",
+  );
+  const successfulOrPendingBuyDecisions =
+    successfulOrPendingSubmittedDecisions.filter(
+      (decision) => decision.order_plan?.action === "buy",
+    );
+  const submittedBuyDecisions = submittedDecisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+  const actionableExitDecisions = exitDecisions.filter(
+    (decision) => !isCompletedWithoutSubmissionInvestDecision(decision),
+  );
+  const plannedDecisions = [...exitDecisions, ...buyDecisions];
+  const exitStatus = getSubmittedExecutionStatus(
+    actionableExitDecisions.length,
+    submittedExitDecisions.length,
+  );
+  const buyStatus = getSubmittedExecutionStatus(
+    buyDecisions.length,
+    submittedBuyDecisions.length,
+  );
+
+  return (
+    <section className="mt-5 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-sky-50 to-violet-50">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/80 px-4 py-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+            Stage 3 Order Outcomes
+          </p>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">
+            Step 1 Exit and Step 2 Buy submission and execution results
+          </h3>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <SubmittedExecutionCountPill className="border-emerald-200 bg-white/80 text-emerald-800">
+            {plannedDecisions.length.toLocaleString("en-IN")} planned
+          </SubmittedExecutionCountPill>
+          <SubmittedExecutionCountPill className="border-sky-200 bg-sky-50 text-sky-800">
+            {submittedDecisions.length.toLocaleString("en-IN")} submitted
+          </SubmittedExecutionCountPill>
+          <SubmittedExecutionCountPill
+            className="border-rose-200 bg-rose-50 text-rose-800"
+            status={exitStatus}
+          >
+            {submittedExitDecisions.length.toLocaleString("en-IN")}/
+            {exitDecisions.length.toLocaleString("en-IN")} exits
+          </SubmittedExecutionCountPill>
+          <SubmittedExecutionCountPill
+            className="border-blue-200 bg-blue-50 text-blue-800"
+            status={buyStatus}
+          >
+            {submittedBuyDecisions.length.toLocaleString("en-IN")}/
+            {buyDecisions.length.toLocaleString("en-IN")} buys
+          </SubmittedExecutionCountPill>
+          {completedWithoutSubmission.length > 0 ? (
+            <SubmittedExecutionCountPill className="border-slate-200 bg-white/80 text-slate-700">
+              {completedWithoutSubmission.length.toLocaleString("en-IN")} no new
+              order
+            </SubmittedExecutionCountPill>
+          ) : null}
+        </div>
+      </div>
+      <div className="space-y-4 p-4">
+        <Stage3DecisionTable
+          title="Step 1 Exit"
+          rows={successfulOrPendingExitDecisions}
+          emptyMessage="No pending or successful submitted Step 1 Exit events were returned for this run."
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        <Stage3DecisionTable
+          title="Step 2 Buy"
+          rows={successfulOrPendingBuyDecisions}
+          emptyMessage="No pending or successful submitted Step 2 Buy events were returned for this run."
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        <Stage3DecisionTable
+          title="Submitted but Unsuccessful"
+          rows={submittedButUnsuccessful}
+          emptyMessage="No submitted orders ended in a terminal unsuccessful state."
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        <Stage3DecisionTable
+          title="Orders Planned but not Submitted"
+          rows={notSubmitted}
+          emptyMessage="No planned orders were left unsubmitted for this run."
+          plannedButNotSubmitted
+          onOpenPlannedOrderDetail={onOpenPlannedOrderDetail}
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        {completedWithoutSubmission.length > 0 ? (
+          <Stage3DecisionTable
+            title="Completed without a New Order"
+            rows={completedWithoutSubmission}
+            emptyMessage="No Stage 3 outcomes completed without a new order."
+            onOpenLlmOdds={onOpenLlmOdds}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function readLlmContextString(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
+  if (!record) return null;
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function readLlmContextNumber(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
+  if (!record) return null;
+  return readStageOutputNumber(record[key]);
+}
+
+function readLlmContextRecord(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
+  if (!record) return null;
+  const value = record[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readLlmContextArray(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
+  if (!record) return [];
+  const value = record[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function getStageTwoLlmReviewedRows(
+  stage: WorkflowStageView,
+  scanCandidates: WorkflowStageView["scanCandidates"] = [],
+  decisions: BullpenAutoLiveDecision[] = [],
+) {
+  const retainedRows = getHistoricalStageTwoLlmReviewedRows(
+    stage,
+    scanCandidates,
+  );
+  if (retainedRows.length > 0 || decisions.length === 0) return retainedRows;
+
+  // Terminal compact projections can retain exact aggregate counts while the
+  // large Stage 2 row array is omitted. Persisted decisions still carry the
+  // market identity, odds, rationale, and any surviving LLM evidence, so use
+  // them as the dialog's honest row-level fallback instead of showing an empty
+  // table beneath a non-zero "LLM ran on" total.
+  return decisions.map((decision) => ({
+    market_id: decision.market_id,
+    slug: decision.slug ?? undefined,
+    market_url: decision.market_url ?? undefined,
+    question: decision.market_title,
+    market_title: decision.market_title,
+    close_time: decision.close_time ?? undefined,
+    category: decision.theme,
+    theme: decision.theme,
+    current_yes_odds: decision.current_yes_odds ?? undefined,
+    current_no_odds: decision.current_no_odds ?? undefined,
+    fair_yes_probability_pct:
+      decision.fair_yes_probability_pct ?? undefined,
+    fair_no_probability_pct:
+      decision.fair_no_probability_pct ?? undefined,
+    llm_outputs: decision.llm_outputs,
+  }));
+}
+
+function getStageTwoLlmTableRows(
+  state: StageTwoLlmRunDialogState,
+  asOfTimestamp?: string | number | Date | null,
+) {
+  const scanCandidates =
+    state.run
+      ? (buildBullpenAutoRunWorkflowView(state.run).stages.find(
+          (workflowStage) => workflowStage.key === "scan",
+        )?.scanCandidates ?? [])
+      : [];
+  const reviewedRows = getStageTwoLlmReviewedRows(
+    state.stage,
+    scanCandidates,
+    state.decisions,
+  );
+  return getHistoricalStageTwoLlmTableRows({
+    reviewedRows,
+    decisions: state.decisions,
+    asOfTimestamp,
+    runId: state.run?.id ?? null,
+  });
+}
+
+function buildStageTwoEventsSummaryRows(
+  reviewedRows: ReturnType<typeof getStageTwoLlmReviewedRows>,
+  decisions: BullpenAutoLiveDecision[],
+  runId: string | number | null,
+  asOfTimestamp?: string | number | Date | null,
+): BullpenQuestionRow[] {
+  return buildHistoricalStageTwoEventsSummaryRows({
+    reviewedRows,
+    decisions,
+    runId,
+    asOfTimestamp,
+  });
+}
+
+function buildStageTwoActivePositionQuestionIds({
+  rows,
+  activePositions,
+}: {
+  rows: BullpenQuestionRow[];
+  activePositions: BullpenActivePositionView[];
+}) {
+  const activeQuestionIds = new Set<string>();
+  const unmatchedRows = [...rows];
+
+  activePositions
+    .filter(isActiveBullpenPosition)
+    .forEach((position) => {
+      const result = BullpenEventIdentityResolver.resolveMatch({
+        target: buildBullpenEventIdentityFromPosition(position),
+        candidates: unmatchedRows,
+        getIdentity: BullpenEventIdentityResolver.fromQuestion,
+      });
+      const matchedRow =
+        result.status === "matched" ? (result.match?.item ?? null) : null;
+      if (!matchedRow) return;
+
+      activeQuestionIds.add(matchedRow.id);
+      const matchedIndex = unmatchedRows.findIndex(
+        (row) => row.id === matchedRow.id,
+      );
+      if (matchedIndex >= 0) unmatchedRows.splice(matchedIndex, 1);
+    });
+
+  return activeQuestionIds;
+}
+
+function getRunWorkflowStageResult(
+  run: BullpenAutoLiveRun | null | undefined,
+  workflowStageKey: "scan" | "llm" | "invest",
+  stageNumber: number,
+) {
+  if (!run) return null;
+  return (
+    run.stage_results.find(
+      (stage) =>
+        readLlmContextString(
+          (stage.outputs as Record<string, unknown> | null) ?? null,
+          "workflow_stage_key",
+        ) === workflowStageKey,
+    ) ??
+    run.stage_results.find((stage) => stage.stage_number === stageNumber) ??
+    null
+  );
+}
+
+function formatStageTwoSummaryMessage({
+  completed,
+  partial,
+  failed,
+}: {
+  completed: number;
+  partial: number;
+  failed: number;
+}) {
+  if (partial <= 0 && failed <= 0) return null;
+
+  const fragments = [
+    `${completed} completed`,
+    `${partial} partial`,
+    `${failed} failed`,
+  ].filter((fragment) => !fragment.startsWith("0 "));
+
+  if (fragments.length === 0) return null;
+  if (fragments.length === 1) return `Partial results: ${fragments[0]}.`;
+  if (fragments.length === 2) {
+    return `Partial results: ${fragments[0]} and ${fragments[1]}.`;
+  }
+  return `Partial results: ${fragments[0]}, ${fragments[1]} and ${fragments[2]}.`;
+}
+
+function groupStageTwoLlmRowsByModel(
+  rows: ReturnType<typeof getStageTwoLlmTableRows>,
+) {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      rows: typeof rows;
+      sourceTimestamp: string | null;
+      cost: number | null;
+    }
+  >();
+
+  rows.forEach((row) => {
+    const provider = row.provider || "—";
+    const model = row.model || "—";
+    const key = `${provider}::${model}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rows.push(row);
+      existing.sourceTimestamp =
+        existing.sourceTimestamp ?? row.sourceTimestamp;
+      const rowCost = readStageTwoLlmOutputCost(row.output);
+      existing.cost =
+        rowCost === null ? existing.cost : (existing.cost ?? 0) + rowCost;
+      return;
+    }
+    groups.set(key, {
+      key,
+      label: provider === "—" ? model : `${provider} · ${model}`,
+      rows: [row],
+      sourceTimestamp: row.sourceTimestamp,
+      cost: readStageTwoLlmOutputCost(row.output),
+    });
+  });
+
+  return [...groups.values()].sort(
+    (left, right) => (right.cost ?? 0) - (left.cost ?? 0),
+  );
+}
+
+function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
+  return (
+    readLlmContextNumber(output, "estimated_cost") ??
+    readLlmContextNumber(output, "cost") ??
+    readLlmContextNumber(output, "cost_usd")
+  );
+}
+
+type StageTwoRunSummaryStatus =
+  | "completed"
+  | "failed"
+  | "partial"
+  | "pending"
+  | "running";
+
+const STAGE_TWO_LLM_IDENTITY_ERROR =
+  "Data integrity error: Stage 2 recorded an LLM target execution without a provider/model identity.";
+type StageTwoLlmRunSummaryRow = {
+  key: string;
+  provider: string;
+  model: string;
+  displayModel: string;
+  requestedModel: string | null;
+  status: StageTwoRunSummaryStatus;
+  runtime: string;
+  cost: number | null;
+  error: string | null;
+  failureCategory: string | null;
+  firstError: Record<string, unknown> | null;
+  lastError: Record<string, unknown> | null;
+  batchErrors: Record<string, unknown>[];
+  failedEventCount: number | null;
+  invalidEventCount: number | null;
+  blockedEventCount: number | null;
+  retryRequestCount: number | null;
+  recoveryBatchCount: number | null;
+};
+
+type StageTwoLlmFailureDialogRow = StageTwoLlmRunSummaryRow;
+
+function formatStageTwoRuntimeSeconds(value: number | null) {
+  if (value === null) return "—";
+  const safeSeconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function normalizeStageTwoRunStatus(
+  value: string | null,
+): StageTwoRunSummaryStatus {
+  if (
+    value === "completed" ||
+    value === "partial" ||
+    value === "failed" ||
+    value === "pending" ||
+    value === "running"
+  )
+    return value;
+  if (value === "processing") return "running";
+  if (value === "queued") return "pending";
+  return "failed";
+}
+
+function readStageTwoLlmIdentity(
+  value: Record<string, unknown> | null,
+) {
+  const provider = readLlmContextString(value, "provider")?.trim() ?? "";
+  const model = readLlmContextString(value, "model")?.trim() ?? "";
+  if (!provider || !model) return null;
+  return { provider, model };
+}
+
+function hasStageTwoLlmIdentity(
+  value: Record<string, unknown> | null,
+) {
+  return readStageTwoLlmIdentity(value) !== null;
+}
+
+function isUsableStageTwoTargetRun(run: Record<string, unknown>) {
+  const usableEventCount = readLlmContextNumber(run, "usable_event_count");
+  if (usableEventCount !== null) return usableEventCount > 0;
+  const status = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+  return status === "completed" || status === "partial";
+}
+
+function isFailedStageTwoTargetRun(run: Record<string, unknown>) {
+  if (!hasStageTwoLlmIdentity(run)) return true;
+  const usableEventCount = readLlmContextNumber(run, "usable_event_count");
+  if (usableEventCount !== null) return usableEventCount <= 0;
+  return normalizeStageTwoRunStatus(readLlmContextString(run, "status")) === "failed";
+}
+
+function getStageTwoLlmTargets(stage: WorkflowStageView) {
+  const targets = stage.outputs.llm_targets ?? stage.inputs.llm_targets;
+  if (!Array.isArray(targets)) return [];
+  return targets.filter(
+    (target): target is Record<string, unknown> =>
+      Boolean(target) && typeof target === "object",
+  );
+}
+
+function getStageTwoLlmTargetRuns(stage: WorkflowStageView) {
+  const runs = stage.outputs.llm_target_runs;
+  if (!Array.isArray(runs)) return [];
+  return runs.filter(
+    (run): run is Record<string, unknown> =>
+      Boolean(run) && typeof run === "object",
+  );
+}
+
+function getStageTwoLlmRunSummaryRows(
+  stage: WorkflowStageView,
+  groups: ReturnType<typeof groupStageTwoLlmRowsByModel>,
+  nowMs = Date.now(),
+): StageTwoLlmRunSummaryRow[] {
+  const groupCostByKey = new Map<string, number | null>();
+  groups.forEach((group) => {
+    const costs = group.rows
+      .map((row) => readStageTwoLlmOutputCost(row.output))
+      .filter((value): value is number => value !== null);
+    groupCostByKey.set(
+      group.key,
+      costs.length ? costs.reduce((total, value) => total + value, 0) : null,
+    );
+  });
+
+  const targetRuns = getStageTwoLlmTargetRuns(stage);
+  if (targetRuns.length) {
+    const targetRunTotals = new Map<string, number>();
+    targetRuns.forEach((run) => {
+      const identity = readStageTwoLlmIdentity(run);
+      const provider = identity?.provider ?? "—";
+      const model = identity?.model ?? "—";
+      const key = `${provider}::${model}`;
+      targetRunTotals.set(key, (targetRunTotals.get(key) ?? 0) + 1);
+    });
+    const targetRunDisplayCounts = new Map<string, number>();
+    const runRows = targetRuns.map((run, index) => {
+      const identity = readStageTwoLlmIdentity(run);
+      const provider = identity?.provider ?? "—";
+      const model = identity?.model ?? "—";
+      const key = `${provider}::${model}`;
+      const duplicateIndex = (targetRunDisplayCounts.get(key) ?? 0) + 1;
+      targetRunDisplayCounts.set(key, duplicateIndex);
+      const rawStatus = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+      const status = identity ? rawStatus : "failed";
+      return {
+        key: `${key}-${index}`,
+        provider,
+        model,
+        displayModel:
+          (targetRunTotals.get(key) ?? 0) > 1
+            ? `${model} ${duplicateIndex}`
+            : model,
+        requestedModel:
+          readLlmContextString(run, "requested_model") ?? (identity ? model : null),
+        status,
+        runtime: (() => {
+          const elapsedSeconds = readLlmContextNumber(run, "elapsed_seconds");
+          if (status === "running" || status === "pending") {
+            const startedAt =
+              readLlmContextString(run, "started_at") ??
+              readLlmContextString(run, "created_at") ??
+              stage.timerStartedAt;
+            return formatStageElapsedTime(startedAt, null, nowMs);
+          }
+          return formatStageTwoRuntimeSeconds(elapsedSeconds);
+        })(),
+        cost:
+          readLlmContextNumber(run, "estimated_cost") ??
+          readLlmContextNumber(run, "cost") ??
+          groupCostByKey.get(key) ??
+          null,
+        error:
+          (!identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null) ??
+          readLlmContextString(run, "error") ??
+          readLlmContextString(run, "error_summary") ??
+          readLlmContextString(
+            readLlmContextRecord(run, "first_error"),
+            "safe_message",
+          ) ??
+          readLlmContextString(run, "message") ??
+          null,
+        failureCategory:
+          (!identity ? "data_integrity_error" : null) ??
+          readLlmContextString(run, "failure_category") ??
+          readLlmContextString(
+            readLlmContextRecord(run, "first_error"),
+            "execution_phase",
+          ) ??
+          null,
+        firstError: readLlmContextRecord(run, "first_error"),
+        lastError: readLlmContextRecord(run, "last_error"),
+        batchErrors:
+          readLlmContextArray(run, "batch_errors").filter(
+            (item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === "object",
+          ) ?? [],
+        failedEventCount: readLlmContextNumber(run, "failed_event_count"),
+        invalidEventCount: readLlmContextNumber(run, "invalid_event_count"),
+        blockedEventCount: readLlmContextNumber(run, "blocked_event_count"),
+        retryRequestCount: readLlmContextNumber(run, "retry_request_count"),
+        recoveryBatchCount: readLlmContextNumber(run, "recovery_batch_count"),
+      };
+    });
+    const runCountsByKey = new Map<string, number>();
+    runRows.forEach((row) => {
+      if (row.provider === "—") return;
+      const model = row.requestedModel ?? row.model;
+      if (!model) return;
+      const key = `${row.provider}::${model}`;
+      runCountsByKey.set(key, (runCountsByKey.get(key) ?? 0) + 1);
+    });
+    const pendingTargets: Record<string, unknown>[] = [];
+    const targetCountsByKey = new Map<string, number>();
+    getStageTwoLlmTargets(stage).forEach((target) => {
+      const identity = readStageTwoLlmIdentity(target);
+      if (!identity) {
+        pendingTargets.push(target);
+        return;
+      }
+      const key = `${identity.provider}::${identity.model}`;
+      const nextSeen = (targetCountsByKey.get(key) ?? 0) + 1;
+      targetCountsByKey.set(key, nextSeen);
+      if (nextSeen > (runCountsByKey.get(key) ?? 0)) pendingTargets.push(target);
+    });
+    const pendingDisplayCounts = new Map<string, number>(runCountsByKey);
+    const pendingRunRows = pendingTargets.map((target, index) => {
+      const identity = readStageTwoLlmIdentity(target);
+      const provider = identity?.provider ?? "—";
+      const model = identity?.model ?? "—";
+      const isIntegrityFailure = !identity;
+      const key = `${provider}::${model}`;
+      const duplicateIndex = (pendingDisplayCounts.get(key) ?? 0) + 1;
+      pendingDisplayCounts.set(key, duplicateIndex);
+      const duplicateTotal = Math.max(
+        targetCountsByKey.get(key) ?? 0,
+        runCountsByKey.get(key) ?? 0,
+      );
+      return {
+        key: `${provider}::${model}-pending-${index}`,
+        provider,
+        model,
+        displayModel: duplicateTotal > 1 ? `${model} ${duplicateIndex}` : model,
+        requestedModel: identity?.model ?? null,
+        status: isIntegrityFailure
+          ? ("failed" as StageTwoRunSummaryStatus)
+          : ("pending" as StageTwoRunSummaryStatus),
+        runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
+        cost: null,
+        error: !identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null,
+        failureCategory: !identity ? "data_integrity_error" : null,
+        firstError: null,
+        lastError: null,
+        batchErrors: [],
+        failedEventCount: null,
+        invalidEventCount: null,
+        blockedEventCount: null,
+        retryRequestCount: null,
+        recoveryBatchCount: null,
+      };
+    });
+    return [...runRows, ...pendingRunRows].sort(
+      (left, right) => (right.cost ?? 0) - (left.cost ?? 0),
+    );
+  }
+
+  const knownKeys = new Set(groups.map((group) => group.key));
+  const pendingTargets = getStageTwoLlmTargets(stage).filter((target) => {
+    const identity = readStageTwoLlmIdentity(target);
+    if (!identity) return true;
+    return !knownKeys.has(`${identity.provider}::${identity.model}`);
+  });
+  const pendingTargetTotals = new Map<string, number>();
+  pendingTargets.forEach((target) => {
+    const identity = readStageTwoLlmIdentity(target);
+    const provider = identity?.provider ?? "—";
+    const model = identity?.model ?? "—";
+    const key = `${provider}::${model}`;
+    pendingTargetTotals.set(key, (pendingTargetTotals.get(key) ?? 0) + 1);
+  });
+  const pendingDisplayCounts = new Map<string, number>();
+  const pendingRows = pendingTargets.map((target, index) => {
+    const identity = readStageTwoLlmIdentity(target);
+    const provider = identity?.provider ?? "—";
+    const model = identity?.model ?? "—";
+    const key = `${provider}::${model}`;
+    const duplicateIndex = (pendingDisplayCounts.get(key) ?? 0) + 1;
+    pendingDisplayCounts.set(key, duplicateIndex);
+    return {
+      key: `${provider}::${model}-pending-${index}`,
+      provider,
+      model,
+      displayModel:
+        (pendingTargetTotals.get(key) ?? 0) > 1
+          ? `${model} ${duplicateIndex}`
+          : model,
+      requestedModel: identity?.model ?? null,
+      status:
+        !identity
+          ? ("failed" as StageTwoRunSummaryStatus)
+          : ("pending" as StageTwoRunSummaryStatus),
+      runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
+      cost: null,
+      error: !identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null,
+      failureCategory: !identity ? "data_integrity_error" : null,
+      firstError: null,
+      lastError: null,
+      batchErrors: [],
+      failedEventCount: null,
+      invalidEventCount: null,
+      blockedEventCount: null,
+      retryRequestCount: null,
+      recoveryBatchCount: null,
+    };
+  });
+
+  return [
+    ...groups.map((group) => ({
+      key: group.key,
+      provider: group.rows[0]?.provider ?? "—",
+      model: group.rows[0]?.model ?? group.label,
+      displayModel: group.rows[0]?.model ?? group.label,
+      requestedModel: group.rows[0]?.model ?? group.label,
+      status:
+        group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
+          ? ("failed" as StageTwoRunSummaryStatus)
+          : ("completed" as StageTwoRunSummaryStatus),
+      runtime: "—",
+      cost: groupCostByKey.get(group.key) ?? null,
+      error:
+        group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
+          ? STAGE_TWO_LLM_IDENTITY_ERROR
+          : readLlmContextString(
+              group.rows.find((row) => readLlmContextString(row.output, "error"))
+                ?.output ?? null,
+              "error",
+            ),
+      failureCategory:
+        group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
+          ? "data_integrity_error"
+          : null,
+      firstError: null,
+      lastError: null,
+      batchErrors: [],
+      failedEventCount: null,
+      invalidEventCount: null,
+      blockedEventCount: null,
+      retryRequestCount: null,
+      recoveryBatchCount: null,
+    })),
+    ...pendingRows,
+  ].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
+}
+
+function getStageTwoLlmFailureFixAdvice(row: StageTwoLlmFailureDialogRow) {
+  const error = (row.error ?? "").toLowerCase();
+  const provider = row.provider.toLowerCase();
+
+  if (
+    /api key|authentication|unauthorized|permission|credential|token/.test(
+      error,
+    )
+  ) {
+    return `Check the ${row.provider} API key/credentials in the backend environment, restart investor-backend and investor-celery-worker, then rerun Stage 2.`;
+  }
+  if (/rate limit|quota|429|resource exhausted|too many requests/.test(error)) {
+    return `Reduce ${row.provider} concurrency or selected models, wait for quota to recover, verify billing/quota, then rerun this LLM.`;
+  }
+  if (
+    /timeout|timed out|deadline|network|fetch failed|connection|econnreset/.test(
+      error,
+    )
+  ) {
+    return `Check provider connectivity from the worker, increase/retry-safe task timeout if needed, and rerun after the network/provider stabilizes.`;
+  }
+  if (/json|parse|schema|invalid|malformed|unusable/.test(error)) {
+    return `Review the Stage 2 prompt/schema instructions for ${row.model}, keep the model response JSON-only, and rerun this model.`;
+  }
+  if (provider.includes("gemini")) {
+    return "Verify Gemini model availability, API key, quota, and safety/block settings before rerunning this Gemini target.";
+  }
+  if (provider.includes("openai")) {
+    return "Verify OpenAI model access, API key, project billing/quota, and request limits before rerunning this OpenAI target.";
+  }
+  if (provider.includes("deepseek")) {
+    return "Verify Deepseek API key, model availability, account credits/quota, and request limits before rerunning this Deepseek target.";
+  }
+  return "Open backend/Celery logs for the exact traceback, fix the provider/configuration issue, then rerun Stage 2 for this model.";
+}
+
+function StageTwoLlmFailureDialog({
+  row,
+  onClose,
+}: {
+  row: StageTwoLlmFailureDialogRow;
+  onClose: () => void;
+}) {
+  const errorMessage =
+    row.error || "No safe provider error was captured for this target.";
+  const diagnosticJson = JSON.stringify(
+    {
+      provider: row.provider,
+      requested_model: row.requestedModel,
+      actual_model: row.model,
+      failure_category: row.failureCategory,
+      first_error: row.firstError,
+      last_error: row.lastError,
+      batch_errors: row.batchErrors,
+    },
+    null,
+    2,
+  );
+  const diagnostics = [
+    ["Runtime", row.runtime],
+    ["Cost", formatUsdCost(row.cost)],
+    ["Failure category", row.failureCategory ?? "—"],
+    ["Requested model", row.requestedModel ?? "—"],
+    ["Actual model", row.model],
+    ["Failed events", row.failedEventCount?.toLocaleString("en-IN") ?? "—"],
+    ["Invalid events", row.invalidEventCount?.toLocaleString("en-IN") ?? "—"],
+    ["Blocked events", row.blockedEventCount?.toLocaleString("en-IN") ?? "—"],
+    ["Retry requests", row.retryRequestCount?.toLocaleString("en-IN") ?? "—"],
+    [
+      "Recovery batches",
+      row.recoveryBatchCount?.toLocaleString("en-IN") ?? "—",
+    ],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-red-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-6 py-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">
+              LLM failure details
+            </p>
+            <h3 className="mt-1 text-xl font-extrabold text-slate-950">
+              {row.provider} · {row.model}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-100"
+            aria-label="Close LLM failure details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-6 py-5">
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Why it failed / error
+            </p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-800">
+              {errorMessage}
+            </pre>
+          </section>
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              What to do to fix it
+            </p>
+            <p className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+              {getStageTwoLlmFailureFixAdvice(row)}
+            </p>
+          </section>
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Run diagnostics
+            </p>
+            <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+              {diagnostics.map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                    {label}
+                  </dt>
+                  <dd className="mt-1 font-mono text-sm font-bold text-slate-900">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+          <section>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Copyable diagnostic JSON
+            </p>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-800">
+              {diagnosticJson}
+            </pre>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
+  if (status === "completed")
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "running")
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  if (status === "pending")
+    return "border-slate-200 bg-slate-50 text-slate-600";
+  return "border-red-200 bg-red-50 text-red-700";
+}
+
+function getStageTwoRunSummaryStatusLabel(status: StageTwoRunSummaryStatus) {
+  if (status === "completed") return "Completed";
+  if (status === "partial") return "Partial";
+  if (status === "running") return "Running";
+  if (status === "pending") return "Pending";
+  return "Failed";
+}
+
+export function StageTwoLlmRunDetailsDialog({
+  state,
+  activePositions = [],
+  onClose,
+}: {
+  state: StageTwoLlmRunDialogState;
+  activePositions?: BullpenActivePositionView[];
+  onClose: () => void;
+}) {
+  const [breakupKind, setBreakupKind] =
+    useState<StageTwoLlmRunBreakupKind | null>(null);
+  const [decisionDialog, setDecisionDialog] = useState<{
+    mode: StageTwoDecisionDialogMode;
+    state: StageTwoDecisionDialogState;
+  } | null>(null);
+  const [eventInputDialog, setEventInputDialog] =
+    useState<StageTwoLlmEventInputDialogState | null>(null);
+  const [stageTwoPromptDialogOpen, setStageTwoPromptDialogOpen] =
+    useState(false);
+  const [selectedFailureRow, setSelectedFailureRow] =
+    useState<StageTwoLlmFailureDialogRow | null>(null);
+  const [eventsSummarySortState, setEventsSummarySortState] =
+    useState<BullpenTableSortState>({
+      key: "returnsPerDay",
+      direction: "desc",
+    });
+  const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
+  const llmOutputGroupRefs = useRef(new Map<string, HTMLElement>());
+  const stats = getStageTwoStats(state.stage, state.decisions, state.run);
+  const overlapCount = Math.max(
+    0,
+    stats.activePositions + stats.newOpportunities - stats.llmRanOn,
+  );
+  const workflowView = state.run ? buildBullpenAutoRunWorkflowView(state.run) : null;
+  const scanWorkflowStage =
+    workflowView?.stages.find((workflowStage) => workflowStage.key === "scan") ?? null;
+  const scanCandidates = scanWorkflowStage?.scanCandidates ?? [];
+  const scanStageResult = getRunWorkflowStageResult(state.run, "scan", 1);
+  const llmStageResult = getRunWorkflowStageResult(state.run, "llm", 2);
+  const reviewedRows = getStageTwoLlmReviewedRows(
+    state.stage,
+    scanCandidates,
+    state.decisions,
+  );
+  const eventsSummaryAsOfTimestamp = resolveStageTwoHistoricalAsOfTimestamp({
+    reviewedRows,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+    stageCompletedAt: llmStageResult?.completed_at ?? state.stage.timerCompletedAt,
+    runStartedAt: state.run?.started_at ?? state.stage.timerStartedAt,
+    runCompletedAt: state.run?.completed_at ?? null,
+    nowMs: dialogNowMs,
+  });
+  const llmTableRows = getStageTwoLlmTableRows(
+    state,
+    eventsSummaryAsOfTimestamp,
+  );
+  const eventsSummaryRows = buildStageTwoEventsSummaryRows(
+    reviewedRows,
+    state.decisions,
+    state.run?.id ?? null,
+    eventsSummaryAsOfTimestamp,
+  );
+  const activePositionQuestionIds = buildStageTwoActivePositionQuestionIds({
+    rows: eventsSummaryRows,
+    activePositions,
+  });
+  const availableLlmDecisionRows = llmTableRows.filter(
+    (row) => row.output && !readLlmContextString(row.output, "error"),
+  );
+  const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
+  const retainedSummaryRows = getStageTwoLlmRunSummaryRows(
+    state.stage,
+    llmModelGroups,
+    dialogNowMs,
+  );
+  const identifiedRetainedSummaryRows = retainedSummaryRows.filter(
+    (row) => row.provider !== "—" && row.model !== "—",
+  );
+  const savedTargets = state.run?.stage2_llm_targets_snapshot ?? [];
+  const summaryRows: StageTwoLlmRunSummaryRow[] =
+    identifiedRetainedSummaryRows.length > 0
+      ? identifiedRetainedSummaryRows
+      : savedTargets.map((target, index) => ({
+          key: `${target.provider}::${target.model}::recovered-${index}`,
+          provider: target.provider,
+          model: target.model,
+          displayModel: target.model,
+          requestedModel: target.model,
+          status:
+            index < stats.llmsPassed
+              ? "completed"
+              : index < stats.llmsPassed + stats.llmsFailed
+                ? "failed"
+                : state.stage.state === "finished"
+                  ? "completed"
+                  : "pending",
+          runtime: "—",
+          cost: null,
+          error: null,
+          failureCategory: null,
+          firstError: null,
+          lastError: null,
+          batchErrors: [],
+          failedEventCount: null,
+          invalidEventCount: null,
+          blockedEventCount: null,
+          retryRequestCount: null,
+          recoveryBatchCount: null,
+        }));
+  const completedSummaryCount = summaryRows.filter(
+    (row) => row.status === "completed",
+  ).length;
+  const partialSummaryCount = summaryRows.filter(
+    (row) => row.status === "partial",
+  ).length;
+  const failedSummaryCount = summaryRows.filter(
+    (row) => row.status === "failed",
+  ).length;
+  const runningSummaryCount = summaryRows.filter(
+    (row) => row.status === "running",
+  ).length;
+  const explicitPendingSummaryCount = summaryRows.filter(
+    (row) => row.status === "pending",
+  ).length;
+  const returnedSummaryCount =
+    completedSummaryCount + partialSummaryCount + failedSummaryCount;
+  const pendingSummaryCount = Math.max(
+    explicitPendingSummaryCount,
+    stats.llmsSelected - returnedSummaryCount,
+  );
+  const eventsSummaryUpdatedAt = resolveStageTwoEventsSummaryUpdatedAt({
+    reviewedRows,
+    stageCompletedAt: llmStageResult?.completed_at ?? state.stage.timerCompletedAt,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+  });
+  const eventsSummaryStatusMessage = formatStageTwoSummaryMessage({
+    completed: completedSummaryCount,
+    partial: partialSummaryCount,
+    failed: failedSummaryCount,
+  });
+  const eventsSummaryUpdateUnavailableReason =
+    eventsSummaryUpdatedAt
+      ? undefined
+      : runningSummaryCount > 0 || pendingSummaryCount > 0
+      ? "Timestamp unavailable while Stage 2 results are still being fetched."
+      : failedSummaryCount > 0 && completedSummaryCount === 0
+        ? "Timestamp unavailable because Stage 2 did not return any completed model results."
+        : "Timestamp was not included in this Stage 2 result.";
+  const cumulativeCost = summaryRows.reduce(
+    (total, row) => total + (row.cost ?? 0),
+    0,
+  );
+  const stageRuntime = formatStageElapsedTime(
+    state.stage.timerStartedAt,
+    state.stage.timerCompletedAt,
+    Date.parse(
+      state.run?.completed_at ??
+        state.run?.started_at ??
+        state.stage.timerCompletedAt ??
+        state.stage.timerStartedAt ??
+        "",
+    ) || 0,
+  );
+  const stageTwoPromptContext =
+    llmTableRows.find((row) => row.row)?.row ?? null;
+  const stagePromptTemplate = getStageTwoRunPromptTemplate(state.stage);
+  const shouldTickDialogTimers = summaryRows.some(
+    (row) => row.status === "running" || row.status === "pending",
+  );
+
+  useEffect(() => {
+    if (!shouldTickDialogTimers) return;
+    const intervalId = window.setInterval(
+      () => setDialogNowMs(Date.now()),
+      RUN_TIMER_INTERVAL_MS,
+    );
+    return () => window.clearInterval(intervalId);
+  }, [shouldTickDialogTimers]);
+
+  const handleEventsSummarySortChange = (key: BullpenTableSortKey) => {
+    setEventsSummarySortState((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "desc" ? "asc" : "desc",
+    }));
+  };
+
+  const scrollToLlmOutputGroup = (row: StageTwoLlmRunSummaryRow) => {
+    const groupKey = `${row.provider}::${row.requestedModel ?? row.model}`;
+    llmOutputGroupRefs.current.get(groupKey)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
+  const unknownStageEvidence = !state.run && !state.stage.timerStartedAt && Object.keys(state.stage.outputs).length === 0;
+  const diagnosticsReturnFocus = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
+  useEffect(() => {
+    if (!unknownStageEvidence) return;
+    const target = diagnosticsReturnFocus.current;
+    return () => target?.focus();
+  }, [unknownStageEvidence]);
+
+  if (unknownStageEvidence) {
+    return (
+      <div data-testid="stage-two-llm-run-dialog" role="dialog" aria-modal="true" aria-label="Stage 2 LLM diagnostics" onKeyDown={(event) => { if (event.key === "Escape") onClose(); if (event.key === "Tab") event.preventDefault(); }} className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 text-slate-950 shadow-xl">
+          <h2 className="text-xl font-semibold">Stage 2 evidence unknown</h2>
+          <p className="mt-3 text-sm">No saved run or stage evidence is available. LLM row counts, completion, runtime and position counts are unknown.</p>
+          <p className="mt-2 text-xs text-slate-600">Source unavailable · observation age unknown. This view does not start or retry work.</p>
+          <Button autoFocus className="mt-4" onClick={onClose} aria-label="Close LLM run details">Close</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="stage-two-llm-run-dialog"
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4"
+    >
+      <div className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1500px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 2 LLM Run
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                LLM ran on {stats.llmRanOn} unique rows
+              </h2>
+              <button
+                type="button"
+                onClick={() => setStageTwoPromptDialogOpen(true)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                aria-label="Open Stage 2 input prompt"
+                title="Show Stage 2 input prompt"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close LLM run details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div
+          data-testid="stage-two-llm-run-dialog-body"
+          className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5"
+        >
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                  Last Run Summary
+                </p>
+                <h4 className="mt-2 text-lg font-extrabold text-slate-950">
+                  Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} ·{" "}
+                  {formatIstDateTime(
+                    state.run?.started_at ?? state.stage.timerStartedAt,
+                  )}
+                  <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
+                    LLM progress: {returnedSummaryCount}/
+                    {stats.llmsSelected || summaryRows.length} returned
+                    {runningSummaryCount
+                      ? ` · ${runningSummaryCount} running`
+                      : ""}
+                    {stageRuntime ? ` · Runtime: ${stageRuntime}` : ""}
+                  </span>
+                </h4>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold uppercase tracking-[0.14em]">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-emerald-700">
+                  <span className="block text-xl">{completedSummaryCount}</span>
+                  Completed
+                </div>
+                <div className="rounded-2xl border border-sky-200 bg-sky-50 px-5 py-3 text-sky-700">
+                  <span className="block text-xl">{partialSummaryCount}</span>
+                  Partial
+                </div>
+                <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-red-700">
+                  <span className="block text-xl">{failedSummaryCount}</span>
+                  Failed
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-slate-600">
+                  <span className="block text-xl">{pendingSummaryCount}</span>
+                  Pending
+                </div>
+              </div>
+            </div>
+            {cumulativeCost > 0 ? (
+              <p className="mt-2 text-sm font-semibold text-slate-600">
+                Cumulative cost: {formatUsdCost(cumulativeCost)}
+              </p>
+            ) : null}
+            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3 font-bold">Provider</th>
+                      <th className="px-4 py-3 font-bold">Model</th>
+                      <th className="px-4 py-3 font-bold">Status</th>
+                      <th className="px-4 py-3 font-bold">Runtime</th>
+                      <th className="px-4 py-3 font-bold">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {summaryRows.length ? (
+                      summaryRows.map((row) => (
+                        <tr
+                          key={`stage-two-summary-${row.key}`}
+                          onClick={() => scrollToLlmOutputGroup(row)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              scrollToLlmOutputGroup(row);
+                            }
+                          }}
+                          tabIndex={0}
+                          role="button"
+                          className="cursor-pointer bg-white transition hover:bg-amber-50/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-300"
+                          aria-label={`Show LLM-wise output for ${row.provider} ${row.model}`}
+                        >
+                          <td className="px-4 py-3 font-bold capitalize text-slate-900">
+                            {row.provider}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-700">
+                            {row.displayModel}
+                          </td>
+                          <td className="px-4 py-3">
+                            {row.status === "failed" ? (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedFailureRow(row);
+                                }}
+                                className={`rounded-full border px-2.5 py-1 text-xs font-bold transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-red-300 ${getStageTwoRunSummaryStatusClass(row.status)}`}
+                                aria-label={`Open failure details for ${row.provider} ${row.model}`}
+                                title="Click to see why this LLM failed"
+                              >
+                                {getStageTwoRunSummaryStatusLabel(row.status)}
+                              </button>
+                            ) : (
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getStageTwoRunSummaryStatusClass(row.status)}`}
+                              >
+                                {getStageTwoRunSummaryStatusLabel(row.status)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                            {row.runtime}
+                          </td>
+                          <td className="px-4 py-3 font-bold text-slate-700">
+                            {formatUsdCost(row.cost)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="px-4 py-6 text-center text-sm text-slate-500"
+                        >
+                          No model-level summary was returned for this Stage 2
+                          run.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div data-testid="stage-two-events-summary" className="mt-5">
+              <BullpenQuestionsTable
+                snapshot={null}
+                rowsOverride={eventsSummaryRows}
+                activePositionQuestionIds={activePositionQuestionIds}
+                emptyMessage="No Events Summary rows were returned for this Stage 2 run."
+                headerContent={null}
+                updatedAt={eventsSummaryUpdatedAt}
+                updateStatusMessage={eventsSummaryStatusMessage ?? undefined}
+                updateUnavailableReason={eventsSummaryUpdateUnavailableReason}
+                scrollResetKey={state.run?.id ?? "stage-two-llm-run"}
+                isLoading={false}
+                onSortChange={handleEventsSummarySortChange}
+                selectedQuestionIds={new Set<string>()}
+                selectionEnabled={false}
+                sortState={eventsSummarySortState}
+                onToggleQuestion={() => undefined}
+                onToggleSelectAll={() => undefined}
+                rowHighlightById={buildStageTwoEventsSummaryHighlightById({
+                  rows: eventsSummaryRows,
+                  stage: state.stage,
+                  decisions: state.decisions,
+                  includeEventExits: true,
+                })}
+              />
+            </div>
+          </section>
+
+          {selectedFailureRow ? (
+            <StageTwoLlmFailureDialog
+              row={selectedFailureRow}
+              onClose={() => setSelectedFailureRow(null)}
+            />
+          ) : null}
+
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
+            {[
+              {
+                label: "Active positions",
+                value: stats.activePositions,
+                kind: "active-positions" as const,
+              },
+              {
+                label: "New opportunities",
+                value: stats.newOpportunities,
+                kind: "new-opportunities" as const,
+              },
+              {
+                label: "Overlap / de-duped",
+                value: overlapCount,
+                kind: "overlap" as const,
+              },
+              {
+                label: "Unique LLM rows",
+                value: stats.llmRanOn,
+                kind: "unique-llm-rows" as const,
+              },
+            ].map((tile) => (
+              <button
+                key={tile.kind}
+                type="button"
+                onClick={() => setBreakupKind(tile.kind)}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-amber-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-300"
+                aria-label={`Open breakup details for ${tile.label}`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  {tile.label}
+                </p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">
+                  {tile.value}
+                </p>
+              </button>
+            ))}
+          </div>
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                LLM-wise output ({llmTableRows.length} rows)
+              </p>
+            </div>
+            <div className="space-y-4 p-4">
+              {llmModelGroups.length ? (
+                llmModelGroups.map((group) => {
+                  const promptContext =
+                    group.rows.find((row) => row.row)?.row ?? null;
+                  return (
+                    <section
+                      key={group.key}
+                      ref={(element) => {
+                        if (element) {
+                          llmOutputGroupRefs.current.set(group.key, element);
+                        } else {
+                          llmOutputGroupRefs.current.delete(group.key);
+                        }
+                      }}
+                      className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+                              {group.label}
+                            </p>
+                            {group.sourceTimestamp ? (
+                              <span
+                                className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-slate-500"
+                                title="Timestamp for the LLM output values shown in this model table"
+                              >
+                                {formatIstDateTime(group.sourceTimestamp)}
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEventInputDialog({
+                                  title: group.label,
+                                  llmContext: promptContext,
+                                })
+                              }
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                              aria-label={`Open full prompt for ${group.label}`}
+                              title="Show full prompt definition sent to this LLM model"
+                            >
+                              <Info className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {group.rows.length} event/provider{" "}
+                            {group.rows.length === 1 ? "row" : "rows"}
+                            {group.cost !== null
+                              ? ` · Cost: ${formatUsdCost(group.cost)}`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="overflow-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                          <thead className="bg-white text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                            <tr>
+                              <th className="px-3 py-3">Event info</th>
+                              <th className="px-3 py-3">S. No</th>
+                              <th className="min-w-64 px-3 py-3">Question</th>
+                              <th className="px-3 py-3">Closing time</th>
+                              <th className="px-3 py-3">Days left</th>
+                              <th className="px-3 py-3">Category</th>
+                              <th className="px-3 py-3">Outcomes</th>
+                              <th className="px-3 py-3">Current Yes odds %</th>
+                              <th className="px-3 py-3">Current No odds %</th>
+                              <th className="px-3 py-3">LLM Yes Odds</th>
+                              <th className="px-3 py-3">LLM No Odds</th>
+                              <th className="px-3 py-3">
+                                <BullpenReturnsPerDayHeader
+                                  onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+                                />
+                              </th>
+                              <th className="px-3 py-3">Action</th>
+                              <th className="px-3 py-3">Risk</th>
+                              <th className="min-w-80 px-3 py-3">
+                                Summary / rationale
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                            {group.rows.map((row) => {
+                              const dialogState = row.decision
+                                ? {
+                                    decision: row.decision,
+                                    llmContext: row.row,
+                                  }
+                                : null;
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className="align-top hover:bg-amber-50/40"
+                                >
+                                  <td className="px-3 py-3">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setEventInputDialog({
+                                          title: row.title,
+                                          llmContext: row.row,
+                                        })
+                                      }
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
+                                      aria-label={`Open LLM input details for ${row.title}`}
+                                      title="Show event input and common LLM prompt"
+                                    >
+                                      <Info className="h-3.5 w-3.5" />
+                                    </button>
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
+                                    {row.serialNumber}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold text-slate-950">
+                                    {row.question}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                    {formatIstDateTime(row.closeTime)}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
+                                    {row.daysLeft === null
+                                      ? "—"
+                                      : `${row.daysLeft}d`}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                    {row.category}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                    {row.outcomes}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-emerald-700">
+                                    {formatOddsPercent(row.currentYesOdds)}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-rose-700">
+                                    {formatOddsPercent(row.currentNoOdds)}
+                                  </td>
+                                  <td className="px-3 py-3 tabular-nums">
+                                    <span
+                                      className={getLlmOddsHighlightClass(
+                                        row.yesOdds,
+                                      )}
+                                    >
+                                      {formatOddsPercent(row.yesOdds)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 tabular-nums">
+                                    <span
+                                      className={getLlmOddsHighlightClass(
+                                        row.noOdds,
+                                      )}
+                                    >
+                                      {formatOddsPercent(row.noOdds)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
+                                    <BullpenReturnsPerDayValueButton
+                                      disabled={row.returnsPerDay === null}
+                                      onOpen={() => setReturnsPerDayQuestion(row.row as BullpenQuestionRow)}
+                                      ariaLabel={`Show Returns/day calculation for ${row.question}`}
+                                    >
+                                      {formatReturnsPerDay(row.returnsPerDay)}
+                                    </BullpenReturnsPerDayValueButton>
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    {dialogState ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDecisionDialog({
+                                            mode: "tag",
+                                            state: dialogState,
+                                          })
+                                        }
+                                        className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+                                        aria-label={`Explain action ${row.action} for ${row.title}`}
+                                        title="Show reason and details behind this action tag"
+                                      >
+                                        {row.action}
+                                      </button>
+                                    ) : (
+                                      row.action
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    {dialogState ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDecisionDialog({
+                                            mode: "tag",
+                                            state: dialogState,
+                                          })
+                                        }
+                                        className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+                                        aria-label={`Explain risk ${row.risk} for ${row.title}`}
+                                        title="Show reason and details behind this risk tag"
+                                      >
+                                        {row.risk}
+                                      </button>
+                                    ) : (
+                                      row.risk
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <span className="font-semibold">
+                                      {row.summary}
+                                    </span>
+                                    <br />
+                                    <span className="text-slate-500">
+                                      {row.rationale}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+                  No LLM row-level output was returned for this run.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Indepth details (
+              {state.decisions.length || availableLlmDecisionRows.length} decisions
+              currently returned)
+            </p>
+            {state.decisions.length ? (
+              state.decisions.map((decision) => {
+                const llmContext = getStageTwoDecisionLlmContext(
+                  state,
+                  decision,
+                );
+                const dialogState = { decision, llmContext };
+                return (
+                  <article
+                    key={decision.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <h3 className="font-semibold text-slate-950">
+                        {decision.market_title}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDecisionDialog({
+                              mode: "llm-inputs",
+                              state: dialogState,
+                            })
+                          }
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                          aria-label={`Open LLM prompt and inputs for ${decision.market_title}`}
+                          title="Show LLM prompt and input packet"
+                        >
+                          <Bot className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDecisionDialog({
+                              mode: "tag",
+                              state: dialogState,
+                            })
+                          }
+                          className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+                          aria-label={`Explain ${decision.decision} ${decision.risk_status} tag for ${decision.market_title}`}
+                        >
+                          {decision.decision} · {decision.risk_status}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 leading-6">
+                      <span className="font-semibold">Summary:</span>{" "}
+                      {decision.summary || decision.reason}
+                    </p>
+                    <p className="mt-2 leading-6">
+                      <span className="font-semibold">Indepth details:</span>{" "}
+                      {decision.rationale || decision.reason}
+                    </p>
+                  </article>
+                );
+              })
+            ) : availableLlmDecisionRows.length ? (
+              availableLlmDecisionRows.map((row) => (
+                <article
+                  key={`llm-decision-${row.id}`}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h3 className="font-semibold text-slate-950">
+                      {row.question}
+                    </h3>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                      {row.provider} · {row.model}
+                    </span>
+                  </div>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Summary:</span>{" "}
+                    {row.summary}
+                  </p>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Indepth details:</span>{" "}
+                    {row.rationale}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Decision rows are still loading or have not been returned yet
+                for this run.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+      {stageTwoPromptDialogOpen ? (
+        <StageTwoInputPromptDialog
+          llmContext={stageTwoPromptContext}
+          promptTemplate={stagePromptTemplate}
+          onClose={() => setStageTwoPromptDialogOpen(false)}
+        />
+      ) : null}
+      {eventInputDialog ? (
+        <StageTwoLlmEventInputDialog
+          state={eventInputDialog}
+          promptTemplate={stagePromptTemplate}
+          onClose={() => setEventInputDialog(null)}
+        />
+      ) : null}
+      {decisionDialog ? (
+        <StageTwoDecisionDetailDialog
+          mode={decisionDialog.mode}
+          state={decisionDialog.state}
+          promptTemplate={stagePromptTemplate}
+          onClose={() => setDecisionDialog(null)}
+        />
+      ) : null}
+      {breakupKind ? (
+        <StageTwoLlmRunBreakupDialog
+          kind={breakupKind}
+          state={state}
+          stats={stats}
+          overlapCount={overlapCount}
+          onClose={() => setBreakupKind(null)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function getStageTwoDecisionLlmContext(
+  state: StageTwoLlmRunDialogState,
+  decision: BullpenAutoLiveDecision,
+) {
+  const rows = Array.isArray(state.stage.outputs.llm_reviewed_candidates)
+    ? state.stage.outputs.llm_reviewed_candidates
+    : [];
+  const decisionKeys = [
+    decision.market_id,
+    decision.slug ?? null,
+    decision.market_url ?? null,
+    decision.market_title,
+  ]
+    .map(getStageTwoBreakupMatchKey)
+    .filter((key): key is string => Boolean(key));
+  return (
+    rows.find((row): row is Record<string, unknown> => {
+      if (!row || typeof row !== "object") return false;
+      const candidate = row as Record<string, unknown>;
+      const rowKeys = [
+        candidate.market_id,
+        candidate.slug,
+        candidate.market_url,
+        candidate.question,
+      ]
+        .map((value) =>
+          getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
+        )
+        .filter((key): key is string => Boolean(key));
+      return rowKeys.some((key) => decisionKeys.includes(key));
+    }) ?? null
+  );
+}
+
+function hasReturnedValue(value: unknown) {
+  return value !== undefined && value !== null && value !== "";
+}
+
+function formatJsonForDisplay(value: unknown) {
+  if (!hasReturnedValue(value)) return "Not returned for this run.";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function readNestedRecord(
+  value: unknown,
+  keys: string[],
+): Record<string, unknown> | null {
+  let cursor = value;
+  for (const key of keys) {
+    if (!isRecord(cursor)) return null;
+    cursor = cursor[key];
+  }
+  return isRecord(cursor) ? cursor : null;
+}
+
+function readFirstReturnedValue(...values: unknown[]) {
+  return values.find(hasReturnedValue);
+}
+
+function getStageTwoRunPromptTemplate(
+  stage: WorkflowStageView | null | undefined,
+) {
+  return readFirstReturnedValue(stage?.outputs?.llm_prompt_template);
+}
+
+function getStageTwoDisplayedPrompt(
+  llmContext: Record<string, unknown> | null,
+  promptTemplate: unknown,
+) {
+  return readFirstReturnedValue(llmContext?.llm_prompt, promptTemplate);
+}
+
+function getStageTwoLlmPromptInputs(
+  llmContext: Record<string, unknown> | null,
+) {
+  return readFirstReturnedValue(
+    llmContext?.llm_prompt_inputs,
+    llmContext?.prompt_inputs,
+  );
+}
+
+function getStageTwoLlmPromptInputMarket(
+  llmContext: Record<string, unknown> | null,
+) {
+  return readNestedRecord(getStageTwoLlmPromptInputs(llmContext), ["market"]);
+}
+
+function getStageTwoLlmPromptInputEvidencePacket(
+  llmContext: Record<string, unknown> | null,
+) {
+  return readFirstReturnedValue(
+    llmContext?.evidence_packet,
+    readNestedRecord(getStageTwoLlmPromptInputs(llmContext), [
+      "evidence_packet",
+    ]),
+  );
+}
+
+function getStageTwoLlmMissingValueReason(
+  label: string,
+  primaryValue: unknown,
+  fallbackValue?: unknown,
+) {
+  if (hasReturnedValue(primaryValue)) return null;
+  if (hasReturnedValue(fallbackValue)) {
+    return `${label} was not returned as a top-level Stage 2 field for this run, so the console is showing it from the organised prompt inputs captured with the LLM review.`;
+  }
+  return `${label} was not returned in this run payload. This usually means the run was created before that field was persisted, or the upstream Polymarket scan did not supply that optional value for this market.`;
+}
+
+function getStageTwoPromptMissingValueReason(
+  label: string,
+  llmContext: Record<string, unknown> | null,
+  promptTemplate: unknown,
+) {
+  const prompt = llmContext?.llm_prompt;
+  if (hasReturnedValue(prompt)) return null;
+  if (hasReturnedValue(promptTemplate)) {
+    return `${label} was not returned as a per-row Stage 2 field for this run, so the console is showing the saved Stage 2 prompt template used for shared LLM execution.`;
+  }
+  return getStageTwoLlmMissingValueReason(label, prompt);
+}
+
+function MissingValueNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-4 text-amber-800">
+      {children}
+    </p>
+  );
+}
+
+function StageTwoInputPromptDialog({
+  llmContext,
+  promptTemplate,
+  onClose,
+}: {
+  llmContext: Record<string, unknown> | null;
+  promptTemplate: unknown;
+  onClose: () => void;
+}) {
+  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
+  const missingReason = getStageTwoPromptMissingValueReason(
+    "Stage 2 Input prompt",
+    llmContext,
+    promptTemplate,
+  );
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 2 Input prompt
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              Stage 2 Input prompt
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 2 input prompt"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
+          <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs leading-5 text-slate-800">
+            {formatJsonForDisplay(prompt)}
+          </pre>
+          {missingReason ? (
+            <MissingValueNote>{missingReason}</MissingValueNote>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageTwoLlmEventInputDialog({
+  state,
+  promptTemplate,
+  onClose,
+}: {
+  state: StageTwoLlmEventInputDialogState;
+  promptTemplate: unknown;
+  onClose: () => void;
+}) {
+  const { title, llmContext } = state;
+  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
+  const promptInputs = getStageTwoLlmPromptInputs(llmContext);
+  const promptInputMarket = getStageTwoLlmPromptInputMarket(llmContext);
+  const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
+  const promptMissingReason = getStageTwoPromptMissingValueReason(
+    "Common prompt sent to LLM",
+    llmContext,
+    promptTemplate,
+  );
+  const eventInputEntries = [
+    ["market_id", llmContext?.market_id, promptInputMarket?.market_id],
+    ["slug", llmContext?.slug, promptInputMarket?.slug],
+    [
+      "question",
+      llmContext?.question ?? llmContext?.market_title,
+      promptInputMarket?.question,
+    ],
+    ["market_url", llmContext?.market_url, promptInputMarket?.market_url],
+    [
+      "current_yes_odds",
+      llmContext?.current_yes_odds,
+      promptInputMarket?.current_yes_odds,
+    ],
+    [
+      "current_no_odds",
+      llmContext?.current_no_odds,
+      promptInputMarket?.current_no_odds,
+    ],
+    ["volume_usd", llmContext?.volume_usd, promptInputMarket?.volume_usd],
+    [
+      "liquidity_usd",
+      llmContext?.liquidity_usd,
+      promptInputMarket?.liquidity_usd,
+    ],
+    ["close_time", llmContext?.close_time, promptInputMarket?.close_time],
+    ["theme", llmContext?.theme, promptInputMarket?.theme],
+    ["source", llmContext?.source, promptInputMarket?.source],
+  ] as const;
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Event LLM input
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              {title}
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Input data and common prompt used for the LLM review of this
+              event.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close event LLM input"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+              <p className="font-semibold text-sky-950">
+                Easy-read event input
+              </p>
+              <dl className="mt-3 space-y-2">
+                {eventInputEntries.map(([key, primaryValue, fallbackValue]) => {
+                  const value = readFirstReturnedValue(
+                    primaryValue,
+                    fallbackValue,
+                  );
+                  const missingReason = getStageTwoLlmMissingValueReason(
+                    key.replaceAll("_", " "),
+                    primaryValue,
+                    fallbackValue,
+                  );
+                  return (
+                    <div key={key} className="rounded-xl bg-white/80 px-3 py-2">
+                      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        {key.replaceAll("_", " ")}
+                      </dt>
+                      <dd className="mt-1 break-words font-medium text-slate-900">
+                        {formatJsonForDisplay(value)}
+                      </dd>
+                      {missingReason ? (
+                        <MissingValueNote>{missingReason}</MissingValueNote>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </dl>
+            </section>
+            <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+              <p className="font-semibold text-violet-950">
+                Common prompt sent to LLM
+              </p>
+              <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+                {formatJsonForDisplay(prompt)}
+              </pre>
+              {promptMissingReason ? (
+                <MissingValueNote>{promptMissingReason}</MissingValueNote>
+              ) : null}
+            </section>
+          </div>
+          <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="font-semibold text-slate-950">
+              Full organised prompt inputs
+            </p>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">
+              {formatJsonForDisplay(promptInputs)}
+            </pre>
+          </section>
+          <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+            <p className="font-semibold text-amber-950">Evidence packet</p>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+              {formatJsonForDisplay(evidencePacket)}
+            </pre>
+            {getStageTwoLlmMissingValueReason(
+              "Evidence packet",
+              llmContext?.evidence_packet,
+              evidencePacket,
+            ) ? (
+              <MissingValueNote>
+                {getStageTwoLlmMissingValueReason(
+                  "Evidence packet",
+                  llmContext?.evidence_packet,
+                  evidencePacket,
+                )}
+              </MissingValueNote>
+            ) : null}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageTwoDecisionDetailDialog({
+  mode,
+  state,
+  promptTemplate,
+  onClose,
+}: {
+  mode: StageTwoDecisionDialogMode;
+  state: StageTwoDecisionDialogState;
+  promptTemplate: unknown;
+  onClose: () => void;
+}) {
+  const { decision, llmContext } = state;
+  const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
+  const promptInputs = getStageTwoLlmPromptInputs(llmContext);
+  const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
+  const title =
+    mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
+  const promptMissingReason = getStageTwoPromptMissingValueReason(
+    "Prompt sent to the LLM",
+    llmContext,
+    promptTemplate,
+  );
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              {title}
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              {decision.market_title}
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              {decision.decision} · {decision.risk_status} · {decision.side}{" "}
+              side · Current YES/NO{" "}
+              {formatPriceCents(decision.current_yes_odds ?? null)} /{" "}
+              {formatPriceCents(decision.current_no_odds ?? null)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close decision details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
+          {mode === "tag" ? (
+            <div className="space-y-4">
+              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-semibold text-slate-950">
+                  What this tag means
+                </p>
+                <p className="mt-2 leading-6">
+                  Action <b>{decision.decision}</b> with risk status{" "}
+                  <b>{decision.risk_status}</b> means the Stage 2 LLM/rules
+                  pipeline classified this event as{" "}
+                  {decision.decision === "EXIT"
+                    ? "an event exit candidate that should move to the exit flow"
+                    : decision.decision === "SKIP"
+                      ? "not currently actionable for investment"
+                      : "an actionable portfolio decision"}
+                  .
+                </p>
+              </section>
+              <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="font-semibold text-slate-950">
+                  Why this event was tagged this way
+                </p>
+                <p className="mt-2 leading-6">
+                  <span className="font-semibold">Summary:</span>{" "}
+                  {decision.summary || decision.reason}
+                </p>
+                <p className="mt-2 leading-6">
+                  <span className="font-semibold">Rationale:</span>{" "}
+                  {decision.rationale || decision.reason}
+                </p>
+                {decision.exit_signals.length ? (
+                  <ul className="mt-3 list-disc space-y-1 pl-5">
+                    {decision.exit_signals.map((signal, index) => (
+                      <li key={`${signal.reasonCode}-${index}`}>
+                        <b>{signal.label}:</b> {signal.description}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
+                <p className="font-semibold text-violet-950">
+                  Prompt sent to the LLM
+                </p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+                  {formatJsonForDisplay(prompt)}
+                </pre>
+                {promptMissingReason ? (
+                  <MissingValueNote>{promptMissingReason}</MissingValueNote>
+                ) : null}
+              </section>
+              <section className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="font-semibold text-slate-950">
+                  Organised prompt inputs
+                </p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">
+                  {formatJsonForDisplay(promptInputs)}
+                </pre>
+              </section>
+              <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                <p className="font-semibold text-amber-950">Evidence packet</p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+                  {formatJsonForDisplay(evidencePacket)}
+                </pre>
+              </section>
+              {!llmContext ? (
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">
+                  This run did not return a matching Stage 2 LLM review context
+                  for this decision.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getStageTwoBreakupMatchKey(value: string | null | undefined) {
+  return normalizeMatchKey(value);
+}
+
+function getStageTwoBreakupRows(
+  state: StageTwoLlmRunDialogState,
+  kind: StageTwoLlmRunBreakupKind,
+) {
+  const activeRows = state.stage.activePositionsFound.map((position) => ({
+    id: `active-${position.positionKey}`,
+    title: position.marketTitle,
+    summary: `${position.isClaimable ? "Claimable" : "Open"} ${position.side ?? "position"} position${position.exposureUsd !== null ? ` · ${formatMoney(position.exposureUsd)} exposure` : ""}.`,
+    detail: `Shares: ${formatShares(position.shares)} · Avg price: ${formatPriceCents(position.averagePriceCents)} · Current YES/NO: ${formatPriceCents(position.currentYesOdds)} / ${formatPriceCents(position.currentNoOdds)}${position.closeTime ? ` · Closes ${formatIstDateTime(position.closeTime)}` : ""}.`,
+    keys: [
+      position.marketId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ],
+  }));
+  const newRows = state.stage.scanCandidates.map((candidate) => ({
+    id: `candidate-${candidate.marketId ?? candidate.questionId ?? candidate.question}`,
+    title: candidate.question,
+    summary: `${candidate.forceInclude ? "Force-included" : "Passed filters"} opportunity${candidate.theme ? ` · ${candidate.theme}` : ""}.`,
+    detail: `Current YES/NO: ${formatPriceCents(candidate.currentYesOdds)} / ${formatPriceCents(candidate.currentNoOdds)} · Volume: ${formatMoney(candidate.volumeUsd)} · Liquidity: ${formatMoney(candidate.liquidityUsd)}${candidate.closeTime ? ` · Closes ${formatIstDateTime(candidate.closeTime)}` : ""}.`,
+    keys: [
+      candidate.marketId,
+      candidate.slug,
+      candidate.marketUrl,
+      candidate.question,
+    ],
+  }));
+  const newRowKeySet = new Set(
+    newRows
+      .flatMap((row) => row.keys.map(getStageTwoBreakupMatchKey))
+      .filter((key): key is string => Boolean(key)),
+  );
+  const overlappingActiveRows = activeRows.filter((row) =>
+    row.keys.some((key) => {
+      const normalized = getStageTwoBreakupMatchKey(key);
+      return normalized ? newRowKeySet.has(normalized) : false;
+    }),
+  );
+
+  if (kind === "active-positions") return activeRows;
+  if (kind === "new-opportunities") return newRows;
+  if (kind === "overlap") return overlappingActiveRows;
+
+  const decisionRows = state.decisions.map((decision) => ({
+    id: `decision-${decision.id}`,
+    title: decision.market_title,
+    summary:
+      decision.summary ||
+      decision.reason ||
+      `${decision.decision} · ${decision.risk_status}`,
+    detail:
+      decision.rationale ||
+      decision.reason ||
+      "No LLM rationale returned for this row yet.",
+    keys: [
+      decision.market_id,
+      decision.slug ?? null,
+      decision.market_url ?? null,
+      decision.market_title,
+    ],
+  }));
+  return decisionRows.length
+    ? decisionRows
+    : [...activeRows, ...newRows].slice(
+        0,
+        state.stage.outputs.llm_candidate_count
+          ? Number(state.stage.outputs.llm_candidate_count)
+          : undefined,
+      );
+}
+
+function StageTwoLlmRunBreakupDialog({
+  kind,
+  state,
+  stats,
+  overlapCount,
+  onClose,
+}: {
+  kind: StageTwoLlmRunBreakupKind;
+  state: StageTwoLlmRunDialogState;
+  stats: ReturnType<typeof getStageTwoStats>;
+  overlapCount: number;
+  onClose: () => void;
+}) {
+  const config = {
+    "active-positions": {
+      title: "Active positions",
+      count: stats.activePositions,
+      summary:
+        "Open wallet position rows that Stage 2 considers alongside fresh scan opportunities.",
+    },
+    "new-opportunities": {
+      title: "New opportunities",
+      count: stats.newOpportunities,
+      summary:
+        "Fresh Stage 1 scan candidates that passed filters and were eligible for Stage 2 review.",
+    },
+    overlap: {
+      title: "Overlap / de-duped",
+      count: overlapCount,
+      summary:
+        "Rows that appear in both active positions and new opportunities and are counted once for the LLM.",
+    },
+    "unique-llm-rows": {
+      title: "Unique LLM rows",
+      count: stats.llmRanOn,
+      summary:
+        "The de-duplicated Stage 2 review set after active positions and new opportunities are unioned.",
+    },
+  }[kind];
+  const rows = getStageTwoBreakupRows(state, kind);
+
+  return (
+    <div className="fixed inset-0 z-[170] flex items-center justify-center bg-slate-950/50 p-4">
+      <div className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Tile breakup
+            </p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-950">
+              {config.title}: {config.count}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {config.summary}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close tile breakup details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div
+          className="flex-1 overflow-auto px-6 py-5"
+          data-testid="stage-two-invest-events-summary"
+        >
+          <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Summary</p>
+            <p className="mt-1 leading-6">
+              {config.summary} Displayed count:{" "}
+              <span className="font-semibold tabular-nums">{config.count}</span>
+              . Rows available below:{" "}
+              <span className="font-semibold tabular-nums">{rows.length}</span>.
+            </p>
+          </div>
+          <div className="mt-5 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Indepth details
+            </p>
+            {rows.length ? (
+              rows.map((row) => (
+                <article
+                  key={row.id}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                >
+                  <h4 className="font-semibold text-slate-950">{row.title}</h4>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Summary:</span>{" "}
+                    {row.summary}
+                  </p>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Indepth details:</span>{" "}
+                    {row.detail}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No row-level details have been returned for this tile yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageTwoBypassDialog({
+  state,
+  onClose,
+}: {
+  state: StageTwoBypassDialogState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-amber-100 bg-amber-50 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+              Stage 2 bypass reason
+            </p>
+            <h3 className="mt-1 text-xl font-semibold text-amber-950">
+              Stage 3 started while Stage 2 is In Queue
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-amber-200 bg-white p-2 text-amber-800 transition hover:bg-amber-50"
+            aria-label="Close Stage 2 bypass reason"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Detailed reason</p>
+            <p className="mt-2 leading-6">{state.reason}</p>
+          </div>
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Steps to rectify
+            </p>
+            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+              {state.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageTwoInvestEventsDialog({
+  state,
+  onClose,
+}: {
+  state: StageTwoInvestEventsDialogState;
+  onClose: () => void;
+}) {
+  const [isCompactRows, setIsCompactRows] = useState(false);
+  const [sortState, setSortState] = useState<BullpenTableSortState>({
+    key: "returnsPerDay",
+    direction: "desc",
+  });
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1500px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 2 Output
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                New Events to Invest in: {state.rows.length}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsCompactRows((current) => !current)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                aria-pressed={isCompactRows}
+                aria-label={
+                  isCompactRows
+                    ? "Expand Stage 2 invest rows"
+                    : "Collapse Stage 2 invest rows"
+                }
+                title={
+                  isCompactRows
+                    ? "Expand Stage 2 invest rows"
+                    : "Collapse Stage 2 invest rows"
+                }
+              >
+                {isCompactRows ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronUp className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              Stage 2 Top 10 events ranked by Returns/day. This table comes
+              straight from the saved Stage 2 Events Summary and does not
+              depend on Stage 3 planning or execution.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close new events to invest details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <BullpenQuestionsTable
+            snapshot={null}
+            rowsOverride={state.rows}
+            emptyMessage="No Stage 2 Top 10 rows were returned for this run."
+            headerContent={
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950">
+                This Events Summary view shows the saved Stage 2 Top 10 by
+                Returns/day, independent of any later Stage 3 ranking,
+                blockers, or order execution.
+              </div>
+            }
+            updatedAt={state.updatedAt}
+            updateUnavailableReason={state.updateUnavailableReason}
+            scrollResetKey={`stage-two-invest-events-${state.rows.length}`}
+            isLoading={false}
+            onSortChange={(key) =>
+              setSortState((current) => ({
+                key,
+                direction:
+                  current.key === key && current.direction === "desc"
+                    ? "asc"
+                    : "desc",
+              }))
+            }
+            selectedQuestionIds={new Set<string>()}
+            selectionEnabled={false}
+            sortState={sortState}
+            onToggleQuestion={() => undefined}
+            onToggleSelectAll={() => undefined}
+            visibleColumnIds={[
+              "serialNumber",
+              "question",
+              "closeTime",
+              "category",
+              "yesOdds",
+              "noOdds",
+              "llmYesOdds",
+              "llmNoOdds",
+              "returnsPerDay",
+              "amountToBeInvested",
+            ]}
+            persistColumnPreferences={false}
+            showPresetFilters={false}
+            displayDensity={isCompactRows ? "compact" : "default"}
+            rowHighlightById={buildStageTwoEventsSummaryHighlightById({
+              rows: state.rows,
+              stage: state.stage,
+              decisions: state.decisions,
+              includeEventExits: false,
+            })}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvestMetricDetailsDialog({
+  state,
+  onClose,
+  onSelectKind,
+  onOpenEventExitInfo,
+  onOpenInvestEligibilityInfo,
+}: {
+  state: InvestMetricDialogState;
+  onClose: () => void;
+  onSelectKind: (kind: InvestMetricDialogKind) => void;
+  onOpenEventExitInfo?: () => void;
+  onOpenInvestEligibilityInfo?: (trigger: HTMLButtonElement | null) => void;
+}) {
+  const [transferQueueMetricInfoKind, setTransferQueueMetricInfoKind] =
+    useState<Stage2TransferQueueMetricInfoKind | null>(null);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
+  const metricDefinition = getInvestMetricDialogDefinition(state.kind);
+  const rows = getInvestMetricRows(state.kind, state.decisions);
+  const stage2TopTenHandoffRows = buildBullpenStage2TopTenHandoffRows({
+    run: state.run,
+    decisions: state.decisions,
+  });
+  const showStage2TopTenGapRows =
+    state.kind === "planned" || state.kind === "buy-planned";
+  const stage2TopTenGapRows = showStage2TopTenGapRows
+    ? stage2TopTenHandoffRows.filter((row) => row.missingFromBuyPlan)
+    : [];
+  const showStage2TopTenEventsSummary =
+    state.kind === "buy-planned" && stage2TopTenHandoffRows.length > 0;
+  const tableRows = (
+    showStage2TopTenGapRows
+      ? [...rows, ...stage2TopTenGapRows.map((row) => row.displayDecision)]
+      : rows
+  ).sort((left, right) => {
+    const leftRank = left.stage3_final_rank ?? Number.POSITIVE_INFINITY;
+    const rightRank = right.stage3_final_rank ?? Number.POSITIVE_INFINITY;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return left.market_title.localeCompare(right.market_title);
+  });
+  const historicalPlannedContractRows =
+    state.kind === "planned" && tableRows.length === 0 && state.stage
+      ? [
+          ...readStageOutputStringList(
+            state.stage.outputs.stage2_actionable_exit_market_ids,
+          ).map((marketId) => ({ marketId, action: "Exit" as const })),
+          ...readStageOutputStringList(
+            state.stage.outputs.stage2_actionable_buy_market_ids,
+          ).map((marketId) => ({ marketId, action: "Buy" as const })),
+        ]
+      : [];
+  const selectedStepKey = state.kind.startsWith("sell-")
+    ? "sell"
+    : state.kind.startsWith("buy-")
+      ? "buy"
+      : null;
+  const selectedStepSummary =
+    selectedStepKey === null
+      ? null
+      : getLastInvestExecutionStep(state.run, selectedStepKey, state.decisions);
+  const decisionsCount = getInvestStageMetric(
+    state.stage,
+    "decisions_count",
+    state.run.decisions_count,
+  );
+  const plannedCount =
+    selectedStepSummary?.plannedOrders ??
+    getInvestStageMetric(state.stage, "orders_planned", state.run.orders_planned);
+  const submittedCount =
+    selectedStepSummary?.submittedOrders ??
+    getInvestStageMetric(
+      state.stage,
+      "orders_submitted",
+      state.run.orders_submitted,
+    );
+  const activePositionRows = state.stage
+    ? readStageOutputNumber(state.stage.outputs.active_position_rows)
+    : null;
+  const candidateRows = state.stage
+    ? readStageOutputNumber(state.stage.outputs.candidate_decision_rows)
+    : null;
+  const stageError = state.stage
+    ? readStageOutputString(state.stage.outputs.error_message)
+    : null;
+  const runError =
+    stageError ??
+    (typeof state.run.error_message === "string" &&
+    state.run.error_message.trim().length > 0
+      ? state.run.error_message.trim()
+      : null);
+  const filteredPlannedCount = tableRows.filter(
+    (decision) => decision.order_plan,
+  ).length;
+  const filteredProcessedCount = tableRows.filter((decision) =>
+    isProcessedInvestOrderPlan(decision.order_plan),
+  ).length;
+  const filteredExecutionGroups =
+    partitionInvestDecisionsByExecutionEvidence(tableRows);
+  const filteredSubmittedCount =
+    filteredExecutionGroups.submittedOrExecuted.length +
+    filteredExecutionGroups.submittedButUnsuccessful.length;
+  const filteredSubmittedUnsuccessfulRows =
+    filteredExecutionGroups.submittedButUnsuccessful;
+  const filteredUnsubmittedRows = filteredExecutionGroups.notSubmitted;
+  const filteredNoActionRows =
+    filteredExecutionGroups.completedWithoutSubmission;
+  const filteredFailedRows = filteredUnsubmittedRows.filter(
+    (decision) =>
+      decision.order_plan?.status === "failed" ||
+      decision.order_plan?.status === "cancelled",
+  );
+  const filteredSkippedRows = filteredUnsubmittedRows.filter(
+    (decision) => decision.order_plan?.status === "skipped",
+  );
+  const filteredPendingRows = filteredUnsubmittedRows.filter(
+    (decision) => decision.order_plan?.status === "planned",
+  );
+  const concreteBuyPlanCount = stage2TopTenHandoffRows.filter(
+    (row) => !row.missingFromBuyPlan,
+  ).length;
+  const submittedBuyPlanCount = stage2TopTenHandoffRows.filter((row) =>
+    isSubmittedOrExecutedInvestOrderPlan(row.displayDecision.order_plan),
+  ).length;
+  const blockedOrWaitingBuyPlanCount = stage2TopTenHandoffRows.filter(
+    (row) => row.missingFromBuyPlan,
+  ).length;
+  const executionSteps = state.stage
+    ? getInvestStageExecutionSteps(state.stage, state.decisions)
+    : [];
+  const progressLogEntries = getInvestProgressLogEntries({
+    stage: state.stage,
+    run: state.run,
+    decisions: rows,
+    steps: executionSteps,
+  });
+
+  return (
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 3 Details
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              {metricDefinition.title}
+            </h2>
+            <p className="text-sm text-slate-600">
+              {metricDefinition.description}
+            </p>
+            <p className="text-xs text-slate-500">
+              Run {state.run.id} · started{" "}
+              {formatIstDateTime(state.run.started_at)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 3 details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <InvestMetricSummaryCard
+              label="Decisions"
+              value={decisionsCount}
+              onClick={() => onSelectKind("decisions")}
+            />
+            <InvestMetricSummaryCard
+              label="Planned"
+              value={plannedCount}
+              onClick={() => onSelectKind("planned")}
+            />
+            <InvestMetricSummaryCard
+              label="Submitted"
+              value={submittedCount}
+              onClick={() => onSelectKind("submitted")}
+            />
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Review rows
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">
+                {(activePositionRows ?? 0).toLocaleString("en-IN")} active +{" "}
+                {(candidateRows ?? 0).toLocaleString("en-IN")} candidate
+              </p>
+            </div>
+          </div>
+
+          {showStage2TopTenEventsSummary ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Saved Stage 2 transfer queue
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="transferred-rows"
+                  label="Transferred rows"
+                  value={stage2TopTenHandoffRows.length.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-500"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-slate-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="concrete-buy-plans"
+                  label="Concrete buy plans"
+                  value={concreteBuyPlanCount.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-700"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-blue-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="submitted-buy-plans"
+                  label="Submitted"
+                  value={submittedBuyPlanCount.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-emerald-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="waiting-blocked"
+                  label="Still waiting / blocked"
+                  value={blockedOrWaitingBuyPlanCount.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-700"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-amber-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Selected filter
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">
+                {(tableRows.length || historicalPlannedContractRows.length).toLocaleString("en-IN")} rows ·{" "}
+                {(filteredPlannedCount || historicalPlannedContractRows.length).toLocaleString("en-IN")} planned ·{" "}
+                {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
+                {filteredSubmittedCount.toLocaleString("en-IN")} submitted
+              </p>
+            </div>
+          )}
+
+          {runError ? (
+            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+              <span className="font-semibold">Latest worker error:</span>{" "}
+              <ErrorCodeWithDetails
+                detail={runError}
+                detailClassName="text-rose-800"
+              />
+            </div>
+          ) : null}
+
+          {stage2TopTenGapRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <span className="font-semibold">
+                Stage 2 Top 10 rows missing from the concrete Step 2 buy-plan count:
+              </span>{" "}
+              {stage2TopTenGapRows.length.toLocaleString("en-IN")} transferred
+              row
+              {stage2TopTenGapRows.length === 1 ? "" : "s"} are still shown
+              below, but Stage 3 never created a buy order plan for them. Each
+              row includes the recorded blocker or a missing-handoff reason.
+            </div>
+          ) : null}
+
+          {executionSteps.length > 0 ? (
+            <div className="mt-5">
+              <InvestExecutionStepsSummary
+                steps={executionSteps}
+                onOpenMetricDetails={onSelectKind}
+                onOpenEventExitInfo={onOpenEventExitInfo}
+                onOpenInvestEligibilityInfo={onOpenInvestEligibilityInfo}
+              />
+            </div>
+          ) : null}
+
+          {filteredNoActionRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-800">
+              <p className="font-semibold">Completed without a new order</p>
+              <p className="mt-1">
+                {filteredNoActionRows.length.toLocaleString("en-IN")} redeem or
+                settlement outcome
+                {filteredNoActionRows.length === 1 ? "" : "s"} required no new
+                remote submission and are excluded from Submitted counts.
+              </p>
+            </div>
+          ) : null}
+
+          {filteredSubmittedUnsuccessfulRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-950">
+              <p className="font-semibold">Submitted but unsuccessful</p>
+              <p className="mt-1">
+                {filteredSubmittedUnsuccessfulRows.length.toLocaleString(
+                  "en-IN",
+                )}{" "}
+                evidence-backed submission
+                {filteredSubmittedUnsuccessfulRows.length === 1 ? "" : "s"}{" "}
+                ended cancelled, rejected, timed out, or permanently failed.
+                They remain included in Submitted and are not mislabeled as
+                never submitted.
+              </p>
+            </div>
+          ) : null}
+
+          {filteredUnsubmittedRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-950">
+              <p className="font-semibold">Orders still not submitted</p>
+              <p className="mt-1">
+                {filteredUnsubmittedRows.length.toLocaleString("en-IN")} of{" "}
+                {filteredPlannedCount.toLocaleString("en-IN")} filtered orders
+                are still not submitted. Failed{" "}
+                {filteredFailedRows.length.toLocaleString("en-IN")} · Skipped{" "}
+                {filteredSkippedRows.length.toLocaleString("en-IN")} · Planned{" "}
+                {filteredPendingRows.length.toLocaleString("en-IN")}
+              </p>
+              <div className="mt-3 space-y-2">
+                {filteredUnsubmittedRows.map((decision) => (
+                  <div
+                    key={decision.id}
+                    className="rounded-xl border border-amber-300/70 bg-white/70 px-3 py-2.5"
+                  >
+                    <p className="font-semibold">
+                      {decision.market_title} ·{" "}
+                      <span className="capitalize">
+                        {decision.order_plan?.status.replaceAll("_", " ")}
+                      </span>
+                    </p>
+                    <div className="mt-1 leading-5 text-amber-950">
+                      <Stage3SellExecutionTelemetry decision={decision} />
+                      <ErrorCodeWithDetails
+                        detail={
+                          decision.order_plan?.detail ??
+                          "No execution detail was recorded."
+                        }
+                        detailClassName="text-amber-900"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {progressLogEntries.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Live progress / error log
+                  </p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    When a step takes a while, this shows the latest worker
+                    checkpoint, gate, and order error details saved for this
+                    run.
+                  </p>
+                </div>
+                {state.stage?.state === "current" ? (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-800">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Updating
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-4 space-y-2">
+                {progressLogEntries.map((entry, index) => {
+                  const toneClass =
+                    entry.tone === "error"
+                      ? "border-rose-200 bg-rose-50 text-rose-950"
+                      : entry.tone === "warning"
+                        ? "border-amber-200 bg-amber-50 text-amber-950"
+                        : entry.tone === "success"
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+                          : "border-sky-200 bg-sky-50 text-sky-950";
+                  return (
+                    <div
+                      key={`${entry.label}-${index}`}
+                      className={`rounded-xl border px-3 py-2.5 text-sm ${toneClass}`}
+                    >
+                      <p className="font-semibold capitalize">{entry.label}</p>
+                      <p className="mt-1 leading-5">{entry.detail}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {showStage2TopTenEventsSummary ? (
+            <div className="mt-5">
+              <Stage2TopTenEventsSummaryTable
+                rows={stage2TopTenHandoffRows}
+                run={state.run}
+                testId="stage-three-step-two-events-summary"
+                emptyMessage="No saved Stage 2 Top 10 rows were returned for this Stage 3 Step 2 view."
+                headerContent={
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950">
+                    This Events Summary view shows the full saved Stage 2 Top 10
+                    transfer queue. Rows that never became concrete Step 2 buy
+                    plans stay visible here with their latest recorded blocker
+                    or missing-handoff reason.
+                  </div>
+                }
+              />
+            </div>
+          ) : (
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
+              {tableRows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-[78rem] divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Event</th>
+                        <th className="px-4 py-3">Decision</th>
+                        <th className="px-4 py-3">Edge & score</th>
+                        <th className="px-4 py-3">Exposure</th>
+                        <th className="px-4 py-3">LLM Yes Odds</th>
+                        <th className="px-4 py-3">LLM No Odds</th>
+                        <th className="px-4 py-3">Returns/day</th>
+                        <th className="px-4 py-3">Exit Type</th>
+                        <th className="px-4 py-3">Order</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {tableRows.map((decision) => (
+                        <tr key={decision.id}>
+                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
+                            <div className="font-semibold text-slate-950">
+                              {decision.market_url ? (
+                                <a
+                                  className="hover:text-sky-700 hover:underline"
+                                  href={decision.market_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {decision.market_title}
+                                </a>
+                              ) : (
+                                decision.market_title
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {decision.theme} · closes{" "}
+                              {formatIstDateTime(decision.close_time)}
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            <span className="font-semibold capitalize text-slate-950">
+                              {decision.decision.replaceAll("_", " ")}
+                            </span>
+                            <br />
+                            Side {decision.side} · {decision.confidence}
+                            <br />
+                            {decision.risk_status.replaceAll("_", " ")}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            Edge{" "}
+                            {decision.edge_pp.toLocaleString("en-IN", {
+                              maximumFractionDigits: 2,
+                            })}{" "}
+                            pp
+                            <br />
+                            Score{" "}
+                            {decision.score.toLocaleString("en-IN", {
+                              maximumFractionDigits: 2,
+                            })}
+                            <br />
+                            Fair{" "}
+                            {formatOddsPercent(decision.fair_probability_pct)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            Current {formatMoney(decision.current_exposure_usd)}
+                            <br />
+                            Target {formatMoney(decision.target_exposure_usd)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold tabular-nums text-violet-800">
+                            {formatOddsPercent(
+                              decision.fair_yes_probability_pct ?? null,
+                            )}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold tabular-nums text-violet-800">
+                            {formatOddsPercent(
+                              decision.fair_no_probability_pct ?? null,
+                            )}
+                          </td>
+                          <td className="px-4 py-3 align-top tabular-nums text-slate-700">
+                            <BullpenReturnsPerDayValueButton
+                              disabled={getDecisionReturnsPerDay(decision) === null}
+                              onOpen={() =>
+                                setReturnsPerDayQuestion(
+                                  buildDecisionReturnsPerDayQuestion(decision),
+                                )
+                              }
+                              ariaLabel={`Show Returns/day calculation for ${decision.market_title}`}
+                            >
+                              {formatReturnsPerDay(
+                                getDecisionReturnsPerDay(decision),
+                              )}
+                            </BullpenReturnsPerDayValueButton>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            {(() => {
+                              const exitType =
+                                getDecisionExitTypeDetails(decision);
+                              return exitType ? (
+                                <>
+                                  <span className="font-semibold text-slate-950">
+                                    {exitType.label}
+                                  </span>
+                                  <br />
+                                  <span className="whitespace-pre-line text-xs leading-5">
+                                    {exitType.details}
+                                  </span>
+                                </>
+                              ) : (
+                                "—"
+                              );
+                            })()}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
+                            <span className="font-semibold capitalize">
+                              {formatInvestMetricOrderStatus(decision)}
+                            </span>
+                            {decision.order_plan ? (
+                              <>
+                                <br />
+                                {formatMoney(
+                                  decision.order_plan.order_size_usd,
+                                )}{" "}
+                                at{" "}
+                                {formatPriceCents(
+                                  decision.order_plan.limit_price_cents,
+                                )}
+                                <br />
+                                <Stage3SellExecutionTelemetry
+                                  decision={decision}
+                                />
+                                <ErrorCodeWithDetails
+                                  detail={getPlannedOrderBrief(decision)}
+                                  detailClassName="text-slate-700"
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <br />
+                                {getPlannedOrderBrief(decision)}
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : historicalPlannedContractRows.length > 0 ? (
+                <HistoricalPlannedContractRows
+                  rows={historicalPlannedContractRows}
+                />
+              ) : (
+                <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
+                  Stage 3 has not emitted any decision rows for this metric yet.
+                  The worker may still be preparing the first review row.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      {transferQueueMetricInfoKind ? (
+        <Stage2TransferQueueMetricInfoDialog
+          kind={transferQueueMetricInfoKind}
+          onClose={() => setTransferQueueMetricInfoKind(null)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function HistoricalPlannedContractRows({
+  rows,
+}: {
+  rows: Array<{ marketId: string; action: "Exit" | "Buy" }>;
+}) {
+  const [titles, setTitles] = useState<Record<string, string | null>>({});
+  const rowsKey = rows.map((row) => `${row.action}:${row.marketId}`).join("|");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/bullpen-ai/market-urls", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+          body: JSON.stringify({
+            questions: rows.map((row) => ({
+              id: row.marketId,
+              slug: null,
+              marketUrl: null,
+              question: null,
+              category: null,
+            })),
+          }),
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          marketTitles?: Record<string, string | null>;
+        };
+        if (!controller.signal.aborted) {
+          setTitles(payload.marketTitles ?? {});
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("Unable to enrich historical Stage 3 plans", error);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [rowsKey]);
+
+  return (
+    <div className="divide-y divide-slate-200 bg-white">
+      {rows.map((row, index) => (
+        <div
+          key={`${row.action}-${row.marketId}`}
+          className="flex items-start justify-between gap-4 px-4 py-3 text-sm"
+        >
+          <div>
+            <p className="font-semibold text-slate-950">
+              {titles[row.marketId] ?? row.marketId}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              Preserved from the completed Stage 2 actionable contract.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">
+              #{index + 1}
+            </span>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                row.action === "Exit"
+                  ? "border-rose-200 bg-rose-50 text-rose-800"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}
+            >
+              {row.action}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Stage3PreviewDialog({
+  state,
+  submitting = false,
+  submitDisabled = false,
+  onClose,
+  onSubmit,
+}: {
+  state: Stage3PreviewDialogState;
+  submitting?: boolean;
+  submitDisabled?: boolean;
+  onClose: () => void;
+  onSubmit?: () => void;
+}) {
+  const sellDecisions = state.decisions.filter(
+    (decision) => decision.order_plan?.action === "sell",
+  );
+  const buyDecisions = state.decisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[88vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 3 Queue Preview
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              Current Stage 3 buy and sell queue
+            </h2>
+            <p className="max-w-4xl text-sm leading-6 text-slate-600">
+              This preview combines the current Event Exits list with the saved
+              Stage 2 top-10 transfer queue. It is not a persisted order plan.
+              Stage 3 submits the exits first, waits for settlement, refreshes
+              live cash plus occupied slots, and only then creates, sizes, and
+              submits concrete buys.
+            </p>
+            <p className="text-xs text-slate-500">
+              Source run{" "}
+              <span className="font-semibold text-slate-700">
+                {state.sourceRun?.id ?? "stage3-preview"}
+              </span>
+              {" · "}snapshot time{" "}
+              <span className="font-semibold text-slate-700">
+                {formatIstDateTime(
+                  state.sourceRun?.completed_at ?? state.sourceRun?.started_at ?? null,
+                )}
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 3 queue preview"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <InvestMetricSummaryCard label="Queued" value={state.plannedOrders} />
+            <InvestMetricSummaryCard
+              label="Step 1 exit queue"
+              value={state.sellPlannedOrders}
+            />
+            <InvestMetricSummaryCard
+              label="Step 2 candidates"
+              value={state.buyPlannedOrders}
+            />
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-950">
+            These are transfer-queue rows, not saved orders. Stage 3 evaluates
+            exits first, then creates concrete buy plans only after it refreshes
+            live wallet cash and open slots.
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <Stage3DecisionTable
+              title="Step 1 Event Exits"
+              rows={sellDecisions}
+              emptyMessage="No executable Event Exit sell rows are waiting right now."
+            />
+            <Stage3DecisionTable
+              title="Step 2 Candidate Queue"
+              rows={buyDecisions}
+              emptyMessage="No saved Stage 2 top-10 candidate rows are waiting right now."
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          <p className="text-xs leading-5 text-slate-500">
+            Preview only until the run is queued. Once started, the worker
+            persists concrete Stage 3 plans and submissions in the history.
+          </p>
+          {onSubmit ? (
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={submitDisabled || submitting}
+              className={`inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                submitDisabled || submitting
+                  ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                  : "border-blue-950 bg-blue-950 text-white hover:bg-blue-900"
+              }`}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Queue Stage 3 Exit and Invest
+                </>
+              )}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildConsoleSettingsUpdate(
   consoleOrderUsd: number,
   consoleScanScope: "trending" | "full_universe",
   startAt?: string | null,
@@ -1329,7 +10225,7 @@ export function buildConsoleSettingsUpdate(
   };
 }
 
-export function buildImmediateRunSettingsUpdate(
+function buildImmediateRunSettingsUpdate(
   consoleOrderUsd: number,
   consoleScanScope: "trending" | "full_universe",
   consoleLlmTargets: ProviderModelTarget[],
@@ -1345,13 +10241,13 @@ export function buildImmediateRunSettingsUpdate(
   };
 }
 
-export function isConsoleProfileSelected(
+function isConsoleProfileSelected(
   summary: BullpenAutoLiveSummaryResponse | null,
 ) {
   return summary?.settings.strategy_profile === CONSOLE_PROFILE_ID;
 }
 
-export function isAutoRunActive(summary: BullpenAutoLiveSummaryResponse | null) {
+function isAutoRunActive(summary: BullpenAutoLiveSummaryResponse | null) {
   return Boolean(
     summary &&
     isConsoleProfileSelected(summary) &&
@@ -1361,7 +10257,11 @@ export function isAutoRunActive(summary: BullpenAutoLiveSummaryResponse | null) 
   );
 }
 
-export function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
+function formatStageLastRunLabel(value: string | null) {
+  return value ? formatIstDateTime(value) : "Not run yet";
+}
+
+function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
   if (status === "running") return "Running";
   if (status === "confirming") return "Confirming";
   if (status === "completed") return "Completed";
@@ -1370,15 +10270,15 @@ export function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
   return "Skipped";
 }
 
-export function isActivelyWorkingRunStatus(
+function isActivelyWorkingRunStatus(
   status: BullpenAutoLiveRun["status"] | null | undefined,
 ) {
   return status === "running" || status === "confirming";
 }
 
-export const ACTIVE_RUN_UI_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
+const ACTIVE_RUN_UI_MAX_AGE_MS = 2 * 60 * 60 * 1_000;
 
-export function isCrediblyActiveWorkflowRun(
+function isCrediblyActiveWorkflowRun(
   run: BullpenAutoLiveRun | null | undefined,
   nowMs: number,
 ) {
@@ -1388,14 +10288,14 @@ export function isCrediblyActiveWorkflowRun(
   return nowMs - startedAtMs <= ACTIVE_RUN_UI_MAX_AGE_MS;
 }
 
-export function isUserCancelledRun(run: BullpenAutoLiveRun | null | undefined) {
+function isUserCancelledRun(run: BullpenAutoLiveRun | null | undefined) {
   if (run?.status !== "failed") return false;
   return /cancelled by user/i.test(
     `${run.error_message ?? ""}\n${run.summary ?? ""}`,
   );
 }
 
-export function formatLatestRunSummaryTileLabel(run: BullpenAutoLiveRun | null) {
+function formatLatestRunSummaryTileLabel(run: BullpenAutoLiveRun | null) {
   if (!run) return "Last run";
   if (run.status === "failed") return "Last failed run";
   if (run.status === "partial_success") return "Last partial run";
@@ -1403,7 +10303,7 @@ export function formatLatestRunSummaryTileLabel(run: BullpenAutoLiveRun | null) 
   return "Last completed run";
 }
 
-export function runNeedsBullpenLogin(run: BullpenAutoLiveRun | null) {
+function runNeedsBullpenLogin(run: BullpenAutoLiveRun | null) {
   if (!run) return false;
   const searchableText = [
     run.summary,
@@ -1428,7 +10328,7 @@ export function runNeedsBullpenLogin(run: BullpenAutoLiveRun | null) {
   );
 }
 
-export function runBelongsToWorkspace(
+function runBelongsToWorkspace(
   run: BullpenAutoLiveRun | null | undefined,
   workspaceProfile: BullpenWorkspaceProfile,
 ) {
@@ -1439,7 +10339,7 @@ export function runBelongsToWorkspace(
   return (runWorkspace ?? "bullpen007") === workspaceProfile;
 }
 
-export function getVisibleRun(
+function getVisibleRun(
   summary: BullpenAutoLiveSummaryResponse | null,
   pendingRunId: string | null,
   workspaceProfile: BullpenWorkspaceProfile,
@@ -1496,13 +10396,74 @@ export function getVisibleRun(
   ) ?? null;
 }
 
-export function isUsableBullpenBalance(
+function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "red" | "slate") {
+  if (tone === "slate") {
+    return {
+      container:
+        "border-slate-200 bg-white/90 dark:border-slate-700/80 dark:bg-slate-950/65",
+      badge:
+        "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700/80 dark:bg-slate-900 dark:text-slate-200",
+      text: "text-slate-950 dark:text-slate-50",
+      muted: "text-slate-600 dark:text-slate-300",
+      progress: "bg-slate-300",
+      progressTrack: "bg-slate-100 dark:bg-slate-800",
+    };
+  }
+  if (tone === "red") {
+    return {
+      container:
+        "border-rose-300 bg-rose-50/90 dark:border-rose-400/35 dark:bg-rose-950/45",
+      badge:
+        "border-rose-300 bg-rose-100 text-rose-900 dark:border-rose-400/35 dark:bg-rose-500/10 dark:text-rose-100",
+      text: "text-rose-950 dark:text-rose-50",
+      muted: "text-rose-900/80 dark:text-rose-100/75",
+      progress: "bg-rose-500",
+      progressTrack: "bg-rose-200/80 dark:bg-rose-500/20",
+    };
+  }
+  if (tone === "yellow") {
+    return {
+      container:
+        "border-amber-300 bg-amber-50/90 dark:border-amber-400/35 dark:bg-amber-950/45",
+      badge:
+        "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/10 dark:text-amber-100",
+      text: "text-amber-950 dark:text-amber-50",
+      muted: "text-amber-900/80 dark:text-amber-100/75",
+      progress: "bg-amber-500",
+      progressTrack: "bg-amber-200/80 dark:bg-amber-500/20",
+    };
+  }
+  if (tone === "green") {
+    return {
+      container:
+        "border-emerald-300 bg-emerald-50/90 dark:border-emerald-400/35 dark:bg-emerald-950/45",
+      badge:
+        "border-emerald-300 bg-emerald-100 text-emerald-900 dark:border-emerald-400/35 dark:bg-emerald-500/10 dark:text-emerald-100",
+      text: "text-emerald-950 dark:text-emerald-50",
+      muted: "text-emerald-900/80 dark:text-emerald-100/75",
+      progress: "bg-emerald-500",
+      progressTrack: "bg-emerald-200/80 dark:bg-emerald-500/20",
+    };
+  }
+  return {
+    container:
+      "border-sky-300 bg-sky-50/90 dark:border-sky-400/35 dark:bg-sky-950/45",
+    badge:
+      "border-sky-300 bg-sky-100 text-sky-900 dark:border-sky-400/35 dark:bg-sky-500/10 dark:text-sky-100",
+    text: "text-sky-950 dark:text-sky-50",
+    muted: "text-sky-900/80 dark:text-sky-100/75",
+    progress: "bg-sky-500",
+    progressTrack: "bg-sky-200/80 dark:bg-sky-500/20",
+  };
+}
+
+function isUsableBullpenBalance(
   balance: PolymarketBotState["live"]["balance"] | null | undefined,
 ): balance is PolymarketBotState["live"]["balance"] & { status: "ready" } {
   return balance?.status === "ready";
 }
 
-export function BullpenPortfolioSnapshot({
+function BullpenPortfolioSnapshot({
   useHistoryPortfolioSource,
   state,
   lastUsableBalance,
@@ -2434,7 +11395,6 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [isExcelHistoryDialogOpen, setIsExcelHistoryDialogOpen] =
     useState(false);
-  const [hasOpenedExcelHistoryDialog, setHasOpenedExcelHistoryDialog] = useState(false);
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
   const [triggerHistoryItems, setTriggerHistoryItems] = useState<
@@ -2491,6 +11451,13 @@ export function BullpenAutoRunScheduleCard({
     useState<Stage2To3StrategyDialogState | null>(null);
   const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
     useState(false);
+  const tradeAmountInfoDialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isTradeAmountInfoDialogOpen) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    tradeAmountInfoDialogRef.current?.querySelector<HTMLElement>("button[aria-label='Close trade amount formula']")?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, [isTradeAmountInfoDialogOpen]);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
   const [consoleScanScope, setConsoleScanScope] = useState<
     "trending" | "full_universe"
@@ -4835,16 +13802,11 @@ export function BullpenAutoRunScheduleCard({
   const independentStageOneView = independentScanSnapshot
     ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
     : null;
-  // Reset the selection only when the snapshot identity changes, preserving
-  // manual selections across refreshes of the same snapshot. React retries
-  // this component before committing, so no stale selection is painted.
-  const [selectedSnapshotId, setSelectedSnapshotId] = useState(
-    independentScanSnapshot?.snapshotId,
-  );
-  if (selectedSnapshotId !== independentScanSnapshot?.snapshotId) {
-    setSelectedSnapshotId(independentScanSnapshot?.snapshotId);
-    if (independentScanSnapshot) setStageOneResultSource("independent");
-  }
+  useEffect(() => {
+    if (independentScanSnapshot) {
+      setStageOneResultSource("independent");
+    }
+  }, [independentScanSnapshot?.snapshotId]);
   const handleIndependentStageOneScan = async (
     downloadScope: "filtered" | "all-scanned" | null = null,
   ) => {
@@ -4951,15 +13913,14 @@ export function BullpenAutoRunScheduleCard({
     // accepted/rejected candidate arrays, so rendering only from the summary
     // can show the authoritative count while incorrectly leaving the table
     // empty.
-    setScanCandidateDialog(
-      buildRunDetailScanCandidateDialogState({
+    const openedDialog = buildRunDetailScanCandidateDialogState({
         run: sourceRun,
         decisions: sourceDecisions,
         stage,
         mode,
         activePositionsFallback: workflowPortfolioPositionFallback,
-      }),
-    );
+      });
+    setScanCandidateDialog(openedDialog);
 
     if (!sourceRun?.id || (isIndependentStage && !isAutoRunSnapshot)) return;
 
@@ -4970,23 +13931,23 @@ export function BullpenAutoRunScheduleCard({
       }),
     ])
       .then(([exactRun, exactDecisions]) => {
+        if (exactRun.id !== sourceRun.id) return;
         const exactStage =
           buildBullpenAutoRunWorkflowView(exactRun).stages.find(
             (candidateStage) => candidateStage.key === stage.key,
           ) ?? null;
         if (!exactStage) return;
 
-        setScanCandidateDialog(
-          buildRunDetailScanCandidateDialogState({
+        setScanCandidateDialog(current => current === openedDialog ? buildRunDetailScanCandidateDialogState({
             run: exactRun,
             decisions: exactDecisions,
             stage: exactStage,
             mode,
             activePositionsFallback: workflowPortfolioPositionFallback,
-          }),
-        );
+          }) : current);
       })
       .catch((nextError) => {
+        setScanCandidateDialog(current => current === openedDialog ? { ...current, hydrationWarning: "Exact saved-run details could not be read. Retained summary evidence may be incomplete or stale; no missing values are confirmed as zero." } : current);
         // Keep the already-open projection usable if the evidence refresh
         // fails; the regular console refresh/error surface will report API
         // health independently.
@@ -6415,7 +15376,7 @@ export function BullpenAutoRunScheduleCard({
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                         onOpenScanFilters={onOpenScanFilters}
-                        onOpenExcelHistory={() => { setHasOpenedExcelHistoryDialog(true); setIsExcelHistoryDialogOpen(true); }}
+                        onOpenExcelHistory={() => setIsExcelHistoryDialogOpen(true)}
                         workspaceProfile={workspaceProfile} />
                     </div>
                     <div className={`mt-5 border-t pt-3 ${isStageOneActive ? "border-amber-200/80" : "border-emerald-200/80"}`}>
@@ -7066,11 +16027,11 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        {hasOpenedExcelHistoryDialog ? <BullpenStageOneExcelHistoryDialog
+        <BullpenStageOneExcelHistoryDialog
           open={isExcelHistoryDialogOpen}
           onClose={() => setIsExcelHistoryDialogOpen(false)}
           workspaceProfile={workspaceProfile}
-        /> : null}
+        />
 
         {isEventExitStrategiesDialogOpen ? (
           <BullpenEventExitStrategiesDialog
@@ -7178,7 +16139,26 @@ export function BullpenAutoRunScheduleCard({
         ) : null}
 
         {isTradeAmountInfoDialogOpen ? (
-          <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+          <div
+            ref={tradeAmountInfoDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Trade amount formula"
+            onKeyDown={(event) => {
+              // Leave any future child dialog's keyboard handling to that child.
+              if ((event.target as HTMLElement).closest('[role="dialog"]') !== event.currentTarget) return;
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setIsTradeAmountInfoDialogOpen(false);
+              }
+              if (event.key !== "Tab") return;
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), [tabindex="0"]'))
+                .filter(item => item.getClientRects().length > 0);
+              const first = items[0], last = items[items.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            }}
+            className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
             <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
@@ -7408,5 +16388,3 @@ export function BullpenAutoRunScheduleCard({
     </Card>
   );
 }
-
-export { BullpenRunDetailScreen, StageTwoLlmRunDetailsDialog } from "./BullpenScheduleLazyDetails";

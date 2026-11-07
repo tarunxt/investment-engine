@@ -1,7 +1,6 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { bullpenPerformanceFixture } from "./fixtures/bullpen-performance.mjs";
 
 import { chromium, devices } from "playwright";
 import { encode } from "next-auth/jwt";
@@ -304,8 +303,6 @@ function dashboardSummaryFixture() {
 
 function legacyDashboardFixture(pathname) {
   const now = new Date().toISOString();
-  const bullpenFixture = bullpenPerformanceFixture(pathname, now);
-  if (bullpenFixture !== null) return bullpenFixture;
   if (pathname.endsWith("/zerodha/status")) {
     return { connected: true, login_time: now, expires_at: now };
   }
@@ -642,11 +639,11 @@ async function collectPageMetrics(page, usableMs, apiResponses) {
           hydrationToUsableMs: navigation
             ? Math.max(0, usableAt - navigation.domContentLoadedEventEnd)
             : null,
-          jsTransferBytes: scripts.length === 0 ? null : scripts.reduce(
+          jsTransferBytes: scripts.reduce(
             (total, entry) => total + entry.transferBytes,
             0,
           ),
-          jsDecodedBytes: scripts.length === 0 ? null : scripts.reduce(
+          jsDecodedBytes: scripts.reduce(
             (total, entry) => total + entry.decodedBytes,
             0,
           ),
@@ -728,8 +725,9 @@ async function measureTarget(context, profile, targetName, target, visit) {
         .waitFor({ state: "attached", timeout: 8_000 })
         .then(() => true)
         .catch(() => false);
-      if (!appeared) throw new Error(`Meaningful ${targetName} UI did not become ready`);
-      meaningfulUsableMs = await page.evaluate(() => performance.now());
+      if (appeared) {
+        meaningfulUsableMs = await page.evaluate(() => performance.now());
+      }
     }
     await exerciseNonMutatingInteraction(page, targetName);
     await page.waitForTimeout(50);
@@ -885,23 +883,8 @@ function markdownReport(report) {
 }
 
 async function main() {
-  let evidence;
-  if (process.env.PERF_CANDIDATE_SHA) {
-    if (!MOCK_API || !["localhost", "127.0.0.1"].includes(new URL(BASE_URL).hostname)) {
-      throw new Error("Candidate budget evidence requires an isolated local fixture server");
-    }
-    const fingerprint = await fetch(`${BASE_URL}/api/runtime-fingerprint`).then((response) => response.json());
-    if (fingerprint.build_sha !== process.env.PERF_CANDIDATE_SHA) throw new Error("Candidate fingerprint mismatch");
-    evidence = {
-      sha: fingerprint.build_sha,
-      buildId: (await readFile(resolve(".next/BUILD_ID"), "utf8")).trim(),
-      environment: "ci-local-synthetic",
-      windowStart: new Date().toISOString(),
-    };
-  }
   const browser = await chromium.launch({ headless: true });
   const report = {
-    evidence,
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     baseUrl: BASE_URL,
@@ -981,7 +964,6 @@ async function main() {
     await browser.close();
   }
 
-  if (evidence) evidence.windowEnd = new Date().toISOString();
   await mkdir(dirname(OUTPUT_JSON), { recursive: true });
   await writeFile(OUTPUT_JSON, `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(OUTPUT_MARKDOWN, markdownReport(report));

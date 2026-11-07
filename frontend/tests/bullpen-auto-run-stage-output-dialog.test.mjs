@@ -1,4 +1,3 @@
-import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -310,7 +309,13 @@ test("Bullpen LLM breakdown dialog layers above the stage output dialog", () => 
 });
 
 test("Bullpen auto-run Stage 2 LLM details keep the selected history run instead of switching to the live run", () => {
-  const source = readBullpenScheduleSource();
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
   assert.match(source, /function resolveStageTwoLlmRunDialogState/);
   assert.match(source, /const selectedRunId = currentState\.run\?\.id \?\? fallbackRun\?\.id \?\? null/);

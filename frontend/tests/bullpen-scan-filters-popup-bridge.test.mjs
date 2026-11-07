@@ -1,4 +1,3 @@
-import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -21,7 +20,13 @@ const settingsSource = readFileSync(
   new URL("../lib/bullpenStageOneSettings.ts", import.meta.url),
   "utf8",
 );
-const scheduleCardSource = readBullpenScheduleSource();
+const scheduleCardSource = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan controls are not rendered", () => {
   assert.match(

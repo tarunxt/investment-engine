@@ -69,9 +69,8 @@ export function brokerDisplayAllocation(weight: number | undefined, assets: numb
   if (!Number.isFinite(unroundedAmount)) return null;
   const validPrice = ltp !== null && Number.isFinite(ltp) && ltp > 0;
   if (market === 'us') {
-    const amount = unroundedAmount;
-    const stocks = validPrice && Number.isFinite(amount / ltp!) ? amount / ltp! : null;
-    return { unroundedAmount, unroundedStocks: stocks, amount, stocks };
+    const amount = excelRound(unroundedAmount);
+    return { unroundedAmount, unroundedStocks: validPrice ? amount / ltp! : null, amount, stocks: validPrice ? amount / ltp! : null };
   }
   if (!validPrice) return { unroundedAmount, unroundedStocks: null, amount: null, stocks: null };
   const unroundedStocks = unroundedAmount / ltp!, stocks = excelRound(unroundedStocks);
@@ -208,27 +207,4 @@ export function allocationDisclosure(weights: Map<string, number>, amounts: (num
   const sumAmount = weight !== null && assets !== null && Number.isFinite(assets) && assets >= 0 && amounts.length === weights.size && amounts.every(value => value !== null && Number.isFinite(value)) ? amounts.reduce<number>((sum, value) => sum + value!, 0) : null;
   const roundedAmount = sumAmount !== null && Number.isFinite(sumAmount) ? sumAmount : null;
   return { weight, residualWeight: weight === null ? null : 1 - weight, roundedAmount, roundedResidual: roundedAmount === null || assets === null ? null : assets - roundedAmount };
-}
-
-/** USD calculations preserve fractional shares and full intermediate precision. */
-export function indmoneyActionSizing(targetWeight: number | null, totalAssets: number | null, invested: number | null, vendorLtp: number | null) {
-  const valid = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-  const targetAmount = valid(targetWeight) && targetWeight >= 0 && targetWeight <= 1 && valid(totalAssets) && totalAssets >= 0 && valid(targetWeight * totalAssets) ? targetWeight * totalAssets : null;
-  const price = valid(vendorLtp) && vendorLtp > 0 ? vendorLtp : null;
-  const amount = targetAmount !== null && valid(invested) && invested >= 0 && valid(targetAmount - invested) ? targetAmount - invested : null;
-  const stocks = amount !== null && price !== null && valid(amount / price) ? amount / price : null;
-  return { targetAmount, targetStocks: targetAmount !== null && price !== null && valid(targetAmount / price) ? targetAmount / price : null, amount, stocks, price };
-}
-
-/** A pasted holding has no venue. Attach it only to a unique explicit US listing in the basket. */
-export function indmoneyHolding(snapshot: { parse_status: string; captured_at: string; holdings_count: number; reported_holdings_count: number | null; holdings: { symbol: string; current_value: number | null; invested_value: number | null; quantity: number | null }[] } | null, symbol: string, exchange: string, universe: { symbol: string; exchange: string }[]) {
-  if (!snapshot || snapshot.parse_status !== 'parsed' || !Number.isFinite(Date.parse(snapshot.captured_at)) || snapshot.holdings_count !== snapshot.holdings.length || snapshot.reported_holdings_count !== null && snapshot.reported_holdings_count !== snapshot.holdings.length) return null;
-  const key = symbol.trim().toUpperCase(), venue = exchange.trim().toUpperCase();
-  const venues = new Set(universe.filter(row => row.symbol.trim().toUpperCase() === key).map(row => row.exchange.trim().toUpperCase()));
-  if (!['NASDAQ', 'NYSE', 'NYSEARCA', 'NYSEAMERICAN'].includes(venue) || venues.size !== 1 || !venues.has(venue)) return null;
-  const matches = snapshot.holdings.filter(row => row.symbol.trim().toUpperCase() === key);
-  if (matches.length > 1) return null;
-  const holding = matches[0];
-  const value = (input: number | null | undefined) => typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : null;
-  return holding ? { currentValue: value(holding.current_value), investedValue: value(holding.invested_value), quantity: value(holding.quantity) } : { currentValue: 0, investedValue: 0, quantity: 0 };
 }

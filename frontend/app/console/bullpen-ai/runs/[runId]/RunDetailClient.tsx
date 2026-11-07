@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 
-import { BullpenRunDetailScreen } from "../../_components/BullpenScheduleDetails";
+import { BullpenRunDetailScreen } from "../../_components/BullpenAutoRunScheduleCard";
 import type { BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
 
 export function RunDetailClient({

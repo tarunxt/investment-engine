@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { Check, Info, Loader2, Trophy, X } from "lucide-react";
 
 import {
@@ -67,6 +68,7 @@ export function BullpenScanFiltersPopupBridge({
     workspaceProfile === "bullpen007" ? undefined : workspaceProfile;
   const [isOpen, setIsOpen] = useState(false);
   const [detailId, setDetailId] = useState<BullpenScanFilterDetailId | null>(null);
+  const reviewDialog = useReviewDialog<HTMLDivElement>(isOpen, () => setIsOpen(false));
   const [oddsFloor, setOddsFloor] = useState(1);
   const [savedOddsFloor, setSavedOddsFloor] = useState(1);
   const [highestOddsFloor, setHighestOddsFloor] = useState(90);
@@ -162,17 +164,7 @@ export function BullpenScanFiltersPopupBridge({
       void loadOddsFloor();
     }
 
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") return;
-      if (detailId) {
-        setDetailId(null);
-        return;
-      }
-      setIsOpen(false);
-    }
-
     document.addEventListener("click", handleClick, true);
-    document.addEventListener("keydown", handleKeyDown);
     const handleReapplyFinished = (event: Event) => {
       const detail = (event as CustomEvent<{ success: boolean; message?: string }>).detail;
       setIsReapplying(false);
@@ -190,7 +182,6 @@ export function BullpenScanFiltersPopupBridge({
     );
     return () => {
       document.removeEventListener("click", handleClick, true);
-      document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener(
         eventNames.reapplyFinished,
         handleReapplyFinished,
@@ -431,6 +422,8 @@ export function BullpenScanFiltersPopupBridge({
         }}
       >
         <div
+          {...reviewDialog}
+          inert={detailId ? true : undefined}
           role="dialog"
           aria-modal="true"
           aria-labelledby="bullpen-stage-one-scan-filters-title"

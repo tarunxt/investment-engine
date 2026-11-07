@@ -34,7 +34,7 @@ test("stock flow and basket preview share score inputs and persisted thresholds"
   assert.match(stockFlowSource, /fetchRebalanceStockFlowSource\(portfolioId\)/);
   assert.match(workflowSource, /fetchRebalanceStockFlowSource\("zerodha"\)/);
   assert.match(workflowSource, /fetchRebalanceStockFlowSource\("indmoneyUs"\)/);
-  assert.match(stockFlowSource, /buildConsensusRows\(matchingRebalanceRuns, portfolio\.market, portfolioSnapshot, runs, sourceInfo\?\.verifiedUsListings \?\? \[\]\)/);
+  assert.match(stockFlowSource, /buildConsensusRows\(matchingRebalanceRuns, portfolio\.market, portfolioSnapshot, runs\)/);
   assert.match(configurationSource, /apiService\.getProfile\(\)/);
   assert.match(configurationSource, /zerodha_buy_threshold/);
   assert.match(configurationSource, /indmoney_buy_threshold/);

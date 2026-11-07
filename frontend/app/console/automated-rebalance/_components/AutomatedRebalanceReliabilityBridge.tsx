@@ -12,6 +12,7 @@ import {
 import { Loader2, X } from "lucide-react";
 
 import { useReviewDialog } from "@/hooks/useReviewDialog";
+import { describeWorkflowJobs, selectWorkflowStageJobs, describeRecentJobs, describeSavedThreat, savedStageLabel, unknownJobAttribution, type SavedJobAttribution } from "@/lib/workflowLlmDetailScope";
 import { normalizeError } from "@/app/console/dashboard/_components/dashboardOverviewUtils";
 import { apiService } from "@/services/api";
 import type { ApiRequestControl } from "@/services/api.types";
@@ -30,11 +31,13 @@ type LlmMetricContext = {
   portfolio: AutoRebalancePortfolioKey;
   stage: LlmStage;
   expectedTotal: number | null;
+  openerSummary?: string | null;
 };
 type StageJobRow = {
   job: AutoRebalanceJobDetailResponse;
   displayModel: string;
   runtime: string;
+  attribution: SavedJobAttribution;
 };
 type CachedRun = {
   expiresAt: number;
@@ -43,6 +46,9 @@ type CachedRun = {
 type LoadedStageJobs = {
   label: string;
   jobs: AutoRebalanceJobDetailResponse[];
+  scope: string;
+  attribution: Record<number, SavedJobAttribution>;
+  warning?: string | null;
 };
 
 const BACKEND_RUN_PAGE_LIMIT = 100;
@@ -412,7 +418,7 @@ function inferMetricContext(
   const explicitPortfolio = metricElement.dataset.workflowPortfolio;
   if (["threats", "swing", "rebalance", "technical"].includes(explicitStage ?? "") && ["india", "indmoney_us"].includes(explicitPortfolio ?? "")) {
     const total = Number(metricElement.dataset.workflowTotal);
-    return { stage: explicitStage as LlmStage, portfolio: explicitPortfolio as AutoRebalancePortfolioKey, expectedTotal: Number.isSafeInteger(total) && total > 0 ? total : null };
+    return { stage: explicitStage as LlmStage, portfolio: explicitPortfolio as AutoRebalancePortfolioKey, expectedTotal: Number.isSafeInteger(total) && total > 0 ? total : null, openerSummary: compactText(metricElement.textContent) };
   }
   const metricText = compactText(metricElement.textContent);
   const countMatch = metricText.match(/LLMs completed\s*:\s*\d+\s*\/\s*(\d+)/i);
@@ -438,6 +444,7 @@ function inferMetricContext(
     portfolio,
     stage,
     expectedTotal: countMatch ? Number(countMatch[1]) : null,
+    openerSummary: metricText,
   };
 }
 
@@ -466,33 +473,7 @@ function collectStageJobs(
   detail: AutoRebalanceHistoryDetailResponse,
   stage: LlmStage,
 ) {
-  const stageSummary = detail.stages.find((item) => item.stage === stage);
-  const explicitRunId = stageSummary?.run_id ?? null;
-  const explicitJobId = stageSummary?.job_id ?? null;
-  const candidates = [
-    ...detail.runs.flatMap((run) =>
-      run.jobs.map((job) => ({
-        runId: run.id,
-        job,
-        prompt: `${run.prompt}\n${job.prompt}`,
-      })),
-    ),
-    ...detail.standalone_jobs.map((job) => ({
-      runId: null,
-      job,
-      prompt: job.prompt,
-    })),
-  ];
-
-  const matching = candidates.filter(
-    ({ runId, job, prompt }) =>
-      (explicitRunId !== null && runId === explicitRunId) ||
-      (explicitJobId !== null && job.id === explicitJobId) ||
-      inferStageFromPrompt(prompt) === stage,
-  );
-  const unique = new Map<number, AutoRebalanceJobDetailResponse>();
-  for (const { job } of matching) unique.set(job.id, job);
-  return [...unique.values()].sort((left, right) => left.id - right.id);
+  return selectWorkflowStageJobs(detail, stage);
 }
 
 function toStageJob(job: JobResponse): AutoRebalanceJobDetailResponse {
@@ -576,6 +557,8 @@ async function loadThreatFallback(
   if (!analysis) return null;
   return {
     label: `Latest saved ${stageLabel(context.stage)}`,
+    scope: "Latest saved Threats analysis; association with the opener's workflow is unknown.",
+    attribution: describeSavedThreat(analysis.job_id),
     jobs: [
       {
         id: analysis.job_id,
@@ -608,6 +591,8 @@ async function loadRecentRunFallback(
   return {
     label: `Recent saved ${stageLabel(context.stage)}`,
     jobs,
+    scope: "Recent saved run selection; it is not guaranteed to be the opener's current run or a stage-only list.",
+    attribution: describeRecentJobs(page.items, jobs),
   };
 }
 
@@ -652,8 +637,8 @@ async function loadSavedStageJobs(
           selected.sequence,
         ),
       );
-      const jobs = collectStageJobs(detail, context.stage);
-      if (jobs.length) return { label: detail.label, jobs };
+      const selectedStage = collectStageJobs(detail, context.stage);
+      return { label: detail.label, jobs: selectedStage.jobs, scope: `Saved ${stageLabel(context.stage)} records selected by workflow stage run/job links (sequence ${Number.isSafeInteger(detail.sequence) ? detail.sequence : "Unknown"}).`, attribution: describeWorkflowJobs(detail, selectedStage.jobs), warning: selectedStage.warning };
     }
   } catch (error) {
     // Missing workflow schema is unavailability, not absence of saved jobs.
@@ -778,10 +763,15 @@ function LlmDetailsDialog({
   const [runLabel, setRunLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scope, setScope] = useState<string | null>(null);
+  const [scopeWarning, setScopeWarning] = useState<string | null>(null);
+  const [requestFor, setRequestFor] = useState(context);
+  const [loadedFor, setLoadedFor] = useState<LlmMetricContext | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      setRequestFor(context);
       setLoading(true);
       setError(null);
       try {
@@ -791,10 +781,14 @@ function LlmDetailsDialog({
           job,
           displayModel: displayModels[index] ?? job.model ?? "Unknown",
           runtime: getJobRuntime(job),
+          attribution: loaded.attribution[job.id] ?? unknownJobAttribution(),
         }));
         if (!cancelled) {
           setRunLabel(loaded.label);
           setRows(jobs);
+          setScope(loaded.scope);
+          setScopeWarning(loaded.warning ?? null);
+          setLoadedFor(context);
         }
       } catch (reason) {
         if (!cancelled) setError(normalizeError(reason));
@@ -809,6 +803,9 @@ function LlmDetailsDialog({
   }, [context]);
 
   const reviewDialog = useReviewDialog<HTMLElement>(true, onClose);
+  const currentLoading = loading || requestFor !== context;
+  const currentError = requestFor === context ? error : null;
+  const verifiedView = !currentLoading && !currentError && loadedFor === context;
 
   const passed = rows.filter(({ job }) =>
     ["completed", "success", "passed", "partial"].includes(
@@ -830,18 +827,18 @@ function LlmDetailsDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`${stageLabel(context.stage)} LLM details`}
-        className="max-h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-600">
-              {stageLabel(context.stage)} · LLM details
+              Opened from {stageLabel(context.stage)} · saved records
             </p>
             <h2 className="mt-1 text-xl font-bold text-slate-950">
-              {runLabel || "Loading saved run…"}
+              {currentLoading ? "Loading saved source…" : currentError ? "Saved source unavailable" : `Saved source: ${runLabel || "Unknown"}`}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              {rows.length} LLMs returned · {passed} passed · {failed} failed
+              {verifiedView ? `${rows.length} saved job record${rows.length === 1 ? "" : "s"} returned · ${passed} complete/partial statuses · ${failed} failed` : "Current saved-record totals are not yet verified."}
             </p>
           </div>
           <button
@@ -854,28 +851,37 @@ function LlmDetailsDialog({
           </button>
         </header>
 
-        <div className="max-h-[calc(88vh-105px)] overflow-auto p-5">
-          {loading ? (
+        <div className="min-h-0 flex-1 overflow-auto p-5">
+          <div className="mb-4 space-y-2 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
+            <p>Opener stage summary: {context.openerSummary || "Unknown"}</p>
+            <p>{verifiedView ? scope : currentLoading ? "Reading saved sources; the opener's stage count does not establish this detail's record count." : "Saved source unavailable; current per-record attribution is not verified."}</p>
+            <p>Totals describe the displayed saved job records, not the stage&apos;s Passed count. Complete/partial includes saved completed, success, passed and partial statuses. Stage and run labels show the saved links used for this selection; missing or conflicting attribution stays Unknown.</p>
+          </div>
+          {verifiedView && scopeWarning ? <p role="status" className="mb-3 text-sm text-amber-800">{scopeWarning}</p> : null}
+          {!verifiedView && rows.length > 0 ? <p role="status" className="mb-3 text-sm text-amber-800">The previous saved source is not verified for this request and may be out of date.</p> : null}
+          {currentLoading ? (
             <div className="flex min-h-52 items-center justify-center gap-2 text-sm text-slate-600">
               <Loader2 className="size-4 animate-spin" /> Loading LLM details…
             </div>
           ) : null}
-          {error ? (
+          {currentError ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-              {error}
+              {currentError}
             </div>
           ) : null}
-          {!loading && !error && rows.length === 0 ? (
+          {verifiedView && rows.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-600">
-              This stage has no saved model-level rows yet.
+              This saved-source lookup returned no model-level records.
             </div>
           ) : null}
-          {!loading && !error && rows.length > 0 ? (
+          {verifiedView && rows.length > 0 ? (
             <div className="overflow-hidden rounded-xl border border-slate-200">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-left text-sm">
+                <table className="w-full min-w-[1000px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs font-bold uppercase tracking-[0.12em] text-slate-600">
                     <tr>
+                      <th className="px-4 py-3">Stage attribution</th>
+                      <th className="px-4 py-3">Run / Job</th>
                       <th className="px-4 py-3">Provider</th>
                       <th className="px-4 py-3">Model</th>
                       <th className="px-4 py-3">Status</th>
@@ -884,8 +890,18 @@ function LlmDetailsDialog({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white">
-                    {rows.map(({ job, displayModel, runtime }) => (
+                    {rows.map(({ job, displayModel, runtime, attribution }) => (
                       <tr key={job.id} className="align-top">
+                        <td className="max-w-xs px-4 py-3 text-slate-700">
+                          <p>{attribution.stage ? savedStageLabel(attribution.stage) : "Unknown"}</p>
+                          <p className="mt-1 text-xs">{attribution.evidence === "job-link" ? "Saved job-stage link" : attribution.evidence === "run-link" ? "Saved run-stage link" : attribution.evidence === "analysis-endpoint" ? "Saved analysis endpoint" : attribution.jobStageLinks.length ? `Saved job links: ${attribution.jobStageLinks.map(savedStageLabel).join(", ")} (attribution unresolved)` : "No saved job-stage link"}</p>
+                          {attribution.runStageLinks.length ? <p className="mt-1 text-xs">Run linked to: {attribution.runStageLinks.map(savedStageLabel).join(", ")} (saved run-stage link)</p> : null}
+                        </td>
+                        <td className="max-w-xs px-4 py-3 text-slate-700">
+                          <p>{attribution.runIds.length ? attribution.runIds.map(id => `Run #${id}`).join(", ") : attribution.standalone ? "Run: Unknown (standalone saved job)" : "Run: Unknown"}</p>
+                          <p>Job #{job.id}</p>
+                          <p className="mt-1 break-all text-xs">Job updated: {job.updated_at || "Unknown"}</p>
+                        </td>
                         <td className="px-4 py-3 font-semibold text-slate-900">
                           {job.provider || "Unknown"}
                         </td>

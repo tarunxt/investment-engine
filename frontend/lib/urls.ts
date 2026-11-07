@@ -481,11 +481,15 @@ export const URLs = {
 
   // INDmoney US endpoints
   indmoneyUs: {
+    displayListings: () => `${resolveApiBaseUrl()}/indmoney-us/prices/listings`,
+    displayQuotes: (instruments: string[]) => {
+      const query = new URLSearchParams();
+      instruments.forEach((instrument) => query.append('instruments', instrument));
+      return `${resolveApiBaseUrl()}/indmoney-us/prices/display?${query.toString()}`;
+    },
     portfolio: () => `${resolveApiBaseUrl()}/indmoney-us/portfolio`,
     portfolioSnapshot: (snapshotId: number) => `${resolveApiBaseUrl()}/indmoney-us/portfolio/${snapshotId}`,
     currentPrices: () => `${resolveApiBaseUrl()}/indmoney-us/prices/current`,
-    displayQuotes: () => `${resolveApiBaseUrl()}/indmoney-us/prices/display`,
-    displayListings: () => `${resolveApiBaseUrl()}/indmoney-us/prices/listings`,
     eventsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/events/history`,
     eventJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/events/${jobId}`,

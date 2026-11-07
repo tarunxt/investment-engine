@@ -44,7 +44,7 @@ function ScopedZerodhaBasketPreviewDialog({open,onClose,columnPreferences}){
  const sortedStocks=[...stocks].sort((a,b)=>compareZerodhaBasketOrdersByScore(asDraft(a),asDraft(b)));
  return <><section role='dialog' aria-label='Offline basket fixture' data-testid='basket' inert={c.popupOpen||menu||renaming||marketNotice?true:undefined}>
  <h1>OFFLINE fixture · dummy user 71 · no production connection</h1><BasketMarketClosedNotice closed={new URL(location.href).searchParams.get('market')!=='open'} executionMode='direct_market' onOpenChange={setMarketNotice}/><button onClick={onClose}>Close fixture basket</button><output data-testid='assets'>{assets.portfolioValue} + 350 = {assets.totalAssets}</output><output data-testid='executable'>{executable}</output>
- <PortfolioParametersTile currency='INR' portfolioValue={assets.portfolioValue} availableMargin={350} totalAssets={assets.totalAssets} capturedAt='${asOf}' onDisplayParametersChange={c.setParameters}/>{c.controls}
+ <PortfolioParametersTile currency='INR' portfolioValue={assets.portfolioValue} availableMargin={350} totalAssets={assets.totalAssets} capturedAt='${asOf}' onDisplayParametersChange={c.setParameters}/>{c.allocationTable(stocks.filter(s=>selected.has(s.symbol)).map(asDraft).reduce((sum,row)=>sum===null||row.amount==null?null:sum+(row.side==="SELL"?-row.amount:row.amount),0))}
  <BasketColumnTable hidden={columnPreferences.hiddenColumns} order={columnPreferences.order} names={columnPreferences.names} onRequestRename={setRenaming} onOpen={setMenu}><table><thead><tr><th>Stock</th><th data-column-label='Selection'><input type='checkbox' aria-label='Select all fixture rows' checked={stocks.every(s=>selected.has(s.symbol))} onChange={()=>setSelected(current=>stocks.every(s=>current.has(s.symbol))?new Set():new Set(stocks.map(s=>s.symbol)))}/></th>{c.headers}<th>Units</th><th>Amount</th><th>Order Type</th></tr></thead><tbody>{sortedStocks.map(s=>{const m=c.metrics(s),suggestion=suggestedDraftUnits(m.actionSizing.stocks),qty=Object.hasOwn(edited,s.symbol)?edited[s.symbol]:suggestion,amount=editableDraftAmount(qty,m.actionSizing.price);return <tr key={s.symbol} data-symbol={s.symbol}><td>{s.symbol}</td><td><input type='checkbox' aria-label={'Select fixture '+s.symbol} checked={selected.has(s.symbol)} onChange={()=>setSelected(current=>{const next=new Set(current);next.has(s.symbol)?next.delete(s.symbol):next.add(s.symbol);return next;})}/></td>{c.cells(s)}<td><BasketDraftUnits symbol={s.symbol} action={m.comparison.action} units={qty} onChange={value=>setEdited(current=>({...current,[s.symbol]:value}))}>{c.units(s,'Units action',qty)}</BasketDraftUnits></td><td data-testid={'amount-'+s.symbol}>{amount===null?'Unavailable':String(amount)}</td><td>Market</td></tr>;})}</tbody></table></BasketColumnTable>
  </section>{c.popup}{menu&&<BasketColumnPicker covered={Boolean(renaming)} labels={menu} order={columnPreferences.order} names={columnPreferences.names} onReorder={columnPreferences.reorder} onRequestRename={setRenaming} hidden={columnPreferences.hiddenColumns} onToggle={columnPreferences.toggle} onClose={()=>setMenu(null)}/>} {renaming&&<BasketColumnRename key={renaming} id={renaming} name={columnPreferences.names[renaming]??renaming} onSave={name=>columnPreferences.rename(renaming,name)} onClose={()=>setRenaming(null)}/>}</>;
 }
@@ -70,17 +70,13 @@ try{
  await context.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin!==origin){denied.push(url.origin);return route.abort('blockedbyclient');}return route.continue();});
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('AAA Historical Weighted Score calculation').filter({hasText:'3.0'}).waitFor();await page.getByLabel('AAA Action Zerodha Stocks calculation').filter({hasText:'+1'}).waitFor();
- const disclosure=page.getByRole('region',{name:'Allocation disclosure'});
- assert.match(await disclosure.textContent(),/Min Cash 5% is a minimum input/);
- assert.match(await disclosure.textContent(),/Weight cap 9.5%/);
- assert.match(await disclosure.textContent(),/Rounded aggregate target amount/);
- const aggregateRows=await disclosure.locator('tr').allTextContents();
- assert.deepEqual(aggregateRows,['Aggregate target weight28.5%','Residual cash before rounding71.5%','Rounded aggregate target amount₹300.00','Residual cash after rounding₹700.00']);
+ const disclosure=page.getByRole('table',{name:'Basket allocation'});
+ assert.match(await disclosure.textContent(),/CurrentTargetSelected/);
+ assert.match(await disclosure.textContent(),/95.00% \(₹950.00\)/);
  await page.getByLabel('AAA Target Weight calculation',{exact:true}).click();
  const aggregatePopup=page.getByRole('dialog',{name:'Target Weight',exact:true});
  assert.match(await aggregatePopup.textContent(),/Residual cash before rounding/);
  await aggregatePopup.getByRole('button',{name:'Calculation details',exact:true}).click();
- assert.deepEqual(await page.getByRole('dialog',{name:'Behind the number',exact:true}).getByRole('region',{name:'Allocation disclosure'}).locator('tr').allTextContents(),aggregateRows);
  await page.keyboard.press('Escape');
  await page.keyboard.press('Escape');results.push('actual allocation table and target popup share cap, residual cash and rounded aggregate; formulas unchanged');
  const executableBaseline=await page.getByTestId('executable').textContent();

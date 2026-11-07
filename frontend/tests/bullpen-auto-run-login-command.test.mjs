@@ -1,10 +1,15 @@
-import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
 test("Bullpen auto-run login command uses the canonical investor HOME", () => {
-  const source = readBullpenScheduleSource();
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
   assert.match(
     source,
@@ -14,7 +19,13 @@ test("Bullpen auto-run login command uses the canonical investor HOME", () => {
 });
 
 test("historical auth text alone cannot render Login Needed", () => {
-  const source = readBullpenScheduleSource();
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
   assert.match(
     source,

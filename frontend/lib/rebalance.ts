@@ -320,7 +320,7 @@ Inputs you will receive in this prompt:
 Capital / Portfolio Rules:
 - MANDATORY coverage: output exactly one decision row for EVERY stock currently present in the Latest Portfolio Snapshot, even if the decision is Hold. Never omit a current holding because it is weak, unchanged, small, low-conviction, or already discussed in threats.
 - Review existing holdings and decide whether each one is Hold, Buy/Add, Trim, or Sell All.
-- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate. For a US snapshot, the Market column identifies the country only. Carry the listing exchange from the selected Swing output for the same security and share class into Exchange Symbol. If no selected output identifies its venue, verify the listing before assigning one. Never output US as an exchange or emit a second row for a market alias. Keep conflicting concrete listings distinct.
+- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate.
 - Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot.
 - Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
 - Output one decision row for EVERY exact exchange/symbol identity in the union of current holdings and ALL supplied Swing tables, including candidates not selected for fresh buy. Never omit a candidate.
@@ -479,9 +479,9 @@ function formatPortfolioSnapshot(
       holding.total_pnl_percent,
       holding.portfolio_weight_percent,
     ]);
-    return `Snapshot date: ${usSnapshot.snapshot_date}; captured at: ${usSnapshot.captured_at}\n\n${asMarkdownTable(
+    return `Snapshot date: ${usSnapshot.snapshot_date}; captured at: ${usSnapshot.captured_at}\nThe US marker in this saved holdings table identifies the market only. In your output, carry forward the exact exchange from the selected Swing model rows for the same listing and share class. Verify an unknown venue before reporting it. Never duplicate a holding under the US market marker.\n\n${asMarkdownTable(
       [
-        "Market",
+        "Exchange",
         "Stock Symbol",
         "Company Name",
         "Current Units",

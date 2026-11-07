@@ -1,4 +1,3 @@
-import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -17,7 +16,13 @@ const screen = readFileSync(
   ),
   "utf8",
 );
-const mainScheduleCard = readBullpenScheduleSource();
+const mainScheduleCard = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("history renders the Bullpen portfolio before run history", () => {
   assert.ok(

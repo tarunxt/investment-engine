@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { Plus, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -64,14 +65,7 @@ export function BullpenScanFilterDetailsDialog({
   const [newKeyword, setNewKeyword] = useState("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  const reviewDialog = useReviewDialog<HTMLDivElement>(true, onClose);
 
   const hasUnsavedChanges = useMemo(
     () => draftKeywords.join(",") !== customKeywords.join(","),
@@ -107,6 +101,7 @@ export function BullpenScanFilterDetailsDialog({
       }}
     >
       <div
+        {...reviewDialog}
         role="dialog"
         aria-modal="true"
         aria-labelledby={`bullpen-scan-filter-${detailId}-title`}
