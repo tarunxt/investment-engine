@@ -92,7 +92,7 @@ class IndMoneyUsPortfolioService:
             "snapshot_date": captured.astimezone(IST).date(),
             "captured_at": captured,
             "source": source,
-            "raw_text": normalized_text,
+            "raw_text": raw_text,
             "parse_status": parse_status,
             "parse_warnings": warnings,
             "holdings_count": len(holdings),

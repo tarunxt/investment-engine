@@ -41,7 +41,7 @@ export function IndMoneyUsPasteCard({
     setSuccessMessage(null);
     try {
       await onSubmit({
-        raw_text: trimmed,
+        raw_text: rawText,
         captured_at: capturedAt ? new Date(capturedAt).toISOString() : null,
       });
 

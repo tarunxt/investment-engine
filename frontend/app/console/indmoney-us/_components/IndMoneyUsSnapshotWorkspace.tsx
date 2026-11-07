@@ -3,12 +3,13 @@
 import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { ClipboardPaste, Loader2, RefreshCw } from 'lucide-react';
+import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
+import navStyles from '../../zerodha/_components/IndiaPortfolioNav.module.css';
+import { LastPasteDialog } from './LastPasteDialog';
+import { Eye, Loader2, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { URLs } from '@/lib/urls';
 import { cn } from '@/lib/utils';
 import type {
   IndMoneyUsPortfolioOverviewResponse,
@@ -18,19 +19,9 @@ import type {
 import { IndMoneyUsPasteCard } from './IndMoneyUsPasteCard';
 import { IndMoneyUsSnapshotsPanel } from './IndMoneyUsSnapshotsPanel';
 
-const stages = [
-  { label: 'Portfolio', india: URLs.routes.console.zerodha(), us: URLs.routes.console.indmoneyUs() },
-  { label: 'Swing Trade', india: URLs.routes.console.zerodhaSwingTrade(), us: URLs.routes.console.indmoneyUsSwingTrade() },
-  { label: 'Threats', india: URLs.routes.console.zerodhaThreats(), us: URLs.routes.console.indmoneyUsThreats() },
-  { label: 'Events', india: URLs.routes.console.zerodhaEvents(), us: URLs.routes.console.indmoneyUsEvents() },
-  { label: 'Rebalance', india: URLs.routes.console.zerodhaRebalance(), us: URLs.routes.console.indmoneyUsRebalance() },
-  { label: 'Final Actionables', india: URLs.routes.console.zerodhaFinalActionables(), us: URLs.routes.console.indmoneyUsFinalActionables() },
-];
-
 const views = [
   { value: 'saved', label: 'Saved US snapshot' },
   { value: 'paste', label: 'Paste snapshot' },
-  { value: 'navigation', label: 'Market and stage navigation' },
 ];
 
 export function IndMoneyUsSnapshotWorkspace({
@@ -51,12 +42,15 @@ export function IndMoneyUsSnapshotWorkspace({
 }) {
   const [view, setView] = useState('saved');
 
+  const [showLastPaste, setShowLastPaste] = useState(false);
+
   return (
     <Tabs value={view} onValueChange={setView} className="mx-auto min-w-0 flex-col gap-3">
+      <nav aria-label="US portfolio stages"><PortfolioAnalysisNav portfolio="indmoneyUs" active="portfolio" className={navStyles.navigation} /></nav>
       <TabsList aria-label="US snapshot views" className="h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
         {views.map((item) => (
+          <div key={item.value} className="inline-flex items-stretch rounded-md bg-purple-50">
           <TabsTrigger
-            key={item.value}
             value={item.value}
             id={`us-snapshot-tab-${item.value}`}
             aria-controls={`us-snapshot-panel-${item.value}`}
@@ -64,8 +58,16 @@ export function IndMoneyUsSnapshotWorkspace({
           >
             {item.label}
           </TabsTrigger>
+          {item.value === 'paste' && (
+            <button type="button" aria-label="View last pasted snapshot" aria-haspopup="dialog" title="View last pasted snapshot"
+              onClick={() => setShowLastPaste(true)} className="rounded-r-md border-l border-purple-200 px-2 text-purple-800 hover:bg-purple-100 focus-visible:outline-2">
+              <Eye className="size-4" aria-hidden="true" />
+            </button>
+          )}
+          </div>
         ))}
       </TabsList>
+      {showLastPaste && <LastPasteDialog onClose={() => setShowLastPaste(false)} />}
 
       <div className="min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:p-5">
         <header className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -87,9 +89,6 @@ export function IndMoneyUsSnapshotWorkspace({
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button type="button" size="sm" onClick={() => setView('paste')} aria-controls="us-snapshot-panel-paste" className="bg-purple-700 text-white hover:bg-purple-800">
-              <ClipboardPaste className="mr-2 size-3.5" />Import snapshot
-            </Button>
             <Button type="button" variant="outline" size="sm" disabled={loading || selecting || saving} onClick={() => void onRefresh()} title="Reload saved records only; does not import a snapshot or sync broker prices.">
               <RefreshCw className={cn('mr-2 size-3.5', loading && 'animate-spin')} />Refresh displayed data
             </Button>
@@ -110,27 +109,7 @@ export function IndMoneyUsSnapshotWorkspace({
         <TabsContent value="paste" forceMount hidden={view !== 'paste'} id="us-snapshot-panel-paste" aria-labelledby="us-snapshot-tab-paste">
           <IndMoneyUsPasteCard saving={saving} error={saveError} onSubmit={onCreateSnapshot} />
         </TabsContent>
-        <TabsContent value="navigation" forceMount hidden={view !== 'navigation'} id="us-snapshot-panel-navigation" aria-labelledby="us-snapshot-tab-navigation">
-          <nav aria-label="Portfolio market and stage destinations" className="rounded-md border border-gray-200 bg-white">
-            <p className="border-b border-gray-200 px-4 py-3 text-sm text-gray-700">Current market: <strong>US</strong> · Current stage: <strong>Portfolio</strong></p>
-            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Stage and market links">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 text-gray-600"><tr><th scope="col" className="px-4 py-2 font-medium">Stage</th><th scope="col" className="px-4 py-2 font-medium">Markets</th></tr></thead>
-                <tbody className="divide-y divide-gray-100">
-                  {stages.map((stage) => (
-                    <tr key={stage.label}>
-                      <th scope="row" className="px-4 py-3 font-medium"><Link href={stage.us} className="rounded text-gray-800 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-purple-700">{stage.label}</Link></th>
-                      <td className="px-4 py-3"><div className="flex flex-wrap gap-3">
-                        <Link href={stage.india} aria-label={`${stage.label} — India`} className="rounded text-purple-800 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-purple-700">India</Link>
-                        <Link href={stage.us} aria-label={`${stage.label} — US`} aria-current={stage.label === 'Portfolio' ? 'page' : undefined} className="rounded text-purple-800 underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-purple-700">US</Link>
-                      </div></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </nav>
-        </TabsContent>
+
       </div>
     </Tabs>
   );

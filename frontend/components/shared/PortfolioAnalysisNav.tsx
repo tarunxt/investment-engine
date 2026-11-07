@@ -53,7 +53,7 @@ export function PortfolioAnalysisNav({
         Current market: <strong>{market}</strong>{currentFunction ? <> · Current function: <strong>{currentFunction}</strong></> : null}
       </p>
       <div role="group" aria-label="Portfolio market" className="mb-3 flex flex-wrap gap-2">
-        {(['zerodha', 'indmoneyUs'] as const).map((target) => (
+        {(active === 'portfolio' ? [portfolio] : (['zerodha', 'indmoneyUs'] as const)).map((target) => (
           <Button
             key={target}
             asChild
