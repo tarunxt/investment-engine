@@ -33,8 +33,8 @@ def sqlite_jsonb(_type, compiler, **kw):
 
 
 @pytest_asyncio.fixture
-async def database(tmp_path, monkeypatch):
-    monkeypatch.setenv("CREDX_RECOVERY_MODE", "0")
+async def database(tmp_path, monkeypatch, request):
+    monkeypatch.setenv("CREDX_RECOVERY_MODE", getattr(request, "param", "0"))
     monkeypatch.setattr("app.infrastructure.messaging.task_registry.register_job_task", AsyncMock())
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/synthetic.db", connect_args={"timeout": 10})
     async with engine.begin() as conn:
@@ -100,6 +100,7 @@ async def test_owner_query_filters_pagination_and_http(database, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("database", ["0", "1"], indirect=True)
 async def test_foreign_and_missing_websocket_never_subscribe(database, monkeypatch):
     from app.domains.jobs import ws_router
     async with database() as db:
@@ -113,6 +114,7 @@ async def test_foreign_and_missing_websocket_never_subscribe(database, monkeypat
         socket = SimpleNamespace(accept=AsyncMock(), close=AsyncMock(), send_json=AsyncMock())
         await ws_router.ws_job_detail(socket, id, "synthetic-token")
         socket.close.assert_awaited_once_with(code=1008, reason="Job unavailable")
+        socket.accept.assert_not_awaited()
         socket.send_json.assert_not_awaited()
         relay.assert_not_awaited()
     monkeypatch.setattr(ws_router, "user_id_from_ws_token", AsyncMock(return_value=None))
@@ -152,4 +154,5 @@ async def test_owner_query_rejects_missing_principal(database):
         repo = PostgresJobRepository(db)
         assert await repo.get_for_user(1, None) is None
         with pytest.raises(ForbiddenException): await repo.list_for_user(None, PagedQuery())
+
 
