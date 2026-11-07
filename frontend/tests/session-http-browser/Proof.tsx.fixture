@@ -1,0 +1,14 @@
+"use client";
+import { SessionProvider, useSession } from 'next-auth/react';
+import type { Session } from 'next-auth';
+import type { UserResponse } from '@/types/api';
+import { useState } from 'react';
+import { AuthProvider } from '@/providers/AuthProvider';
+import { useAuth } from '@/hooks/useAuth';
+import { apiService } from '@/services/api';
+function Probe() {
+ const auth=useAuth(),sdk=useSession();const [status,setStatus]=useState('idle');
+ async function read(){setStatus('pending');try{await apiService.get('/backend-api/__proof/private',{headers:{'x-proof-lane':new URLSearchParams(location.search).get('lane')||'a'}});setStatus('200');}catch(e){setStatus(String((e as {status?:number}).status||'error'));}}
+ return <main><output id="identity">{auth.user?.id||'anonymous'}</output><output id="state">{status}</output><output id="error">{auth.error||''}</output><button id="read" onClick={read}>Read</button><button id="logout" onClick={()=>auth.logout()}>Logout</button><button id="client-update" onClick={()=>sdk.update({accessToken:'fake',refreshToken:'fake',id:'43'})}>Update</button></main>;
+}
+export function Proof({initialSession}:{initialSession:Session|null}){return <SessionProvider session={initialSession}><AuthProvider initialUser={initialSession?.userData as unknown as UserResponse}><Probe/></AuthProvider></SessionProvider>;}

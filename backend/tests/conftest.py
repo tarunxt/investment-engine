@@ -6,6 +6,8 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://test:test@localhost:5432/testdb",
 )
+# Isolated synthetic signing key; never use a test fixture in a running service.
+os.environ.setdefault("JWT_SIGNING_KEY", bytes(range(32)).hex())
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("GEMINI_API_KEY", "test-gemini-key")

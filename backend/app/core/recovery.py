@@ -189,7 +189,8 @@ def recovery_http_allowed(method, path):
         ):
             return True
         return path in {
-            "/auth/login", "/auth/google", "/auth/refresh", "/auth/logout", "/auth/websocket-ticket",
+            "/auth/login", "/auth/google", "/auth/refresh", "/auth/refresh-intent",
+            "/auth/logout", "/auth/logout-refresh", "/auth/websocket-ticket",
             "/indmoney-us/portfolio", "/indmoney-us/prices/current",
             "/indmoney-us/events/run", "/indmoney-us/threats/run",
             "/zerodha/events/run", "/zerodha/threats/run", "/runs", "/jobs",

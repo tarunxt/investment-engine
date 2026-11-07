@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import ts from "typescript";
 
 const trendsTable = readFileSync(
   new URL(
@@ -18,7 +19,7 @@ const marketLinkRoute = readFileSync(
   "utf8",
 );
 
-test("Bullpen History event names use the canonical-link resolver", () => {
+test("Bullpen History event names use the canonical-link resolver", async () => {
   assert.match(
     trendsTable,
     /import \{ buildBullpenMarketUrl \} from "@\/lib\/bullpenMarketLinks"/,
@@ -28,10 +29,15 @@ test("Bullpen History event names use the canonical-link resolver", () => {
     /href=\{buildBullpenMarketUrl\(event\.market_id\)\}/,
   );
   assert.match(marketLinks, /BULLPEN_LINK_RESOLVER_PATH = "\/api\/bullpen-ai\/market-link"/);
-  assert.doesNotMatch(
-    marketLinks,
-    /BULLPEN_EVENT_BASE_URL[\s\S]*?\/predictions\/market/,
-  );
+  const executable = ts.transpileModule(marketLinks, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+  const links = await import(`data:text/javascript;base64,${Buffer.from(executable).toString("base64")}`);
+  assert.equal(links.buildBullpenMarketUrl(" market-1 "), "/api/bullpen-ai/market-link?marketId=market-1");
+  const canonical = new URL(links.buildBullpenCanonicalMarketUrl({ marketId: "market-1", eventSlug: "event one", marketSlug: "market one", outcome: "No" }));
+  assert.equal(canonical.pathname, "/predictions/polymarket/event/event%20one");
+  assert.equal(canonical.searchParams.get("marketSlug"), "market one");
+  assert.equal(canonical.searchParams.get("outcome"), "No");
+  assert.equal(canonical.searchParams.get("marketId"), "market-1");
+  assert.throws(() => links.buildBullpenMarketUrl(" "), /marketId is required/);
 });
 
 test("canonical Bullpen links use Polymarket event and market slugs", () => {

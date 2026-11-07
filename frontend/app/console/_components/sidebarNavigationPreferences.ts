@@ -107,7 +107,7 @@ export function readNavigationNameOverrides(storageKey: string): NavigationNameO
         const value = Object.fromEntries(
             Object.entries(parsed)
                 .filter((entry): entry is [string, string] => (
-                    typeof entry[1] === 'string' && entry[1].trim().length > 0
+                    entry[0] !== 'item:automated-rebalance' && typeof entry[1] === 'string' && entry[1].trim().length > 0
                 ))
                 .map(([key, name]) => [key, name.trim().slice(0, 48)]),
         );

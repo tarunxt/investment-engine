@@ -56,6 +56,14 @@ class User(Base, TimestampMixin):
         return f"<User {self.email}>"
 
 
+class AuthRefreshIntent(Base):
+    __tablename__ = "auth_refresh_intents"
+    token_digest = Column(String(64), primary_key=True)
+    family_id = Column(String(64), ForeignKey("auth_session_families.id", ondelete="CASCADE"), nullable=False, index=True)
+    nonce_digest = Column(String(64), nullable=False)
+    started = Column(Boolean, nullable=False, default=False)
+
+
 class UserProfile(Base, TimestampMixin):
     __tablename__ = "user_profiles"
 
@@ -88,6 +96,16 @@ class UserSession(Base):
     is_active = Column(Boolean, default=True, nullable=False)
 
     user = relationship("User", back_populates="sessions")
+
+
+class AuthSessionFamily(Base):
+    __tablename__ = "auth_session_families"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    refresh_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class APIKey(Base):
