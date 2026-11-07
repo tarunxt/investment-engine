@@ -142,7 +142,7 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
   const units = (stock: Stock, label = market === 'india' ? 'Action Zerodha Stocks' : 'Action IndMoney Stocks', draftUnits?: number | null) => {
     const suggested = market === "us" ? metrics(stock).indmoney.actionStocks : metrics(stock).actionSizing.stocks;
     const quantity = draftUnits !== undefined ? draftUnits : suggested;
-    return <button type="button" className={draftUnits !== undefined ? "min-w-10 px-2 py-2 text-inherit transition-colors hover:brightness-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded" : "whitespace-nowrap text-blue-700 transition-colors hover:text-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"} aria-label={`${stock.symbol} ${label} calculation`} onClick={() => setPopup({ stock, kind: market === "us" ? "Action IndMoney Stocks" : "Action Zerodha Stocks", request, ...(draftUnits !== undefined && draftUnits !== null ? { draftUnits } : {}) })}>{quantity === null ? "Unavailable" : `${draftUnits === undefined && quantity > 0 ? "+" : ""}${market === "us" ? quantity.toFixed(2) : number(quantity)}`}</button>;
+    return <button type="button" className={draftUnits !== undefined ? "min-w-10 px-2 py-2 text-inherit transition-colors hover:brightness-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded" : "whitespace-nowrap text-blue-700 transition-colors hover:text-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded"} aria-label={`${stock.symbol} ${label} calculation`} onClick={() => setPopup({ stock, kind: market === "us" ? (draftUnits !== undefined ? "Units" : "Action IndMoney Stocks") : "Action Zerodha Stocks", request, ...(draftUnits !== undefined && draftUnits !== null ? { draftUnits } : {}) })}>{quantity === null ? "Unavailable" : `${(draftUnits === undefined || market === "us") && quantity > 0 ? "+" : ""}${market === "us" ? quantity.toFixed(2) : number(quantity)}`}</button>;
   };
   const cells = (stock: Stock) => {
     const { mean, weight, pricing, target, comparison, shown, actionSizing } = metrics(stock);
@@ -187,7 +187,25 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
     const held = market === "india" && (popup.kind === "Target Zerodha Stocks" || popup.kind === "Target Zerodha Amount") ? sellHoldingDisplay(stock) : null;
     if (market === "us" && !history) {
       const us = metrics(stock).indmoney, evidence = stock.indmoneyDisplay;
-      popupContent = <CalculationPopup title={popup.kind} onClose={() => setPopup(null)}>
+      const shares = (v: number | null) => v == null ? "Unavailable" : v.toFixed(2);
+      const values: Record<string,string> = {
+        "Current Weight": percent(us.current), "Target Weight": percent(us.target), "Weight Difference": percent(us.difference),
+        "Action New": us.action ?? "Unavailable", "Action IndMoney Stocks": shares(us.actionStocks), "Action IndMoney Amount": currency(us.actionAmount),
+        "Target IndMoney Stocks": shares(us.targetStocks), "Target IndMoney Amount": currency(us.targetAmount), Units: shares(popup.draftUnits ?? us.actionStocks),
+      };
+      const targetMetric = popup.kind.startsWith("Target");
+      const quantity = popup.kind === "Units" ? popup.draftUnits ?? us.actionStocks : targetMetric ? us.targetStocks : us.actionStocks;
+      const amount = popup.kind === "Units" && quantity != null && us.price != null ? quantity * us.price : targetMetric ? us.targetAmount : us.actionAmount;
+      const weights = popup.kind.includes("Weight") || popup.kind === "Action New";
+      popupContent = <BasketMetricPopup title={popup.kind} eyebrow={`${stock.exchange}:${stock.symbol} / ${broker}`} onClose={() => setPopup(null)} summary={{
+        label: weights ? "Portfolio allocation" : targetMetric ? "Target allocation" : "Display action",
+        value: values[popup.kind] ?? "Unavailable",
+        subtitle: weights ? "Target weight minus current weight" : `${shares(quantity)} shares × ${currency(us.price)} ≈ ${currency(amount)}`,
+        metrics: weights ? [{label:"Current weight",value:percent(us.current)},{label:"Target weight",value:percent(us.target)},{label:"Difference",value:percent(us.difference)}]
+          : [{label:"Shares",value:shares(quantity)},{label:"Alpaca LTP",value:currency(us.price)},{label:"Action New",value:us.action ?? "Unavailable"}],
+        notice: us.missing || "Shares and USD amounts are rounded for display. Open calculation details for the inputs.",
+        warning: Boolean(us.missing),
+      }}>
         <div className="space-y-3 mt-4 text-sm">
           <p>{stock.exchange}:{stock.symbol} · IndMoney · USD · Portfolio snapshot {snapshot ?? "Unavailable"}</p>
           <p>Holding source: verified IndMoney snapshot. As of: {evidence?.sourceAsOf ?? "Unavailable"}. Current holding value: {currency(us.currentValue)}. Invested amount (cost, not market value): {currency(us.invested)}.</p>
@@ -204,11 +222,11 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
           <p>Action IndMoney Amount = Target IndMoney Amount − invested amount = {number(us.targetAmount)} − {number(us.invested)} = {number(us.actionAmount)} USD.</p>
           <p>Action IndMoney Stocks = Action IndMoney Amount / Alpaca LTP = {number(us.actionAmount)} / {number(us.price)} = {us.actionStocks?.toFixed(2) ?? "Unavailable"}.</p>
           <p>{loading ? "Loading saved history…" : error ?? us.missing}</p>
-          <p>Amounts and fractional shares retain full precision internally. Currency is rounded for display; share display uses up to 12 decimal places. Missing inputs remain unavailable, not zero. Zero holdings require an explicitly verified complete snapshot and instrument join.</p>
+          <p>Amounts and fractional shares retain full precision internally. Currency is rounded for display; shares are displayed to two decimal places. Missing inputs remain unavailable, not zero. Zero holdings require an explicitly verified complete snapshot and instrument join.</p>
 
           <p className="font-semibold">Display estimates only. Original saved snapshot, order units, order amount and readiness are unchanged. These estimates do not assert executable fractional shares.</p>
         </div>
-      </CalculationPopup>;
+      </BasketMetricPopup>;
     } else     if (market === "india" && (popup.kind === "Action Zerodha Stocks" || popup.kind === "Action Zerodha Amount")) {
       const comparison = weightComparison(stock.currentValue, totalAssets, weight);
       const priceEvidence = stock.upstoxSource?.startsWith("Upstox ") && Number.isFinite(Date.parse(stock.upstoxAsOf ?? ""));

@@ -67,3 +67,13 @@ test('finite negative wallet margin reduces assets without changing saved inputs
   assert.equal(calc(0.2, 1000, -1000, input).targetAmount, 0);
   assert.equal(calc(0.2, 1000, -1001, input).targetAmount, null);
 });
+
+test('US regular session reflects DST, holidays and shortened trading days', async () => {
+  const {usCoreSessionClosed} = await import('../lib/indmoneyBasketDisplay.ts');
+  for (const [timestamp,closed] of [
+    ['2026-11-07T16:00:00Z',true], ['2026-11-09T14:29:00Z',true],
+    ['2026-11-09T14:30:00Z',false], ['2026-11-09T21:00:00Z',true],
+    ['2026-07-06T13:30:00Z',false], ['2026-11-26T16:00:00Z',true],
+    ['2026-11-27T17:59:00Z',false], ['2026-11-27T18:00:00Z',true],
+  ]) assert.equal(usCoreSessionClosed(new Date(timestamp)),closed,timestamp);
+});

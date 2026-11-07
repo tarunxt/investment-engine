@@ -9,8 +9,8 @@ export function basketClosedMarketMessage(mode: "direct_market" | "publisher_lim
 }
 
 /** Status explanation only: never changes mode, refreshes quotes or submits orders. */
-export function BasketMarketClosedNotice({ closed, executionMode, onOpenChange }: {
-  closed: boolean; executionMode: "direct_market" | "publisher_limit"; onOpenChange?: (open: boolean) => void;
+export function BasketMarketClosedNotice({ closed, executionMode, market = "india", onOpenChange }: {
+  closed: boolean; market?: "india" | "us"; executionMode: "direct_market" | "publisher_limit"; onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -30,9 +30,9 @@ export function BasketMarketClosedNotice({ closed, executionMode, onOpenChange }
     <button ref={trigger} type="button" aria-haspopup="dialog" aria-expanded={visible}
       className="rounded-full border border-amber-300 bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900 transition hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-500"
       onClick={() => { setOpen(true); onOpenChange?.(true); }}>Markets closed</button>
-    {visible && <BasketModalLayer title="Markets closed" eyebrow="Zerodha Basket" onClose={close}
+    {visible && <BasketModalLayer title="Markets closed" eyebrow={market === "us" ? "IndMoney Basket" : "Zerodha Basket"} onClose={close}
       footer={<button type="button" className="rounded-full bg-emerald-100 px-5 py-2 font-semibold text-emerald-950" onClick={close}>Done</button>}>
-      <p>{basketClosedMarketMessage(executionMode)}</p>
+      <p>{market === "us" ? "The regular US equity session is closed. Standard trading hours are 9:30 am to 4:00 pm New York time on trading days." : basketClosedMarketMessage(executionMode)}</p>
     </BasketModalLayer>}
   </>;
 }
