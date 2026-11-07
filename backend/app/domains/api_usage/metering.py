@@ -195,7 +195,8 @@ class ApiAttempt:
     def __init__(self, *, provider: str, model: str | None, request: object,
                  phase: str = "request", tariff_rates: dict | None = None,
                  instrumentation_scope: str = "sdk_call_hidden_retries_unknown",
-                 retry: bool = False, parent_attempt_id: str | None = None):
+                 retry: bool = False, parent_attempt_id: str | None = None,
+                 admission_request: object = None):
         self.context = get_provider_usage_context()
         context = self.context
         attempt_id = str(uuid4())
@@ -232,7 +233,10 @@ class ApiAttempt:
         self._usage_sources: set[str] = set()
         self._malformed_usage_fields: set[str] = set()
         self._conflicting_usage_fields: set[str] = set()
-        self._spend_request = request
+        # A telemetry-only hash projection must not replace the actual request
+        # inspected by the mandatory spending admission boundary.
+        self._spend_request = request if admission_request is None else admission_request
+        self._spend_model = model
         self._spend_admission = None
 
     def __enter__(self):
@@ -240,7 +244,8 @@ class ApiAttempt:
         # separate fail-closed policy and must not be swallowed by telemetry.
         from app.domains.rebalance_budget.runtime import before_call
         self._spend_admission = before_call(provider=self.values["actual_provider"],
-            model=self.values["requested_model"], request=self._spend_request)
+            model=self._spend_model, request=self._spend_request,
+            usage_context=self.context)
         if self.context:
             self.context.last_attempt["attempt_id"] = self.values["attempt_id"]
         self._update_coverage()
@@ -414,8 +419,10 @@ def metered_call(call: Callable, *args, provider: str, meter_model: str | None,
     """Pass upstream kwargs through unchanged; metering never controls retries."""
     with ApiAttempt(provider=provider, model=meter_model,
                     request={"args": args, "kwargs": kwargs} if request_hash_input is None else request_hash_input,
+                    admission_request={"args": args, "kwargs": kwargs},
                     phase=phase, tariff_rates=tariff_rates,
                     instrumentation_scope=instrumentation_scope) as attempt:
         response = call(*args, **kwargs)
         attempt.observe(response)
         return response
+

@@ -118,6 +118,24 @@ def bind_scope(db, *, user_id, portfolio, sequence):
     return scope
 
 
+def require_reconciled_job(db, *, scope, job_id):
+    """Called under bind_scope's lock before a worker execution is installed.
+
+    Queue redelivery/retry cannot treat a committed start without settlement as
+    permission for fresh paid I/O. Live fanout within an execution is unchanged.
+    """
+    unresolved = db.scalar(select(RebalanceSpendAttempt.id).where(
+        RebalanceSpendAttempt.scope_id == scope.id,
+        RebalanceSpendAttempt.job_id == job_id,
+        RebalanceSpendAttempt.status.in_(("reserved", "uncertain")),
+    ).limit(1))
+    if unresolved is not None:
+        if scope.status not in {"bound_breach", "settlement_conflict"}:
+            scope.status = "uncertain"
+        db.commit()
+        raise SpendCapBlocked("Prior job dispatch is unresolved; reservation retained and scope suspended")
+
+
 def reserve(db, *, scope_id, user_id, job_id, attempt_key, provider, model,
             upper_inr, tariff_version, fx_version):
     upper = money(upper_inr, positive=True)
@@ -243,3 +261,4 @@ def record_confirmed_refund(db, *, scope_id, attempt_id, user_id, evidence):
     db.flush()
     db.commit()
     return row.id
+

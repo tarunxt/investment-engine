@@ -185,9 +185,10 @@ def test_ambiguous_mocked_call_blocks_redelivery_and_continuation(cap_db, monkey
         runtime.reset_job(token)
     for next_job, retry in [(job(), 0), (job(), 1), (job(sequence=2, job_id=2), 0)]:
         bind(f, sequence=next_job.auto_rebalance_sequence)
-        token = runtime.configure_job(next_job, retry)
+        token = None
         try:
             with pytest.raises(ledger.SpendCapBlocked):
+                token = runtime.configure_job(next_job, retry)
                 metered_call(lambda: calls.append(1), provider="synthetic", meter_model="fixture")
         finally:
             runtime.reset_job(token)
@@ -516,3 +517,4 @@ def test_stale_revision_rejected_but_original_uuid_replay_recovers(cap_db):
     with f() as db, pytest.raises(ledger.SpendCapBlocked, match="another tab"):
         ledger.authorize_workflow(db, user_id=1, portfolio="india", sequence=72,
             request_key=str(uuid4()), intent="new_workflow", observed_revision=0)
+

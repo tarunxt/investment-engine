@@ -108,9 +108,17 @@ def validate_provider_input(args, kwargs):
                 raise ResourceBlocked("Cyclic provider input is not authorized")
             active.add(id(value))
             stack.append((value, True))
-            children = value.values() if isinstance(value, dict) else value
+            # JSON keys (including schema properties and tool names) are also
+            # transmitted input. Do not let an oversized key evade the bound.
+            if isinstance(value, dict):
+                if any(not isinstance(key, str) for key in value):
+                    raise ResourceBlocked("Provider input object keys must be strings")
+                children = (*value.keys(), *value.values())
+            else:
+                children = value
             stack.extend((child, False) for child in children)
         elif value is not None and not isinstance(value, (int, float, bool)):
             raise ResourceBlocked("Structured provider input bound is uncertified")
         if chars > MAX_PROMPT_CHARS or size > MAX_PROMPT_BYTES:
             raise ResourceBlocked("Expanded provider input exceeds the approved character/UTF-8 envelope")
+

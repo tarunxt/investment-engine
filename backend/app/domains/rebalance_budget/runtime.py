@@ -3,7 +3,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from . import policy
-from .ledger import SpendCapBlocked, bind_scope, reserve, settle
+from .ledger import SpendCapBlocked, bind_scope, require_reconciled_job, reserve, settle
 
 
 def sessions():
@@ -37,6 +37,7 @@ def configure_job(job, retry):
         raise SpendCapBlocked("Automated rebalance dispatch identity is unavailable")
     with sessions() as db:
         scope = bind_scope(db, user_id=user_id, portfolio=portfolio, sequence=sequence)
+        require_reconciled_job(db, scope=scope, job_id=job_id)
         scope_id = scope.id
         db.commit()
     return _context.set(SpendContext(scope_id, user_id, job_id, retry))
@@ -54,10 +55,20 @@ class Admission:
     bound: policy.RequestBound
 
 
-def before_call(*, provider, model, request):
+def before_call(*, provider, model, request, usage_context=None):
     context = _context.get()
     if context is None:
+        # A persisted automated-workflow identity must never become uncapped
+        # merely because a thread/task boundary lost its spend ContextVar.
+        # Ordinary untagged analysis retains its existing policy.
+        if getattr(usage_context, "workflow_id", None) is not None:
+            raise SpendCapBlocked("Workflow spending context is missing; no paid request was dispatched")
         return None
+    if usage_context is not None and (
+            getattr(usage_context, "job_id", None) != context.job_id
+            or getattr(usage_context, "user_id", None) != context.user_id
+            or getattr(usage_context, "job_attempt", None) != context.retry):
+        raise SpendCapBlocked("Provider attempt conflicts with its owned spending context")
     bound = policy.resolve_bound(provider=provider, model=model, request=request)
     bound.validate()  # unknown/stale policy fails before external I/O
     ordinal = context.ordinal
@@ -101,3 +112,4 @@ def after_call(admission, evidence):
             receipt=charge.receipt if charge else None,
             evidence_hash=charge.digest() if charge else None,
             settlement_reference=charge.settlement_reference if charge else None)
+
