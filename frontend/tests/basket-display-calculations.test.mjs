@@ -39,7 +39,12 @@ test('inclusive outer-range visibility, Show all and unknown scores do not chang
 });
 
 function hooks() {
- const slots=[],effects=[];let cursor=0;return { start(){cursor=0;}, unmount(){for(const slot of slots)slot?.cleanup?.();}, flush(){for(const effect of effects.splice(0))effect();}, bindings:{
+ // Effects are executed manually in Node. Model browser dependencies locally
+ // rather than creating real polling timers or changing the production hook.
+ const listeners=new Set(),timers=new Map();let nextTimer=0;
+ const document={visibilityState:'visible',addEventListener(type,listener){assert.equal(type,'visibilitychange');listeners.add(listener);},removeEventListener(type,listener){assert.equal(type,'visibilitychange');listeners.delete(listener);}};
+ const slots=[],effects=[];let cursor=0;return { document, timers, listeners, visibility(value){document.visibilityState=value;for(const listener of [...listeners])listener();},fireTimer(){assert.equal(timers.size,1);const [id,timer]=[...timers][0];timers.delete(id);timer.callback();return timer.delay;}, start(){cursor=0;}, unmount(){for(const slot of slots)slot?.cleanup?.();}, flush(){for(const effect of effects.splice(0))effect();}, bindings:{
+ document,setTimeout(callback,delay){const id=++nextTimer;timers.set(id,{callback,delay});return id;},clearTimeout(id){timers.delete(id);},
  useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],next=>{slots[i]=typeof next==='function'?next(slots[i]):next;}];},
  useRef(initial){const i=cursor++;if(!(i in slots))slots[i]={current:initial};return slots[i];},useMemo(fn,deps){const i=cursor++;if(!slots[i]||deps.some((value,index)=>value!==slots[i].deps[index]))slots[i]={deps,value:fn()};return slots[i].value;},
  useEffect(fn,deps){const i=cursor++,prior=slots[i];if(!prior||deps.some((d,n)=>d!==prior.deps[n])){effects.push(()=>{prior?.cleanup?.();slots[i]={deps,cleanup:fn()};});}}
@@ -754,4 +759,26 @@ test('verified US aliases contribute original historical observations once witho
  assert.equal(math.historicalMean(original,'ABC','NASDAQ').rows.length,2,'without verified proof only explicit NASDAQ observations count');
  const conflicting={...original,observations:[observation(1,2,{symbol:'ABC',exchange:'US',action:'Buy New'}),observation(1,-2,{symbol:'ABC',exchange:'NASDAQ',action:'Sell All'}),observation(2,1,{symbol:'ABC',exchange:'NASDAQ'})]};
  const rejected=math.historicalMean(conflicting,'ABC','NASDAQ',undefined,proof);assert.equal(rejected.score,1);assert.equal(rejected.rows.length,1);assert.equal(rejected.excludedRows.length,2);assert.match(rejected.excludedRows[0].reason,/Conflicting saved alias/);
+});
+
+
+test('quote effect fixture owns polling timers, visibility listeners and aborted request cycles',async()=>{
+ const h=hooks(),pending=[];let now=0;
+ const FakeDate=class extends Date {static now(){return now;}};
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,Date:FakeDate,apiService:{zerodhaDisplayQuotes:(keys,signal)=>new Promise((resolve,reject)=>pending.push({keys,signal,resolve,reject}))}});
+ const render=(open=true,scope='a',keys=['NSE:AAA'])=>{h.start();return component.useBasketDisplayQuotes(open,'india',keys,scope);};
+ const finish=async request=>{request.resolve({quotes:[],missing:[],upstox_quotes:[]});await tick();};
+ render();h.flush();assert.equal(h.listeners.size,1);assert.equal(pending.length,1);assert.equal(h.timers.size,0);
+ h.visibility('hidden');await finish(pending[0]);assert.equal(h.timers.size,0,'hidden completion cannot restart polling');
+ now=30000;h.visibility('visible');assert.equal(pending.length,2);assert.equal(h.timers.size,0);
+ now=210000;await finish(pending[1]);assert.equal([...h.timers.values()][0].delay,30000);
+ h.visibility('hidden');assert.equal(h.timers.size,0);now+=10000;h.visibility('visible');assert.equal([...h.timers.values()][0].delay,20000,'visibility retains remaining interval');
+ now+=20000;assert.equal(h.fireTimer(),20000);assert.equal(pending.length,3);h.visibility('visible');assert.equal(pending.length,3,'pending read cannot overlap');
+ pending[2].reject(new Error('HTTP 429'));await tick();assert.equal([...h.timers.values()][0].delay,60000);
+ h.visibility('hidden');now+=10000;h.visibility('visible');assert.equal([...h.timers.values()][0].delay,50000,'visibility retains error cooldown');
+ now+=50000;h.fireTimer();assert.equal(pending.length,4);
+ render(true,'b',['NSE:BBB']);h.flush();assert.equal(pending[3].signal.aborted,true);assert.equal(pending.length,5);assert.equal(h.listeners.size,1);
+ await finish(pending[3]);assert.equal(render(true,'b',['NSE:BBB']).loading,true,'late old cycle cannot publish');assert.equal(h.timers.size,0,'late old cycle cannot schedule');
+ await finish(pending[4]);assert.equal(h.timers.size,1);render(false,'b',['NSE:BBB']);h.flush();assert.equal(pending[4].signal.aborted,true);assert.equal(h.timers.size,0);assert.equal(h.listeners.size,0);
+ render(true,'b',['NSE:BBB']);h.flush();assert.equal(pending.length,6);h.unmount();assert.equal(pending[5].signal.aborted,true);assert.equal(h.listeners.size,0);await finish(pending[5]);assert.equal(h.timers.size,0);
 });
