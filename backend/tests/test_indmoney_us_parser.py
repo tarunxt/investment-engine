@@ -184,3 +184,16 @@ def test_stored_loss_percentage_is_normalized_without_mutating_snapshot():
     assert enriched[0]["total_pnl_percent"] == -10
     assert original[0]["total_pnl_percent"] == 10
     assert service._build_derived(enriched, {})["top_laggards"][0]["total_pnl_percent"] == -10
+
+
+def test_icon_wallet_in_new_and_previously_saved_snapshots():
+    from types import SimpleNamespace
+    service = IndMoneyUsPortfolioService()
+    for text, expected in [("$1,234.56", 1234.56), ("$0.00", 0.0), ("Buying power $75", None)]:
+        raw = f"My Portfolio\n\n{text}\nAdd money\nCurrent Value\n$99.00"
+        parsed = service.parse_snapshot(raw)
+        assert parsed["wallet_balance"] == expected
+        snapshot = SimpleNamespace(**dict(parsed, id=1, wallet_balance=None))
+        assert service.serialize_detail(snapshot)["wallet_balance"] == expected
+        snapshot.wallet_balance = 0.0
+        assert service.serialize_summary(snapshot)["wallet_balance"] == 0.0
