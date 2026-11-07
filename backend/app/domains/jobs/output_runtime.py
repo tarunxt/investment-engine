@@ -81,7 +81,9 @@ def holdings_from_prompt(prompt: str) -> tuple[Mapping[str, Any], ...] | None:
         return None
     exchange_name = 'exchange' if 'exchange' in headers else 'exchange symbol'
     if exchange_name not in headers:
-        return None
+        if 'market' not in headers or any(row[headers.index('market')].strip().upper() != 'US' for row in block.rows):
+            return None
+        exchange_name = 'market'
     indices = {key: headers.index(header) for key, header in {
         'exchange_symbol': exchange_name, 'stock_symbol': 'stock symbol', 'current_units': 'current units',
     }.items()}

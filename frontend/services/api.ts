@@ -1,3 +1,4 @@
+import { recoverIndmoneyWallet } from "@/lib/indmoneyWallet";
 import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
 import type { LogoutResponse } from "@/lib/logoutOutcome";
@@ -1475,18 +1476,21 @@ class apiServiceClass implements IApiService {
     }
   }
 
-  indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
-    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio(), { cache: "no-store" });
+  async indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
+    const overview = await this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio(), { cache: "no-store" });
+    if (!overview.latest) return overview;
+    const latest = recoverIndmoneyWallet(overview.latest);
+    return { ...overview, latest, history: overview.history.map(row => row.id === latest.id ? { ...row, wallet_balance: latest.wallet_balance } : row) };
   }
 
   indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail> {
-    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId));
+    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId)).then(recoverIndmoneyWallet);
   }
 
   indmoneyUsCreatePortfolioSnapshot(
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
-    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data).then(recoverIndmoneyWallet);
   }
 
   indmoneyVerifiedListings(): Promise<{ listings: VerifiedUsListing[]; reason: string | null }> {
