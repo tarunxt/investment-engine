@@ -89,9 +89,6 @@ export function PortfolioAnalysisNav({
           </Button>
         ))}
       </div>
-      <p className="mt-2 text-xs text-gray-500">
-        Market links open the selected view. Final Actionables brings portfolio recommendations together for review.
-      </p>
     </div>
   );
 }
