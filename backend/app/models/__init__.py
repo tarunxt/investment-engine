@@ -1,5 +1,7 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
+from app.domains.rebalance_budget.models import RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund
+
 from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession, AuthSessionFamily, AuthRefreshIntent
 from app.domains.api_usage.models import (
     ApiUsageAttemptEvent,
@@ -161,3 +163,5 @@ __all__ = [
 from app.domains.recommendation_audit.models import (  # noqa: F401
     EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
 )
+
+from app.domains.rebalance_budget.execution_models import RebalanceExecution, RebalanceResourceReservation

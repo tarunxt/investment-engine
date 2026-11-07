@@ -195,7 +195,8 @@ class ApiAttempt:
     def __init__(self, *, provider: str, model: str | None, request: object,
                  phase: str = "request", tariff_rates: dict | None = None,
                  instrumentation_scope: str = "sdk_call_hidden_retries_unknown",
-                 retry: bool = False, parent_attempt_id: str | None = None):
+                 retry: bool = False, parent_attempt_id: str | None = None,
+                 admission_request: object = None):
         self.context = get_provider_usage_context()
         context = self.context
         attempt_id = str(uuid4())
@@ -232,8 +233,19 @@ class ApiAttempt:
         self._usage_sources: set[str] = set()
         self._malformed_usage_fields: set[str] = set()
         self._conflicting_usage_fields: set[str] = set()
+        # A telemetry-only hash projection must not replace the actual request
+        # inspected by the mandatory spending admission boundary.
+        self._spend_request = request if admission_request is None else admission_request
+        self._spend_model = model
+        self._spend_admission = None
 
     def __enter__(self):
+        # Telemetry remains fail-open; rebalance spending admission is a
+        # separate fail-closed policy and must not be swallowed by telemetry.
+        from app.domains.rebalance_budget.runtime import before_call
+        self._spend_admission = before_call(provider=self.values["actual_provider"],
+            model=self._spend_model, request=self._spend_request,
+            usage_context=self.context)
         if self.context:
             self.context.last_attempt["attempt_id"] = self.values["attempt_id"]
         self._update_coverage()
@@ -355,6 +367,11 @@ class ApiAttempt:
                 self.observe_search_results(len(results))
 
     def __exit__(self, exc_type, exc, traceback):
+        from app.domains.rebalance_budget.runtime import after_call
+        # Retain the reservation even if optional telemetry processing fails.
+        # Successful evidence is collected below before settlement.
+        if exc is not None:
+            after_call(self._spend_admission, {"status": "uncertain"})
         if exc is not None:
             values = self.values
             # Read only available SDK metadata; never fetch, decode a raw body,
@@ -390,18 +407,25 @@ class ApiAttempt:
         self.values["latency_ms"] = max(0.0, (perf_counter() - self._start) * 1000)
         self._update_coverage()
         _persist_attempt(self.values)
+        if exc is None:
+            after_call(self._spend_admission, self.values)
         return False
 
 
 def metered_call(call: Callable, *args, provider: str, meter_model: str | None,
                  phase: str = "request", tariff_rates: dict | None = None,
                  request_hash_input: object = None, instrumentation_scope: str = "sdk_call_hidden_retries_unknown",
-                 **kwargs):
-    """Pass upstream kwargs through unchanged; metering never controls retries."""
+                 spend_endpoint: str | None = None, **kwargs):
+    """Ordinary kwargs are unchanged; tagged dispatch applies reviewed bounds."""
+    if spend_endpoint is not None:
+        from app.domains.rebalance_budget.runtime import prepare_request
+        kwargs = prepare_request(spend_endpoint, call, args, kwargs)
     with ApiAttempt(provider=provider, model=meter_model,
                     request={"args": args, "kwargs": kwargs} if request_hash_input is None else request_hash_input,
+                    admission_request={"args": args, "kwargs": kwargs},
                     phase=phase, tariff_rates=tariff_rates,
                     instrumentation_scope=instrumentation_scope) as attempt:
         response = call(*args, **kwargs)
         attempt.observe(response)
         return response
+

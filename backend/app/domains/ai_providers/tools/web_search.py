@@ -11,6 +11,7 @@ import requests
 
 from app.domains.api_usage.metering import ApiAttempt, metered_call
 from app.core.config import settings
+from app.domains.rebalance_budget.ledger import SpendCapBlocked
 
 logger = logging.getLogger("app")
 
@@ -60,6 +61,8 @@ def execute(name: str, args: dict[str, Any]) -> str:
             return _web_search(args["query"], int(args.get("max_results", 5)))
         logger.warning("Unknown tool requested")
         return json.dumps({"error": f"Unknown tool: {name}"})
+    except SpendCapBlocked:
+        raise  # budget denial must not be converted to tool text and retried
     except Exception as exc:
         logger.error("Search tool failed (%s)", type(exc).__name__)
         return json.dumps(
@@ -83,6 +86,8 @@ def _web_search(query: str, max_results: int = 5) -> str:
             if _payload_has_results(tavily_payload):
                 return tavily_payload
             errors.append("Tavily returned no results")
+        except SpendCapBlocked:
+            raise
         except Exception as exc:
             logger.warning("Tavily search failed (%s)", type(exc).__name__)
             errors.append(f"Tavily failed: {exc}")
@@ -99,6 +104,8 @@ def _web_search(query: str, max_results: int = 5) -> str:
             if _payload_has_results(payload):
                 return payload
             errors.append(f"{search_name} returned no results")
+        except SpendCapBlocked:
+            raise
         except Exception as exc:
             logger.warning("%s search failed (%s)", search_name, type(exc).__name__)
             errors.append(f"{search_name} failed: {exc}")

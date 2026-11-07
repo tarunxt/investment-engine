@@ -46,13 +46,27 @@ def test_request_rejects_missing_partial_malformed_or_unknown_policy(value):
 
 @pytest.mark.anyio
 async def test_reservation_freezes_policy_and_returns_it(audit_db, monkeypatch):
-    monkeypatch.setattr(routes, "_reserve_auto_rebalance_sequence", AsyncMock(return_value=43))
+    from uuid import uuid4
+    from app.domains.rebalance_budget.models import RebalanceSpendScope, RebalanceSpendBinding
+    async with audit_db.engine.begin() as connection:
+        await connection.run_sync(lambda db: RebalanceSpendScope.metadata.create_all(db,
+            tables=[RebalanceSpendScope.__table__, RebalanceSpendBinding.__table__]))
+    request_id = str(uuid4())
+    monkeypatch.setattr(routes, "_reserve_auto_rebalance_sequence", AsyncMock(side_effect=[43, 44]))
     monkeypatch.setattr(routes, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
     async with audit_db.sessions() as db:
         response = await routes.reserve_auto_rebalance_label(
-            AutoRebalanceRunReservationRequest(portfolio="india", side_effect_policy=POLICY), db, OWNER,
+            AutoRebalanceRunReservationRequest(portfolio="india", side_effect_policy=POLICY,
+                spend_intent="new_workflow", spend_request_id=request_id, spend_observed_revision=0), db, OWNER,
         )
     assert response.side_effect_policy.model_dump() == POLICY
+    async with audit_db.sessions() as db:
+        replay = await routes.reserve_auto_rebalance_label(
+            AutoRebalanceRunReservationRequest(portfolio="india", side_effect_policy={"version": 1, "mode": "existing_preferences"},
+                spend_intent="new_workflow", spend_request_id=request_id, spend_observed_revision=0), db, OWNER)
+    assert replay.side_effect_policy.model_dump() == POLICY
+    assert replay.sequence == response.sequence and replay.spend_scope_id == response.spend_scope_id
+    assert replay.reservation_created is False
     async with audit_db.sessions() as db:
         history = await routes._build_auto_rebalance_history(db, user_id=7, portfolio="india", sequences={43})
     assert history[0][0].side_effect_policy.model_dump() == POLICY

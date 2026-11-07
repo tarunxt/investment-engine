@@ -25,6 +25,10 @@ RATES = {"input": 1, "output": 2}
 @pytest.fixture
 def ledger(monkeypatch):
     from app.domains.api_usage import recorder
+    from app.domains.rebalance_budget import runtime
+    # This telemetry-only fixture has no workflow grants. Dedicated cap tests
+    # exercise real admission and lost-context rejection before provider I/O.
+    monkeypatch.setattr(runtime, "before_call", lambda **kwargs: None)
     from app.domains.api_usage.models import LlmProviderUsageCallRecord
     engine = create_engine("sqlite://")
     ApiUsageAttemptEvent.__table__.create(engine)
@@ -843,3 +847,4 @@ def test_request_response_identity_bridge_quarantines_both_prior_estimates(ledge
     coverage = summarize_attempt_coverage(ledger(None))
     assert coverage["summary"]["ambiguous_attempts"] == 3
     assert coverage["summary"]["known_token_estimate_subtotal_usd"] is None
+

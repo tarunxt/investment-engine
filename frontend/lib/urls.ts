@@ -440,6 +440,7 @@ export const URLs = {
     get: (id: number) => `${resolveApiBaseUrl()}/runs/${id}`,
     cancel: (id: number) => `${resolveApiBaseUrl()}/runs/${id}/cancel`,
     autoRebalanceLabel: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-label`,
+    autoRebalanceSpendReadiness: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-spend-readiness`,
     autoRebalanceCompletionEmail: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-completion-email`,
     finalActionableHistory: () => `${resolveApiBaseUrl()}/runs/final-actionables/history`,
     finalActionableHistoryBackfill: () => `${resolveApiBaseUrl()}/runs/final-actionables/history/backfill`,

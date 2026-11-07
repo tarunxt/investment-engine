@@ -8,6 +8,7 @@ import re
 from openai import OpenAI
 
 from app.domains.api_usage.metering import metered_call
+from app.domains.rebalance_budget.runtime import scoped_client, check_tool_batch
 from app.core.config import settings
 from app.domains.ai_providers.base import (
     AIProviderResponse,
@@ -80,7 +81,7 @@ class OpenAIProvider(BaseAIProvider):
     ) -> AIProviderResponse:
 
         response = metered_call(
-            self.client.responses.create, provider=self.provider_name, meter_model=model,
+            scoped_client(self.client).responses.create, spend_endpoint="openai.responses", provider=self.provider_name, meter_model=model,
             phase="request", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             input=prompt,
@@ -98,7 +99,7 @@ class OpenAIProvider(BaseAIProvider):
         if needs_table and not self._looks_like_markdown_table(content):
             minimum_rows = 5 if needs_stock_recommendation_table else 1
             rewrite = metered_call(
-                self.client.responses.create, provider=self.provider_name, meter_model=model,
+                scoped_client(self.client).responses.create, spend_endpoint="openai.responses", provider=self.provider_name, meter_model=model,
                 phase="format_repair", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 input=(
@@ -169,7 +170,7 @@ class OpenAIProvider(BaseAIProvider):
 
         for _round in range(self._max_tool_rounds):
             response = metered_call(
-                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                scoped_client(self.client).chat.completions.create, spend_endpoint="openai.chat", provider=self.provider_name, meter_model=model,
                 phase="request" if _round == 0 else "tool_round", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 messages=messages,
@@ -186,6 +187,7 @@ class OpenAIProvider(BaseAIProvider):
 
             message = choices[0].message
             tool_calls = getattr(message, "tool_calls", None) or []
+            check_tool_batch(tool_calls)
             if not tool_calls:
                 content = (getattr(message, "content", "") or "").strip()
                 break
@@ -236,7 +238,7 @@ class OpenAIProvider(BaseAIProvider):
         if needs_table and not self._looks_like_markdown_table(content):
             minimum_rows = 5 if needs_stock_recommendation_table else 1
             rewrite = metered_call(
-                self.client.responses.create, provider=self.provider_name, meter_model=model,
+                scoped_client(self.client).responses.create, spend_endpoint="openai.responses", provider=self.provider_name, meter_model=model,
                 phase="format_repair", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 input=(
