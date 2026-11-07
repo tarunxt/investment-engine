@@ -3187,73 +3187,74 @@ function ScopedZerodhaBasketPreviewDialog({
             {orderSubmissionBlockedReason}
           </div>
         ) : null}
-        <div className="min-h-0 flex-1 overflow-auto p-5">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-5">
           {loading ? (isZerodhaPreview ? <ZerodhaBasketLoading /> : (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}
             </div>
           )) : orders.length || allocationUniverse.length || !error ? (
             <>
-              {error ? (
-                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
+              <div className="sticky left-5">
+                {error ? (
+                  <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                    {error}
+                  </div>
+                ) : null}
 
-              {displayCalculations.controls}
+                {displayCalculations.controls}
 
-              {!isZerodhaPreview ? <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p> : null}
+                {!isZerodhaPreview ? <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p> : null}
 
-              {submission ? (
-                <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm", submission.executionMode === "direct_market" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-800")}>
-                  {submission.executionMode === "direct_market" ? (
-                    <div className="flex flex-col gap-1">
-                      <div className="font-bold">Success: {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} completed in Kite.</div>
-                      <div>Executed rows are highlighted green below so you can see which Trim/Sell/Buy transactions finished.</div>
-                      {submission.portfolioRefreshedAt ? (
-                        <div>Portfolio snapshot refreshed after execution; the latest holdings are available for the next Trim calculation.</div>
-                      ) : null}
-                      {submission.failedMessages?.length ? (
-                        <div className="font-semibold text-amber-800">Failed: {submission.failedMessages.join("; ")}</div>
-                      ) : null}
+                {submission ? (
+                  <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm", submission.executionMode === "direct_market" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-800")}>
+                    {submission.executionMode === "direct_market" ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="font-bold">Success: {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} completed in Kite.</div>
+                        <div>Executed rows are highlighted green below so you can see which Trim/Sell/Buy transactions finished.</div>
+                        {submission.portfolioRefreshedAt ? (
+                          <div>Portfolio snapshot refreshed after execution; the latest holdings are available for the next Trim calculation.</div>
+                        ) : null}
+                        {submission.failedMessages?.length ? (
+                          <div className="font-semibold text-amber-800">Failed: {submission.failedMessages.join("; ")}</div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <>
+                        Created {submission.basketCount} Kite protected LIMIT basket tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                        {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
+                        {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+
+                {!isZerodhaPreview ? <p className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Review selected US stock quantities and USD amounts before confirming the final basket.</p> : null}
+
+                <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                    <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
+                    <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "BUY" && order.amount === null) ? null : selectedBuyAmount, basketCurrency)}</div>
+                    <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
+                      Available Margin
                     </div>
-                  ) : (
-                    <>
-                      Created {submission.basketCount} Kite protected LIMIT basket tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
-                      {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
-                      {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
-                    </>
-                  )}
-                </div>
-              ) : null}
-
-              {!isZerodhaPreview ? <p className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Review selected US stock quantities and USD amounts before confirming the final basket.</p> : null}
-
-              <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-                  <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
-                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "BUY" && order.amount === null) ? null : selectedBuyAmount, basketCurrency)}</div>
-                  <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
-                    Available Margin
+                    <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
+                      {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin, basketCurrency)}
+                    </div>
+                    <div className="mt-2 whitespace-nowrap text-sm text-emerald-900">After sales: <strong>{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</strong></div>
                   </div>
-                  <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
-                    {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin, basketCurrency)}
+                  <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+                    <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
+                    <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "SELL" && order.amount === null) ? null : selectedSellAmount, basketCurrency)}</div>
                   </div>
-                  <div className="mt-2 whitespace-nowrap text-sm text-emerald-900">After sales: <strong>{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</strong></div>
+                  <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Portfolio exposure includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
                 </div>
-                <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
-                  <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
-                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "SELL" && order.amount === null) ? null : selectedSellAmount, basketCurrency)}</div>
-                </div>
-                <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Portfolio exposure includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
+                {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
+                {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
-              {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
-              {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="overflow-x-auto overscroll-x-contain">
+              <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
                   <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-semibold" data-column-label="Selection">
                           <input type="checkbox" checked={allSelected} onChange={() => onToggleAll(basketRows.map(row => row.id))} aria-label="Select or deselect all basket rows" className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
@@ -3421,7 +3422,6 @@ function ScopedZerodhaBasketPreviewDialog({
                     </tbody>
                   </table>
                   </BasketColumnTable>
-                </div>
               </div>
             </>
           ) : (
