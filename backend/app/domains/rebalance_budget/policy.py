@@ -117,6 +117,7 @@ class RequestBound:
     # telemetry tariff estimate is deliberately not used by the runtime.
     confirmed_charge: Callable[[Mapping], ConfirmedCharge | None]
     limits: FiniteRequestLimits | None = None
+    confirmed_resources: Callable[[Mapping], tuple[int, int] | None] | None = None
 
     def validate(self):
         money(self.upper_inr, positive=True)

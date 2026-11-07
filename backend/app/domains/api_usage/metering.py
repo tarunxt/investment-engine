@@ -415,8 +415,11 @@ class ApiAttempt:
 def metered_call(call: Callable, *args, provider: str, meter_model: str | None,
                  phase: str = "request", tariff_rates: dict | None = None,
                  request_hash_input: object = None, instrumentation_scope: str = "sdk_call_hidden_retries_unknown",
-                 **kwargs):
-    """Pass upstream kwargs through unchanged; metering never controls retries."""
+                 spend_endpoint: str | None = None, **kwargs):
+    """Ordinary kwargs are unchanged; tagged dispatch applies reviewed bounds."""
+    if spend_endpoint is not None:
+        from app.domains.rebalance_budget.runtime import prepare_request
+        kwargs = prepare_request(spend_endpoint, call, args, kwargs)
     with ApiAttempt(provider=provider, model=meter_model,
                     request={"args": args, "kwargs": kwargs} if request_hash_input is None else request_hash_input,
                     admission_request={"args": args, "kwargs": kwargs},

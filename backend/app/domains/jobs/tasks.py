@@ -23,6 +23,7 @@ from app.domains.api_usage.recorder import (
 from app.domains.api_usage.metering import content_hash
 from app.domains.jobs.usage_identity import resolve_job_usage_identity
 from app.domains.rebalance_budget.ledger import SpendCapBlocked
+from app.domains.jobs.resource_policy import ResourceBlocked
 from app.domains.rebalance_budget.runtime import configure_job as configure_spend_job, reset_job as reset_spend_job
 from app.domains.jobs.output_runtime import (
     OutputPreflightError, active_contract_hash, configure_output_context, contract_issue,
@@ -739,7 +740,7 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Everything else retries after 30 s.
     """
 
-    if isinstance(exc, (OutputPreflightError, SpendCapBlocked)) or is_provider_capacity_error(exc):
+    if isinstance(exc, (OutputPreflightError, SpendCapBlocked, ResourceBlocked)) or is_provider_capacity_error(exc):
         return False, 0
 
     text = str(exc).lower()
@@ -1687,7 +1688,9 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
-        reset_spend_job(spend_context_token)
-        reset_output_context(output_context_token)
-        reset_provider_usage_context(provider_usage_token)
-        db.close()
+        try:
+            reset_spend_job(spend_context_token, completed=job is not None and job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED})
+        finally:
+            reset_output_context(output_context_token)
+            reset_provider_usage_context(provider_usage_token)
+            db.close()

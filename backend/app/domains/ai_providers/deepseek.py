@@ -9,6 +9,7 @@ import re
 from openai import OpenAI
 
 from app.domains.api_usage.metering import metered_call
+from app.domains.rebalance_budget.runtime import scoped_client, check_tool_batch
 from app.core.config import settings
 from app.domains.api_usage.recorder import record_provider_usage_call
 from app.domains.ai_providers.base import (
@@ -269,7 +270,7 @@ class DeepSeekProvider(BaseAIProvider):
             )
 
         recovery_response = metered_call(
-            self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+            scoped_client(self.client).chat.completions.create, spend_endpoint="deepseek.chat", provider=self.provider_name, meter_model=model,
             phase="recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             messages=[
@@ -350,7 +351,7 @@ class DeepSeekProvider(BaseAIProvider):
         logger.info("DeepSeek generation started")
         for round_num in range(_MAX_TOOL_ROUNDS):
             response = metered_call(
-                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                scoped_client(self.client).chat.completions.create, spend_endpoint="deepseek.chat", provider=self.provider_name, meter_model=model,
                 phase="request" if round_num == 0 else "tool_round", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                 **kwargs,
             )
@@ -369,6 +370,7 @@ class DeepSeekProvider(BaseAIProvider):
 
             message = choices[0].message
             tool_calls = getattr(message, "tool_calls", None)
+            check_tool_batch(tool_calls or [])
 
             if not tool_calls:
                 content = getattr(message, "content", "") or ""
@@ -437,7 +439,7 @@ class DeepSeekProvider(BaseAIProvider):
             # job back to Celery's retry policy.
             for recovery_attempt in range(_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS):
                 final_response = metered_call(
-                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    scoped_client(self.client).chat.completions.create, spend_endpoint="deepseek.chat", provider=self.provider_name, meter_model=model,
                     phase="empty_recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                     model=model,
                     messages=messages
@@ -508,7 +510,7 @@ class DeepSeekProvider(BaseAIProvider):
             needs_rewrite = _looks_like_tool_trace(cleaned) or normalized_json is None
             if needs_rewrite:
                 rewrite_response = metered_call(
-                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    scoped_client(self.client).chat.completions.create, spend_endpoint="deepseek.chat", provider=self.provider_name, meter_model=model,
                     phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                     model=model,
                     messages=[
@@ -555,7 +557,7 @@ class DeepSeekProvider(BaseAIProvider):
             ) or not _looks_like_valid_markdown_table(cleaned)
             if needs_rewrite:
                 rewrite_response = metered_call(
-                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    scoped_client(self.client).chat.completions.create, spend_endpoint="deepseek.chat", provider=self.provider_name, meter_model=model,
                     phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                     model=model,
                     messages=[
@@ -591,7 +593,7 @@ class DeepSeekProvider(BaseAIProvider):
                     ).strip()
         elif _looks_like_tool_trace(cleaned):
             rewrite_response = metered_call(
-                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                scoped_client(self.client).chat.completions.create, spend_endpoint="deepseek.chat", provider=self.provider_name, meter_model=model,
                 phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 messages=[

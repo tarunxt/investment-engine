@@ -1,5 +1,6 @@
 """Approved A9-004 Option A. Resource ceilings are not spending guarantees."""
 import math
+import json
 from app.shared.exceptions import AppException, ValidationException
 
 MAX_PROMPT_CHARS = 1_048_576
@@ -97,19 +98,15 @@ def validate_provider_input(args, kwargs):
         if leaving:
             active.remove(id(value))
             continue
-        if isinstance(value, str):
-            chars += len(value)
-            try:
-                size += len(value.encode("utf-8"))
-            except UnicodeEncodeError:
-                raise ResourceBlocked("Provider input must be valid UTF-8") from None
-        elif isinstance(value, (dict, list, tuple)):
+        if isinstance(value, (dict, list, tuple)):
             if id(value) in active:
                 raise ResourceBlocked("Cyclic provider input is not authorized")
             active.add(id(value))
             stack.append((value, True))
-            # JSON keys (including schema properties and tool names) are also
-            # transmitted input. Do not let an oversized key evade the bound.
+            # Include container delimiters, separators and object colons.
+            punctuation = 2 + max(0, len(value) - 1) + (len(value) if isinstance(value, dict) else 0)
+            chars += punctuation
+            size += punctuation
             if isinstance(value, dict):
                 if any(not isinstance(key, str) for key in value):
                     raise ResourceBlocked("Provider input object keys must be strings")
@@ -117,7 +114,14 @@ def validate_provider_input(args, kwargs):
             else:
                 children = value
             stack.extend((child, False) for child in children)
-        elif value is not None and not isinstance(value, (int, float, bool)):
+        elif value is None or isinstance(value, (str, int, float, bool)):
+            try:
+                encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
+                chars += len(encoded)
+                size += len(encoded.encode("utf-8"))
+            except (UnicodeEncodeError, ValueError, OverflowError):
+                raise ResourceBlocked("Provider input must have a finite UTF-8 JSON representation") from None
+        else:
             raise ResourceBlocked("Structured provider input bound is uncertified")
         if chars > MAX_PROMPT_CHARS or size > MAX_PROMPT_BYTES:
             raise ResourceBlocked("Expanded provider input exceeds the approved character/UTF-8 envelope")

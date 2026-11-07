@@ -6,6 +6,7 @@ import anthropic
 from anthropic.types import TextBlock
 
 from app.domains.api_usage.metering import metered_call
+from app.domains.rebalance_budget.runtime import scoped_client
 from app.core.config import settings
 from app.domains.ai_providers.base import AIProviderResponse, BaseAIProvider
 
@@ -41,7 +42,7 @@ class AnthropicProvider(BaseAIProvider):
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         response = metered_call(
-            self.client.messages.create, provider=self.provider_name, meter_model=model,
+            scoped_client(self.client).messages.create, spend_endpoint="anthropic.messages", provider=self.provider_name, meter_model=model,
             phase="request", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             max_tokens=8096,

@@ -97,3 +97,40 @@ alone do not prove this. Required evidence is the actual account's applicable
 model/tool tariffs and charging rules, plus an enforceable all-in INR basis and
 bounded requests, not a bank invoice for each token. Ordinary untagged analysis
 continues on its existing route without this workflow grant.
+
+## Tagged execution and dispatch integration
+
+The next source-only candidate adds durable per-job execution ownership and
+original 600-second deadlines, plus output/tool resource reservations committed
+atomically with spend admission. Queue waiting does not start the deadline.
+Retry cannot renew it; an active or ambiguous fence cannot expire into a new
+allowance. Resource reconciliation requires complete generated-output (including
+reasoning) and tool counts independently from currency evidence. Unknown usage
+retains reservations and suspends further dispatch.
+
+OpenAI, DeepSeek and Anthropic request sites now use zero-retry SDK copies only
+inside a tagged spending context. Per-endpoint preparation checks expanded input,
+output limits and remaining original deadline before the metered boundary.
+Explicit output requests that cannot fit are rejected rather than reduced.
+Custom tool batches are checked before dispatch, while every actual tool request
+still needs its own admission. Numeric/null/boolean payloads, object keys and JSON
+container/separator overhead count toward expanded input bounds. SDK inactivity
+timeouts are not represented as proof of remote cancellation or an absolute
+in-flight deadline. Gemini/native tools and search pricing remain unsupported by
+`resolve_bound`, which still activates no provider.
+
+The unreleased `rebalance_execution_003` migration follows the cap/refund chain.
+All existing main migrations remain unchanged. Local focused backend regression:
+314 passed, nine PostgreSQL-only skips. The existing hosted PostgreSQL workflow
+now creates a separate disposable cap-test database and runs the cap suite with
+zero skips required, covering original five ledger races and four new execution
+fence/resource races. Hosted results must be checked for the published head.
+Current-main composition commit 223e989d passed both existing CI workflows before
+this additional execution work. No local or production migration was executed.
+
+These are tagged-workflow controls. General untagged actor-aware queue/concurrency
+and execution resource admission are not completed by this candidate; ordinary
+analysis receives no new currency promise or silently minted INR grant. Control
+closure and enabling a paid provider are separate: unknown tariff/FX can remain
+explicitly unsupported/fail-closed for control acceptance, but the remaining
+resource/admission path coverage still has to be completed and tested.

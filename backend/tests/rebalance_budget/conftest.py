@@ -12,6 +12,7 @@ from sqlalchemy.schema import CreateSchema, DropSchema
 from app.domains.rebalance_budget import ledger, runtime
 from app.domains.rebalance_budget.models import RebalanceSpendAttempt, RebalanceSpendBinding, RebalanceSpendRefund, RebalanceSpendScope
 from app.domains.runs.models import AutoRebalanceWorkflow
+from app.domains.rebalance_budget.execution_models import RebalanceExecution, RebalanceResourceReservation
 
 
 def guarded_url(raw):
@@ -39,7 +40,7 @@ def cap_db(monkeypatch):
     jobs = Table("jobs", metadata, Column("id", Integer, primary_key=True),
         Column("user_id", Integer, ForeignKey("users.id")),
         Column("auto_rebalance_portfolio", String(32)), Column("auto_rebalance_sequence", Integer))
-    for model in (RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund, AutoRebalanceWorkflow):
+    for model in (RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund, AutoRebalanceWorkflow, RebalanceExecution, RebalanceResourceReservation):
         model.__table__.to_metadata(metadata)
     metadata.create_all(engine)
     with engine.begin() as connection:

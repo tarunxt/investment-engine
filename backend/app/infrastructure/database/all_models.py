@@ -86,3 +86,5 @@ from app.domains.recommendation_audit.models import (  # noqa: F401
 from app.domains.rebalance_budget.models import (  # noqa: F401
     RebalanceSpendScope, RebalanceSpendBinding, RebalanceSpendAttempt, RebalanceSpendRefund,
 )
+
+from app.domains.rebalance_budget.execution_models import RebalanceExecution, RebalanceResourceReservation
