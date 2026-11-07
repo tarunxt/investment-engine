@@ -2975,11 +2975,16 @@ function ScopedZerodhaBasketPreviewDialog({
   const portfolioAssets = tradingViewMarket === "india"
     ? { portfolioValue: currentWeights.portfolioValue, availableMargin, totalAssets: currentWeights.totalAssets }
     : portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
-  const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
-  const upstoxCell = (symbol: string, exchange: string) => {
+  const quoteRows = allocationUniverse.map(row => row.stock);
+  const quoteInstruments = (tradingViewMarket === "us" ? [...quoteRows, ...orders] : quoteRows)
+    .map(row => `${row.exchange.toUpperCase()}:${row.symbol.toUpperCase()}`);
+  const columnNames = { ...(tradingViewMarket === "us" ? { "Vendor LTP": "Alpaca IEX LTP" } : {}), ...columnPreferences?.names } as Record<string, string>;
+  const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, quoteInstruments, detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
+  const providerPriceCell = (symbol: string, exchange: string) => {
     const quote = verifiedFetchedDisplayQuote(tradingViewMarket === "india" ? (quoteRead.upstoxQuotes ?? []).filter(row => row.source.startsWith("Upstox ")) : quoteRead.quotes, symbol, exchange);
-    return <td className="whitespace-nowrap px-4 py-3 text-slate-700" data-provider={tradingViewMarket === "india" ? "upstox" : "us-vendor"} title={quote ? `${quote.source} · As of ${quote.asOf}` : tradingViewMarket === "india" ? "No Upstox quote available for this exact listing" : "No verified US vendor quote available for this exact listing"}>
-      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><time dateTime={quote.asOf} className="block text-[10px] text-slate-500">{formatCompactQuoteTime(quote.asOf)}</time></> : "Unavailable"}
+    const stale = tradingViewMarket === "us" && quoteRead.vendorQuotes?.some(row => row.instrument === stockIdentity(symbol, exchange) && row.stale);
+    return <td className="whitespace-nowrap px-4 py-3 text-slate-700" data-provider={tradingViewMarket === "india" ? "upstox" : "alpaca-iex"} title={quote ? `${quote.source} · As of ${quote.asOf}` : tradingViewMarket === "india" ? "No Upstox quote available for this exact listing" : "No verified Alpaca IEX trade available for this exact listing"}>
+      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><time dateTime={quote.asOf} className="block text-[10px] text-slate-500">{formatCompactQuoteTime(quote.asOf)}</time>{stale && <span className="block text-xs text-amber-700">Stale last trade</span>}</> : "Unavailable"}
     </td>;
   };
   const displayQuote = (symbol: string, exchange: string) => {
@@ -3246,7 +3251,7 @@ function ScopedZerodhaBasketPreviewDialog({
               {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="overflow-x-auto overscroll-x-contain">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnPreferences?.names} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead>
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -3261,7 +3266,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         {displayCalculations.headers}
                         <th className="px-4 py-3 font-semibold">Units</th>
                         <th className="px-4 py-3 font-semibold">%</th>
-                        <th className="px-4 py-3 font-semibold">{tradingViewMarket === "india" ? "Upstox LTP" : "Vendor LTP"}</th>
+                        <th className="px-4 py-3 font-semibold" data-column-label={tradingViewMarket === "us" ? "Vendor LTP" : undefined}>{tradingViewMarket === "india" ? "Upstox LTP" : "Alpaca IEX LTP"}</th>
                         <th className="px-4 py-3 font-semibold">Quoted LTP</th>
                         <th className="px-4 py-3 font-semibold">Limit Price</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
@@ -3352,7 +3357,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="px-4 py-3">
                                   <span>{formatBasketPercent(order.percent)}</span>
                                 </td>
-                                {upstoxCell(order.symbol, order.exchange)}
+                                {providerPriceCell(order.symbol, order.exchange)}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(displayQuote(order.symbol, order.exchange).ltp, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={`Market orders have no limit price; estimated value uses ${isZerodhaPreview ? "Upstox" : "US vendor"} LTP.`}>—</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount, basketCurrency)}</td>
@@ -3403,7 +3408,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
                                 {displayCalculations.cells(displayStock(row))}
                                 <td className="px-4 py-3 text-slate-500">{isZerodhaPreview ? displayCalculations.units?.(displayStock(row), "Units action") : "Not applicable"}</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
-                                {upstoxCell(row.stock.symbol, row.stock.exchange)}
+                                {providerPriceCell(row.stock.symbol, row.stock.exchange)}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={quote.ltpSource}>{quote.ltp === null ? "Unavailable" : formatBasketCurrency(quote.ltp, basketCurrency)}</td>
                                 <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">{row.formulaAction === "Hold" ? "Hold · No executable order" : "Display only · No executable order"}</td>
@@ -3450,8 +3455,8 @@ function ScopedZerodhaBasketPreviewDialog({
     </div>
     {displayCalculations.popup}
     {unitsDetailOrder ? <BasketUnitsPopup row={unitsDetailOrder} broker={basketBrokerLabel} onClose={() => setUnitsDetailId(null)} /> : null}
-    {renameColumn ? <BasketColumnRename key={renameColumn} id={renameColumn} name={columnPreferences?.names?.[renameColumn] ?? renameColumn} onSave={name => columnPreferences?.rename?.(renameColumn, name)} onClose={() => setRenameColumn(null)} /> : null}
-    {columnMenu ? <BasketColumnPicker covered={Boolean(renameColumn)} labels={columnMenu} hidden={hiddenColumns} order={columnPreferences?.order} names={columnPreferences?.names} onReorder={columnPreferences?.reorder} onRequestRename={setRenameColumn} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
+    {renameColumn ? <BasketColumnRename key={renameColumn} id={renameColumn} name={columnNames[renameColumn] ?? renameColumn} onSave={name => columnPreferences?.rename?.(renameColumn, name)} onClose={() => setRenameColumn(null)} /> : null}
+    {columnMenu ? <BasketColumnPicker covered={Boolean(renameColumn)} labels={columnMenu} hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onReorder={columnPreferences?.reorder} onRequestRename={setRenameColumn} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
     </>
   );
 }
