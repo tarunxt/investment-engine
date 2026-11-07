@@ -759,3 +759,23 @@ test('verified US aliases contribute original historical observations once witho
  const conflicting={...original,observations:[observation(1,2,{symbol:'ABC',exchange:'US',action:'Buy New'}),observation(1,-2,{symbol:'ABC',exchange:'NASDAQ',action:'Sell All'}),observation(2,1,{symbol:'ABC',exchange:'NASDAQ'})]};
  const rejected=math.historicalMean(conflicting,'ABC','NASDAQ',undefined,proof);assert.equal(rejected.score,1);assert.equal(rejected.rows.length,1);assert.equal(rejected.excludedRows.length,2);assert.match(rejected.excludedRows[0].reason,/Conflicting saved alias/);
 });
+
+test('saved US basket uses its source-run cutoff and keeps verified US history in the mean', async () => {
+ const h = hooks(), pending = [];
+ const component = load('../components/BasketDisplayCalculations.tsx', {
+   ...h.bindings, ...math,
+   apiService: {getBasketScoreHistory: params => new Promise(resolve => pending.push({params, resolve}))},
+ });
+ const stock = {symbol:'SMCI', exchange:'NASDAQ', score:-2.22, ltp:20,
+   verifiedUsIdentity:{securityId:'smci',exchangeAliases:['US']},
+   scoreSources:[{runId:462,createdAt:end,completed:false,status:'partial',market:'us'}]};
+ const render = () => { h.start(); return component.useBasketDisplayCalculations(true,'us',[stock],1000,end,'IndMoney'); };
+ render(); h.flush();
+ assert.equal(Date.parse(pending[0].params.as_of), Date.parse(end));
+ pending[0].resolve({...history([observation(461,-1.78,{symbol:'SMCI',exchange:'US'})]), market:'us',symbols:['SMCI']});
+ await tick();
+ const state = render();
+ const value = name => find(state.cells(stock), n=>n.props?.['aria-label'] === 'SMCI '+name+' calculation').props.children;
+ assert.equal(Number(value('Historical Weighted Score')), -2);
+ assert.match(String(value('Target Weight')), /^0(?:\.0+)?%$/);
+});
