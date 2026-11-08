@@ -90,6 +90,15 @@ async def health_live():
     return {"status": "ok"}
 
 
+@router.get("/execution")
+async def health_execution():
+    """Passive advisory evidence; never gates serving saved data or deployment."""
+    from app.core.recovery import recovery_mode
+    from app.domains.health.execution import execution_diagnostics
+
+    return await execution_diagnostics(recovery=recovery_mode())
+
+
 @router.get("/ready")
 async def health_ready(request: Request, response: Response):
     """Readiness: dependencies and required Stage 3 workers are available."""
