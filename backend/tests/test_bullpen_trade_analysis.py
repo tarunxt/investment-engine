@@ -242,7 +242,7 @@ def test_capture_buy_and_exit_updates_same_trade_record(monkeypatch):
         assert any(entry.phase == "BUY_ANALYSIS" for entry in llm_entries)
 
 
-def test_generate_post_trade_analysis_penalizes_high_confidence_loss():
+def test_generate_post_trade_analysis_reviews_high_confidence_loss_without_calibration():
     analysis = generate_bullpen_post_trade_analysis(
         {
             "net_pnl": -1.2,
@@ -256,16 +256,12 @@ def test_generate_post_trade_analysis_penalizes_high_confidence_loss():
         }
     )
 
-    assert analysis["reinforcement_signal"] == "PENALTY"
+    assert analysis["reinforcement_signal"] == "NOT_EVALUATED"
     assert analysis["human_review_required"] is True
-    assert analysis["should_avoid_similar_trade"] is True
-    assert analysis["mistake_category"] in {
-        "OVERCONFIDENT_LLM",
-        "POOR_LIQUIDITY_OR_SPREAD",
-        "LATE_EXIT",
-        "WEAK_EDGE",
-        "LOW_LIQUIDITY",
-    }
+    assert analysis["should_avoid_similar_trade"] is False
+    assert analysis["mistake_category"] == "NOT_EVALUATED"
+    assert analysis["llm_confidence_aligned"] is None
+
 
 
 @pytest.mark.anyio
@@ -364,11 +360,11 @@ async def test_history_sync_backfills_manual_trade_and_marks_it_squared_off():
         assert record.sell_executed_at is not None
         assert record.status == "SOLD"
         assert record.lifecycle_state == "BUY_AND_SELL_EXECUTED"
-        assert record.final_tag == "PROFIT"
-        assert record.pnl_outcome_tag == "PROFIT"
+        assert record.final_tag == "SOLD"
+        assert record.pnl_outcome_tag == "UNKNOWN"
         assert record.gross_pnl == pytest.approx(0.25)
-        assert record.net_pnl == pytest.approx(0.25)
-        assert record.pnl_percent == pytest.approx(12.5)
+        assert record.net_pnl is None  # Execution fees were absent, not verified zero.
+        assert record.pnl_percent is None
 
         response = await service.list_trades(user_id=7)
         assert response.summary.total_executed_trades == 1

@@ -294,12 +294,12 @@ def extract_execution_summary(
     )
     average_fill_price = recursive_find(
         payload,
-        ("avgPrice", "averagePrice", "average_fill_price", "price", "fillPrice"),
+        ("avgPrice", "averagePrice", "average_fill_price", "fillPrice"),
     )
     fees = recursive_find(payload, ("fees", "fee", "totalFees"))
 
-    avg_price = parse_float(average_fill_price) or requested_price
-    shares = parse_float(filled_shares) or requested_shares
+    avg_price = parse_float(average_fill_price)
+    shares = parse_float(filled_shares)
     amount = parse_float(filled_amount)
     if amount is None and avg_price is not None and shares is not None:
         amount = round(avg_price * shares, 6)
@@ -310,7 +310,7 @@ def extract_execution_summary(
             str(client_order_id).strip() if client_order_id is not None else None
         ),
         "status": str(status).strip() if status is not None else None,
-        "filled_amount": amount if amount is not None else requested_amount,
+        "filled_amount": amount,
         "filled_shares": shares,
         "average_fill_price": avg_price,
         "average_fill_odds": round(avg_price * 100, 4) if avg_price is not None else None,
