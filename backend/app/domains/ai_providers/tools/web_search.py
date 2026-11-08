@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from typing import Any
 from urllib.parse import urlencode
@@ -11,6 +12,7 @@ import requests
 
 from app.domains.api_usage.metering import ApiAttempt, metered_call
 from app.core.config import settings
+from app.domains.ai_providers.tools.public_queries import PUBLIC_MARKETS, PUBLIC_TOPICS, project_query
 
 logger = logging.getLogger("app")
 
@@ -28,25 +30,25 @@ TOOL_DEFINITIONS: list[dict] = [
         "function": {
             "name": "web_search",
             "description": (
-                "Search the web for real-time information: live stock prices, market indices, "
-                "breaking news, economic data, company announcements, or any current data "
-                "needed for analysis. Always prefer this over training-data knowledge when "
-                "current figures are required."
+                "Search approved public market/index context only using market/topic enums. "
+                "Custom company, portfolio and private queries are unavailable. "
+                "If a request is rejected, report missing current evidence; never imply a lookup succeeded."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Specific search query, e.g. 'NIFTY 50 live price today' or 'Reliance Industries Q4 2025 results'",
-                    },
+                    "market": {"type": "string", "enum": list(PUBLIC_MARKETS)},
+                    "topic": {"type": "string", "enum": list(PUBLIC_TOPICS)},
                     "max_results": {
                         "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8,
                         "description": "Number of results to return (1-8). Default 5.",
                         "default": 5,
                     },
                 },
-                "required": ["query"],
+                "required": ["market", "topic"],
+                "additionalProperties": False,
             },
         },
     },
@@ -54,26 +56,77 @@ TOOL_DEFINITIONS: list[dict] = [
 
 
 def execute(name: str, args: dict[str, Any]) -> str:
+    # Application constants alone become outbound queries. No prompt/portfolio
+    # extraction or model assertion of public status can authorize egress.
+    if name != "web_search":
+        return _tool_error("Unknown tool")
+    query = project_query(args)
+    if query is None:
+        return _tool_error("Search blocked: approved public market/topic required; current evidence unavailable")
+    count = args.get("max_results", 5)
+    if type(count) is not int or not 1 <= count <= 8:
+        return _tool_error("Invalid search arguments")
     try:
-        if name == "web_search":
-            logger.info("Executing web_search tool")
-            return _web_search(args["query"], int(args.get("max_results", 5)))
-        logger.warning("Unknown tool requested")
-        return json.dumps({"error": f"Unknown tool: {name}"})
+        logger.info("Executing web_search tool")
+        return _bounded_tool_result(_web_search(query, count), query, count)
     except Exception as exc:
         logger.error("Search tool failed (%s)", type(exc).__name__)
-        return json.dumps(
-            {
-                "query": args.get("query"),
-                "answer": None,
-                "results": [],
-                "errors": [str(exc)],
-            },
-            ensure_ascii=False,
-        )
+        return _tool_error("Search unavailable")
+
+
+def _tool_error(message: str) -> str:
+    # Never echo rejected arguments, tool names, or provider exception bodies.
+    return json.dumps({"answer": None, "results": [], "errors": [message]})
+
+
+def _bounded_tool_result(payload: str, query: str, count: int) -> str:
+    """Bound data sent back to the model without treating retrieval as authority.
+
+    URLs and dates remain whole; oversized provenance is omitted explicitly.
+    Truncation is visible and is never represented as complete source evidence.
+    """
+    if not isinstance(payload, str) or len(payload) > 1_000_000:
+        return _tool_error("Invalid search response")
+    parsed = json.loads(payload)
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("results"), list):
+        return _tool_error("Invalid search response")
+    truncated = len(parsed["results"]) > count
+
+    def text(value: object, limit: int, *, whole: bool = False):
+        nonlocal truncated
+        if not isinstance(value, str):
+            return None
+        if len(value) > limit:
+            truncated = True
+            return None if whole else value[:limit]
+        return value
+
+    results = []
+    for result in parsed["results"][:count]:
+        if not isinstance(result, dict):
+            truncated = True
+            continue
+        results.append({
+            "title": text(result.get("title"), 512),
+            "url": text(result.get("url"), 2048, whole=True),
+            "content": text(result.get("content"), 4096),
+            "published_date": text(result.get("published_date"), 128, whole=True),
+        })
+        score = result.get("score")
+        if type(score) in (int, float) and math.isfinite(score):
+            results[-1]["score"] = score
+    answer = text(parsed.get("answer"), 4096)
+    output = {"query": query, "answer": answer, "results": results,
+              "trust": "untrusted_external_data", "truncated": truncated}
+    if parsed.get("errors"):
+        output.pop("query", None)
+        output["errors"] = ["Search incomplete or unavailable"]
+    return json.dumps(output, ensure_ascii=False)
 
 
 def _web_search(query: str, max_results: int = 5) -> str:
+    if project_query({"query": query}) is None or type(max_results) is not int or not 1 <= max_results <= 8:
+        return _tool_error("Search blocked: approved public market/topic required; current evidence unavailable")
     max_results = max(1, min(max_results, 8))
     errors: list[str] = []
 
@@ -85,7 +138,7 @@ def _web_search(query: str, max_results: int = 5) -> str:
             errors.append("Tavily returned no results")
         except Exception as exc:
             logger.warning("Tavily search failed (%s)", type(exc).__name__)
-            errors.append(f"Tavily failed: {exc}")
+            errors.append("Tavily failed")
     else:
         logger.warning("TAVILY_API_KEY not configured — falling back to alternative search providers")
         errors.append("Tavily not configured")
@@ -101,7 +154,7 @@ def _web_search(query: str, max_results: int = 5) -> str:
             errors.append(f"{search_name} returned no results")
         except Exception as exc:
             logger.warning("%s search failed (%s)", search_name, type(exc).__name__)
-            errors.append(f"{search_name} failed: {exc}")
+            errors.append(f"{search_name} failed")
 
     return json.dumps(
         {
