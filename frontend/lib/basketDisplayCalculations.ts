@@ -52,6 +52,22 @@ export function historicalMean(history: BasketScoreHistory, symbol: string, exch
   const sum = rows.reduce((sum, row) => sum + row.score!, 0);
   return { rows, sum, score: history.truncated || !rows.length ? null : sum / rows.length, excludedRows };
 }
+/** Display-only diagnostics. Never relax historicalMean eligibility or date bounds. */
+export function scoreSourceIssues(history: BasketScoreHistory, sources: CurrentScoreCalculation['sources']) {
+  if (!sources.length) return ['No saved source-run provenance is available for the displayed calculation.'];
+  const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
+  return sources.flatMap(source => {
+    const label = `Run #${source.runId}`, time = Date.parse(source.createdAt);
+    const issues: string[] = [];
+    if (!Number.isSafeInteger(source.runId) || source.runId <= 0) issues.push('Source run identity is invalid.');
+    if (source.market !== history.market) issues.push(`${label}: market provenance is missing or does not match this basket.`);
+    if (!source.completed && source.status !== 'partial') issues.push(`${label}: status ${source.status ?? 'unknown'} is not eligible completed or partial output.`);
+    if (!Number.isFinite(time)) issues.push(`${label}: source timestamp is unavailable.`);
+    else if (time <= start) issues.push(`${label}: recorded ${source.createdAt}, outside the selected ${history.days}-day window (too old).`);
+    else if (time > end) issues.push(`${label}: recorded ${source.createdAt}, after this score window.`);
+    return issues;
+  });
+}
 export function allocateDisplayScores(stocks: { key: string; score: number | null }[], parameters: DisplayParameters) {
   const selected = parameters.valid && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 ?  stocks.filter(row => typeof row.score === 'number' && Number.isFinite(row.score) && row.score > 0).sort((a, b) => b.score! - a.score! || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, parameters.maximumStocks) : [];
   const denominator = selected.reduce((sum, row) => sum + row.score!, 0);
