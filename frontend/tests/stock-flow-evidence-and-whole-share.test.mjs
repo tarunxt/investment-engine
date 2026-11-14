@@ -179,6 +179,7 @@ test('LLM completion separates passed, partial and failed and partial notices ar
   const ui = load('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx', {
     parseTimestampMs: v => Date.parse(v || '') || 0,
     readFailureDiagnostics: () => ({}),
+    classifyRunOutputJob: load('../lib/workflowLlmEvidence.ts').classifyWorkflowLlmJob,
   }, ['getRunProgress', 'formatLlmCompletion', 'summarizeRun'], true);
   const mixed = run(json);
   mixed.run_jobs = ['completed', 'partial', 'failed'].map((status, i) => ({job: {
