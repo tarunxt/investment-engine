@@ -3,7 +3,7 @@
 import { useId, useState, type ComponentProps, type ReactElement } from "react";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { StageErrorDetails } from "./StageErrorDetails";
-import { getStageBackgroundClass, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
+import { getStageLedgerTone, hasStagePartialOutput, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
@@ -55,7 +55,8 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   const openDuration = (item: Stage) => {
     setDurationStage(item);
   };
-  const partialStages = stages.filter(item => item.info.runStatus === "partial" || (item.info.partialLlms ?? 0) > 0 || item.info.partialNotice);
+  const partialStages = stages.filter(item => hasStagePartialOutput(item.info));
+  const syncedStockCount = market === "zerodha" ? stages.find(item => item.stage === "sync")?.info.portfolioStockCount : undefined;
   return <div className="mt-4 min-w-0 space-y-3 text-sm text-slate-600">
     {view !== "execution" && partialStages.map(item => <p key={item.stage} role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
       <strong>{getStageTileLabel(item.stage)} has partial output.</strong>{" "}
@@ -69,11 +70,14 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const error = rows.find(row => row.label === "Error")!;
           const time = rows[0].value;
-          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${getStageBackgroundClass(item.info.state)}`}>
-            <th scope="row" className="px-3 py-2 font-normal">
+          const inspecting = selected.stage === item.stage;
+          const usesSyncStockCount = market === "zerodha" && (item.stage === "sync" || item.stage === "threats");
+          const stockCell = usesSyncStockCount ? String(syncedStockCount ?? "n/a") : rowValue(item, "Stocks recommended");
+          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${getStageLedgerTone(item.info)}`}>
+            <th scope="row" className={`px-3 py-2 font-normal ${inspecting ? "bg-blue-100 shadow-[inset_3px_0_0_var(--color-blue-600)] dark:bg-blue-950/65" : ""}`}>
               <div className="flex items-start gap-2">
                 {item.selectable ? <input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} aria-label={`Select ${getStageTileLabel(item.stage)} for the next run`} className="mt-2 size-4 accent-indigo-700" /> : null}
-                <button type="button" className="rounded text-left font-semibold text-slate-900 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" aria-pressed={selected.stage === item.stage} aria-controls={detailId} onClick={() => setSelectedStage(item.stage)}>
+                <button type="button" className="rounded text-left font-semibold text-slate-900 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" aria-pressed={inspecting} aria-controls={detailId} onClick={() => setSelectedStage(item.stage)}>
                   {STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}
                   <span className="mt-0.5 block text-xs font-normal capitalize text-slate-500">{item.info.state}{item.info.runStatus ? ` · ${item.info.runStatus}` : ""}</span>
                   <span className="mt-0.5 block text-xs font-normal text-slate-600">{evidenceLabel(item)}</span>
@@ -81,8 +85,15 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               </div>
             </th>
             <td className="px-3 py-2 whitespace-nowrap">{time}</td>
-            <td className="max-w-56 px-3 py-2">{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined} aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</td>
-            <td className="px-3 py-2">{rowValue(item, "Stocks recommended")}</td>
+            <td className="max-w-56 px-3 py-2">{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined}
+              data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
+              data-workflow-job-id={item.info.jobId ?? undefined}
+              data-workflow-sequence={item.info.workflowSequence ?? undefined}
+              data-workflow-passed={item.info.passedLlms ?? undefined}
+              data-workflow-failed={item.info.failedLlms ?? undefined}
+              data-workflow-partial={item.info.partialLlms ?? undefined}
+              aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</td>
+            <td className="px-3 py-2" title={usesSyncStockCount ? "Holdings count from the latest saved Zerodha portfolio snapshot" : undefined}>{stockCell}</td>
             <td className="px-3 py-2 whitespace-nowrap">{rows.some(row => row.label === "Duration") ? <button type="button" aria-haspopup="dialog" aria-label={`Show duration breakdown for ${STAGE_METADATA[item.stage].idle}`} className="rounded text-indigo-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" onClick={() => openDuration(item)}>{rowValue(item, "Duration")}</button> : "—"}</td>
             <td className={`max-w-44 px-3 py-2 ${error.detail ? "text-amber-900" : ""}`}>{error.value}{error.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>
           </tr>;

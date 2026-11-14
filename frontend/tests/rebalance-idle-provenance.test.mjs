@@ -16,19 +16,21 @@ const mergeStageEvidence = new Function(ts.transpileModule('function mergeStageE
 const stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'];
 const oldTime = '2026-10-30T12:00:00Z', newTime = '2026-11-01T12:00:00Z';
 const record = (status, count) => ({ portfolio: 'india', sequence: 7, created_at: newTime, updated_at: newTime, completed_at: newTime, stages: [{ stage: 'actionables', status, started_at: newTime, completed_at: newTime, run_id: 10, job_id: 20, provider_count: 2, completed_provider_count: 1, failed_provider_count: 1, partial_provider_count: 0, estimated_cost: 0, summary: { recommended_stocks: count } }] });
-async function hydrate({ runs = [], histories = [], initial, historyFailure, onError = () => {} } = {}) {
+async function hydrate({ runs = [], histories = [], initial, historyFailure, snapshot, onError = () => {} } = {}) {
   let states = initial ?? Object.fromEntries(['zerodha', 'indmoneyUs'].map(market => [market, Object.fromEntries(stages.map(stage => [stage, { state: 'idle' }]))]));
   const apiService = Object.fromEntries(['zerodhaPortfolioOverview', 'indmoneyUsPortfolioOverview', 'zerodhaThreatsLatest', 'indmoneyUsThreatsLatest'].map(key => [key, async () => ({})]));
+  apiService.zerodhaPortfolioOverview = async () => ({latest: snapshot});
   apiService.getAutoRebalanceHistory = async market => { if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
   const context = {
     setWorkflowHistoryError: onError, normalizeError: error => error.message,
+    runtimeOwner: {}, isCurrentWorkflowOwner: () => true, savedStageReadGeneration: {current: 0},
     apiService, fetchDashboardRecentFullRuns: async () => runs, useCallback: fn => fn, usdInrRate: 1,
     getLatestStageRun: (rows, stage, market) => market === 'india' ? rows.find(row => row.stage === stage) : undefined,
     getLatestMatchingRebalanceRuns: (rows, market) => market === 'india' ? rows.filter(row => row.stage === 'rebalance') : [],
     getLatestRunTimestamp: run => run.updated_at, parseTimestampMs: time => Date.parse(time ?? '') || 0,
     buildConsensusRows: rows => rows.flatMap(row => Array.from({length: row.stocks ?? 0}, () => ({}))),
     countUniqueStocksFromRun: run => run.stocks,
-    summarizeRunForIdleTile: run => run ? { completedAt: run.updated_at, runStatus: run.status, lastRunId: run.id } : {},
+    summarizeRunForIdleTile: run => run ? { completedAt: run.updated_at, runStatus: run.status, lastRunId: run.id, evidence:{kind:'saved',references:[`Run #${run.id}`]} } : {},
     withInrCost: value => value,
     mergeStageEvidence,
     STAGE_ORDER: stages, setStates: updater => { states = updater(states); },
@@ -61,8 +63,8 @@ test('saved final record preserves its own workflow, job, zero, partial and term
 });
 test('missing evidence stays unknown and hydration cannot overwrite an active failed stage', async () => {
   const result = await hydrate();
-  assert.equal(result.zerodha.actionables.completedAt, null);
-  assert.equal(result.zerodha.actionables.recommendedStocks, null);
+  assert.equal(result.zerodha.actionables.completedAt ?? null, null);
+  assert.equal(result.zerodha.actionables.recommendedStocks ?? null, null);
   assert.equal(result.zerodha.actionables.evidence, undefined);
   result.zerodha.technical = { state: 'failed', lastRunId: 301, error: 'Synthetic timeout' };
   const reloaded = await hydrate({initial: result});
@@ -85,4 +87,18 @@ test('history read failure is unavailable and cannot replace saved evidence with
   assert.deepEqual(result, initial);
   await hydrate({initial, onError: value => {error=value;}});
   assert.equal(error, null);
+});
+
+test('a newer successful stage replaces old errors, but stale evidence does not', async () => {
+  const initial = await hydrate();
+  initial.zerodha.technical = {state:'failed', completedAt:oldTime, runStatus:'failed', partialNotice:'old partial', error:'old failure', errorDetails:[{ message:'old failure' }], lastRunId:15};
+  const run = {id:16, stage:'technical', status:'completed', updated_at:newTime};
+  const result = await hydrate({initial, runs:[run], snapshot:{holdings_count:0, captured_at:newTime}});
+  assert.equal(result.zerodha.technical.lastRunId, 16);
+  assert.equal(result.zerodha.technical.error, undefined);
+  assert.equal(result.zerodha.technical.errorDetails, undefined);
+  assert.equal(result.zerodha.technical.partialNotice, undefined);
+  assert.equal(result.zerodha.sync.portfolioStockCount, 0);
+  const stale = await hydrate({initial: result, runs:[{...run, id:15, status:'failed', updated_at:oldTime}]});
+  assert.deepEqual(stale.zerodha.technical, result.zerodha.technical);
 });

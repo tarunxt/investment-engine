@@ -40,6 +40,7 @@ import { BasketColumnTable, BasketColumnPicker, BasketColumnRename } from "@/com
 import type { BasketUnitsTrace } from "@/lib/basketUnitsExplanation";
 import { useWorkflowConfiguration } from "@/app/console/_components/WorkflowConfiguration";
 import { mergeStageEvidence } from "@/lib/stockFlowEvidence";
+import { classifyWorkflowLlmJob as classifyRunOutputJob } from "@/lib/workflowLlmEvidence";
 import { assertWholeShareOrdersReviewed, isWholeShareOrderSelectable, needsWholeShareTrimReview, type WholeShareChoice } from "@/lib/wholeShareReview";
 import {
   Fragment,
@@ -631,6 +632,7 @@ function summarizeThreat(
     completedAt: analysis.updated_at ?? analysis.created_at,
     provider: analysis.provider,
     model: analysis.model,
+    jobId: analysis.job_id ?? null,
     runStatus: analysis.status,
     exportStatus: null,
     costUsd: analysis.estimated_cost ?? null,
@@ -1922,6 +1924,7 @@ function summarizeRunForIdleTile(
       startedAt: run.created_at,
       completedAt: isActiveRun ? null : getLatestRunTimestamp(run),
       lastRunId: run.id,
+      workflowSequence: run.auto_rebalance_sequence ?? null,
       evidence: { kind: "saved", references: [`Run #${run.id} · ${run.status} · ${getLatestRunTimestamp(run) ?? run.created_at}`] },
       recommendedStocks: recommendedStocks ?? null,
     },
@@ -1984,6 +1987,7 @@ function summarizeAutoRebalanceHistoryStage(
       costInr: getAutoRebalanceSummaryNumber(summary, "cost_inr"),
       error: item.error_message ?? null,
       lastRunId: item.run_id ?? null,
+      workflowSequence: history?.sequence ?? null,
       jobId: item.job_id ?? null,
       evidence: { kind: "saved", references: [
         `${history?.portfolio} workflow #${history?.sequence} · ${stage} · ${item.status} · ${item.completed_at ?? item.started_at ?? "stage time unavailable"}`,
@@ -2013,16 +2017,16 @@ function getLatestAutoRebalanceHistoryItem(
   items: AutoRebalanceHistoryItemResponse[] | undefined,
   stage?: WorkflowStageKey,
 ) {
+  const recordedStageTime = (invocation: AutoRebalanceHistoryItemResponse) => {
+    const entry = stage ? invocation.stages.find((item) => item.stage === stage) : undefined;
+    return parseTimestampMs(entry?.completed_at ?? entry?.started_at ?? invocation.completed_at ?? invocation.updated_at ?? invocation.created_at);
+  };
   return [...(items ?? [])]
     .filter(
       (item) =>
         !stage || item.stages.some((stageItem) => stageItem.stage === stage),
     )
-    .sort(
-      (a, b) =>
-        parseTimestampMs(b.completed_at ?? b.updated_at ?? b.created_at) -
-        parseTimestampMs(a.completed_at ?? a.updated_at ?? a.created_at),
-    )[0] ?? null;
+    .sort((a, b) => recordedStageTime(b) - recordedStageTime(a) || b.sequence - a.sequence)[0] ?? null;
 }
 
 function getStageCostInr(info: StageInfo, usdInrRate: number) {
@@ -2077,29 +2081,6 @@ function getRunDuration(run: RunResponse) {
     new Date(startMs).toISOString(),
     new Date(endMs).toISOString(),
   );
-}
-
-function classifyRunOutputJob(
-  job: NonNullable<RunResponse["run_jobs"]>[number]["job"],
-): RunOutputJobStatus {
-  const status = (job?.status || "").toLowerCase();
-  const issueText = `${job?.error_message || ""}
-${job?.response || ""}`.toLowerCase();
-  const hasSavedRows = Boolean(job?.response?.trim());
-  const isMalformedTable = issueText.includes("malformed table output");
-  const isPartialTable = issueText.includes("partial rebalance table");
-
-  if (
-    status === "partial" ||
-    isPartialTable ||
-    (isMalformedTable && hasSavedRows) ||
-    (hasSavedRows && status !== "completed" && status !== "failed")
-  ) {
-    return "partial";
-  }
-  if (status === "completed") return "completed";
-  if (status === "failed") return "failed";
-  return "other";
 }
 
 function getRunOutputDisplayLabel(run: RunResponse) {
@@ -5312,7 +5293,9 @@ ${zerodhaExecutionMode === "direct_market"
     }
   }, [runtimeOwner, apiService, basketSafety, zerodhaBasketPlacing, zerodhaBasketLtpRefreshing, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
 
+  const savedStageReadGeneration = useRef(0);
   const loadLatestIdleStageInfo = useCallback(async () => {
+    const generation = ++savedStageReadGeneration.current;
     const [
       zerodhaOverviewResult,
       indmoneyOverviewResult,
@@ -5331,6 +5314,7 @@ ${zerodhaExecutionMode === "direct_market"
       apiService.getAutoRebalanceHistory("indmoney_us", { limit: 25 }),
     ]);
 
+    if (!isCurrentWorkflowOwner(runtimeOwner) || generation !== savedStageReadGeneration.current) return;
     const zerodhaOverview =
       zerodhaOverviewResult.status === "fulfilled"
         ? zerodhaOverviewResult.value
@@ -5349,8 +5333,8 @@ ${zerodhaExecutionMode === "direct_market"
     const failedHistory = [zerodhaHistoryResult, indmoneyHistoryResult].find(result => result.status === "rejected");
     setWorkflowHistoryError(failedHistory?.status === "rejected"
       ? `Saved workflow history unavailable: ${normalizeError(failedHistory.reason)}. Refresh to retry.` : null);
-    // Failed reads are unavailable, never evidence of an empty saved history.
-    if (failedHistory) return;
+    // A failed history read cannot establish a newer stage result. The other
+    // portfolio may still refresh, and the latest holdings count is independent.
     const historyByPortfolio: Record<
       WorkflowPortfolio,
       AutoRebalanceHistoryItemResponse[]
@@ -5399,18 +5383,11 @@ ${zerodhaExecutionMode === "direct_market"
             : (indmoneyOverview?.latest?.parse_status ?? "last snapshot");
 
         const historyInfo = (stage: WorkflowStageKey) =>
-          Object.fromEntries(
-            Object.entries(
-              summarizeAutoRebalanceHistoryStage(
-                getLatestAutoRebalanceHistoryItem(
-                  historyByPortfolio[portfolio],
-                  stage,
-                ),
-                stage,
-                usdInrRate,
-              ),
-            ).filter(([, value]) => value !== null && value !== undefined),
-          ) as Partial<StageInfo>;
+          summarizeAutoRebalanceHistoryStage(
+            getLatestAutoRebalanceHistoryItem(historyByPortfolio[portfolio], stage),
+            stage,
+            usdInrRate,
+          );
         const latestHistoryRebalance = historyInfo("rebalance");
         const latestHistoryTechnical = historyInfo("technical");
         const latestHistoryActionables = historyInfo("actionables");
@@ -5424,10 +5401,12 @@ ${zerodhaExecutionMode === "direct_market"
 
         acc[portfolio] = {
           sync: {
-            completedAt: overview?.latest?.captured_at ?? null,
-            runStatus: overview?.latest ? syncStatus : null,
-            evidence: overview?.latest ? { kind: "saved", references: [`Portfolio snapshot · ${overview.latest.captured_at}`] } : undefined,
-            ...historyInfo("sync"),
+            ...mergeStageEvidence({
+              completedAt: overview?.latest?.captured_at ?? null,
+              runStatus: overview?.latest ? syncStatus : null,
+              evidence: overview?.latest ? { kind: "saved", references: [`Portfolio snapshot · ${overview.latest.captured_at}`] } : undefined,
+            } as Partial<StageInfo>, historyInfo("sync"), true),
+            ...(overview?.latest ? { portfolioStockCount: overview.latest.holdings_count } : {}),
           },
           swing: mergeStageEvidence(
             summarizeRunForIdleTile(
@@ -5436,9 +5415,10 @@ ${zerodhaExecutionMode === "direct_market"
               latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
             ),
             historyInfo("swing"),
+            true,
           ),
-          threats: {
-            ...(threat
+          threats: mergeStageEvidence(
+            threat
               ? withInrCost(
                   {
                     ...summarizeThreat(threat),
@@ -5453,9 +5433,10 @@ ${zerodhaExecutionMode === "direct_market"
                   },
                   usdInrRate,
                 )
-              : {}),
-            ...historyInfo("threats"),
-          },
+              : {},
+            historyInfo("threats"),
+            true,
+          ),
           rebalance: mergeStageEvidence(
             summarizeRunForIdleTile(
               latestRebalanceRun,
@@ -5464,7 +5445,8 @@ ${zerodhaExecutionMode === "direct_market"
                 ? buildConsensusRows(latestRebalanceRuns, market).length
                 : null,
             ),
-            historyInfo("rebalance"),
+            latestHistoryRebalance,
+            true,
           ),
           technical: mergeStageEvidence(
             summarizeRunForIdleTile(
@@ -5474,7 +5456,8 @@ ${zerodhaExecutionMode === "direct_market"
                 ? countUniqueStocksFromRun(latestTechnicalRun)
                 : null,
             ),
-            historyInfo("technical"),
+            latestHistoryTechnical,
+            true,
           ),
           actionables: mergeStageEvidence({
             evidence: latestActionablesTimestamp || historyActionablesTimestamp ? { kind: "derived", references: [
@@ -5513,33 +5496,46 @@ ${zerodhaExecutionMode === "direct_market"
     );
 
     setStates((current) => {
+      if (!isCurrentWorkflowOwner(runtimeOwner) || generation !== savedStageReadGeneration.current) return current;
       const next = { ...current };
-      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach(
-        (portfolio) => {
-          next[portfolio] = { ...current[portfolio] };
-          STAGE_ORDER.forEach((stage) => {
-            if (current[portfolio][stage].state !== "idle") return;
-            next[portfolio][stage] = {
-              ...current[portfolio][stage],
-              ...nextByPortfolio[portfolio][stage],
-              state: "idle",
-            };
-          });
-        },
-      );
+      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach((portfolio) => {
+        next[portfolio] = { ...current[portfolio] };
+        STAGE_ORDER.forEach((stage) => {
+          const existing = current[portfolio][stage];
+          const incoming = nextByPortfolio[portfolio][stage];
+          if (existing.state === "running" || existing.state === "queued") return;
+          const existingAt = parseTimestampMs(existing.completedAt ?? existing.endedAt);
+          const incomingAt = parseTimestampMs(incoming.completedAt);
+          const knownStockCount = incoming.portfolioStockCount ?? existing.portfolioStockCount;
+          const snapshotCount = stage === "sync" && knownStockCount != null
+            ? { portfolioStockCount: knownStockCount }
+            : {};
+          // Replace one run's evidence atomically: spreading the prior stage leaks
+          // old errors and partial counts into a new successful result.
+          const historyAvailable = (portfolio === "zerodha" ? zerodhaHistoryResult : indmoneyHistoryResult).status === "fulfilled";
+          next[portfolio][stage] = historyAvailable && incoming.evidence && incomingAt > 0 && incomingAt >= existingAt
+            ? { ...incoming, ...snapshotCount, state: "idle" }
+            : { ...existing, ...snapshotCount };
+        });
+      });
       return next;
     });
-  }, [apiService, usdInrRate]);
+  }, [apiService, runtimeOwner, usdInrRate]);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadLatestIdleStageInfo().catch(() => {
-        // The workflow tiles keep their built-in "Not available" fallbacks if
-        // any dashboard source is temporarily unavailable.
-      });
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
+    const refreshSavedEvidence = () => {
+      if (document.visibilityState === "visible") {
+        void loadLatestIdleStageInfo().catch(() => {
+          // Do not turn unavailable history into blank or successful output.
+        });
+      }
+    };
+    const timeoutId = window.setTimeout(refreshSavedEvidence, 0);
+    window.addEventListener("focus", refreshSavedEvidence);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("focus", refreshSavedEvidence);
+    };
   }, [loadLatestIdleStageInfo]);
 
   const updateStage = useCallback(
@@ -5716,7 +5712,7 @@ ${zerodhaExecutionMode === "direct_market"
         completedAt: null,
         error: null,
         errorDetails: [],
-        lastRunId: null, activeRunId: null, recommendedStocks: null,
+        lastRunId: null, activeRunId: null, recommendedStocks: null, jobId: null, workflowSequence: null,
         passedLlms: 0, partialLlms: 0, failedLlms: 0, completedLlms: 0,
         partialNotice: null, exportStatus: null, costUsd: null, costInr: null,
         provider: null, model: null, runStatus: "processing", totalLlms: null,
@@ -6848,6 +6844,7 @@ ${zerodhaExecutionMode === "direct_market"
             workflowSnapshot = overview.latest;
             await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
+              portfolioStockCount: overview.latest?.holdings_count ?? null,
               runStatus:
                 overview.latest?.captured_at !== previousOverview.latest?.captured_at
                   ? "synced"
@@ -7500,6 +7497,7 @@ ${zerodhaExecutionMode === "direct_market"
           );
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
+            portfolioStockCount: overview.latest?.holdings_count ?? null,
             runStatus:
               overview.latest?.captured_at !== previousOverview.latest?.captured_at
                 ? "synced"
