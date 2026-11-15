@@ -624,6 +624,7 @@ jobs:
           node scripts/dashboard-freshness-playwright.mjs
           node scripts/data-error-20261102-02-offline.mjs
           node scripts/rebalance-market-readiness-offline.mjs
+          STATE_BOTS_EVIDENCE_DIR="$RUNNER_TEMP/stage-one-evidence" node tests/state-bots-source-correction.browser.mjs
 
       - name: Verify saved-output states and keyboard behavior offline
         if: matrix.bundler == 'webpack'

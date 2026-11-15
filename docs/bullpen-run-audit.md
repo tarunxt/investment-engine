@@ -2803,3 +2803,12 @@ execution permissions or API responses. Offline component/browser fixtures are i
 `frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
 `frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
 navigation or provider calls.
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.

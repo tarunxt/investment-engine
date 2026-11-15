@@ -8,7 +8,7 @@ const source = readBullpenScheduleSource();
 test("scanned events dialog uses the authoritative total and explains missing rows", () => {
   assert.match(
     source,
-    /All Events Scanned \(\{state\.totalScanned\}\)/,
+    /All Events Scanned \(\{state\.evidence\.scanKnown \? state\.totalScanned : "Unknown"\}\)/,
   );
   assert.match(source, /No detailed event rows are available\./);
   assert.match(source, /retained aggregate scan counts only/);
