@@ -545,9 +545,23 @@ for (const analysisOnly of [false, true]) {
     assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
   });
 }
-test("stale India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+test("stale India quotes start unanchored Technical research with the exact listing and reason", async () => {
   const h = harness({quoteRead: async instruments => ({
     quotes: instruments.map(instrument => ({instrument,price:100,as_of:'2000-01-01T00:00:00Z',source:'synthetic stale fixture'})),
+    missing:[],
+  })});
+  await h.runWorkflow("zerodha");
+  const technicalCalls = h.modelCalls.filter(call => call.scanLabel === "Technical Scan");
+  assert.equal(technicalCalls.length, 1);
+  assert.match(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_MODE_V1\]internet_research_no_broker_quotes\[\/TECHNICAL_PRICE_MODE_V1\]/);
+  assert.match(technicalCalls[0].prompt, /NSE:TEST \(stale quote\)/);
+  assert.doesNotMatch(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_ANCHORS_V1\]/);
+});
+
+test("future-dated India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+  const futureQuote = new Date(Date.now() + 10 * 60_000).toISOString();
+  const h = harness({quoteRead: async instruments => ({
+    quotes: instruments.map(instrument => ({instrument, price:100, as_of:futureQuote, source:'synthetic future fixture'})),
     missing:[],
   })});
   await h.runWorkflow("zerodha");
@@ -556,6 +570,7 @@ test("stale India quotes stop the actual workflow before Technical job creation 
   assert.notEqual(h.view.states.zerodha.actionables.state,"completed");
   assert.equal(h.emails.length,0);
   assert.equal(h.durable.get("india:42:technical").status,"failed");
+  assert.equal(h.durable.get("india:42:actionables")?.summary?.frozen_final, undefined);
 });
 for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
   test(`actual workflow freezes explicit v2 raw/effective evidence for ${rawScore}`, async () => {
