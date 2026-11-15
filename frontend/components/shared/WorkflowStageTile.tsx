@@ -286,8 +286,7 @@ export function getStageLedgerTone(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase();
   if (info.state === "running" || info.state === "queued") return getStageBackgroundClass(info.state);
   if (info.state === "failed" || ["failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
-  if (hasStagePartialOutput(info)) return "bg-amber-50";
-  if (info.state === "completed" || ["completed", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
+  if (info.state === "completed" || ["completed", "partial", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
   if (["processing", "running"].includes(status ?? "")) return "bg-amber-50";
   if (["pending", "queued"].includes(status ?? "")) return "bg-sky-50";
   return getStageBackgroundClass(info.state);
