@@ -273,6 +273,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
+    requireWorkflowOwner: () => ({ id: 7 }), actionablesActivityKey: () => "test", announceActionablesActivity: () => () => {},
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     recommendationAuditEnabled: false,
     scoreMatrixFormulaConfig: {},

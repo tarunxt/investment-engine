@@ -126,6 +126,8 @@ import {
   AutoRebalanceAuditSession,
   assertAutoRebalanceRunMetadata,
   autoRebalanceAuditKey,
+  actionablesActivityKey,
+  announceActionablesActivity,
   restoreAutoRebalanceAuditState,
   type AutoRebalanceAuditState,
 } from "@/lib/autoRebalanceAudit";
@@ -7274,7 +7276,9 @@ ${zerodhaExecutionMode === "direct_market"
 
         currentStage = "actionables";
         if (shouldRunCurrentStage("actionables")) {
+          const releaseActivity = announceActionablesActivity(actionablesActivityKey(requireWorkflowOwner(runtimeOwner).id, runMetadata.auto_rebalance_portfolio, runMetadata.auto_rebalance_sequence));
           try {
+          markRunning(portfolio, "actionables", { rebalanceInputs: finalRebalanceInputs.length });
           // Freeze the actual calculation before marking this system stage complete.
           // Never silently substitute a latest run for a missing upstream result.
           if (!finalRebalanceInputs.length || !generatedTechnicalRun) {
@@ -7304,12 +7308,11 @@ ${zerodhaExecutionMode === "direct_market"
               scorePolicy: "score-matrix-raw-effective-v2", estimate: row.formulaEstimate,
               formula_inputs: row.detail, valid_suggestions: row.stock.totalSuggestions })),
           };
-          markRunning(portfolio, "actionables", { rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length });
-          await onDashboardRefresh();
           await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt, runStatus: "saved calculation",
             rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal,
           });
+          await Promise.resolve().then(onDashboardRefresh).catch(error => console.error("Could not refresh dashboard after Actionables", error));
           window.dispatchEvent(new CustomEvent("final-actionables-refresh", {
             detail: {
               market,
@@ -7318,6 +7321,8 @@ ${zerodhaExecutionMode === "direct_market"
           }));
           } catch (error) {
             continueAfterStageFailure("actionables", error);
+          } finally {
+            releaseActivity();
           }
         } else {
           completeSkippedStage(
