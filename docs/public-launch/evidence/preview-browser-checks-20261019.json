@@ -1,0 +1,25 @@
+{
+  "checked_at": "2026-10-19T16:16:52.029005+00:00",
+  "url": "http://localhost:54987/console/profile/preferences",
+  "method": "separate Chrome tab through CUA after parent-confirmed UAT2 handoff",
+  "observations": [
+    "Synthetic A identity visible",
+    "Dark theme and India Standard Time saved; success message visible",
+    "Reload retained selected Dark and India Standard Time",
+    "Logout returned to login",
+    "Logged-out direct preferences visit redirected to login",
+    "Synthetic B logged in via real form; identity visible",
+    "B retained independent Light theme and UTC",
+    "B Profile showed own synthetic name and bio",
+    "Google Sheets displayed explicit synthetic unavailable response; backend GET status/auth-url both 503",
+    "Signed back into A after B logout: own identity, Dark theme and India Standard Time remained selected; sidebar also showed Dark"
+  ],
+  "limitations": [
+    "Transient initial post-reload sidebar Light indicator while saved dropdown/page were Dark; after re-login both showed Dark. No UI source changes.",
+    "No PostgreSQL/Redis, real Google/provider or UAT acceptance"
+  ],
+  "screenshot_paths": [
+    ".runtime/stage01-preview/browser-integrations-disabled.jpg",
+    ".runtime/stage01-preview/browser-usera-preferences.jpg"
+  ]
+}

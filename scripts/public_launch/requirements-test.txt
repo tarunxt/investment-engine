@@ -1,0 +1,12 @@
+# Runtime libraries use the repository constraint file at installation time.
+pytest>=8,<9
+pytest-asyncio>=0.25,<2
+SQLAlchemy
+fastapi
+google-auth
+requests
+cryptography
+python-jose
+passlib
+argon2-cffi
+pydantic-settings
