@@ -28,6 +28,16 @@ class IndMoneyUsPortfolioSnapshotRepository:
         )
         return result.scalar_one_or_none()
 
+    async def last_paste(self, user_id: int):
+        model = IndMoneyUsPortfolioSnapshot
+        result = await self._db.execute(
+            select(model.raw_text, model.created_at)
+            .where(model.user_id == user_id, model.source == "manual_paste")
+            .order_by(model.created_at.desc(), model.id.desc())
+            .limit(1)
+        )
+        return result.one_or_none()
+
     async def get_by_user_and_id(
         self,
         user_id: int,

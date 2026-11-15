@@ -797,9 +797,10 @@ async def update_auto_rebalance_stage(
     )
     if not was_terminal and body.error_message is not None:
         stage_record.error_message = body.error_message
-    stage_record.started_at = stage_record.started_at or body.started_at or datetime.now(timezone.utc)
+    recorded_at = datetime.now(timezone.utc)
+    stage_record.started_at = stage_record.started_at or body.started_at or recorded_at
     if not was_terminal and status in AUTO_REBALANCE_TERMINAL_STATUSES:
-        stage_record.completed_at = body.completed_at or datetime.now(timezone.utc)
+        stage_record.completed_at = body.completed_at or recorded_at
 
     # The parent lock serializes different stage writers too. A delayed sync
     # update cannot move a later stage backward or reopen a terminal workflow.
@@ -857,6 +858,24 @@ async def update_auto_rebalance_stage(
     if not response:
         raise HTTPException(500, detail="Auto-rebalance stage could not be serialized")
     return response
+
+
+@router.post("/auto-rebalance-history/{portfolio}/{sequence}/reconcile", response_model=AutoRebalanceStageResponse)
+async def reconcile_auto_rebalance(portfolio: str, sequence: int, db: AsyncSession = Depends(get_async_db),
+                                   current_user: User = Depends(get_current_user)):
+    from .final_reconciliation import recover_final
+    workflow = (await db.execute(select(AutoRebalanceWorkflow).where(
+        AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio,
+        AutoRebalanceWorkflow.sequence == sequence,
+    ).options(selectinload(AutoRebalanceWorkflow.stages)).with_for_update())).scalar_one_or_none()
+    if workflow is None:
+        raise HTTPException(404, "Workflow not found")
+    if workflow.status not in {"processing", "running", "completed", "partial"}:
+        raise HTTPException(409, "Workflow is ineligible for final reconciliation")
+    capture = await recover_final(db, workflow)
+    return await update_auto_rebalance_stage(portfolio, sequence, "actionables", AutoRebalanceStageUpdateRequest(
+        status="completed", summary={"frozen_final": capture, "run_status": "saved calculation",
+                                    "recommended_stocks": len(capture["rows"])}), db, current_user)
 
 
 @router.post("/auto-rebalance-completion-email")

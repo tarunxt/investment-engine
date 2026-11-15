@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,10 +8,7 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
 test("Stage 3 working status exposes a retry that reuses Stage 2 output for both steps", () => {
-  const source = readFileSync(
-    new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /aria-label="Retry Stage 3 from saved Stage 2 output"/);
   assert.match(source, /effectiveInvestOnlyRequest \?\? investOnlySource\.plan\.request/);
@@ -1303,13 +1301,7 @@ test("Stage 3 invest execution plan reopens a saved-run buy after a later redeem
 });
 
 test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investments in Stage 2", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
   const statusSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/bullpenAutoRunStageStatus.ts",
@@ -1330,10 +1322,13 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /CheckCircle2/);
   assert.match(source, /Open Stage 3 \$\{counter\.label\.toLowerCase\(\)\} details/);
   assert.match(source, /Explain Stage 2 to Stage 3 planned strategy/);
-  assert.match(source, /formatOddsPercent\(candidate\.llmYesOdds\)/);
-  assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
-  assert.match(source, /formatReturnsPerDay\(candidate\.returnsPerDay\)/);
-  assert.match(source, /formatInvestAmount\(candidate\.amountToBeInvested\)/);
+  // Shared table owns probability/return/amount cells; the schedule supplies rows.
+  const table = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx", import.meta.url), "utf8");
+  assert.match(source, /questionRows = buildStage2TopTenEventsSummaryRows\(rows\)/);
+  assert.match(table, /question.llmYesOdds/);
+  assert.match(table, /question.llmNoOdds/);
+  assert.match(table, /question.returnsPerDay/);
+  assert.match(table, /question.amountToBeInvested/);
   assert.match(source, />LLM Yes Odds<\/th>/);
   assert.match(source, />LLM No Odds<\/th>/);
   assert.match(source, />Returns\/day<\/th>/);
@@ -1347,13 +1342,7 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
 });
 
 test("Stage 3 schedule card distinguishes its transfer queue from persisted plans", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /Stage 3 Queue Preview/);
   assert.match(source, /Current Stage 3 buy and sell queue/);

@@ -24,7 +24,7 @@ export function rebalanceUniverse(runs: RunResponse[]) {
       const cells = (line: string) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
       const header = lines.findIndex(line => /Stock Symbol/i.test(line) && /Current Units/i.test(line));
       const names = header < 0 ? [] : cells(lines[header]).map(cell => cell.toLowerCase());
-      for (const line of lines.slice(header + 2)) { const values = cells(line); if (values.length !== names.length) { warnings.add('Saved holdings table has malformed rows; coverage may be incomplete.'); continue; } add(values[names.indexOf('exchange')], values[names.indexOf('stock symbol')], `Run #${run.id} saved holdings`); }
+      for (const line of lines.slice(header + 2)) { const values = cells(line); if (values.length !== names.length) { warnings.add('Saved holdings table has malformed rows; coverage may be incomplete.'); continue; } add(values[names.includes('exchange') ? names.indexOf('exchange') : names.indexOf('market')], values[names.indexOf('stock symbol')], `Run #${run.id} saved holdings`); }
     } else warnings.add(`Run #${run.id}: saved holdings input unavailable.`);
     const swing = /##\s*2\.\s*Completed Swing Trade Runs[^\n]*([\s\S]*?)(?=\n##\s*3\.|$)/i.exec(prompt)?.[1];
     if (swing) {

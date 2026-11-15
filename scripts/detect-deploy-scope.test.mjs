@@ -12,6 +12,8 @@ import {
   combineDeploymentScopes,
 } from "./detect-deploy-scope.mjs";
 
+import { resolveReleaseScope } from "./resolve-deploy-scope.mjs";
+
 const execFileAsync = promisify(execFile);
 const scopeScript = fileURLToPath(
   new URL("./detect-deploy-scope.mjs", import.meta.url),
@@ -158,4 +160,27 @@ test("deploy and recovery use independent queues plus one production host lock",
     );
     assert.match(workflow, /\bflock\b/);
   }
+});
+
+test("operator-managed SSH windows require an explicit scope and immutable SHA", () => {
+  const sha = "1".repeat(40);
+  const io = { git: () => sha };
+  const input = { event: "workflow_dispatch", ref: "refs/heads/main", sha, requestedScope: "full", runnerSshWindow: true };
+  for (const expectedSha of [undefined, "", "2".repeat(40)]) {
+    assert.throws(() => resolveReleaseScope({ ...input, expectedSha }, io), /exact reviewed SHA/);
+  }
+  assert.equal(resolveReleaseScope({ ...input, expectedSha: sha }, io).scope, "full-stack");
+  assert.throws(() => resolveReleaseScope({ ...input, expectedSha: sha, requestedScope: "auto" }, io), /explicit frontend or full/);
+  assert.equal(resolveReleaseScope({ ...input, runnerSshWindow: false }, io).scope, "full-stack");
+});
+
+test("both production runners publish their own source before attempting SSH", () => {
+  const [build, deploy] = deployWorkflow.split("  deploy-production:");
+  for (const [job, prefix, firstRemote] of [[build, "&", "uses: appleboy/ssh-action"], [deploy, "*", "uses: appleboy/scp-action"]]) {
+    const positions = ["record-runner-address", "publish-runner-address", "wait-for-ssh"].map(name => job.indexOf(prefix + name));
+    positions.push(job.indexOf(firstRemote));
+    assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])));
+  }
+  assert.match(build, /retention-days: 1\n/);
+  assert.match(build, /github\.run_attempt.*github\.job.*steps\.runner-address\.outputs\.ipv4/);
 });
