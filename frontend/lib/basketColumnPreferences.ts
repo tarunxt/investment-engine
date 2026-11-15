@@ -1,4 +1,4 @@
-/** Tab-session display preferences only; callers include authenticated owner/broker/market. */
+/** Legacy tab-session display preferences; callers include authenticated owner/broker/market. */
 const prefix = "credx:basket-columns:v1:";
 function labels(value: unknown): string[] {
   return Array.isArray(value) && value.length <= 100 && value.every(label => typeof label === "string" && label.length <= 128)
@@ -26,14 +26,30 @@ export function normalizeBasketColumnLayout(value: unknown): BasketColumnLayout 
   return { hidden: labels(raw.hidden), order: labels(raw.order), names };
 }
 export function readBasketColumnLayout(scope: string): BasketColumnLayout {
-  try {
-    const raw = window.sessionStorage.getItem('credx:basket-layout:v2:' + scope);
-    return raw ? normalizeBasketColumnLayout(JSON.parse(raw)) : { ...emptyBasketColumnLayout(), hidden: readBasketColumnPreferences(scope) };
-  } catch { return emptyBasketColumnLayout(); }
+  const key = 'credx:basket-layout:v2:' + scope;
+  for (const store of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      const raw = window[store].getItem(key);
+      if (!raw) continue;
+      const layout = normalizeBasketColumnLayout(JSON.parse(raw));
+      if (store === 'sessionStorage') writeBasketColumnLayout(scope, layout);
+      return layout;
+    } catch { /* Try the next available store. */ }
+  }
+  const hidden = readBasketColumnPreferences(scope);
+  const layout = { ...emptyBasketColumnLayout(), hidden };
+  if (hidden.length) writeBasketColumnLayout(scope, layout);
+  return layout;
 }
 export function writeBasketColumnLayout(scope: string, layout: BasketColumnLayout) {
-  try { window.sessionStorage.setItem('credx:basket-layout:v2:' + scope, JSON.stringify(normalizeBasketColumnLayout(layout))); }
-  catch { /* In-memory controls remain usable. */ }
+  const key = 'credx:basket-layout:v2:' + scope;
+  const value = JSON.stringify(normalizeBasketColumnLayout(layout));
+  for (const store of ['localStorage', 'sessionStorage'] as const) {
+    try {
+      window[store].setItem(key, value);
+      return;
+    } catch { /* Restricted storage must never prevent using the basket. */ }
+  }
 }
 export function orderedBasketColumns(ids: string[], order: string[] = []): string[] {
   return [...new Set([...order.filter(id => ids.includes(id)), ...ids])];
