@@ -31,6 +31,9 @@ class ServiceTests(TestCase):
         self.assertEqual(unit['Service']['MemoryMax'],'256M')
         self.assertEqual(unit['Service']['NoNewPrivileges'],'yes')
         self.assertEqual(unit['Service']['ProtectSystem'],'strict')
+        self.assertEqual(unit['Service']['ProtectHome'],'yes')
+        self.assertEqual(unit['Service']['ExecStart'].split()[0],
+                         '__IMMUTABLE_VIEWER_ARTIFACT__/venv/bin/python')
         self.assertEqual(unit['Service']['SocketBindDeny'],'any')
         self.assertNotIn('EnvironmentFile',unit['Service'])
         self.assertEqual(unit['Unit']['Requires'],'investor-database-viewer.socket')

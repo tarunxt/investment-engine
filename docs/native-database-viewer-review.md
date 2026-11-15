@@ -145,9 +145,15 @@ separate socket-activated service uses `DynamicUser`, systemd credential deliver
 resource/sandbox limits and no application environment or financial-service
 startup dependency. The executable artifact path is a deliberate unresolved
 placeholder: templates are not ready for installation. The operator must stage
-only serve.py, browser.py, catalog.json and privilege-audit.review.sql from the
+serve.py, browser.py, catalog.json, privilege-audit.review.sql and other_database_audit.sql from the
 reviewed exact source SHA into a root-owned immutable directory, verify hashes,
-verify interpreter access/import compatibility, and render the unit to that path.
+and stage the reviewed Python runtime at `venv/bin/python` inside that directory.
+Use a root-owned release directory outside `/home` (for example under `/opt`).
+Verify the interpreter, its symlink targets and its modules are accessible with
+`ProtectHome=yes` and the dynamic service identity. Run `serve.verify_dependencies()`
+in that environment before rendering the unit. Before enabling the socket, compare
+the frontend owner ID to the reviewed owner predicate in each of the eleven live
+view definitions. Repeat this check when changing ownership.
 Do not include fixtures/tests, reuse write credentials, install packages, alter
 pg_hba/PUBLIC defaults, or start anything without the remaining review gates.
 
