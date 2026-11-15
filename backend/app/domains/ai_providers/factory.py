@@ -46,19 +46,19 @@ class ProviderFactory:
     _provider_internet_access: dict[str, InternetAccessInfo] = {
         "openai": {
             "mode": "conditional",
-            "label": "Search only if forced",
+            "label": "Public market topics only",
             "force_token": "[ENABLE_WEB_SEARCH]",
             "caveat": (
                 "The OpenAI adapter enables live web tools when the prompt asks for "
-                "current context or explicitly includes [ENABLE_WEB_SEARCH]."
+                "current context or explicitly includes [ENABLE_WEB_SEARCH]; only closed public market/topic queries are admitted."
             ),
         },
         "gemini": {
-            "mode": "always_enabled",
-            "label": "Search attached",
+            "mode": "none",
+            "label": "Native search unavailable",
             "caveat": (
-                "The Gemini adapter attaches Google Search by default for normal runs. "
-                "Repair prompts disable search to keep output formatting deterministic."
+                "Native grounding is disabled because provider-managed queries cannot pass "
+                "through the application's public-query projection."
             ),
         },
         "deepseek": {
@@ -66,7 +66,7 @@ class ProviderFactory:
             "label": "Can search, not guaranteed",
             "caveat": (
                 "The DeepSeek adapter exposes a custom web_search tool with tool_choice=auto. "
-                "Whether search actually ran must be verified from the saved run metadata."
+                "Only closed public market/topic queries are admitted; saved metadata records admitted queries."
             ),
         },
         "anthropic": {

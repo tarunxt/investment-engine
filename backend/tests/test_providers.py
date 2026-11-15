@@ -136,7 +136,7 @@ class ProviderFactoryTests(unittest.TestCase):
         providers = {item["name"]: item for item in ProviderFactory.list_providers()}
 
         self.assertEqual(providers["openai"]["internet_access"]["mode"], "conditional")
-        self.assertEqual(providers["gemini"]["internet_access"]["mode"], "always_enabled")
+        self.assertEqual(providers["gemini"]["internet_access"]["mode"], "none")
         self.assertEqual(providers["deepseek"]["internet_access"]["mode"], "tool_auto")
         self.assertEqual(providers["anthropic"]["internet_access"]["mode"], "none")
 
@@ -214,6 +214,7 @@ class ProviderCostSelectionTests(unittest.TestCase):
         self.assertEqual(latest_model_cost, 0.0008)
 
 
+@patch.object(GeminiProvider, "__init__", lambda self: None)
 class GeminiProviderConfigTests(unittest.TestCase):
     def test_flash_generation_disables_thinking_and_uses_larger_output_budget(self):
         provider = GeminiProvider()
@@ -238,7 +239,7 @@ class GeminiProviderConfigTests(unittest.TestCase):
 
         config = stream_mock.call_args.kwargs["config"]
         self.assertEqual(config.max_output_tokens, MAX_OUTPUT_TOKENS)
-        self.assertIsNotNone(config.tools)
+        self.assertIsNone(config.tools)
         self.assertIsNotNone(config.thinking_config)
         self.assertEqual(config.thinking_config.thinking_budget, 0)
 
@@ -267,7 +268,7 @@ class GeminiProviderConfigTests(unittest.TestCase):
         config = stream_mock.call_args.kwargs["config"]
         self.assertIsNone(config.tools)
 
-    def test_generate_captures_grounded_web_metadata(self):
+    def test_generate_ignores_unadmitted_grounding_metadata(self):
         provider = GeminiProvider()
         stream_mock = MagicMock(
             return_value=[
@@ -305,9 +306,9 @@ class GeminiProviderConfigTests(unittest.TestCase):
             model="gemini-2.5-flash",
         )
 
-        self.assertEqual(result.web_search_used, True)
-        self.assertEqual(result.web_search_queries, ["UEFA Euro 2024 winner"])
-        self.assertEqual(result.web_sources, ["https://www.uefa.com/euro2024/"])
+        self.assertEqual(result.web_search_used, False)
+        self.assertEqual(result.web_search_queries, [])
+        self.assertEqual(result.web_sources, [])
 
 
 class ExecuteAIJobTests(unittest.TestCase):

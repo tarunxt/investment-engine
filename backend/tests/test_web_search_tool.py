@@ -19,17 +19,17 @@ class WebSearchToolTests(unittest.TestCase):
         ddg_search_mock,
         bing_rss_search_mock,
     ):
-        ddg_search_mock.return_value = '{"query":"AMD earnings date","answer":null,"results":[]}'
+        ddg_search_mock.return_value = '{"query":"NIFTY 50 earnings announcements","answer":null,"results":[]}'
         bing_rss_search_mock.return_value = (
-            '{"query":"AMD earnings date","answer":null,"results":[{"title":"AMD IR","url":"https://example.com"}]}'
+            '{"query":"NIFTY 50 earnings announcements","answer":null,"results":[{"title":"AMD IR","url":"https://example.com"}]}'
         )
 
         with patch.object(web_search.settings, "tavily_api_key", None):
-            payload = web_search._web_search("AMD earnings date", 5)
+            payload = web_search._web_search("NIFTY 50 earnings announcements", 5)
 
         self.assertTrue(web_search._payload_has_results(payload))
-        ddg_search_mock.assert_called_once_with("AMD earnings date", 5)
-        bing_rss_search_mock.assert_called_once_with("AMD earnings date", 5)
+        ddg_search_mock.assert_called_once_with("NIFTY 50 earnings announcements", 5)
+        bing_rss_search_mock.assert_called_once_with("NIFTY 50 earnings announcements", 5)
 
     @patch("app.domains.ai_providers.tools.web_search.requests.get")
     def test_bing_rss_search_parses_items(self, requests_get_mock):
@@ -48,7 +48,7 @@ class WebSearchToolTests(unittest.TestCase):
         )
         requests_get_mock.return_value.raise_for_status.return_value = None
 
-        payload = web_search._bing_rss_search("AMD earnings date", 5)
+        payload = web_search._bing_rss_search("NIFTY 50 earnings announcements", 5)
 
         self.assertTrue(web_search._payload_has_results(payload))
         self.assertIn("AMD Investor Relations", payload)

@@ -15,7 +15,6 @@ from app.domains.ai_providers.base import (
 )
 from app.domains.ai_providers.web_metadata import (
     dedupe_strings,
-    merge_web_metadata,
 )
 
 MODEL_PRICING_PER_1M_TOKENS = {
@@ -194,16 +193,14 @@ class GeminiProvider(BaseAIProvider):
         model: str,
         usage_retry: bool = False,
     ) -> AIProviderResponse:
-        tools: list[types.Tool] = []
-
-        if not _should_disable_search(prompt):
-            tools.append(types.Tool(google_search=types.GoogleSearch()))
-
+        # Native grounding chooses queries inside the provider and cannot enforce
+        # our public-field projection. Keep it disabled; original analysis input
+        # remains unchanged. Re-enable only through a separately mediated route.
         config = types.GenerateContentConfig(
             thinking_config=_thinking_config_for_model(model),
             temperature=0.7,
             max_output_tokens=MAX_OUTPUT_TOKENS,
-            tools=tools if tools else None,
+            tools=None,
         )
 
         contents = [
@@ -255,15 +252,8 @@ class GeminiProvider(BaseAIProvider):
                 if metadata:
                     usage_metadata = metadata
 
-                chunk_queries, chunk_sources = _extract_grounding_web_metadata(chunk)
-                web_search_used, web_search_queries, web_sources = merge_web_metadata(
-                    web_search_used,
-                    web_search_queries,
-                    web_sources,
-                    response_used=bool(chunk_queries or chunk_sources),
-                    response_queries=chunk_queries,
-                    response_sources=chunk_sources,
-                )
+                # No search was admitted. Unsolicited grounding metadata cannot
+                # create query history or evidence provenance.
         full_text = "".join(full_text_parts)
 
         tokens_in = int(
@@ -283,17 +273,6 @@ class GeminiProvider(BaseAIProvider):
             )
             or 0
         )
-        tool_use_prompt_tokens = int(
-            getattr(
-                usage_metadata,
-                "tool_use_prompt_token_count",
-                0,
-            )
-            or 0
-        )
-        if tool_use_prompt_tokens > 0:
-            web_search_used = True
-
         return AIProviderResponse(
             content=full_text.strip(),
             tokens_in=tokens_in,

@@ -17,6 +17,7 @@ from app.domains.ai_providers.base import (
     ProviderCallError,
 )
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.tools.public_queries import admitted_query
 from app.domains.ai_providers.web_metadata import (
     extract_web_search_sources,
     merge_web_metadata,
@@ -239,20 +240,22 @@ class DeepSeekProvider(BaseAIProvider):
                     "max_results": int(call["max_results"]),
                 },
             )
-            search_queries.append(query)
-            search_sources.extend(extract_web_search_sources(result))
-            search_payloads.append(
-                {
-                    "query": query,
-                    "max_results": int(call["max_results"]),
-                    "result": result,
-                }
-            )
-            if len(search_payloads) >= _MAX_DSML_RECOVERY_SEARCHES:
+            admitted = admitted_query(result)
+            if admitted is not None:
+                search_queries.append(admitted)
+                payload = json.loads(result)
+                if payload.get("answer") or payload.get("results"):
+                    search_sources.extend(extract_web_search_sources(result))
+                    search_payloads.append({"query": admitted, "result": result})
+            if len(seen_queries) >= _MAX_DSML_RECOVERY_SEARCHES:
                 break
 
-        if not search_payloads:
-            return tool_trace, empty_token_usage, [], []
+        if search_payloads:
+            evidence_instruction = "Use only the collected search results for live web evidence."
+            evidence = f"Collected search results JSON:\n{json.dumps(search_payloads, ensure_ascii=False)}"
+        else:
+            evidence_instruction = "No live search evidence is available. Disclose this limitation."
+            evidence = "Do not infer current facts or invent sources."
 
         if output_kind == "json":
             recovery_instruction = (
@@ -276,7 +279,7 @@ class DeepSeekProvider(BaseAIProvider):
                 {
                     "role": "system",
                     "content": (
-                        "You are given live web-search results already collected for the user. "
+                        f"{evidence_instruction} "
                         "Do not call tools. Do not output XML, DSML, or tool traces. "
                         f"{recovery_instruction}"
                     ),
@@ -285,10 +288,8 @@ class DeepSeekProvider(BaseAIProvider):
                     "role": "user",
                     "content": (
                         f"Original user request:\n{prompt}\n\n"
-                        "Your previous attempt returned an invalid tool-call trace instead of the "
-                        "final answer. Use the collected search results below and produce the final "
-                        "markdown table now.\n\n"
-                        f"Collected search results JSON:\n{json.dumps(search_payloads, ensure_ascii=False)}"
+                        "Return the final answer in the requested format.\n\n"
+                        f"{evidence}"
                     ),
                 },
             ],
@@ -375,9 +376,9 @@ class DeepSeekProvider(BaseAIProvider):
                 break
 
             logger.info(
-                "DeepSeek tool calls round %d: %s",
+                "DeepSeek tool calls round %d: %d",
                 round_num + 1,
-                [tc.function.name for tc in tool_calls],
+                len(tool_calls),
             )
 
             # Append assistant message with tool_calls as a plain dict.
@@ -406,15 +407,22 @@ class DeepSeekProvider(BaseAIProvider):
             for tc in tool_calls:
                 try:
                     args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, TypeError):
                     args = {}
-                result = web_search_tool.execute(tc.function.name, args)
-                query = args.get("query")
+                if not isinstance(args, dict):
+                    args = {}
+                if tools_enabled:
+                    result = web_search_tool.execute(tc.function.name, args)
+                    query = admitted_query(result)
+                else:
+                    result = json.dumps({"answer": None, "results": [],
+                                         "errors": ["Tools disabled for this request"]})
+                    query = None
                 web_search_used, web_search_queries, web_sources = merge_web_metadata(
                     web_search_used,
                     web_search_queries,
                     web_sources,
-                    response_used=True,
+                    response_used=query is not None,
                     response_queries=[query] if isinstance(query, str) and query.strip() else None,
                     response_sources=extract_web_search_sources(result),
                 )
@@ -474,7 +482,7 @@ class DeepSeekProvider(BaseAIProvider):
                 )
 
         cleaned = content.strip()
-        if _looks_like_tool_trace(cleaned):
+        if tools_enabled and _looks_like_tool_trace(cleaned):
             (
                 recovered,
                 recovered_token_usage,

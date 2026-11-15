@@ -12,6 +12,7 @@ import httpx
 
 from app.core.logging import get_logger
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.tools.public_queries import admitted_query
 from app.domains.ai_providers.web_metadata import dedupe_strings
 from app.domains.polymarket.stage2_models import (
     EvidencePacketV2,
@@ -1212,7 +1213,7 @@ def prepare_polymarket_event_context(
         search_queries: list[str] = []
         evidence_packet: EvidencePacketV2 | None = None
         if context.evidence_options.require_fresh_internet_evidence:
-            search_queries = _build_search_queries(
+            candidate_queries = _build_search_queries(
                 question,
                 refreshed_question=refreshed_question,
                 rules_text=refreshed_rules,
@@ -1226,14 +1227,17 @@ def prepare_polymarket_event_context(
                 yes_definition=refreshed_rule_evaluation.yes_definition,
             )
             seen_result_keys: set[str] = set()
-            for query in search_queries:
+            for query in candidate_queries:
                 raw_payload = web_search_tool.execute(
                     "web_search",
                     {"query": query, "max_results": MAX_QUERY_RESULTS},
                 )
                 parsed_results, query_warnings = _parse_search_payload(raw_payload)
                 question_warnings.extend(query_warnings)
-                all_queries.append(query)
+                admitted = admitted_query(raw_payload)
+                if admitted is not None:
+                    search_queries.append(admitted)
+                    all_queries.append(admitted)
                 for parsed in parsed_results:
                     result_key = _normalize_url(parsed.get("url")) or _content_fingerprint(
                         parsed.get("title"),

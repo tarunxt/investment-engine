@@ -6,6 +6,7 @@ import re
 from urllib.parse import urlparse
 
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.tools.public_queries import admitted_query
 from app.domains.polymarket.stage2_models import (
     EvidencePacketV2,
     Stage2EvidenceClaim,
@@ -367,12 +368,16 @@ def build_evidence_packet(
     *,
     built_at: str,
 ) -> EvidencePacket:
-    queries = build_evidence_queries(market, rules)
+    candidate_queries = build_evidence_queries(market, rules)
+    queries = []
     warnings: list[str] = []
     sources: list[Stage2EvidenceSource] = []
     seen_keys: set[str] = set()
-    for query in queries:
+    for query in candidate_queries:
         payload = web_search_tool.execute("web_search", {"query": query, "max_results": 4})
+        admitted = admitted_query(payload)
+        if admitted is not None:
+            queries.append(admitted)
         query_results, query_warnings = _parse_search_payload(payload)
         warnings.extend(query_warnings)
         for row in query_results:
