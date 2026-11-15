@@ -1398,7 +1398,9 @@ def execute_ai_job(self, job_id: int) -> None:
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
-                    if not rebalance_table_issue:
+                    if not rebalance_table_issue or (
+                        _parsed_rebalance_rows and rebalance_table_issue.startswith("partial rebalance table")
+                    ):
                         break
                     if _job_was_cancelled(repo, job_id):
                         logger.info("Stopping cancelled rebalance repair job %s", job_id)
