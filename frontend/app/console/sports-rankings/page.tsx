@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useReviewDialog } from '@/hooks/useReviewDialog';
 import { RankingReadError, readRankingJson as read, type RankingErrorDetails } from '@/lib/sportsRankingsApi';
 
 type RankingRow = { name: string; rank: number | null; points: number | null; imported_names: string[]; rating?: number; nrr?: number; group?: string; record?: string; rank_label?: string; country?: string; played?: number; won?: number; drawn?: number; lost?: number; goal_difference?: number; roster?: string };
@@ -46,6 +47,7 @@ export default function SportsRankingsPage() {
   const [error, setError] = useState<RankingErrorDetails | null>(null);
   const [detailError, setDetailError] = useState<RankingErrorDetails | null>(null);
   const [errorDialog, setErrorDialog] = useState<RankingErrorDetails | null>(null);
+  const errorReviewDialog = useReviewDialog<HTMLElement>(Boolean(errorDialog), () => setErrorDialog(null));
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -149,8 +151,8 @@ export default function SportsRankingsPage() {
       <div className="flex flex-wrap gap-2"><button className="rounded-md border border-amber-400 px-3 py-1.5 font-semibold hover:bg-amber-100 dark:hover:bg-amber-900" onClick={reload}>Retry now</button><button type="button" aria-haspopup="dialog" className="rounded-md border border-amber-400 px-3 py-1.5 font-semibold hover:bg-amber-100 dark:hover:bg-amber-900" onClick={() => setErrorDialog(issue)}>View details</button></div>
     </div>; })()}
     {errorDialog && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" onMouseDown={event => { if (event.currentTarget === event.target) setErrorDialog(null); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="rankings-error-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
-        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-red-600 dark:text-red-300">Sports Rankings diagnostic</p><h2 id="rankings-error-title" className="mt-1 text-2xl font-semibold">{errorDialog.title}</h2></div><button autoFocus aria-label="Close error details" className="rounded-lg border px-3 py-1.5" onClick={() => setErrorDialog(null)}>Close</button></div>
+      <section {...errorReviewDialog} role="dialog" aria-modal="true" aria-labelledby="rankings-error-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100">
+        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-red-600 dark:text-red-300">Sports Rankings diagnostic</p><h2 id="rankings-error-title" className="mt-1 text-2xl font-semibold">{errorDialog.title}</h2></div><button aria-label="Close error details" className="rounded-lg border px-3 py-1.5" onClick={() => setErrorDialog(null)}>Close</button></div>
         <div className="mt-5 space-y-5 text-sm">
           <div><h3 className="font-semibold">What happened</h3><p className="mt-1 text-slate-700 dark:text-slate-300">{errorDialog.cause}</p>{errorDialog.serviceMessage && <p className="mt-2 rounded-lg bg-slate-100 p-3 font-mono text-xs dark:bg-slate-800">Service response: {errorDialog.serviceMessage}</p>}</div>
           <div><h3 className="font-semibold">How to fix it</h3><ol className="mt-2 list-decimal space-y-2 pl-5 text-slate-700 dark:text-slate-300">{errorDialog.steps.map(step => <li key={step}>{step}</li>)}</ol></div>
