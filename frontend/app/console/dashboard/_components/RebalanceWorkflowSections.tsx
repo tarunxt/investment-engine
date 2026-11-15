@@ -348,6 +348,21 @@ function buildInitialStates() {
   };
 }
 
+// Older tabs may have persisted history fields on upcoming/running stages.
+// Keep polling identity and terminal current failures; refresh running metrics
+// from that exact job instead of trusting fields inherited by older code.
+function restoreCurrentWorkflowStages(stages: WorkflowState): WorkflowState {
+  return STAGE_ORDER.reduce((next, stage) => {
+    const info = stages[stage];
+    next[stage] = info.state === "idle" || info.state === "queued"
+      ? { state: info.state }
+      : info.state === "running"
+        ? { state: info.state, activeRunId: info.activeRunId, startedAt: info.startedAt, runStatus: info.runStatus }
+        : info;
+    return next;
+  }, {} as WorkflowState);
+}
+
 function readPersistedWorkflow(): PersistedWorkflow | null {
   if (typeof window === "undefined") return null;
   try {
@@ -4374,7 +4389,7 @@ export function RebalanceWorkflowSections({
     Record<WorkflowPortfolio, WorkflowState>
   >(() =>
     initialRunningPortfolio && initialPersisted?.states
-      ? initialPersisted.states
+      ? { ...initialPersisted.states, [initialRunningPortfolio]: restoreCurrentWorkflowStages(initialPersisted.states[initialRunningPortfolio]) }
       : buildInitialStates(),
   );
   const [ledgerMarket, setLedgerMarket] = useState<WorkflowPortfolio>(() => initialRunningPortfolio ?? "zerodha");
@@ -5503,6 +5518,7 @@ ${zerodhaExecutionMode === "direct_market"
         STAGE_ORDER.forEach((stage) => {
           const existing = current[portfolio][stage];
           const incoming = nextByPortfolio[portfolio][stage];
+          if (isWorkflowExecutingRef.current || runningPortfolio === portfolio) return;
           if (existing.state === "running" || existing.state === "queued") return;
           const existingAt = parseTimestampMs(existing.completedAt ?? existing.endedAt);
           const incomingAt = parseTimestampMs(incoming.completedAt);
@@ -5520,7 +5536,7 @@ ${zerodhaExecutionMode === "direct_market"
       });
       return next;
     });
-  }, [apiService, runtimeOwner, usdInrRate]);
+  }, [apiService, runtimeOwner, usdInrRate, runningPortfolio]);
 
   useEffect(() => {
     const refreshSavedEvidence = () => {
@@ -5650,15 +5666,14 @@ ${zerodhaExecutionMode === "direct_market"
   );
 
   const resetPortfolio = useCallback((portfolio: WorkflowPortfolio) => {
+    // Invalidate reads started before the Run click, including before reservation.
+    savedStageReadGeneration.current += 1;
+    setWorkflowHistoryError(null);
     setStates((current) => ({
       ...current,
       [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
-        const info = current[portfolio][stage];
-        acc[stage] = {
-          ...info,
-          state: "idle",
-          activeRunId: null,
-        };
+        // Saved evidence remains in audit/history, never in a new run's cells.
+        acc[stage] = { state: "idle" };
         return acc;
       }, {} as WorkflowState),
     }));
@@ -7849,7 +7864,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         ) : null}
 
-        <WorkflowStageLedger market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
+        <WorkflowStageLedger active={runningPortfolio === section.portfolio} market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
