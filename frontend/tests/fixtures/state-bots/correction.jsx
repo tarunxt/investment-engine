@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { TradingBotsOverviewPage } from '../../../app/console/trading-bots/_components/TradingBotsOverviewPage';
-import { StageOneOutputDialog, buildRunDetailScanCandidateDialogState, StageTwoLlmRunDetailsDialog } from '../../../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard';
+import { StageOneOutputDialog } from '../../../app/console/bullpen-ai/_components/BullpenScheduleDetails';
+import { buildRunDetailScanCandidateDialogState } from '../../../app/console/bullpen-ai/_components/bullpenScheduleShared';
+import { StageTwoLlmRunDetailsDialog } from '../../../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard';
 import { buildBullpenAutoRunWorkflowView } from '../../../app/console/bullpen-ai/_components/bullpenAutoRunProgress';
 import BullpenAiPage from '../../../app/console/bullpen-ai/_components/BullpenAiPageClient';
 import { scopeBullpenWorkspaceStorageKey } from '../../../lib/bullpenStageOneSettings';

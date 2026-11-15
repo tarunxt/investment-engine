@@ -18,7 +18,6 @@ const result = await build({ entryPoints: ['tests/fixtures/state-bots/correction
   b.onLoad({ filter: /BullpenAiPageClient\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8')
     .replace(/const BULLPEN_ACCOUNT_USERNAME = [\s\S]*?;/, 'const BULLPEN_ACCOUNT_USERNAME = "synthetic-account";')
     .replace(/const BULLPEN_ACCOUNT_WALLET_FALLBACK =\s*[\s\S]*?;/, 'const BULLPEN_ACCOUNT_WALLET_FALLBACK = "synthetic-wallet";'), loader: 'tsx' }));
-  b.onLoad({ filter: /BullpenAutoRunScheduleCard\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8') + '\nexport { StageOneOutputDialog, buildRunDetailScanCandidateDialogState };', loader: 'tsx' }));
   b.onLoad({ filter: /TradingBotsOverviewPage\.tsx$/ }, args => ({ contents: readFileSync(args.path, 'utf8') + '\nexport { TradingBotCard };', loader: 'tsx' }));
   b.onLoad({ filter: /services\/api\.ts$/ }, () => ({ contents: `export const apiService = new Proxy({}, { get: (_, name) => (...args) => { (window.__fixtureApiCalls ??= []).push(String(name)); if (window.__fixtureName === "overview") return new Promise((resolve,reject) => window.__rejectReads.push(() => reject(new Error("Synthetic source unavailable")))); return Promise.reject(new Error("Synthetic source unavailable: " + String(name))); } }); export class APIError extends Error {} export class RequestTimeoutError extends Error {}`, loader: 'js' }));
   b.onLoad({ filter: /UniversalPolymarketScan\.tsx$/ }, () => ({ contents: 'export const UniversalPolymarketScan = () => null;', loader: 'js' }));
@@ -32,7 +31,7 @@ const result = await build({ entryPoints: ['tests/fixtures/state-bots/correction
 const css = await postcss([tailwind()]).process(readFileSync('app/globals.css', 'utf8'), { from: resolve('app/globals.css') });
 const server = createServer((req,res) => { res.setHeader('Content-Type', req.url === '/bundle.js' ? 'application/javascript' : 'text/html'); res.end(req.url === '/bundle.js' ? result.outputFiles[0].text : `<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css.css}</style></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>`); });
 await new Promise(r => server.listen(0, '127.0.0.1', r));
-const browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
 const page = await browser.newPage({ viewport: { width: 1180, height: 757 }, deviceScaleFactor: 1 });
 const errors = [], blocked = [];
 page.on('pageerror', e => { errors.push(e.message); console.error(e.stack); });
