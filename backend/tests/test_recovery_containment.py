@@ -145,7 +145,7 @@ def test_producers_reject_before_session_or_locks(recovery):
 
 @pytest.mark.parametrize("stage", ["holdings", "events", "threats", "swing", "rebalance", "technical"])
 @pytest.mark.parametrize("portfolio,market", [("indmoney_us", "us"), ("india", "india")])
-def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery, monkeypatch, stage, portfolio, market):
+def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery, monkeypatch, stage, portfolio, market, tmp_path):
     from contextlib import asynccontextmanager
     from unittest.mock import AsyncMock
     from app.domains.runs.use_cases import create_run as producer
@@ -161,18 +161,7 @@ def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery,
         monkeypatch.setitem(app.conf, key, app.conf.get(key))
     configure_recovery_queue(app)
     jobs, publications = [], []
-    class Session:
-        flush = AsyncMock()
-        commit = AsyncMock()
-        def add(self, obj):
-            if isinstance(obj, Job):
-                obj.id = len(jobs) + 1
-                jobs.append(obj)
-    class Repo:
-        async def create(self, run):
-            self.run = run
-            run.id = 123
-        async def get(self, run_id): return self.run
+    sessions, engine = asyncio.run(_durable_recovery_fixture(tmp_path, monkeypatch, 2))
     class Lock:
         @asynccontextmanager
         async def acquire(self, *args, **kwargs): yield None
@@ -180,19 +169,26 @@ def test_equity_fanout_preserves_identity_and_uses_only_recovery_queue(recovery,
                producer.RunModelTarget("fixture-b", "model-b")]
     monkeypatch.setattr(producer, "freeze_output_source_context", AsyncMock(return_value=None))
     monkeypatch.setattr(producer, "filter_recently_available_targets", AsyncMock(return_value=(targets, [])))
-    monkeypatch.setattr(producer, "register_job_task", AsyncMock())
+    monkeypatch.setattr("app.infrastructure.messaging.task_registry.register_job_task", AsyncMock())
     def publish(self, name, **options):
         publications.append((name, options))
         return SimpleNamespace(id="fixture-task-" + str(len(publications)))
     monkeypatch.setattr(Celery, "send_task", publish)
-    uc = object.__new__(producer.CreateRunUseCase)
-    uc._session, uc._run_repo, uc._lock = Session(), Repo(), Lock()
-    run = asyncio.run(uc.execute(producer.CreateRunCommand(
+    async def create():
+        async with sessions() as db:
+            run = await producer.CreateRunUseCase(db, Lock()).execute(producer.CreateRunCommand(
         prompt=f"Fixture {portfolio} {stage}", targets=targets, user_id=2,
         auto_rebalance_portfolio=portfolio, auto_rebalance_sequence=7,
         auto_rebalance_label=f"INDmoney Run 7 ({stage})", allow_parallel=True,
         auto_export_enabled=True, export_sheet_name="requested-by-existing-ui",
-    )))
+    ))
+            from sqlalchemy import select
+            jobs.extend((await db.execute(select(Job))).scalars())
+            return run
+    try:
+        run = asyncio.run(create())
+    finally:
+        asyncio.run(engine.dispose())
     assert len(jobs) == len(publications) == 2
     assert run.auto_export_enabled is False
     assert run.export_status == "disabled"
@@ -486,7 +482,7 @@ def test_recovery_accepts_matching_equity_market_identity(recovery, portfolio, m
         require_equity_analysis(portfolio, auto_export=True)
 
 
-def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, monkeypatch):
+def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, monkeypatch, tmp_path):
     from contextlib import asynccontextmanager
     from datetime import date, datetime, timezone
     from unittest.mock import AsyncMock
@@ -500,20 +496,11 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
     now = datetime.now(timezone.utc)
     snapshot = SimpleNamespace(snapshot_date=date.today(), captured_at=now)
     jobs, publications = [], []
-    class Repo:
-        def __init__(self, db): pass
-        async def create(self, job):
-            job.id, job.created_at = 123, now
-            jobs.append(job)
-        async def get(self, job_id): return jobs[0]
-        async def get_for_user(self, job_id, user_id): return jobs[0] if jobs[0].user_id == user_id else None
     class Lock:
         def __init__(self, *args): pass
         @asynccontextmanager
         async def acquire(self, *args, **kwargs): yield None
-    monkeypatch.setattr(producer, "PostgresJobRepository", Repo)
-    monkeypatch.setattr(producer, "register_job_task", AsyncMock())
-    monkeypatch.setattr(routes, "PostgresJobRepository", Repo)
+    monkeypatch.setattr("app.infrastructure.messaging.task_registry.register_job_task", AsyncMock())
     monkeypatch.setattr(routes, "ZerodhaPortfolioSnapshotRepository", lambda _: SimpleNamespace(get_latest_by_user=AsyncMock(return_value=snapshot)))
     monkeypatch.setattr(routes, "_resolve_threat_target", AsyncMock(return_value=("fixture-provider", "fixture-model")))
     monkeypatch.setattr(routes, "build_zerodha_threat_prompt", lambda _: "Fixture Zerodha threats prompt")
@@ -524,8 +511,10 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
     app = FastAPI()
     app.add_middleware(RecoveryMiddleware)
     app.include_router(routes.router)
-    db = SimpleNamespace(add=lambda _: None, commit=AsyncMock())
-    async def session(): yield db
+    sessions, engine = asyncio.run(_durable_recovery_fixture(tmp_path, monkeypatch, 123))
+    async def session():
+        async with sessions() as db:
+            yield db
     app.dependency_overrides[get_async_db] = session
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=123)
     celery_app = execute_ai_job.app
@@ -544,9 +533,42 @@ def test_zerodha_threats_http_request_creates_an_isolated_india_job(recovery, mo
             "auto_rebalance_label": "Zerodha Run 12 (threats)",
         })
         assert result.status_code == 200, result.text
-        assert result.json()["job_id"] == 123
+        assert result.json()["job_id"] > 0
+    async def read_jobs():
+        from sqlalchemy import select
+        from app.domains.jobs.models import Job
+        async with sessions() as db:
+            jobs.extend((await db.execute(select(Job))).scalars())
+    asyncio.run(read_jobs())
+    asyncio.run(engine.dispose())
     assert jobs[0].auto_rebalance_portfolio == "india"
     assert jobs[0].auto_rebalance_sequence == 12
     assert publications[0][0] == ANALYSIS_TASK
     assert publications[0][1]["queue"] == ANALYSIS_QUEUE
-    db.commit.assert_awaited_once()
+    assert len(jobs) == 1
+
+
+async def _durable_recovery_fixture(tmp_path, monkeypatch, actor):
+    """Real persisted admission/outbox; only SQLite advisory lock is substituted."""
+    from unittest.mock import AsyncMock
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.compiler import compiles
+    from app.infrastructure.database.base import Base
+    from app.domains.auth.models import User
+    from app.domains.prompts.models import Prompt
+    from app.domains.jobs.models import Job
+    from app.domains.jobs.admission import JobAdmission
+    from app.domains.runs.models import Run, RunJob
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    @compiles(JSONB, "sqlite")
+    def jsonb_sqlite(*args, **kwargs): return "JSON"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/recovery.db")
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[m.__table__ for m in
+            (User, Prompt, Job, JobAdmission, Run, RunJob, OutboxMessage)]))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as db:
+        db.add(User(id=actor,email=f"actor{actor}@example.invalid",username=f"actor{actor}",password_hash="synthetic"))
+        await db.commit()
+    return sessions, engine

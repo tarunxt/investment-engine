@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime
 import unittest
 
-from sqlalchemy import Column, DateTime, Integer, JSON, MetaData, String, Table, create_engine
+from sqlalchemy import Column, DateTime, Integer, JSON, MetaData, String, Table, create_engine, null
 from sqlalchemy.dialects import postgresql
 
 from app.domains.health import execution_reader as reader
@@ -70,6 +70,28 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
             rows = db.execute(reader.projection_query(
                 self.jobs, self.outbox, actor_id=7, recovery=True)).all()
             self.assertEqual(len(rows), 101)
+
+    def test_sql_and_json_null_context_match_recovery_policy(self):
+        engine = create_engine("sqlite://")
+        self.meta.create_all(engine)
+        with engine.begin() as db:
+            for i, portfolio, context in [
+                (1, "india", None), (2, "india", null()),
+                (3, "indmoney_us", None), (4, "indmoney_us", null()),
+                (5, "india", "null"), (6, "india", {}),
+                (7, "india", {"kind": "equity_output_sources_v1", "market": "us"}),
+                (8, "sports", None),
+            ]:
+                db.execute(self.jobs.insert().values(
+                    id=i, user_id=7, status="processing", auto_rebalance_portfolio=portfolio,
+                    request_context_json=context,
+                    runtime_metadata_json={"execution_claim": {"state": "owned", "expires_at": i}}))
+                db.execute(self.outbox.insert().values(
+                    id=i, job_id=i, topic=reader.TOPIC, state="delivered", created_at=datetime(2026, 1, 1)))
+            rows = db.execute(reader.projection_query(
+                self.jobs, self.outbox, actor_id=7, recovery=True)).mappings().all()
+            self.assertEqual({int(row["claim_expires_at"]) for row in rows}, {1, 2, 3, 4})
+        engine.dispose()
 
     async def test_deadlines_rollback_and_unknown_heartbeat(self):
         calls = []

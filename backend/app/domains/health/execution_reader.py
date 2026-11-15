@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 import math
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import String, and_, cast, or_, select, text
 
 from .execution import DurableProjection, summarize_durable
 
@@ -38,13 +38,18 @@ def projection_query(jobs, outbox, *, actor_id: int, recovery: bool):
     )
     if recovery:
         context = j.request_context_json
+        # SQLAlchemy's JSON default stores explicit Python None as JSON null,
+        # while legacy omitted values can be SQL NULL. Recovery permits both.
+        # A text cast works for PostgreSQL JSON (which has no equality operator)
+        # and does not admit the JSON string "null" or malformed objects.
+        no_context = or_(context.is_(None), cast(context, String) == "null")
         query = query.where(or_(
             and_(j.auto_rebalance_portfolio == "india", or_(
-                context.is_(None), and_(
+                no_context, and_(
                     context["kind"].as_string() == "equity_output_sources_v1",
                     context["market"].as_string() == "india"))),
             and_(j.auto_rebalance_portfolio == "indmoney_us", or_(
-                context.is_(None), and_(
+                no_context, and_(
                     context["kind"].as_string() == "equity_output_sources_v1",
                     context["market"].as_string() == "us"))),
         ))

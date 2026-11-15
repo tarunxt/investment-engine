@@ -1,7 +1,7 @@
-"""Opt-in PG18.6 synthetic fixture. Fixed disposable socket; no app DB config.
+"""Opt-in disposable PostgreSQL fixture; no application DB configuration.
 
-Fixture: official postgres image, network none, tmpfs data, Unix socket mounted at
-/tmp/a11-004-pg-socket, port 55434 (container mount /var/run/postgresql). Never point this suite at an application DB.
+Uses the existing guarded local CI service or an acknowledged synthetic socket.
+Only fresh random schemas are created and dropped. No Alembic or runtime action.
 """
 import asyncio
 import json
@@ -12,25 +12,26 @@ from unittest.mock import patch
 from uuid import uuid4
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Integer, JSON, MetaData, String, Table, text
+from sqlalchemy import Column, DateTime, Integer, JSON, MetaData, String, Table, text, null
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app.domains.health import execution_reader as reader
 
-SOCKET = Path('/tmp/a11-004-pg-socket/.s.PGSQL.55434')
-URL = 'postgresql+asyncpg://postgres@/postgres?host=/tmp/a11-004-pg-socket&port=55434'
+from execution_health_fixture import configured_target
+URL = configured_target()
 
 
-@unittest.skipUnless(SOCKET.exists(), 'disposable PostgreSQL fixture unavailable')
+@unittest.skipUnless(URL is not None, 'disposable PostgreSQL fixture not acknowledged')
 class NativeReader(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.schema = 'a11_health_' + uuid4().hex
         self.admin = create_async_engine(URL)
         async with self.admin.begin() as conn:
             version = await conn.scalar(text('SHOW server_version'))
-            self.assertTrue(version.startswith('18.6'), version)
+            self.assertGreaterEqual(int(version.split('.')[0]), 16, version)
+            print('Synthetic execution-health PostgreSQL:', version.split(' ')[0])
             await conn.execute(CreateSchema(self.schema))
         self.engine = create_async_engine(URL, pool_size=1, max_overflow=0,
             connect_args={'server_settings': {'search_path': self.schema}})
@@ -95,6 +96,18 @@ class NativeReader(unittest.IsolatedAsyncioTestCase):
     def nodes(self, plan):
         yield plan['Node Type']
         for child in plan.get('Plans', []): yield from self.nodes(child)
+
+    async def test_native_sql_and_json_null_recovery_context(self):
+        async with self.engine.begin() as conn:
+            for i, context in [(1, None), (2, null()), (3, 'null'), (4, {})]:
+                await conn.execute(self.jobs.update().where(self.jobs.c.id == i).values(
+                    user_id=9, request_context_json=context))
+        result = await reader.read_durable_projection(self.sessions,
+            self.jobs, self.outbox, actor_id=9, recovery=True, now=200)
+        self.assertEqual(result['read_state'], 'sampled')
+        self.assertEqual(result['sample_size'], 2)
+        self.assertEqual(result['consumer'], 'unknown')
+        await self.assert_clean()
 
     async def test_native_statement_timeout_and_rollback(self):
         started = time.monotonic()

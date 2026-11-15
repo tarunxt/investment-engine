@@ -32,6 +32,65 @@ class MigrationSafetyTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(AssertionError):
                 verifier.verify_forward_baseline(prior, changed)
 
+    def test_forward_dispatch_exact_additions_and_negative_controls(self):
+        prior = {"outbox": {
+            "columns": [("id", "UUID", False, None)],
+            "rows": [json.dumps({"id": "historical"}, sort_keys=True)],
+            "indexes": [{"name": "legacy_idx", "column_names": ["id"], "unique": False}],
+            "unique": [], "foreign_keys": [], "checks": [],
+            "primary_key": {"name": "outbox_pkey", "constrained_columns": ["id"]},
+        }}
+        valid = deepcopy(prior)
+        box = valid["outbox"]
+        columns = [("job_id", "INTEGER", True, None), ("state", "VARCHAR(32)", True, None),
+                   ("claim_token", "VARCHAR(36)", True, None),
+                   ("next_attempt_at", "TIMESTAMP WITH TIME ZONE", True, None),
+                   ("last_error_type", "VARCHAR(100)", True, None)]
+        box["columns"] += columns
+        box["rows"] = [json.dumps({"id": "historical", **{c[0]: None for c in columns}}, sort_keys=True)]
+        box["foreign_keys"] = [{"name": "fk_outbox_job_id", "constrained_columns": ["job_id"],
+                                 "referred_schema": None, "referred_table": "jobs", "referred_columns": ["id"],
+                                 "options": {}, "comment": None}]
+        box["unique"] = [{"name": "uq_outbox_job_id", "column_names": ["job_id"], "comment": None,
+                          "dialect_options": {"postgresql_include": [], "postgresql_nulls_not_distinct": False}}]
+        box["indexes"] += [
+            {"name": "ix_outbox_state", "unique": False, "column_names": ["state"],
+             "include_columns": [], "dialect_options": {"postgresql_include": []}},
+            {"name": "uq_outbox_job_id", "unique": True, "column_names": ["job_id"],
+             "duplicates_constraint": "uq_outbox_job_id", "include_columns": [],
+             "dialect_options": {"postgresql_include": []}},
+        ]
+        untouched = deepcopy(valid)
+        verifier.verify_forward_baseline(prior, valid)
+        self.assertEqual(valid, untouched)
+        mutations = {
+            "column_missing": lambda b: b["columns"].pop(),
+            "column_type": lambda b: b["columns"].__setitem__(1, ("job_id", "BIGINT", True, None)),
+            "column_nonnullable": lambda b: b["columns"].__setitem__(1, ("job_id", "INTEGER", False, None)),
+            "column_default": lambda b: b["columns"].__setitem__(1, ("job_id", "INTEGER", True, "1")),
+            "timezone_lost": lambda b: b["columns"].__setitem__(4, ("next_attempt_at", "TIMESTAMP WITHOUT TIME ZONE", True, None)),
+            "extra_column": lambda b: b["columns"].append(("unapproved", "TEXT", True, None)),
+            "old_column": lambda b: b["columns"].__setitem__(0, ("id", "TEXT", False, None)),
+            "old_row": lambda b: b["rows"].__setitem__(0, b["rows"][0].replace('historical', 'changed')),
+            "new_value": lambda b: b["rows"].__setitem__(0, b["rows"][0].replace('"state": null', '"state": "pending"')),
+            "old_index": lambda b: b["indexes"].pop(0),
+            "missing_index": lambda b: b["indexes"].pop(1),
+            "duplicate_index": lambda b: b["indexes"].append(deepcopy(b["indexes"][1])),
+            "partial_index": lambda b: b["indexes"][1]["dialect_options"].update(postgresql_where="state IS NOT NULL"),
+            "covering_index": lambda b: b["indexes"][1].update(include_columns=["id"]),
+            "unique_changed": lambda b: b["unique"][0].update(column_names=["id"]),
+            "null_uniqueness": lambda b: b["unique"][0]["dialect_options"].update(postgresql_nulls_not_distinct=True),
+            "foreign_target": lambda b: b["foreign_keys"][0].update(referred_table="users"),
+            "foreign_cascade": lambda b: b["foreign_keys"][0]["options"].update(ondelete="CASCADE"),
+            "old_pk": lambda b: b["primary_key"].update(constrained_columns=[]),
+            "check_added": lambda b: b["checks"].append({"name": "unapproved"}),
+        }
+        for name, mutation in mutations.items():
+            changed = deepcopy(valid)
+            mutation(changed["outbox"])
+            with self.subTest(mutation=name), self.assertRaises(AssertionError):
+                verifier.verify_forward_baseline(prior, changed)
+
     def environment(self):
         return {**verifier.TEST_ENVIRONMENT, "PATH": "/usr/local/bin:/usr/bin"}
 
