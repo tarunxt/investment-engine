@@ -111,6 +111,13 @@ def compare(left: Manifest, right: Manifest) -> str:
                and all(len(m.metadata[k]) == 64 and all(c in '0123456789abcdef' for c in m.metadata[k])
                        for k in COVERAGE - {'tables'}) for m in (left, right)):
         return 'partial'
+    for manifest in (left, right):
+        for table in manifest.tables.values():
+            if (not isinstance(table, TableDigest) or type(table.count) is not int
+                    or table.count < 0 or not isinstance(table.digest, str)
+                    or len(table.digest) != 64
+                    or any(c not in '0123456789abcdef' for c in table.digest)):
+                return 'error'
     return 'pass' if left.tables == right.tables and left.metadata == right.metadata else 'error'
 
 

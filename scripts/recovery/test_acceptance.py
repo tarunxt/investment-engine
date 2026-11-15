@@ -2,7 +2,7 @@ import tracemalloc
 import unittest
 from dataclasses import replace
 
-from acceptance import (COVERAGE, VERSION, Field, Manifest, compare, recovery_status,
+from acceptance import (COVERAGE, VERSION, Field, Manifest, TableDigest, compare, recovery_status,
                         row_digest, table_digest)
 
 
@@ -53,6 +53,9 @@ class AcceptanceTests(unittest.TestCase):
                             COVERAGE, {'opaque-1': table_digest([])},
                             {k: 'b' * 64 for k in COVERAGE - {'tables'}})
         self.assertEqual(compare(original, original), 'pass')
+        for invalid in (TableDigest(-1, 'a' * 64), TableDigest(0, 'invalid')):
+            malformed = replace(original, tables={'opaque-1': invalid})
+            self.assertEqual(compare(malformed, malformed), 'error')
         for changes in ({'snapshot': 'later'}, {'snapshot_lost': True},
                         {'snapshot_pair_attested': False}, {'archive_sha256': 'c' * 64}):
             self.assertEqual(compare(original, replace(original, **changes)), 'unknown')
