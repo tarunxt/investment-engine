@@ -520,6 +520,8 @@ jobs:
                 sudo -u "$APP_USER" git -C "$APP_ROOT" show "$DEPLOY_COMMIT_SHA:deploy/no-docker/$driver_file" > "$contained_driver/$driver_file"
                 chmod 0644 "$contained_driver/$driver_file"
               done
+              sudo -u "$APP_USER" git -C "$APP_ROOT" show "$DEPLOY_COMMIT_SHA:backend/app/core/jwt_configuration.py" > "$contained_driver/jwt_configuration.py"
+              chmod 0644 "$contained_driver/jwt_configuration.py"
               APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
                 bash "$contained_driver/deploy-recovery.sh" --preflight
               export CREDX_RECOVERY_ROLLBACK_DIR="$APP_ROOT/.recovery-release-${DEPLOY_COMMIT_SHA:0:12}-$(date +%s)-$$"

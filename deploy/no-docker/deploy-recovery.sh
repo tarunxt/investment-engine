@@ -50,6 +50,17 @@ require_lock() {
   flock -n 9
 }
 preflight() {
+  local validator="$SCRIPT_DIR/jwt_configuration.py"
+  if [[ "$SCRIPT_DIR" == "$APP_ROOT/deploy/no-docker" ]]; then
+    validator="$APP_ROOT/backend/app/core/jwt_configuration.py"
+  fi
+  sudo -u "$APP_USER" bash -s -- "$APP_ROOT" "$BACKEND_ENV_FILE" "$validator" <<'CHECK_SIGNING' || return 1
+set -eu
+set +x
+source "$1/deploy/no-docker/load-env-file.sh"
+load_env_file "$2"
+python3 "$3"
+CHECK_SIGNING
   [[ "$(mode_for_service investor-backend)" == 1 ]] || return 1
   [[ "$(mode_for_service investor-recovery-analysis)" == 1 ]] || return 1
   # Unreviewed startup hooks can fetch external data or synchronize credentials.

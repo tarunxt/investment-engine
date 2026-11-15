@@ -1,10 +1,11 @@
 import os
-import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.jwt_configuration import signing_key
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
 _FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}
@@ -30,22 +31,9 @@ class Settings(BaseSettings):
             for value in (self.jwt_signing_key, self.jwt_secret, self.secret_key)
             if value is not None
         ]
-        if not supplied:
-            raise ValueError("JWT_SIGNING_KEY is required (private server-generated key)")
-        # A single explicit format avoids whitespace/encoding ambiguity. Format
-        # checks cannot establish randomness: generate 32 bytes with a CSPRNG.
-        if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in supplied):
-            raise ValueError("JWT signing keys must encode 32 random bytes as 64 lowercase hex characters")
-        if any(
-            value == value[:size] * (64 // size)
-            for value in supplied for size in (1, 2, 4, 8, 16, 32)
-        ):
-            raise ValueError("JWT signing keys must not be repeated/default patterns")
-        if any(value != supplied[0] for value in supplied[1:]):
-            raise ValueError("Conflicting JWT_SIGNING_KEY, JWT_SECRET or SECRET_KEY configuration")
         # Canonical > JWT_SECRET > SECRET_KEY, with all supplied names required
         # to agree. No default or previous-key verification path is supported.
-        self.jwt_signing_key = SecretStr(supplied[0])
+        self.jwt_signing_key = SecretStr(signing_key(supplied))
         return self
 
     # Database

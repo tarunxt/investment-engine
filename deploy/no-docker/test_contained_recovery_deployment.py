@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -29,7 +30,7 @@ class ContainedDeploymentTests(unittest.TestCase):
             (self.app/name).mkdir(parents=True)
         for name,value in {"backend/app/main.py":"previous","backend/app/nested/guard.py":"old-guard","backend/requirements.txt":"unchanged","backend/.env":"env-sentinel","backend/.venv/marker":"venv-sentinel","deploy/no-docker/scripts/run-backend.sh":"previous-launcher"}.items():
             (self.app/name).write_text(value)
-        (self.app/"deploy/no-docker/load-env-file.sh").write_text('load_env_file() { source "$1"; }\n')
+        shutil.copyfile(DRIVER.parent / "load-env-file.sh", self.app / "deploy/no-docker/load-env-file.sh")
         self.executable(self.app/"backend/.venv/bin/python","#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n")
         self.executable(self.app/"deploy/no-docker/redeploy.sh",'''#!/usr/bin/env bash
 echo frontend-only-promotion >> "$FIXTURE_ROOT/commands"
@@ -48,9 +49,10 @@ fi
         (self.root/"tracked.json").write_text(json.dumps([p.relative_to(self.app).as_posix() for p in self.app.rglob('*') if p.is_file() and '.venv' not in p.parts and not p.name.startswith('.env')]))
         self.state=self.root/"state.json";self.state.write_text(json.dumps({"investor-backend":"active","investor-recovery-analysis":"active"}))
         (self.root/"head").write_text("a"*40)
-        self.envfile=self.root/"backend.env";self.envfile.write_text("CREDX_RECOVERY_MODE=1\n")
+        self.envfile=self.root/"backend.env";self.envfile.write_text(f"CREDX_RECOVERY_MODE=1\nJWT_SIGNING_KEY={secrets.token_hex(32)}\n")
         candidate=self.root/"candidate";candidate.mkdir()
         for name in ("deploy-recovery.sh","backend-recovery-artifact.py"): shutil.copyfile(DRIVER.parent/name,candidate/name)
+        shutil.copyfile(REPO / "backend/app/core/jwt_configuration.py", candidate / "jwt_configuration.py")
         # Bash's SECONDS advances during real sleeps. Model that in each fixture shell
         # so readiness deadlines can be exercised without waiting two minutes.
         virtual_time = self.root / "virtual-time.bash"
@@ -203,6 +205,15 @@ else: print('401',end='')
         self.assertTrue(list(self.app.glob('.recovery-release-*/failed-candidate-*/backend/app/new_feature.py')))
         self.assertEqual(json.loads(self.state.read_text())['investor-backend'],'active')
         self.unchanged_runtime()
+
+    def test_invalid_signing_configuration_stops_before_source_or_service_changes(self):
+        self.envfile.write_text("CREDX_RECOVERY_MODE=1\nJWT_SIGNING_KEY=invalid-fixture-key\n")
+        result = self.run_workflow()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("JWT signing keys must encode", result.stderr)
+        self.assertNotIn("invalid-fixture-key", result.stdout + result.stderr)
+        self.assertEqual((self.root / "head").read_text(), "a" * 40)
+        self.assertNotIn("systemctl stop", (self.root / "commands").read_text())
 
     def test_success_keeps_candidate_and_only_promotes_frontend_scope(self):
         result=self.run_workflow(DEPLOY_SCOPE='full-stack');self.assertEqual(result.returncode,0,result.stderr)
