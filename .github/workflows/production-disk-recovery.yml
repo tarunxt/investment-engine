@@ -13,11 +13,6 @@ on:
         required: true
         default: true
         type: boolean
-  workflow_run:
-    workflows: ['Deploy to Production']
-    types: [completed]
-  schedule:
-    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
@@ -28,7 +23,8 @@ concurrency:
 
 jobs:
   recover:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
+    # Destructive recovery must never run as a consequence of a failed deploy.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -116,6 +112,23 @@ jobs:
             }
 
             cleanup_caches() {
+              # Only replayable Gamma page caches older than 72 hours; the
+              # completed UPS exports, source packs and run records remain.
+              local page_cache="$APP_ROOT/backend/.stage-one-exports/scan-pages-v1"
+              if sudo test -d "$page_cache"; then
+                sudo find "$page_cache" -mindepth 1 -maxdepth 1 -type d \
+                  -mmin +4320 -exec rm -rf -- {} +
+              fi
+              # Keep log history, but compress the previous oversized syslog
+              # before a scan or deployment needs its disk reserve.
+              if sudo test -f /etc/logrotate.d/rsyslog; then
+                local rotate_config
+                rotate_config="$(sudo mktemp /run/investor-rsyslog-rotate.XXXXXX)"
+                printf 'su root root\ninclude /etc/logrotate.d/rsyslog\n' |
+                  sudo tee "$rotate_config" >/dev/null
+                sudo logrotate -f "$rotate_config" || true
+                sudo rm -f -- "$rotate_config"
+              fi
               sudo journalctl --rotate || true
               sudo journalctl --vacuum-time=3d --vacuum-size=96M || true
               sudo apt-get clean || true

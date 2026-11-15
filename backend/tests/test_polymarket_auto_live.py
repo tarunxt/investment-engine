@@ -82,6 +82,7 @@ from app.domains.polymarket_auto_live.normalization import (
 )
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
+    SyncPolymarketAutoLiveRepository,
     _event_trend_llm_outputs,
     apply_state_to_record,
     normalize_auto_live_status,
@@ -876,6 +877,9 @@ def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
         console_profile=BullpenAutoLiveConsoleRunContext(
             source_label="Saved Bullpen table",
             snapshot_id="snapshot-1",
+            scanned_at="2026-06-25T04:55:00+00:00",
+            source_scan_completed_at="2026-06-25T04:56:00+00:00",
+            filters_completed_at="2026-06-25T04:57:00+00:00",
             mode="30-days",
             total_candidates=12,
             candidate_rows=[
@@ -904,6 +908,13 @@ def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
     assert stage.outputs["completed_items"] == 0
     assert stage.outputs["total_items"] == 12
     assert stage.outputs["selected_manual_candidate_count"] == 1
+    assert stage.outputs["snapshot_id"] == "snapshot-1"
+    assert stage.outputs["scanned_at"] == "2026-06-25T04:55:00+00:00"
+    assert (
+        stage.outputs["source_scan_completed_at"]
+        == "2026-06-25T04:56:00+00:00"
+    )
+    assert stage.outputs["filters_completed_at"] == "2026-06-25T04:57:00+00:00"
 
 
 @pytest.mark.anyio
@@ -2348,6 +2359,19 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
         current_no_odds=88,
     )
     wallet_read_cancelled = asyncio.Event()
+    observed_stage1_progress: list[dict[str, object]] = []
+
+    def capture_progress(current_run, _current_state):
+        stage = next(
+            (
+                item
+                for item in current_run.stage_results
+                if item.outputs.get("workflow_stage_key") == "scan"
+            ),
+            None,
+        )
+        if stage is not None:
+            observed_stage1_progress.append(stage.model_dump(mode="json"))
 
     async def hang_wallet_refresh():
         if wallet_failure == "lock_timeout":
@@ -2384,6 +2408,10 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.console_stage1_wallet_refresh_timeout_seconds",
+        lambda: 0.01,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.console_stage1_wallet_recovery_timeout_seconds",
         lambda: 0.01,
     )
     monkeypatch.setattr(
@@ -2425,6 +2453,7 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
         run=_run_snapshot(),
         positions=[],
         historical_decisions=[],
+        progress_callback=capture_progress,
     )
 
     if expects_wallet_task_cancellation:
@@ -2448,12 +2477,21 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
     assert result.run.status == "partial_success"
     assert result.decisions == []
     assert stage1.outputs["phase_status"] == "completed"
+    assert stage1.outputs["wallet_snapshot_required_for_stage1_completion"] is False
     assert stage1.outputs["wallet_snapshot_status"] == "unavailable"
     assert stage1.outputs["stage2_candidate_only"] is True
     assert stage2.outputs["phase_status"] == "completed"
     assert stage2.outputs["stage2_candidate_only"] is True
     assert stage3.outputs["phase_status"] == "blocked"
     assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+    scan_completion = next(
+        progress
+        for progress in observed_stage1_progress
+        if progress["outputs"].get("phase_status") == "completed"
+    )
+    assert scan_completion["completed_at"] is not None
+    assert scan_completion["outputs"]["wallet_snapshot_status"] == "refreshing"
+    assert len(scan_completion["outputs"]["accepted_candidates"]) == 1
 
 
 @pytest.mark.anyio
@@ -4873,6 +4911,10 @@ async def test_console_profile_reviews_all_stage1_events_before_building_ranked_
 
     buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
 
+    assert [
+        row["returns_per_day"]
+        for row in result.run.stage_results[0].outputs["accepted_candidates"]
+    ] == [1.5, 2.0]
     assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
     assert len(buy_decisions) == 2
     assert all(decision.order_plan is not None for decision in buy_decisions)
@@ -6266,6 +6308,137 @@ def test_apply_state_to_record_normalizes_legacy_status_assignments():
     assert record.payload["status"] == "stopped"
 
 
+def test_durable_hourly_rebalance_columns_survive_legacy_payload_writes():
+    recorded_at = datetime.fromisoformat("2026-09-11T02:49:00+00:00")
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=True,
+        paused=False,
+        status="running",
+        mode="live-trading",
+        latest_hourly_rebalance_status="failed",
+        latest_hourly_rebalance_at=recorded_at,
+        latest_hourly_rebalance_detail="Live reconciliation was blocked.",
+        payload={},
+    )
+
+    state = record_to_state(record)
+
+    assert state.latest_hourly_rebalance_status == "failed"
+    assert state.latest_hourly_rebalance_at == recorded_at.isoformat()
+    assert state.latest_hourly_rebalance_detail == "Live reconciliation was blocked."
+
+
+def test_state_save_preserves_newer_external_hourly_rebalance_result():
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=True,
+        paused=False,
+        status="running",
+        mode="live-trading",
+        payload={
+            "latest_hourly_rebalance_status": "failed",
+            "latest_hourly_rebalance_at": "2026-09-11T02:49:00+00:00",
+            "latest_hourly_rebalance_detail": "Live reconciliation was blocked.",
+        },
+    )
+    stale_worker_state = BullpenAutoLiveState(
+        running=True,
+        status="running",
+        mode="live-trading",
+        latest_hourly_rebalance_status=None,
+        latest_hourly_rebalance_at=None,
+        latest_hourly_rebalance_detail=None,
+    )
+    statements = []
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return record
+
+    class _Session:
+        def execute(self, statement):
+            statements.append(statement)
+            return _Result()
+
+        def add(self, _record):
+            raise AssertionError("existing state must be updated")
+
+    SyncPolymarketAutoLiveRepository(_Session()).save_state(  # type: ignore[arg-type]
+        1,
+        stale_worker_state,
+    )
+
+    assert "FOR UPDATE" in str(statements[0])
+    assert record.payload["latest_hourly_rebalance_status"] == "failed"
+    assert record.payload["latest_hourly_rebalance_at"] == "2026-09-11T02:49:00+00:00"
+    assert record.latest_hourly_rebalance_status == "failed"
+    assert record.latest_hourly_rebalance_at == datetime.fromisoformat(
+        "2026-09-11T02:49:00+00:00"
+    )
+    assert (
+        record.payload["latest_hourly_rebalance_detail"]
+        == "Live reconciliation was blocked."
+    )
+
+
+@pytest.mark.anyio
+async def test_async_state_save_preserves_newer_external_hourly_rebalance_result():
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=True,
+        paused=False,
+        status="running",
+        mode="live-trading",
+        payload={
+            "latest_hourly_rebalance_status": "failed",
+            "latest_hourly_rebalance_at": "2026-09-11T02:49:00+00:00",
+            "latest_hourly_rebalance_detail": "Live reconciliation was blocked.",
+        },
+    )
+    stale_worker_state = BullpenAutoLiveState(
+        running=True,
+        status="running",
+        mode="live-trading",
+        latest_hourly_rebalance_status=None,
+        latest_hourly_rebalance_at=None,
+        latest_hourly_rebalance_detail=None,
+    )
+    statements = []
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return record
+
+    class _Session:
+        async def execute(self, statement):
+            statements.append(statement)
+            return _Result()
+
+        def add(self, _record):
+            raise AssertionError("existing state must be updated")
+
+        async def flush(self):
+            return None
+
+    await AsyncPolymarketAutoLiveRepository(_Session()).save_state(  # type: ignore[arg-type]
+        1,
+        stale_worker_state,
+    )
+
+    assert "FOR UPDATE" in str(statements[0])
+    assert record.payload["latest_hourly_rebalance_status"] == "failed"
+    assert record.payload["latest_hourly_rebalance_at"] == "2026-09-11T02:49:00+00:00"
+    assert record.latest_hourly_rebalance_status == "failed"
+    assert record.latest_hourly_rebalance_at == datetime.fromisoformat(
+        "2026-09-11T02:49:00+00:00"
+    )
+    assert (
+        record.payload["latest_hourly_rebalance_detail"]
+        == "Live reconciliation was blocked."
+    )
+
+
 def test_record_to_decision_drops_malformed_legacy_order_plan():
     executed_at = "2026-06-25T06:00:00+00:00"
     executed_at_dt = datetime.fromisoformat(executed_at)
@@ -6963,6 +7136,46 @@ def test_console_market_filter_reasons_block_player_prop_ou_markets():
     assert "Excluded sports market." in reasons
 
 
+def test_console_market_filter_reasons_honor_saved_section_toggles():
+    market = _market(
+        question=(
+            "Will Wimbledon rain move Bitcoin after 10 tweets and a model "
+            "is released by July 1?"
+        ),
+        theme="Sports",
+        close_time="2026-06-25T12:00:00+00:00",
+        outcome_labels=["Option A", "Option B"],
+    )
+    now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+
+    enabled_reasons = console_market_filter_reasons(
+        market,
+        now=now,
+        custom_exclude_phrases=["model"],
+    )
+    disabled_reasons = console_market_filter_reasons(
+        market,
+        now=now,
+        exclude_sports=False,
+        exclude_weather=False,
+        exclude_market_predictions=False,
+        exclude_tweet_count_questions=False,
+        exclude_released_by_events=False,
+        only_binary_yes_no=False,
+        exclude_custom_phrases=False,
+        custom_exclude_phrases=["model"],
+    )
+
+    assert "Excluded sports market." in enabled_reasons
+    assert "Excluded weather market." in enabled_reasons
+    assert "Excluded market-prediction or finance market." in enabled_reasons
+    assert "Excluded tweet-count or social-post-count market." in enabled_reasons
+    assert "Excluded release-by event market." in enabled_reasons
+    assert "Excluded unclear non-binary market." in enabled_reasons
+    assert 'Excluded by custom phrase "model".' in enabled_reasons
+    assert disabled_reasons == []
+
+
 def test_console_market_filter_reasons_use_saved_odds_floor():
     market = _market(
         question="Will candidate X win the primary?",
@@ -6981,7 +7194,68 @@ def test_console_market_filter_reasons_use_saved_odds_floor():
     )
 
     assert not any("odds floor" in reason for reason in default_reasons)
-    assert "Excluded market below the 8.5% Yes/No odds floor." in configured_reasons
+    assert "Excluded because min(Yes, No) must be above 8.5%." in configured_reasons
+
+
+def test_console_market_filter_reasons_use_saved_expiry_window():
+    market = _market(
+        question="Will candidate X win the general election?",
+        close_time="2026-08-05T12:00:00+00:00",
+    )
+
+    default_reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
+    configured_reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+        max_closing_days=60,
+    )
+
+    assert "Excluded market outside the 30-day Bullpen window." in default_reasons
+    assert not any("Bullpen window" in reason for reason in configured_reasons)
+
+
+def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filters():
+    market = _market(
+        theme="Ethereum · 1H · Multi Strikes · Crypto · Crypto Prices · Recurring",
+        liquidity_usd=100,
+    )
+    market.volume_usd = 100
+    market.volume_24hr_usd = 100
+    market.spread_cents = 10
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime.now(UTC),
+        min_volume_usd=100,
+        min_liquidity_usd=100,
+        rejected_theme_pattern="crypto prices|twitter|Mentions",
+    )
+
+    assert "Excluded market with Volume USD not greater than 100." in reasons
+    assert "Excluded market with Liquidity USD not greater than 100." in reasons
+    assert "Excluded market with volume24hr USD not greater than 100." in reasons
+    assert "Excluded market with spread not below 10 cents." in reasons
+    assert any("theme-name pattern" in reason for reason in reasons)
+
+    passing = _market(theme="Politics", liquidity_usd=100.01)
+    passing.volume_usd = 100.01
+    passing.volume_24hr_usd = 100.01
+    passing.spread_cents = 9.99
+    passing_reasons = console_market_filter_reasons(
+        passing,
+        now=datetime.now(UTC),
+        min_volume_usd=100,
+        min_liquidity_usd=100,
+        rejected_theme_pattern="crypto prices|twitter|Mentions",
+    )
+    assert not any("Volume USD" in reason for reason in passing_reasons)
+    assert not any("Liquidity USD" in reason for reason in passing_reasons)
+    assert not any("volume24hr USD" in reason for reason in passing_reasons)
+    assert not any("spread not below" in reason for reason in passing_reasons)
+    assert not any("theme-name pattern" in reason for reason in passing_reasons)
 
 
 def test_candidate_filter_reasons_block_trump_insult_markets():
@@ -7056,16 +7330,6 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
     async def fake_bullpen_state():
         return _fake_polymarket_state()
 
-    async def fake_direct_state():
-        return _fake_polymarket_state(
-            running=False,
-            mode="mock",
-            doctor_ok=False,
-            doctor_message="Direct execution not configured",
-            tracked_accounts=[],
-            next_poll_at=None,
-        )
-
     auto_live_summary = BullpenAutoLiveSummary(
         state=BullpenAutoLiveState(
             running=True,
@@ -7093,33 +7357,19 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
         ),
     )
 
-    class FakeBot:
-        def __init__(self, state):
-            self._state = state
-
-        async def get_state(self):
-            return await self._state()
-
     class FakeSummaryBot:
-        async def get_summary(self):
+        async def get_dashboard_summary(self):
             return auto_live_summary
 
-    async def fake_get_bullpen_bot(user_id: int):
-        return FakeBot(fake_bullpen_state)
-
-    async def fake_get_direct_bot(user_id: int):
-        return FakeBot(fake_direct_state)
+    async def fake_read_bullpen_state(user_id: int):
+        return await fake_bullpen_state()
 
     async def fake_get_auto_live_bot(user_id: int):
         return FakeSummaryBot()
 
     monkeypatch.setattr(
-        "app.domains.trading_bots.service.polymarket_bot_manager.get_bot",
-        fake_get_bullpen_bot,
-    )
-    monkeypatch.setattr(
-        "app.domains.trading_bots.service.polymarket_direct_bot_manager.get_bot",
-        fake_get_direct_bot,
+        "app.domains.trading_bots.service.polymarket_bot_manager.read_state",
+        fake_read_bullpen_state,
     )
     monkeypatch.setattr(
         "app.domains.trading_bots.service.polymarket_auto_live_bot_manager.get_bot",
@@ -7136,7 +7386,7 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
         "bullpen-ai-auto-live",
     ]
     assert summary.cards[0].name == "Bullpen x Polymarket"
-    assert summary.cards[1].status == "not-configured"
+    assert summary.cards[1].status == "unavailable"
     assert summary.cards[2].source == "placeholder"
     assert summary.cards[3].route == "/console/trading-bots/bullpen-ai-auto-live"
 

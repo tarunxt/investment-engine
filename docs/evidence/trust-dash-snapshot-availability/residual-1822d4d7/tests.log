@@ -1,0 +1,32 @@
+✔ India and INDmoney totals include portfolio plus cash (39.730181ms)
+✔ Bullpen includes cash once and never double-counts an inclusive wallet value (7.04327ms)
+✔ dashboard overview preserves three totals with native currency fallback (0.841807ms)
+✔ one overview replaces the duplicated command center (0.995347ms)
+✔ portfolio command chart supports and remembers every portfolio view (0.886274ms)
+✔ Refresh Board preserves last-known-good Bullpen and requests a live refresh (0.544974ms)
+✔ USD portfolio history is converted to portfolio-plus-cash INR totals (6.202935ms)
+✔ persisted server history drives Bullpen and combined charts (7.435756ms)
+✔ latest threat responses hydrate a bounded history with one snapshot query (0.842508ms)
+✔ dashboard mount uses bounded summary-selected run details (477.86466ms)
+✔ structured Bullpen errors become concise dashboard warnings (10.560713ms)
+✔ changed dashboard TypeScript and threat routers parse (47.830109ms)
+✔ stage Duration opens a dedicated breakdown dialog without navigating the tile (7.053435ms)
+✔ dashboard skeletons visibly distinguish deferred panels from active reads (19.247288ms)
+✔ loading remains unknown (0.590292ms)
+✔ failed read makes no absence claim (0.074161ms)
+✔ successful empty read confirms only its response (0.110425ms)
+✔ known snapshot without timestamp remains known (0.068363ms)
+✔ failed read retains known snapshot (0.062513ms)
+✔ pending read retains known snapshot (0.037907ms)
+✔ cached snapshot is explicitly unverified (0.03995ms)
+✔ status announces labels and links to read-only history without an action handler (4.4325ms)
+✔ logout/account cache purge removes private dashboard data only (35.030471ms)
+✔ cache owner changes purge global private caches before adoption (5.065546ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 832.635094

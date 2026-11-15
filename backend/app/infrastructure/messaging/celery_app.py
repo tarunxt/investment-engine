@@ -1,7 +1,8 @@
 import logging
 import os
 
-from celery import Celery
+from app.infrastructure.messaging.recovery_celery import RecoveryCelery, RecoveryTask, configure_recovery_queue
+from app.core.recovery import recovery_mode, audit_recovery_blocked, stored_audit_recovery_enabled
 from celery.signals import task_received, worker_ready
 from kombu import Queue
 from celery.schedules import crontab, schedule
@@ -24,7 +25,13 @@ install_bullpen_ui_positions_refresh()
 _broker = settings.celery_broker_url or settings.redis_url
 _backend = settings.celery_result_backend or settings.redis_url
 
-celery = Celery("worker", broker=_broker, backend=_backend)
+celery = RecoveryCelery("worker", broker=_broker, backend=_backend, task_cls=RecoveryTask)
+
+# Recovery of advisory verification requests lives in the consumer service,
+# rather than adding a recurring Beat task or touching financial workflows.
+if not audit_recovery_blocked():
+    from app.domains.recommendation_audit.outbox import AuditOutboxRelay
+    celery.steps["consumer"].add(AuditOutboxRelay)
 
 # ── Queue definitions ────────────────────────────────────────────────────────
 # Separate queues prevent long AI tasks from starving short email/beat tasks.
@@ -40,11 +47,18 @@ celery.conf.task_queues = (
 celery.conf.task_default_queue = "ai"
 
 celery.conf.task_routes = {
+    "app.domains.sports_rankings.tasks.dispatch_refresh": {"queue": "ai"},
+    "app.domains.sports_rankings.tasks.reconcile_cricket": {"queue": "ai"},
+    "app.domains.sports_rankings.tasks.refresh_source": {"queue": "ai"},
     "app.domains.jobs.tasks.*": {"queue": "ai"},
+    "app.domains.recommendation_audit.tasks.*": {"queue": "ai"},
+    "app.domains.mails.tasks.deliver_completion_email": {"queue": "email"},
+    "app.domains.mails.tasks.recover_completion_emails": {"queue": "beat"},
     "app.domains.auth.tasks.*": {"queue": "email"},
     "app.domains.runs.tasks.backfill_final_actionable_history_task": {"queue": "ai"},
     "app.domains.runs.tasks.*": {"queue": "email"},
     "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run": {"queue": AUTO_LIVE_QUEUE},
+    "app.domains.polymarket_auto_live.tasks.dispatch_bullpen_workflow_trigger_batch": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent": {"queue": "ai"},
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_order_intent": {"queue": "ai"},
     "app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent": {"queue": "ai"},
@@ -54,6 +68,12 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace": {"queue": AUTO_LIVE_QUEUE},
+    # Universal catalogue capture is independent from Bullpen planning. Keep
+    # it on the multi-process AI pool so a long or redelivered scan cannot hold
+    # the single-consumer Stage 1/2 planning lane.
+    "app.domains.trading_bots.tasks.execute_universal_polymarket_scan": {"queue": "ai"},
+    "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans": {"queue": "beat"},
+    "app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers": {"queue": "beat"},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
@@ -76,6 +96,19 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "cricket-rankings-daily-reconciliation": {
+        "task": "app.domains.sports_rankings.tasks.reconcile_cricket",
+        "schedule": crontab(minute=10, hour=3),
+    },
+    "sports-rankings-refresh": {
+        "task": "app.domains.sports_rankings.tasks.dispatch_refresh",
+        "schedule": crontab(minute="*/15"),
+        "options": {"expires": 900},
+    },
+    "completion-mail-outbox-recovery": {
+        "task": "app.domains.mails.tasks.recover_completion_emails",
+        "schedule": crontab(minute="*"),
+    },
     "verified-usd-inr-rate-refresh": {
         "task": "app.domains.fx_rates.tasks.refresh_usd_inr_rate",
         "schedule": crontab(minute=7, hour="*/6"),
@@ -98,6 +131,14 @@ celery.conf.beat_schedule = {
         # minute-only beat tick can miss that timestamp for almost a full minute
         # when the user starts just after the tick, so scan due runs frequently
         # while the actual planning work stays isolated on ``auto_live``.
+        "schedule": schedule(run_every=10.0),
+    },
+    "universal-polymarket-scan-due-run-scan": {
+        "task": "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans",
+        "schedule": schedule(run_every=10.0),
+    },
+    "universal-polymarket-stage1-handoff-recovery": {
+        "task": "app.domains.trading_bots.tasks.reconcile_completed_universal_scan_workflow_triggers",
         "schedule": schedule(run_every=10.0),
     },
     "bullpen008-shadow-due-run-scan": {
@@ -147,10 +188,13 @@ except ValueError:
     _prefetch_multiplier = 1
 celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 
-celery.autodiscover_tasks([
+celery.autodiscover_tasks((["app.domains.jobs", "app.domains.zerodha"] + (["app.domains.recommendation_audit"] if stored_audit_recovery_enabled() else [])) if recovery_mode() else [
+    "app.domains.sports_rankings",
     "app.domains.jobs",
     "app.domains.auth",
+    "app.domains.mails",
     "app.domains.runs",
+    "app.domains.recommendation_audit",
     "app.domains.google_sheets",
     "app.domains.bullpen_run_audit",
     "app.domains.bullpen008",
@@ -158,6 +202,7 @@ celery.autodiscover_tasks([
     "app.domains.dashboard",
     "app.domains.fx_rates",
     "app.domains.polymarket_auto_live",
+    "app.domains.trading_bots",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",
 ])
@@ -165,6 +210,8 @@ celery.autodiscover_tasks([
 
 @task_received.connect
 def mark_received_auto_live_planning_task(**kwargs) -> None:
+    if recovery_mode():
+        return
     """Record broker receipt before a prefork pool slot starts the task.
 
     Celery's main consumer receives/reserves a message before the child process
@@ -223,6 +270,8 @@ def mark_received_auto_live_planning_task(**kwargs) -> None:
 
 @worker_ready.connect
 def reconcile_interrupted_auto_live_runs_after_worker_restart(**_kwargs) -> None:
+    if recovery_mode():
+        return
     """Schedule, rather than immediately perform, destructive restart recovery.
 
     Late-acknowledged tasks can be redelivered several seconds after systemd
@@ -256,3 +305,6 @@ def reconcile_interrupted_auto_live_runs_after_worker_restart(**_kwargs) -> None
             "Could not schedule delayed Auto-Live restart recovery; no automatic "
             "Stage 3 retry was requested."
         )
+
+# Apply last so no default route/scheduler overwrites recovery isolation.
+configure_recovery_queue(celery)

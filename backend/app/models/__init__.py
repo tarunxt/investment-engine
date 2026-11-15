@@ -1,6 +1,11 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
-from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
+from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession, AuthSessionFamily, AuthRefreshIntent
+from app.domains.api_usage.models import (
+    ApiUsageAttemptEvent,
+    LlmProviderUsageCallRecord,
+    LlmProviderUsageDailySnapshot,
+)
 from app.domains.bullpen_run_audit.models import (
     BullpenRunAuditBlobRecord,
     BullpenRunAuditEventRecord,
@@ -42,11 +47,13 @@ from app.domains.bullpen_trade_analysis.models import (
 )
 from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.cost_drivers.models import (
+    CostCollectionIntent,
     CostRecommendation,
     CostSnapshot,
     TrafficCostRollup,
 )
 from app.domains.fx_rates.models import FxRate
+from app.domains.sports_rankings.models import SportsRankingSnapshot
 from app.domains.google_sheets.models import (
     GoogleSheetsAppConfig,
     GoogleSheetsCredential,
@@ -73,9 +80,13 @@ from app.domains.runs.models import (
 )
 from app.domains.zerodha.audit import ZerodhaAuditLog
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
+from app.domains.trading_bots.models import UniversalScanSettingsRecord, UniversalScanStateRecord
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 __all__ = [
+    "SportsRankingSnapshot",
+    "UniversalScanSettingsRecord",
+    "UniversalScanStateRecord",
     "Bullpen008ContingentExitActivationRecord",
     "Bullpen008ContingentExitPolicyRecord",
     "Bullpen008DailyEquityBaselineRecord",
@@ -114,6 +125,7 @@ __all__ = [
     "BullpenTradeAnalysisLlmRecord",
     "BullpenTradeAnalysisRecord",
     "BullpenTradeAnalysisSnapshotRecord",
+    "CostCollectionIntent",
     "CostRecommendation",
     "DashboardPortfolioDailySnapshot",
     "CostSnapshot",
@@ -122,6 +134,9 @@ __all__ = [
     "GoogleSheetsCredential",
     "IndMoneyUsPortfolioSnapshot",
     "Job",
+    "ApiUsageAttemptEvent",
+    "LlmProviderUsageCallRecord",
+    "LlmProviderUsageDailySnapshot",
     "OutboxMessage",
     "PolymarketAutoLiveDecisionRecord",
     "PolymarketAutoLiveOrderAttemptRecord",
@@ -138,7 +153,13 @@ __all__ = [
     "User",
     "UserProfile",
     "UserSession",
+    "AuthSessionFamily",
+    "AuthRefreshIntent",
     "ZerodhaAuditLog",
     "ZerodhaCredential",
     "ZerodhaPortfolioSnapshot",
 ]
+
+from app.domains.recommendation_audit.models import (  # noqa: F401
+    EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
+)

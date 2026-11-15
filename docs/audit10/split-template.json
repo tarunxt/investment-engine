@@ -1,0 +1,32 @@
+{
+  "schema_version": "chronological-split-draft-v1",
+  "status": "draft_not_historical_predeclaration",
+  "contract_hash": null,
+  "corpus_hash": null,
+  "frozen_at": null,
+  "embargo_seconds": null,
+  "embargo_reason": null,
+  "rows": [
+    {
+      "partition": "develop",
+      "decision_at": null,
+      "outcome_end_at": null,
+      "dependency_group": null,
+      "first_result_inspected_at": null
+    },
+    {
+      "partition": "tune",
+      "decision_at": null,
+      "outcome_end_at": null,
+      "dependency_group": null,
+      "first_result_inspected_at": null
+    },
+    {
+      "partition": "test",
+      "decision_at": null,
+      "outcome_end_at": null,
+      "dependency_group": null,
+      "first_result_inspected_at": null
+    }
+  ]
+}

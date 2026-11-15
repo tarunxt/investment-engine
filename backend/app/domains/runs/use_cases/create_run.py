@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from app.domains.jobs.resource_policy import validate_prompt, validate_targets
+from app.domains.jobs.resource_validation import validate_model_identifiers
+
+from app.core.recovery import recovery_mode, require_equity_analysis
+
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -9,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.ai_providers.availability import filter_recently_available_targets
 from app.domains.jobs.models import Job
+from app.domains.jobs.output_sources import OutputSourceJobReference, freeze_output_source_context
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.presentation import build_run_prompt_preview
@@ -33,7 +39,9 @@ class CreateRunCommand:
     prompt: str
     targets: list[RunModelTarget]
     user_id: UserId
+    recommendation_audit: Any | None = None
     polymarket_event_context: dict[str, Any] | None = None
+    output_source_jobs: list[OutputSourceJobReference] | None = None
     prompt_id: int | None = None
     scheduled_at: datetime | None = None
     auto_export_enabled: bool = False
@@ -55,8 +63,24 @@ class CreateRunUseCase:
         self._lock = lock
 
     async def execute(self, cmd: CreateRunCommand) -> Run:
+        require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
+        validate_prompt(cmd.prompt)
+        validate_targets(cmd.targets)
+        for target in cmd.targets:
+            validate_model_identifiers(target.provider, target.model)
+
+        from app.domains.runs.side_effect_policy import execution_allows_side_effects
+        if recovery_mode() or not await execution_allows_side_effects(self._session, cmd):
+            # Existing six-stage UI requests sheet exports; contain that optional
+            # side effect while preserving queued analysis and database results.
+            cmd = replace(cmd, auto_export_enabled=False)
         if not cmd.targets:
             raise ValidationException("At least one (provider, model) target is required.")
+        if cmd.output_source_jobs is not None and cmd.polymarket_event_context is not None:
+            raise ValidationException("Equity output sources cannot be combined with Polymarket context.")
+        output_source_context = await freeze_output_source_context(
+            self._session, user_id=int(cmd.user_id), target=cmd, references=cmd.output_source_jobs,
+        )
 
         targets, blocked_targets = await filter_recently_available_targets(
             self._session,
@@ -140,7 +164,8 @@ class CreateRunUseCase:
                         model=target.model,
                         user_id=cmd.user_id,
                         status=initial_status,
-                        request_context_json=cmd.polymarket_event_context,
+                        request_context_json=(output_source_context if output_source_context is not None
+                                              else cmd.polymarket_event_context),
                         scheduled_at=scheduled_at,
                         auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
                         auto_rebalance_sequence=cmd.auto_rebalance_sequence,
@@ -154,6 +179,10 @@ class CreateRunUseCase:
                 for job in jobs:
                     self._session.add(RunJob(run_id=run.id, job_id=job.id, stage=1))
 
+                from app.core.config import settings
+                if settings.recommendation_audit_enabled:
+                    from app.domains.recommendation_audit.capture import freeze_input
+                    await self._session.run_sync(lambda session: freeze_input(session, run, jobs, cmd.recommendation_audit))
                 await self._session.commit()
 
         except LockAcquisitionError:

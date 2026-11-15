@@ -20,12 +20,16 @@ export type BullpenQuestion = {
   questionId?: string | null;
   closeTime: string | null;
   category: string;
+  sportsTournament?: string | null;
+  sportsTags?: string[];
   yesOdds: number | null;
   noOdds: number | null;
   currentOddsUpdatedAt?: string | null;
   investmentTableAddedAt?: string | null;
   volume: string | null;
   liquidity: string | null;
+  volume24hr?: string | null;
+  spreadCents?: number | null;
   sourceUrl: string;
   slug: string | null;
   marketUrl: string | null;
@@ -108,7 +112,14 @@ export function hasBullpenLlmAnalysis(
 
 export type BullpenScanFilters = {
   maxClosingDays: number;
+  minVolumeUsd: number;
+  minLiquidityUsd: number;
+  minVolume24hrUsd: number;
+  maxSpreadCents: number;
+  rejectedThemePattern: string;
   targetDate: string;
+  applyYesNoOddsThresholds: boolean;
+  sportsMoneylineOnly: boolean;
   excludeSports: boolean;
   excludeWeather: boolean;
   excludeMarketPredictions: boolean;
@@ -122,6 +133,8 @@ export type BullpenScanFilters = {
   onlyBinaryYesNo: boolean;
   minYesOdds: number;
   minNoOdds: number;
+  minLowerOutcomeOdds: number;
+  minHigherOutcomeOdds: number;
 };
 
 export type ScanResult = {
@@ -140,6 +153,15 @@ export type ScanResult = {
   error?: string;
   warning?: string;
   details?: string;
+  isPartial?: boolean;
+  interruptionReason?: string;
+  pagesScanned?: number;
+  totalAcceptedQuestions?: number;
+  totalRejectedQuestions?: number;
+  scanExportId?: string | null;
+  sourceScanExportId?: string | null;
+  sourceScanCompletedAt?: string | null;
+  filtersCompletedAt?: string | null;
 };
 
 export type BullpenScanSnapshot = Omit<ScanResult, "questions"> & {
@@ -427,7 +449,14 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
 > = {
   "30-days": {
     maxClosingDays: 30,
+    minVolumeUsd: 100,
+    minLiquidityUsd: 100,
+    minVolume24hrUsd: 100,
+    maxSpreadCents: 10,
+    rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
+    applyYesNoOddsThresholds: true,
+    sportsMoneylineOnly: false,
     excludeSports: true,
     excludeWeather: true,
     excludeMarketPredictions: true,
@@ -439,12 +468,21 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     customExcludeTweetCountQuestionsKeywords: [],
     customExcludeOtherPhrases: [],
     onlyBinaryYesNo: true,
-    minYesOdds: 5,
-    minNoOdds: 5,
+    minYesOdds: 0,
+    minNoOdds: 0,
+    minLowerOutcomeOdds: 1,
+    minHigherOutcomeOdds: 90,
   },
   "end-of-month": {
     maxClosingDays: 30,
+    minVolumeUsd: 100,
+    minLiquidityUsd: 100,
+    minVolume24hrUsd: 100,
+    maxSpreadCents: 10,
+    rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
+    applyYesNoOddsThresholds: true,
+    sportsMoneylineOnly: false,
     excludeSports: true,
     excludeWeather: true,
     excludeMarketPredictions: true,
@@ -456,8 +494,10 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     customExcludeTweetCountQuestionsKeywords: [],
     customExcludeOtherPhrases: [],
     onlyBinaryYesNo: true,
-    minYesOdds: 5,
-    minNoOdds: 5,
+    minYesOdds: 0,
+    minNoOdds: 0,
+    minLowerOutcomeOdds: 1,
+    minHigherOutcomeOdds: 90,
   },
 };
 
@@ -528,9 +568,22 @@ export function normalizeBullpenScanFilters(
       1,
       parseNumberSearchParam(searchParams.get("maxClosingDays"), defaults.maxClosingDays),
     ),
+    minVolumeUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minVolumeUsd"), defaults.minVolumeUsd)),
+    minLiquidityUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minLiquidityUsd"), defaults.minLiquidityUsd)),
+    minVolume24hrUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minVolume24hrUsd"), defaults.minVolume24hrUsd)),
+    maxSpreadCents: Math.max(0, parseNumberSearchParam(searchParams.get("maxSpreadCents"), defaults.maxSpreadCents)),
+    rejectedThemePattern: searchParams.get("rejectedThemePattern") ?? defaults.rejectedThemePattern,
     targetDate: parseDateSearchParam(
       searchParams.get("targetDate"),
       defaults.targetDate,
+    ),
+    applyYesNoOddsThresholds: parseBooleanSearchParam(
+      searchParams.get("applyYesNoOddsThresholds"),
+      defaults.applyYesNoOddsThresholds,
+    ),
+    sportsMoneylineOnly: parseBooleanSearchParam(
+      searchParams.get("sportsMoneylineOnly"),
+      defaults.sportsMoneylineOnly,
     ),
     excludeSports: parseBooleanSearchParam(
       searchParams.get("excludeSports"),
@@ -579,6 +632,20 @@ export function normalizeBullpenScanFilters(
       0,
       parseNumberSearchParam(searchParams.get("minNoOdds"), defaults.minNoOdds),
     ),
+    minLowerOutcomeOdds: Math.max(
+      0,
+      parseNumberSearchParam(
+        searchParams.get("minLowerOutcomeOdds"),
+        defaults.minLowerOutcomeOdds,
+      ),
+    ),
+    minHigherOutcomeOdds: Math.max(
+      50,
+      parseNumberSearchParam(
+        searchParams.get("minHigherOutcomeOdds"),
+        defaults.minHigherOutcomeOdds,
+      ),
+    ),
   };
 }
 
@@ -589,7 +656,17 @@ export function buildBullpenScanQueryParams(
   const params = new URLSearchParams();
   params.set("mode", mode);
   params.set("maxClosingDays", String(filters.maxClosingDays));
+  params.set("minVolumeUsd", String(filters.minVolumeUsd));
+  params.set("minLiquidityUsd", String(filters.minLiquidityUsd));
+  params.set("minVolume24hrUsd", String(filters.minVolume24hrUsd));
+  params.set("maxSpreadCents", String(filters.maxSpreadCents));
+  params.set("rejectedThemePattern", filters.rejectedThemePattern);
   params.set("targetDate", filters.targetDate);
+  params.set(
+    "applyYesNoOddsThresholds",
+    String(filters.applyYesNoOddsThresholds),
+  );
+  params.set("sportsMoneylineOnly", String(filters.sportsMoneylineOnly));
   params.set("excludeSports", String(filters.excludeSports));
   params.set("excludeWeather", String(filters.excludeWeather));
   params.set(
@@ -627,6 +704,8 @@ export function buildBullpenScanQueryParams(
   params.set("onlyBinaryYesNo", String(filters.onlyBinaryYesNo));
   params.set("minYesOdds", String(filters.minYesOdds));
   params.set("minNoOdds", String(filters.minNoOdds));
+  params.set("minLowerOutcomeOdds", String(filters.minLowerOutcomeOdds));
+  params.set("minHigherOutcomeOdds", String(filters.minHigherOutcomeOdds));
   return params;
 }
 
@@ -1093,17 +1172,6 @@ export function getBullpenReturnsPerDayBreakdown({
     };
   }
 
-  if (llmYesOdds === null || llmNoOdds === null) {
-    return {
-      currentOdds: null,
-      currentSide: null,
-      daysUntilClose,
-      llmYesOdds,
-      llmNoOdds,
-      result: null,
-    };
-  }
-
   // Polymarket date-only markets close at end-of-day ET, but expired pending-settlement
   // rows are measured from the event date itself. The technical close is therefore
   // one day later than the formula deadline once the row has expired.
@@ -1112,10 +1180,19 @@ export function getBullpenReturnsPerDayBreakdown({
       ? Number((daysUntilClose - 1).toFixed(1))
       : daysUntilClose;
 
-  // Returns/day uses the unpriced upside for the current odds on the side matching the strongest LLM odds:
+  // Returns/day uses the unpriced upside for the current odds on the side matching the strongest LLM odds.
+  // Before a valid LLM result exists, Stage 1 uses the strongest current Bullpen side, matching the backend's
+  // candidate_returns_per_day calculation instead of hiding an otherwise complete candidate metric.
   // Default persisted Excel-style formula:
   // (100 - current odds on strongest(LLM Yes odds, LLM No odds) side) / (days left + 4).
-  const currentSide = llmYesOdds >= llmNoOdds ? "Yes" : "No";
+  const currentSide =
+    llmYesOdds !== null && llmNoOdds !== null
+      ? llmYesOdds >= llmNoOdds
+        ? "Yes"
+        : "No"
+      : yesOdds >= noOdds
+        ? "Yes"
+        : "No";
   const currentOdds = currentSide === "Yes" ? yesOdds : noOdds;
 
   return {

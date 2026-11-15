@@ -13,6 +13,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.indmoney_us.repository import IndMoneyUsPortfolioSnapshotRepository
+from app.domains.indmoney_us.snapshot_validation import validate_holdings_snapshot
 from app.domains.indmoney_us.threats import (
     THREAT_ANALYSIS_MODEL,
     THREAT_ANALYSIS_PROVIDER,
@@ -28,10 +29,12 @@ from app.domains.indmoney_us.threats_schemas import (
     IndMoneyUsThreatHistoryResponse,
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
+    IndMoneyUsThreatRunRequest,
 )
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.jobs.use_cases.create_job import CreateJobCommand, CreateJobUseCase
+from app.domains.portfolio_events.job_projection import portfolio_analysis_job_projection
 from app.domains.portfolio_events.urgent_actionables import (
     HoldingContext,
     build_holding_context_index,
@@ -92,7 +95,7 @@ async def get_threat_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    jobs = await _get_threat_jobs(db, current_user.id, limit)
+    jobs = await _get_threat_jobs(db, current_user.id, limit, include_details=False)
     return IndMoneyUsThreatHistoryResponse(history=[_serialize_threat_history_item(job) for job in jobs])
 
 
@@ -111,7 +114,7 @@ async def get_threat_analysis(
 
 @router.post("/run", response_model=IndMoneyUsThreatRunResponse)
 async def run_threat_analysis(
-    body: PortfolioEventRunRequest | None = None,
+    body: IndMoneyUsThreatRunRequest | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -125,6 +128,17 @@ async def run_threat_analysis(
             detail="No INDmoney US portfolio snapshot found. Paste a snapshot first.",
         )
 
+    if body and body.expected_snapshot_id is not None and body.expected_snapshot_id != latest_snapshot.id:
+        raise HTTPException(
+            409,
+            detail="The latest saved snapshot changed. Reopen the snapshot choice and review the new source before continuing.",
+        )
+
+    validate_holdings_snapshot({
+        "holdings": latest_snapshot.holdings,
+        "parse_status": latest_snapshot.parse_status,
+        "reported_holdings_count": latest_snapshot.reported_holdings_count,
+    })
     prompt = build_indmoney_us_threat_prompt(latest_snapshot)
     redis = _get_redis()
     try:
@@ -148,7 +162,7 @@ async def run_threat_analysis(
     finally:
         await redis.aclose()
 
-    job = await PostgresJobRepository(db).get(result.job_id)
+    job = await PostgresJobRepository(db).get_for_user(result.job_id, UserId(current_user.id))
     if not job:
         raise HTTPException(500, detail="Threat analysis job could not be loaded after creation")
 
@@ -188,27 +202,15 @@ async def _get_latest_threat_job(db: AsyncSession, user_id: int) -> Job | None:
     return jobs[0] if jobs else None
 
 
-async def _get_threat_jobs(db: AsyncSession, user_id: int, limit: int) -> list[Job]:
+async def _get_threat_jobs(
+    db: AsyncSession, user_id: int, limit: int, *, include_details: bool = True,
+) -> list[Job]:
     result = await db.execute(
         select(Job)
         .options(
-            load_only(
-                Job.id,
-                Job.user_id,
-                Job.prompt,
-                Job.provider,
-                Job.model,
-                Job.status,
-                Job.response,
-                Job.error_message,
-                Job.tokens_in,
-                Job.tokens_out,
-                Job.estimated_cost,
-                Job.auto_rebalance_portfolio,
-                Job.auto_rebalance_sequence,
-                Job.auto_rebalance_label,
-                Job.created_at,
-                Job.updated_at,
+            portfolio_analysis_job_projection(
+                include_details=include_details,
+                include_runtime_metadata=True,
             )
         )
         .where(
@@ -278,6 +280,7 @@ async def _serialize_threat_job(
         tokens_out=job.tokens_out,
         estimated_cost=job.estimated_cost,
         error_message=job.error_message,
+        runtime_metadata_json=job.runtime_metadata_json,
         report=parsed,
     )
 

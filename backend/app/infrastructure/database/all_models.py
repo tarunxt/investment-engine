@@ -1,7 +1,12 @@
 # Import every ORM model so SQLAlchemy's mapper registry is fully populated
 # before any query runs. Required in Celery workers (which don't load main.py).
-from app.domains.cost_drivers.models import CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
+from app.domains.cost_drivers.models import CostCollectionIntent, CostRecommendation, CostSnapshot, TrafficCostRollup  # noqa: F401
 from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
+from app.domains.api_usage.models import (  # noqa: F401
+    ApiUsageAttemptEvent,
+    LlmProviderUsageCallRecord,
+    LlmProviderUsageDailySnapshot,
+)
 from app.domains.bullpen_trade_analysis.models import (  # noqa: F401
     BullpenTradeAnalysisEventLogRecord,
     BullpenTradeAnalysisLlmRecord,
@@ -70,3 +75,11 @@ from app.domains.prompts.models import Prompt  # noqa: F401
 from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
 from app.domains.zerodha.audit import ZerodhaAuditLog  # noqa: F401
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot  # noqa: F401
+from app.domains.trading_bots.models import (  # noqa: F401
+    UniversalScanSettingsRecord,
+    UniversalScanStateRecord,
+)
+
+from app.domains.recommendation_audit.models import (  # noqa: F401
+    EvidenceRecord, DecisionRecord, VerificationRecord, SpendAccount, SpendAttempt,
+)

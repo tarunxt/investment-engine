@@ -91,6 +91,7 @@ test("active Nginx templates enforce public and private cache boundaries", () =>
   assert.match(apiNginx, /upstream investor_backend[\s\S]*keepalive 32/);
   assert.match(apiNginx, /location \/ws\/[\s\S]*proxy_buffering off/);
   assert.match(apiNginx, /location \/\s*\{[\s\S]*proxy_buffering on/);
+  assert.match(frontendNginx, /location = \/api\/bullpen-ai\/stage-one\.xlsx[\s\S]*proxy_read_timeout 600s[\s\S]*proxy_buffering off/);
 });
 
 test("frontend-only deployment cannot install or restart backend services", () => {

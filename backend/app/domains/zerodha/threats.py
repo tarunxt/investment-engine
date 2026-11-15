@@ -394,13 +394,13 @@ class ThreatPromptMetadata:
 
 def build_zerodha_threat_prompt(snapshot: ZerodhaPortfolioSnapshot) -> str:
     captured_at_ist = snapshot.captured_at.astimezone(IST)
+    exposure_value = sum((int(h.get("quantity") or 0) + int(h.get("t1_quantity") or 0)) * float(h.get("last_price") or 0) for h in snapshot.holdings or [])
     top_weight = 0.0
-    if snapshot.holdings_market_value > 0:
+    if exposure_value > 0:
         top_weight = max(
             (
-                ((holding.get("market_value") or 0.0) / snapshot.holdings_market_value) * 100
+                ((int(holding.get("quantity") or 0) + int(holding.get("t1_quantity") or 0)) * float(holding.get("last_price") or 0) / exposure_value) * 100
                 for holding in snapshot.holdings or []
-                if (holding.get("quantity") or 0) > 0
             ),
             default=0.0,
         )
@@ -448,7 +448,8 @@ def build_zerodha_threat_prompt(snapshot: ZerodhaPortfolioSnapshot) -> str:
         f"- Captured at (IST): {captured_at_ist.strftime('%d %b %Y, %I:%M %p IST')}",
         f"- Holdings count: {snapshot.holdings_count}",
         f"- Net positions count: {snapshot.net_positions_count}",
-        f"- Holdings market value (INR): {_fmt_num(snapshot.holdings_market_value)}",
+        f"- Holdings market value including T1 exposure (INR): {_fmt_num(exposure_value)}",
+        f"- Settled holdings market value (INR): {_fmt_num(snapshot.holdings_market_value)}",
         f"- Holdings unrealized PnL (INR): {_fmt_num(snapshot.holdings_pnl)}",
         f"- Holdings day change value (INR): {_fmt_num(snapshot.holdings_day_change_value)}",
         f"- Net positions PnL (INR): {_fmt_num(snapshot.positions_pnl)}",
@@ -457,6 +458,7 @@ def build_zerodha_threat_prompt(snapshot: ZerodhaPortfolioSnapshot) -> str:
         "- Cash / wallet balance: Not available from the Zerodha snapshot; do not invent it.",
         "- Sector is not present in the snapshot; infer sector/theme only when supported by current public company data.",
         "",
+        "All snapshot records are included, including zero settled balances. T1 units are unsettled exposure, not automatically sellable units. Do not treat a zero settled balance with positive T1 as no exposure.",
         "Portfolio holdings table:",
         _build_holdings_markdown_table(snapshot),
         "",
@@ -573,7 +575,6 @@ def _build_holdings_markdown_table(snapshot: ZerodhaPortfolioSnapshot) -> str:
         [
             holding
             for holding in (snapshot.holdings or [])
-            if (holding.get("quantity") or 0) > 0 or abs(float(holding.get("market_value") or 0.0)) > 0
         ],
         key=lambda holding: float(holding.get("market_value") or 0.0),
         reverse=True,
@@ -592,15 +593,18 @@ def _build_holdings_markdown_table(snapshot: ZerodhaPortfolioSnapshot) -> str:
         "Weight %",
         "Day Change %",
         "Day Change Value",
+        "T1 Units",
+        "Settled Units",
     ]
     lines = [
         f"| {' | '.join(headers)} |",
         f"| {' | '.join('---' for _ in headers)} |",
     ]
-    total_market_value = snapshot.holdings_market_value or 0.0
+    total_market_value = sum((int(h.get("quantity") or 0) + int(h.get("t1_quantity") or 0)) * float(h.get("last_price") or 0) for h in holdings)
     for holding in holdings:
-        invested_value = float(holding.get("invested_value") or 0.0)
-        market_value = float(holding.get("market_value") or 0.0)
+        exposure_units = int(holding.get("quantity") or 0) + int(holding.get("t1_quantity") or 0)
+        invested_value = exposure_units * float(holding.get("average_price") or 0)
+        market_value = exposure_units * float(holding.get("last_price") or 0)
         pnl = float(holding.get("pnl") or 0.0)
         day_change_pct = float(holding.get("day_change_percentage") or 0.0)
         weight_pct = ((market_value / total_market_value) * 100) if total_market_value > 0 else 0.0
@@ -612,7 +616,7 @@ def _build_holdings_markdown_table(snapshot: ZerodhaPortfolioSnapshot) -> str:
                     str(holding.get("exchange") or ""),
                     str(holding.get("tradingsymbol") or ""),
                     str(holding.get("tradingsymbol") or ""),
-                    str(int(holding.get("quantity") or 0)),
+                    str(exposure_units),
                     _fmt_num(float(holding.get("average_price") or 0.0)),
                     _fmt_num(float(holding.get("last_price") or 0.0)),
                     _fmt_num(invested_value),
@@ -622,6 +626,8 @@ def _build_holdings_markdown_table(snapshot: ZerodhaPortfolioSnapshot) -> str:
                     _fmt_pct(weight_pct),
                     _fmt_pct(day_change_pct),
                     _fmt_num(float(holding.get("day_change_value") or 0.0)),
+                    str(int(holding.get("t1_quantity") or 0)),
+                    str(int(holding.get("quantity") or 0)),
                 ]
             )
             + " |"

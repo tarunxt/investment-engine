@@ -1,10 +1,15 @@
 from types import SimpleNamespace
 
 from app.domains.mails.service import (
+    BULLPEN_WALLET_PORTFOLIO_URL,
     STAGE2_WARNING_THRESHOLD,
+    _initial_sell_action,
+    _sell_handoff_email_footer,
     build_stage2_warning_email,
     extract_stage2_position_warnings,
 )
+
+
 def _run(rows, *, active_positions=None):
     stages = []
     if active_positions is not None:
@@ -128,6 +133,11 @@ def test_stage2_warning_email_is_actionable_and_identifies_pre_stage3_timing():
     assert "Actual current held-side Bullpen odds: 84%" in text_content
     assert "Alert triggered by: LLM odds" in text_content
     assert "Example event" in html_content
+    assert (
+        f'href="{BULLPEN_WALLET_PORTFOLIO_URL}" '
+        'style="color:inherit;text-decoration:underline">Example event</a>'
+        in html_content
+    )
     assert "immediate exit review" in remarks
 
 
@@ -217,6 +227,45 @@ def test_stage2_warning_keeps_both_measures_strictly_below_80():
     )
 
     assert extract_stage2_position_warnings(run) == []
+
+
+def test_exit_warning_creates_gpt_work_delivery_audit_handoff():
+    action = _initial_sell_action(
+        [
+            {
+                "market_id": "1130016",
+                "recommended_action": "EXIT",
+            }
+        ],
+        at="2026-09-02T07:00:00+00:00",
+    )
+
+    assert action is not None
+    assert action["status"] == "detected"
+    assert action["market_ids"] == ["1130016"]
+    html_footer, text_footer = _sell_handoff_email_footer(91, action)
+    assert "Delivery audit ID:</strong> 91" in html_footer
+    assert "Market IDs:</strong> 1130016" in html_footer
+    assert "Delivery audit ID: 91" in text_footer
+    assert "Action: SELL FULL POSITION" in text_footer
+    assert "https://cred-x.in/console/mails?deliveryId=91" in text_footer
+
+
+def test_non_exit_mail_does_not_create_sell_handoff():
+    assert _initial_sell_action(
+        [{"market_id": "1130016", "recommended_action": "HOLD"}],
+        at="2026-09-02T07:00:00+00:00",
+    ) is None
+
+
+def test_continuous_bullpen_breach_also_creates_sell_handoff():
+    action = _initial_sell_action(
+        [{"market_id": "1130016", "side": "NO", "breach_type": "actual"}],
+        at="2026-09-02T07:00:00+00:00",
+    )
+
+    assert action is not None
+    assert action["market_ids"] == ["1130016"]
 
 
 def test_stage2_warning_uses_stage1_actual_odds_when_review_row_is_compact():

@@ -1,0 +1,7 @@
+Runtime startup and fingerprint: 0.55s
+Login initial JavaScript: 193684 transferred bytes, 616262 decoded bytes (12 files)
+Dashboard initial JavaScript: 235896 transferred bytes, 760120 decoded bytes (16 files)
+Bullpen AI initial JavaScript: 253139 transferred bytes, 817000 decoded bytes (20 files)
+Automated rebalance initial JavaScript: 705914 transferred bytes, 2228612 decoded bytes (25 files)
+Routes, auth boundary, proxy, and route assets: 0.85s
+Verified webpack standalone artifact in 1.52s

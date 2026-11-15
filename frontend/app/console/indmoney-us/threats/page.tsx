@@ -268,6 +268,7 @@ export default function IndMoneyUsThreatsPage() {
   const [currentPriceQuotes, setCurrentPriceQuotes] = useState<IndMoneyUsCurrentPriceQuote[]>([]);
   const [currentPricesLoading, setCurrentPricesLoading] = useState(false);
   const [loadingPage, setLoadingPage] = useState(true);
+  const [analysisLoaded, setAnalysisLoaded] = useState(false);
   const [runningAnalysis, setRunningAnalysis] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const usdInrRate = useUsdInrRate();
@@ -280,6 +281,7 @@ export default function IndMoneyUsThreatsPage() {
   const loadLatestAnalysis = useCallback(async () => {
     const response = await apiService.indmoneyUsThreatsLatest();
     setAnalysis(response.analysis);
+    setAnalysisLoaded(true);
     if (response.analysis?.report) {
       setLastReportAnalysis(response.analysis);
       return;
@@ -529,32 +531,38 @@ export default function IndMoneyUsThreatsPage() {
               <Clock3 className="size-3.5" />
               Current Snapshot
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Latest Paste</div>
-                <div className="mt-1 text-sm text-white">{formatTs(latestSnapshot?.captured_at)}</div>
+            {!overview ? (
+              <p role="status" className="mt-4 text-sm text-slate-200">
+                Snapshot availability unknown. Saved portfolio has not been loaded.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Latest Paste</div>
+                  <div className="mt-1 text-sm text-white">{formatTs(latestSnapshot?.captured_at)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Snapshot Date</div>
+                  <div className="mt-1 text-sm text-white">{latestSnapshot?.snapshot_date ?? '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Current Value</div>
+                  <div className="mt-1 text-sm text-white">{formatUsd(latestSnapshot?.current_value)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Total Return</div>
+                  <div className="mt-1 text-sm text-white">{formatUsd(latestSnapshot?.total_return_value)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Parse Status</div>
+                  <div className="mt-1 text-sm capitalize text-white">{latestSnapshot?.parse_status ?? 'missing'}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Threat Model</div>
+                  <div className="mt-1 text-sm text-white">{analysis ? `${analysis.provider}/${analysis.model}` : 'OpenAI gpt-4o-mini'}</div>
+                </div>
               </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Snapshot Date</div>
-                <div className="mt-1 text-sm text-white">{latestSnapshot?.snapshot_date ?? '-'}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Current Value</div>
-                <div className="mt-1 text-sm text-white">{formatUsd(latestSnapshot?.current_value)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Total Return</div>
-                <div className="mt-1 text-sm text-white">{formatUsd(latestSnapshot?.total_return_value)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Parse Status</div>
-                <div className="mt-1 text-sm capitalize text-white">{latestSnapshot?.parse_status ?? 'missing'}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Threat Model</div>
-                <div className="mt-1 text-sm text-white">{analysis ? `${analysis.provider}/${analysis.model}` : 'OpenAI gpt-4o-mini'}</div>
-              </div>
-            </div>
+            )}
 
             {topHoldings.length > 0 && (
               <div className="mt-5">
@@ -585,7 +593,7 @@ export default function IndMoneyUsThreatsPage() {
         </div>
       )}
 
-      {!latestSnapshot && (
+      {overview && !latestSnapshot && (
         <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-8 text-sm text-slate-600 shadow-sm">
           <div className="font-semibold text-slate-900">No INDmoney US snapshot found yet.</div>
           <p className="mt-2 max-w-2xl leading-7">
@@ -598,6 +606,12 @@ export default function IndMoneyUsThreatsPage() {
               <ArrowRight className="ml-2 size-4" />
             </Link>
           </Button>
+        </div>
+      )}
+
+      {!analysisLoaded && !analysis && (
+        <div role="status" className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600">
+          Saved analysis availability unknown. The latest saved analysis has not been loaded.
         </div>
       )}
 
@@ -714,7 +728,7 @@ export default function IndMoneyUsThreatsPage() {
         </>
       )}
 
-      {!analysis && latestSnapshot && (
+      {analysisLoaded && !analysis && latestSnapshot && (
         <div className="rounded-[28px] border border-slate-200 bg-white px-6 py-8 text-sm text-slate-600 shadow-sm">
           <div className="font-semibold text-slate-900">No threat scan has been run yet.</div>
           <p className="mt-2 max-w-2xl leading-7">

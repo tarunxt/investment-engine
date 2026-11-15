@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import json
 import os
 import re
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.core.logging import get_logger
@@ -57,9 +59,13 @@ CONSOLE_SCAN_WINDOW_DAYS = 30
 CONSOLE_RANKED_EVENT_LIMIT = 10
 DEFAULT_CONSOLE_ORDER_USD = 5.0
 CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
-CONSOLE_MIN_MARKET_ODDS = 5.0
+CONSOLE_MIN_MARKET_ODDS = 1.0
 CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
 CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS = 90
+# Full Universe includes streaming filtering and source-pack writes. Five
+# minutes truncates ordinary catalogues. Keep a bounded scan budget below the
+# planner's two-hour limit, leaving time for wallet/LLM work and finalization.
+CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS = 5400
 CONSOLE_POSITIONS_TIMEOUT_SECONDS = 20
 CONSOLE_POSITIONS_TIMEOUT_ENV_VAR = "BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS"
 # The broker may wait for a shared authenticated CLI refresh before it runs the
@@ -122,6 +128,7 @@ CONSOLE_CLI_SOURCE_URL = (
     "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3"
 )
 CONSOLE_GAMMA_SOURCE_LABEL = "Polymarket Gamma API"
+ConsoleScanScope = Literal["trending", "full_universe"]
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
 logger = get_logger("app.domains.polymarket_auto_live.console_profile")
 _OUTCOME_LABEL_KEYS = ("name", "label", "outcome", "title", "side")
@@ -247,6 +254,29 @@ class ConsoleScanResult:
     warning: str | None = None
     details: str | None = None
     complete_universe: bool = True
+    trending_candidates: int | None = None
+    catalogue_candidates: int | None = None
+    # Universal scans can contain hundreds of thousands of rejected markets.
+    # When a callback externalizes their raw source, retain only the serialized
+    # candidate dictionaries and release the heavier wrapper/market objects.
+    serialized_rejected: list[dict[str, object]] | None = None
+    filter_ledger: dict[str, object] | None = None
+
+
+def _market_identity_keys(market: ScannedMarket) -> set[str]:
+    raw = market.raw if isinstance(market.raw, dict) else {}
+    keys = {
+        str(value).strip().lower()
+        for value in (
+            market.market_id,
+            raw.get("conditionId"),
+            raw.get("condition_id"),
+            raw.get("marketId"),
+            raw.get("market_id"),
+        )
+        if value is not None and str(value).strip()
+    }
+    return keys
 
 
 @dataclass(frozen=True)
@@ -571,6 +601,8 @@ def _read_outcome_labels(row: dict[str, object]) -> list[str]:
 def _read_yes_no_prices(
     row: dict[str, object], outcome_labels: list[str]
 ) -> tuple[float | None, float | None]:
+    """Read executable Buy Yes and Buy No prices, with legacy fallbacks."""
+
     normalized_labels = [_normalize_text(label) for label in outcome_labels]
     outcome_prices = [
         _read_number(value) for value in _iter_list_like(row.get("outcomePrices"))
@@ -587,13 +619,50 @@ def _read_yes_no_prices(
         if no_index < len(outcome_prices):
             no_price = outcome_prices[no_index]
 
+    # Bullpen payloads may expose a separate ask for each outcome. Prefer those
+    # because they directly represent what a Buy order can fill at.
+    yes_ask = None
+    no_ask = None
+    ask_keys = ("bestAsk", "best_ask", "ask", "buyPrice", "buy_price")
+    for collection_name in ("outcomes", "options", "tokens", "markets"):
+        for item in _iter_list_like(row.get(collection_name)):
+            if not isinstance(item, dict):
+                continue
+            label = _read_string(item, _OUTCOME_LABEL_KEYS)
+            if not label:
+                continue
+            normalized_label = _normalize_text(label)
+            if normalized_label == "yes" and yes_ask is None:
+                yes_ask = _read_nested_number(item, ask_keys)
+            elif normalized_label == "no" and no_ask is None:
+                no_ask = _read_nested_number(item, ask_keys)
+
+    is_binary_yes_no = (
+        len(set(normalized_labels)) == 2
+        and set(normalized_labels) == {"yes", "no"}
+    )
+    if is_binary_yes_no:
+        # Gamma exposes the YES book at the market level: bestAsk buys YES;
+        # 1 - bestBid buys the complementary NO token.
+        top_level_yes_ask = _normalize_console_odds(row.get("bestAsk"))
+        top_level_yes_bid = _normalize_console_odds(row.get("bestBid"))
+        normalized_yes_ask = _normalize_console_odds(yes_ask)
+        normalized_no_ask = _normalize_console_odds(no_ask)
+        if normalized_yes_ask is not None:
+            yes_price = normalized_yes_ask
+        elif top_level_yes_ask is not None:
+            yes_price = top_level_yes_ask
+        if normalized_no_ask is not None:
+            no_price = normalized_no_ask
+        elif top_level_yes_bid is not None:
+            no_price = round(100.0 - top_level_yes_bid, 2)
+
+    # Compatibility fallbacks for non-Gamma/Bullpen payload variants.
     nested_price_keys = (
         "odds",
         "decimalOdds",
         "price",
         "lastPrice",
-        "bestAsk",
-        "bestBid",
         "probability",
         "probabilityValue",
     )
@@ -642,7 +711,6 @@ def _read_yes_no_prices(
 
     return _normalize_console_odds(yes_price), _normalize_console_odds(no_price)
 
-
 def _is_binary_yes_no(
     outcome_labels: list[str],
     yes_odds: float | None,
@@ -659,46 +727,109 @@ def console_market_filter_reasons(
     *,
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    min_highest_market_odds: float = 90,
+    apply_yes_no_odds_thresholds: bool = True,
+    max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    min_volume_usd: float = 100,
+    min_liquidity_usd: float = 100,
+    min_volume_24hr_usd: float = 100,
+    max_spread_cents: float = 10,
+    rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
+    exclude_sports: bool = True,
+    sports_moneyline_only: bool = False,
+    exclude_weather: bool = True,
+    exclude_market_predictions: bool = True,
+    exclude_tweet_count_questions: bool = True,
+    exclude_released_by_events: bool = True,
+    only_binary_yes_no: bool = True,
+    exclude_custom_phrases: bool = True,
     custom_exclude_phrases: list[str] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     search_text = build_market_filter_search_text(market)
-    for phrase in custom_exclude_phrases or []:
-        normalized_phrase = _normalize_text(phrase)
-        if normalized_phrase and normalized_phrase in search_text:
-            reasons.append(f'Excluded by custom phrase "{phrase}".')
-            break
-    if is_sports_market_text(search_text):
+    if market.volume_usd is None or market.volume_usd <= min_volume_usd:
+        reasons.append(
+            f"Excluded market with Volume USD not greater than {min_volume_usd:g}."
+        )
+    if market.liquidity_usd is None or market.liquidity_usd <= min_liquidity_usd:
+        reasons.append(
+            f"Excluded market with Liquidity USD not greater than {min_liquidity_usd:g}."
+        )
+    if market.volume_24hr_usd is None or market.volume_24hr_usd <= min_volume_24hr_usd:
+        reasons.append(
+            f"Excluded market with volume24hr USD not greater than {min_volume_24hr_usd:g}."
+        )
+    if market.spread_cents is None or market.spread_cents >= max_spread_cents:
+        reasons.append(
+            f"Excluded market with spread not below {max_spread_cents:g} cents."
+        )
+    if rejected_theme_pattern and re.search(
+        rejected_theme_pattern, market.theme or "", flags=re.IGNORECASE
+    ):
+        reasons.append(
+            f'Excluded theme "{market.theme}" by theme-name pattern.'
+        )
+    if exclude_custom_phrases:
+        for phrase in custom_exclude_phrases or []:
+            normalized_phrase = _normalize_text(phrase)
+            if normalized_phrase and normalized_phrase in search_text:
+                reasons.append(f'Excluded by custom phrase "{phrase}".')
+                break
+    if exclude_sports and is_sports_market_text(search_text):
         reasons.append("Excluded sports market.")
-    if _includes_any(search_text, WEATHER_KEYWORDS):
+    if sports_moneyline_only:
+        raw_market = market.raw if isinstance(market.raw, dict) else {}
+        event_slug = (market.event_slug or "").strip().lower()
+        fee_type = str(raw_market.get("feeType") or "").strip().lower()
+        sports_market_type = str(
+            raw_market.get("sportsMarketType") or ""
+        ).strip().lower()
+        if event_slug.endswith("draw"):
+            reasons.append('Excluded sports event whose event slug ends with "draw".')
+        if fee_type not in {"sports_fees_v2", "sports_fees_v3"}:
+            reasons.append(
+                "Excluded sports market without feeType sports_fees_v2 or sports_fees_v3."
+            )
+        if sports_market_type != "moneyline":
+            reasons.append(
+                "Excluded sports market whose sportsMarketType is not moneyline."
+            )
+    if exclude_weather and _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")
-    if _includes_any(search_text, MARKET_PREDICTION_KEYWORDS) or any(
-        pattern.search(search_text) for pattern in MARKET_PREDICTION_PATTERNS
+    if exclude_market_predictions and (
+        _includes_any(search_text, MARKET_PREDICTION_KEYWORDS)
+        or any(pattern.search(search_text) for pattern in MARKET_PREDICTION_PATTERNS)
     ):
         reasons.append("Excluded market-prediction or finance market.")
-    if _includes_any(search_text, TWEET_COUNT_KEYWORDS) and any(
-        pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
+    if (
+        exclude_tweet_count_questions
+        and _includes_any(search_text, TWEET_COUNT_KEYWORDS)
+        and any(pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS)
     ):
         reasons.append("Excluded tweet-count or social-post-count market.")
-    if _includes_any(search_text, RELEASED_BY_EVENT_KEYWORDS):
+    if exclude_released_by_events and _includes_any(
+        search_text, RELEASED_BY_EVENT_KEYWORDS
+    ):
         reasons.append("Excluded release-by event market.")
     if is_insult_market_text(search_text):
         reasons.append("Excluded insult or name-calling market.")
-    if not _is_binary_yes_no(
+    if only_binary_yes_no and not _is_binary_yes_no(
         market.outcome_labels,
         market.current_yes_odds,
         market.current_no_odds,
     ):
         reasons.append("Excluded unclear non-binary market.")
-    if market.current_yes_odds is None or market.current_no_odds is None:
-        reasons.append("Excluded market without both Yes and No odds.")
-    elif (
-        market.current_yes_odds < min_market_odds
-        or market.current_no_odds < min_market_odds
-    ):
-        reasons.append(
-            f"Excluded market below the {min_market_odds:g}% Yes/No odds floor."
-        )
+    if apply_yes_no_odds_thresholds:
+        if market.current_yes_odds is None or market.current_no_odds is None:
+            reasons.append("Excluded market without both Yes and No odds.")
+        elif min(market.current_yes_odds, market.current_no_odds) <= min_market_odds:
+            reasons.append(
+                f"Excluded because min(Yes, No) must be above {min_market_odds:g}%."
+            )
+        elif max(market.current_yes_odds, market.current_no_odds) <= min_highest_market_odds:
+            reasons.append(
+                f"Excluded because max(Yes, No) must be above {min_highest_market_odds:g}%."
+            )
     if not market.close_time:
         reasons.append("Excluded market without a close time.")
     else:
@@ -709,9 +840,9 @@ def console_market_filter_reasons(
             days_until_close = (close_time - now).total_seconds() / 86_400
             if days_until_close <= 0:
                 reasons.append("Excluded market that is already closed.")
-            elif days_until_close > CONSOLE_SCAN_WINDOW_DAYS:
+            elif days_until_close > max_closing_days:
                 reasons.append(
-                    f"Excluded market outside the {CONSOLE_SCAN_WINDOW_DAYS}-day Bullpen window."
+                    f"Excluded market outside the {max_closing_days}-day Bullpen window."
                 )
     return reasons
 
@@ -778,6 +909,7 @@ def _normalize_console_market(
                 "dollarVolume",
             ),
         ),
+        volume_24hr_usd=_read_nested_number(row, ("volume24hr", "volume24h")),
         liquidity_usd=_read_nested_number(
             row,
             ("liquidity", "liquidityNum", "liquidityUsd", "liquidityUSD"),
@@ -860,6 +992,22 @@ def _build_cli_console_scan_result(
     now: datetime,
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    min_highest_market_odds: float = 90,
+    apply_yes_no_odds_thresholds: bool = True,
+    max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    min_volume_usd: float = 100,
+    min_liquidity_usd: float = 100,
+    min_volume_24hr_usd: float = 100,
+    max_spread_cents: float = 10,
+    rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
+    exclude_sports: bool = True,
+    sports_moneyline_only: bool = False,
+    exclude_weather: bool = True,
+    exclude_market_predictions: bool = True,
+    exclude_tweet_count_questions: bool = True,
+    exclude_released_by_events: bool = True,
+    only_binary_yes_no: bool = True,
+    exclude_custom_phrases: bool = True,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
 ) -> ConsoleScanResult:
@@ -882,6 +1030,22 @@ def _build_cli_console_scan_result(
                 market,
                 now=now,
                 min_market_odds=min_market_odds,
+                min_highest_market_odds=min_highest_market_odds,
+                apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
+                max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                min_volume_24hr_usd=min_volume_24hr_usd,
+                max_spread_cents=max_spread_cents,
+                rejected_theme_pattern=rejected_theme_pattern,
+                exclude_sports=exclude_sports,
+                sports_moneyline_only=sports_moneyline_only,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
                 custom_exclude_phrases=custom_exclude_phrases,
             )
             if apply_base_filters
@@ -895,6 +1059,7 @@ def _build_cli_console_scan_result(
                     slug=market.slug,
                     market_url=market.market_url,
                     reasons=reasons,
+                    source_market=market,
                 )
             )
             continue
@@ -909,19 +1074,133 @@ def _build_cli_console_scan_result(
         accepted=accepted,
         rejected=rejected,
         total_candidates=len(normalized_by_market_id),
+        trending_candidates=len(normalized_by_market_id),
     )
+
 
 
 async def scan_console_profile_markets(
     *,
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    min_highest_market_odds: float = 90,
+    apply_yes_no_odds_thresholds: bool = True,
+    max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    min_volume_usd: float = 100,
+    min_liquidity_usd: float = 100,
+    min_volume_24hr_usd: float = 100,
+    max_spread_cents: float = 10,
+    rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
+    exclude_sports: bool = True,
+    sports_moneyline_only: bool = False,
+    exclude_weather: bool = True,
+    exclude_market_predictions: bool = True,
+    exclude_tweet_count_questions: bool = True,
+    exclude_released_by_events: bool = True,
+    only_binary_yes_no: bool = True,
+    exclude_custom_phrases: bool = True,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
     use_deadline_cursor_pagination: bool = False,
     gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+    scan_scope: ConsoleScanScope = "trending",
+    progress_callback: Callable[[int, int], None] | None = None,
+    rejected_callback: Callable[[ScanRejectedMarket], dict[str, object] | None] | None = None,
+    accepted_callback: Callable[[ScannedMarket], None] | None = None,
+    page_cache_key: str | None = None,
+    universal_scan_user_id: int | None = None,
+    universal_scan_export_id: str | None = None,
 ) -> ConsoleScanResult:
+    if universal_scan_user_id is not None:
+        from app.domains.trading_bots.universal_scan import iter_universal_scan_markets
+
+        metadata, universal_rows = iter_universal_scan_markets(
+            universal_scan_user_id,
+            export_id=universal_scan_export_id,
+        )
+        accepted: list[ScannedMarket] = []
+        rejected: list[ScanRejectedMarket] = []
+        serialized_rejected: list[dict[str, object]] | None = (
+            [] if rejected_callback is not None else None
+        )
+        total_candidates = 0
+        rejection_counts: dict[str, int] = {}
+        rejected_total = 0
+        for total_candidates, market in enumerate(universal_rows, 1):
+            reasons = console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+                min_highest_market_odds=min_highest_market_odds,
+                apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
+                max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                min_volume_24hr_usd=min_volume_24hr_usd,
+                max_spread_cents=max_spread_cents,
+                rejected_theme_pattern=rejected_theme_pattern,
+                exclude_sports=exclude_sports,
+                sports_moneyline_only=sports_moneyline_only,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
+                custom_exclude_phrases=custom_exclude_phrases,
+            ) if apply_base_filters else []
+            if reasons:
+                rejected_total += 1
+                for reason in set(reasons):
+                    rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+                rejected_market = ScanRejectedMarket(
+                    market_id=market.market_id,
+                    question=market.question,
+                    slug=market.slug,
+                    market_url=market.market_url,
+                    reasons=reasons,
+                    source_market=market,
+                )
+                if rejected_callback is None:
+                    rejected.append(rejected_market)
+                else:
+                    serialized = rejected_callback(rejected_market)
+                    if serialized is None:
+                        # Preserve compatibility for callbacks that only observe
+                        # rejects and do not take ownership of their payload.
+                        rejected.append(rejected_market)
+                    else:
+                        assert serialized_rejected is not None
+                        serialized_rejected.append(serialized)
+            else:
+                accepted.append(market)
+                if accepted_callback is not None:
+                    accepted_callback(market)
+            if progress_callback is not None and total_candidates % 1_000 == 0:
+                progress_callback(total_candidates, 1)
+        if progress_callback is not None:
+            progress_callback(total_candidates, 1)
+        return ConsoleScanResult(
+            source_label="Universal Polymarket Scan",
+            source_url="/console/trading-bots",
+            scanned_at=str(metadata.get("scannedAt") or metadata.get("createdAt") or ""),
+            accepted=accepted,
+            rejected=rejected,
+            total_candidates=total_candidates,
+            complete_universe=True,
+            catalogue_candidates=total_candidates,
+            serialized_rejected=serialized_rejected,
+            filter_ledger={
+                "version": 1, "source_export_id": metadata.get("exportId"),
+                "source_sha256": metadata.get("rowsSha256"),
+                "expected_rows": metadata["rowCount"], "evaluated_rows": total_candidates,
+                "accepted_rows": len(accepted), "rejected_rows": rejected_total,
+                "rejection_reasons": rejection_counts,
+                "reason_counts_overlap": True, "source_status": "validated",
+            },
+        )
+
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
     cli_exc: Exception | None = None
@@ -936,26 +1215,115 @@ async def scan_console_profile_markets(
             now=now,
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
+            min_highest_market_odds=min_highest_market_odds,
+            apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
+            max_closing_days=max_closing_days,
+            min_volume_usd=min_volume_usd,
+            min_liquidity_usd=min_liquidity_usd,
+            min_volume_24hr_usd=min_volume_24hr_usd,
+            max_spread_cents=max_spread_cents,
+            rejected_theme_pattern=rejected_theme_pattern,
+            exclude_sports=exclude_sports,
+            sports_moneyline_only=sports_moneyline_only,
+            exclude_weather=exclude_weather,
+            exclude_market_predictions=exclude_market_predictions,
+            exclude_tweet_count_questions=exclude_tweet_count_questions,
+            exclude_released_by_events=exclude_released_by_events,
+            only_binary_yes_no=only_binary_yes_no,
+            exclude_custom_phrases=exclude_custom_phrases,
             custom_exclude_phrases=custom_exclude_phrases,
             apply_base_filters=apply_base_filters,
         )
-        # Bullpen CLI limits parent discovery rows, while one parent can contain
-        # multiple markets. The normalized count can therefore exceed the CLI
-        # limit without representing the complete active market universe. Always
-        # complete the scan through Gamma before treating Stage 1 as exhaustive.
+        # Bullpen CLI is the complete legacy Trending contract. Full Universe
+        # supplements it through Gamma below without changing this fast path.
     except Exception as exc:
         cli_exc = exc
 
+    explicit_complete_scan = bool(
+        scan_scope == "full_universe"
+        or use_keyset_pagination
+        or use_deadline_cursor_pagination
+    )
+    if cli_result is not None and not explicit_complete_scan:
+        # Trending is the legacy Bullpen 007 behaviour. Keep this path
+        # byte-for-byte independent from the exhaustive Gamma catalogue so a
+        # Full Universe outage can never alter the default scheduled workflow.
+        cli_result.complete_universe = False
+        return cli_result
+
+    effective_keyset_pagination = bool(
+        use_keyset_pagination or scan_scope == "full_universe"
+    )
+    effective_gamma_timeout_seconds = (
+        max(
+            gamma_scan_timeout_seconds,
+            CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS,
+        )
+        if scan_scope == "full_universe"
+        else gamma_scan_timeout_seconds
+    )
+
+    # Opt-in streaming keeps legacy callers compatible. The engine persists
+    # rejected source data before the next page can grow the raw catalogue.
+    def filter_market(market: ScannedMarket) -> list[str]:
+        return (
+            console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+                min_highest_market_odds=min_highest_market_odds,
+                apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
+                max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                min_volume_24hr_usd=min_volume_24hr_usd,
+                max_spread_cents=max_spread_cents,
+                rejected_theme_pattern=rejected_theme_pattern,
+                exclude_sports=exclude_sports,
+                sports_moneyline_only=sports_moneyline_only,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
+                custom_exclude_phrases=custom_exclude_phrases,
+            )
+            if apply_base_filters
+            else []
+        )
+
     try:
-        gamma_scan = await asyncio.wait_for(
-            scan_candidate_markets(
-                min_liquidity_usd=0,
-                existing_position_slugs=set(),
-                apply_base_filters=apply_base_filters,
-                use_keyset_pagination=use_keyset_pagination,
-                use_deadline_cursor_pagination=use_deadline_cursor_pagination,
+        gamma_scan_coro = scan_candidate_markets(
+            min_liquidity_usd=0,
+            existing_position_slugs=set(),
+            # The console profile owns the user-configurable Stage 1 rules.
+            # Fetch the complete active catalogue here, then apply the saved
+            # toggle set below so a disabled section cannot be pre-filtered by
+            # the lower-level scanner.
+            apply_base_filters=False,
+            use_keyset_pagination=effective_keyset_pagination,
+            use_deadline_cursor_pagination=use_deadline_cursor_pagination,
+            preserve_partial_on_error=scan_scope == "full_universe",
+            pagination_deadline_seconds=(
+                effective_gamma_timeout_seconds
+                if scan_scope == "full_universe"
+                else None
             ),
-            timeout=gamma_scan_timeout_seconds,
+            filter_parent_deadlines=False,
+            **({"progress_callback": progress_callback} if progress_callback else {}),
+            **({"market_filter": filter_market, "rejected_callback": rejected_callback}
+               if rejected_callback is not None else {}),
+            **({"accepted_callback": accepted_callback} if accepted_callback else {}),
+            **({"page_cache_key": page_cache_key} if page_cache_key else {}),
+        )
+        gamma_scan = (
+            await gamma_scan_coro
+            if scan_scope == "full_universe"
+            else await asyncio.wait_for(
+                gamma_scan_coro,
+                timeout=effective_gamma_timeout_seconds,
+            )
         )
     except Exception as gamma_exc:
         if cli_result is not None:
@@ -999,16 +1367,7 @@ async def scan_console_profile_markets(
     accepted: list[ScannedMarket] = []
     rejected = list(gamma_scan.rejected)
     for market in gamma_scan.accepted:
-        reasons = (
-            console_market_filter_reasons(
-                market,
-                now=now,
-                min_market_odds=min_market_odds,
-                custom_exclude_phrases=custom_exclude_phrases,
-            )
-            if apply_base_filters
-            else []
-        )
+        reasons = [] if rejected_callback is not None else filter_market(market)
         if reasons:
             rejected.append(
                 ScanRejectedMarket(
@@ -1017,24 +1376,77 @@ async def scan_console_profile_markets(
                     slug=market.slug,
                     market_url=market.market_url,
                     reasons=reasons,
+                    source_market=market,
                 )
             )
             continue
         accepted.append(market)
     accepted.sort(key=lambda market: (market.close_time or "", market.question))
+    if scan_scope == "full_universe" and cli_result is not None:
+        # The exhaustive catalogue is authoritative, but Bullpen can expose a
+        # newly listed row before Gamma pagination observes it. Preserve that
+        # row in the union and deduplicate on the canonical market identifier.
+        accepted_by_id = {market.market_id: market for market in accepted}
+        rejected_by_id = {market.market_id: market for market in rejected}
+        seen_identity_keys = {
+            identity
+            for market in accepted
+            for identity in _market_identity_keys(market)
+        } | {market.market_id.strip().lower() for market in rejected}
+        for market in cli_result.accepted:
+            market_identity_keys = _market_identity_keys(market)
+            if market_identity_keys & seen_identity_keys:
+                continue
+            accepted_by_id[market.market_id] = market
+            seen_identity_keys.update(market_identity_keys)
+        for market in cli_result.rejected:
+            identity = market.market_id.strip().lower()
+            if identity in seen_identity_keys:
+                continue
+            rejected_by_id[market.market_id] = market
+            seen_identity_keys.add(identity)
+        accepted = list(accepted_by_id.values())
+        rejected = list(rejected_by_id.values())
+        accepted.sort(key=lambda market: (market.close_time or "", market.question))
+        rejected.sort(key=lambda market: (market.question, market.market_id))
+
+    gamma_complete = bool(getattr(gamma_scan, "complete_universe", True))
+    gamma_warning = getattr(gamma_scan, "warning", None)
+    gamma_details = getattr(gamma_scan, "details", None)
+    result_warning = gamma_warning
+    if result_warning is None and scan_scope != "full_universe":
+        result_warning = (
+            f"Bullpen CLI returned only {cli_result.total_candidates} rows; "
+            "Polymarket Gamma completed the market universe."
+            if cli_result is not None
+            else "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
+        )
     gamma_result = ConsoleScanResult(
-        source_label=CONSOLE_GAMMA_SOURCE_LABEL,
+        source_label=(
+            "Bullpen + Polymarket Full Universe"
+            if scan_scope == "full_universe"
+            else CONSOLE_GAMMA_SOURCE_LABEL
+        ),
         source_url=gamma_scan.source_url,
         scanned_at=gamma_scan.scanned_at,
         accepted=accepted,
         rejected=rejected,
-        total_candidates=len(gamma_scan.accepted) + len(gamma_scan.rejected),
-        warning=(
-            f"Bullpen CLI returned only {cli_result.total_candidates} rows; Polymarket Gamma completed the market universe."
-            if cli_result is not None
-            else "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
+        total_candidates=len(accepted) + len(rejected),
+        trending_candidates=(
+            cli_result.total_candidates if cli_result is not None else None
         ),
-        details=redact_secrets(str(cli_exc)) if cli_exc else None,
+        catalogue_candidates=(
+            len(gamma_scan.accepted) + len(gamma_scan.rejected)
+        ),
+        warning=result_warning,
+        details=(
+            redact_secrets(gamma_details)
+            if gamma_details
+            else redact_secrets(str(cli_exc))
+            if cli_exc
+            else None
+        ),
+        complete_universe=gamma_complete,
     )
     return gamma_result
 

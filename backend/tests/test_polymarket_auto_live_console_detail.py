@@ -31,6 +31,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveRun,
+    BullpenAutoLiveStageResult,
 )
 
 
@@ -334,6 +335,76 @@ async def test_console_run_detail_stops_before_decisions_when_run_is_not_owned(
 
 
 @pytest.mark.anyio
+async def test_stage_one_run_detail_avoids_decisions_and_preserves_candidates(
+    monkeypatch,
+):
+    scan_stage = BullpenAutoLiveStageResult(
+        stage_number=1,
+        stage_name="Stage 1",
+        status="pass",
+        reason="Scanned candidates.",
+        started_at="2026-07-27T10:00:00+00:00",
+        completed_at="2026-07-27T10:00:30+00:00",
+        outputs={
+            "workflow_stage_key": "scan",
+            "accepted_candidates_count": 1,
+            "accepted_candidates": [
+                {"market_id": "market-1", "question": "Will it happen?"}
+            ],
+        },
+    )
+    invest_stage = BullpenAutoLiveStageResult(
+        stage_number=2,
+        stage_name="Stage 2",
+        status="warning",
+        reason="Still processing.",
+        started_at="2026-07-27T10:00:30+00:00",
+        outputs={"workflow_stage_key": "invest"},
+    )
+    run = _run(decisions_count=40).model_copy(
+        update={
+            "stage_results": [scan_stage, invest_stage],
+            "decision_ids": ["decision-1"],
+        }
+    )
+    observed_calls: list[tuple[int, str]] = []
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeRepository:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def get_projected_run_for_user(self, user_id: int, run_id: str):
+            observed_calls.append((user_id, run_id))
+            return run, True, "2026-07-27T10:01:00+00:00"
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        _FakeSession,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _FakeRepository,
+    )
+
+    detail = await BullpenAutoLiveBot(user_id=7).get_stage_one_run_detail(run.id)
+
+    assert observed_calls == [(7, run.id)]
+    assert len(detail.stage_results) == 1
+    assert detail.stage_results[0].outputs["accepted_candidates"] == [
+        {"market_id": "market-1", "question": "Will it happen?"}
+    ]
+    assert detail.decision_ids == []
+    assert detail.order_intent_ids == []
+
+
+@pytest.mark.anyio
 async def test_console_run_detail_route_is_additive_bounded_and_uncached(
     monkeypatch,
 ):
@@ -357,6 +428,14 @@ async def test_console_run_detail_route_is_additive_bounded_and_uncached(
                 projection_version=1,
             )
 
+        async def get_stage_one_run_detail(
+            self,
+            run_id: str,
+        ) -> BullpenAutoLiveRun:
+            if run_id != run.id:
+                raise ValueError("Auto-Live run not found.")
+            return run
+
     async def _fake_get_bot(user_id: int):
         assert user_id == 7
         return _FakeBot()
@@ -375,6 +454,12 @@ async def test_console_run_detail_route_is_additive_bounded_and_uncached(
         missing = await client.get(
             "/polymarket/auto-live/runs/not-owned/console",
         )
+        stage_one = await client.get(
+            f"/polymarket/auto-live/runs/{run.id}/stage-one",
+        )
+        missing_stage_one = await client.get(
+            "/polymarket/auto-live/runs/not-owned/stage-one",
+        )
 
     assert found.status_code == 200
     assert found.json()["run"]["id"] == run.id
@@ -383,3 +468,9 @@ async def test_console_run_detail_route_is_additive_bounded_and_uncached(
     assert found.headers["vary"] == "Authorization, Cookie"
     assert "app;dur=" in found.headers["server-timing"]
     assert missing.status_code == 404
+    assert stage_one.status_code == 200
+    assert stage_one.json()["id"] == run.id
+    assert stage_one.headers["cache-control"] == "private, no-cache"
+    assert stage_one.headers["vary"] == "Authorization, Cookie"
+    assert "app;dur=" in stage_one.headers["server-timing"]
+    assert missing_stage_one.status_code == 404

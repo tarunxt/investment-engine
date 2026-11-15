@@ -6,6 +6,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
+from app.domains.api_usage.metering import ApiAttempt
 from app.core.config import get_gemini_api_keys
 from app.domains.ai_providers.base import (
     AIProviderResponse,
@@ -166,15 +167,16 @@ class GeminiProvider(BaseAIProvider):
                 safe_message=f"Gemini model '{model}' is not supported by this adapter.",
                 retryable=False,
             )
+        self._last_usage_attempt_id = None
         last_error: Exception | None = None
         requested_model = (model or "").strip()
-        for api_key in self._api_keys:
+        for key_index, api_key in enumerate(self._api_keys):
             try:
                 self.client = genai.Client(
                     api_key=api_key,
                     http_options={"api_version": "v1alpha"},
                 )
-                return self._generate_once(prompt=prompt, model=requested_model)
+                return self._generate_once(prompt=prompt, model=requested_model, usage_retry=key_index > 0)
             except Exception as exc:
                 last_error = exc
                 should_retry_with_next_key = _should_rotate_key(exc)
@@ -190,6 +192,7 @@ class GeminiProvider(BaseAIProvider):
         *,
         prompt: str,
         model: str,
+        usage_retry: bool = False,
     ) -> AIProviderResponse:
         tools: list[types.Tool] = []
 
@@ -218,42 +221,49 @@ class GeminiProvider(BaseAIProvider):
         web_search_queries: list[str] = []
         web_sources: list[str] = []
 
-        stream = self.client.models.generate_content_stream(
-            model=model,
-            contents=contents,
-            config=config,
-        )
-
-        for chunk in stream:
-
-            text = getattr(chunk, "text", None)
-
-            if text:
-                full_text_parts.append(text)
-                if sum(len(part) for part in full_text_parts) > max_chars:
-                    raise ValueError(
-                        "Generated response exceeded safety output limit for this prompt. Please retry."
-                    )
-
-            metadata = getattr(
-                chunk,
-                "usage_metadata",
-                None,
+        with ApiAttempt(
+            provider=self.provider_name, model=model, request={"prompt": prompt},
+            phase="retry" if usage_retry else "request", retry=usage_retry,
+            parent_attempt_id=getattr(self, "_last_usage_attempt_id", None) if usage_retry else None,
+            tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
+        ) as attempt:
+            self._last_usage_attempt_id = attempt.values["attempt_id"]
+            stream = self.client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=config,
             )
 
-            if metadata:
-                usage_metadata = metadata
+            for chunk in stream:
+                attempt.observe(chunk)
 
-            chunk_queries, chunk_sources = _extract_grounding_web_metadata(chunk)
-            web_search_used, web_search_queries, web_sources = merge_web_metadata(
-                web_search_used,
-                web_search_queries,
-                web_sources,
-                response_used=bool(chunk_queries or chunk_sources),
-                response_queries=chunk_queries,
-                response_sources=chunk_sources,
-            )
+                text = getattr(chunk, "text", None)
 
+                if text:
+                    full_text_parts.append(text)
+                    if sum(len(part) for part in full_text_parts) > max_chars:
+                        raise ValueError(
+                            "Generated response exceeded safety output limit for this prompt. Please retry."
+                        )
+
+                metadata = getattr(
+                    chunk,
+                    "usage_metadata",
+                    None,
+                )
+
+                if metadata:
+                    usage_metadata = metadata
+
+                chunk_queries, chunk_sources = _extract_grounding_web_metadata(chunk)
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=bool(chunk_queries or chunk_sources),
+                    response_queries=chunk_queries,
+                    response_sources=chunk_sources,
+                )
         full_text = "".join(full_text_parts)
 
         tokens_in = int(

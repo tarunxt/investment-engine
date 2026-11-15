@@ -27,6 +27,24 @@ from app.domains.dashboard.schemas import (
 from app.domains.dashboard.tasks import _is_carried_forward, _portfolio_values
 from app.domains.auth.models import UserRole
 from app.domains.zerodha.tasks import is_weekend_snapshot_date
+from app.shared.portfolio_summary import signed_holding_return_percent
+
+
+@pytest.mark.parametrize(
+    "percent,pnl,invested,expected",
+    [(10, -10, 100, -10), (-10, 10, 100, 10), (-10, -10, 100, -10),
+     (None, -10, 100, None), (10, None, 100, 10), (10, -10, 0, 10),
+     (10, -10, -100, 10), (10, 0, 100, 10)],
+)
+def test_pasted_holding_percentage_has_same_sign_as_long_position_pnl(percent, pnl, invested, expected):
+    assert signed_holding_return_percent(percent, pnl=pnl, invested_value=invested) == expected
+
+
+def test_dashboard_normalizes_legacy_pasted_loss_percentage_without_writing_snapshot():
+    rows = [{"symbol": "LOSS", "current_value": 90, "invested_value": 100,
+             "pnl": -10, "pnl_percent": 10}]
+    assert service._top_holdings(rows, total_value=90)[0].pnl_percent == -10
+    assert rows[0]["pnl_percent"] == 10
 
 
 def _summary_fixture() -> DashboardSummaryResponse:

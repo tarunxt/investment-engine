@@ -58,26 +58,45 @@ test("Bullpen includes cash once and never double-counts an inclusive wallet val
   );
 });
 
-test("dashboard server overview presents all three portfolio-plus-cash totals in INR", () => {
+test("dashboard overview preserves three totals with native currency fallback", () => {
   const source = readFileSync(
-    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    new URL(
+      "../app/console/dashboard/DashboardPageClient.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
-  assert.match(source, /India total \(portfolio \+ cash\)/);
-  assert.match(source, /INDmoney total \(portfolio \+ cash\)/);
-  assert.match(source, /Bullpen total \(portfolio \+ cash\)/);
-  assert.match(source, /usdInrRate == null[\s\S]*?"Unavailable"/);
+  for (const heading of ["Portfolio + cash", "Snapshot age", "Captured snapshot text", "Refresh"]) {
+    assert.ok(source.includes(heading));
+  }
+  assert.match(source, /currency: fx\?\.status === "valid" \? "INR" : "USD"/);
 });
 
-test("command-center heading spans above the two expanded dashboard panels", () => {
+test("one overview replaces the duplicated command center", () => {
   const source = readFileSync(
-    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    new URL(
+      "../app/console/dashboard/DashboardPageClient.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
+  assert.doesNotMatch(
+    source,
+    /Portfolio Command Center|Investments Control Room/,
+  );
+  assert.equal((source.match(/<PortfolioCommandSummary/g) ?? []).length, 1);
+  assert.equal((source.match(/<h1/g) ?? []).length, 1);
   assert.match(
     source,
-    /Portfolio Command Center[\s\S]*?mt-7 grid gap-6 xl:grid-cols-2 xl:items-stretch[\s\S]*?<PortfolioCommandSummary[\s\S]*?<PortfolioCommandChart/,
+    /aria-label="Portfolio history"[\s\S]*?<PortfolioCommandChart/,
   );
+  for (const view of [
+    "Overview",
+    "Sources and freshness",
+    "Refresh behaviour",
+  ]) {
+    assert.ok(source.includes(view));
+  }
   assert.match(source, /refreshBullpenTile\(false\)/);
   assert.match(source, /filter\(isBullpenHistoryActivePosition\)/);
   assert.match(source, /filter\(isBullpenHistoryClaimablePosition\)/);
@@ -87,10 +106,12 @@ test("command-center heading spans above the two expanded dashboard panels", () 
   );
 });
 
-
 test("portfolio command chart supports and remembers every portfolio view", () => {
   const dashboardSource = readFileSync(
-    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    new URL(
+      "../app/console/dashboard/DashboardPageClient.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
   const chartSource = readFileSync(
@@ -117,7 +138,10 @@ test("portfolio command chart supports and remembers every portfolio view", () =
 
 test("Refresh Board preserves last-known-good Bullpen and requests a live refresh", () => {
   const source = readFileSync(
-    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    new URL(
+      "../app/console/dashboard/DashboardPageClient.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
 
@@ -152,7 +176,6 @@ test("USD portfolio history is converted to portfolio-plus-cash INR totals", () 
   );
 });
 
-
 test("persisted server history drives Bullpen and combined charts", () => {
   const { buildPersistedDashboardTrend } = loadTotalsModule();
   const trend = buildPersistedDashboardTrend(
@@ -169,17 +192,14 @@ test("persisted server history drives Bullpen and combined charts", () => {
   );
 
   const dashboardSource = readFileSync(
-    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    new URL(
+      "../app/console/dashboard/DashboardPageClient.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
-  assert.match(
-    dashboardSource,
-    /dashboard\.portfolioHistory\?\.bullpen/,
-  );
-  assert.match(
-    dashboardSource,
-    /dashboard\.portfolioHistory\?\.combined/,
-  );
+  assert.match(dashboardSource, /dashboard\.portfolioHistory\?\.bullpen/);
+  assert.match(dashboardSource, /dashboard\.portfolioHistory\?\.combined/);
   assert.match(sourceForDailyHistoryType(), /portfolio_history:/);
 });
 

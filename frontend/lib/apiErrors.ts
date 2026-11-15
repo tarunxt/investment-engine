@@ -163,6 +163,7 @@ export function formatApiErrorSummary(error: ApiErrorLike) {
 }
 
 export function formatUnknownError(error: unknown) {
+  if (error == null) return "The request failed without returning error details. Please retry.";
   if (error instanceof Error) {
     const message = error.message?.trim() || "Unexpected error";
     return `${error.name}: ${message}`;

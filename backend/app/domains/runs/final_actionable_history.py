@@ -19,6 +19,7 @@ from app.domains.runs.models import (
     RunJob,
 )
 from app.domains.runs.schemas import FinalActionableHistoryCreateItem
+from app.domains.runs.run_identity import analysis_run_identity
 
 USABLE_STATUSES = {"completed", "partial"}
 ACTION_HEADER_ALIASES = {
@@ -156,28 +157,29 @@ def choose_mode(actions: Sequence[str]) -> str | None:
 
 
 def infer_market(run: Run) -> str | None:
-    if run.auto_rebalance_portfolio == "india":
-        return "india"
-    if run.auto_rebalance_portfolio == "indmoney_us":
-        return "us"
-    prompt = run.prompt or ""
-    if re.search(r"Market:\s*US equities|INDmoney|US portfolio", prompt, re.IGNORECASE):
-        return "us"
-    if re.search(r"Market:\s*India equities|Zerodha|India portfolio", prompt, re.IGNORECASE):
-        return "india"
-    return None
+    return analysis_run_identity(run).market
 
 
 def is_rebalance_run(run: Run) -> bool:
-    prompt = run.prompt or ""
-    label = run.auto_rebalance_label or ""
-    if "## Technical Scan Input Bundle" in prompt:
-        return False
-    return bool(
-        "## Rebalance Input Bundle" in prompt
-        or "[rebalance_flow:" in prompt
-        or re.search(r"rebalance scan", label, re.IGNORECASE)
-    )
+    identity = analysis_run_identity(run)
+    return identity.stage == "rebalance" and identity.market is not None
+
+
+def validate_history_source_identity(items, source_runs) -> None:
+    """Reject wrong-market/stage input before any immutable history write."""
+    identities = {run.id: analysis_run_identity(run) for run in source_runs}
+    for item in items:
+        primary = identities.get(item.rebalance_run_id)
+        if primary is None or primary.market != item.market or primary.stage != "rebalance":
+            raise ValueError("Referenced run market or stage does not match the final actionable history item")
+        references = {item.rebalance_run_id, *item.source_run_ids_json}
+        if item.technical_scan_run_id is not None:
+            references.add(item.technical_scan_run_id)
+        for run_id in references:
+            identity = identities.get(run_id)
+            expected_stage = "technical" if run_id == item.technical_scan_run_id else "rebalance"
+            if identity is None or identity.market != item.market or identity.stage != expected_stage:
+                raise ValueError("Referenced run market or stage does not match the final actionable history item")
 
 
 def encode_history_cursor(covered_at: datetime, row_id: int) -> str:
@@ -211,13 +213,15 @@ async def persist_history_items(
         for source_id in item.source_run_ids_json
     }
     all_run_ids = run_ids | technical_ids | source_ids
-    owned_ids = set(
-        (await db.execute(select(Run.id).where(Run.user_id == user_id, Run.id.in_(all_run_ids))))
-        .scalars()
-        .all()
-    )
-    if owned_ids != all_run_ids:
+    source_runs = (
+        await db.execute(
+            select(Run.id, Run.prompt, Run.auto_rebalance_portfolio, Run.auto_rebalance_label)
+            .where(Run.user_id == user_id, Run.id.in_(all_run_ids))
+        )
+    ).all()
+    if {run.id for run in source_runs} != all_run_ids:
         raise ValueError("One or more referenced runs do not belong to the current user")
+    validate_history_source_identity(items, source_runs)
 
     workflow_ids = {item.workflow_id for item in items if item.workflow_id is not None}
     if workflow_ids:

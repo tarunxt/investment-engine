@@ -1,0 +1,30 @@
+.navigation a[data-slot="button"] {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #5b21b6;
+}
+
+.navigation a[data-slot="button"][class~="bg-gray-950"] {
+  border-color: #7c3aed;
+  background: #7c3aed;
+  color: #fff;
+}
+
+.navigation a[data-slot="button"]:hover {
+  background: #ede9fe;
+}
+
+.navigation a[data-slot="button"][class~="bg-gray-950"]:hover {
+  background: #6d28d9;
+}
+
+:global(.dark) .navigation a[data-slot="button"] {
+  border-color: #5b21b6;
+  background: #2e1065;
+  color: #ede9fe;
+}
+
+:global(.dark) .navigation a[data-slot="button"][class~="bg-gray-950"] {
+  background: #7c3aed;
+  color: #fff;
+}

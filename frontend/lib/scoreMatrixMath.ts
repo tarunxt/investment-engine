@@ -43,24 +43,33 @@ export function getScoreMatrixRowOutOfBoundsDenominatorWeight(row: ScoreMatrixWe
   return row.outOfBoundsDenominatorWeight ?? getScoreMatrixRowDenominatorWeight(row);
 }
 
+export function getMissingScoreDenominatorWeight(rows: ScoreMatrixWeightedRow[]) {
+  return rows
+    .filter((row) => row.multiplier !== 0 && (row.score === null || !Number.isFinite(row.score)))
+    .reduce((sum, row) => sum + getScoreMatrixRowDenominatorWeight(row), 0);
+}
+
 export function calculateWeightedRationaleScore(
   rows: ScoreMatrixWeightedRow[],
   denominatorOverride?: number | null,
+  denominatorAlreadyEffective = false,
 ) {
-  const defaultDenominatorBase = rows
+  const missingWeight = getMissingScoreDenominatorWeight(rows);
+  const availableRows = rows.filter((row) => row.score !== null && Number.isFinite(row.score));
+  const defaultDenominatorBase = availableRows
     .filter((row) => row.multiplier !== 0)
     .reduce((sum, row) => sum + getScoreMatrixRowDenominatorWeight(row), 0);
-  const outOfBoundsDenominatorReduction = rows
+  const outOfBoundsDenominatorReduction = availableRows
     .filter((row) => row.multiplier !== 0 && isScoreMatrixRowOutOfBounds(row))
     .reduce((sum, row) => sum + getScoreMatrixRowOutOfBoundsDenominatorWeight(row), 0);
   const defaultDenominator = Math.max(0, defaultDenominatorBase - outOfBoundsDenominatorReduction);
   const denominator = denominatorOverride !== undefined && denominatorOverride !== null
-    ? denominatorOverride
+    ? Math.max(0, denominatorOverride - (denominatorAlreadyEffective ? 0 : missingWeight))
     : defaultDenominator;
 
   if (!denominator) return { finalScore: null, denominator };
 
-  const numerator = rows.reduce(
+  const numerator = availableRows.reduce(
     (sum, row) => sum + (row.score ?? 0) * getScoreMatrixRowEffectiveMultiplier(row),
     0,
   );

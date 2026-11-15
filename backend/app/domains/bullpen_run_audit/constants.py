@@ -4,11 +4,11 @@ from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
 BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
-    "2026-07-27-stage3-submission-evidence-v29"
+    "2026-09-20-ups-filter-integrity-v32"
 )
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-27-stage3-submission-evidence-v29"
+    "2026-09-20-ups-filter-integrity-v32"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -45,6 +45,21 @@ AUDIT_SECTION_KEYS: Final[tuple[str, ...]] = (
 
 AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
+        "algorithm_key": "ups_filter_integrity",
+        "stage": "stage-1", "algorithm_version": "v1",
+        "source_module": "app.domains.trading_bots.universal_scan",
+        "source_function": "iter_universal_scan_markets",
+        "label": "Immutable UPS manifest, checksum, decoded row count and filter reconciliation",
+    },
+    {
+        "algorithm_key": "sports_ranking_reference",
+        "stage": "stage-1",
+        "algorithm_version": "sports-ranking-v2",
+        "source_module": "app.domains.sports_rankings.comparisons",
+        "source_function": "compare_events",
+        "label": "Frozen sports reference ranks, identities, scopes and source provenance",
+    },
+    {
         "algorithm_key": "run_execution_handoff_fallback",
         "stage": "overview",
         "algorithm_version": "v2",
@@ -67,6 +82,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "candidate_returns_per_day",
         "label": "Candidate returns per day",
+    },
+    {
+        "algorithm_key": "stage1_common_scan_filters_and_wallet_union",
+        "stage": "stage-1",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.console_profile",
+        "source_function": "scan_console_profile_markets",
+        "label": "Saved toggleable filters, child deadlines, and active-wallet union",
     },
     {
         "algorithm_key": "stage1_wallet_handoff_circuit_breaker",

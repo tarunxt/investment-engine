@@ -130,6 +130,32 @@ def test_console_projection_is_bounded_and_does_not_mutate_frozen_run() -> None:
     assert run.model_dump(mode="json") == frozen_payload
 
 
+def test_console_projection_keeps_current_filtered_candidate_universe() -> None:
+    run = _large_run()
+    candidates = [
+        {
+            "question_id": f"question-{index}",
+            "market_id": f"market-{index}",
+            "condition_id": f"condition-{index}",
+            "question": f"Will filtered event {index} happen?",
+            "slug": f"filtered-market-{index}",
+            "close_time": "2026-09-30T23:59:59+00:00",
+            "current_yes_odds": 40,
+            "current_no_odds": 60,
+            "returns_per_day": 1.25,
+        }
+        for index in range(116)
+    ]
+    run.stage_results[0].outputs["accepted_candidates"] = candidates
+    run.stage_results[0].outputs["accepted_candidates_count"] = len(candidates)
+
+    projection = build_run_console_projection(run)
+
+    assert len(
+        projection["stage_results"][0]["outputs"]["accepted_candidates"]
+    ) == 116
+
+
 def test_only_fresh_completed_stage1_wallet_rows_verify_a_portfolio() -> None:
     verified = _large_run()
     verified.stage_results[0].outputs.update(
@@ -345,6 +371,7 @@ def test_legacy_projected_row_is_explicitly_degraded_without_fabricated_stages()
         orders_planned=0,
         orders_submitted=0,
         error_message=None,
+        workspace_profile="bullpen-sports",
     )
     projected = BullpenAutoLiveRun.model_validate(payload)
     history = build_history_item(
@@ -357,6 +384,7 @@ def test_legacy_projected_row_is_explicitly_degraded_without_fabricated_stages()
     assert history.projection_available is False
     assert history.stages == []
     assert history.decisions_count == 25
+    assert projected.workspace_profile == "bullpen-sports"
 
 
 def test_history_item_exposes_stage_counts_and_frozen_duration() -> None:
@@ -413,3 +441,44 @@ def test_projection_and_history_keep_one_canonical_row_per_workflow_stage() -> N
         for stage in projection["stage_results"]
     ] == ["scan", "invest"]
     assert [stage.key for stage in history.stages] == ["scan", "invest"]
+
+
+def test_history_metadata_projection_preserves_list_response_without_candidate_arrays():
+    from app.domains.polymarket_auto_live.history_projection import HISTORY_OUTPUT_KEYS
+    run = _large_run()
+    stages = [stage.model_copy(update={
+        "inputs": {},
+        "outputs": {key: stage.outputs.get(key) for key in HISTORY_OUTPUT_KEYS},
+        "guardrails_checked": [],
+    }) for stage in run.stage_results]
+    slim = run.model_copy(update={"stage_results": stages})
+    kwargs = {"latest_update_at": run.completed_at, "projection_available": True}
+    assert build_history_item(slim, **kwargs) == build_history_item(run, **kwargs)
+    assert len(json.dumps([stage.model_dump() for stage in stages])) < 5000
+
+
+def test_history_sql_projects_metadata_without_full_candidate_or_frozen_payload():
+    from sqlalchemy import Column, Integer, JSON, select
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.dialects import postgresql
+    from app.domains.polymarket_auto_live.history_projection import history_console_projection
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Record(Base):
+        __tablename__ = "runs"
+        id = Column(Integer, primary_key=True)
+        console_projection = Column(JSON)
+
+    sql = str(select(history_console_projection(Record)).select_from(Record).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+    ))
+    assert "accepted_candidates_count" in sql
+    assert "stage2_reviewed_rows" in sql
+    assert "stage2_universe_blocker_summary" in sql
+    assert "'accepted_candidates'" not in sql
+    assert "llm_reviewed_candidates" not in sql
+    assert "payload" not in sql
+    assert "ORDER BY history_stage.ordinality" in sql
+    assert sql.count("FROM runs") == 1

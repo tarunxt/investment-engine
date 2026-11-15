@@ -1,25 +1,13 @@
 "use client";
 
-import { useCallback } from "react";
-
+import type { WorkflowSurface } from "@/app/console/_components/WorkflowSurfaceHost";
 import { RebalanceWorkflowSections } from "@/app/console/dashboard/_components/RebalanceWorkflowSections";
-import { apiService } from "@/services/api";
 import { installAutomatedRebalanceStartRecovery } from "./automatedRebalanceStartRecovery";
-import { AutomatedRebalanceReliabilityBridge } from "./AutomatedRebalanceReliabilityBridge";
 
 installAutomatedRebalanceStartRecovery();
 
-export function AutomatedRebalanceClient() {
-  const refreshSummary = useCallback(async () => {
-    // The workflow historically refreshed the embedded dashboard after sync
-    // and completion. On the dedicated route, retain that consistency check
-    // without remounting the dashboard or loading its detailed panels.
-    await apiService.getDashboardSummary();
-  }, []);
-
+export function AutomatedRebalanceClient({ surface }: { surface?: WorkflowSurface | null }) {
   return (
-    <AutomatedRebalanceReliabilityBridge>
-      <RebalanceWorkflowSections onDashboardRefresh={refreshSummary} />
-    </AutomatedRebalanceReliabilityBridge>
+    <RebalanceWorkflowSections stageLedger surface={surface} />
   );
 }

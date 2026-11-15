@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket_auto_live.stage_one_excel import encode_scan_export_data
+
 from dataclasses import asdict
 
 import asyncio
@@ -51,7 +53,6 @@ from app.domains.polymarket.position_classification import (
 from app.domains.polymarket_auto_live.console_profile import (
     DEFAULT_CONSOLE_ORDER_USD,
     CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
-    CONSOLE_MIN_MARKET_ODDS,
     CONSOLE_PROFILE_ID,
     CONSOLE_RANKED_EVENT_LIMIT,
     CONSOLE_SCHEDULE_HOURS,
@@ -578,6 +579,51 @@ def build_console_stage2_universe_status(
         },
     }
     return universe_status
+
+
+def apply_full_universe_scan_completeness(
+    stage2_universe_status: dict[str, object],
+    *,
+    scan_scope: str,
+    scan_complete_universe: bool,
+    scan_warning: str | None,
+) -> dict[str, object]:
+    if scan_scope != "full_universe" or scan_complete_universe:
+        return stage2_universe_status
+
+    blocker_summary = (
+        "The Full Universe catalogue scan did not reach its terminal cursor; "
+        "successfully fetched pages and wallet positions were preserved."
+    )
+    if scan_warning:
+        blocker_summary = f"{blocker_summary} {scan_warning}"
+    blocker_fix = (
+        "Rerun Full Universe until scan completeness is Complete and the "
+        "missing-wallet-market count is zero. New purchases remain blocked meanwhile."
+    )
+    updated = dict(stage2_universe_status)
+    updated.update(
+        {
+            "stage2_universe_complete": False,
+            "stage2_universe_blocker_code": "FULL_UNIVERSE_SCAN_INCOMPLETE",
+            "stage2_universe_blocker_summary": blocker_summary,
+            "stage2_universe_blocker_fix": blocker_fix,
+            "stage2_universe_blocker_rows": [],
+        }
+    )
+    nested = updated.get("stage2_universe_status")
+    nested_status = dict(nested) if isinstance(nested, dict) else {}
+    nested_status.update(
+        {
+            "is_complete": False,
+            "blocker_code": "FULL_UNIVERSE_SCAN_INCOMPLETE",
+            "blocker_summary": blocker_summary,
+            "blocker_fix": blocker_fix,
+            "blocker_rows": [],
+        }
+    )
+    updated["stage2_universe_status"] = nested_status
+    return updated
 
 
 def _read_stage2_universe_blocker_detail(
@@ -3209,9 +3255,14 @@ def _reused_manual_active_position_context(
 
 def _serialize_scan_candidate(
     market: ScannedMarket,
+    *,
+    returns_per_day: float | None = None,
 ) -> dict[str, object]:
     raw = market.raw if isinstance(market.raw, dict) else {}
+    parent = raw.get("_export_event")
+    parent = parent if isinstance(parent, dict) else next((e for e in (raw.get("events") or []) if isinstance(e, dict) and e.get("slug") == market.event_slug), {})
     return {
+        "scan_export_data": raw.get("_scan_export_data") or encode_scan_export_data(raw),
         "question_id": (
             str(raw.get("question_id")).strip()
             if isinstance(raw.get("question_id"), str)
@@ -3219,9 +3270,16 @@ def _serialize_scan_candidate(
             else market.market_id
         ),
         "market_id": market.market_id,
+        "condition_id": (
+            str(raw.get("conditionId") or raw.get("condition_id")).strip()
+            if raw.get("conditionId") or raw.get("condition_id")
+            else None
+        ),
         "question": market.question,
         "market_title": market.question,
         "market_url": market.market_url,
+        "sports_event_slug": market.event_slug if str(market.theme).casefold() == "sports" or raw.get("sportsMarketType") else None,
+        "sports_event_title": parent.get("title"),
         "slug": market.slug,
         "close_time": market.close_time,
         "theme": market.theme,
@@ -3232,6 +3290,7 @@ def _serialize_scan_candidate(
         "best_bid_cents": market.best_bid_cents,
         "best_ask_cents": market.best_ask_cents,
         "spread_cents": market.spread_cents,
+        "returns_per_day": returns_per_day,
         "rules": market.description,
         "event_description": market.description,
         "market_context": (
@@ -3260,7 +3319,10 @@ def _serialize_manual_console_candidate(
     row: BullpenAutoLiveConsoleCandidateInput,
     market: ScannedMarket,
 ) -> dict[str, object]:
-    serialized = _serialize_scan_candidate(market)
+    serialized = _serialize_scan_candidate(
+        market,
+        returns_per_day=row.returns_per_day,
+    )
     serialized.update(
         {
             "question_id": row.question_id,
@@ -3284,7 +3346,10 @@ def _serialize_manual_console_candidate(
 def _serialize_rejected_scan_candidate(
     rejected: ScanRejectedMarket,
 ) -> dict[str, object]:
+    if rejected.serialized_candidate is not None:
+        return dict(rejected.serialized_candidate)
     return {
+        **(_serialize_scan_candidate(rejected.source_market) if rejected.source_market is not None else {}),
         "market_id": rejected.market_id,
         "question": rejected.question,
         "market_title": rejected.question,
@@ -3297,6 +3362,8 @@ def _serialize_rejected_scan_candidate(
 
 def _serialize_active_wallet_position(
     position: ConsoleWalletPosition,
+    *,
+    returns_per_day: float | None = None,
 ) -> dict[str, object]:
     return {
         "position_key": f"{position.market_id}::{position.side}",
@@ -3315,6 +3382,7 @@ def _serialize_active_wallet_position(
         "current_yes_odds": position.current_yes_odds,
         "current_no_odds": position.current_no_odds,
         "close_time": position.close_time,
+        "returns_per_day": returns_per_day,
         "condition_id": position.condition_id,
         "is_claimable": position.is_claimable,
         "raw_claimable_flag": position.raw_claimable_flag,
@@ -3643,7 +3711,8 @@ def _trade_analysis_llm_payloads(
 
 
 def _trade_analysis_event_snapshot(market: ScannedMarket) -> dict[str, object]:
-    raw = market.raw if isinstance(market.raw, dict) else {}
+    from app.domains.polymarket_auto_live.scan_source_store import restore_market_raw
+    raw = restore_market_raw(market)
     return sanitize_json_value(
         {
             "market_id": market.market_id,
@@ -3663,6 +3732,7 @@ def _trade_analysis_event_snapshot(market: ScannedMarket) -> dict[str, object]:
 
 
 def _trade_analysis_market_snapshot(market: ScannedMarket) -> dict[str, object]:
+    from app.domains.polymarket_auto_live.scan_source_store import restore_market_raw
     return sanitize_json_value(
         {
             "market_id": market.market_id,
@@ -3673,7 +3743,7 @@ def _trade_analysis_market_snapshot(market: ScannedMarket) -> dict[str, object]:
             "liquidity_usd": market.liquidity_usd,
             "description": market.description,
             "outcome_labels": market.outcome_labels,
-            "raw": market.raw or {},
+            "raw": restore_market_raw(market),
         }
     )
 
@@ -5547,6 +5617,10 @@ class BullpenAutoLiveEngine:
         )
         scan_warning: str | None = None
         scan_details: str | None = None
+        scan_scope = settings.console_scan_scope
+        scan_complete_universe = scan_scope != "full_universe"
+        bullpen_trending_rows: int | None = None
+        complete_catalogue_markets: int | None = None
         stage1_accepted_candidates: list[dict[str, object]] = []
         stage1_rejected_candidates: list[dict[str, object]] = []
         accepted_manual_rows: list[BullpenAutoLiveConsoleCandidateInput] = []
@@ -5581,6 +5655,10 @@ class BullpenAutoLiveEngine:
             max_llm_candidates_per_run=max(1, settings.max_llm_candidates_per_run),
         )
 
+        latest_scan_progress: dict[str, object] = {}
+        stage1_candidate_scan_completed_at: str | None = None
+        filter_ledger: dict[str, object] | None = None
+
         def report_stage1_progress(
             reason: str,
             *,
@@ -5589,17 +5667,62 @@ class BullpenAutoLiveEngine:
             commentary: list[str] | None = None,
             outputs: dict[str, object] | None = None,
         ) -> None:
+            existing_stage1 = next(
+                (
+                    stage
+                    for stage in run.stage_results
+                    if stage.stage_number == 1
+                    and stage.outputs.get("workflow_stage_key") == "scan"
+                ),
+                None,
+            )
             progress_outputs: dict[str, object] = {
+                **(existing_stage1.outputs if existing_stage1 is not None else {}),
                 "progress_commentary": commentary or [reason],
             }
             if outputs:
                 progress_outputs.update(outputs)
+                if isinstance(outputs.get("scan_progress"), dict):
+                    latest_scan_progress.update(outputs["scan_progress"])
+            if manual_console_context is not None:
+                if manual_console_context.scanned_at:
+                    progress_outputs.setdefault(
+                        "scanned_at", manual_console_context.scanned_at
+                    )
+                if manual_console_context.source_scan_completed_at:
+                    progress_outputs.setdefault(
+                        "source_scan_completed_at",
+                        manual_console_context.source_scan_completed_at,
+                    )
+                if manual_console_context.snapshot_id:
+                    progress_outputs.setdefault(
+                        "snapshot_id", manual_console_context.snapshot_id
+                    )
+            if stage1_candidate_scan_completed_at is not None:
+                # This is the completion time of this workflow's filter pass.
+                # A source snapshot may carry an older filters_completed_at;
+                # it must not overwrite the evidence for the current run.
+                progress_outputs["filters_completed_at"] = (
+                    stage1_candidate_scan_completed_at
+                )
+            if latest_scan_progress:
+                progress_outputs["scan_progress"] = {
+                    **latest_scan_progress, "message": reason,
+                    "lastUpdatedAt": datetime.now(UTC).isoformat(),
+                }
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
                     stage_number=1,
                     workflow_stage_key="scan",
-                    phase_status="running",
+                    # Stage 1 is the candidate scan.  Once its filtered output is
+                    # durable, the independent wallet preflight must never turn
+                    # it back into a running stage or delay its completion event.
+                    phase_status=(
+                        "completed"
+                        if stage1_candidate_scan_completed_at is not None
+                        else "running"
+                    ),
                     status="pass",
                     reason=reason,
                     completed_items=completed_items,
@@ -5608,7 +5731,7 @@ class BullpenAutoLiveEngine:
                     outputs=progress_outputs,
                     guardrails_checked=global_guardrails,
                     started_at=stage1_stage_started_at,
-                    completed_at=None,
+                    completed_at=stage1_candidate_scan_completed_at,
                 ),
             )
             self._report_progress(progress_callback, run, state)
@@ -5661,6 +5784,33 @@ class BullpenAutoLiveEngine:
                         market,
                         now=now,
                         min_market_odds=settings.console_min_market_odds,
+                        min_highest_market_odds=settings.console_min_highest_market_odds,
+                        apply_yes_no_odds_thresholds=(
+                            settings.console_apply_yes_no_odds_thresholds
+                        ),
+                        max_closing_days=settings.console_max_closing_days,
+                        min_volume_usd=settings.console_min_volume_usd,
+                        min_liquidity_usd=settings.console_min_liquidity_usd,
+                        min_volume_24hr_usd=settings.console_min_volume_24hr_usd,
+                        max_spread_cents=settings.console_max_spread_cents,
+                        rejected_theme_pattern=settings.console_rejected_theme_pattern,
+                        exclude_sports=settings.console_exclude_sports,
+                        sports_moneyline_only=settings.console_sports_moneyline_only,
+                        exclude_weather=settings.console_exclude_weather,
+                        exclude_market_predictions=(
+                            settings.console_exclude_market_predictions
+                        ),
+                        exclude_tweet_count_questions=(
+                            settings.console_exclude_tweet_count_questions
+                        ),
+                        exclude_released_by_events=(
+                            settings.console_exclude_released_by_events
+                        ),
+                        only_binary_yes_no=settings.console_only_binary_yes_no,
+                        exclude_custom_phrases=(
+                            settings.console_exclude_custom_phrases
+                        ),
+                        custom_exclude_phrases=settings.console_custom_exclude_phrases,
                     )
                     if rejection_reasons:
                         rejected = ScanRejectedMarket(
@@ -5906,52 +6056,233 @@ class BullpenAutoLiveEngine:
                     "used_manual_console_rows": False,
                 },
             )
-            scanned = await scan_console_profile_markets(
-                now=now,
-                min_market_odds=settings.console_min_market_odds,
-                custom_exclude_phrases=settings.console_custom_exclude_phrases,
+            def report_scan_page(scanned_markets: int, completed_pages: int) -> None:
+                label = (
+                    "Universal Scan"
+                    if manual_console_context is not None
+                    and manual_console_context.source_scan_completed_at
+                    else "Full Universe"
+                    if scan_scope == "full_universe"
+                    else "Trending"
+                )
+                message = f"Scanning {label}: {scanned_markets:,} markets across {completed_pages} pages."
+                report_stage1_progress(
+                    message,
+                    completed_items=scanned_markets,
+                    total_items=(
+                        manual_console_context.total_candidates
+                        if manual_console_context is not None
+                        and manual_console_context.total_candidates > 0
+                        else None
+                    ),
+                    outputs={
+                        "scan_scope": scan_scope,
+                        "scan_progress": {
+                            "scannedMarkets": scanned_markets,
+                            "totalMarkets": (
+                                manual_console_context.total_candidates
+                                if manual_console_context is not None
+                                and manual_console_context.total_candidates > 0
+                                else None
+                            ),
+                            "completedPages": completed_pages,
+                            "currentPage": completed_pages,
+                            "lastUpdatedAt": datetime.now(UTC).isoformat(),
+                            "message": message,
+                        },
+                    },
+                )
+
+            from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
+            with ScanSourceWriter() as streaming_sources:
+                def store_rejected_source(
+                    rejected: ScanRejectedMarket,
+                ) -> dict[str, object]:
+                    serialized = streaming_sources.store_rejected(
+                        _serialize_rejected_scan_candidate(rejected)
+                    )
+                    # The callback transfers ownership to the lightweight
+                    # serialized list. Release the raw ScannedMarket before the
+                    # next Universal row is decoded.
+                    rejected.serialized_candidate = None
+                    rejected.source_market = None
+                    return serialized
+
+                scanned = await scan_console_profile_markets(
+                    now=now,
+                    min_market_odds=settings.console_min_market_odds,
+                    min_highest_market_odds=settings.console_min_highest_market_odds,
+                    apply_yes_no_odds_thresholds=(
+                        settings.console_apply_yes_no_odds_thresholds
+                    ),
+                    max_closing_days=settings.console_max_closing_days,
+                    min_volume_usd=settings.console_min_volume_usd,
+                    min_liquidity_usd=settings.console_min_liquidity_usd,
+                    min_volume_24hr_usd=settings.console_min_volume_24hr_usd,
+                    max_spread_cents=settings.console_max_spread_cents,
+                    rejected_theme_pattern=settings.console_rejected_theme_pattern,
+                    exclude_sports=settings.console_exclude_sports,
+                    sports_moneyline_only=settings.console_sports_moneyline_only,
+                    exclude_weather=settings.console_exclude_weather,
+                    exclude_market_predictions=(
+                        settings.console_exclude_market_predictions
+                    ),
+                    exclude_tweet_count_questions=(
+                        settings.console_exclude_tweet_count_questions
+                    ),
+                    exclude_released_by_events=(
+                        settings.console_exclude_released_by_events
+                    ),
+                    only_binary_yes_no=settings.console_only_binary_yes_no,
+                    exclude_custom_phrases=settings.console_exclude_custom_phrases,
+                    custom_exclude_phrases=settings.console_custom_exclude_phrases,
+                    scan_scope=scan_scope,
+                    progress_callback=report_scan_page,
+                    rejected_callback=store_rejected_source,
+                    accepted_callback=streaming_sources.store_market,
+                    page_cache_key=run.id if scan_scope == "full_universe" else None,
+                    universal_scan_user_id=(
+                        user_id
+                        if manual_console_context is not None
+                        and manual_console_context.source_scan_completed_at
+                        else None
+                    ),
+                    universal_scan_export_id=(
+                        manual_console_context.snapshot_id
+                        if manual_console_context is not None
+                        else None
+                    ),
+                )
+            report_stage1_progress(
+                "Stage 1 pagination finished; preparing candidate exports and wallet handoff.",
+                completed_items=scanned.total_candidates,
             )
             scan_source_label = scanned.source_label
+            filter_ledger = getattr(scanned, "filter_ledger", None)
             scan_source_url = scanned.source_url
             scan_warning = getattr(scanned, "warning", None)
             scan_details = getattr(scanned, "details", None)
+            scan_complete_universe = bool(
+                getattr(scanned, "complete_universe", False)
+            )
+            bullpen_trending_rows = getattr(scanned, "trending_candidates", None)
+            complete_catalogue_markets = getattr(
+                scanned,
+                "catalogue_candidates",
+                None,
+            )
             scanned_total_candidates = scanned.total_candidates
             stage1_accepted_candidates = [
-                _serialize_scan_candidate(market) for market in scanned.accepted
+                _serialize_scan_candidate(
+                    market,
+                    returns_per_day=candidate_returns_per_day(
+                        market,
+                        now=now,
+                        formula=settings.returns_per_day_formula,
+                    ),
+                )
+                for market in scanned.accepted
             ]
-            stage1_rejected_candidates = [
-                _serialize_rejected_scan_candidate(rejected)
-                for rejected in scanned.rejected
-            ]
+            # Gamma source payloads must survive for exhaustive Excel exports, but
+            # retaining raw objects plus base64 payloads in every run/heartbeat copy
+            # can exhaust the planner's memory at Full Universe scale.
+            from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
+            serialized_rejected = getattr(scanned, "serialized_rejected", None)
+            if serialized_rejected is not None:
+                # The Universal reader already externalized each raw source and
+                # released its wrapper object during streaming. Reuse that list
+                # directly instead of constructing a second 177k-object graph.
+                stage1_rejected_candidates = serialized_rejected
+            else:
+                stage1_rejected_candidates = []
+                with ScanSourceWriter() as source_store:
+                    for candidate in stage1_accepted_candidates:
+                        source_store.store(candidate)
+                    for rejected_index, rejected in enumerate(scanned.rejected, 1):
+                        if rejected_index % 5000 == 0:
+                            report_stage1_progress(
+                                f"Preparing Stage 1 exports: {rejected_index:,} rejected rows processed.",
+                                completed_items=scanned_total_candidates,
+                            )
+                        candidate = rejected.serialized_candidate
+                        if candidate is None:
+                            candidate = source_store.store_rejected(
+                                _serialize_rejected_scan_candidate(rejected)
+                            )
+                        stage1_rejected_candidates.append(candidate)
+                        rejected.serialized_candidate = None
+                        rejected.source_market = None
+
             market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
             market_by_id = {market.market_id: market for market in scanned.accepted}
             scan_seed_markets = scanned.accepted
-            for rejected in scanned.rejected:
-                for reason in rejected.reasons:
+            # Rejection diagnostics are explanatory samples, not a trading
+            # input. Bound the map for Universal scans; the complete rejected
+            # catalogue remains in stage1_rejected_candidates for Excel/audit.
+            diagnostic_rejections = (
+                scanned.rejected
+                if serialized_rejected is None
+                else stage1_rejected_candidates[:1_000]
+            )
+            for rejected in diagnostic_rejections:
+                if isinstance(rejected, ScanRejectedMarket):
+                    rejected_market = rejected
+                    reasons = rejected.reasons
+                else:
+                    rejected_market = ScannedMarket(
+                        market_id=str(rejected.get("market_id") or ""),
+                        question=str(rejected.get("question") or ""),
+                        market_url=rejected.get("market_url"),
+                        slug=rejected.get("slug"),
+                        close_time=None,
+                        theme=str(rejected.get("theme") or "Uncategorized"),
+                        current_yes_odds=None,
+                        current_no_odds=None,
+                        volume_usd=None,
+                        liquidity_usd=None,
+                        description=None,
+                        outcome_labels=[],
+                        event_slug=None,
+                        best_bid_cents=None,
+                        best_ask_cents=None,
+                        spread_cents=None,
+                        force_include=False,
+                        raw=None,
+                    )
+                    reasons = rejected.get("reasons") or []
+                for reason in reasons:
                     _record_rejected_candidate(
                         rejected_candidate_map,
-                        market=ScannedMarket(
-                            market_id=rejected.market_id,
-                            question=rejected.question,
-                            market_url=rejected.market_url,
-                            slug=rejected.slug,
-                            close_time=None,
-                            theme="Uncategorized",
-                            current_yes_odds=None,
-                            current_no_odds=None,
-                            volume_usd=None,
-                            liquidity_usd=None,
-                            description=None,
-                            outcome_labels=[],
-                            event_slug=None,
-                            best_bid_cents=None,
-                            best_ask_cents=None,
-                            spread_cents=None,
-                            force_include=False,
-                            raw=None,
+                        market=(
+                            rejected_market
+                            if isinstance(rejected_market, ScannedMarket)
+                            else ScannedMarket(
+                                market_id=rejected_market.market_id,
+                                question=rejected_market.question,
+                                market_url=rejected_market.market_url,
+                                slug=rejected_market.slug,
+                                close_time=None,
+                                theme="Uncategorized",
+                                current_yes_odds=None,
+                                current_no_odds=None,
+                                volume_usd=None,
+                                liquidity_usd=None,
+                                description=None,
+                                outcome_labels=[],
+                                event_slug=None,
+                                best_bid_cents=None,
+                                best_ask_cents=None,
+                                spread_cents=None,
+                                force_include=False,
+                                raw=None,
+                            )
                         ),
-                        reason=reason,
+                        reason=str(reason),
                     )
+
+            # Only accepted ScannedMarket objects are used by later review stages.
+            # Drop the catalogue container before wallet reconciliation/persistence.
+            del scanned
 
         def fail_stage_one_wallet_refresh(reason: str) -> EngineResult:
             completed_at = utc_now_iso()
@@ -6032,8 +6363,20 @@ class BullpenAutoLiveEngine:
             self._report_progress(progress_callback, run, state)
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
 
+        # Reference-only enrichment: freeze the same resolver used by history.
+        # This does not affect eligibility, order planning, or trading decisions.
+        if any(row.get("sports_event_slug") for row in stage1_accepted_candidates):
+            from app.domains.sports_rankings.capture import capture_candidate_rankings
+            try:
+                await asyncio.to_thread(capture_candidate_rankings, stage1_accepted_candidates)
+            except Exception as exc:
+                for row in stage1_accepted_candidates:
+                    if row.get("sports_event_slug") and not row.get("sports_ranking_at_scan"):
+                        row["sports_ranking_capture_error"] = type(exc).__name__
+
+        stage1_candidate_scan_completed_at = utc_now_iso()
         report_stage1_progress(
-            "Stage 1 candidate scan finished; waiting for the live wallet snapshot.",
+            "Stage 1 candidate scan completed; the live wallet preflight is continuing for Stage 2 and Stage 3.",
             completed_items=len(stage1_accepted_candidates),
             total_items=scanned_total_candidates,
             commentary=[
@@ -6047,10 +6390,22 @@ class BullpenAutoLiveEngine:
                 "scan_source_url": scan_source_url,
                 "scanned_candidates": scanned_total_candidates,
                 "accepted_candidates_count": len(stage1_accepted_candidates),
+                "filter_ledger": filter_ledger,
+                "accepted_candidates": stage1_accepted_candidates,
                 "rejected_candidates_count": len(stage1_rejected_candidates),
                 "wallet_snapshot_status": "refreshing",
+                "wallet_snapshot_required_for_stage1_completion": False,
+                "wallet_snapshot_required_for_stage3": True,
                 "scan_warning": scan_warning,
                 "scan_details": scan_details,
+                "scan_scope": scan_scope,
+                "scan_completeness": (
+                    "complete" if scan_complete_universe else "incomplete"
+                    if scan_scope == "full_universe"
+                    else "trending"
+                ),
+                "bullpen_trending_rows": bullpen_trending_rows,
+                "complete_catalogue_markets": complete_catalogue_markets,
             },
         )
 
@@ -6082,13 +6437,28 @@ class BullpenAutoLiveEngine:
                     "wallet_recovery_max_age_seconds": stage1_wallet_recovery_max_age_seconds,
                 },
             )
+            recovery_task = asyncio.create_task(
+                _read_stage1_wallet_positions_recovery_snapshot(
+                    max_age_seconds=stage1_wallet_recovery_max_age_seconds,
+                )
+            )
             try:
-                recovered = await asyncio.wait_for(
-                    _read_stage1_wallet_positions_recovery_snapshot(
-                        max_age_seconds=stage1_wallet_recovery_max_age_seconds,
-                    ),
+                completed_recovery_tasks, _ = await asyncio.wait(
+                    {recovery_task},
                     timeout=stage1_wallet_recovery_timeout_seconds,
                 )
+                if recovery_task not in completed_recovery_tasks:
+                    # asyncio.wait_for waits for cancellation cleanup.  A
+                    # wedged Redis/CLI cleanup path could therefore defeat the
+                    # advertised timeout and leave Stage 1 visually running
+                    # for hours.  Detach cancellation so the workflow deadline
+                    # remains a real wall-clock bound.
+                    _cancel_background_task(recovery_task)
+                    raise TimeoutError(
+                        "Bounded shared Bullpen wallet recovery timed out after "
+                        f"{stage1_wallet_recovery_timeout_seconds} seconds."
+                    )
+                recovered = recovery_task.result()
                 if recovered.freshness_state not in {"fresh", "cached"}:
                     raise RuntimeError(
                         "Shared Bullpen wallet recovery returned a non-current snapshot."
@@ -6325,21 +6695,160 @@ class BullpenAutoLiveEngine:
             *closed_wallet_positions,
         ]
         serialized_active_positions_found = [
-            _serialize_active_wallet_position(position)
+            _serialize_active_wallet_position(
+                position,
+                returns_per_day=position_returns_per_day(
+                    position,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                ),
+            )
             for position in active_bullpen_wallet_positions
         ]
         serialized_claimable_positions = [
-            _serialize_active_wallet_position(position)
+            _serialize_active_wallet_position(
+                position,
+                returns_per_day=position_returns_per_day(
+                    position,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                ),
+            )
             for position in claimable_wallet_positions
         ]
         serialized_settlement_pending_positions = [
-            _serialize_active_wallet_position(position)
+            _serialize_active_wallet_position(
+                position,
+                returns_per_day=position_returns_per_day(
+                    position,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                ),
+            )
             for position in settlement_pending_positions
         ]
         serialized_excluded_position_diagnostics = [
             _serialize_active_wallet_position(position)
             for position in excluded_position_diagnostics
         ]
+        scanned_identity_keys = {
+            str(value).strip().lower()
+            for row in [
+                *stage1_accepted_candidates,
+                *stage1_rejected_candidates,
+            ]
+            for value in (
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("slug"),
+            )
+            if value is not None and str(value).strip()
+        }
+        active_wallet_markets_missing_from_catalogue = [
+            row
+            for row in serialized_active_positions_found
+            if not (
+                {
+                    str(value).strip().lower()
+                    for value in (
+                        row.get("market_id"),
+                        row.get("condition_id"),
+                        row.get("slug"),
+                    )
+                    if value is not None and str(value).strip()
+                }
+                & scanned_identity_keys
+            )
+        ]
+        active_wallet_markets_added_to_union = len(
+            {
+                str(row.get("condition_id") or row.get("market_id") or row.get("slug"))
+                .strip()
+                .lower()
+                for row in active_wallet_markets_missing_from_catalogue
+                if row.get("condition_id") or row.get("market_id") or row.get("slug")
+            }
+        )
+        active_identity_keys = {
+            str(value).strip().lower()
+            for row in serialized_active_positions_found
+            for value in (
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("slug"),
+            )
+            if value is not None and str(value).strip()
+        }
+        for row in stage1_accepted_candidates:
+            row_identity_keys = {
+                str(value).strip().lower()
+                for value in (
+                    row.get("market_id"),
+                    row.get("condition_id"),
+                    row.get("slug"),
+                )
+                if value is not None and str(value).strip()
+            }
+            if row_identity_keys & active_identity_keys:
+                row["force_include"] = True
+                row["force_included_position"] = True
+
+        retained_rejected_candidates: list[dict[str, object]] = []
+        for row in stage1_rejected_candidates:
+            row_identity_keys = {
+                str(value).strip().lower()
+                for value in (
+                    row.get("market_id"),
+                    row.get("condition_id"),
+                    row.get("slug"),
+                )
+                if value is not None and str(value).strip()
+            }
+            if not (row_identity_keys & active_identity_keys):
+                retained_rejected_candidates.append(row)
+            else:
+                # Preserve source fields when promoting a filtered wallet market.
+                stage1_accepted_candidates.append({
+                    **row, "force_include": True, "force_included_position": True,
+                    "scan_status": "passed", "reasons": [],
+                })
+        stage1_rejected_candidates = retained_rejected_candidates
+
+        accepted_identity_keys = {
+            str(value).strip().lower()
+            for row in stage1_accepted_candidates
+            for value in (
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("slug"),
+            )
+            if value is not None and str(value).strip()
+        }
+        for position_row in serialized_active_positions_found:
+            position_identity_keys = {
+                str(value).strip().lower()
+                for value in (
+                    position_row.get("market_id"),
+                    position_row.get("condition_id"),
+                    position_row.get("slug"),
+                )
+                if value is not None and str(value).strip()
+            }
+            if position_identity_keys & accepted_identity_keys:
+                continue
+            stage1_accepted_candidates.append(
+                {
+                    **position_row,
+                    "question_id": position_row.get("market_id"),
+                    "force_include": True,
+                    "force_included_position": True,
+                    "scan_status": "passed",
+                    "filter_reasons": [],
+                }
+            )
+            accepted_identity_keys.update(position_identity_keys)
+        scanned_total_candidates += active_wallet_markets_added_to_union
+        missing_active_market_count = 0
 
         position_snapshots: list[PositionSnapshot] = []
         for position in active_bullpen_wallet_positions:
@@ -6624,6 +7133,13 @@ class BullpenAutoLiveEngine:
                 conservatively_occupied_market_ids
             ),
             "active_wallet_positions": active_position_rows_before_llm,
+            "active_wallet_markets_missing_from_catalogue": (
+                active_wallet_markets_missing_from_catalogue
+            ),
+            "active_wallet_markets_added_to_union": (
+                active_wallet_markets_added_to_union
+            ),
+            "missing_active_market_count": missing_active_market_count,
             "active_positions_found": serialized_active_positions_found,
             "available_for_claim": serialized_claimable_positions,
             "claimable_wallet_positions": len(claimable_wallet_positions),
@@ -6653,6 +7169,7 @@ class BullpenAutoLiveEngine:
                 item_label="events",
                 outputs={
                     **stage1_wallet_position_outputs,
+                    **({"scan_progress": dict(latest_scan_progress)} if latest_scan_progress else {}),
                     "pending_historical_exit_positions": len(pending_historical_sell_keys),
                     "pending_historical_redeem_conditions": len(
                         pending_historical_redeem_condition_ids
@@ -6691,12 +7208,23 @@ class BullpenAutoLiveEngine:
                     ],
                     "accepted_candidates": stage1_accepted_candidates,
                     "accepted_candidates_count": len(stage1_accepted_candidates),
+                    "filter_ledger": filter_ledger,
                     "rejected_candidates": stage1_rejected_candidates,
                     "rejected_candidates_count": len(stage1_rejected_candidates),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
                     "scan_warning": scan_warning,
                     "scan_details": scan_details,
+                    "scan_scope": scan_scope,
+                    "scan_completeness": (
+                        "complete" if scan_complete_universe else "incomplete"
+                        if scan_scope == "full_universe"
+                        else "trending"
+                    ),
+                    "wallet_snapshot_required_for_stage1_completion": False,
+                    "wallet_snapshot_required_for_stage3": True,
+                    "bullpen_trending_rows": bullpen_trending_rows,
+                    "complete_catalogue_markets": complete_catalogue_markets,
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                     "used_manual_console_rows": manual_console_rows_used,
@@ -6711,11 +7239,16 @@ class BullpenAutoLiveEngine:
                     "scanned_at": manual_console_context.scanned_at
                     if manual_console_context and manual_console_context.scanned_at
                     else now.isoformat(),
+                    "source_scan_completed_at": manual_console_context.source_scan_completed_at
+                    if manual_console_context
+                    else None,
+                    "filters_completed_at": stage1_candidate_scan_completed_at,
                     "fixed_schedule_timezone": "Asia/Kolkata",
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                 },
                 guardrails_checked=global_guardrails,
                 started_at=stage1_stage_started_at,
+                completed_at=stage1_candidate_scan_completed_at,
             ),
         )
         verified_portfolio_snapshot = (
@@ -7003,6 +7536,12 @@ class BullpenAutoLiveEngine:
                 fresh_llm_candidate_cap=len(fresh_llm_rows),
                 configured_max_llm_candidates_per_run=configured_max_llm_candidates,
             )
+            stage2_universe_status = apply_full_universe_scan_completeness(
+                stage2_universe_status,
+                scan_scope=scan_scope,
+                scan_complete_universe=scan_complete_universe,
+                scan_warning=scan_warning,
+            )
             stage2_strategy_metadata = build_console_strategy_metadata(
                 stage2_universe_complete=bool(
                     stage2_universe_status["stage2_universe_complete"]
@@ -7079,12 +7618,23 @@ class BullpenAutoLiveEngine:
                         ],
                         "accepted_candidates": stage1_accepted_candidates,
                         "accepted_candidates_count": len(stage1_accepted_candidates),
+                        "filter_ledger": filter_ledger,
                         "rejected_candidates": stage1_rejected_candidates,
                         "rejected_candidates_count": len(stage1_rejected_candidates),
                         "scan_source_label": scan_source_label,
                         "scan_source_url": scan_source_url,
                         "scan_warning": scan_warning,
                         "scan_details": scan_details,
+                        "scan_scope": scan_scope,
+                        "scan_completeness": (
+                            "complete" if scan_complete_universe else "incomplete"
+                            if scan_scope == "full_universe"
+                            else "trending"
+                        ),
+                        "wallet_snapshot_required_for_stage1_completion": False,
+                        "wallet_snapshot_required_for_stage3": True,
+                        "bullpen_trending_rows": bullpen_trending_rows,
+                        "complete_catalogue_markets": complete_catalogue_markets,
                         "used_manual_console_rows": manual_console_rows_used,
                         "selected_manual_candidate_ids": selected_manual_candidate_ids,
                         "selected_manual_candidate_count": len(selected_manual_candidate_ids),
@@ -7097,10 +7647,16 @@ class BullpenAutoLiveEngine:
                         "scanned_at": manual_console_context.scanned_at
                         if manual_console_context and manual_console_context.scanned_at
                         else now.isoformat(),
+                        "source_scan_completed_at": manual_console_context.source_scan_completed_at
+                        if manual_console_context
+                        else None,
+                        "filters_completed_at": stage1_candidate_scan_completed_at,
                         "fixed_schedule_timezone": "Asia/Kolkata",
                         "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                     },
                     guardrails_checked=global_guardrails,
+                    started_at=stage1_stage_started_at,
+                    completed_at=stage1_candidate_scan_completed_at,
                 ),
             )
             self._report_progress(progress_callback, run, state)
@@ -8404,6 +8960,15 @@ class BullpenAutoLiveEngine:
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.diagnostics.scan_source_label = scan_source_label
         run.diagnostics.scan_source_url = scan_source_url
+        run.diagnostics.scan_scope = scan_scope
+        run.diagnostics.scan_completeness = (
+            "complete" if scan_complete_universe else "incomplete"
+            if scan_scope == "full_universe"
+            else "trending"
+        )
+        run.diagnostics.bullpen_trending_rows = bullpen_trending_rows
+        run.diagnostics.complete_catalogue_markets = complete_catalogue_markets
+        run.diagnostics.missing_active_market_count = missing_active_market_count
         run.diagnostics.used_manual_console_rows = manual_console_rows_used
         run.diagnostics.selected_manual_candidate_ids = selected_manual_candidate_ids
 
@@ -9391,7 +9956,7 @@ class BullpenAutoLiveEngine:
                             current_no_probability=current_no_probability,
                             selected_side=selected_side,
                             held_side=current_position.side,
-                            minimum_market_probability=CONSOLE_MIN_MARKET_ODDS / 100,
+                            minimum_market_probability=settings.console_min_market_odds / 100,
                             now=now,
                         ),
                         snapshot=event_exit_snapshot,

@@ -1,3 +1,8 @@
+import type { LogoutResponse } from "@/lib/logoutOutcome";
+import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
+import type { StockSourceObservationPage } from "@/types/api";
+
+import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
 import {
     LoginResponse,
     LlmPerformanceResponse,
@@ -58,6 +63,8 @@ import {
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
+    BullpenWorkflowRunNowRequest,
+    BullpenWorkflowRunNowResponse,
     BullpenAutoLiveDecision,
     BullpenAutoLivePersistedStatus,
     BullpenAutoLiveState,
@@ -106,6 +113,7 @@ import {
     FinalActionableHistoryBulkCreateRequest,
     FinalActionableHistoryBulkCreateResponse,
     FinalActionableHistoryListResponse,
+    HistoricalScoreEvidenceResponse,
 } from '@/types/api';
 
 export type ApiRequestControl = {
@@ -117,11 +125,12 @@ export type ApiRequestControl = {
 // Define the API service interface with proper types
 export interface IApiService {
     setSessionGeneration(generation: string): void;
+    beginLogout(): void;
 
     // Auth endpoints
     login(data: { email?: string; username?: string; password: string }): Promise<LoginResponse>;
     register(data: { email: string; username: string; password: string; full_name?: string }): Promise<RegisterResponse>;
-    logout(token?: string): Promise<void>;
+    logout(token?: string): Promise<LogoutResponse>;
     getCurrentUser(token?: string): Promise<UserResponse>;
     updatePassword(data: UpdatePasswordRequest, token?: string): Promise<void>;
     getProfile(token?: string): Promise<UpdateProfileRequest>;
@@ -140,6 +149,7 @@ export interface IApiService {
     getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
     getJob(id: number): Promise<JobResponse>;
     getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>>;
+    getAllFullRuns(): Promise<RunResponse[]>;
     getFullRuns(
         params?: { page?: number; limit?: number },
         options?: ApiRequestControl,
@@ -150,6 +160,10 @@ export interface IApiService {
         limit?: number;
         cursor?: string | null;
     }): Promise<FinalActionableHistoryListResponse>;
+    getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage>;
+
+    getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory>;
+    getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse>;
     saveFinalActionableHistory(
         data: FinalActionableHistoryBulkCreateRequest,
     ): Promise<FinalActionableHistoryBulkCreateResponse>;
@@ -196,6 +210,7 @@ export interface IApiService {
     zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse>;
     zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse>;
     zerodhaStatus(): Promise<ZerodhaStatusResponse>;
+    zerodhaDisplayQuotes(instruments: string[]): Promise<ZerodhaDisplayQuoteResponse>;
     zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse>;
     zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail>;
     zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse>;
@@ -228,7 +243,7 @@ export interface IApiService {
     indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse>;
     indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse>;
     indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis>;
-    indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse>;
+    indmoneyUsRunThreats(data?: PortfolioEventRunRequest & { expected_snapshot_id?: number }): Promise<IndMoneyUsThreatRunResponse>;
 
     // Polymarket endpoints
     polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState>;
@@ -257,20 +272,36 @@ export interface IApiService {
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
     getBullpenAutoLiveStatus(options?: ApiRequestControl): Promise<BullpenAutoLivePersistedStatus>;
     getBullpenAutoLiveSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
-    getBullpenAutoLiveDashboardSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
+    getBullpenAutoLiveDashboardSummary(
+      options?: ApiRequestControl,
+      workspaceProfile?: "bullpen007" | "bullpen-sports",
+    ): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveState(): Promise<BullpenAutoLiveState>;
+    recordBullpenHourlyRebalanceResult(
+      status: "completed" | "failed",
+      detail?: string,
+    ): Promise<BullpenAutoLiveState>;
     getBullpenAutoLiveSettings(options?: ApiRequestControl): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
+    updateBullpenAutoLiveEventTrendsScanCount(scanCount: number): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     getBullpenAutoLiveRuns(
       options?: ApiRequestControl,
       includeDetails?: boolean,
     ): Promise<BullpenAutoLiveRun[]>;
     getBullpenAutoLiveHistory(
-        params?: { page?: number; size?: number },
+        params?: {
+          page?: number;
+          size?: number;
+          workspaceProfile?: "bullpen007" | "bullpen-sports";
+        },
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveHistoryPage>;
     getBullpenAutoLiveHistoryEventTrends(
+        params?: {
+          workspaceProfile?: "bullpen007" | "bullpen-sports";
+          timeoutSeconds?: number;
+        },
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveEventTrendsResponse>;
     getBullpenAutoLiveRun(runId: string, options?: ApiRequestControl): Promise<BullpenAutoLiveRun>;
@@ -278,6 +309,10 @@ export interface IApiService {
         runId: string,
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveConsoleRunDetail>;
+    getBullpenAutoLiveStageOneRun(
+        runId: string,
+        options?: ApiRequestControl,
+    ): Promise<BullpenAutoLiveRun>;
     getBullpenAutoLiveRunDecisions(
         runId: string,
         options?: ApiRequestControl,
@@ -325,6 +360,9 @@ export interface IApiService {
     ): Promise<BullpenRunAuditFeedbackDetail>;
     exportBullpenRunAudit(runId: string): Promise<Record<string, unknown>>;
     runBullpenAutoLiveOnce(data?: BullpenAutoLiveRunOnceRequest): Promise<BullpenAutoLiveRun>;
+    queueBullpenWorkflowRunNow(
+        data: BullpenWorkflowRunNowRequest,
+    ): Promise<BullpenWorkflowRunNowResponse>;
     startBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     stopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     pauseBullpenAutoLive(): Promise<BullpenAutoLiveState>;

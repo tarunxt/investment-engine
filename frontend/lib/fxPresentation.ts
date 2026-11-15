@@ -29,6 +29,17 @@ export function isVerifiedFxRate(value: number | null | undefined): value is num
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
+export function displayedUsdCostCurrency(usdInrRate: number | null | undefined) {
+  return isVerifiedFxRate(usdInrRate) ? "INR" : "USD";
+}
+
+export function formatUsdCostWithCurrency(
+  value: number,
+  usdInrRate: number | null | undefined,
+) {
+  return `${displayedUsdCostCurrency(usdInrRate)} ${formatUsdAsVerifiedInr(value, usdInrRate)}`;
+}
+
 export function formatUsdWithoutFx(value: number) {
   return `$${value.toFixed(value < 0.01 && value > 0 ? 6 : 2)} (FX unavailable)`;
 }

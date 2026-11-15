@@ -313,3 +313,47 @@ class Bullpen008HistoryPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class Bullpen008EventTrend(BaseModel):
+    market_id: str
+    market_title: str
+    market_url: str | None = None
+    close_time: str | None = None
+    score: float = Field(ge=0)
+    scan_scores: list[float | None] = Field(min_length=20, max_length=20)
+    scan_sides: list[Literal["YES", "NO"] | None] = Field(
+        default_factory=lambda: [None] * 20,
+        min_length=20,
+        max_length=20,
+    )
+    scan_timestamps: list[str | None] = Field(
+        default_factory=lambda: [None] * 20,
+        min_length=20,
+        max_length=20,
+    )
+    scan_llm_outputs: list[list[dict[str, object]]] = Field(
+        default_factory=lambda: [[] for _ in range(20)],
+        min_length=20,
+        max_length=20,
+    )
+    current_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    current_no_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    returns_per_day: float | None = None
+    is_active_position: bool = False
+    is_claimable_position: bool = False
+    active_position_side: Literal["YES", "NO"] | None = None
+
+
+class Bullpen008EventTrendsResponse(BaseModel):
+    events: list[Bullpen008EventTrend] = Field(default_factory=list)
+    scan_count: int = Field(default=20, ge=0, le=20)
+    generated_at: str
+
+
+class Bullpen008KillResponse(BaseModel):
+    state: Bullpen008State
+    killed_run: Bullpen008Run | None = None
+    message: str

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
@@ -25,16 +26,22 @@ import {
   type ZerodhaPortfolioSnapshotSummary,
 } from "@/types/api";
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 2,
-  }).format(value || 0);
+  }).format(value);
 }
 
-function formatCount(value: number) {
-  return new Intl.NumberFormat("en-IN").format(value || 0);
+function formatCount(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-IN").format(value);
+}
+
+function formatPrice(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 }
 
 function formatSnapshotDate(value: string) {
@@ -45,18 +52,11 @@ function formatSnapshotDate(value: string) {
 }
 
 function formatCapturedAt(value: string) {
-  return new Date(value).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return formatPortfolioTimestamp(value);
 }
 
 function formatSnapshotTime(value: string) {
-  return new Date(value).toLocaleTimeString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    timeStyle: "short",
-  });
+  return formatPortfolioTimestamp(value, true);
 }
 
 function formatShortSnapshotDate(value: string) {
@@ -162,7 +162,8 @@ function getSyncButtonTone(lastSyncAt: string | null | undefined, now: Date) {
   };
 }
 
-function toneClass(value: number) {
+function toneClass(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "text-gray-500";
   if (value > 0) return "text-emerald-600";
   if (value < 0) return "text-red-600";
   return "text-gray-500";
@@ -419,14 +420,14 @@ function SnapshotHistoryChart({
     points.at(-1);
 
   return (
-    <div className="flex h-full flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
+    <div className="flex h-full min-w-0 flex-col border-t border-gray-200 px-5 py-5 xl:border-l xl:border-t-0">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Daily History
           </span>
           <p className="mt-1 text-sm text-gray-500">
-            Holdings value trend across saved portfolio snapshots.
+            Settled holdings value trend (excludes T1) across saved portfolio snapshots.
           </p>
         </div>
         {selectedPoint && (
@@ -435,7 +436,7 @@ function SnapshotHistoryChart({
               {formatCurrency(selectedPoint.value)}
             </p>
             <p className="text-xs text-gray-500">
-              {formatSnapshotDate(selectedPoint.snapshot_date)} · Saved{" "}
+              {formatSnapshotDate(selectedPoint.snapshot_date)} · Captured{" "}
               {formatSnapshotTime(selectedPoint.captured_at)}
             </p>
           </div>
@@ -561,10 +562,10 @@ function PositionRow({ position }: { position: ZerodhaPortfolioPosition }) {
         {formatCount(position.quantity)}
       </td>
       <td className="py-2.5 pr-4 text-gray-700">
-        {position.average_price ? position.average_price.toFixed(2) : "—"}
+        {formatPrice(position.average_price)}
       </td>
       <td className="py-2.5 pr-4 text-gray-700">
-        {position.last_price ? position.last_price.toFixed(2) : "—"}
+        {formatPrice(position.last_price)}
       </td>
       <td className={cn("py-2.5 pr-4 font-medium", toneClass(position.pnl))}>
         {formatCurrency(position.pnl)}
@@ -670,17 +671,17 @@ export function PortfolioSnapshotsPanel({
             <h2 className="text-lg font-semibold text-gray-950">
               Portfolio Snapshots
             </h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Daywise holdings and positions saved from your Zerodha account.
+            <p className="mt-1 text-xs text-gray-500">
+              Source: {selectedSnapshot.source} · Holdings: {formatCount(selectedSnapshot.holdings_count)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="text-right text-xs text-gray-500">
               <p>Viewing snapshot</p>
               <p className="font-medium text-gray-700">
                 {formatSnapshotDate(selectedSnapshot.snapshot_date)}
               </p>
-              <p className="mt-1">Snapshot time</p>
+              <p className="mt-1">Capture time</p>
               <p className="font-medium text-gray-700">
                 {formatSnapshotTime(selectedSnapshot.captured_at)}
               </p>
@@ -705,10 +706,10 @@ export function PortfolioSnapshotsPanel({
             {error}
           </div>
         )}
-        <div className="grid gap-5 px-5 py-5 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 px-5 py-5 xl:grid-cols-2">
           <div className="grid gap-4 sm:grid-cols-2">
             <MetricCard
-              label="Holdings Value"
+              label="Settled Holdings Value (excludes T1)"
               value={formatCurrency(selectedSnapshot.holdings_market_value)}
               icon={Wallet}
             />
@@ -769,7 +770,9 @@ export function PortfolioSnapshotsPanel({
               </p>
             </div>
             <div className="text-sm text-gray-500">
-              <p>Captured {formatCapturedAt(selectedSnapshot.captured_at)}</p>
+              <p role="status">Captured <time dateTime={selectedSnapshot.captured_at}>{formatCapturedAt(selectedSnapshot.captured_at)}</time></p>
+              <p>Save time unavailable in this view</p>
+              <p>Price as-of unavailable in this view</p>
               <p className="capitalize">Source: {selectedSnapshot.source}</p>
             </div>
           </div>
@@ -801,7 +804,7 @@ export function PortfolioSnapshotsPanel({
                       className="pb-2 pr-4"
                     />
                     <SortableTableHeader
-                      label="Qty"
+                      label="Settled Qty"
                       activeDirection={
                         holdingsSort?.column === "quantity"
                           ? holdingsSort.direction
@@ -843,7 +846,7 @@ export function PortfolioSnapshotsPanel({
                       className="pb-2 pr-4"
                     />
                     <SortableTableHeader
-                      label="Value"
+                      label="Settled Value (excludes T1)"
                       activeDirection={
                         holdingsSort?.column === "market_value"
                           ? holdingsSort.direction
@@ -911,10 +914,10 @@ export function PortfolioSnapshotsPanel({
                         {formatCount(holding.quantity)}
                       </td>
                       <td className="py-2.5 pr-4 text-gray-700">
-                        {holding.average_price.toFixed(2)}
+                        {formatPrice(holding.average_price)}
                       </td>
                       <td className="py-2.5 pr-4 text-gray-700">
-                        {holding.last_price.toFixed(2)}
+                        {formatPrice(holding.last_price)}
                       </td>
                       <td className="py-2.5 pr-4 text-gray-700">
                         {formatCurrency(holding.market_value)}

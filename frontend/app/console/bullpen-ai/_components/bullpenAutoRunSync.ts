@@ -93,6 +93,16 @@ function readStringArray(value: unknown) {
     .filter((entry): entry is string => Boolean(entry));
 }
 
+function readCandidateSportsTags(record: Record<string, unknown>) {
+  const values = [
+    ...readStringArray(record.sports_tags),
+    ...readStringArray(record.tags),
+  ];
+  return Array.from(
+    new Map(values.map((tag) => [tag.toLowerCase(), tag] as const)).values(),
+  );
+}
+
 function readDisagreementLevel(value: unknown): BullpenLlmDisagreementLevel | null {
   return value === "Low" || value === "Medium" || value === "High" ? value : null;
 }
@@ -160,6 +170,7 @@ function calculateDaysUntilClose(closeTime: string | null) {
 
 function createBaseQuestionRow({
   marketId,
+  conditionId,
   questionKey,
   questionId,
   question,
@@ -175,6 +186,7 @@ function createBaseQuestionRow({
   rules,
 }: {
   marketId: string | null;
+  conditionId: string | null;
   questionKey: string | null;
   questionId: string;
   question: string;
@@ -193,7 +205,7 @@ function createBaseQuestionRow({
     id: questionId,
     question,
     positionKey: null,
-    conditionId: null,
+    conditionId,
     marketId,
     questionId: questionKey ?? questionId,
     closeTime,
@@ -245,6 +257,7 @@ function buildQuestionFromAcceptedCandidate({
     existingQuestion ??
     createBaseQuestionRow({
       marketId,
+      conditionId: readString(record.condition_id),
       questionKey,
       questionId,
       question: questionLabel,
@@ -259,15 +272,28 @@ function buildQuestionFromAcceptedCandidate({
       marketUrl: readString(record.market_url),
       rules: readString(record.rules),
     });
+  const candidateSportsTags = readCandidateSportsTags(record);
 
   return createBullpenQuestionRow({
     ...baseQuestion,
     id: questionId,
     question: questionLabel,
+    conditionId:
+      readString(record.condition_id) ?? baseQuestion.conditionId ?? null,
     marketId: marketId ?? baseQuestion.marketId ?? null,
     questionId: questionKey ?? baseQuestion.questionId ?? questionId,
     closeTime: readString(record.close_time) ?? baseQuestion.closeTime,
     category: readCandidateCategory(record, baseQuestion.category),
+    sportsTournament:
+      readString(record.sports_tournament) ??
+      readString(record.tournament) ??
+      readString(record.league) ??
+      baseQuestion.sportsTournament ??
+      null,
+    sportsTags:
+      candidateSportsTags.length > 0
+        ? candidateSportsTags
+        : (baseQuestion.sportsTags ?? []),
     yesOdds: readNumber(record.current_yes_odds) ?? baseQuestion.yesOdds,
     noOdds: readNumber(record.current_no_odds) ?? baseQuestion.noOdds,
     volume: stringifyNumericValue(record.volume_usd) ?? baseQuestion.volume,

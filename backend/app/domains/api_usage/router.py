@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import load_only
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +31,7 @@ from app.infrastructure.database.session import get_async_db
 router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
 
-API_USAGE_TZ = ZoneInfo("UTC")
+API_USAGE_TZ = ZoneInfo("Asia/Kolkata")
 _google_sheets_service = GoogleSheetsService()
 
 SCAN_MARKERS: tuple[tuple[str, str], ...] = (
@@ -180,8 +181,7 @@ def _window_utc(
         end = day_start + timedelta(days=1)
         label = "Today"
     elif period == "week":
-        # Monday-start week in the API usage timezone. Provider consoles, including
-        # DeepSeek, report usage in UTC, so app-side totals use UTC day buckets too.
+        # Monday-start week in the user's provider-console timezone.
         start = day_start - timedelta(days=day_start.weekday())
         end = day_start + timedelta(days=1)
         label = "This week"
@@ -407,7 +407,7 @@ async def api_usage_summary(
     )
 
     return {
-        "timezone": "UTC",
+        "timezone": str(API_USAGE_TZ),
         "date": datetime.now(API_USAGE_TZ).date().isoformat(),
         "last_env_loaded_at_utc": settings_loaded_at_utc,
         "period": period,
@@ -445,7 +445,7 @@ async def llm_cost_history(
 
     day_rows = (
         await db.execute(
-            select(Job)
+            select(Job).options(load_only(Job.id, Job.model, Job.status, Job.created_at, Job.estimated_cost, Job.tokens_in, Job.tokens_out))
             .where(
                 Job.user_id == current_user.id,
                 Job.provider == normalized_provider,
@@ -477,7 +477,7 @@ async def llm_cost_history(
 
     run_jobs = (
         await db.execute(
-            select(Job)
+            select(Job).options(load_only(Job.id, Job.model, Job.status, Job.created_at, Job.estimated_cost, Job.tokens_in, Job.tokens_out))
             .where(
                 Job.user_id == current_user.id,
                 Job.provider == normalized_provider,
@@ -535,7 +535,7 @@ async def llm_cost_history(
     return LlmCostHistoryResponse(
         provider=normalized_provider,
         name=LLM_PROVIDER_LABELS[normalized_provider],
-        timezone="UTC",
+        timezone=str(API_USAGE_TZ),
         usd_inr_rate=round(usd_inr_rate, 4) if usd_inr_rate is not None else None,
         fx_source=fx.source,
         fx_as_of=fx.as_of,

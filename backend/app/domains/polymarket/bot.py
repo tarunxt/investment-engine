@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import recovery_mode, require_financial_writes_allowed
+
 import asyncio
 import os
 from collections import defaultdict
@@ -166,6 +168,7 @@ class PolymarketPaperCopyBot:
         self._redeem_claim_lock = asyncio.Lock()
 
     async def init(self) -> None:
+        require_financial_writes_allowed()
         async with self._lock:
             await self.logger.init()
             self.trade_history = await self.store.load()
@@ -219,6 +222,7 @@ class PolymarketPaperCopyBot:
             self._forced_redeem_claim_task = None
 
     async def start(self) -> None:
+        require_financial_writes_allowed()
         async with self._lock:
             if self.running:
                 return
@@ -692,11 +696,11 @@ class PolymarketPaperCopyBot:
         finally:
             self._lock.release()
 
-    def get_state_snapshot(self) -> PolymarketBotState:
-        return self._build_state_unlocked()
+    def get_state_snapshot(self, *, restore_poller: bool = True) -> PolymarketBotState:
+        return self._build_state_unlocked(restore_poller=restore_poller)
 
-    def _build_state_unlocked(self) -> PolymarketBotState:
-        if self.running and (self._poll_task is None or self._poll_task.done()):
+    def _build_state_unlocked(self, *, restore_poller: bool = True) -> PolymarketBotState:
+        if restore_poller and self.running and (self._poll_task is None or self._poll_task.done()):
             self._add_activity(
                 "Warning: Bot poller stopped automatically; restarting it now."
             )
@@ -1714,6 +1718,8 @@ class PolymarketPaperCopyBot:
         )
 
     async def _force_redeem_claim_background(self) -> None:
+        if recovery_mode():
+            return
         async with self._lock:
             should_redeem = self.doctor_status.ok
         if not should_redeem:
@@ -1723,6 +1729,7 @@ class PolymarketPaperCopyBot:
         )
 
     async def _run_redeem_claim_background(self, *, success_message: str) -> None:
+        require_financial_writes_allowed()
         try:
             had_redeem_metadata_warning = (
                 await self._redeem_and_claim_completed_positions(

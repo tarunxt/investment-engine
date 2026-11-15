@@ -40,7 +40,7 @@ import type {
 } from '@/types/api';
 
 const COLUMNS: Array<{ key: SortKey; label: string; align?: 'left' | 'right' }> = [
-  { key: 'setup', label: 'Setup (SellAll, Add More, Buy New, Trim, Hold)' },
+  { key: 'setup', label: 'Setup' },
   { key: 'confidence', label: 'Confidence', align: 'right' },
   { key: 'bestUse', label: 'Best use' },
   { key: 'trigger', label: 'Entry trigger' },
@@ -121,7 +121,10 @@ function SortIcon({ isActive, direction }: { isActive: boolean; direction: SortD
   );
 }
 
+type SetupCountsStatus = 'loading' | 'ready' | 'error';
+
 type SetupTableWithGroupsProps = SetupTableProps & {
+  countsStatus: SetupCountsStatus;
   setupGroups: Record<string, SetupStockGroup>;
   onSetupClick: (group: SetupStockGroup) => void;
   defaultSortByStockCount?: boolean;
@@ -136,6 +139,7 @@ function SetupTable({
   targetSetup,
   targetTone,
   setupGroups,
+  countsStatus,
   onSetupClick,
   defaultSortByStockCount = false,
 }: SetupTableWithGroupsProps) {
@@ -190,7 +194,7 @@ function SetupTable({
         <p className="mt-1 text-sm text-gray-600">{description}</p>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-sm" aria-describedby={countsStatus !== 'ready' ? 'setup-counts-status' : undefined}>
           <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
             <tr>
               {COLUMNS.map((column) => {
@@ -243,7 +247,7 @@ function SetupTable({
                       targetClasses?.cell || populatedToneClasses?.cell || 'text-gray-950'
                     }`}
                   >
-                    <SetupNameCell row={row} group={setupGroups[row.setup]} onSetupClick={onSetupClick} />
+                    <SetupNameCell row={row} group={setupGroups[row.setup]} countsStatus={countsStatus} onSetupClick={onSetupClick} />
                   </td>
                   <td
                     className={`${baseCellClass} text-right font-semibold ${
@@ -388,12 +392,22 @@ function SetupActionCountBreakdown({ group }: { group: SetupStockGroup }) {
 function SetupNameCell({
   row,
   group,
+  countsStatus,
   onSetupClick,
 }: {
   row: SetupRow;
   group?: SetupStockGroup;
+  countsStatus: SetupCountsStatus;
   onSetupClick: (group: SetupStockGroup) => void;
 }) {
+  if (countsStatus === 'loading') {
+    return <span>{row.setup}</span>;
+  }
+
+  if (countsStatus === 'error') {
+    return <span>{row.setup} (Unavailable)</span>;
+  }
+
   if (!group?.stocks.length) {
     return <span>{row.setup} (0)</span>;
   }
@@ -512,7 +526,14 @@ function readTargetSetupFromLocation() {
 }
 
 export default function TechnicalSetupsPage() {
+  const [view, setView] = useState<'comparison' | 'guidance'>('comparison');
+  const comparisonTabRef = useRef<HTMLButtonElement>(null);
+  const guidanceTabRef = useRef<HTMLButtonElement>(null);
+  const comparisonFocusRef = useRef<HTMLElement | null>(null);
   const [targetSetup] = useState<string | null>(() => readTargetSetupFromLocation());
+  const [countsStatus, setCountsStatus] = useState<SetupCountsStatus>('loading');
+  const [countsError, setCountsError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [setupGroups, setSetupGroups] = useState<Record<string, SetupStockGroup>>({});
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
 
@@ -530,52 +551,143 @@ export default function TechnicalSetupsPage() {
             india: zerodhaOverview.latest,
             us: indmoneyOverview.latest,
           }));
+          setCountsStatus('ready');
+          setCountsError(null);
         }
       })
       .catch((error: unknown) => {
         console.warn('Failed to load final actionables setup counts:', error);
+        if (!ignore) {
+          setCountsStatus('error');
+          setCountsError(error instanceof Error ? error.message : 'Unable to load run history or portfolio snapshots.');
+        }
       });
 
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   return (
     <div className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.24em] text-indigo-600">Technical setups</p>
         <h1 className="mt-2 text-2xl font-semibold text-gray-950">Technical Setups</h1>
-        <p className="mt-2 max-w-3xl text-sm text-gray-600">
-          Bullish setup rows default to highest stock count first, then highest confidence, then alphabetical order. Bearish setups
-          default to highest confidence first; click any column header to toggle between descending and ascending order.
-        </p>
       </div>
 
-      <SetupTable
-        title="Bullish Setups"
-        description="Long-entry and continuation structures sorted by stock count, then confidence score."
-        accentClassName="border-emerald-500 bg-emerald-50/50"
-        triggerLabel="Entry trigger"
-        rows={BULLISH_SETUPS}
-        targetSetup={targetSetup}
-        targetTone="bullish"
-        setupGroups={setupGroups}
-        onSetupClick={setSelectedSetupGroup}
-        defaultSortByStockCount
-      />
+      <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:p-4">
+        <div role="tablist" aria-label="Technical setup views" className="flex flex-wrap gap-2">
+          {(['comparison', 'guidance'] as const).map((tab) => (
+            <button
+              key={tab}
+              ref={tab === 'comparison' ? comparisonTabRef : guidanceTabRef}
+              id={`setup-${tab}-tab`}
+              role="tab"
+              type="button"
+              aria-selected={view === tab}
+              aria-controls={`setup-${tab}-panel`}
+              tabIndex={view === tab ? 0 : -1}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600 ${view === tab ? 'bg-violet-600 text-white' : 'bg-violet-100 text-violet-900 hover:bg-violet-200'}`}
+              onClick={() => setView(tab)}
+              onKeyDown={(event) => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                event.preventDefault();
+                const next = event.key === 'Home' ? 'comparison' : event.key === 'End' ? 'guidance' : tab === 'comparison' ? 'guidance' : 'comparison';
+                setView(next);
+                (next === 'comparison' ? comparisonTabRef : guidanceTabRef).current?.focus();
+              }}
+            >
+              {tab === 'comparison' ? 'Setup comparison' : 'Sorting guidance'}
+            </button>
+          ))}
+        </div>
 
-      <SetupTable
-        title="Bearish / Sell-Trim Setups"
-        description="Exit, trim, and downside-continuation structures sorted by confidence score."
-        accentClassName="border-red-500 bg-red-50/50"
-        triggerLabel="Sell / trim trigger"
-        rows={BEARISH_SETUPS}
-        targetSetup={targetSetup}
-        targetTone="bearish"
-        setupGroups={setupGroups}
-        onSetupClick={setSelectedSetupGroup}
-      />
+        <div
+          id="setup-comparison-panel"
+          role="tabpanel"
+          aria-labelledby="setup-comparison-tab"
+          hidden={view !== 'comparison'}
+          className="space-y-4"
+          onFocusCapture={(event) => { comparisonFocusRef.current = event.target as HTMLElement; }}
+        >
+          {countsStatus === 'loading' ? (
+            <p id="setup-counts-status" role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">Loading setup counts from run history and portfolio snapshots. No count is inferred as zero.</p>
+          ) : null}
+          {countsStatus === 'error' ? (
+            <div id="setup-counts-status" role="alert" className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+              <p className="font-semibold">Setup counts are unavailable. They have not been reported as zero.</p>
+              <p>{countsError}</p>
+              <button
+                type="button"
+                className="rounded-md border border-amber-500 px-3 py-1.5 font-semibold hover:bg-amber-100"
+                onClick={() => {
+                  setCountsStatus('loading');
+                  setCountsError(null);
+                  setLoadAttempt((attempt) => attempt + 1);
+                }}
+              >
+                Retry counts
+              </button>
+            </div>
+          ) : null}
+
+          <SetupTable
+            title="Bullish Setups"
+            description="Long-entry and continuation structures sorted by stock count, then confidence score."
+            accentClassName="border-emerald-500 bg-emerald-50/50"
+            triggerLabel="Entry trigger"
+            rows={BULLISH_SETUPS}
+            targetSetup={targetSetup}
+            targetTone="bullish"
+            setupGroups={setupGroups}
+            countsStatus={countsStatus}
+            onSetupClick={setSelectedSetupGroup}
+            defaultSortByStockCount
+          />
+
+          <SetupTable
+            title="Bearish / Sell-Trim Setups"
+            description="Exit, trim, and downside-continuation structures sorted by confidence score."
+            accentClassName="border-red-500 bg-red-50/50"
+            triggerLabel="Sell / trim trigger"
+            rows={BEARISH_SETUPS}
+            targetSetup={targetSetup}
+            targetTone="bearish"
+            setupGroups={setupGroups}
+            countsStatus={countsStatus}
+            onSetupClick={setSelectedSetupGroup}
+          />
+        </div>
+
+        <div id="setup-guidance-panel" role="tabpanel" aria-labelledby="setup-guidance-tab" hidden={view !== 'guidance'} className="space-y-4">
+          <button
+            type="button"
+            className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-900 hover:bg-violet-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+            onClick={() => {
+              setView('comparison');
+              requestAnimationFrame(() => {
+                const previous = comparisonFocusRef.current;
+                (previous?.isConnected ? previous : comparisonTabRef.current)?.focus();
+              });
+            }}
+          >
+            Return to Setup comparison
+          </button>
+          <dl className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-white text-sm">
+            {[
+              ['Bullish defaults', 'Highest stock count, then highest confidence, then alphabetical'],
+              ['Bearish defaults', 'Highest confidence first'],
+              ['Column headers', 'Toggle descending and ascending order'],
+              ['Action context', 'SellAll, Add More, Buy New, Trim, Hold'],
+            ].map(([label, value]) => (
+              <div key={label} className="grid gap-1 px-4 py-3 sm:grid-cols-[minmax(12rem,1fr)_2fr] sm:gap-4">
+                <dt className="font-semibold text-gray-950">{label}</dt>
+                <dd className="text-gray-700">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      </div>
 
       <SetupStocksModal
         group={selectedSetupGroup}

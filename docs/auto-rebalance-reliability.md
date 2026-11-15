@@ -34,6 +34,46 @@ fresh portfolio data with stale analysis.
   cancelled flows are likewise explicit terminal audit states.
 - The history API merges new durable workflow records with legacy labelled
   runs/jobs, so runs completed before this change remain visible.
+- Stage handoffs include each authenticated source once, using market/stage plus
+  run/job identity for Swing and Rebalance outputs, and the market-specific threat
+  job identity for Threat outputs. Identity sets exist only for the current
+  handoff. A generated output selected again or returned by the latest-run fallback
+  does not add another copy to the next model prompt.
+- Distinct jobs remain independent evidence, including repeated samples from the
+  same provider/model, identical stock candidates, rationale and dissent. First-seen
+  source order is retained; content rows are never deduplicated by normalized text.
+  PR1213's market/stage classification and display-consensus identity checks remain
+  in place. Model choices, sample counts and all six workflow stages are unchanged.
+- Explicitly selected historical run/job and threat-job IDs are fetched through
+  authenticated detail endpoints. Missing, invalid, cross-market or wrong-stage
+  selections stop the handoff before the next paid request, rather than silently
+  replacing them with a recent result. Threat market/stage ownership is checked by
+  the corresponding server endpoint; the client also checks the returned job ID.
+- Two deliveries of one source must have identical response text and source
+  provenance. The API has no dedicated response-version field, so exact text
+  comparison detects conflicting output versions without lossy normalization or
+  hash collisions. Export-only timestamps may differ. Conflicts produce an
+  actionable request to refresh Select Inputs and start a new workflow.
+- The manual Rebalance Console catches the same validation errors in its input
+  preview and blocks form submission until inputs are valid. Refresh and selection
+  controls remain available, and unrelated Create Job forms keep their existing
+  behavior.
+
+## Offline verification
+
+From `frontend/`, run:
+
+```sh
+node --test tests/rebalance-stage-inputs.test.mjs tests/final-actionables-run-identity.test.mjs tests/rebalance-workflow-resilience.test.mjs
+```
+
+This exercises the pure
+identity helpers and the real workflow callback with mocked APIs only. It checks
+generated/selected overlap, historical selections, independent same-model samples,
+source conflicts, market/stage rejection, evidence order, failure before queueing,
+unchanged six-stage execution and sample counts, and the manual form's submit
+guard. No provider, scan, trade or
+production endpoint is contacted by these tests.
 
 ## Operating guidance
 

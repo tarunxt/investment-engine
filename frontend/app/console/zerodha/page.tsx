@@ -1,5 +1,8 @@
 'use client';
 
+import { onWorkflowOwnerInvalidated } from '@/lib/workflowOwnerLifetime';
+import { acquireZerodhaLogin } from '@/lib/zerodhaLoginArbitration';
+import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceSlots';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -24,6 +27,7 @@ import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { PortfolioSnapshotsPanel } from './_components/PortfolioSnapshotsPanel';
 import { ZerodhaConnectionGuide } from './_components/ZerodhaConnectionGuide';
+import styles from './_components/IndiaPortfolioNav.module.css';
 import {
   type ZerodhaOrder,
   type ZerodhaPortfolioOverviewResponse,
@@ -510,6 +514,7 @@ export default function ZerodhaPage() {
   const [showRedirectDetails, setShowRedirectDetails] = useState(false);
   const popupRef = useRef<Window | null>(null);
   const popupPollRef = useRef<number | null>(null);
+  const loginReleaseRef = useRef<(() => void) | null>(null);
 
   const stopPopupTracking = useCallback((updateState = true) => {
     if (popupPollRef.current !== null) {
@@ -517,10 +522,17 @@ export default function ZerodhaPage() {
       popupPollRef.current = null;
     }
     popupRef.current = null;
+    loginReleaseRef.current?.();
+    loginReleaseRef.current = null;
     if (updateState) {
       setConnectingPopup(false);
     }
   }, []);
+
+  useEffect(() => onWorkflowOwnerInvalidated(() => {
+    popupRef.current?.close();
+    stopPopupTracking();
+  }), [stopPopupTracking]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -626,6 +638,9 @@ export default function ZerodhaPage() {
       return;
     }
 
+    const release = acquireZerodhaLogin();
+    if (!release) { setError("Another Zerodha sign-in is already open. Complete or close it before retrying."); return; }
+    loginReleaseRef.current = release;
     setError(null);
     setConnectingPopup(true);
 
@@ -635,12 +650,12 @@ export default function ZerodhaPage() {
     const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
     const popup = window.open(
       loginUrl,
-      'zerodha-connect',
+      'zerodha-portfolio-connect',
       `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`,
     );
 
     if (!popup) {
-      setConnectingPopup(false);
+      stopPopupTracking();
       setError('Popup blocked. Allow popups for this site or use the manual token option below.');
       return;
     }
@@ -690,6 +705,7 @@ export default function ZerodhaPage() {
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) return;
+      if (!popupRef.current || ev.source !== popupRef.current) return;
       if (ev.data?.type === 'zerodha_connected') {
         stopPopupTracking();
         const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
@@ -751,11 +767,21 @@ export default function ZerodhaPage() {
     }
   };
 
+  // The initial status placeholder can delay mounting a bookmarked fragment target.
+  useEffect(() => {
+    if (loadingStatus) return;
+    const id = window.location.hash.slice(1);
+    if (id !== 'saved-portfolio-snapshots' && id !== 'portfolio-top') return;
+    const target = document.getElementById(id);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView();
+  }, [loadingStatus]);
+
   if (loadingStatus) {
     return (
       <div className="flex items-center gap-3 text-sm text-gray-500">
         <Loader2 className="size-4 animate-spin" />
-        Loading Zerodha status…
+        Loading India Portfolio · Zerodha status…
       </div>
     );
   }
@@ -763,10 +789,10 @@ export default function ZerodhaPage() {
   return (
     <div className="mx-auto flex flex-col gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <header id="portfolio-top" tabIndex={-1} className="flex scroll-mt-6 flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
         <div>
           <div className="inline-flex items-start gap-1">
-            <h1 className="text-lg font-semibold tracking-tight text-gray-950">Zerodha</h1>
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">India Portfolio · Zerodha</h1>
             {status?.connected && (
               <Button
                 variant="ghost"
@@ -786,25 +812,26 @@ export default function ZerodhaPage() {
               </Button>
             )}
           </div>
-          <p className="text-sm text-gray-500">
-            Kite Connect integration — save daywise portfolio history and manage orders
+          <p className="flex flex-wrap gap-x-2 text-sm text-gray-500">
+            <span>India</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {selectedSnapshot
+                ? `Saved snapshot ${new Date(`${selectedSnapshot.snapshot_date}T00:00:00+05:30`).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}`
+                : loadingPortfolio
+                  ? 'Loading saved snapshots…'
+                  : portfolioError
+                    ? 'Saved snapshot status unavailable'
+                    : 'No saved snapshot'}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{status ? (status.connected ? 'Connected' : 'Not connected') : 'Connection status unavailable'}</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" />
-        </div>
-      </div>
-
-      {/* Not configured warning */}
-      {!configured && (
-        <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            Zerodha is not configured. Add <code className="font-mono text-xs">ZERODHA_API_KEY</code> and{' '}
-            <code className="font-mono text-xs">ZERODHA_API_SECRET</code> to your backend <code className="font-mono text-xs">.env</code> file.
-          </span>
-        </div>
-      )}
+        <nav aria-label="Portfolio stages and markets">
+          <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" className={styles.navigation} />
+        </nav>
+      </header>
 
       {/* Error */}
       {error && (
@@ -822,7 +849,7 @@ export default function ZerodhaPage() {
           onClick={() => setShowConnectionDetails((current) => !current)}
           className={cn(
             status?.connected
-              ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+              ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:bg-emerald-50'
               : 'border-gray-200 text-gray-600 hover:bg-gray-100',
           )}
         >
@@ -833,7 +860,7 @@ export default function ZerodhaPage() {
             active={showRedirectDetails}
             label="Show Zerodha redirect URL details"
             onClick={() => setShowRedirectDetails((current) => !current)}
-            className="border-blue-200 text-blue-700 hover:bg-blue-50"
+            className="border-blue-200 text-blue-700 hover:bg-blue-50 focus-visible:bg-blue-50"
           >
             <Link2 className="size-4" />
           </StatusRevealButton>
@@ -862,7 +889,7 @@ export default function ZerodhaPage() {
           ) : (
             <>
               <LogOut className="size-4 shrink-0 text-gray-400" />
-              <span>Not connected — log in below to get started.</span>
+              <span>Not connected. Saved snapshots remain available; open connection guidance to sign in.</span>
             </>
           )}
         </div>
@@ -875,40 +902,75 @@ export default function ZerodhaPage() {
         </div>
       ) : null}
 
-      {!status?.connected && (
-        <ZerodhaConnectionGuide
-          configured={configured}
-          loginUrl={loginUrl}
-          redirectUrl={`${URLs.frontend}/zerodha/callback`}
-          connecting={connectingPopup}
-          onQuickConnect={handlePopupConnect}
+      <div className="border border-gray-200 bg-white px-4 py-3 text-sm">
+        <a
+          href="#saved-portfolio-snapshots"
+          className="font-semibold text-violet-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
         >
-          {configured ? (
-            <ManualTokenForm
-              onConnected={() => {
-                const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
-                fetchStatus().then(() => {
-                  fetchOrders();
-                  pollPortfolioOverview(baselineCapturedAt);
-                });
-              }}
-            />
-          ) : null}
-        </ZerodhaConnectionGuide>
+          View saved snapshot
+        </a>
+        <p className="mt-1 text-gray-600">
+          View any saved portfolio data without signing in to Zerodha. Reconnect separately to sync new provider data.
+        </p>
+      </div>
+
+      {!status?.connected && (
+        <details className="border border-gray-200 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
+            Connection guidance
+            <span className="ml-2 text-xs font-normal text-gray-500">Review login options separately from saved data</span>
+          </summary>
+          <div className="border-t border-gray-200 p-4">
+            <ZerodhaConnectionGuide
+              configured={configured}
+              loginUrl={loginUrl}
+              redirectUrl={`${URLs.frontend}/zerodha/callback`}
+              connecting={connectingPopup}
+              onQuickConnect={handlePopupConnect}
+            >
+              {configured ? (
+                <ManualTokenForm
+                  onConnected={() => {
+                    const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+                    fetchStatus().then(() => {
+                      fetchOrders();
+                      pollPortfolioOverview(baselineCapturedAt);
+                    });
+                  }}
+                />
+              ) : null}
+            </ZerodhaConnectionGuide>
+          </div>
+        </details>
       )}
 
-      <PortfolioSnapshotsPanel
-        connected={Boolean(status?.connected)}
-        overview={portfolioOverview}
-        selectedSnapshot={selectedSnapshot}
-        selectedSnapshotDate={selectedSnapshotDate}
-        loading={loadingPortfolio}
-        selecting={selectingSnapshot}
-        syncing={syncingPortfolio}
-        error={portfolioError}
-        onSelectSnapshot={handleSelectSnapshot}
-        onSync={handleSyncPortfolio}
-      />
+      <section
+        id="saved-portfolio-snapshots"
+        aria-label="Saved portfolio snapshots"
+        tabIndex={-1}
+        className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
+      >
+        {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
+          <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+            <h2 className="font-semibold">Saved snapshots unavailable</h2>
+            <p className="mt-1">{portfolioError}</p>
+            <p className="mt-1">Saved data could not be loaded. This does not mean it was erased.</p>
+          </div>
+        ) : (
+          <PortfolioSnapshotsPanel
+            connected={Boolean(status?.connected)}
+            overview={portfolioOverview}
+            selectedSnapshot={selectedSnapshot}
+            selectedSnapshotDate={selectedSnapshotDate}
+            loading={loadingPortfolio}
+            selecting={selectingSnapshot}
+            syncing={syncingPortfolio}
+            error={portfolioError}
+            onSelectSnapshot={handleSelectSnapshot}
+            onSync={handleSyncPortfolio}
+          />
+        )}
+      </section>
 
       {/* Connected — orders + place order */}
       {status?.connected && (
@@ -962,6 +1024,7 @@ export default function ZerodhaPage() {
           </div>
         </>
       )}
+      <PortfolioWorkflowSlot market="zerodha" />
     </div>
   );
 }

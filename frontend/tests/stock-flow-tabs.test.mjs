@@ -6,6 +6,8 @@ const workflowSource = readFileSync(
   new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url),
   "utf8",
 );
+const configurationSource = readFileSync(new URL("../app/console/_components/WorkflowConfiguration.tsx", import.meta.url), "utf8");
+const surfacesSource = readFileSync(new URL("../app/console/_components/WorkflowSessionSurfaces.tsx", import.meta.url), "utf8");
 const stockFlowSource = readFileSync(
   new URL("../app/console/dashboard/_components/StockFlowTabs.tsx", import.meta.url),
   "utf8",
@@ -13,7 +15,8 @@ const stockFlowSource = readFileSync(
 
 test("legacy stock-flow tabs are composed as one reusable rebalance widget", () => {
   assert.doesNotMatch(workflowSource, /ZerodhaRebalanceFlowCard|Zerodha Rebalance Flow/);
-  assert.match(workflowSource, /<RebalanceStockFlowWidget/);
+  assert.match(surfacesSource, /<RebalanceStockFlowWidget/);
+  assert.doesNotMatch(workflowSource, /<RebalanceStockFlowWidget/);
   assert.match(workflowSource, /buyThresholds=\{\{/);
   assert.match(stockFlowSource, /Rebalance Stock Flow/);
   assert.match(stockFlowSource, /Zerodha Rebalance Stock Flow/);
@@ -23,7 +26,7 @@ test("legacy stock-flow tabs are composed as one reusable rebalance widget", () 
 });
 
 test("stock flow and basket preview share score inputs and persisted thresholds", () => {
-  assert.match(stockFlowSource, /fetchAllFullRuns/);
+  assert.match(stockFlowSource, /fetchDashboardRecentFullRuns/);
   assert.match(stockFlowSource, /apiService\.zerodhaPortfolioOverview\(\)/);
   assert.match(stockFlowSource, /apiService\.indmoneyUsPortfolioOverview\(\)/);
   assert.match(stockFlowSource, /latestMatchingRebalanceRuns/);
@@ -31,11 +34,11 @@ test("stock flow and basket preview share score inputs and persisted thresholds"
   assert.match(stockFlowSource, /fetchRebalanceStockFlowSource\(portfolioId\)/);
   assert.match(workflowSource, /fetchRebalanceStockFlowSource\("zerodha"\)/);
   assert.match(workflowSource, /fetchRebalanceStockFlowSource\("indmoneyUs"\)/);
-  assert.match(stockFlowSource, /buildConsensusRows\(matchingRebalanceRuns, portfolio\.market, portfolioSnapshot, runs\)/);
-  assert.match(workflowSource, /apiService\.getProfile\(\)/);
-  assert.match(workflowSource, /zerodha_buy_threshold/);
-  assert.match(workflowSource, /indmoney_buy_threshold/);
-  assert.match(workflowSource, /apiService\.updateProfile/);
+  assert.match(stockFlowSource, /buildConsensusRows\(matchingRebalanceRuns, portfolio\.market, portfolioSnapshot, runs, sourceInfo\?\.verifiedUsListings \?\? \[\]\)/);
+  assert.match(configurationSource, /apiService\.getProfile\(\)/);
+  assert.match(configurationSource, /zerodha_buy_threshold/);
+  assert.match(configurationSource, /indmoney_buy_threshold/);
+  assert.match(configurationSource, /apiService\.updateProfile/);
 });
 
 test("final actionables prioritize and highlight buys above the shared threshold", () => {
@@ -63,7 +66,7 @@ test("summary view uses scrollable stage tables and standard action colours", ()
   assert.match(stockFlowSource, /sticky top-0/);
   assert.match(stockFlowSource, /overflow-auto overscroll-contain/);
   assert.match(stockFlowSource, /getStandardActionBadgeClass/);
-  assert.match(stockFlowSource, /action=\{stock\.consensusAction\}/);
+  assert.match(stockFlowSource, /action=\{row\.disposition\}/);
   assert.match(stockFlowSource, /<ActionBadge action=\{row\.formulaAction\}/);
 });
 
@@ -72,7 +75,7 @@ test("summary preserves each LLM job output instead of only showing consensus", 
   assert.match(stockFlowSource, /SwingJobOutputsStage/);
   assert.match(stockFlowSource, /RebalanceJobOutputsStage/);
   assert.match(stockFlowSource, /Job #\{output\.jobId\}/);
-  assert.match(stockFlowSource, /output\.actions\.get\(stock\.key\)/);
+  assert.match(stockFlowSource, /stock\.actions\[output\.key\]/);
   assert.match(stockFlowSource, /Not covered/);
 });
 

@@ -41,7 +41,6 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
     "AI Models",
     "Integrations",
     "API Connections",
-    "Google Sheets",
     "Usage & Costs",
   ]) {
     assert.match(configSource, new RegExp(`name: '${label}'`));
@@ -93,7 +92,6 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
     "URLs.routes.console.prompts()",
     "URLs.routes.console.llms()",
     "URLs.routes.console.apis()",
-    "URLs.routes.console.googleSheets()",
     "URLs.routes.profile.costDrivers()",
   ]) {
     assert.match(
@@ -215,4 +213,14 @@ test("Legacy Bullpen AI Auto-Live route redirects to the Trading Bots parent rou
     legacyPageSource,
     /redirect\(URLs\.routes\.console\.bullpenAiAutoLive\(\)\);/,
   );
+});
+
+ test("Retired Google Sheets screen is absent from navigation and old bookmarks redirect safely", () => {
+  const navigation = readSource("../app/console/_components/sidebarNavigationConfig.ts");
+  assert.doesNotMatch(navigation, /google-sheets|Google Sheets|googleSheets/);
+  const page = readSource("../app/console/google-sheets/page.tsx");
+  assert.match(page, /redirect\(URLs\.routes\.console\.dashboard\(\)\)/);
+  assert.doesNotMatch(page, /GoogleSheetsPanel|use client/);
+  const field = readSource("../app/console/dashboard/_components/GoogleSheetsField.tsx");
+  assert.doesNotMatch(field, /\/console\/google-sheets/);
 });

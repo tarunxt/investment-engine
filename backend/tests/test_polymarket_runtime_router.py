@@ -94,7 +94,8 @@ async def test_runtime_health_reads_cached_snapshot_without_refetching_positions
                 "Runtime health must not trigger a fresh positions snapshot."
             )
 
-        async def read_passive_health(self):
+        async def read_passive_health(self, *, strict_read_only):
+            assert strict_read_only is True
             return BullpenRuntimePassiveHealth(
                 ok=True,
                 checked_at="2026-07-19T12:05:00+00:00",
@@ -222,7 +223,7 @@ async def test_runtime_display_positions_allows_signed_in_user_and_strips_runtim
 
 
 @pytest.mark.anyio
-async def test_runtime_display_positions_replaces_a_different_cli_account(
+async def test_passive_display_positions_does_not_refresh_a_different_cli_account(
     monkeypatch,
 ):
     silver_snapshot = BullpenPositionsSnapshot(
@@ -236,32 +237,22 @@ async def test_runtime_display_positions_replaces_a_different_cli_account(
         ),
     )
     intrepid_wallet = "0xa70b18abdebf0704b41901c33e8477ea1085afdf"
-    intrepid_snapshot = BullpenPositionsSnapshot(
-        payload={"positions": [], "summary": {"cash_balance": 9.21}},
-        fetched_at="2026-08-26T10:01:00+00:00",
-        account_identity=intrepid_wallet,
-        source="redis-cache",
-        freshness_state="cached",
-        diagnostics=BullpenCommandDiagnostics(
-            command_category="positions", pid=1, effective_home="/home/investor"
-        ),
-    )
+
 
     class FakeBroker:
-        async def read_display_positions_snapshot(self):
+        async def read_display_positions_snapshot(self, *, delete_invalid):
+            assert delete_invalid is False
             return silver_snapshot
 
-        async def read_cached_positions_snapshot(self):
+        async def read_cached_positions_snapshot(self, *, delete_invalid):
+            assert delete_invalid is False
             return silver_snapshot
 
         async def get_positions_snapshot(self, **kwargs):
-            return silver_snapshot
+            raise AssertionError("Passive display cannot fetch or wait for providers.")
 
     async def fake_public_snapshot(broker, *, wallet, caller_source):
-        assert isinstance(broker, FakeBroker)
-        assert wallet == intrepid_wallet
-        assert caller_source == "ui-passive-refresh"
-        return intrepid_snapshot
+        raise AssertionError("Passive display cannot fetch another wallet.")
 
     app = FastAPI()
     app.include_router(polymarket_router)
@@ -291,8 +282,10 @@ async def test_runtime_display_positions_replaces_a_different_cli_account(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["snapshot"]["account_identity"] == intrepid_wallet
-    assert payload["snapshot"]["payload"]["summary"]["cash_balance"] == 9.21
+    assert payload["ok"] is False
+    assert payload["snapshot"] is None
+    assert payload["stale_snapshot"] is None
+    assert "for this account" in payload["error"]
 
 
 @pytest.mark.anyio

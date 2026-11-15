@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
@@ -16,16 +17,28 @@ const screen = readFileSync(
   ),
   "utf8",
 );
+const mainScheduleCard = readBullpenScheduleSource();
 
 test("history renders the Bullpen portfolio before run history", () => {
   assert.ok(
-    screen.indexOf("<BullpenHistoryPortfolio />") <
+    screen.indexOf("<BullpenHistoryPortfolio") <
       screen.indexOf("<BullpenRunHistoryContent"),
   );
 });
 
+test("main Bullpen page reuses the History portfolio as its canonical current-value source", () => {
+  assert.match(mainScheduleCard, /import \{ BullpenHistoryPortfolio \}/);
+  assert.match(mainScheduleCard, /useHistoryPortfolioSource/);
+  assert.match(mainScheduleCard, /return <BullpenHistoryPortfolio \/>/);
+  assert.match(
+    mainScheduleCard,
+    /<BullpenPortfolioSnapshot\s+useHistoryPortfolioSource/,
+  );
+});
+
 test("history uses the same verified Stage 1 fallback contract as the main Bullpen portfolio", () => {
-  assert.match(component, /getBullpenAutoLiveSummary/);
+  assert.match(component, /getBullpenAutoLiveDashboardSummary/);
+  assert.doesNotMatch(component, /getBullpenAutoLiveSummary\(/);
   assert.match(component, /resolveVerifiedStage1PortfolioSnapshot/);
   assert.match(component, /resolveLatestVerifiedStage1Portfolio/);
   assert.match(component, /selectLatestVerifiedStage1Portfolio/);

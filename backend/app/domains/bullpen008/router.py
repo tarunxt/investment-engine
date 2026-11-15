@@ -17,8 +17,10 @@ from app.domains.bullpen008.constants import (
 )
 from app.domains.bullpen008.schemas import (
     Bullpen008Bootstrap,
+    Bullpen008EventTrendsResponse,
     Bullpen008HistoryPage,
     Bullpen008ExecutionControlRequest,
+    Bullpen008KillResponse,
     Bullpen008Run,
     Bullpen008RunRequest,
     Bullpen008Settings,
@@ -27,8 +29,10 @@ from app.domains.bullpen008.schemas import (
     Bullpen008State,
 )
 from app.domains.bullpen008.service import (
+    cancel_active_run,
     create_run_record,
     get_bootstrap,
+    get_event_trends,
     get_history,
     get_run,
     get_stage,
@@ -44,6 +48,7 @@ from app.domains.bullpen008.service import (
 from app.domains.bullpen008.tasks import execute_bullpen008_run
 from app.domains.bullpen_run_audit.provenance import resolve_backend_commit_sha
 from app.infrastructure.database.session import get_async_db
+from app.infrastructure.messaging.celery_app import celery
 
 router = APIRouter(prefix="/polymarket/bullpen008", tags=["bullpen008"])
 
@@ -164,6 +169,52 @@ async def clear_bullpen008_emergency_stop(
     return await set_emergency_stop(session, user_id=current_user.id, active=False)
 
 
+@router.post("/kill", response_model=Bullpen008KillResponse)
+async def kill_bullpen008_run(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+) -> Bullpen008KillResponse:
+    """Kill only the active Bullpen 008 task and clear its isolated leases."""
+    import redis.asyncio as aioredis
+
+    record = await cancel_active_run(session, user_id=current_user.id)
+    if record is not None:
+        task_id = str(
+            record.task_metadata.get("celery_task_id")
+            or f"bullpen008:{record.id}"
+        )
+        await asyncio.to_thread(
+            celery.control.revoke,
+            task_id,
+            terminate=True,
+            signal="SIGTERM",
+        )
+        redis_client = aioredis.from_url(
+            app_settings.redis_url,
+            decode_responses=True,
+        )
+        try:
+            await redis_client.delete(f"{REDIS_PREFIX}:run:{record.id}:lock")
+            await redis_client.delete(_pending_key(current_user.id))
+        finally:
+            await redis_client.close()
+
+    bootstrap = await get_bootstrap(session, user_id=current_user.id)
+    return Bullpen008KillResponse(
+        state=bootstrap.state,
+        killed_run=(
+            run_from_record(record, include_stage_payloads=False)
+            if record is not None
+            else None
+        ),
+        message=(
+            f"Bullpen 008 run {record.id} was killed."
+            if record is not None
+            else "No queued or running Bullpen 008 run was found."
+        ),
+    )
+
+
 @router.post("/execution-control", response_model=Bullpen008Settings)
 async def update_bullpen008_execution_control(
     request: Bullpen008ExecutionControlRequest,
@@ -272,6 +323,22 @@ async def bullpen008_runs(
         user_id=current_user.id,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get(
+    "/history/event-trends",
+    response_model=Bullpen008EventTrendsResponse,
+)
+async def bullpen008_event_trends(
+    scan_count: int = Query(default=20, ge=1, le=20),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+) -> Bullpen008EventTrendsResponse:
+    return await get_event_trends(
+        session,
+        user_id=current_user.id,
+        scan_count=scan_count,
     )
 
 

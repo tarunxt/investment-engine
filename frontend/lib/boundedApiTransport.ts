@@ -4,6 +4,7 @@ export type BoundedApiCandidate = {
   baseUrl: string;
   stage: ApiCandidateStage;
   transport: string;
+  circuitScope?: string;
 };
 
 export type CircuitPhase = "closed" | "open" | "half-open";
@@ -18,7 +19,8 @@ type CircuitRecord = {
 export type CircuitLease = "normal" | "probe" | "skip";
 
 function candidateOrigin(candidate: BoundedApiCandidate) {
-  return new URL(candidate.baseUrl).origin;
+  const origin = new URL(candidate.baseUrl).origin;
+  return candidate.circuitScope ? `${origin}|${candidate.circuitScope}` : origin;
 }
 
 export class ApiOriginCircuitBreaker {
@@ -124,7 +126,7 @@ export type BufferedTransportResponse = {
   status: number;
   statusText: string;
   headers: Headers;
-  body: ArrayBuffer | null;
+  body: ArrayBuffer | ReadableStream<Uint8Array> | null;
 };
 
 type ExecuteBoundedApiRequestOptions = {
@@ -144,6 +146,15 @@ type ExecuteBoundedApiRequestOptions = {
 
 function isRetryableStatus(status: number) {
   return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function isRecoveryContainment(response: BufferedTransportResponse) {
+  if (response.status !== 503 || !(response.body instanceof ArrayBuffer)) return false;
+  try {
+    return JSON.parse(new TextDecoder().decode(response.body)).code === "RECOVERY_CONTAINMENT";
+  } catch {
+    return false;
+  }
 }
 
 function abortError() {
@@ -260,7 +271,8 @@ export async function executeBoundedApiRequest({
         continue;
       }
 
-      if (!isRetryableStatus(response.status)) {
+      // Application policy is authoritative; another origin cannot bypass it.
+      if (!isRetryableStatus(response.status) || isRecoveryContainment(response)) {
         circuit.recordSuccess(candidate);
         return { candidate, response };
       }

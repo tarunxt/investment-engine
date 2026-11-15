@@ -30,6 +30,7 @@ from app.domains.bullpen008.tasks import (
     _stage2_input_rows,
     _stage2_repair_market_ids,
 )
+from app.domains.mails.service import BULLPEN_WALLET_PORTFOLIO_URL
 
 
 def test_008_namespaces_do_not_alias_007_resources() -> None:
@@ -54,6 +55,38 @@ def test_008_namespaces_do_not_alias_007_resources() -> None:
         "bullpen008_stage_outputs",
         "bullpen008_portfolio_certificates",
     }
+
+
+def test_008_warning_event_title_links_to_bullpen_wallet_portfolio() -> None:
+    task = Path("app/domains/bullpen008/tasks.py").read_text()
+
+    assert "BULLPEN_WALLET_PORTFOLIO_URL" in task
+    assert "safe(alert[\"question\"])}</a>" in task
+    assert BULLPEN_WALLET_PORTFOLIO_URL == (
+        "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3"
+    )
+
+
+def test_008_kill_and_history_recovery_remain_profile_isolated() -> None:
+    router = Path("app/domains/bullpen008/router.py").read_text()
+    service = Path("app/domains/bullpen008/service.py").read_text()
+    task = Path("app/domains/bullpen008/tasks.py").read_text()
+
+    kill = router.split('async def kill_bullpen008_run', 1)[1].split(
+        "@router.post", 1
+    )[0]
+    assert "cancel_active_run" in kill
+    assert "celery.control.revoke" in kill
+    assert "terminate=True" in kill
+    assert "REDIS_PREFIX" in kill
+    assert "PolymarketAutoLive" not in kill
+
+    trends = service.split("async def get_event_trends", 1)[1]
+    assert "Bullpen008RunRecord" in trends
+    assert "workflow_profile == WORKFLOW_PROFILE" in trends
+    assert "PolymarketAutoLiveRunRecord" not in trends
+    assert 'run.status in {"completed", "failed", "cancelled"}' in task
+    assert 'run.status == "cancelled"' in task
 
 
 def test_only_a_different_deployed_build_is_recoverable() -> None:

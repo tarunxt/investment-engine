@@ -1,16 +1,15 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const scheduleCard = readFileSync(
-  new URL(
-    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const scheduleCard = readBullpenScheduleSource();
 const historyContent = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx", import.meta.url), "utf8");
+const historyScreen = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryScreen.tsx", import.meta.url), "utf8");
 const trendsTable = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx", import.meta.url), "utf8");
+const sportsEventMetadataRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-metadata/route.ts", import.meta.url), "utf8");
+const sportsEventComparisonsRoute = readFileSync(new URL("../app/api/bullpen-ai/sports-event-comparisons/route.ts", import.meta.url), "utf8");
+const sportsRankingsApi = readFileSync(new URL("../lib/sportsRankingsApi.ts", import.meta.url), "utf8");
 const llmDialog = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx", import.meta.url), "utf8");
 const apiService = readFileSync(
   new URL("../services/api.ts", import.meta.url),
@@ -24,16 +23,38 @@ const bullpenAi = readFileSync(
   new URL("../lib/bullpen-ai.ts", import.meta.url),
   "utf8",
 );
+const stageOneExcel = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/bullpenStageOneExcel.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const stageOneExcelHistoryDialog = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenStageOneExcelHistoryDialog.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const backendProxy = readFileSync(
+  new URL("../app/backend-api/[...path]/route.ts", import.meta.url),
+  "utf8",
+);
 
 test("Bullpen history modal loads a compact page and lazy selected-run detail", () => {
   assert.match(scheduleCard, /apiService\.getBullpenAutoLiveHistory\(/);
   assert.match(
     scheduleCard,
-    /apiService\.getBullpenAutoLiveRun\(item\.id,[\s\S]*?apiService\.getBullpenAutoLiveRunDecisions\(item\.id,/,
+    /const consoleDetail = await apiService\.getBullpenAutoLiveRunConsole\(/,
   );
   assert.match(
     scheduleCard,
-    /getBullpenAutoLiveRunConsole\(item\.id,[\s\S]*?const visibleDecisionIds = Array\.isArray\([\s\S]*?consoleDetail\.visible_decision_ids/,
+    /consoleDetail\.projection_available[\s\S]*?\[consoleDetail\.run, consoleDetail\.decisions\][\s\S]*?apiService\.getBullpenAutoLiveRun\(item\.id/,
+  );
+  assert.match(
+    scheduleCard,
+    /getBullpenAutoLiveRunConsole\([\s\S]*?const visibleDecisionIds = Array\.isArray\([\s\S]*?consoleDetail\.visible_decision_ids/,
   );
   assert.match(
     scheduleCard,
@@ -58,10 +79,17 @@ test("Bullpen history modal loads a compact page and lazy selected-run detail", 
   );
 });
 
+test("dedicated Bullpen run page prefers the bounded console projection", () => {
+  assert.match(
+    scheduleCard,
+    /const consoleDetail = await apiService\.getBullpenAutoLiveRunConsole\([\s\S]*?normalizedRunId[\s\S]*?consoleDetail\.projection_available[\s\S]*?\[consoleDetail\.run, consoleDetail\.decisions\][\s\S]*?apiService\.getBullpenAutoLiveRun\(normalizedRunId/,
+  );
+});
+
 test("Bullpen history requests bypass caches and remain abortable", () => {
   assert.match(
     apiService,
-    /getBullpenAutoLiveHistory\([\s\S]*?\{ cache: "no-store", \.\.\.options \}/,
+    /getBullpenAutoLiveHistory\([\s\S]*?\{ cache: "no-store", timeoutMs: BULLPEN_HISTORY_READ_TIMEOUT_MS, \.\.\.options \}/,
   );
   assert.match(
     apiService,
@@ -76,16 +104,90 @@ test("Bullpen history requests bypass caches and remain abortable", () => {
   assert.match(historyContent, /Page \{page\.page\}/);
 });
 
-test("Bullpen history shows scored event trends for exactly 20 newest-first scans", () => {
-  assert.match(historyContent, /Recurring Events Across the Last 20 Scans/);
-  assert.match(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
-  assert.match(trendsTable, /event\.scan_scores\.map\(\(score,i\) =>/);
-  assert.match(historyContent, /Grey = not covered \/ no valid LLM score/);
-  assert.match(historyContent, /Latest saved run:/);
-  assert.match(historyContent, /Latest scored LLM scan:/);
-  assert.match(historyContent, /page\?\.page === 1 \? page\.items\[0\]\?\.started_at/);
+test("Bullpen history uses a saved, editable 1-20 scan window", () => {
+  assert.match(historyContent, /Recurring Events Across the Last/);
+  assert.match(historyContent, /event-trends-scan-count-title/);
+  assert.match(historyContent, /Enter a whole number from 1 to 20 scans/);
+  assert.match(historyContent, /This preference is saved to your account/);
+  assert.match(historyContent, /updateBullpenAutoLiveEventTrendsScanCount\(scanCount\)/);
+  assert.match(apiService, /historyEventTrendsScanCount\(\)/);
+  assert.match(urls, /history\/event-trends\/scan-count/);
+  assert.match(trendsTable, /event\.scan_scores\.slice\(0, scanCount\)\.map\(\(score,i\) =>/);
+  assert.doesNotMatch(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
+  assert.doesNotMatch(historyContent, /Grey = not covered \/ no valid LLM score/);
+  assert.doesNotMatch(historyContent, /Latest saved run:/);
+  assert.doesNotMatch(historyContent, /Latest scored LLM scan:/);
+  assert.match(historyContent, /Latest Stage 1:/);
+  assert.match(historyContent, /Latest Stage 1 Clustering:/);
+  assert.match(historyContent, /Latest Bullpen Rebalance:/);
+  assert.match(historyContent, /formatHourlyRebalance\(hourlyRebalanceStatus, hourlyRebalanceAt, lastRebalanceAt\)/);
+  assert.match(historyContent, /`Failed at \$\{formatTime\(attemptedAt\)\}`/);
+  assert.match(historyContent, /return legacyCompletedAt \? formatTime\(legacyCompletedAt\) : "Not recorded"/);
+  assert.match(historyContent, /`Pending since \$\{formatTime\(latestStage1CompletedAt\)\}`/);
+  assert.match(historyContent, /metadata\.failed_at[\s\S]*?`Failed at \$\{formatTime\(metadata\.failed_at\)\}`/);
+  assert.doesNotMatch(historyContent, /Record Hourly Rebalance Completed/);
+  assert.doesNotMatch(historyContent, /Record Hourly Rebalance Failed/);
+  assert.match(historyContent, /OperationalStatusDialog/);
+  assert.match(historyContent, /bullpen-operational-status-title/);
+  assert.match(historyContent, /title: "Latest Stage 1 Clustering"/);
+  assert.match(historyContent, /title: "Latest Bullpen Rebalance"/);
+  assert.match(historyContent, /Latest published run/);
+  assert.match(historyContent, /Reason/);
+  assert.match(historyScreen, /HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult"/);
+  assert.match(historyScreen, /value === "completed" \|\| value === "failed"/);
+  assert.match(historyScreen, /recordBullpenHourlyRebalanceResult\([\s\S]*?requestedRebalanceResult/);
+  assert.match(historyScreen, /clearHourlyRebalanceResultRequest\(\)/);
+  assert.match(historyScreen, /window\.history\.replaceState/);
+  assert.match(historyScreen, /latest_hourly_rebalance_status/);
+  assert.match(historyScreen, /latest_hourly_rebalance_at/);
+  assert.match(historyScreen, /latest_hourly_rebalance_detail/);
+  assert.match(historyScreen, /runtimeState\.last_error/);
+  assert.match(historyScreen, /runtimeState\.last_action/);
+  assert.match(historyContent, /Cred-X runner error \(may be separate\)/);
+  assert.match(historyContent, /Cred-X runner action \(may be separate\)/);
+  assert.match(historyContent, /without persisting a workflow-specific cause/);
+  assert.match(historyContent, /Latest Stage 2 LLM scan:/);
+  assert.match(historyContent, /Latest Stage 3 completion:/);
+  assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "scan"\)/);
+  assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "llm"\)/);
+  assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "invest"\)/);
+  assert.match(historyContent, /formatClusteringStatus\(/);
+  assert.match(historyContent, /clusteredAt >= stage1At/);
+  assert.match(historyContent, /lastRebalanceAt/);
+  assert.match(historyContent, /Current Bullpen Odds fetched\/updated:/);
+  assert.match(historyContent, /currentOddsUpdatedAt = trends\?\.current_odds_fetched_at \?\? latestScoredScanAt \?\? trends\?\.generated_at/);
+  assert.match(historyScreen, /current_odds_fetched_at: response\.fetchedAt/);
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
+  assert.match(historyContent, /aria-label="Choose table columns"/);
+  assert.match(historyContent, /fixed inset-0 z-\[220\]/);
+  assert.match(historyContent, /aria-modal="true"/);
+  assert.match(historyContent, /max-h-\[calc\(100dvh-2rem\)\]/);
+  assert.match(historyContent, /BULLPEN_EVENT_TREND_COLUMN_OPTIONS\.map/);
+  assert.match(historyContent, /bullpen-event-trends-visible-columns-v1/);
+  assert.match(historyContent, /visibleColumnKeys=\{visibleColumnKeys\}/);
+  assert.match(trendsTable, /label: "Active \(icon\)"/);
+  assert.match(trendsTable, /label: "Cluster ID"/);
+  for (const label of [
+    "Event",
+    "Deadline",
+    "Claim date",
+    "Score",
+    "tag(s)",
+    "Ranking",
+    "Rating",
+    "Points",
+    "Bought",
+    "Current Odds",
+    "LLM Odds",
+    "Returns/day",
+    "20 scans · newest to oldest",
+  ]) {
+    assert.ok(trendsTable.includes(`label: "${label}"`), label);
+  }
+  assert.match(trendsTable, /preferences\.order\.filter\(key => selectedColumnKeys\.has\(key\)\)/);
+  assert.match(trendsTable, /showActiveColumn &&/);
+  assert.match(trendsTable, /showClusterColumn &&/);
   assert.match(trendsTable, /\(event\.scan_scores\[0\] \?\? -1\) >= 80/);
   assert.match(trendsTable, /hasStrongestLatestLlmOdds\(event\) \|\| event\.is_active_position \|\| event\.is_claimable_position/);
   assert.match(trendsTable, /hasHeldSideOddsBelowThreshold\(event\)[\s\S]*?activeBelowOddsThreshold \? "bg-red-200 text-red-950 ring-2 ring-inset ring-red-600/);
@@ -111,6 +213,8 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(scheduleCard, /Promise\.allSettled/);
   assert.match(historyContent, /Loading event trends/);
   assert.match(scheduleCard, /Event trends are temporarily unavailable/);
+  assert.match(historyContent, /useState<ClusterMode>\(0\)/);
+  assert.match(trendsTable, /return to all Stage 1 events/);
   assert.match(trendsTable, /href=\{buildBullpenMarketUrl\(event\.market_id\)\}/);
   assert.match(trendsTable, /aria-label=\{`Open \$\{event\.market_title\} on Polymarket`\}/);
   assert.match(trendsTable, /href=\{event\.market_url\}/);
@@ -124,13 +228,51 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(trendsTable, /ALERT: held-side LLM odds are below 80%/);
   assert.match(trendsTable, /border-\[1\.5px\] border-black/);
   assert.match(historyContent, /<BullpenLlmBreakdownDialog question=\{llmQuestion\}/);
-  assert.match(historyContent, /<BullpenInvestmentMathDialog focus="returnsPerDay"/);
+  assert.match(historyContent, /<BullpenClaimReturnsDialog event=\{returnsEvent\}/);
   assert.match(historyContent, /calculateTrendDaysUntilClose/);
   assert.match(historyContent, /event\.scan_timestamps\.find\(Boolean\)/);
   assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
 });
 
-test("Run History Returns/day header opens a persistent Excel-style formula editor", () => {
+test("event trends timeout is editable, persisted, and sent to the proxy", () => {
+  const timeoutHook = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/useEventTrendsTimeout.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(timeoutHook, /DEFAULT_EVENT_TRENDS_TIMEOUT_SECONDS = 30/);
+  assert.match(timeoutHook, /bullpen-event-trends-timeout-seconds-v1/);
+  assert.match(timeoutHook, /window\.localStorage\.setItem/);
+  assert.match(historyContent, /Backend wait threshold/);
+  assert.match(historyContent, /Save threshold/);
+  assert.match(historyContent, /onClick=\{onConfigure\}/);
+  assert.match(apiService, /query\.set\("proxy_timeout_seconds"/);
+});
+
+test("Stage 1 and history refresh exact contracts instead of shared parent events", () => {
+  assert.match(scheduleCard, /conditionId: candidate\.conditionId/);
+  assert.match(scheduleCard, /const activeSide = \[\s*candidate\.conditionId/);
+  assert.doesNotMatch(
+    scheduleCard,
+    /const activeSide = \[\s*candidate\.marketId/,
+  );
+  assert.match(historyScreen, /conditionId: event\.condition_id \?\? null/);
+  assert.match(historyScreen, /slug: event\.slug \?\? null/);
+  assert.match(scheduleCard, /const candidateCloseTimeByKey = new Map/);
+  assert.match(scheduleCard, /matchingCandidateCloseTime/);
+  assert.match(scheduleCard, /snapshot_id: snapshot\.snapshotId/);
+  assert.match(scheduleCard, /function hasTruncatedStageOneCandidates/);
+  assert.match(
+    scheduleCard,
+    /!hasTruncatedStageOneCandidates\(runDetail\.run\)/,
+  );
+  assert.match(scheduleCard, /isAutoRunSnapshot/);
+});
+
+test("Run History Returns/day header explains the claim-date formula", () => {
   const historyContent = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx",
@@ -147,20 +289,17 @@ test("Run History Returns/day header opens a persistent Excel-style formula edit
   );
   const formulaDialog = readFileSync(
     new URL(
-      "../app/console/bullpen-ai/_components/BullpenReturnsPerDayInfo.tsx",
+      "../app/console/bullpen-ai/_components/BullpenClaimReturnsDialog.tsx",
       import.meta.url,
     ),
     "utf8",
   );
 
   assert.match(trendsTable, /BullpenReturnsPerDayHeaderInfo/);
-  assert.match(historyContent, /BullpenReturnsPerDayFormulaDialog/);
-  assert.match(formulaDialog, /Excel-style formula/);
-  assert.match(formulaDialog, /returns_per_day_formula: formula/);
-  assert.match(
-    formulaDialog,
-    /=\(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS\)\/\(DAYS_UNTIL_CLOSE\+4\)/,
-  );
+  assert.match(historyContent, /BullpenClaimReturnsDialog/);
+  assert.match(formulaDialog, /CLAIM_RETURNS_FORMULA/);
+  assert.match(formulaDialog, /Days left for claim/);
+  assert.match(formulaDialog, /fractional days without rounding or a four-day buffer/);
 });
 
 test("Bullpen event links use the direct market route instead of the trending search", () => {
@@ -177,14 +316,159 @@ test("Bullpen event links use the direct market route instead of the trending se
 
 test("event trends support deadlines, persistent table controls, and stable scan details", () => {
   assert.match(trendsTable, /label: "Deadline"/);
-  assert.match(trendsTable, /localStorage\.setItem\(STORAGE_KEY/);
+  assert.match(trendsTable, /localStorage\.setItem\(storageKey/);
   assert.match(trendsTable, /draggable/);
   assert.match(trendsTable, /cursor-col-resize/);
-  assert.match(trendsTable, /rowIndex===9/);
+  assert.match(trendsTable, /data-returns-divider="0\.1"/);
+  assert.doesNotMatch(trendsTable, /rowIndex===9/);
   assert.match(trendsTable, /Click the event circle to keep these details open/);
   assert.match(trendsTable, /scan_llm_outputs/);
   assert.match(llmDialog, /Individual LLM odds and commentary/);
   assert.match(llmDialog, /output\.rationale/);
+});
+
+test("Sports History shows linked ranking comparisons immediately after Score", () => {
+  assert.match(trendsTable, /"score", "tags", "ranking", "rating", "points", "bought"/);
+  assert.match(trendsTable, /label: "tag\(s\)"/);
+  assert.match(trendsTable, /label: "Ranking"/);
+  assert.match(trendsTable, /label: "Rating"/);
+  assert.match(trendsTable, /label: "Points"/);
+  assert.match(trendsTable, /\/console\/sports-rankings\?code=/);
+  assert.match(trendsTable, /fallbackSportsTag/);
+  assert.match(trendsTable, /SportsRankingMetric/);
+  assert.match(historyScreen, /readSportsEventComparisons<[\s\S]*?>\(events\)/);
+  assert.doesNotMatch(historyScreen, /readSportsEventComparisonsFromDetails/);
+  assert.match(historyScreen, /comparisons\[event.market_id\] \?\? null/);
+  assert.match(historyScreen, /SERVICE_UNAVAILABLE/);
+  assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)/);
+  assert.match(historyScreen, /sportsEventSlug\(event\)/);
+  assert.match(historyScreen, /applySportsEventMetadata\(identityBaseTrends, sportsEventMetadata\)/);
+  assert.match(historyScreen, /setTrends\(identityBaseTrends\)/);
+  assert.match(historyScreen, /setTrends\(metadataTrends\)/);
+  assert.match(historyScreen, /const identityBaseTrends = applySportsEventMetadata\(cachedTrends, null\)/);
+  assert.match(historyScreen, /fetchSportsEventMetadata\(identityBaseTrends\)\.catch\(\(\) => null\)/);
+  assert.match(trendsTable, /absoluteSportsMetricDelta/);
+  assert.match(trendsTable, /Math\.abs\(delta\)/);
+  assert.match(trendsTable, /isSportsDeltaSortKey\(key\)/);
+  assert.match(trendsTable, /return left === null \? 1 : -1/);
+  assert.match(trendsTable, /Sort \$\{item\.label\} by absolute A minus B delta/);
+  assert.match(trendsTable, /data-ranking-delta=/);
+  assert.match(trendsTable, /data-rating-delta=/);
+  assert.match(trendsTable, /data-points-delta=/);
+  assert.match(trendsTable, /variant !== "trends" \|\| isSportsDeltaSortKey\(preferences\.sort\.key\)/);
+  assert.doesNotMatch(trendsTable, /sports_ranking\?\.\[key\]\?\.delta \?\? Number\.NEGATIVE_INFINITY/);
+  assert.match(sportsEventMetadataRoute, /gamma-api\.polymarket\.com\/events/);
+  assert.match(sportsEventMetadataRoute, /params\.append\("slug", slug\)/);
+  assert.match(sportsEventMetadataRoute, /GAMMA_BATCH_SIZE = 10/);
+  assert.match(sportsEventMetadataRoute, /Promise\.allSettled\(chunkSlugs\(missing\)\.map\(fetchEvents\)\)/);
+  assert.match(backendProxy, /SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000/);
+  assert.match(backendProxy, /method === "POST" && path === "api\/sports-rankings\/event-comparisons"/);
+  assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
+  assert.match(sportsEventComparisonsRoute, /createBackendSessionContext\(request\)/);
+  assert.match(sportsEventComparisonsRoute, /"\/api\/sports-rankings\/event-comparisons"/);
+  assert.match(sportsEventComparisonsRoute, /method: "POST", body/);
+});
+
+test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {
+  assert.match(scheduleCard, /variant="active-positions"/);
+  assert.match(scheduleCard, /variant="fresh-opportunities"/);
+  assert.match(scheduleCard, /events=\{activePositionEvents\}/);
+  assert.match(scheduleCard, /events=\{freshOpportunityEvents\}/);
+  assert.match(scheduleCard, /buildStageOnePositionTableEvent/);
+  assert.match(scheduleCard, /buildStageOneOpportunityTableEvent/);
+  assert.match(trendsTable, /"currentOdds", "llmOdds", "returns", "position"/);
+  assert.match(trendsTable, /"amount", "volume", "liquidity"/);
+});
+
+test("Stage 1 filtered exports remain available without projected browser rows", () => {
+  const expression = scheduleCard.match(/const filteredDownloadUnavailable =([\s\S]*?);/)[1];
+  const unavailable = new Function("hideNumbers", "stats", "isIndependentStageOne", "independentExportId", "onRecoverLegacyExport", "run", "filteredEventRows", `return (${expression});`);
+  assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, { id: 123 }, []), false);
+  assert.equal(unavailable(false, { passedFilters: 80 }, true, "saved-scan", null, null, []), false);
+  assert.equal(unavailable(false, { passedFilters: 80 }, true, null, () => {}, null, []), false);
+  assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, null, []), true);
+  assert.equal(unavailable(false, { passedFilters: 0 }, false, null, null, { id: 123 }, []), true);
+  assert.equal(unavailable(true, { passedFilters: 80 }, false, null, null, { id: 123 }, []), true);
+  assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, null, [{}]), false);
+  assert.equal((scheduleCard.match(/disabled=\{filteredDownloadUnavailable\}/g) || []).length, 3);
+  assert.doesNotMatch(scheduleCard, /disabled=\{filteredEventExportRows.length === 0\}/);
+});
+
+test("Stage 1 filtered events can be downloaded as a complete Excel workbook", () => {
+  assert.match(scheduleCard, /Download Excel/);
+  assert.match(scheduleCard, /FileSpreadsheet/);
+  assert.match(
+    scheduleCard,
+    /candidates: filteredEventExportRows,[\s\S]*?scanCompletedAt: state\.scanCompletedAt/,
+  );
+  assert.match(
+    scheduleCard,
+    /candidates: filteredEventRows,[\s\S]*?scanCompletedAt: stage\.timerCompletedAt/,
+  );
+  assert.match(stageOneExcel, /write-excel-file\/browser/);
+  assert.match(stageOneExcel, /backgroundColor: "#E2F3EA"/);
+  assert.match(stageOneExcel, /textColor: "#14532D"/);
+  assert.match(stageOneExcel, /"Condition ID"/);
+  assert.match(stageOneExcel, /"Current Yes Odds \(%\)"/);
+  assert.match(stageOneExcel, /"LLM Yes Odds \(%\)"/);
+  assert.match(stageOneExcel, /"Returns\/day \(%\)"/);
+  assert.match(stageOneExcel, /"Filter Reasons"/);
+  assert.match(stageOneExcel, /candidates\.map/);
+});
+
+test("Stage 1 Excel split button opens the last 10 workspace-scoped scans", () => {
+  assert.match(scheduleCard, /Open last 10 Excel scans/);
+  assert.match(scheduleCard, /BullpenStageOneExcelHistoryDialog/);
+  assert.match(scheduleCard, /setIsExcelHistoryDialogOpen\(true\)/);
+  assert.match(
+    scheduleCard,
+    /hasOpenedExcelHistoryDialog \? <BullpenStageOneExcelHistoryDialog\s+open=\{isExcelHistoryDialogOpen\}[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
+  );
+  assert.match(scheduleCard, /Events that Passed Filters/);
+  assert.match(
+    stageOneExcelHistoryDialog,
+    /getBullpenAutoLiveHistory\([\s\S]*?size: 30, workspaceProfile/,
+  );
+  assert.match(stageOneExcelHistoryDialog, /\.slice\(0, 10\)/);
+  assert.match(stageOneExcelHistoryDialog, /Universal Polymarket Scan timestamp/);
+  assert.match(stageOneExcelHistoryDialog, /Events that Passed Filters/);
+  assert.match(
+    stageOneExcelHistoryDialog,
+    /downloadCompleteStageOneRunExcel\(entry\.runId, "filtered"\)/,
+  );
+});
+
+test("Stage 1 all-scanned count downloads the maximum available CLI fields", () => {
+  assert.match(scheduleCard, /downloadCompleteStageOneRunExcel/);
+  assert.match(
+    scheduleCard,
+    /if \(run\?\.id\) \{[\s\S]*?downloadCompleteStageOneRunExcel\(run\.id\)/,
+  );
+  assert.match(
+    scheduleCard,
+    /candidates: allScannedEventRows,[\s\S]*?scanCompletedAt: stage\.timerCompletedAt/,
+  );
+  assert.match(
+    scheduleCard,
+    /Download Excel with all \$\{stats\.totalScanned\} scanned events/,
+  );
+  assert.match(stageOneExcel, /"Best Bid \(cents\)"/);
+  assert.match(stageOneExcel, /"Best Ask \(cents\)"/);
+  assert.match(stageOneExcel, /"Spread \(cents\)"/);
+  assert.match(stageOneExcel, /"Force-Included Position"/);
+  assert.match(stageOneExcel, /"Event Description"/);
+  assert.match(stageOneExcel, /"Market Context"/);
+  assert.match(stageOneExcel, /"Resolution Source"/);
+  assert.match(stageOneExcel, /"Preflight Evidence"/);
+  assert.match(
+    stageOneExcel,
+    /sheet:\s*exportScope === "all-scanned"/,
+  );
+  assert.match(stageOneExcel, /bullpen-stage-1-\$\{exportScope\}-events/);
+  assert.match(stageOneExcel, /URLs\.bullpenAutoLive\.runStageOneExcel\(runId\)/);
+  assert.match(urls, /runStageOneExcel:[\s\S]*?stage-one\.xlsx/);
+  assert.match(backendProxy, /BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000/);
+  assert.match(backendProxy, /isBullpenStageOneExcelDownload/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {
@@ -221,4 +505,19 @@ test("active run detail keeps polling the exact selected run and stops when hidd
   assert.match(scheduleCard, /decisions_truncated: decisionsTruncated/);
   assert.match(scheduleCard, /mergeBullpenConsoleRunProjection/);
   assert.match(scheduleCard, /mergeBullpenConsoleDecisionProjection/);
+});
+
+test("console detail falls back to Stage 1 without the heavier decision projection", () => {
+  assert.match(
+    urls,
+    /runStageOne: \(runId: string\)[\s\S]*?encodeURIComponent\(runId\)\}\/stage-one/,
+  );
+  assert.match(
+    apiService,
+    /getBullpenAutoLiveStageOneRun\([\s\S]*?URLs\.bullpenAutoLive\.runStageOne\(runId\)[\s\S]*?\{ cache: "no-store", \.\.\.options \}/,
+  );
+  assert.match(
+    apiService,
+    /catch \(error\)[\s\S]*?getBullpenAutoLiveStageOneRun\(runId, options\)[\s\S]*?decisions: \[\][\s\S]*?projection_available: true/,
+  );
 });

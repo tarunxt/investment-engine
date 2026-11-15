@@ -1,3 +1,8 @@
+
+from app.core.recovery import RecoveryMiddleware
+from app.domains.jobs.resource_body import ResourceBodyMiddleware
+
+from app.core.recovery import recovery_mode
 import json
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +26,7 @@ from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
+from app.domains.sports_rankings.router import router as sports_rankings_router
 from app.domains.bullpen_run_audit.router import router as bullpen_run_audit_router
 from app.domains.bullpen008.router import router as bullpen008_router
 from app.domains.bullpen_trade_analysis.router import (
@@ -57,6 +63,7 @@ from app.domains.zerodha.router import router as zerodha_router
 from app.domains.zerodha.events_router import router as zerodha_events_router
 from app.domains.zerodha.threats_router import router as zerodha_threats_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+from app.infrastructure.database.errors import database_is_unavailable
 from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata.
@@ -113,9 +120,13 @@ cors_allowed_origins = _build_cors_allowed_origins()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    recovery_mode()  # Refuse malformed recovery configuration before startup work.
+    from app.domains.auth.session_startup import require_session_schema
+    async with AsyncSessionLocal() as session_schema_db:
+        await require_session_schema(session_schema_db)
     logger.info("Starting AI Investment Platform Backend")
-    logger.info("Database: %s", settings.database_url.split("@")[-1])
-    logger.info("Redis: %s", settings.redis_url)
+    logger.info("Database configured: %s", bool(settings.database_url))
+    logger.info("Redis configured: %s", bool(settings.redis_url))
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
     # Do not terminalize persisted Auto-Live runs during FastAPI startup.
@@ -170,6 +181,13 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
+    if database_is_unavailable(exc):
+        logger.error("Database unavailable", exc_info=exc)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "3", "Cache-Control": "no-store"},
+            content={"error": "DATABASE_UNAVAILABLE", "message": "The service is temporarily unavailable. Please retry shortly."},
+        )
     logger.error("Unhandled exception", exc_info=exc)
     return JSONResponse(
         status_code=500,
@@ -265,6 +283,9 @@ async def correlation_id_middleware(request: Request, call_next):
         end_request_timing(timing_token)
 
 
+app.add_middleware(RecoveryMiddleware)
+app.add_middleware(ResourceBodyMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins,
@@ -279,6 +300,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(sports_rankings_router)
 app.include_router(bullpen_run_audit_router)
 app.include_router(bullpen008_router)
 app.include_router(bullpen_trade_analysis_router)
@@ -297,6 +319,8 @@ app.include_router(polymarket_direct_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
 app.include_router(api_usage_router)
+from app.domains.recommendation_audit.router import router as recommendation_audit_router
+app.include_router(recommendation_audit_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
 app.include_router(trading_bots_router)

@@ -24,7 +24,7 @@ _LIST_LIMITS = {
     # Candidate identity rows are required to repopulate the Auto Scan table.
     # Keep the list bounded, while allowing the normal 30-day/EOM scan universe
     # to survive the lightweight dashboard projection without an extra read.
-    "accepted_candidates": 100,
+    "accepted_candidates": 200,
     "rejected_candidates": 100,
     "active_positions_found": 10,
     "available_for_claim": 10,
@@ -42,6 +42,7 @@ _LIST_LIMITS = {
     "llm_target_runs": 0,
 }
 _DROPPED_KEYS = {
+    "scan_export_data",
     "raw",
     "raw_output",
     "raw_response",
@@ -69,9 +70,19 @@ _STAGE_INPUT_KEYS = {
     "source_run_id",
 }
 _STAGE_OUTPUT_KEYS = {
+    "filter_ledger",
+    "scan_scope",
+    "scan_completeness",
+    "scan_warning",
+    "scan_details",
     "workflow_stage_key",
     "phase_status",
     "progress_commentary",
+    "scan_progress",
+    "snapshot_id",
+    "scanned_at",
+    "source_scan_completed_at",
+    "filters_completed_at",
     "error_message",
     "failure_category",
     "cancellation_state",
@@ -640,6 +651,10 @@ def build_minimal_workflow_stage_results(
             stage.outputs,
             (
                 "phase_status",
+                "scan_scope",
+                "scan_completeness",
+                "scan_warning",
+                "scan_details",
                 "scanned_candidates",
                 "completed_items",
                 "total_items",
@@ -718,6 +733,7 @@ def projected_run_payload(
     orders_planned: int,
     orders_submitted: int,
     error_message: str | None,
+    workspace_profile: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     valid_projection = (
         isinstance(projection, dict)
@@ -744,6 +760,7 @@ def projected_run_payload(
                 if error_message is not None
                 else None
             ),
+            "workspace_profile": workspace_profile or "bullpen007",
         }
     )
     return payload, valid_projection

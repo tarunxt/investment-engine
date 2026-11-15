@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, noload, selectinload
 
 from app.domains.bullpen008.constants import (
     CELERY_QUEUE,
@@ -36,6 +37,8 @@ from app.domains.bullpen008.models import (
 from app.domains.bullpen008.schemas import (
     Bullpen008Bootstrap,
     Bullpen008Alert,
+    Bullpen008EventTrend,
+    Bullpen008EventTrendsResponse,
     Bullpen008HistoryPage,
     Bullpen008InheritedRun,
     Bullpen008Run,
@@ -64,6 +67,68 @@ def _hash(value: object) -> str:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _compact_run_options():
+    """Load run-card facts without hydrating the large immutable JSON payloads."""
+    return (
+        selectinload(Bullpen008RunRecord.stages).load_only(
+            Bullpen008StageOutputRecord.stage_number,
+            Bullpen008StageOutputRecord.stage_name,
+            Bullpen008StageOutputRecord.stage_version,
+            Bullpen008StageOutputRecord.status,
+            Bullpen008StageOutputRecord.pass_condition,
+            Bullpen008StageOutputRecord.block_reason,
+            Bullpen008StageOutputRecord.previous_stage_output_hash,
+            Bullpen008StageOutputRecord.output_hash,
+            Bullpen008StageOutputRecord.settings_snapshot_hash,
+            Bullpen008StageOutputRecord.wallet_snapshot_hash,
+            Bullpen008StageOutputRecord.prompt_version,
+            Bullpen008StageOutputRecord.parser_version,
+            Bullpen008StageOutputRecord.started_at,
+            Bullpen008StageOutputRecord.completed_at,
+            Bullpen008StageOutputRecord.duration_seconds,
+        ),
+        noload(Bullpen008RunRecord.certificate),
+        noload(Bullpen008RunRecord.action_plan),
+        noload(Bullpen008RunRecord.execution_intents),
+    )
+
+
+async def _attach_compact_stage_metrics(
+    session: AsyncSession,
+    records: list[Bullpen008RunRecord],
+) -> None:
+    """Attach only the two small JSON subobjects used by run-summary cards."""
+    stages = [stage for record in records for stage in record.stages]
+    stage_ids = [stage.id for stage in stages]
+    if not stage_ids:
+        return
+    rows = (
+        await session.execute(
+            select(
+                Bullpen008StageOutputRecord.id,
+                Bullpen008StageOutputRecord.outputs_json["metrics"].label("metrics"),
+                Bullpen008StageOutputRecord.outputs_json["risk_metrics"].label(
+                    "risk_metrics"
+                ),
+            ).where(Bullpen008StageOutputRecord.id.in_(stage_ids))
+        )
+    ).all()
+    compact_by_id = {
+        row.id: {
+            "metrics": row.metrics if isinstance(row.metrics, dict) else {},
+            "risk_metrics": (
+                row.risk_metrics if isinstance(row.risk_metrics, dict) else {}
+            ),
+        }
+        for row in rows
+    }
+    for stage in stages:
+        stage._compact_outputs_json = compact_by_id.get(  # type: ignore[attr-defined]
+            stage.id,
+            {"metrics": {}, "risk_metrics": {}},
+        )
 
 
 def _is_interrupted_previous_build(
@@ -111,7 +176,7 @@ async def recover_interrupted_previous_build_run(
     record = (
         await session.execute(
             select(Bullpen008RunRecord)
-            .options(selectinload(Bullpen008RunRecord.stages))
+            .options(*_compact_run_options())
             .where(
                 Bullpen008RunRecord.user_id == user_id,
                 Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -354,18 +419,17 @@ def state_from_record(record: Bullpen008StateRecord) -> Bullpen008State:
 def stage_from_record(
     record, *, include_payload: bool = True
 ) -> Bullpen008StageOutput:
-    outputs = (
-        record.outputs_json
-        if include_payload
-        else {
-            "metrics": record.outputs_json.get("metrics", {}),
-            # Stage 1 keeps the P0 counters separate so its legacy accounting
-            # metrics remain byte-for-byte compatible.  They are still compact
-            # headline data, not a large stage payload, and must survive the
-            # bootstrap projection used by the stage cards.
-            "risk_metrics": record.outputs_json.get("risk_metrics", {}),
+    if include_payload:
+        outputs = record.outputs_json
+    else:
+        source = record.__dict__.get(
+            "_compact_outputs_json",
+            record.__dict__.get("outputs_json", {}),
+        )
+        outputs = {
+            "metrics": source.get("metrics", {}),
+            "risk_metrics": source.get("risk_metrics", {}),
         }
-    )
     return Bullpen008StageOutput(
         stage_number=record.stage_number,
         stage_name=record.stage_name,
@@ -392,10 +456,21 @@ def stage_from_record(
 
 
 def run_from_record(
-    record: Bullpen008RunRecord, *, include_stage_payloads: bool = True
+    record: Bullpen008RunRecord,
+    *,
+    include_stage_payloads: bool = True,
+    include_run_snapshots: bool = True,
 ) -> Bullpen008Run:
-    certificate = record.certificate.payload if record.certificate is not None else None
-    action_plan = record.action_plan.payload if record.action_plan is not None else None
+    certificate = (
+        record.certificate.payload
+        if include_stage_payloads and record.certificate is not None
+        else None
+    )
+    action_plan = (
+        record.action_plan.payload
+        if include_stage_payloads and record.action_plan is not None
+        else None
+    )
     execution_intents = [
         {
             "intent_id": intent.id,
@@ -416,7 +491,7 @@ def run_from_record(
             "retryable": intent.retryable,
             "payload": intent.payload if include_stage_payloads else {},
         }
-        for intent in record.execution_intents
+        for intent in (record.execution_intents if include_stage_payloads else [])
     ]
     return Bullpen008Run(
         id=record.id,
@@ -429,10 +504,10 @@ def run_from_record(
         summary=record.summary,
         error_message=record.error_message,
         code_build_version=record.code_build_version,
-        settings_snapshot=record.settings_snapshot,
-        wallet_snapshot=record.wallet_snapshot,
-        task_metadata=record.task_metadata,
-        run_metadata=record.run_metadata,
+        settings_snapshot=record.settings_snapshot if include_run_snapshots else {},
+        wallet_snapshot=record.wallet_snapshot if include_run_snapshots else {},
+        task_metadata=record.task_metadata if include_run_snapshots else {},
+        run_metadata=record.run_metadata if include_run_snapshots else {},
         stages=[
             stage_from_record(stage, include_payload=include_stage_payloads)
             for stage in record.stages
@@ -599,12 +674,7 @@ async def create_run_record(
     existing = (
         await session.execute(
             select(Bullpen008RunRecord)
-            .options(
-                selectinload(Bullpen008RunRecord.stages),
-                selectinload(Bullpen008RunRecord.certificate),
-                selectinload(Bullpen008RunRecord.action_plan),
-                selectinload(Bullpen008RunRecord.execution_intents),
-            )
+            .options(*_compact_run_options())
             .where(
                 Bullpen008RunRecord.user_id == user_id,
                 Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -736,12 +806,7 @@ async def get_bootstrap(
     latest = (
         await session.execute(
             select(Bullpen008RunRecord)
-            .options(
-                selectinload(Bullpen008RunRecord.stages),
-                selectinload(Bullpen008RunRecord.certificate),
-                selectinload(Bullpen008RunRecord.action_plan),
-                selectinload(Bullpen008RunRecord.execution_intents),
-            )
+            .options(*_compact_run_options())
             .where(
                 Bullpen008RunRecord.user_id == user_id,
                 Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -750,8 +815,11 @@ async def get_bootstrap(
             .limit(1)
         )
     ).scalar_one_or_none()
+    if latest is not None:
+        await _attach_compact_stage_metrics(session, [latest])
+    has_active_run = bool(latest and latest.status in {"queued", "running"})
     inherited = await _inherited_runs(session, user_id=user_id)
-    alert_records = (
+    alert_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008AlertRecord)
@@ -767,7 +835,7 @@ async def get_bootstrap(
         .all()
     )
     latest_run_id = latest.id if latest is not None else None
-    scenario_records = [] if latest_run_id is None else (
+    scenario_records = [] if latest_run_id is None or has_active_run else (
         (
             await session.execute(
                 select(Bullpen008JointLossScenarioRecord)
@@ -776,7 +844,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    activation_records = (
+    activation_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008ContingentExitActivationRecord)
@@ -786,7 +854,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    regime_records = (
+    regime_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008RegimeChangeEpisodeRecord)
@@ -796,7 +864,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    drawdown_record = (
+    drawdown_record = None if has_active_run else (
         await session.execute(
             select(Bullpen008DrawdownEpisodeRecord)
             .where(Bullpen008DrawdownEpisodeRecord.user_id == user_id)
@@ -804,7 +872,7 @@ async def get_bootstrap(
             .limit(1)
         )
     ).scalar_one_or_none()
-    cooldown_records = (
+    cooldown_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008ScenarioCooldownRecord)
@@ -814,7 +882,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    pnl_records = [] if latest_run_id is None else (
+    pnl_records = [] if latest_run_id is None or has_active_run else (
         (
             await session.execute(
                 select(Bullpen008PnlAttributionRecord)
@@ -823,7 +891,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    audit_records = [] if latest_run_id is None else (
+    audit_records = [] if latest_run_id is None or has_active_run else (
         (
             await session.execute(
                 select(Bullpen008LossPreventionAuditRecord)
@@ -895,10 +963,19 @@ async def get_history(
             await session.execute(
                 select(Bullpen008RunRecord)
                 .options(
-                    selectinload(Bullpen008RunRecord.stages),
-                    selectinload(Bullpen008RunRecord.certificate),
-                    selectinload(Bullpen008RunRecord.action_plan),
-                    selectinload(Bullpen008RunRecord.execution_intents),
+                    load_only(
+                        Bullpen008RunRecord.id,
+                        Bullpen008RunRecord.status,
+                        Bullpen008RunRecord.triggered_by,
+                        Bullpen008RunRecord.shadow_mode,
+                        Bullpen008RunRecord.execution_enabled,
+                        Bullpen008RunRecord.started_at,
+                        Bullpen008RunRecord.completed_at,
+                        Bullpen008RunRecord.summary,
+                        Bullpen008RunRecord.error_message,
+                        Bullpen008RunRecord.code_build_version,
+                    ),
+                    *_compact_run_options(),
                 )
                 .where(
                     Bullpen008RunRecord.user_id == user_id,
@@ -912,28 +989,269 @@ async def get_history(
         .scalars()
         .all()
     )
-    total = len(
+    total = int(
         (
             await session.execute(
-                select(Bullpen008RunRecord.id).where(
+                select(func.count(Bullpen008RunRecord.id)).where(
                     Bullpen008RunRecord.user_id == user_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
                 )
             )
-        )
-        .scalars()
-        .all()
+        ).scalar_one()
     )
     inherited = (
         await _inherited_runs(session, user_id=user_id, limit=10) if offset == 0 else []
     )
     return Bullpen008HistoryPage(
         rows=[
-            run_from_record(record, include_stage_payloads=False)
+            run_from_record(
+                record,
+                include_stage_payloads=False,
+                include_run_snapshots=False,
+            )
             for record in records
         ],
         inherited_rows=inherited,
         total=total,
         limit=limit,
         offset=offset,
+    )
+
+
+async def cancel_active_run(
+    session: AsyncSession,
+    *,
+    user_id: int,
+) -> Bullpen008RunRecord | None:
+    """Terminalize the newest 008 run without touching any Bullpen 007 state."""
+    record = (
+        (
+            await session.execute(
+                select(Bullpen008RunRecord)
+                .options(*_compact_run_options())
+                .where(
+                    Bullpen008RunRecord.user_id == user_id,
+                    Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+                    Bullpen008RunRecord.status.in_(("queued", "running")),
+                )
+                .order_by(Bullpen008RunRecord.started_at.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if record is None:
+        return None
+
+    now = datetime.now(UTC)
+    record.status = "cancelled"
+    record.completed_at = now
+    record.summary = "Bullpen 008 shadow run was killed by the user."
+    record.error_message = "cancelled_by_user"
+    record.run_metadata = {
+        **dict(record.run_metadata),
+        "cancelled_by_user": True,
+        "cancelled_at": now.isoformat(),
+        "orders_permitted": False,
+    }
+    record.task_metadata = {
+        **dict(record.task_metadata),
+        "revocation_requested_at": now.isoformat(),
+    }
+    state = (
+        await session.execute(
+            select(Bullpen008StateRecord).where(
+                Bullpen008StateRecord.user_id == user_id,
+                Bullpen008StateRecord.workflow_profile == WORKFLOW_PROFILE,
+            )
+        )
+    ).scalar_one_or_none()
+    if state is not None:
+        state.last_run_at = now
+        state.last_run_id = record.id
+        state.status = "shadow-paused" if state.paused else (
+            "shadow-scheduled" if state.running else "shadow-ready"
+        )
+        state.payload = {
+            **dict(state.payload),
+            "last_action": f"Bullpen 008 run {record.id} killed by the user.",
+            "last_action_at": now.isoformat(),
+        }
+    await session.commit()
+    return record
+
+
+def _trend_number(*values: object) -> float | None:
+    for value in values:
+        if isinstance(value, bool) or value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number == number:
+            return number
+    return None
+
+
+def _trend_text(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+async def get_event_trends(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    scan_count: int = 20,
+) -> Bullpen008EventTrendsResponse:
+    """Build the Bullpen 007-style 20-scan widget from isolated 008 Stage 2 facts."""
+    normalized_scan_count = max(1, min(scan_count, 20))
+    run_rows = (
+        await session.execute(
+            select(Bullpen008RunRecord.id, Bullpen008RunRecord.started_at)
+            .where(
+                Bullpen008RunRecord.user_id == user_id,
+                Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+            )
+            .order_by(Bullpen008RunRecord.started_at.desc())
+            .limit(normalized_scan_count)
+        )
+    ).all()
+    run_ids = [row.id for row in run_rows]
+    stage_rows = [] if not run_ids else (
+        await session.execute(
+            select(
+                Bullpen008StageOutputRecord.run_id,
+                Bullpen008StageOutputRecord.inputs_json,
+                Bullpen008StageOutputRecord.outputs_json,
+                Bullpen008StageOutputRecord.completed_at,
+            ).where(
+                Bullpen008StageOutputRecord.run_id.in_(run_ids),
+                Bullpen008StageOutputRecord.workflow_profile == WORKFLOW_PROFILE,
+                Bullpen008StageOutputRecord.stage_number == 2,
+            )
+        )
+    ).all()
+    stage_by_run = {row.run_id: row for row in stage_rows}
+    event_rows: dict[str, dict[str, object]] = {}
+
+    for scan_index, run_row in enumerate(run_rows):
+        stage = stage_by_run.get(run_row.id)
+        if stage is None:
+            continue
+        rows = stage.outputs_json.get("rows", [])
+        if not isinstance(rows, list):
+            continue
+        provider = _trend_text(stage.inputs_json.get("provider")) or "Bullpen 008"
+        model = _trend_text(stage.inputs_json.get("model")) or "probability-risk"
+        timestamp = stage.completed_at.isoformat()
+        for raw_row in rows:
+            if not isinstance(raw_row, dict):
+                continue
+            market_id = _trend_text(raw_row.get("market_id"))
+            title = _trend_text(raw_row.get("question"), raw_row.get("market_title"))
+            yes_probability = _trend_number(
+                raw_row.get("llm_yes_probability"),
+                raw_row.get("llm_yes_odds"),
+            )
+            no_probability = _trend_number(
+                raw_row.get("llm_no_probability"),
+                raw_row.get("llm_no_odds"),
+            )
+            if not market_id or not title or yes_probability is None or no_probability is None:
+                continue
+            strongest = max(yes_probability, no_probability)
+            side: Literal["YES", "NO"] = (
+                "YES" if yes_probability >= no_probability else "NO"
+            )
+            entry = event_rows.setdefault(
+                market_id,
+                {
+                    "title": title,
+                    "scores": [None] * 20,
+                    "sides": [None] * 20,
+                    "timestamps": [None] * 20,
+                    "llm_outputs": [[] for _ in range(20)],
+                    "latest": {},
+                },
+            )
+            entry["scores"][scan_index] = round(strongest, 2)
+            entry["sides"][scan_index] = side
+            entry["timestamps"][scan_index] = timestamp
+            entry["llm_outputs"][scan_index] = [
+                {
+                    "provider": provider,
+                    "model": model,
+                    "status": "completed",
+                    "llm_yes_odds": round(yes_probability, 2),
+                    "llm_no_odds": round(no_probability, 2),
+                    "direction": f"{side}_CAMP",
+                    "confidence": raw_row.get("confidence"),
+                    "evidence_status": raw_row.get("evidence_quality"),
+                    "key_evidence": raw_row.get("key_evidence", []),
+                    "red_flags": raw_row.get("red_flags", []),
+                    "rationale": raw_row.get("rationale"),
+                    "completed_at": timestamp,
+                }
+            ]
+            if scan_index == 0:
+                entry["latest"] = raw_row
+
+    events: list[Bullpen008EventTrend] = []
+    for market_id, entry in event_rows.items():
+        latest = entry["latest"] if isinstance(entry.get("latest"), dict) else {}
+        held_sides = latest.get("held_sides", [])
+        active_side = (
+            str(held_sides[0]).upper()
+            if isinstance(held_sides, list) and held_sides
+            else None
+        )
+        if active_side not in {"YES", "NO"}:
+            active_side = None
+        scores = entry["scores"]
+        events.append(
+            Bullpen008EventTrend(
+                market_id=market_id,
+                market_title=str(entry["title"]),
+                market_url=_trend_text(
+                    latest.get("market_url"),
+                    latest.get("source_url"),
+                ),
+                close_time=_trend_text(
+                    latest.get("deadline"),
+                    latest.get("close_time"),
+                ),
+                score=round(
+                    sum((scores[index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))),
+                    2,
+                ),
+                scan_scores=scores,
+                scan_sides=entry["sides"],
+                scan_timestamps=entry["timestamps"],
+                scan_llm_outputs=entry["llm_outputs"],
+                current_yes_odds=_trend_number(latest.get("current_yes_odds")),
+                current_no_odds=_trend_number(latest.get("current_no_odds")),
+                llm_yes_odds=_trend_number(
+                    latest.get("llm_yes_probability"),
+                    latest.get("llm_yes_odds"),
+                ),
+                llm_no_odds=_trend_number(
+                    latest.get("llm_no_probability"),
+                    latest.get("llm_no_odds"),
+                ),
+                returns_per_day=_trend_number(latest.get("returns_per_day")),
+                is_active_position=active_side is not None,
+                is_claimable_position=bool(latest.get("claimable")),
+                active_position_side=active_side,
+            )
+        )
+    events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
+    return Bullpen008EventTrendsResponse(
+        events=events,
+        scan_count=20,
+        generated_at=datetime.now(UTC).isoformat(),
     )

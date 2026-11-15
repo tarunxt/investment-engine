@@ -99,13 +99,6 @@ export const SIDEBAR_SECTIONS = [
                         matchMode: 'prefix',
                         title: 'US Portfolio — Connected through INDmoney',
                     },
-                    {
-                        type: 'item',
-                        id: 'automated-rebalance',
-                        name: 'Automated Rebalance',
-                        href: URLs.routes.console.automatedRebalance(),
-                        matchMode: 'exact',
-                    },
                 ],
             },
             {
@@ -130,6 +123,17 @@ export const SIDEBAR_SECTIONS = [
                         matchMode: 'prefix',
                         badge: {
                             label: 'Review',
+                            variant: 'review',
+                        },
+                    },
+                    {
+                        type: 'item',
+                        id: 'bullpen-sports',
+                        name: 'Bullpen Sports',
+                        href: URLs.routes.console.bullpenSports(),
+                        matchMode: 'prefix',
+                        badge: {
+                            label: 'Sports',
                             variant: 'review',
                         },
                     },
@@ -249,6 +253,15 @@ export const SIDEBAR_SECTIONS = [
                 title: 'Open the database viewer',
             },
             {
+                type: 'item',
+                id: 'sports-rankings',
+                name: 'Sports Rankings',
+                href: '/console/sports-rankings',
+                icon: Database,
+                matchMode: 'prefix',
+                title: 'Sports competitions, teams and ranking sources',
+            },
+            {
                 type: 'group',
                 id: 'integrations',
                 name: 'Integrations',
@@ -259,13 +272,6 @@ export const SIDEBAR_SECTIONS = [
                         id: 'api-connections',
                         name: 'API Connections',
                         href: URLs.routes.console.apis(),
-                        matchMode: 'prefix',
-                    },
-                    {
-                        type: 'item',
-                        id: 'google-sheets',
-                        name: 'Google Sheets',
-                        href: URLs.routes.console.googleSheets(),
                         matchMode: 'prefix',
                     },
                 ],

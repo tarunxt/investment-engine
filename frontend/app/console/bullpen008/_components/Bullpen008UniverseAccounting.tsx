@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Database, Loader2, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,9 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function asFiniteNumber(value: unknown): number | null {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
+  return Number.isSafeInteger(numeric) && numeric >= 0 ? numeric : null;
 }
 
 function formatCount(value: number | null) {
@@ -47,10 +48,13 @@ export function Bullpen008UniverseAccounting() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const request = useRef(0);
   const load = useCallback(async () => {
+    const current = ++request.current;
     setLoading(true);
     try {
       const bootstrap = await apiService.getBullpen008Bootstrap();
+      if (current !== request.current) return;
       const latestRun = bootstrap.latest_run;
       if (!latestRun) {
         setSnapshot(EMPTY_SNAPSHOT);
@@ -66,6 +70,7 @@ export function Bullpen008UniverseAccounting() {
       }
 
       const stage1 = await apiService.getBullpen008Stage(latestRun.id, 1);
+      if (current !== request.current) return;
       const inputs = asRecord(stage1.inputs);
       const sourceScan = asRecord(inputs.source_scan);
       const outputs = asRecord(stage1.outputs);
@@ -102,16 +107,21 @@ export function Bullpen008UniverseAccounting() {
       });
       setError(null);
     } catch (loadError) {
+      if (current !== request.current) return;
+      setSnapshot(EMPTY_SNAPSHOT);
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
-      setLoading(false);
+      if (current === request.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
     const interval = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      request.current++;
+      window.clearInterval(interval);
+    };
   }, [load]);
 
   const incomplete = snapshot.universeComplete === false;

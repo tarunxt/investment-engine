@@ -12,6 +12,10 @@ class UserRole(str, Enum):
 
 
 # Request schemas
+class GoogleSignInRequest(BaseModel):
+    credential: str = Field(..., min_length=1, max_length=8192)
+
+
 class UserRegisterRequest(BaseModel):
     """User registration request."""
     email: EmailStr
@@ -48,6 +52,7 @@ class UserLoginRequest(BaseModel):
 class RefreshTokenRequest(BaseModel):
     """Refresh token request."""
     refresh_token: str
+    intent_nonce: str | None = None
 
 
 class UpdatePasswordRequest(BaseModel):
@@ -67,6 +72,11 @@ class UpdateProfileRequest(BaseModel):
     theme_preference: Optional[str] = None  # light, dark
     zerodha_buy_threshold: Optional[float] = Field(None, ge=-100, le=100)
     indmoney_buy_threshold: Optional[float] = Field(None, ge=-100, le=100)
+
+
+class ProfilePreferencesResponse(UpdateProfileRequest):
+    """Read-only capability metadata; never accepted as a profile update."""
+    preferences_writable: bool
 
 
 class ForgotPasswordRequest(BaseModel):

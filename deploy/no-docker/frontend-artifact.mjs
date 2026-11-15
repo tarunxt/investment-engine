@@ -36,6 +36,7 @@ export const PUBLIC_BUILD_ENV_DEFAULTS = Object.freeze({
   NEXT_PUBLIC_DISABLE_AUTH: "false",
   NEXT_PUBLIC_DISABLE_API_PROXY: "false",
   NEXT_PUBLIC_API_DEBUG: "false",
+  NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED: "false",
 });
 
 const FORBIDDEN_ROOT_ENTRIES = new Set([
@@ -456,7 +457,12 @@ export async function validateArtifactDirectory(
     );
     if (
       JSON.stringify(resolvedPublicEnvironment) !==
-      JSON.stringify(manifest.public_environment)
+      JSON.stringify({
+        ...manifest.public_environment,
+        // Older valid rollback artifacts predate this default-off feature.
+        NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED:
+          manifest.public_environment?.NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED ?? "false",
+      })
     ) {
       throw new Error(
         "Frontend artifact public build environment is incomplete",

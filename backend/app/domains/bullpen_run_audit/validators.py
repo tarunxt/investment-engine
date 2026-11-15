@@ -850,6 +850,38 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     stage_3 = bundle.get("stage_3") if isinstance(bundle.get("stage_3"), dict) else {}
     raw = bundle.get("raw") if isinstance(bundle.get("raw"), dict) else {}
 
+    ledger = stage_1.get("filter_ledger")
+    if isinstance(ledger, dict):
+        expected = ledger.get("expected_rows")
+        evaluated = ledger.get("evaluated_rows")
+        accepted = ledger.get("accepted_rows")
+        rejected = ledger.get("rejected_rows")
+        if (not all(isinstance(value, int) and value >= 0 for value in (expected, evaluated, accepted, rejected))
+            or expected != evaluated or evaluated != accepted + rejected
+            or ledger.get("source_status") != "validated"):
+            findings.append(_finding(
+                code="UPS_FILTER_LEDGER_INVALID", severity="critical", stage="stage-1",
+                category="source-integrity", title="Universal Scan filtering is incomplete",
+                explanation="The exact source must validate and evaluated rows must reconcile to accepted plus rejected rows.",
+                suggested_remediation="Restore or recapture the UPS source, then rerun filtering. Do not treat missing input as zero eligible events.",
+                evidence_pointers=["/stage_1/filter_ledger"], blocking=True,
+            ))
+
+    for index, evidence in enumerate(stage_1.get("sports_ranking_evidence") or []):
+        ranking = evidence.get("ranking") or {}
+        unsafe_delta = not ranking.get("comparable") and any(
+            (ranking.get(metric) or {}).get("delta") is not None
+            for metric in ("ranking", "rating", "points")
+        )
+        if evidence.get("capture_error") or not ranking or unsafe_delta:
+            findings.append(_finding(
+                code="SPORTS_RANKING_EVIDENCE_INVALID", severity="medium", stage="stage-1",
+                category="reference-data", title="Sports ranking evidence is incomplete or inconsistent",
+                explanation="Scan evidence must preserve source identity and must not subtract incompatible ranks.",
+                suggested_remediation="Repair ranking capture/resolution for future runs. Never rewrite frozen historical evidence.",
+                evidence_pointers=[f"/stage_1/sports_ranking_evidence/{index}"],
+            ))
+
     started_at = overview.get("started_at")
     completed_at = overview.get("completed_at")
     duration_seconds = _float(overview.get("duration_seconds"))
@@ -1632,6 +1664,60 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     stage3_wallet_blocked = bool(
         stage_3.get("blocked_by_stage1_wallet_refresh")
     )
+    if scan_context.get("scan_scope") == "full_universe":
+        missing_active_market_count = scan_context.get(
+            "missing_active_market_count"
+        )
+        if (
+            isinstance(missing_active_market_count, (int, float))
+            and missing_active_market_count > 0
+        ):
+            findings.append(
+                _finding(
+                    code="FULL_UNIVERSE_MISSING_ACTIVE_MARKETS",
+                    severity="critical",
+                    stage="stage-1",
+                    category="scan-completeness",
+                    title="Full Universe omitted active wallet markets",
+                    explanation=(
+                        "Every active wallet market must be reconciled into the "
+                        "Stage 1/2 review universe before execution can continue."
+                    ),
+                    observed_value=str(missing_active_market_count),
+                    expected_value="0",
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/scan_context/missing_active_market_count"
+                    ],
+                )
+            )
+        universe_status = (
+            stage_2.get("universe_status")
+            if isinstance(stage_2.get("universe_status"), dict)
+            else {}
+        )
+        if (
+            scan_context.get("scan_completeness") == "incomplete"
+            and universe_status.get("is_complete") is not False
+        ):
+            findings.append(
+                _finding(
+                    code="FULL_UNIVERSE_INCOMPLETE_SCAN_NOT_BLOCKED",
+                    severity="critical",
+                    stage="stage-2",
+                    category="scan-completeness",
+                    title="Incomplete Full Universe scan retained buy authority",
+                    explanation=(
+                        "A Full Universe scan that did not reach its terminal "
+                        "cursor must make the Stage 2 universe non-authoritative."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/scan_context/scan_completeness",
+                        "/stage_2/universe_status/is_complete",
+                    ],
+                )
+            )
 
     if stage2_candidate_only:
         if not stage3_wallet_blocked:

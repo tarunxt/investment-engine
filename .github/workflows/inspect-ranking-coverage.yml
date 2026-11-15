@@ -1,0 +1,45 @@
+name: Inspect Sports Ranking Coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/sports-ranking-live-validation]
+    paths: [.github/workflows/inspect-ranking-coverage.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read ranking snapshot and queue health
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 120s
+          script: |
+            set -eu
+            sudo systemctl show investor-celery-worker --property=ActiveState,SubState,MainPID --no-pager
+            sudo systemd-run --quiet --wait --pipe --collect --uid=investor --property=EnvironmentFile=/etc/investor/backend.env --working-directory=/srv/investor/backend /srv/investor/backend/.venv/bin/python - <<'PY'
+            import json
+            from sqlalchemy import select, func
+            from redis import Redis
+            import app.infrastructure.database.all_models
+            from app.core.config import settings
+            from app.infrastructure.database.sync_session import SyncSessionLocal
+            from app.infrastructure.messaging.celery_app import celery
+            from app.domains.sports_rankings.models import SportsRankingSnapshot as S
+            from app.domains.sports_rankings.catalogue import SOURCE_IDS
+            with SyncSessionLocal() as db:
+                rows = db.execute(select(S.source_id, S.status, S.checked_at, S.successful_at, func.json_array_length(S.rows), S.error)).all()
+                print(json.dumps({'configured_sources': len(SOURCE_IDS), 'snapshots': [dict(source=r[0], status=r[1], checked=str(r[2]), successful=str(r[3]), rows=r[4], error=r[5]) for r in rows]}, default=str))
+            with Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2) as redis:
+                print(json.dumps({'queue_lengths': {q: redis.llen(q) for q in ('ai', 'beat')}}))
+            active = celery.control.inspect(timeout=3).active() or {}
+            print(json.dumps({'active_tasks': {worker: [{'name': t.get('name'), 'time_start': t.get('time_start')} for t in tasks] for worker, tasks in active.items()}}))
+            PY
+            sudo journalctl -u investor-celery-worker --since '-20 minutes' -n 3000 -o cat --no-pager | grep -E 'sports_rankings|Unknown ranking source|ranking refresh failed' | tail -n 35 || true

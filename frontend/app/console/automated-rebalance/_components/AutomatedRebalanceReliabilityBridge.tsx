@@ -1,5 +1,6 @@
 "use client";
 
+import { captureWorkflowOwner, requireWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -10,6 +11,8 @@ import {
 } from "react";
 import { Loader2, X } from "lucide-react";
 
+import { classifyWorkflowLlmJob, summarizeWorkflowLlmJobs } from "@/lib/workflowLlmEvidence";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { normalizeError } from "@/app/console/dashboard/_components/dashboardOverviewUtils";
 import { apiService } from "@/services/api";
 import type { ApiRequestControl } from "@/services/api.types";
@@ -28,6 +31,12 @@ type LlmMetricContext = {
   portfolio: AutoRebalancePortfolioKey;
   stage: LlmStage;
   expectedTotal: number | null;
+  runId?: number | null;
+  sequence?: number | null;
+  jobId?: number | null;
+  passed?: number | null;
+  partial?: number | null;
+  failed?: number | null;
 };
 type StageJobRow = {
   job: AutoRebalanceJobDetailResponse;
@@ -53,6 +62,7 @@ const RUN_DETAIL_TIMEOUT_MS = 15_000;
 const ACTIVE_RUN_CACHE_MS = 2_500;
 const TERMINAL_RUN_CACHE_MS = 60_000;
 const runDetailCache = new Map<number, CachedRun>();
+onWorkflowOwnerInvalidated(() => runDetailCache.clear());
 let safeFullRunAdapterInstalled = false;
 
 const TERMINAL_RUN_STATUSES = new Set([
@@ -131,21 +141,29 @@ async function loadRunDetailWithRetry(
   runId: number,
   options?: ApiRequestControl,
 ): Promise<RunResponse> {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal?.aborted) throw abortError();
   const requestOptions: ApiRequestControl = {
     ...options,
     timeoutMs: Math.max(options?.timeoutMs ?? 0, RUN_DETAIL_TIMEOUT_MS),
   };
   try {
-    return await apiService.getRun(runId, requestOptions);
+    const run = await apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    return run;
   } catch (error) {
+    requireWorkflowOwner(owner);
     if (options?.signal?.aborted) throw abortError();
     await wait(250);
-    return apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    const run = await apiService.getRun(runId, requestOptions);
+    requireWorkflowOwner(owner);
+    return run;
   }
 }
 
 function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal) return loadRunDetailWithRetry(runId, options);
 
   pruneRunDetailCache();
@@ -158,6 +176,7 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
   };
   entry.promise = loadRunDetailWithRetry(runId)
     .then((run) => {
+      requireWorkflowOwner(owner);
       entry.expiresAt =
         Date.now() +
         (TERMINAL_RUN_STATUSES.has((run.status || "").toLowerCase())
@@ -166,7 +185,7 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
       return run;
     })
     .catch((error) => {
-      runDetailCache.delete(runId);
+      if (runDetailCache.get(runId) === entry) runDetailCache.delete(runId);
       throw error;
     });
   runDetailCache.set(runId, entry);
@@ -297,35 +316,38 @@ function toFallbackRun(item: RunListItem): RunResponse {
 }
 
 async function loadSummaryPageWithRetry(options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   if (options?.signal?.aborted) throw abortError();
-  try {
-    return await apiService.getRuns({
-      page: 1,
-      limit: BACKEND_RUN_PAGE_LIMIT,
-      summary: true,
-    });
-  } catch (error) {
+  const read = async () => {
+    requireWorkflowOwner(owner);
+    const page = await apiService.getRuns({ page: 1, limit: BACKEND_RUN_PAGE_LIMIT, summary: true });
+    requireWorkflowOwner(owner);
+    return page;
+  };
+  try { return await read(); }
+  catch (error) {
+    requireWorkflowOwner(owner);
     if (options?.signal?.aborted) throw abortError();
     await wait(250);
-    return apiService.getRuns({
-      page: 1,
-      limit: BACKEND_RUN_PAGE_LIMIT,
-      summary: true,
-    });
+    return read();
   }
 }
 
 async function buildBoundedFullRunPage(options?: ApiRequestControl) {
+  const owner = requireWorkflowOwner(captureWorkflowOwner());
   const summaryPage = await loadSummaryPageWithRetry(options);
   if (options?.signal?.aborted) throw abortError();
+  requireWorkflowOwner(owner);
   const selected = selectRecentRunSummaries(summaryPage.items);
   const items = await mapWithConcurrency(
     selected,
     RUN_DETAIL_CONCURRENCY,
     async (item) => {
+      requireWorkflowOwner(owner);
       try {
         return await getCachedRunDetail(item.id, options);
       } catch (error) {
+        requireWorkflowOwner(owner);
         console.warn(
           `Using compact fallback for run #${item.id}: ${normalizeError(error)}`,
         );
@@ -334,6 +356,7 @@ async function buildBoundedFullRunPage(options?: ApiRequestControl) {
     },
   );
 
+  requireWorkflowOwner(owner);
   return {
     items,
     total: items.length,
@@ -365,6 +388,7 @@ function compactText(value: string | null | undefined) {
 function findMetricElement(target: HTMLElement, root: HTMLElement) {
   let element: HTMLElement | null = target;
   while (element && element !== root) {
+    if (element.dataset.autoRebalanceLlmMetric === "true") return element;
     const text = compactText(element.textContent);
     if (text.length <= 180 && /^LLMs completed\s*:/i.test(text)) return element;
     element = element.parentElement;
@@ -391,6 +415,21 @@ function inferMetricContext(
   metricElement: HTMLElement,
   root: HTMLElement,
 ): LlmMetricContext | null {
+  const explicitStage = metricElement.dataset.workflowStage;
+  const explicitPortfolio = metricElement.dataset.workflowPortfolio;
+  if (["threats", "swing", "rebalance", "technical"].includes(explicitStage ?? "") && ["india", "indmoney_us"].includes(explicitPortfolio ?? "")) {
+    const readCount = (value: string | undefined) => {
+      if (value === undefined || value.trim() === "") return null;
+      const number = Number(value);
+      return Number.isSafeInteger(number) && number >= 0 ? number : null;
+    };
+    const readId = (value: string | undefined) => { const n = readCount(value); return n && n > 0 ? n : null; };
+    return { stage: explicitStage as LlmStage, portfolio: explicitPortfolio as AutoRebalancePortfolioKey,
+      expectedTotal: readCount(metricElement.dataset.workflowTotal),
+      runId: readId(metricElement.dataset.workflowRunId), sequence: readId(metricElement.dataset.workflowSequence),
+      jobId: readId(metricElement.dataset.workflowJobId), passed: readCount(metricElement.dataset.workflowPassed),
+      partial: readCount(metricElement.dataset.workflowPartial), failed: readCount(metricElement.dataset.workflowFailed) };
+  }
   const metricText = compactText(metricElement.textContent);
   const countMatch = metricText.match(/LLMs completed\s*:\s*\d+\s*\/\s*(\d+)/i);
   let stage: LlmStage | null = null;
@@ -463,8 +502,8 @@ function collectStageJobs(
 
   const matching = candidates.filter(
     ({ runId, job, prompt }) =>
-      (explicitRunId !== null && runId === explicitRunId) ||
-      (explicitJobId !== null && job.id === explicitJobId) ||
+      explicitRunId !== null ? runId === explicitRunId :
+      explicitJobId !== null ? job.id === explicitJobId :
       inferStageFromPrompt(prompt) === stage,
   );
   const unique = new Map<number, AutoRebalanceJobDetailResponse>();
@@ -518,12 +557,7 @@ function collectStageJobsFromRuns(
       (left, right) =>
         parseTimestamp(right.created_at) - parseTimestamp(left.created_at),
     );
-  const exact = matchingRuns.find(
-    (run) =>
-      context.expectedTotal === null ||
-      run.run_jobs.length === context.expectedTotal,
-  );
-  const selected = exact || matchingRuns[0];
+  const selected = context.runId ? matchingRuns.find(run => run.id === context.runId) : matchingRuns[0];
   return selected
     ? selected.run_jobs
         .map((link) => link.job)
@@ -604,24 +638,38 @@ async function retryRead<T>(reader: () => Promise<T>) {
 async function loadSavedStageJobs(
   context: LlmMetricContext,
 ): Promise<LoadedStageJobs> {
+  // Exact tile identity is authoritative. Failure must not silently open another run.
+  if (context.runId) {
+    const run = await retryRead(() => apiService.getRun(context.runId!));
+    if (run.id !== context.runId || !runMatchesPortfolio(run, context.portfolio)) {
+      throw new Error("The saved run does not match this stage's portfolio. No other run was substituted.");
+    }
+    return { label: `Saved ${stageLabel(context.stage)} · Run #${run.id}`, jobs: run.run_jobs.map(link => link.job).filter(Boolean).map(toStageJob) };
+  }
+  if (context.sequence) {
+    const detail = await retryRead(() => apiService.getAutoRebalanceHistoryDetail(context.portfolio, context.sequence!));
+    if (detail.portfolio !== context.portfolio || detail.sequence !== context.sequence) {
+      throw new Error("The saved workflow identity could not be verified. No other run was substituted.");
+    }
+    return { label: detail.label, jobs: collectStageJobs(detail, context.stage).filter(job => !context.jobId || job.id === context.jobId) };
+  }
+  if (context.jobId) {
+    const threat = await loadThreatFallback(context);
+    if (!threat || !threat.jobs.some(job => job.id === context.jobId)) {
+      throw new Error(`Saved job #${context.jobId} is unavailable. No other job was substituted.`);
+    }
+    return { ...threat, jobs: threat.jobs.filter(job => job.id === context.jobId) };
+  }
+  // A zero aggregate has no model rows; do not search older workflows for a matching count.
+  if (context.expectedTotal === 0) return { label: `Saved ${stageLabel(context.stage)} · no model rows recorded`, jobs: [] };
   let primaryError: unknown = null;
   try {
     const history = await retryRead(() =>
       apiService.getAutoRebalanceHistory(context.portfolio, { limit: 25 }),
     );
-    const exact = history.items.find((item) =>
-      item.stages.some(
-        (stage) =>
-          stage.stage === context.stage &&
-          (context.expectedTotal === null ||
-            stage.provider_count === context.expectedTotal),
-      ),
+    const selected = history.items.find((item) =>
+      item.stages.some((stage) => stage.stage === context.stage),
     );
-    const selected =
-      exact ||
-      history.items.find((item) =>
-        item.stages.some((stage) => stage.stage === context.stage),
-      );
     if (selected) {
       const detail = await retryRead(() =>
         apiService.getAutoRebalanceHistoryDetail(
@@ -633,6 +681,9 @@ async function loadSavedStageJobs(
       if (jobs.length) return { label: detail.label, jobs };
     }
   } catch (error) {
+    // Missing workflow schema is unavailability, not absence of saved jobs.
+    if (error && typeof error === "object" && "details" in error
+      && (error.details as { error?: string } | undefined)?.error === "WORKFLOW_SCHEMA_NOT_READY") throw error;
     primaryError = error;
   }
 
@@ -758,6 +809,8 @@ function LlmDetailsDialog({
     const load = async () => {
       setLoading(true);
       setError(null);
+      setRows([]);
+      setRunLabel(null);
       try {
         const loaded = await loadSavedStageJobs(context);
         const displayModels = getOrdinalModelLabels(loaded.jobs);
@@ -782,20 +835,15 @@ function LlmDetailsDialog({
     };
   }, [context]);
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
+  const reviewDialog = useReviewDialog<HTMLElement>(true, onClose);
 
-  const passed = rows.filter(({ job }) =>
-    ["completed", "success", "passed", "partial"].includes(
-      job.status.toLowerCase(),
-    ),
-  ).length;
-  const failed = rows.filter(({ job }) => job.status.toLowerCase() === "failed").length;
+  const counts = summarizeWorkflowLlmJobs(rows.map(row => row.job));
+  const aggregateMismatch = !loading && !error &&
+    ([['total', context.expectedTotal], ['passed', context.passed], ['partial', context.partial], ['failed', context.failed]] as const)
+      .some(([key, expected]) => expected != null && counts[key] !== expected);
+  const recordedSummary = context.expectedTotal != null
+    ? `${context.passed ?? "?"}/${context.expectedTotal} passed · ${context.partial ?? "?"} partial · ${context.failed ?? "?"} failed`
+    : null;
 
   return (
     <div
@@ -806,6 +854,7 @@ function LlmDetailsDialog({
       }}
     >
       <section
+        {...reviewDialog}
         role="dialog"
         aria-modal="true"
         aria-label={`${stageLabel(context.stage)} LLM details`}
@@ -817,10 +866,12 @@ function LlmDetailsDialog({
               {stageLabel(context.stage)} · LLM details
             </p>
             <h2 className="mt-1 text-xl font-bold text-slate-950">
-              {runLabel || "Loading saved run…"}
+              {runLabel || (loading ? "Loading saved run…" : "Saved run details unavailable")}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              {rows.length} LLMs returned · {passed} passed · {failed} failed
+              {loading ? "Loading model-level evidence…" : error ? "Model-level evidence unavailable" :
+                `${counts.total} LLMs returned · ${counts.passed} passed · ${counts.partial} partial · ${counts.failed} failed${counts.unresolved ? ` · ${counts.unresolved} unresolved` : ""}`}
+              {aggregateMismatch && recordedSummary ? <span role="status" className="mt-1 block text-amber-800">Recorded tile summary: {recordedSummary}. It differs from this exact run's model-level evidence; the summary needs refresh.</span> : null}
             </p>
           </div>
           <button
@@ -873,9 +924,9 @@ function LlmDetailsDialog({
                         </td>
                         <td className="px-4 py-3">
                           <span
-                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(job.status)}`}
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusTone(classifyWorkflowLlmJob(job) === "other" ? job.status : classifyWorkflowLlmJob(job))}`}
                           >
-                            {job.status || "Unknown"}
+                            {classifyWorkflowLlmJob(job) === "other" ? job.status || "Unknown" : classifyWorkflowLlmJob(job)}
                           </span>
                           {job.error_message ? (
                             <p className="mt-2 max-w-md text-xs leading-5 text-rose-700">

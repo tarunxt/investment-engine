@@ -49,6 +49,15 @@ class PolymarketAutoLiveStateRecord(Base, TimestampMixin):
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    latest_hourly_rebalance_status: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    latest_hourly_rebalance_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    latest_hourly_rebalance_detail: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
     user: Mapped[User] = relationship()
@@ -63,6 +72,12 @@ class PolymarketAutoLiveRunRecord(Base, TimestampMixin):
             "status",
             "started_at",
         ),
+        Index(
+            "ix_polymarket_auto_live_runs_user_workspace_started_at",
+            "user_id",
+            "workspace_profile",
+            "started_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -73,6 +88,10 @@ class PolymarketAutoLiveRunRecord(Base, TimestampMixin):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     triggered_by: Mapped[str] = mapped_column(String(32), nullable=False)
+    workspace_profile: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
     dry_run: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
