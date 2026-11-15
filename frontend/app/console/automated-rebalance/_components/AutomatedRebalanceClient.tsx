@@ -1,15 +1,13 @@
 "use client";
 
+import type { WorkflowSurface } from "@/app/console/_components/WorkflowSurfaceHost";
 import { RebalanceWorkflowSections } from "@/app/console/dashboard/_components/RebalanceWorkflowSections";
 import { installAutomatedRebalanceStartRecovery } from "./automatedRebalanceStartRecovery";
-import { AutomatedRebalanceReliabilityBridge } from "./AutomatedRebalanceReliabilityBridge";
 
 installAutomatedRebalanceStartRecovery();
 
-export function AutomatedRebalanceClient() {
+export function AutomatedRebalanceClient({ surface }: { surface?: WorkflowSurface | null }) {
   return (
-    <AutomatedRebalanceReliabilityBridge>
-      <RebalanceWorkflowSections stageLedger />
-    </AutomatedRebalanceReliabilityBridge>
+    <RebalanceWorkflowSections stageLedger surface={surface} />
   );
 }

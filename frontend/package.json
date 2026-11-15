@@ -13,7 +13,8 @@
     "test:secure-auth-bff": "node scripts/verify-secure-auth-bff.mjs",
     "start": "next start",
     "lint": "eslint",
-    "postbuild": "node ../deploy/no-docker/repair-next-runtime-artifacts.mjs . \"${NEXT_DIST_DIR:-.next}\""
+    "postbuild": "node ../deploy/no-docker/repair-next-runtime-artifacts.mjs . \"${NEXT_DIST_DIR:-.next}\"",
+    "test:indmoney-basket-offline": "node scripts/indmoney-basket-parity-playwright.mjs"
   },
   "dependencies": {
     "@auth/core": "^0.41.2",

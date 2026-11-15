@@ -1,4 +1,8 @@
 "use client";
+import { deferBullpenDetail } from "./BullpenDeferredDetail";
+const BullpenLlmBreakdownDialog = deferBullpenDetail(() => import("./BullpenLlmBreakdownDialog").then(module => module.BullpenLlmBreakdownDialog));
+const BullpenInvestmentMathDialog = deferBullpenDetail(() => import("./BullpenInvestmentMathDialog").then(module => module.BullpenInvestmentMathDialog));
+const BullpenStage3ShortlistReasonDialog = deferBullpenDetail(() => import("./BullpenStage3ShortlistReasonDialog").then(module => module.BullpenStage3ShortlistReasonDialog));
 
 import {
   useEffect,
@@ -44,14 +48,14 @@ import {
   type BullpenTableColumnId,
   type BullpenTableColumnWidths,
 } from "./bullpenTableColumnWidths";
-import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
-import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
+
+
 import {
   BullpenReturnsPerDayFormulaDialog,
   BullpenReturnsPerDayHeaderInfo,
   BullpenReturnsPerDayValueButton,
 } from "./BullpenReturnsPerDayInfo";
-import { BullpenStage3ShortlistReasonDialog } from "./BullpenStage3ShortlistReasonDialog";
+
 
 export type BullpenTableSortKey =
   | "question"

@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -9,13 +10,7 @@ const tableSource = readFileSync(
   ),
   "utf8",
 );
-const scheduleSource = readFileSync(
-  new URL(
-    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const scheduleSource = readBullpenScheduleSource();
 
 test("Stage 2 Events Summary marks current active Bullpen positions with a large green tick", () => {
   assert.match(tableSource, /activePositionQuestionIds\?: ReadonlySet<string>/);

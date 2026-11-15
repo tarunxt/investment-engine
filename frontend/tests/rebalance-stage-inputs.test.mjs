@@ -9,6 +9,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const modules = {};
 modules['react/jsx-runtime'] = jsxRuntime;
 function load(source, bindings = {}) {
+  bindings = { apiService: {}, runtimeOwner: {}, isCurrentWorkflowOwner: () => true, ...bindings };
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;

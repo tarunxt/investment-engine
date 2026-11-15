@@ -10,10 +10,12 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from math import fsum, isfinite
 
+from app.domains.api_usage.provenance import cache_provenance, tariff_provenance
 from app.domains.api_usage.usage_metadata import ALIASES, DETAILS, has_reported_usage, number
 
 
 MAX_EVENT_ROWS = 10_000
+MAX_TARIFF_VERSIONS = 32
 USAGE_STATUSES = ("reported", "omitted", "malformed", "unavailable", "legacy_unknown", "ambiguous")
 COST_STATUSES = (
     "estimated_token_only", "unpriced", "unavailable", "duplicate_excluded", "legacy_unknown", "ambiguous",
@@ -133,6 +135,13 @@ def _projection(row: object) -> dict:
 def _new_totals() -> dict:
     return {
         "attempts": 0,
+        "cache_fields": {key: {
+            "reported_attempts": 0, "inferred_attempts": 0, "unknown_attempts": 0,
+            "reported_tokens": 0, "inferred_tokens": 0,
+        } for key in ("cache_read_input_tokens", "cache_miss_input_tokens")},
+        "tariff_versions": {},
+        "unversioned_tariff_attempts": 0,
+        "additional_tariff_version_attempts": 0,
         "finished_attempts": 0,
         "unmatched_starts": 0,
         "finished_without_start": 0,
@@ -202,6 +211,19 @@ def _add_attempt(totals: dict, row: object, *, started: bool, finished: bool,
     # a fact in the counts, even if a malformed input retained a cost on it.
     if not finished or duplicate or ambiguous:
         return
+    for key, evidence in cache_provenance(_get(row, "reported_usage"), _get(row, "inferred_usage")).items():
+        cache = totals["cache_fields"][key]
+        cache[f"{evidence['state']}_attempts"] += 1
+        for source in ("reported", "inferred"):
+            if evidence[source] is not None:
+                cache[f"{source}_tokens"] += evidence[source]
+    version = tariff_provenance(_get(row, "tariff_rates"))["rate_version"]
+    if version and (version in totals["tariff_versions"] or len(totals["tariff_versions"]) < MAX_TARIFF_VERSIONS):
+        totals["tariff_versions"][version] = totals["tariff_versions"].get(version, 0) + 1
+    elif version:
+        totals["additional_tariff_version_attempts"] += 1
+    else:
+        totals["unversioned_tariff_attempts"] += 1
     token_cost = _cost(_get(row, "tariff_estimated_cost_usd"))
     if token_cost is None:
         totals["missing_token_estimate_attempts"] += 1
@@ -220,6 +242,13 @@ def _add_attempt(totals: dict, row: object, *, started: bool, finished: bool,
 
 def _finish_totals(totals: dict) -> dict:
     result = dict(totals)
+    result["cache_fields"] = {key: {
+        **values,
+        "reported_tokens": values["reported_tokens"] if values["reported_attempts"] else None,
+        "inferred_tokens": values["inferred_tokens"] if values["inferred_attempts"] else None,
+    } for key, values in totals["cache_fields"].items()}
+    result["tariff_freshness"] = "repository_snapshot_unverified" if totals["tariff_versions"] else "unknown"
+    result["tariff_effective_date"] = None
     for component in ("token", "tool"):
         values = result.pop(f"_{component}_estimates")
         try:
@@ -246,27 +275,44 @@ def summarize_attempt_coverage(
             or not 1 <= max_event_rows <= MAX_EVENT_ROWS):
         raise ValueError(f"max_event_rows must be an integer from 1 to {MAX_EVENT_ROWS}")
 
-    attempts: dict[str, dict[str, dict]] = {}
-    identity_links: dict[str, set[str]] = {}
-    provider_identities: dict[tuple[str, str, str], str] = {}
-    identity_conflicts: set[str] = set()
-    consumed = replays = conflicts = invalid = 0
-    truncated = False
+    accumulator = AttemptCoverageAccumulator(max_event_rows=max_event_rows)
     for index, row in enumerate(events):
         if index >= max_event_rows:
-            truncated = True
+            accumulator.truncated = True
             break
-        consumed += 1
+        accumulator.add(row)
+    return accumulator.finish()
+
+
+class AttemptCoverageAccumulator:
+    """Incremental compact accounting projections across one selected SQL window.
+
+    Database fetch batches are bounded independently of accounting completeness.
+    Identity/lifecycle state grows with unique attempts so page boundaries cannot
+    drop rows, split lifecycle accounting or reset duplicate/conflict detection.
+    No raw request/response payload is retained.
+    """
+    def __init__(self, *, max_event_rows: int | None = None):
+        self.max_event_rows = max_event_rows
+        self.attempts = {}
+        self.identity_links = {}
+        self.provider_identities = {}
+        self.identity_conflicts = set()
+        self.consumed = self.replays = self.conflicts = self.invalid = 0
+        self.truncated = False
+
+    def add(self, row: object) -> None:
+        self.consumed += 1
         attempt_id, kind = _get(row, "attempt_id"), _get(row, "event_kind")
         if not isinstance(attempt_id, str) or not attempt_id or kind not in ("started", "finished"):
-            invalid += 1
-            continue
-        lifecycle = attempts.setdefault(attempt_id, {})
+            self.invalid += 1
+            return
+        lifecycle = self.attempts.setdefault(attempt_id, {})
         projection = _projection(row)
         duplicate_of = projection["duplicate_of_attempt_id"]
         if duplicate_of:
-            identity_links.setdefault(attempt_id, set()).add(duplicate_of)
-            identity_links.setdefault(duplicate_of, set()).add(attempt_id)
+            self.identity_links.setdefault(attempt_id, set()).add(duplicate_of)
+            self.identity_links.setdefault(duplicate_of, set()).add(attempt_id)
         provider = projection["actual_provider"]
         if provider in PROVIDERS:
             for identity_kind in ("request", "response"):
@@ -278,20 +324,20 @@ def summarize_attempt_coverage(
                 # Separate providers and request/response namespaces remain
                 # independent. These links only propagate an existing flag.
                 key = (provider, identity_kind, identity)
-                first_attempt = provider_identities.setdefault(key, attempt_id)
+                first_attempt = self.provider_identities.setdefault(key, attempt_id)
                 if first_attempt != attempt_id:
-                    identity_links.setdefault(attempt_id, set()).add(first_attempt)
-                    identity_links.setdefault(first_attempt, set()).add(attempt_id)
+                    self.identity_links.setdefault(attempt_id, set()).add(first_attempt)
+                    self.identity_links.setdefault(first_attempt, set()).add(attempt_id)
         metadata = _metadata(projection)
         if (_get(metadata, "cost_status") == "ambiguous"
                 and _get(metadata, "cost_reason") == "conflicting_provider_identity"):
-            identity_conflicts.add(attempt_id)
+            self.identity_conflicts.add(attempt_id)
         if kind in lifecycle:
             bucket = lifecycle[kind]
             if projection == bucket["projection"]:
-                replays += 1
+                self.replays += 1
             else:
-                conflicts += 1
+                self.conflicts += 1
                 bucket["ambiguous"] = True
             bucket["known_usage"] |= has_reported_usage(projection["reported_usage"])
             for name in GROUP_LABELS:
@@ -299,7 +345,7 @@ def summarize_attempt_coverage(
             metadata = _metadata(projection)
             for name in ("usage_sources", "malformed_fields", "conflicting_fields"):
                 bucket[name].update(_get(metadata, name) or ())
-            continue
+            return
         metadata = _metadata(projection)
         lifecycle[kind] = {
             "projection": projection, "ambiguous": False,
@@ -308,67 +354,69 @@ def summarize_attempt_coverage(
             **{name: set(_get(metadata, name) or ()) for name in ("usage_sources", "malformed_fields", "conflicting_fields")},
         }
 
-    # Propagate a persisted identity conflict through supplied duplicate links
-    # and scoped raw IDs, including canonical estimates. No outside-window lookup.
-    ambiguous_identity_nodes = set(identity_conflicts)
-    pending = list(identity_conflicts)
-    while pending:
-        current = pending.pop()
-        for linked in identity_links.get(current, ()):
-            if linked not in ambiguous_identity_nodes:
-                ambiguous_identity_nodes.add(linked)
-                pending.append(linked)
 
-    totals = _new_totals()
-    groups: dict[tuple[str, str, str], dict] = {}
-    for attempt_id, lifecycle in attempts.items():
-        finished, started = "finished" in lifecycle, "started" in lifecycle
-        bucket = lifecycle["finished" if finished else "started"]
-        row = dict(bucket["projection"])
-        identity_ambiguous = attempt_id in ambiguous_identity_nodes
-        ambiguous = identity_ambiguous or any(item["ambiguous"] for item in lifecycle.values())
-        if bucket["ambiguous"]:
-            # Do not choose one contradictory provider/phase/status or usage
-            # classification as authoritative. Numeric availability means some
-            # supplied representation contains evidence, not that its count is trusted.
-            row.update({name: next(iter(values)) if len(values) == 1 else "unknown" for name, values in bucket["labels"].items()})
-            row["inferred_usage"] = {"coverage": {
-                "version": 1, "usage_status": "ambiguous",
-                "cost_status": "ambiguous", "cost_reason": "conflicting_event_representations",
-                **{name: sorted(bucket[name]) for name in ("usage_sources", "malformed_fields", "conflicting_fields")},
-            }}
-        key = (
-            row["actual_provider"], row["phase"], row["status"],
-        )
-        options = {"started": started, "finished": finished, "ambiguous": ambiguous,
-                   "identity_ambiguous": identity_ambiguous, "known_usage": bucket["known_usage"]}
-        _add_attempt(totals, row, **options)
-        _add_attempt(groups.setdefault(key, _new_totals()), row, **options)
+    def finish(self) -> dict:
+        # Propagate a persisted identity conflict through supplied duplicate links
+        # and scoped raw IDs, including canonical estimates. No outside-window lookup.
+        ambiguous_identity_nodes = set(self.identity_conflicts)
+        pending = list(self.identity_conflicts)
+        while pending:
+            current = pending.pop()
+            for linked in self.identity_links.get(current, ()):
+                if linked not in ambiguous_identity_nodes:
+                    ambiguous_identity_nodes.add(linked)
+                    pending.append(linked)
 
-    return {
-        "scope": "supplied_event_window_only",
-        "max_event_rows": max_event_rows,
-        "processed_event_rows": consumed,
-        "truncated": truncated,
-        "unique_event_rows": consumed - replays - conflicts - invalid,
-        "replayed_event_rows": replays,
-        "conflicting_event_rows": conflicts,
-        "provider_identity_conflict_attempts": len(identity_conflicts),
-        "linked_identity_attempts_outside_window": len(ambiguous_identity_nodes - attempts.keys()),
-        "invalid_event_rows": invalid,
-        "summary": _finish_totals(totals),
-        "groups": [
-            {"provider": provider, "phase": phase, "status": status, **_finish_totals(group)}
-            for (provider, phase, status), group in sorted(groups.items())
-        ],
-        "invoice_total_usd": None,
-        "limitations": [
-            "Lifecycle pairs and replay detection are limited to the supplied event window; truncation can split pairs.",
-            "Known estimates are partial tariff subtotals, not complete costs or provider bills.",
-            "Missing coverage metadata is legacy_unknown; historical omission and unavailability are not inferred.",
-            "Conflicting event representations quarantine all estimates for the attempt; available usage in those representations is not a trusted quantity.",
-            "Persisted provider identity conflicts propagate through duplicate links and shared provider-scoped request/response IDs; this does not establish invoice deduplication.",
-            "Linked identities outside this window are counted but not fetched or priced; missing or unrecognized provider identities cannot establish a bridge.",
-            "Hidden SDK retries, telemetry persistence gaps and unpriced native tools are not measured by this report.",
-        ],
-    }
+        totals = _new_totals()
+        groups: dict[tuple[str, str, str], dict] = {}
+        for attempt_id, lifecycle in self.attempts.items():
+            finished, started = "finished" in lifecycle, "started" in lifecycle
+            bucket = lifecycle["finished" if finished else "started"]
+            row = dict(bucket["projection"])
+            identity_ambiguous = attempt_id in ambiguous_identity_nodes
+            ambiguous = identity_ambiguous or any(item["ambiguous"] for item in lifecycle.values())
+            if bucket["ambiguous"]:
+                # Do not choose one contradictory provider/phase/status or usage
+                # classification as authoritative. Numeric availability means some
+                # supplied representation contains evidence, not that its count is trusted.
+                row.update({name: next(iter(values)) if len(values) == 1 else "unknown" for name, values in bucket["labels"].items()})
+                row["inferred_usage"] = {"coverage": {
+                    "version": 1, "usage_status": "ambiguous",
+                    "cost_status": "ambiguous", "cost_reason": "conflicting_event_representations",
+                    **{name: sorted(bucket[name]) for name in ("usage_sources", "malformed_fields", "conflicting_fields")},
+                }}
+            key = (
+                row["actual_provider"], row["phase"], row["status"],
+            )
+            options = {"started": started, "finished": finished, "ambiguous": ambiguous,
+                       "identity_ambiguous": identity_ambiguous, "known_usage": bucket["known_usage"]}
+            _add_attempt(totals, row, **options)
+            _add_attempt(groups.setdefault(key, _new_totals()), row, **options)
+
+        return {
+            "scope": "supplied_event_window_only",
+            "max_event_rows": self.max_event_rows,
+            "processed_event_rows": self.consumed,
+            "truncated": self.truncated,
+            "unique_event_rows": self.consumed - self.replays - self.conflicts - self.invalid,
+            "replayed_event_rows": self.replays,
+            "conflicting_event_rows": self.conflicts,
+            "provider_identity_conflict_attempts": len(self.identity_conflicts),
+            "linked_identity_attempts_outside_window": len(ambiguous_identity_nodes - self.attempts.keys()),
+            "invalid_event_rows": self.invalid,
+            "summary": _finish_totals(totals),
+            "groups": [
+                {"provider": provider, "phase": phase, "status": status, **_finish_totals(group)}
+                for (provider, phase, status), group in sorted(groups.items())
+            ],
+            "invoice_total_usd": None,
+            "limitations": [
+                "Lifecycle pairs and replay detection are limited to the supplied event window; truncation can split pairs.",
+                "Known estimates are partial tariff subtotals, not complete costs or provider bills.",
+                "Missing coverage metadata is legacy_unknown; historical omission and unavailability are not inferred.",
+                "Conflicting event representations quarantine all estimates for the attempt; available usage in those representations is not a trusted quantity.",
+                "Persisted provider identity conflicts propagate through duplicate links and shared provider-scoped request/response IDs; this does not establish invoice deduplication.",
+                "Linked identities outside this window are counted but not fetched or priced; missing or unrecognized provider identities cannot establish a bridge.",
+                "Hidden SDK retries, telemetry persistence gaps and unpriced native tools are not measured by this report.",
+            ],
+        }
