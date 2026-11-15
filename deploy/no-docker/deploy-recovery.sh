@@ -60,6 +60,22 @@ preflight() {
   done
   assert_financial_stopped
 }
+wait_for_backend_ready() {
+  local deadline=$((SECONDS + 120)) remaining probe_timeout status
+  while (( SECONDS < deadline )); do
+    remaining=$((deadline - SECONDS))
+    (( remaining > 0 )) || break
+    probe_timeout=$((remaining < 3 ? remaining : 3))
+    if status=$(curl -fs --max-time "$probe_timeout" -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/health/ready) && [[ "$status" == 200 ]]; then
+      return 0
+    fi
+    remaining=$((deadline - SECONDS))
+    (( remaining > 0 )) || break
+    sleep "$((remaining < 2 ? remaining : 2))"
+  done
+  echo 'Backend readiness did not return HTTP 200 within 120 seconds.' >&2
+  return 1
+}
 restore_backend() {
   require_lock || return 1
   assert_financial_stopped || return 1
@@ -67,11 +83,7 @@ restore_backend() {
   sudo systemctl stop investor-backend investor-recovery-analysis || return 1
   sudo -u "$APP_USER" python3 "$SCRIPT_DIR/backend-recovery-artifact.py" restore "$APP_ROOT" "$rollback_dir" || return 1
   sudo systemctl start investor-recovery-analysis investor-backend || return 1
-  for attempt in $(seq 1 40); do
-    if curl -fsS --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then break; fi
-    sleep 1
-  done
-  curl -fsS --max-time 5 http://127.0.0.1:8000/health/ready >/dev/null || return 1
+  wait_for_backend_ready || return 1
   preflight
 }
 if [[ "${1:-}" == --restore ]]; then restore_backend; exit 0; fi
@@ -132,11 +144,7 @@ SH
 # No systemd drop-in, daemon-reload, migration or normal unit installation.
 # The workflow stopped both processes before replacing their source.
 sudo systemctl start investor-recovery-analysis investor-backend
-for attempt in $(seq 1 40); do
-  if curl -fsS --max-time 3 http://127.0.0.1:8000/health/ready >/dev/null; then break; fi
-  sleep 1
-done
-curl -fsS --max-time 5 http://127.0.0.1:8000/health/ready >/dev/null
+wait_for_backend_ready
 [[ "$(mode_for_service investor-backend)" == 1 ]]
 [[ "$(mode_for_service investor-recovery-analysis)" == 1 ]]
 for path in /zerodha/status /zerodha/login-url /zerodha/portfolio /zerodha/threats/latest /zerodha/events/latest; do
